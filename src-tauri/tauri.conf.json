@@ -1,0 +1,92 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "MyAgents",
+  "version": "0.1.2",
+  "identifier": "com.myagents.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build:web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MyAgents",
+        "label": "main",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 20
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' ipc: tauri:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://download.myagents.io; img-src 'self' data: blob:;",
+      "dangerousDisableAssetCspModification": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "dmg",
+      "app"
+    ],
+    "createUpdaterArtifacts": "v1Compatible",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../src-tauri/resources/server-dist.js": "server-dist.js",
+      "../src-tauri/resources/claude-agent-sdk": "claude-agent-sdk",
+      "../src/shared": "shared"
+    },
+    "externalBin": [
+      "binaries/bun"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "Entitlements.plist",
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null,
+      "dmg": {
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        },
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        }
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY3RkQ5QjIzMTE4RTgyRTkKUldUcGdvNFJJNXY5OTB3T2pnUzVUbjFrV203Zk5ZTDg0NVJRdGI0UVRranJzTUsvM0hGcmFlc0IK",
+      "endpoints": [
+        "https://download.myagents.io/update/{{target}}.json"
+      ]
+    }
+  }
+}

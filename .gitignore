@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Lockfiles (project uses Bun)
+package-lock.json
+
+# Vite
+.vite/
+
+# ESLint & Prettier
+.eslintcache
+.prettiercache
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.code-workspace
+
+# macOS
+.DS_Store
+._*
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Turbo
+.turbo/
+
+# Claude Code (user-specific settings)
+.claude/settings.json
+.claude/settings.local.json
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/resources/server-dist.js
+src-tauri/resources/claude-agent-sdk
+
+# Test coverage
+coverage/
+
+# Misc
+*.pem
+*.local
+
+.agent/
+.claude/
+specs/prd/
+
+publish_release.sh
+start_dev.sh

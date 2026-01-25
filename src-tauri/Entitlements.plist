@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  MyAgents Hardened Runtime Entitlements
+  
+  NOTE: The allow-jit, allow-unsigned-executable-memory, and disable-library-validation
+  entitlements are REQUIRED for Bun JavaScript runtime to function.
+  Removing these will cause the sidecar process to crash on launch.
+  
+  These are documented requirements for most JavaScript runtimes on macOS.
+  The app is still notarized by Apple which provides Gatekeeper protection.
+-->
+<dict>
+    <!-- Allow the app to make network connections (required for API calls) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    
+    <!-- Allow the app to act as a network server (required for local sidecar) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    
+    <!-- Allow JIT compilation (required for JavaScript engine) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    
+    <!-- Allow unsigned executable memory (required for Bun/Node.js) -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    
+    <!-- Disable library validation (required for loading external binaries) -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

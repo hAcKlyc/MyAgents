@@ -1,0 +1,920 @@
+/**
+ * TabProvider - Provides isolated state for each Tab
+ * 
+ * Each TabProvider instance manages:
+ * - Its own Sidecar instance (per-Tab isolation)
+ * - Its own SSE connection
+ * - Its own message history
+ * - Its own loading/session state
+ * - Its own logs and system info
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+
+import { createSseConnection, type SseConnection } from '@/api/SseConnection';
+import type { ImageAttachment } from '@/components/SimpleChatInput';
+import type { PermissionRequest } from '@/components/PermissionPrompt';
+import type { AskUserQuestionRequest, AskUserQuestion } from '../../shared/types/askUserQuestion';
+import { TabContext, type SessionState, type TabContextValue } from './TabContext';
+import type { Message, ContentBlock, ToolUseSimple, ToolInput } from '@/types/chat';
+import type { ToolUse } from '@/types/stream';
+import type { SystemInitInfo } from '../../shared/types/system';
+import type { LogEntry } from '@/types/log';
+import { parsePartialJson } from '@/utils/parsePartialJson';
+import { REACT_LOG_EVENT } from '@/utils/frontendLogger';
+import { getTabServerUrl, proxyFetch, stopTabSidecar, isTauri } from '@/api/tauriClient';
+import type { PermissionMode } from '@/config/types';
+
+// File-modifying tools that should trigger workspace refresh
+const FILE_MODIFYING_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
+
+interface TabProviderProps {
+    children: ReactNode;
+    tabId: string;
+    agentDir: string;
+    sessionId?: string | null;
+    /** @deprecated Currently unused - reserved for future optimization (lazy rendering) */
+    isActive?: boolean;
+    /** Callback when generating state changes (for close confirmation) */
+    onGeneratingChange?: (isGenerating: boolean) => void;
+}
+
+/**
+ * Create a Tab-scoped POST function
+ */
+function createPostJson(tabId: string) {
+    return async <T,>(path: string, body?: unknown): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        return (await response.json()) as T;
+    };
+}
+
+/**
+ * Create a Tab-scoped GET function
+ */
+function createApiGetJson(tabId: string) {
+    return async <T,>(path: string): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url);
+        return (await response.json()) as T;
+    };
+}
+
+export default function TabProvider({
+    children,
+    tabId,
+    agentDir,
+    sessionId = null,
+    isActive,
+    onGeneratingChange,
+}: TabProviderProps) {
+    // Create Tab-scoped API functions
+    const postJson = useMemo(() => createPostJson(tabId), [tabId]);
+    const apiGetJson = useMemo(() => createApiGetJson(tabId), [tabId]);
+
+    // Core state
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [sessionState, setSessionState] = useState<SessionState>('idle');
+    const [logs, setLogs] = useState<string[]>([]);
+    const [unifiedLogs, setUnifiedLogs] = useState<LogEntry[]>([]);
+    const [systemInitInfo, setSystemInitInfo] = useState<SystemInitInfo | null>(null);
+    const [agentError, setAgentError] = useState<string | null>(null);
+    const [systemStatus, setSystemStatus] = useState<string | null>(null);  // e.g., 'compacting'
+    const [isConnected, setIsConnected] = useState(false);
+    const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
+    const [pendingAskUserQuestion, setPendingAskUserQuestion] = useState<AskUserQuestionRequest | null>(null);
+    const [toolCompleteCount, setToolCompleteCount] = useState(0);
+
+    // Store callback in ref to avoid triggering effect on every render
+    const onGeneratingChangeRef = useRef(onGeneratingChange);
+    onGeneratingChangeRef.current = onGeneratingChange;
+
+    // Notify parent when generating state changes (for close confirmation)
+    useEffect(() => {
+        onGeneratingChangeRef.current?.(isLoading);
+    }, [isLoading]);
+
+    // Refs for SSE handling
+    const sseRef = useRef<SseConnection | null>(null);
+    const isStreamingRef = useRef(false);
+    const seenIdsRef = useRef<Set<string>>(new Set());
+    // Flag to skip message-replay after user clicks "new session"
+    const isNewSessionRef = useRef(false);
+    // Pending attachments to merge with next user message from SSE replay
+    const pendingAttachmentsRef = useRef<{
+        id: string;
+        name: string;
+        size: number;
+        mimeType: string;
+        previewUrl: string;
+        isImage: boolean;
+    }[] | null>(null);
+
+    /**
+     * Reset session for "新对话" functionality
+     * This synchronizes frontend AND backend state:
+     * - Stops any ongoing AI response
+     * - Clears all messages on both sides
+     * - Generates new session ID on backend
+     * - Clears logs and permissions
+     */
+    const resetSession = useCallback(async (): Promise<boolean> => {
+        console.log(`[TabProvider ${tabId}] resetSession: starting...`);
+
+        // 1. Clear frontend state immediately for responsive UI
+        setMessages([]);
+        seenIdsRef.current.clear();
+        isNewSessionRef.current = true;
+        isStreamingRef.current = false;
+        setIsLoading(false);
+        setAgentError(null);
+        setUnifiedLogs([]); // Clear logs for new conversation
+        setLogs([]);
+        // Clear pending prompts to prevent stale UI
+        setPendingPermission(null);
+        setPendingAskUserQuestion(null);
+
+        // 2. Tell backend to reset (this will also broadcast chat:init)
+        try {
+            const response = await postJson<{ success: boolean; error?: string }>('/chat/reset');
+            if (!response.success) {
+                console.error(`[TabProvider ${tabId}] resetSession failed:`, response.error);
+                return false;
+            }
+            console.log(`[TabProvider ${tabId}] resetSession complete`);
+            return true;
+        } catch (error) {
+            console.error(`[TabProvider ${tabId}] resetSession error:`, error);
+            return false;
+        }
+    }, [tabId, postJson]);
+
+    // Append log
+    const appendLog = useCallback((line: string) => {
+        setLogs(prev => {
+            const next = [...prev, line];
+            if (next.length > 2000) {
+                return next.slice(-2000);
+            }
+            return next;
+        });
+    }, []);
+
+    // Append unified log entry (from SSE chat:log events) - keep max 3000
+    const appendUnifiedLog = useCallback((entry: LogEntry) => {
+        setUnifiedLogs(prev => {
+            const next = [...prev, entry];
+            if (next.length > 3000) {
+                return next.slice(-3000);
+            }
+            return next;
+        });
+    }, []);
+
+    // Clear all unified logs
+    const clearUnifiedLogs = useCallback(() => {
+        setUnifiedLogs([]);
+        setLogs([]);
+    }, []);
+
+    // Listen for React frontend logs
+    useEffect(() => {
+        const handleReactLog = (event: Event) => {
+            const customEvent = event as CustomEvent<LogEntry>;
+            appendUnifiedLog(customEvent.detail);
+        };
+
+        window.addEventListener(REACT_LOG_EVENT, handleReactLog);
+        return () => {
+            window.removeEventListener(REACT_LOG_EVENT, handleReactLog);
+        };
+    }, [appendUnifiedLog]);
+
+    // Listen for Rust logs via Tauri events (unified with React/Bun logs)
+    // Note: Rust logs are only displayed in UI, NOT persisted via frontend API
+    // This avoids a log loop: Rust log → API call → Rust proxy logs the call → new Rust log → ...
+    useEffect(() => {
+        if (!isTauri()) return;
+
+        let unlisten: (() => void) | undefined;
+
+        (async () => {
+            const { listen } = await import('@tauri-apps/api/event');
+            unlisten = await listen<LogEntry>('log:rust', (event) => {
+                const entry = event.payload;
+                // Add to unified logs for UI display only
+                // Do NOT call queueLogsForPersistence - that would cause infinite loop
+                appendUnifiedLog(entry);
+            });
+        })();
+
+        return () => {
+            unlisten?.();
+        };
+    }, [appendUnifiedLog]);
+
+    // Handle SSE events
+    const handleSseEvent = useCallback((eventName: string, data: unknown) => {
+        switch (eventName) {
+            case 'chat:init': {
+                // chat:init is sent on SSE connect/reconnect
+                // If user just started a new session, we've already cleared state - skip
+                // This prevents race conditions where backend's init arrives after frontend reset
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping chat:init (new session in progress)');
+                    break;
+                }
+                seenIdsRef.current.clear();
+                setMessages([]);
+                setAgentError(null);
+
+                // Sync isLoading with backend state on SSE connect/reconnect
+                // This catches cases where message-complete was lost during connection issues
+                const initPayload = data as { sessionState?: SessionState } | null;
+                if (initPayload?.sessionState) {
+                    setSessionState(initPayload.sessionState);
+                    if (initPayload.sessionState === 'idle' && isStreamingRef.current) {
+                        console.debug(`[TabProvider ${tabId}] chat:init state=idle, syncing isLoading`);
+                        isStreamingRef.current = false;
+                        setIsLoading(false);
+                    }
+                }
+                break;
+            }
+
+            case 'chat:message-replay': {
+                // Skip replay if user started a new session
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping message-replay (new session)');
+                    break;
+                }
+                const payload = data as { message: { id: string; role: 'user' | 'assistant'; content: string | ContentBlock[]; timestamp: string } } | null;
+                if (!payload?.message) break;
+                const msg = payload.message;
+                if (seenIdsRef.current.has(msg.id)) break;
+                seenIdsRef.current.add(msg.id);
+
+                // Merge pending attachments with user messages
+                let attachments = undefined;
+                if (msg.role === 'user' && pendingAttachmentsRef.current) {
+                    attachments = pendingAttachmentsRef.current;
+                    pendingAttachmentsRef.current = null; // Clear after use
+                }
+
+                setMessages(prev => [...prev, {
+                    ...msg,
+                    timestamp: new Date(msg.timestamp),
+                    attachments,
+                }]);
+                break;
+            }
+
+            case 'chat:status': {
+                const payload = data as { sessionState: SessionState } | null;
+                if (payload?.sessionState) {
+                    setSessionState(payload.sessionState);
+                    // Sync isLoading with sessionState - defensive fix for when message-complete event is lost
+                    // When backend reports 'idle', ensure frontend isLoading is also false
+                    if (payload.sessionState === 'idle' && isStreamingRef.current) {
+                        console.debug(`[TabProvider ${tabId}] chat:status=idle, syncing isLoading`);
+                        isStreamingRef.current = false;
+                        setIsLoading(false);
+                    }
+                }
+                break;
+            }
+
+            case 'chat:system-status': {
+                // System status from SDK (e.g., 'compacting' for context compression)
+                const payload = data as { status: string | null } | null;
+                setSystemStatus(payload?.status ?? null);
+                break;
+            }
+
+            case 'chat:message-chunk': {
+                // Skip stale chunks if user started a new session
+                // (old stream may still be sending events before fully disconnecting)
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping message-chunk (new session, stale event)');
+                    break;
+                }
+                const chunk = data as string;
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role === 'assistant' && isStreamingRef.current) {
+                        if (typeof last.content === 'string') {
+                            return [...prev.slice(0, -1), { ...last, content: last.content + chunk }];
+                        }
+                        const contentArray = last.content;
+                        const lastBlock = contentArray[contentArray.length - 1];
+                        if (lastBlock?.type === 'text') {
+                            return [...prev.slice(0, -1), {
+                                ...last,
+                                content: [...contentArray.slice(0, -1), { type: 'text', text: (lastBlock.text || '') + chunk }]
+                            }];
+                        }
+                        return [...prev.slice(0, -1), {
+                            ...last,
+                            content: [...contentArray, { type: 'text', text: chunk }]
+                        }];
+                    }
+                    isStreamingRef.current = true;
+                    setIsLoading(true);
+                    return [...prev, {
+                        id: Date.now().toString(),
+                        role: 'assistant',
+                        content: chunk,
+                        timestamp: new Date()
+                    }];
+                });
+                break;
+            }
+
+            case 'chat:thinking-start': {
+                // Skip stale events if user started a new session
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping thinking-start (new session, stale event)');
+                    break;
+                }
+                const { index } = data as { index: number };
+                setMessages(prev => {
+                    const thinkingBlock: ContentBlock = {
+                        type: 'thinking',
+                        thinking: '',
+                        thinkingStreamIndex: index,
+                        thinkingStartedAt: Date.now()
+                    };
+                    const last = prev[prev.length - 1];
+                    if (last?.role === 'assistant') {
+                        const content = typeof last.content === 'string'
+                            ? [{ type: 'text' as const, text: last.content }]
+                            : last.content;
+                        return [...prev.slice(0, -1), { ...last, content: [...content, thinkingBlock] }];
+                    }
+                    isStreamingRef.current = true;
+                    setIsLoading(true);
+                    return [...prev, { id: Date.now().toString(), role: 'assistant', content: [thinkingBlock], timestamp: new Date() }];
+                });
+                break;
+            }
+
+            case 'chat:thinking-chunk': {
+                const { index, delta } = data as { index: number; delta: string };
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
+                    const contentArray = last.content;
+                    const idx = contentArray.findIndex(b => b.type === 'thinking' && b.thinkingStreamIndex === index && !b.isComplete);
+                    if (idx === -1) return prev;
+                    const block = contentArray[idx];
+                    if (block.type !== 'thinking') return prev;
+                    const updated = [...contentArray];
+                    updated[idx] = { ...block, thinking: (block.thinking || '') + delta };
+                    return [...prev.slice(0, -1), { ...last, content: updated }];
+                });
+                break;
+            }
+
+            case 'chat:tool-use-start': {
+                // Skip stale events if user started a new session
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping tool-use-start (new session, stale event)');
+                    break;
+                }
+                const tool = data as ToolUse;
+                setMessages(prev => {
+                    const toolBlock: ContentBlock = {
+                        type: 'tool_use',
+                        tool: { ...tool, inputJson: '', isLoading: true } as ToolUseSimple
+                    };
+                    const last = prev[prev.length - 1];
+                    if (last?.role === 'assistant') {
+                        const content = typeof last.content === 'string'
+                            ? [{ type: 'text' as const, text: last.content }]
+                            : last.content;
+                        return [...prev.slice(0, -1), { ...last, content: [...content, toolBlock] }];
+                    }
+                    isStreamingRef.current = true;
+                    setIsLoading(true);
+                    return [...prev, { id: Date.now().toString(), role: 'assistant', content: [toolBlock], timestamp: new Date() }];
+                });
+                break;
+            }
+
+            case 'chat:tool-input-delta': {
+                const { toolId, delta } = data as { index: number; toolId: string; delta: string };
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
+                    const contentArray = last.content;
+                    const idx = contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === toolId);
+                    if (idx === -1) return prev;
+                    const block = contentArray[idx];
+                    if (block.type !== 'tool_use' || !block.tool) return prev;
+                    const newInputJson = (block.tool.inputJson || '') + delta;
+                    const parsedInput = parsePartialJson<ToolInput>(newInputJson);
+                    const updated = [...contentArray];
+                    updated[idx] = {
+                        ...block,
+                        tool: { ...block.tool, inputJson: newInputJson, parsedInput: parsedInput || block.tool.parsedInput }
+                    };
+                    return [...prev.slice(0, -1), { ...last, content: updated }];
+                });
+                break;
+            }
+
+            case 'chat:content-block-stop': {
+                const { index, toolId } = data as { index: number; toolId?: string };
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
+                    const contentArray = last.content;
+
+                    // Check thinking block
+                    const thinkingIdx = contentArray.findIndex(b =>
+                        b.type === 'thinking' && b.thinkingStreamIndex === index && !b.isComplete
+                    );
+                    if (thinkingIdx !== -1) {
+                        const block = contentArray[thinkingIdx];
+                        if (block.type === 'thinking') {
+                            const updated = [...contentArray];
+                            updated[thinkingIdx] = {
+                                ...block,
+                                isComplete: true,
+                                thinkingDurationMs: block.thinkingStartedAt ? Date.now() - block.thinkingStartedAt : undefined
+                            };
+                            return [...prev.slice(0, -1), { ...last, content: updated }];
+                        }
+                    }
+
+                    // Check tool block
+                    const toolIdx = toolId
+                        ? contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === toolId)
+                        : contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.streamIndex === index);
+                    if (toolIdx !== -1) {
+                        const block = contentArray[toolIdx];
+                        if (block.type === 'tool_use' && block.tool?.inputJson) {
+                            let parsedInput: ToolInput | undefined;
+                            try {
+                                parsedInput = JSON.parse(block.tool.inputJson);
+                            } catch {
+                                parsedInput = parsePartialJson<ToolInput>(block.tool.inputJson) ?? undefined;
+                            }
+                            const updated = [...contentArray];
+                            updated[toolIdx] = { ...block, tool: { ...block.tool, parsedInput } };
+                            return [...prev.slice(0, -1), { ...last, content: updated }];
+                        }
+                    }
+                    return prev;
+                });
+                break;
+            }
+
+            case 'chat:tool-result-start':
+            case 'chat:tool-result-delta':
+            case 'chat:tool-result-complete': {
+                const payload = data as { toolUseId: string; content?: string; delta?: string; isError?: boolean };
+                // Track if we need to trigger workspace refresh (for file-modifying tools)
+                let shouldTriggerRefresh = false;
+
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
+                    const contentArray = last.content;
+                    const idx = contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === payload.toolUseId);
+                    if (idx === -1) return prev;
+                    const block = contentArray[idx];
+                    if (block.type !== 'tool_use' || !block.tool) return prev;
+
+                    const updated = [...contentArray];
+                    if (eventName === 'chat:tool-result-delta') {
+                        updated[idx] = {
+                            ...block,
+                            tool: { ...block.tool, result: (block.tool.result || '') + (payload.delta ?? ''), isLoading: true }
+                        };
+                    } else {
+                        updated[idx] = {
+                            ...block,
+                            tool: {
+                                ...block.tool,
+                                result: payload.content ?? block.tool.result,
+                                isError: payload.isError,
+                                isLoading: eventName !== 'chat:tool-result-complete'
+                            }
+                        };
+                    }
+
+                    // Mark for workspace refresh when file-modifying tool completes
+                    if (eventName === 'chat:tool-result-complete' && block.tool.name && FILE_MODIFYING_TOOLS.has(block.tool.name)) {
+                        shouldTriggerRefresh = true;
+                    }
+
+                    return [...prev.slice(0, -1), { ...last, content: updated }];
+                });
+
+                // Trigger workspace refresh after state update (outside setMessages callback)
+                if (shouldTriggerRefresh) {
+                    setToolCompleteCount(c => c + 1);
+                }
+                break;
+            }
+
+            case 'chat:message-complete': {
+                console.debug(`[TabProvider ${tabId}] chat:message-complete received`);
+                isStreamingRef.current = false;
+                setIsLoading(false);
+                break;
+            }
+
+            case 'chat:message-stopped': {
+                isStreamingRef.current = false;
+                setIsLoading(false);
+                break;
+            }
+
+            case 'chat:message-error': {
+                isStreamingRef.current = false;
+                setIsLoading(false);
+                break;
+            }
+
+            case 'chat:system-init': {
+                const payload = data as { info: SystemInitInfo } | null;
+                if (payload?.info) {
+                    setSystemInitInfo(payload.info);
+                }
+                break;
+            }
+
+            case 'chat:logs': {
+                const payload = data as { lines: string[] } | null;
+                if (payload?.lines) {
+                    setLogs(payload.lines);
+                }
+                break;
+            }
+
+            case 'chat:log': {
+                // Handle both legacy string format and new LogEntry format
+                if (typeof data === 'string') {
+                    // Legacy format: plain string
+                    appendLog(data);
+                } else if (data && typeof data === 'object' && 'source' in data && 'message' in data) {
+                    // New unified logger format: LogEntry
+                    appendUnifiedLog(data as LogEntry);
+                }
+                break;
+            }
+
+            case 'chat:agent-error': {
+                const payload = data as { message: string } | null;
+                if (payload?.message) {
+                    setAgentError(payload.message);
+                }
+                break;
+            }
+
+            // TODO: Implement Subagent event handling for nested tool calls
+            // These events are emitted by the Task tool when it spawns subagents
+            // Currently ignored - subagent calls will not be displayed in UI
+            case 'chat:subagent-tool-use':
+            case 'chat:subagent-tool-input-delta':
+            case 'chat:subagent-tool-result-start':
+            case 'chat:subagent-tool-result-delta':
+            case 'chat:subagent-tool-result-complete': {
+                // See useClaudeChat.ts for reference implementation
+                console.debug(`[TabProvider] Subagent event ignored: ${eventName}`);
+                break;
+            }
+
+            case 'permission:request': {
+                // Agent is requesting permission to use a tool
+                const payload = data as { requestId: string; toolName: string; input: string } | null;
+                console.log(`[TabProvider] permission:request received:`, payload);
+                if (payload?.requestId) {
+                    console.log(`[TabProvider] Setting pendingPermission for: ${payload.toolName}`);
+                    setPendingPermission({
+                        requestId: payload.requestId,
+                        toolName: payload.toolName,
+                        input: payload.input || '',
+                    });
+                }
+                break;
+            }
+
+            case 'ask-user-question:request': {
+                // Agent is asking user structured questions
+                const payload = data as { requestId: string; questions: AskUserQuestion[] } | null;
+                console.log(`[TabProvider] ask-user-question:request received:`, payload);
+                if (payload?.requestId && payload.questions?.length > 0) {
+                    console.log(`[TabProvider] Setting pendingAskUserQuestion with ${payload.questions.length} questions`);
+                    setPendingAskUserQuestion({
+                        requestId: payload.requestId,
+                        questions: payload.questions,
+                    });
+                }
+                break;
+            }
+
+            default: {
+                // Log unhandled events for debugging
+                if (!eventName.startsWith('chat:')) {
+                    console.log(`[TabProvider] Unhandled SSE event: ${eventName}`);
+                }
+            }
+        }
+    }, [appendLog, appendUnifiedLog, tabId]);
+
+    // Connect SSE
+    const connectSse = useCallback(async () => {
+        if (sseRef.current?.isConnected()) return;
+
+        const sse = createSseConnection(tabId);
+        sse.setEventHandler(handleSseEvent);
+        sseRef.current = sse;
+
+        try {
+            await sse.connect();
+            setIsConnected(true);
+            // Note: Log server URL is set once in App.tsx using global sidecar
+            // Tab sidecars should not override it to avoid URL switching issues
+        } catch (error) {
+            console.error(`[TabProvider ${tabId}] SSE connect failed:`, error);
+            throw error;
+        }
+    }, [tabId, handleSseEvent]);
+
+    // Disconnect SSE
+    const disconnectSse = useCallback(() => {
+        if (sseRef.current) {
+            void sseRef.current.disconnect();
+            sseRef.current = null;
+            setIsConnected(false);
+        }
+    }, []);
+
+    // Track agentDir for cleanup (need ref because cleanup runs after props may change)
+    const agentDirRef = useRef(agentDir);
+    agentDirRef.current = agentDir;
+
+    // Cleanup on unmount - disconnect SSE and stop Tab's Sidecar
+    useEffect(() => {
+        return () => {
+            if (sseRef.current) {
+                void sseRef.current.disconnect();
+            }
+            // Only stop Sidecar if this Tab had one (i.e., was running a project)
+            // Settings/Launcher tabs don't have sidecars (agentDir is empty string)
+            if (agentDirRef.current) {
+                void stopTabSidecar(tabId);
+            }
+        };
+    }, [tabId]);
+
+    // Send message with optional images, permission mode, and model
+    const sendMessage = useCallback(async (
+        text: string,
+        images?: ImageAttachment[],
+        permissionMode?: PermissionMode,
+        model?: string,
+        providerEnv?: { baseUrl?: string; apiKey?: string; authType?: 'auth_token' | 'api_key' | 'both' | 'auth_token_clear_api_key' }
+    ): Promise<boolean> => {
+        const trimmed = text.trim();
+        if (!trimmed && (!images || images.length === 0)) return false;
+
+        try {
+            // Reset new session flag BEFORE sending - allow message replay to show user's message
+            // This must happen before API call because chat:message-replay arrives during the call
+            isNewSessionRef.current = false;
+
+            // Store attachments for merging with SSE replay
+            if (images && images.length > 0) {
+                pendingAttachmentsRef.current = images.map((img) => ({
+                    id: img.id,
+                    name: img.file.name,
+                    size: img.file.size,
+                    mimeType: img.file.type,
+                    previewUrl: img.preview,
+                    isImage: true,
+                }));
+            }
+
+            // Prepare image data for backend
+            const imageData = images?.map((img) => ({
+                name: img.file.name,
+                mimeType: img.file.type,
+                // Extract base64 data from data URL (remove "data:image/xxx;base64," prefix)
+                data: img.preview.split(',')[1],
+            }));
+
+            const response = await postJson<{ success: boolean; error?: string }>('/chat/send', {
+                text: trimmed,
+                images: imageData,
+                permissionMode: permissionMode ?? 'auto',
+                model,
+                providerEnv,
+            });
+
+            return response.success;
+        } catch (error) {
+            console.error(`[TabProvider ${tabId}] Send message failed:`, error);
+            pendingAttachmentsRef.current = null; // Clear on error
+            return false;
+        }
+    }, [tabId]);
+
+    // Stop response
+    const stopResponse = useCallback(async (): Promise<boolean> => {
+        try {
+            const response = await postJson<{ success: boolean; error?: string }>('/chat/stop');
+            return response.success;
+        } catch (error) {
+            console.error(`[TabProvider ${tabId}] Stop response failed:`, error);
+            return false;
+        }
+    }, [tabId]);
+
+    // Load session from history
+    const loadSession = useCallback(async (targetSessionId: string): Promise<boolean> => {
+        try {
+            console.log(`[TabProvider ${tabId}] Loading session: ${targetSessionId}`);
+            const response = await apiGetJson<{ success: boolean; session?: { messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: string; attachments?: Array<{ id: string; name: string; mimeType: string; path: string; previewUrl?: string }> }> } }>(`/sessions/${targetSessionId}`);
+
+            if (!response.success || !response.session) {
+                console.error(`[TabProvider ${tabId}] Session not found`);
+                return false;
+            }
+
+            // Convert session messages to Message format
+            const loadedMessages: Message[] = response.session.messages.map((msg) => {
+                // Parse content - it may be JSON stringified ContentBlock[] or plain text
+                let parsedContent: string | ContentBlock[] = msg.content ?? '';
+
+                // Only try to parse if content is a non-empty string starting with '['
+                if (typeof msg.content === 'string' && msg.content.length > 0 && msg.content.startsWith('[') && msg.content.includes('"type"')) {
+                    try {
+                        parsedContent = JSON.parse(msg.content) as ContentBlock[];
+                    } catch {
+                        // Keep as string if parse fails
+                        parsedContent = msg.content;
+                    }
+                }
+
+                return {
+                    id: msg.id,
+                    role: msg.role,
+                    content: parsedContent,
+                    timestamp: new Date(msg.timestamp),
+                    attachments: msg.attachments?.map((att: { id: string; name: string; mimeType: string; path: string; previewUrl?: string }) => ({
+                        id: att.id,
+                        name: att.name,
+                        size: 0,
+                        mimeType: att.mimeType,
+                        savedPath: att.path,
+                        relativePath: att.path,
+                        previewUrl: att.previewUrl,
+                        isImage: att.mimeType.startsWith('image/'),
+                    })),
+                };
+            });
+
+            // Clear current state and load new messages
+            seenIdsRef.current.clear();
+            isNewSessionRef.current = false; // Allow SSE replays again
+            setMessages(loadedMessages);
+            setAgentError(null);
+
+            // Also update backend to switch session (for continuity)
+            await postJson('/sessions/switch', { sessionId: targetSessionId });
+
+            console.log(`[TabProvider ${tabId}] Loaded ${loadedMessages.length} messages from session`);
+            return true;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            console.error(`[TabProvider ${tabId}] Load session failed:`, errorMessage);
+            if (errorStack) {
+                console.error(errorStack);
+            }
+            return false;
+        }
+    }, [tabId]);
+
+    // Track whether initial session has been loaded
+    const initialSessionLoadedRef = useRef(false);
+
+    // Auto-load session when initial sessionId is provided and SSE is connected
+    useEffect(() => {
+        // Only load if:
+        // 1. sessionId is provided
+        // 2. SSE is connected (sidecar is ready)
+        // 3. We haven't loaded this session yet
+        if (sessionId && isConnected && !initialSessionLoadedRef.current) {
+            initialSessionLoadedRef.current = true;
+            console.log(`[TabProvider ${tabId}] Auto-loading initial session: ${sessionId}`);
+            void loadSession(sessionId);
+        }
+    }, [sessionId, isConnected, tabId, loadSession]);
+
+    // Reset the loaded flag when sessionId changes to a different value
+    useEffect(() => {
+        if (!sessionId) {
+            initialSessionLoadedRef.current = false;
+        }
+    }, [sessionId]);
+
+    // Respond to permission request
+    const respondPermission = useCallback(async (decision: 'deny' | 'allow_once' | 'always_allow') => {
+        if (!pendingPermission) return;
+
+        const requestId = pendingPermission.requestId;
+        console.log(`[TabProvider] Permission response: ${decision} for ${pendingPermission.toolName}`);
+
+        // Clear pending permission immediately for UI responsiveness
+        setPendingPermission(null);
+
+        // Send response to backend
+        try {
+            await postJson('/api/permission/respond', { requestId, decision });
+        } catch (error) {
+            console.error('[TabProvider] Failed to send permission response:', error);
+        }
+    }, [pendingPermission, postJson]);
+
+    // Respond to AskUserQuestion request
+    const respondAskUserQuestion = useCallback(async (answers: Record<string, string> | null) => {
+        if (!pendingAskUserQuestion) return;
+
+        const requestId = pendingAskUserQuestion.requestId;
+        console.log(`[TabProvider] AskUserQuestion response: ${answers ? 'submitted' : 'cancelled'}`);
+
+        // Clear pending question immediately for UI responsiveness
+        setPendingAskUserQuestion(null);
+
+        // Send response to backend
+        try {
+            await postJson('/api/ask-user-question/respond', { requestId, answers });
+        } catch (error) {
+            console.error('[TabProvider] Failed to send AskUserQuestion response:', error);
+        }
+    }, [pendingAskUserQuestion, postJson]);
+
+    // Context value
+    const contextValue: TabContextValue = useMemo(() => ({
+        tabId,
+        agentDir,
+        sessionId,
+        messages,
+        isLoading,
+        sessionState,
+        logs,
+        unifiedLogs,
+        systemInitInfo,
+        agentError,
+        systemStatus,
+        isActive: isActive ?? false,
+        pendingPermission,
+        pendingAskUserQuestion,
+        toolCompleteCount,
+        isConnected,
+        setMessages,
+        setIsLoading,
+        setSessionState,
+        appendLog,
+        appendUnifiedLog,
+        clearUnifiedLogs,
+        setSystemInitInfo,
+        setAgentError,
+        connectSse,
+        disconnectSse,
+        sendMessage,
+        stopResponse,
+        loadSession,
+        resetSession,
+        // Tab-scoped API functions
+        apiGet: apiGetJson,
+        apiPost: postJson,
+        respondPermission,
+        respondAskUserQuestion,
+    }), [
+        tabId, agentDir, sessionId, messages, isLoading, sessionState,
+        logs, unifiedLogs, systemInitInfo, agentError, systemStatus, isActive, pendingPermission, pendingAskUserQuestion, toolCompleteCount, isConnected,
+        appendLog, appendUnifiedLog, clearUnifiedLogs, connectSse, disconnectSse, sendMessage, stopResponse, loadSession, resetSession,
+        apiGetJson, postJson, respondPermission, respondAskUserQuestion
+    ]);
+
+    return (
+        <TabContext.Provider value={contextValue}>
+            {children}
+        </TabContext.Provider>
+    );
+}

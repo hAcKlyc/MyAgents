@@ -1,0 +1,40 @@
+[package]
+name = "myagents"
+version = "0.1.0"
+description = "MyAgents - Desktop Claude Code for everyone"
+authors = ["MyAgents Team <myagents.io@gmail.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/hAcKlyc/MyAgents"
+homepage = "https://myagents.io"
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.9.5", features = ["tray-icon", "devtools"] }
+tauri-plugin-log = "2"
+tauri-plugin-fs = "2.4.5"
+tauri-plugin-dialog = "2.6.0"
+which = "8.0.0"
+libc = "0.2.180"
+tauri-plugin-localhost = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+reqwest = { version = "0.13.1", features = ["stream"] }
+futures-util = "0.3.31"
+tokio = { version = "1.49.0", features = ["rt", "sync"] }
+chrono = "0.4"
+base64 = "0.22"
+dirs = "6.0"

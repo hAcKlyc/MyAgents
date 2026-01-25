@@ -1,0 +1,291 @@
+name: Release (Disabled)
+
+# === WORKFLOW DISABLED ===
+# 此 workflow 已禁用，改用本地 build_macos.sh + publish_release.sh 发布
+# 如需重新启用，将 on: 部分改回：
+#   on:
+#     push:
+#       tags:
+#         - 'v*'
+#     workflow_dispatch:
+#       inputs:
+#         version:
+#           description: 'Version to release'
+#           required: true
+#           type: string
+# === WORKFLOW DISABLED ===
+
+on:
+  # 使用永远不会匹配的分支名来禁用所有触发
+  push:
+    branches:
+      - 'workflow-disabled-do-not-use'
+
+env:
+  APP_NAME: MyAgents
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - platform: macos-15-large
+            target: x86_64-apple-darwin
+            arch: x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download Bun binary for bundling
+        run: |
+          # Download the appropriate Bun binary for the target architecture
+          if [ "${{ matrix.arch }}" = "aarch64" ]; then
+            BUN_ARCH="aarch64"
+          else
+            BUN_ARCH="x64"
+          fi
+
+          mkdir -p src-tauri/binaries
+          curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-darwin-${BUN_ARCH}.zip" -o bun.zip
+          unzip -o bun.zip -d src-tauri/binaries/
+          mv src-tauri/binaries/bun-darwin-${BUN_ARCH}/bun src-tauri/binaries/bun-${{ matrix.target }}
+          rm -rf src-tauri/binaries/bun-darwin-${BUN_ARCH} bun.zip
+          chmod +x src-tauri/binaries/bun-${{ matrix.target }}
+
+      - name: Build server bundle
+        run: |
+          bun build src/server/index.ts --outfile src-tauri/resources/server-dist.js --target bun
+
+      - name: Copy claude-agent-sdk
+        run: |
+          SDK_SRC="node_modules/@anthropic-ai/claude-agent-sdk"
+          SDK_DEST="src-tauri/resources/claude-agent-sdk"
+          mkdir -p "$SDK_DEST"
+          cp "$SDK_SRC/cli.js" "$SDK_DEST/"
+          cp "$SDK_SRC/sdk.mjs" "$SDK_DEST/"
+          cp "$SDK_SRC"/*.wasm "$SDK_DEST/"
+          cp -R "$SDK_SRC/vendor" "$SDK_DEST/"
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Increase Node.js memory limit for Vite build (default ~1.5GB is not enough)
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS code signing (required for distribution)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'MyAgents v__VERSION__'
+          releaseBody: 'See the assets to download this version and install.'
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+
+  # Upload update manifests to R2
+  publish-update:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: List artifacts
+        run: find artifacts -type f -name "*.tar.gz*" | head -20
+
+      - name: Setup rclone for R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          curl -O https://downloads.rclone.org/rclone-current-linux-amd64.deb
+          sudo dpkg -i rclone-current-linux-amd64.deb
+
+          mkdir -p ~/.config/rclone
+          printf '%s\n' \
+            "[r2]" \
+            "type = s3" \
+            "provider = Cloudflare" \
+            "access_key_id = ${R2_ACCESS_KEY_ID}" \
+            "secret_access_key = ${R2_SECRET_ACCESS_KEY}" \
+            "endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            "acl = private" \
+            > ~/.config/rclone/rclone.conf
+
+      - name: Generate update manifests and upload to R2
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DOWNLOAD_BASE_URL: https://download.myagents.io
+        run: |
+          # Create update directory
+          mkdir -p update-manifests
+
+          # Variables for latest.json
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          DMG_ARM64=""
+          DMG_X64=""
+
+          # Process each architecture
+          for target in "aarch64-apple-darwin" "x86_64-apple-darwin"; do
+            echo "Processing $target..."
+
+            # Find the .tar.gz, .sig, and .dmg files
+            TAR_GZ=$(find artifacts -name "*.app.tar.gz" -path "*${target}*" ! -name "*.sig" | head -1)
+            SIG=$(find artifacts -name "*.app.tar.gz.sig" -path "*${target}*" | head -1)
+            DMG=$(find artifacts -name "*.dmg" -path "*${target}*" | head -1)
+
+            if [ -z "$TAR_GZ" ] || [ -z "$SIG" ]; then
+              echo "Warning: Missing update artifacts for $target"
+              continue
+            fi
+
+            echo "Found tar.gz: $TAR_GZ"
+            echo "Found sig: $SIG"
+            echo "Found dmg: $DMG"
+
+            # Get file names
+            FILENAME=$(basename "$TAR_GZ")
+            SIGNATURE=$(cat "$SIG")
+
+            # Upload tar.gz to R2 (for updater)
+            rclone copy "$TAR_GZ" "r2:myagents-releases/releases/v${VERSION}/"
+
+            # Upload DMG to R2 (for website download)
+            if [ -n "$DMG" ]; then
+              DMG_FILENAME=$(basename "$DMG")
+              rclone copy "$DMG" "r2:myagents-releases/releases/v${VERSION}/"
+
+              # Store DMG filename for latest.json
+              if [ "$target" = "aarch64-apple-darwin" ]; then
+                DMG_ARM64="$DMG_FILENAME"
+              else
+                DMG_X64="$DMG_FILENAME"
+              fi
+            fi
+
+            # Determine manifest filename based on target
+            if [ "$target" = "aarch64-apple-darwin" ]; then
+              MANIFEST_NAME="darwin-aarch64"
+            else
+              MANIFEST_NAME="darwin-x86_64"
+            fi
+
+            # Generate update manifest JSON (for Tauri updater)
+            printf '%s\n' \
+              '{' \
+              "  \"version\": \"${VERSION}\"," \
+              "  \"notes\": \"MyAgents v${VERSION}\"," \
+              "  \"pub_date\": \"${PUB_DATE}\"," \
+              '  "platforms": {' \
+              "    \"${MANIFEST_NAME}\": {" \
+              "      \"signature\": \"${SIGNATURE}\"," \
+              "      \"url\": \"${DOWNLOAD_BASE_URL}/releases/v${VERSION}/${FILENAME}\"" \
+              '    }' \
+              '  }' \
+              '}' \
+              > "update-manifests/${MANIFEST_NAME}.json"
+
+            echo "Generated ${MANIFEST_NAME}.json"
+          done
+
+          # Generate latest.json for website
+          printf '%s\n' \
+            '{' \
+            "  \"version\": \"${VERSION}\"," \
+            "  \"pub_date\": \"${PUB_DATE}\"," \
+            "  \"release_notes\": \"MyAgents v${VERSION}\"," \
+            '  "downloads": {' \
+            '    "mac_arm64": {' \
+            '      "name": "Apple Silicon",' \
+            "      \"url\": \"${DOWNLOAD_BASE_URL}/releases/v${VERSION}/${DMG_ARM64}\"" \
+            '    },' \
+            '    "mac_intel": {' \
+            '      "name": "Intel Mac",' \
+            "      \"url\": \"${DOWNLOAD_BASE_URL}/releases/v${VERSION}/${DMG_X64}\"" \
+            '    }' \
+            '  }' \
+            '}' \
+            > "update-manifests/latest.json"
+
+          echo "Generated latest.json"
+
+          # Upload all manifests to R2
+          rclone copy update-manifests/ "r2:myagents-releases/update/"
+
+          echo "Upload complete!"
+          echo "Update endpoints:"
+          echo "  - ${DOWNLOAD_BASE_URL}/update/darwin-aarch64.json (updater)"
+          echo "  - ${DOWNLOAD_BASE_URL}/update/darwin-x86_64.json (updater)"
+          echo "  - ${DOWNLOAD_BASE_URL}/update/latest.json (website)"
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DOWNLOAD_BASE_URL: https://download.myagents.io
+        run: |
+          echo "## Release v${VERSION} Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Updater Manifests" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${DOWNLOAD_BASE_URL}/update/darwin-aarch64.json\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${DOWNLOAD_BASE_URL}/update/darwin-x86_64.json\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Website Download API" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${DOWNLOAD_BASE_URL}/update/latest.json\`" >> $GITHUB_STEP_SUMMARY
