@@ -66,7 +66,7 @@ MyAgents 基于 Claude Agent SDK 运行的**桌面端通用 Agent 产品**，将
 #### 最终用户
 
 - **macOS 13.0 (Ventura)** 或更高版本
-- 支持 Apple Silicon (M1/M2/M3) 和 Intel 芯片
+- 支持 Apple Silicon 和 Intel 芯片
 
 #### 开发者
 
@@ -184,7 +184,7 @@ Therefore, MyAgents' core principles are: **zero-barrier GUI, flexible model pro
 #### End Users
 
 - **macOS 13.0 (Ventura)** or later
-- Apple Silicon (M1/M2/M3) and Intel supported
+- Apple Silicon and Intel supported
 
 #### Developers
 
