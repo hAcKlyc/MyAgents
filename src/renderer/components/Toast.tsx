@@ -1,4 +1,5 @@
 import { createContext, useContext, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { AlertCircle, CheckCircle, Info, X, AlertTriangle } from 'lucide-react';
 
@@ -103,14 +104,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return (
         <ToastContext.Provider value={{ showToast, success, error, warning, info }}>
             {children}
-            {/* Toast container - top center */}
-            <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none">
-                {toasts.map((toast) => (
-                    <div key={toast.id} className="pointer-events-auto">
-                        <ToastItem toast={toast} onClose={() => removeToast(toast.id)} />
-                    </div>
-                ))}
-            </div>
+            {/* Toast container - use portal to ensure it's above all modals */}
+            {createPortal(
+                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
+                    {toasts.map((toast) => (
+                        <div key={toast.id} className="pointer-events-auto">
+                            <ToastItem toast={toast} onClose={() => removeToast(toast.id)} />
+                        </div>
+                    ))}
+                </div>,
+                document.body
+            )}
         </ToastContext.Provider>
     );
 }

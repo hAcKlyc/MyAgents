@@ -1,6 +1,6 @@
 
 import { AlertCircle, Brain, ChevronDown, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import Markdown from '@/components/Markdown';
 import {
@@ -23,57 +23,39 @@ export default function ProcessRow({
     totalBlocks,
     isStreaming = false
 }: ProcessRowProps) {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [userManuallyOpened, setUserManuallyOpened] = useState(false);
-    const prevIsBlockActiveRef = useRef(false);
+    // User manually toggled state (null = not toggled, true/false = user choice)
+    const [userToggled, setUserToggled] = useState<boolean | null>(null);
 
     const isThinking = block.type === 'thinking';
     const isTool = block.type === 'tool_use';
     const isLastBlock = index === totalBlocks - 1;
 
-    // Issue 1: 改进 loading 判断逻辑
-    // - Thinking: 没有 isComplete 就是 loading
-    // - Tool: 有下一个 block 就结束了，或者有 result 就结束了
+    // Thinking: 没有 isComplete 就是 active
     const isThinkingActive = isThinking && block.isComplete !== true;
 
-    // Tool loading 逻辑改进：
-    // 1. 如果不是最后一个 block，说明后面有更多内容了，这个工具已完成
-    // 2. 如果是最后一个 block 且正在 streaming，需要检查是否有 result
-    // 3. 有 result 就完成了
+    // Tool: 是最后一个 block 且正在 streaming 且没有 result 就是 active
     const isToolActive = isTool && isLastBlock && isStreaming && !block.tool?.result;
 
     const isBlockActive = isThinkingActive || isToolActive;
 
-    // Issue 3: 自动展开/折叠逻辑
-    useEffect(() => {
-        const wasActive = prevIsBlockActiveRef.current;
+    // Check if block has expandable content
+    const hasContent =
+        (isThinking && block.thinking && block.thinking.length > 0) ||
+        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.subagentCalls?.length));
 
-        if (isBlockActive && !wasActive) {
-            // Block just became active -> expand
-            setIsExpanded(true);
-        } else if (!isBlockActive && wasActive && !userManuallyOpened) {
-            // Block just completed and user didn't manually open -> collapse
-            setIsExpanded(false);
-        }
+    // 派生展开状态（无 useEffect，避免无限循环）
+    // 规则：
+    // 1. 如果用户手动切换过，使用用户的选择
+    // 2. 否则，thinking 块在 active 时自动展开
+    // 3. tool 块默认不展开
+    const isExpanded = userToggled !== null
+        ? userToggled
+        : (isThinking && isThinkingActive);
 
-        prevIsBlockActiveRef.current = isBlockActive;
-    }, [isBlockActive, userManuallyOpened]);
-
-    // If this becomes the latest active block, auto expand
-    useEffect(() => {
-        if (isLastBlock && isStreaming && isBlockActive) {
-            setIsExpanded(true);
-        }
-    }, [isLastBlock, isStreaming, isBlockActive]);
-
-    // Handle user click - track manual interaction
+    // Handle user click
     const handleToggle = () => {
         if (!hasContent) return;
-        const newState = !isExpanded;
-        setIsExpanded(newState);
-        if (newState) {
-            setUserManuallyOpened(true);
-        }
+        setUserToggled(prev => prev === null ? true : !prev);
     };
 
     // Build display content
@@ -82,7 +64,6 @@ export default function ProcessRow({
     let subLabel = '';
 
     if (isThinking) {
-        // Issue: 正确的思考标题 - "思考中…" vs "思考了 Xs"
         if (isThinkingActive) {
             mainLabel = '思考中…';
             icon = <Loader2 className="size-4 animate-spin" />;
@@ -95,11 +76,9 @@ export default function ProcessRow({
         const config = getToolBadgeConfig(block.tool.name);
         const toolLabel = getToolLabel(block.tool);
 
-        // 工具名在前（深色粗体），内容描述在后（浅色）
         mainLabel = block.tool.name;
         subLabel = toolLabel !== block.tool.name ? toolLabel : '';
 
-        // Loading 判断：有后续 block 或有 result 就不 loading
         if (isToolActive) {
             icon = <Loader2 className="size-4 animate-spin" />;
         } else if (block.tool.isError) {
@@ -108,10 +87,6 @@ export default function ProcessRow({
             icon = config.icon;
         }
     }
-
-    const hasContent =
-        (isThinking && block.thinking && block.thinking.length > 0) ||
-        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.subagentCalls?.length));
 
     return (
         <div className={`group ${index < totalBlocks - 1 ? 'border-b border-[var(--line-subtle)]' : ''}`}>

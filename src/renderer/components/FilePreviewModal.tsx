@@ -249,11 +249,11 @@ export default function FilePreviewModal({
                         {/* Action buttons - unified styling with smooth transitions */}
                         <div className="flex flex-shrink-0 items-center gap-1.5">
                             {isEditing ? (
-                                <>
+                                <div key="editing" className="flex items-center gap-1.5">
                                     <button
                                         type="button"
                                         onClick={handleCancel}
-                                        className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-[var(--ink-muted)] transition-all duration-150 hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 active:scale-[0.98]"
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 active:scale-[0.98]"
                                     >
                                         <X className="h-3.5 w-3.5" />
                                         取消
@@ -271,9 +271,10 @@ export default function FilePreviewModal({
                                         )}
                                         保存
                                     </button>
-                                </>
+                                </div>
                             ) : (
                                 <button
+                                    key="view"
                                     type="button"
                                     onClick={handleEdit}
                                     disabled={isLoading || !!error}

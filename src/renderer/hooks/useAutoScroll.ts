@@ -35,6 +35,13 @@ export function useAutoScroll(
   const lastFrameTimeRef = useRef<number>(0);
   const isAnimatingRef = useRef(false);
 
+  // Keep isLoading in a ref so animation loop can access it
+  const isLoadingRef = useRef(isLoading);
+  isLoadingRef.current = isLoading;
+
+  // Track scroll position to detect user scroll direction
+  const lastScrollTopRef = useRef(0);
+
   const cancelAnimation = useCallback(() => {
     if (animationFrameRef.current !== null && typeof window !== 'undefined') {
       window.cancelAnimationFrame(animationFrameRef.current);
@@ -68,6 +75,7 @@ export function useAutoScroll(
   /**
    * Smooth scroll animation using RAF
    * Scrolls at a consistent speed that ramps up when far from bottom
+   * Keeps running while loading to catch new content
    */
   const animateSmoothScroll = useCallback(() => {
     if (!isAutoScrollEnabledRef.current || isPausedRef.current) {
@@ -85,10 +93,15 @@ export function useAutoScroll(
     const currentScrollTop = element.scrollTop;
     const distance = targetScrollTop - currentScrollTop;
 
-    // Already at bottom (or very close), stop animation
+    // At bottom (or very close)
     if (distance <= SNAP_THRESHOLD_PX) {
       element.scrollTop = targetScrollTop;
-      isAnimatingRef.current = false;
+      // Keep animation loop running while loading to catch new content
+      if (isLoadingRef.current) {
+        animationFrameRef.current = requestAnimationFrame(animateSmoothScroll);
+      } else {
+        isAnimatingRef.current = false;
+      }
       return;
     }
 
@@ -96,11 +109,9 @@ export function useAutoScroll(
     const deltaTime = lastFrameTimeRef.current ? now - lastFrameTimeRef.current : 16;
     lastFrameTimeRef.current = now;
 
-    // Calculate adaptive scroll speed
-    // Speed increases when we're far behind, to catch up faster
+    // Calculate adaptive scroll speed - faster when far behind
     let speed = SCROLL_SPEED_PX_PER_MS;
     if (distance > SPEED_RAMP_DISTANCE) {
-      // Ramp up speed proportionally to how far we are
       const speedMultiplier = Math.min(distance / SPEED_RAMP_DISTANCE, MAX_SCROLL_SPEED_PX_PER_MS / SCROLL_SPEED_PX_PER_MS);
       speed = SCROLL_SPEED_PX_PER_MS * speedMultiplier;
     }
@@ -112,12 +123,8 @@ export function useAutoScroll(
     const newScrollTop = Math.min(currentScrollTop + scrollAmount, targetScrollTop);
     element.scrollTop = newScrollTop;
 
-    // Continue animation if not at bottom
-    if (newScrollTop < targetScrollTop) {
-      animationFrameRef.current = requestAnimationFrame(animateSmoothScroll);
-    } else {
-      isAnimatingRef.current = false;
-    }
+    // Continue animation
+    animationFrameRef.current = requestAnimationFrame(animateSmoothScroll);
   }, []);
 
   /**
@@ -161,33 +168,49 @@ export function useAutoScroll(
     }
   }, [messages, startSmoothScroll]);
 
-  // Start smooth scroll when loading starts
+  // Start smooth scroll when loading starts, stop when loading ends
   useEffect(() => {
     if (isLoading && isAutoScrollEnabledRef.current) {
       startSmoothScroll();
+    } else if (!isLoading && isAnimatingRef.current) {
+      // Loading stopped - let the current animation frame finish naturally
+      // The animation loop will check isLoadingRef and stop
     }
   }, [isLoading, startSmoothScroll]);
 
-  // Handle user scroll - detect if near bottom
+  // Handle user scroll - detect scroll direction to distinguish user vs programmatic scroll
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
 
-    const handleScroll = () => {
-      // Don't interfere while animating
-      if (isAnimatingRef.current) return;
+    // Initialize last scroll position
+    lastScrollTopRef.current = element.scrollTop;
 
-      if (isNearBottom()) {
-        if (!isAutoScrollEnabledRef.current) {
-          isAutoScrollEnabledRef.current = true;
-          // User scrolled back to bottom, resume smooth scrolling
-          startSmoothScroll();
+    const handleScroll = () => {
+      const currentScrollTop = element.scrollTop;
+      const scrollDelta = currentScrollTop - lastScrollTopRef.current;
+      lastScrollTopRef.current = currentScrollTop;
+
+      // User scrolled UP (negative delta) - immediately disable auto-scroll
+      // Use a small threshold (-5px) to avoid triggering on tiny fluctuations
+      if (scrollDelta < -5) {
+        if (isAutoScrollEnabledRef.current) {
+          isAutoScrollEnabledRef.current = false;
+          cancelAnimation();
         }
         return;
       }
-      // User scrolled up, disable auto-scroll
-      isAutoScrollEnabledRef.current = false;
-      cancelAnimation();
+
+      // Check if user scrolled back to bottom - re-enable auto-scroll
+      if (isNearBottom()) {
+        if (!isAutoScrollEnabledRef.current) {
+          isAutoScrollEnabledRef.current = true;
+          // Resume scrolling if still loading
+          if (isLoadingRef.current) {
+            startSmoothScroll();
+          }
+        }
+      }
     };
 
     element.addEventListener('scroll', handleScroll, { passive: true });
@@ -214,7 +237,8 @@ export function useAutoScroll(
       const currentHeight = element.scrollHeight;
       const heightDelta = currentHeight - lastScrollHeightRef.current;
 
-      // Only scroll when height increases (new content added)
+      // Only trigger scroll when height increases (new content added)
+      // The animation loop will decide whether to actually scroll based on mode
       if (heightDelta > 0) {
         startSmoothScroll();
       }

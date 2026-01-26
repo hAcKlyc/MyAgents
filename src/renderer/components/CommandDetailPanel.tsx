@@ -164,10 +164,11 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     description,
                 };
 
-                // Check if file should be renamed (based on sanitized command name)
+                // Check if file should be renamed (only if user modified name AND sanitized name differs from current file)
                 const newFileName = sanitizeFolderName(commandName.trim());
                 const currentFileName = command.fileName || name;
-                const shouldRename = newFileName && newFileName !== currentFileName;
+                const nameWasModified = commandName.trim() !== originalCommandName;
+                const shouldRename = nameWasModified && newFileName && newFileName !== currentFileName;
 
                 // When using Tab API, no need to pass agentDir (sidecar already has it)
                 const payload = isInTabContext
@@ -269,8 +270,10 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         }
 
         // Calculate preview path based on edited command name
+        // Only show "will rename" if user actually changed the name AND the sanitized file name is different
         const currentFileName = command.fileName || name;
-        const pathChanged = isEditing && !!expectedFileName && expectedFileName !== currentFileName;
+        const nameWasModified = commandName.trim() !== originalCommandName;
+        const pathChanged = isEditing && nameWasModified && !!expectedFileName && expectedFileName !== currentFileName;
         const previewPath = pathChanged
             ? command.path.replace(`${currentFileName}.md`, `${expectedFileName}.md`)
             : command.path;
@@ -304,11 +307,11 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     </div>
                     <div className="flex items-center gap-2">
                         {isEditing ? (
-                            <>
+                            <div key="editing" className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     删除
@@ -316,7 +319,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                 >
                                     <X className="h-4 w-4" />
                                     取消
@@ -330,9 +333,10 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                     保存
                                 </button>
-                            </>
+                            </div>
                         ) : (
                             <button
+                                key="view"
                                 type="button"
                                 onClick={() => handleEdit('name')}
                                 className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"

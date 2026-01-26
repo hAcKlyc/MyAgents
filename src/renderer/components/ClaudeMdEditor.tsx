@@ -182,11 +182,11 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                         </div>
                         <div className="flex items-center gap-2">
                             {isEditing ? (
-                                <>
+                                <div key="editing" className="flex items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={handleCancel}
-                                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                     >
                                         <X className="h-4 w-4" />
                                         取消
@@ -204,9 +204,10 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                                         )}
                                         保存
                                     </button>
-                                </>
+                                </div>
                             ) : (
                                 <button
+                                    key="view"
                                     type="button"
                                     onClick={handleEdit}
                                     className="flex items-center gap-1.5 rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"

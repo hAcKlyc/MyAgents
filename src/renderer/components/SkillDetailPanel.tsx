@@ -261,9 +261,10 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 if (agent) frontmatter.agent = agent;
                 if (argumentHint) frontmatter['argument-hint'] = argumentHint;
 
-                // Check if folder should be renamed (based on sanitized skill name)
+                // Check if folder should be renamed (only if user modified name AND sanitized name differs from current folder)
                 const newFolderName = sanitizeFolderName(skillName.trim());
-                const shouldRename = newFolderName && newFolderName !== skill.folderName;
+                const nameWasModified = skillName.trim() !== originalSkillName;
+                const shouldRename = nameWasModified && newFolderName && newFolderName !== skill.folderName;
 
                 // When using Tab API, no need to pass agentDir (sidecar already has it)
                 const payload = isInTabContext
@@ -370,7 +371,9 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         }
 
         // Calculate preview path based on edited skill name
-        const pathChanged = isEditing && !!expectedFolderName && expectedFolderName !== skill.folderName;
+        // Only show "will rename" if user actually changed the name AND the sanitized folder name is different
+        const nameWasModified = skillName.trim() !== originalSkillName;
+        const pathChanged = isEditing && nameWasModified && !!expectedFolderName && expectedFolderName !== skill.folderName;
         const previewPath = pathChanged
             ? skill.path.replace(skill.folderName, expectedFolderName)
             : skill.path;
@@ -404,11 +407,11 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     </div>
                     <div className="flex items-center gap-2">
                         {isEditing ? (
-                            <>
+                            <div key="editing" className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     删除
@@ -416,7 +419,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                 >
                                     <X className="h-4 w-4" />
                                     取消
@@ -430,9 +433,10 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                     保存
                                 </button>
-                            </>
+                            </div>
                         ) : (
                             <button
+                                key="view"
                                 type="button"
                                 onClick={() => handleEdit('name')}
                                 className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
