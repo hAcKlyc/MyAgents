@@ -354,7 +354,7 @@ export default function App() {
         />
       </CustomTitleBar>
 
-      {/* Tab content - each Tab wrapped in its own TabProvider */}
+      {/* Tab content - only Chat views need TabProvider for sidecar communication */}
       <div className="relative flex-1 overflow-hidden">
         {tabs.map((tab) => {
           const isLoading = loadingTabs[tab.id] ?? false;
@@ -366,29 +366,31 @@ export default function App() {
               key={tab.id}
               className={`absolute inset-0 ${isActive ? '' : 'pointer-events-none invisible'}`}
             >
-              <TabProvider
-                tabId={tab.id}
-                agentDir={tab.agentDir ?? ''}
-                sessionId={tab.sessionId}
-                isActive={isActive}
-                onGeneratingChange={(isGenerating) => updateTabGenerating(tab.id, isGenerating)}
-              >
-                {tab.view === 'launcher' ? (
-                  <Launcher
-                    onLaunchProject={handleLaunchProject}
-                    isStarting={isLoading}
-                    startError={error}
-                    onOpenSettings={handleOpenSettings}
-                  />
-                ) : tab.view === 'settings' ? (
-                  <Settings
-                    initialSection={settingsInitialSection}
-                    onSectionChange={() => setSettingsInitialSection(undefined)}
-                  />
-                ) : (
+              {/* Launcher and Settings use Global Sidecar - no TabProvider needed */}
+              {tab.view === 'launcher' ? (
+                <Launcher
+                  onLaunchProject={handleLaunchProject}
+                  isStarting={isLoading}
+                  startError={error}
+                  onOpenSettings={handleOpenSettings}
+                />
+              ) : tab.view === 'settings' ? (
+                <Settings
+                  initialSection={settingsInitialSection}
+                  onSectionChange={() => setSettingsInitialSection(undefined)}
+                />
+              ) : (
+                /* Chat views use Tab Sidecar - wrapped in TabProvider */
+                <TabProvider
+                  tabId={tab.id}
+                  agentDir={tab.agentDir ?? ''}
+                  sessionId={tab.sessionId}
+                  isActive={isActive}
+                  onGeneratingChange={(isGenerating) => updateTabGenerating(tab.id, isGenerating)}
+                >
                   <Chat onBack={handleBackToLauncher} />
-                )}
-              </TabProvider>
+                </TabProvider>
+              )}
             </div>
           );
         })}

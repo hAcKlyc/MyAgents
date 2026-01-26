@@ -56,12 +56,19 @@ export default function ProcessRow({
         }
 
         const startTime = block.tool.taskStartTime;
-        setTaskElapsed(Date.now() - startTime);
+
+        // Use requestAnimationFrame to set initial value asynchronously (avoids lint warning)
+        const rafId = requestAnimationFrame(() => {
+            setTaskElapsed(Date.now() - startTime);
+        });
+
+        // Update every second
         taskTimerRef.current = setInterval(() => {
             setTaskElapsed(Date.now() - startTime);
         }, 1000);
 
         return () => {
+            cancelAnimationFrame(rafId);
             if (taskTimerRef.current) {
                 clearInterval(taskTimerRef.current);
                 taskTimerRef.current = undefined;
@@ -79,7 +86,7 @@ export default function ProcessRow({
         }
     }, [isTaskTool, block.tool?.result]);
 
-    // Get Task duration (running: elapsed, completed: from result)
+    // Get Task duration (running: from state, completed: from result)
     const taskDuration = useMemo(() => {
         if (!isTaskTool || !block.tool) return null;
 

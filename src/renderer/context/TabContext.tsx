@@ -166,6 +166,9 @@ export function useTabState(): TabContextValue {
 
 /**
  * Hook to check if inside a TabProvider (safe version)
+ *
+ * Returns the TabContext value if inside a TabProvider, null otherwise.
+ * Use this in components that may or may not be rendered within a Tab context.
  */
 export function useTabStateOptional(): TabContextValue | null {
     const context = useContext(TabContext);
