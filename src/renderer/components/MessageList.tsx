@@ -1,5 +1,5 @@
 import { Loader2 } from 'lucide-react';
-import { useEffect, useRef, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 import Message from '@/components/Message';
 import { PermissionPrompt, type PermissionRequest } from '@/components/PermissionPrompt';
@@ -21,6 +21,9 @@ interface MessageListProps {
 
 // Enable CSS scroll anchoring for smoother streaming experience
 const containerClasses = 'flex-1 overflow-y-auto px-3 py-3 scroll-anchor-auto';
+
+// Debounce delay for hiding loading indicator (prevents flicker)
+const LOADING_HIDE_DELAY_MS = 150;
 
 // Fun streaming status messages - randomly picked for each AI response
 const STREAMING_MESSAGES = [
@@ -60,6 +63,43 @@ function getRandomStreamingMessage(): string {
   return STREAMING_MESSAGES[Math.floor(Math.random() * STREAMING_MESSAGES.length)];
 }
 
+/**
+ * Hook to debounce loading state changes to prevent flicker
+ * - Shows loading immediately when isLoading becomes true
+ * - Delays hiding by LOADING_HIDE_DELAY_MS to prevent brief flickers
+ */
+function useDebouncedLoading(isLoading: boolean, systemStatus: string | null | undefined): boolean {
+  const [showLoading, setShowLoading] = useState(isLoading);
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Clear any pending hide timeout
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+
+    if (isLoading || systemStatus) {
+      // Show immediately when loading starts
+      setShowLoading(true);
+    } else {
+      // Delay hiding to prevent flicker from brief false states
+      hideTimeoutRef.current = setTimeout(() => {
+        setShowLoading(false);
+        hideTimeoutRef.current = null;
+      }, LOADING_HIDE_DELAY_MS);
+    }
+
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+      }
+    };
+  }, [isLoading, systemStatus]);
+
+  return showLoading;
+}
+
 export default function MessageList({
   messages,
   isLoading,
@@ -88,8 +128,8 @@ export default function MessageList({
     wasLoadingRef.current = isLoading;
   }, [isLoading]);
 
-  // Determine which status message to show
-  const showStatus = isLoading || systemStatus;
+  // Debounced loading state to prevent flicker
+  const showStatus = useDebouncedLoading(isLoading, systemStatus);
   const statusMessage = systemStatus
     ? (SYSTEM_STATUS_MESSAGES[systemStatus] || systemStatus)
     : streamingMessageRef.current;
@@ -123,13 +163,15 @@ export default function MessageList({
             />
           </div>
         )}
-        {/* Unified status indicator */}
-        {showStatus && statusMessage && (
-          <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--ink-muted)]">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>{statusMessage}</span>
-          </div>
-        )}
+        {/* Unified status indicator with fade transition */}
+        <div
+          className={`flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--ink-muted)] transition-opacity duration-150 ${
+            showStatus && statusMessage ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>{statusMessage}</span>
+        </div>
       </div>
       {/* Scroll anchor - helps browser maintain scroll position during content changes */}
       <div className="scroll-anchor h-px" aria-hidden="true" />
