@@ -235,7 +235,8 @@ export function useAutoScroll(
       // Use instant scroll for initial load
       scrollToBottomInstant();
     }
-  }, []); // Only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only run on mount
+  }, []);
 
   return { containerRef, pauseAutoScroll };
 }
