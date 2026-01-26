@@ -38,23 +38,21 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         // Use Tab-scoped API when available (in project workspace context)
         const tabState = useTabStateOptional();
 
-        // Create API functions that use Tab API when available
+        // Create stable API functions - only depend on the specific functions, not the whole tabState
+        const apiGet = tabState?.apiGet;
+        const apiPost = tabState?.apiPost;
+        const apiPut = tabState?.apiPut;
+        const apiDeleteFn = tabState?.apiDelete;
+
         const api = useMemo(() => {
-            if (tabState) {
-                return {
-                    get: tabState.apiGet,
-                    post: tabState.apiPost,
-                    put: tabState.apiPut,
-                    delete: tabState.apiDelete,
-                };
+            if (apiGet && apiPost && apiPut && apiDeleteFn) {
+                return { get: apiGet, post: apiPost, put: apiPut, delete: apiDeleteFn };
             }
-            return {
-                get: globalApiGet,
-                post: globalApiPost,
-                put: globalApiPut,
-                delete: globalApiDelete,
-            };
-        }, [tabState]);
+            return { get: globalApiGet, post: globalApiPost, put: globalApiPut, delete: globalApiDelete };
+        }, [apiGet, apiPost, apiPut, apiDeleteFn]);
+
+        // Track if we're in tab context (stable boolean)
+        const isInTabContext = !!tabState;
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [command, setCommand] = useState<CommandDetail | null>(null);
@@ -90,7 +88,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 setLoading(true);
                 try {
                     // When using Tab API, no need to pass agentDir (sidecar already has it)
-                    const agentDirParam = (!tabState && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
                     const response = await api.get<{ success: boolean; command: CommandDetail; error?: string }>(
                         `/api/command-item/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                     );
@@ -115,7 +113,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 }
             };
             loadCommand();
-        }, [name, scope, agentDir, toast, api, tabState]);
+        }, [name, scope, agentDir, toast, api, isInTabContext]);
 
         const handleEdit = useCallback((field?: 'name' | 'description' | 'body') => {
             setFocusField(field || 'name');
@@ -172,7 +170,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 const shouldRename = newFileName && newFileName !== currentFileName;
 
                 // When using Tab API, no need to pass agentDir (sidecar already has it)
-                const payload = tabState
+                const payload = isInTabContext
                     ? { scope, frontmatter, body, ...(shouldRename ? { newFileName } : {}) }
                     : { scope, frontmatter, body, ...(shouldRename ? { newFileName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) };
 
@@ -220,14 +218,14 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
             } finally {
                 setSaving(false);
             }
-        }, [command, name, scope, agentDir, commandName, description, body, toast, onSaved, api, tabState]);
+        }, [command, name, scope, agentDir, commandName, description, body, toast, onSaved, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             if (!command) return;
             setDeleting(true);
             try {
                 const currentFileName = command.fileName || name;
-                const agentDirParam = (!tabState && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
                 const response = await api.delete<{ success: boolean; error?: string }>(
                     `/api/command-item/${encodeURIComponent(currentFileName)}?scope=${scope}${agentDirParam}`
                 );
@@ -243,7 +241,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [command, name, scope, agentDir, toast, onDeleted, api, tabState]);
+        }, [command, name, scope, agentDir, toast, onDeleted, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!command) return;

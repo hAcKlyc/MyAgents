@@ -34,21 +34,21 @@ export default function SkillsCommandsList({
     // Fall back to global API when not in Tab context (Settings page)
     const tabState = useTabStateOptional();
 
-    // Create API functions that use Tab API when available
+    // Create stable API functions - only depend on the specific functions, not the whole tabState
+    // This prevents re-creating the api object when unrelated tabState properties change
+    const apiGet = tabState?.apiGet;
+    const apiPost = tabState?.apiPost;
+    const apiDeleteFn = tabState?.apiDelete;
+
     const api = useMemo(() => {
-        if (tabState) {
-            return {
-                get: tabState.apiGet,
-                post: tabState.apiPost,
-                delete: tabState.apiDelete,
-            };
+        if (apiGet && apiPost && apiDeleteFn) {
+            return { get: apiGet, post: apiPost, delete: apiDeleteFn };
         }
-        return {
-            get: globalApiGet,
-            post: globalApiPost,
-            delete: globalApiDelete,
-        };
-    }, [tabState]);
+        return { get: globalApiGet, post: globalApiPost, delete: globalApiDelete };
+    }, [apiGet, apiPost, apiDeleteFn]);
+
+    // Track if we're in tab context (stable boolean that won't change)
+    const isInTabContext = !!tabState;
     const [loading, setLoading] = useState(true);
     const [skills, setSkills] = useState<SkillItem[]>([]);
     const [commands, setCommands] = useState<CommandItem[]>([]);
@@ -92,7 +92,7 @@ export default function SkillsCommandsList({
         try {
             // When using Tab API, no need to pass agentDir (sidecar already has it)
             // When using global API, pass agentDir for project scope
-            const payload = tabState
+            const payload = isInTabContext
                 ? { name: tempName, scope, description: '' }
                 : { name: tempName, scope, description: '', ...(scope === 'project' && agentDir ? { agentDir } : {}) };
 
@@ -108,7 +108,7 @@ export default function SkillsCommandsList({
         } catch {
             toast.error('创建失败');
         }
-    }, [scope, agentDir, toast, loadData, onSelectSkill, api, tabState]);
+    }, [scope, agentDir, toast, loadData, onSelectSkill, api, isInTabContext]);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {

@@ -35,19 +35,20 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
         // Use Tab-scoped API when available (in project workspace context)
         const tabState = useTabStateOptional();
 
-        // Create API functions that use Tab API when available
+        // Create stable API functions - only depend on the specific functions, not the whole tabState
+        // This prevents re-creating the api object when unrelated tabState properties change
+        const apiGet = tabState?.apiGet;
+        const apiPost = tabState?.apiPost;
+
         const api = useMemo(() => {
-            if (tabState) {
-                return {
-                    get: tabState.apiGet,
-                    post: tabState.apiPost,
-                };
+            if (apiGet && apiPost) {
+                return { get: apiGet, post: apiPost };
             }
-            return {
-                get: globalApiGet,
-                post: globalApiPost,
-            };
-        }, [tabState]);
+            return { get: globalApiGet, post: globalApiPost };
+        }, [apiGet, apiPost]);
+
+        // Track if we're in tab context (stable boolean that won't change)
+        const isInTabContext = !!tabState;
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [content, setContent] = useState('');
@@ -69,7 +70,7 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 setError(null);
                 try {
                     // When using Tab API, no need to pass agentDir (sidecar already has it)
-                    const endpoint = tabState
+                    const endpoint = isInTabContext
                         ? '/api/claude-md'
                         : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
                     const response = await api.get<ClaudeMdResponse>(endpoint);
@@ -89,7 +90,7 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 }
             };
             loadContent();
-        }, [agentDir, api, tabState]);
+        }, [agentDir, api, isInTabContext]);
 
         const handleEdit = useCallback(() => {
             setEditContent(content);
@@ -105,7 +106,7 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
             setSaving(true);
             try {
                 // When using Tab API, no need to pass agentDir (sidecar already has it)
-                const endpoint = tabState
+                const endpoint = isInTabContext
                     ? '/api/claude-md'
                     : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
                 const response = await api.post<{ success: boolean; error?: string }>(endpoint, {
@@ -124,19 +125,19 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
             } finally {
                 setSaving(false);
             }
-        }, [editContent, toast, agentDir, api, tabState]);
+        }, [editContent, toast, agentDir, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             try {
                 // When using Tab API, no need to pass agentDir (sidecar already has it)
-                const payload = tabState
+                const payload = isInTabContext
                     ? { path: 'CLAUDE.md' }
                     : { path: 'CLAUDE.md', agentDir };
                 await api.post('/agent/open-in-finder', payload);
             } catch (err) {
                 toast.error('无法打开目录');
             }
-        }, [agentDir, toast, api, tabState]);
+        }, [agentDir, toast, api, isInTabContext]);
 
         if (loading) {
             return (
