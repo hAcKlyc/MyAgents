@@ -68,6 +68,13 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         const contextMenuRef = useRef<HTMLDivElement>(null);
         const agentMenuRef = useRef<HTMLDivElement>(null);
 
+        // 输入框 refs 用于焦点控制
+        const nameInputRef = useRef<HTMLInputElement>(null);
+        const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+        const bodyInputRef = useRef<HTMLTextAreaElement>(null);
+        // 跟踪进入编辑模式时应聚焦的字段
+        const [focusField, setFocusField] = useState<'name' | 'description' | 'body' | null>(null);
+
         // Expose isEditing to parent
         useImperativeHandle(ref, () => ({
             isEditing: () => isEditing
@@ -148,9 +155,32 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             return () => document.removeEventListener('click', handleClickOutside);
         }, []);
 
-        const handleEdit = useCallback(() => {
+        const handleEdit = useCallback((field?: 'name' | 'description' | 'body') => {
+            setFocusField(field || 'name');
             setIsEditing(true);
         }, []);
+
+        // 处理进入编辑模式后的焦点
+        useEffect(() => {
+            if (isEditing && focusField) {
+                // 使用 setTimeout 确保 DOM 已更新
+                const timer = setTimeout(() => {
+                    switch (focusField) {
+                        case 'name':
+                            nameInputRef.current?.focus();
+                            break;
+                        case 'description':
+                            descriptionInputRef.current?.focus();
+                            break;
+                        case 'body':
+                            bodyInputRef.current?.focus();
+                            break;
+                    }
+                    setFocusField(null);
+                }, 0);
+                return () => clearTimeout(timer);
+            }
+        }, [isEditing, focusField]);
 
         const handleCancel = useCallback(async () => {
             if (isNewSkill) {
@@ -375,7 +405,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                         ) : (
                             <button
                                 type="button"
-                                onClick={handleEdit}
+                                onClick={() => handleEdit('name')}
                                 className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 <Edit2 className="h-4 w-4" />
@@ -385,83 +415,109 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     </div>
                 </div>
 
-                {/* Content */}
+                {/* Content - scrollable area */}
                 <div className="flex-1 overflow-auto p-6">
-                    <div className="mx-auto max-w-4xl space-y-6">
+                    <div className="mx-auto max-w-4xl space-y-4">
                         {/* Skill Name */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">名称</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={skillName}
-                                    onChange={(e) => setSkillName(e.target.value)}
-                                    placeholder="为技能起一个名字"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                    autoFocus
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {skillName ? (
-                                        <span className="text-[var(--ink)]">{skillName}</span>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑名称...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">名称</label>
+                            <div className={`w-full rounded-lg border px-4 py-2.5 ${
+                                isEditing
+                                    ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                    : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                            }`} onClick={!isEditing ? () => handleEdit('name') : undefined}>
+                                {isEditing ? (
+                                    <input
+                                        ref={nameInputRef}
+                                        type="text"
+                                        value={skillName}
+                                        onChange={(e) => setSkillName(e.target.value)}
+                                        placeholder="为技能起一个名字"
+                                        className="w-full border-none bg-transparent p-0 text-sm leading-relaxed text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <span className={`block text-sm leading-relaxed ${skillName ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}`}>
+                                        {skillName || '点击编辑名称...'}
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Description */}
+                        {/* Description - 1-4 lines with overflow scroll, same height for edit/preview */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">描述</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="描述这个技能是做什么的，Claude 会根据此决定何时使用"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {description ? (
-                                        <span className="text-[var(--ink)]">{description}</span>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">描述</label>
+                            <div
+                                className={`w-full rounded-lg border px-4 py-2.5 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                onClick={!isEditing ? () => handleEdit('description') : undefined}
+                            >
+                                {/* Fixed height container: min 1 line, max 4 lines (22px line-height * 4 = 88px) */}
+                                <div className="max-h-[88px] min-h-[22px] overflow-y-auto">
+                                    {isEditing ? (
+                                        <textarea
+                                            ref={(el) => {
+                                                // 同时存储 ref 和调整高度
+                                                (descriptionInputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+                                                if (el) {
+                                                    el.style.height = 'auto';
+                                                    el.style.height = Math.max(22, el.scrollHeight) + 'px';
+                                                }
+                                            }}
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="描述这个技能是做什么的，Claude 会根据此决定何时使用"
+                                            className="block min-h-[22px] w-full resize-none border-none bg-transparent p-0 text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                            style={{ height: 'auto' }}
+                                            onInput={(e) => {
+                                                const target = e.target as HTMLTextAreaElement;
+                                                target.style.height = 'auto';
+                                                target.style.height = Math.max(22, target.scrollHeight) + 'px';
+                                            }}
+                                        />
                                     ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑描述...</span>
+                                        <div className="whitespace-pre-wrap text-sm leading-[22px]">
+                                            <span className={description ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}>
+                                                {description || '点击编辑描述...'}
+                                            </span>
+                                        </div>
                                     )}
                                 </div>
-                            )}
+                            </div>
                         </div>
 
-                        {/* Instructions */}
+                        {/* Instructions - same height for edit/preview, adapts to viewport */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">技能内容 (Instructions)</label>
-                            {isEditing ? (
-                                <textarea
-                                    value={body}
-                                    onChange={(e) => setBody(e.target.value)}
-                                    placeholder="在这里编写技能的详细指令..."
-                                    rows={12}
-                                    className="w-full resize-none rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-3 font-mono text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="min-h-[200px] w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-3 font-mono text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {body ? (
-                                        <pre className="m-0 whitespace-pre-wrap text-[var(--ink)]">{body}</pre>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑技能内容...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">技能内容 (Instructions)</label>
+                            <div
+                                className={`overflow-hidden rounded-lg border px-4 py-3 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                style={{ height: 'max(300px, calc(100vh - 420px))' }}
+                                onClick={!isEditing ? () => handleEdit('body') : undefined}
+                            >
+                                {isEditing ? (
+                                    <textarea
+                                        ref={bodyInputRef}
+                                        value={body}
+                                        onChange={(e) => setBody(e.target.value)}
+                                        placeholder="在这里编写技能的详细指令..."
+                                        className="h-full w-full resize-none overflow-auto border-none bg-transparent p-0 font-mono text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <div className="h-full overflow-auto">
+                                        {body ? (
+                                            <pre className="m-0 whitespace-pre-wrap font-mono text-sm leading-[22px] text-[var(--ink)]">{body}</pre>
+                                        ) : (
+                                            <span className="font-mono text-sm text-[var(--ink-muted)]/60">点击编辑技能内容...</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Advanced Settings Toggle */}
@@ -527,7 +583,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                             className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none"
                                         />
                                     ) : (
-                                        <div onClick={handleEdit} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
+                                        <div onClick={() => handleEdit()} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
                                             {allowedTools || <span className="text-[var(--ink-muted)]/60">未设置 (不限制)</span>}
                                         </div>
                                     )}
@@ -656,7 +712,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                             className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none"
                                         />
                                     ) : (
-                                        <div onClick={handleEdit} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
+                                        <div onClick={() => handleEdit()} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
                                             {argumentHint || <span className="text-[var(--ink-muted)]/60">未设置</span>}
                                         </div>
                                     )}
