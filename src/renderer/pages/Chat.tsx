@@ -282,9 +282,13 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
   // Listen for skill copy events to refresh both panels:
   // - WorkspaceConfigPanel (skills/commands list)
   // - DirectoryPanel (file tree shows .claude/skills/)
+  // Listen for skill copy events to refresh DirectoryPanel
+  // Note: WorkspaceConfigPanel has its own listener for internalRefreshKey,
+  // so we only need to refresh DirectoryPanel here (not workspaceRefreshKey)
   useEffect(() => {
     const handleSkillCopied = () => {
-      setWorkspaceRefreshKey(k => k + 1);
+      // Only trigger DirectoryPanel refresh to show newly copied skill folder
+      // WorkspaceConfigPanel handles its own refresh via internalRefreshKey
       setWorkspaceRefreshTrigger(k => k + 1);
     };
     window.addEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);
