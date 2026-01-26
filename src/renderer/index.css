@@ -34,6 +34,15 @@
   }
 }
 
+/* Scroll anchoring for smoother streaming experience */
+.scroll-anchor-auto {
+  overflow-anchor: auto;
+}
+
+.scroll-anchor {
+  overflow-anchor: auto;
+}
+
 :root {
   /* ========== Layout ========== */
   --breakpoint-mobile: 768px;

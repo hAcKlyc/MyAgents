@@ -160,20 +160,27 @@ export default function ProcessRow({
                 )}
             </button>
 
-            {/* Expanded Body */}
-            {isExpanded && hasContent && (
-                <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
-                    <div className="ml-7">
-                        {isThinking && block.thinking && (
-                            <div className="text-[var(--ink-secondary)]">
-                                <Markdown compact>{block.thinking}</Markdown>
+            {/* Expanded Body - CSS Grid animation for smooth height transition */}
+            {hasContent && (
+                <div
+                    className="grid transition-[grid-template-rows] duration-200 ease-out"
+                    style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
+                >
+                    <div className="overflow-hidden">
+                        <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
+                            <div className="ml-7">
+                                {isThinking && block.thinking && (
+                                    <div className="text-[var(--ink-secondary)]">
+                                        <Markdown compact>{block.thinking}</Markdown>
+                                    </div>
+                                )}
+                                {isTool && block.tool && (
+                                    <div className="w-full overflow-hidden">
+                                        <ToolUse tool={block.tool} />
+                                    </div>
+                                )}
                             </div>
-                        )}
-                        {isTool && block.tool && (
-                            <div className="w-full overflow-hidden">
-                                <ToolUse tool={block.tool} />
-                            </div>
-                        )}
+                        </div>
                     </div>
                 </div>
             )}
