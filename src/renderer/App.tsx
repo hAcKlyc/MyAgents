@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { startTabSidecar, stopTabSidecar, startGlobalSidecar, stopAllSidecars, initGlobalSidecarReadyPromise, markGlobalSidecarReady, getGlobalServerUrl } from '@/api/tauriClient';
+import { startTabSidecar, stopTabSidecar, startGlobalSidecar, stopAllSidecars, initGlobalSidecarReadyPromise, markGlobalSidecarReady, getGlobalServerUrl, resetGlobalSidecarReadyPromise } from '@/api/tauriClient';
 import CustomTitleBar from '@/components/CustomTitleBar';
 import TabBar from '@/components/TabBar';
 import TabProvider from '@/context/TabProvider';
@@ -30,40 +30,88 @@ export default function App() {
   const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
   const [tabErrors, setTabErrors] = useState<Record<string, string | null>>({});
 
+  // Global Sidecar silent retry mechanism
+  const mountedRef = useRef(true);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
+
+  // Silent background retry with exponential backoff
+  const startGlobalSidecarSilent = useCallback(async () => {
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 2000; // 2 seconds
+
+    try {
+      // Reset and reinitialize the ready promise for retry
+      if (retryCountRef.current > 0) {
+        resetGlobalSidecarReadyPromise();
+        initGlobalSidecarReadyPromise();
+      }
+
+      await startGlobalSidecar();
+
+      if (!mountedRef.current) return;
+
+      markGlobalSidecarReady();
+      retryCountRef.current = 0; // Reset on success
+
+      // Set log server URL to global sidecar for unified logging
+      try {
+        const globalUrl = await getGlobalServerUrl();
+        setLogServerUrl(globalUrl);
+        console.log('[App] Global sidecar started, log URL set:', globalUrl);
+      } catch (e) {
+        console.warn('[App] Failed to set log server URL:', e);
+      }
+    } catch (error) {
+      if (!mountedRef.current) return;
+
+      retryCountRef.current += 1;
+      const currentRetry = retryCountRef.current;
+
+      if (currentRetry <= MAX_RETRIES) {
+        // Exponential backoff: 2s, 4s, 8s, 16s, 32s
+        const delay = BASE_DELAY * Math.pow(2, currentRetry - 1);
+        console.log(`[App] Global sidecar failed, retry ${currentRetry}/${MAX_RETRIES} in ${delay}ms`);
+
+        retryTimeoutRef.current = setTimeout(() => {
+          if (mountedRef.current) {
+            void startGlobalSidecarSilent();
+          }
+        }, delay);
+      } else {
+        // Max retries reached, mark as ready to unblock waiting components
+        markGlobalSidecarReady();
+        console.error('[App] Global sidecar failed after max retries:', error);
+      }
+    }
+  }, []);
+
   // Start Global Sidecar on mount, cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true;
+    retryCountRef.current = 0;
+
     // Initialize the ready promise BEFORE starting the sidecar
     // This allows other components to wait for it
     initGlobalSidecarReadyPromise();
 
     // Start Global Sidecar immediately on app launch
     // This ensures MCP and other global API calls work from any page
-    startGlobalSidecar()
-      .then(async () => {
-        markGlobalSidecarReady();
-        // Set log server URL to global sidecar for unified logging
-        // This ensures logs work in Settings page and persist across tab switches
-        try {
-          const globalUrl = await getGlobalServerUrl();
-          setLogServerUrl(globalUrl);
-          console.log('[App] Global sidecar started, log URL set:', globalUrl);
-        } catch (e) {
-          console.warn('[App] Failed to set log server URL:', e);
-        }
-      })
-      .catch((error) => {
-        // Still mark as ready so waiting components don't hang forever
-        markGlobalSidecarReady();
-        console.warn('[App] Failed to start global sidecar on mount:', error);
-      });
+    void startGlobalSidecarSilent();
 
     return () => {
+      mountedRef.current = false;
+      // Clear any pending retry
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
       // Flush any pending frontend logs before shutdown
       forceFlushLogs();
       clearLogServerUrl();
       void stopAllSidecars();
     };
-  }, []);
+  }, [startGlobalSidecarSilent]);
 
   // Update tab isGenerating state (called from TabProvider via callback)
   const updateTabGenerating = useCallback((tabId: string, isGenerating: boolean) => {
@@ -306,7 +354,7 @@ export default function App() {
         />
       </CustomTitleBar>
 
-      {/* Tab content - each Tab wrapped in its own TabProvider */}
+      {/* Tab content - only Chat views need TabProvider for sidecar communication */}
       <div className="relative flex-1 overflow-hidden">
         {tabs.map((tab) => {
           const isLoading = loadingTabs[tab.id] ?? false;
@@ -318,29 +366,31 @@ export default function App() {
               key={tab.id}
               className={`absolute inset-0 ${isActive ? '' : 'pointer-events-none invisible'}`}
             >
-              <TabProvider
-                tabId={tab.id}
-                agentDir={tab.agentDir ?? ''}
-                sessionId={tab.sessionId}
-                isActive={isActive}
-                onGeneratingChange={(isGenerating) => updateTabGenerating(tab.id, isGenerating)}
-              >
-                {tab.view === 'launcher' ? (
-                  <Launcher
-                    onLaunchProject={handleLaunchProject}
-                    isStarting={isLoading}
-                    startError={error}
-                    onOpenSettings={handleOpenSettings}
-                  />
-                ) : tab.view === 'settings' ? (
-                  <Settings
-                    initialSection={settingsInitialSection}
-                    onSectionChange={() => setSettingsInitialSection(undefined)}
-                  />
-                ) : (
+              {/* Launcher and Settings use Global Sidecar - no TabProvider needed */}
+              {tab.view === 'launcher' ? (
+                <Launcher
+                  onLaunchProject={handleLaunchProject}
+                  isStarting={isLoading}
+                  startError={error}
+                  onOpenSettings={handleOpenSettings}
+                />
+              ) : tab.view === 'settings' ? (
+                <Settings
+                  initialSection={settingsInitialSection}
+                  onSectionChange={() => setSettingsInitialSection(undefined)}
+                />
+              ) : (
+                /* Chat views use Tab Sidecar - wrapped in TabProvider */
+                <TabProvider
+                  tabId={tab.id}
+                  agentDir={tab.agentDir ?? ''}
+                  sessionId={tab.sessionId}
+                  isActive={isActive}
+                  onGeneratingChange={(isGenerating) => updateTabGenerating(tab.id, isGenerating)}
+                >
                   <Chat onBack={handleBackToLauncher} />
-                )}
-              </TabProvider>
+                </TabProvider>
+              )}
             </div>
           );
         })}

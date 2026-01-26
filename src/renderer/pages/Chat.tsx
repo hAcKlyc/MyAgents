@@ -253,7 +253,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     }
   }, [currentProvider?.id, currentProvider?.primaryModel]);
 
-  const messagesContainerRef = useAutoScroll(isLoading, messages);
+  const { containerRef: messagesContainerRef } = useAutoScroll(isLoading, messages);
 
   // Auto-focus input when Tab becomes active
   useEffect(() => {
@@ -279,12 +279,10 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     // connectSse/disconnectSse are stable from TabProvider's useCallback
   }, [agentDir, connectSse, disconnectSse]);
 
-  // Listen for skill copy events to refresh both panels:
-  // - WorkspaceConfigPanel (skills/commands list)
-  // - DirectoryPanel (file tree shows .claude/skills/)
+  // Listen for skill copy events to refresh DirectoryPanel (file tree shows .claude/skills/)
+  // Note: WorkspaceConfigPanel has its own event listener for internalRefreshKey
   useEffect(() => {
     const handleSkillCopied = () => {
-      setWorkspaceRefreshKey(k => k + 1);
       setWorkspaceRefreshTrigger(k => k + 1);
     };
     window.addEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);

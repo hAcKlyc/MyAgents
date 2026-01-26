@@ -1,11 +1,16 @@
 /**
  * CommandDetailPanel - Component for viewing and editing a Command
  * Supports preview/edit mode with save confirmation and file rename
+ * UI structure matches SkillDetailPanel for consistency
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context (GlobalSkillsPanel).
  */
 import { Save, FolderOpen, Loader2, Trash2, Edit2, X } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 
-import { apiGetJson, apiPutJson, apiDelete, apiPostJson } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPutJson as globalApiPut, apiDelete as globalApiDelete, apiPostJson as globalApiPost } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type { CommandFrontmatter, CommandDetail } from '../../shared/skillsTypes';
@@ -29,6 +34,28 @@ export interface CommandDetailPanelRef {
 const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelProps>(
     function CommandDetailPanel({ name, scope, onBack: _onBack, onSaved, onDeleted, agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
+
+        // Use Tab-scoped API when available (in project workspace context)
+        const tabState = useTabStateOptional();
+
+        // Create stable API functions - only depend on the specific functions, not the whole tabState
+        const apiGet = tabState?.apiGet;
+        const apiPost = tabState?.apiPost;
+        const apiPut = tabState?.apiPut;
+        const apiDeleteFn = tabState?.apiDelete;
+
+        const api = useMemo(() => {
+            if (apiGet && apiPost && apiPut && apiDeleteFn) {
+                return { get: apiGet, post: apiPost, put: apiPut, delete: apiDeleteFn };
+            }
+            return { get: globalApiGet, post: globalApiPost, put: globalApiPut, delete: globalApiDelete };
+        }, [apiGet, apiPost, apiPut, apiDeleteFn]);
+
+        // Track if we're in tab context (stable boolean)
+        const isInTabContext = !!tabState;
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [command, setCommand] = useState<CommandDetail | null>(null);
@@ -46,6 +73,13 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         const [description, setDescription] = useState('');
         const [body, setBody] = useState('');
 
+        // Input refs for focus control
+        const nameInputRef = useRef<HTMLInputElement>(null);
+        const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+        const bodyInputRef = useRef<HTMLTextAreaElement>(null);
+        // Track which field should receive focus when entering edit mode
+        const [focusField, setFocusField] = useState<'name' | 'description' | 'body' | null>(null);
+
         // Expose isEditing to parent
         useImperativeHandle(ref, () => ({
             isEditing: () => isEditing
@@ -56,9 +90,9 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
             const loadCommand = async () => {
                 setLoading(true);
                 try {
-                    // Include agentDir for project scope to ensure correct path resolution
-                    const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                    const response = await apiGetJson<{ success: boolean; command: CommandDetail; error?: string }>(
+                    // When using Tab API, no need to pass agentDir (sidecar already has it)
+                    const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    const response = await api.get<{ success: boolean; command: CommandDetail; error?: string }>(
                         `/api/command-item/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                     );
                     if (response.success && response.command) {
@@ -73,20 +107,42 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                         setOriginalDescription(desc);
                         setOriginalBody(bd);
                     } else {
-                        toast.error(response.error || '加载失败');
+                        toastRef.current.error(response.error || '加载失败');
                     }
                 } catch {
-                    toast.error('加载失败');
+                    toastRef.current.error('加载失败');
                 } finally {
                     setLoading(false);
                 }
             };
             loadCommand();
-        }, [name, scope, agentDir, toast]);
+        }, [name, scope, agentDir, api, isInTabContext]);
 
-        const handleEdit = useCallback(() => {
+        const handleEdit = useCallback((field?: 'name' | 'description' | 'body') => {
+            setFocusField(field || 'name');
             setIsEditing(true);
         }, []);
+
+        // Handle focus when entering edit mode
+        useEffect(() => {
+            if (isEditing && focusField) {
+                const timer = setTimeout(() => {
+                    switch (focusField) {
+                        case 'name':
+                            nameInputRef.current?.focus();
+                            break;
+                        case 'description':
+                            descriptionInputRef.current?.focus();
+                            break;
+                        case 'body':
+                            bodyInputRef.current?.focus();
+                            break;
+                    }
+                    setFocusField(null);
+                }, 0);
+                return () => clearTimeout(timer);
+            }
+        }, [isEditing, focusField]);
 
         const handleCancel = useCallback(() => {
             setCommandName(originalCommandName);
@@ -101,38 +157,39 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         const handleSave = useCallback(async () => {
             if (!command) return;
             if (!commandName.trim()) {
-                toast.error('指令名称不能为空');
+                toastRef.current.error('指令名称不能为空');
                 return;
             }
             setSaving(true);
             try {
                 const frontmatter: Partial<CommandFrontmatter> = {
+                    name: commandName.trim(),
                     description,
                 };
 
-                // Check if file should be renamed (based on sanitized command name)
+                // Check if file should be renamed (only if user modified name AND sanitized name differs from current file)
                 const newFileName = sanitizeFolderName(commandName.trim());
-                const currentFileName = name; // Original file name (without .md)
-                const shouldRename = newFileName && newFileName !== currentFileName;
+                const currentFileName = command.fileName || name;
+                const nameWasModified = commandName.trim() !== originalCommandName;
+                const shouldRename = nameWasModified && newFileName && newFileName !== currentFileName;
 
-                const response = await apiPutJson<{
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const payload = isInTabContext
+                    ? { scope, frontmatter, body, ...(shouldRename ? { newFileName } : {}) }
+                    : { scope, frontmatter, body, ...(shouldRename ? { newFileName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) };
+
+                const response = await api.put<{
                     success: boolean;
                     error?: string;
                     fileName?: string;
                     path?: string;
                 }>(
-                    `/api/command-item/${encodeURIComponent(name)}`,
-                    {
-                        scope,
-                        frontmatter,
-                        body,
-                        ...(shouldRename ? { newFileName } : {}),
-                        ...(scope === 'project' && agentDir ? { agentDir } : {})
-                    }
+                    `/api/command-item/${encodeURIComponent(currentFileName)}`,
+                    payload
                 );
 
                 if (response.success) {
-                    toast.success('保存成功');
+                    toastRef.current.success('保存成功');
 
                     // If file was renamed, always close detail view (name prop is now invalid)
                     const fileWasRenamed = response.fileName && response.fileName !== currentFileName;
@@ -145,7 +202,8 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     if (response.fileName && response.path) {
                         setCommand(prev => prev ? {
                             ...prev,
-                            name: response.fileName!,
+                            name: commandName.trim(),
+                            fileName: response.fileName!,
                             path: response.path!
                         } : null);
                     }
@@ -157,45 +215,46 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     setIsEditing(false);
                     onSaved();
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch {
-                toast.error('保存失败');
+                toastRef.current.error('保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [command, name, scope, agentDir, commandName, description, body, toast, onSaved]);
+        }, [command, name, scope, agentDir, commandName, originalCommandName, description, body, onSaved, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
+            if (!command) return;
             setDeleting(true);
             try {
-                const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                const response = await apiDelete<{ success: boolean; error?: string }>(
-                    `/api/command-item/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
+                const currentFileName = command.fileName || name;
+                const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                const response = await api.delete<{ success: boolean; error?: string }>(
+                    `/api/command-item/${encodeURIComponent(currentFileName)}?scope=${scope}${agentDirParam}`
                 );
                 if (response.success) {
-                    toast.success('删除成功');
+                    toastRef.current.success('删除成功');
                     onDeleted();
                 } else {
-                    toast.error(response.error || '删除失败');
+                    toastRef.current.error(response.error || '删除失败');
                 }
             } catch {
-                toast.error('删除失败');
+                toastRef.current.error('删除失败');
             } finally {
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [name, scope, agentDir, toast, onDeleted]);
+        }, [command, name, scope, agentDir, onDeleted, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!command) return;
             try {
-                // Use full path from command.path which is already correctly resolved by backend
-                await apiPostJson('/agent/open-path', { fullPath: command.path });
+                await api.post('/agent/open-path', { fullPath: command.path });
             } catch {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [command, toast]);
+        }, [command, api]);
 
         if (loading) {
             return (
@@ -214,9 +273,12 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         }
 
         // Calculate preview path based on edited command name
-        const pathChanged = isEditing && !!expectedFileName && expectedFileName !== name;
+        // Only show "will rename" if user actually changed the name AND the sanitized file name is different
+        const currentFileName = command.fileName || name;
+        const nameWasModified = commandName.trim() !== originalCommandName;
+        const pathChanged = isEditing && nameWasModified && !!expectedFileName && expectedFileName !== currentFileName;
         const previewPath = pathChanged
-            ? command.path.replace(`${name}.md`, `${expectedFileName}.md`)
+            ? command.path.replace(`${currentFileName}.md`, `${expectedFileName}.md`)
             : command.path;
 
         return (
@@ -224,7 +286,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 {/* Header */}
                 <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--line)] bg-[var(--paper-contrast)]/50 px-6 py-2">
                     <div className="min-w-0 flex-1">
-                        <h3 className="text-base font-semibold text-[var(--ink)]">/{commandName || name}</h3>
+                        <h3 className="text-base font-semibold text-[var(--ink)]">{commandName || name}</h3>
                         <div className="mt-0.5 flex items-center gap-2">
                             <span
                                 className={`max-w-[300px] truncate font-mono text-xs ${pathChanged ? 'text-[var(--accent)]' : 'text-[var(--ink-muted)]'}`}
@@ -248,11 +310,11 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     </div>
                     <div className="flex items-center gap-2">
                         {isEditing ? (
-                            <>
+                            <div key="editing" className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     删除
@@ -260,7 +322,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                 >
                                     <X className="h-4 w-4" />
                                     取消
@@ -274,11 +336,12 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                     保存
                                 </button>
-                            </>
+                            </div>
                         ) : (
                             <button
+                                key="view"
                                 type="button"
-                                onClick={handleEdit}
+                                onClick={() => handleEdit('name')}
                                 className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 <Edit2 className="h-4 w-4" />
@@ -288,82 +351,108 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     </div>
                 </div>
 
-                {/* Content */}
+                {/* Content - scrollable area */}
                 <div className="flex-1 overflow-auto p-6">
-                    <div className="mx-auto max-w-2xl space-y-6">
-                        {/* Command Name (editable) */}
+                    <div className="mx-auto max-w-4xl space-y-4">
+                        {/* Command Name */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">名称</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={commandName}
-                                    onChange={(e) => setCommandName(e.target.value)}
-                                    placeholder="为指令起一个名字"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {commandName ? (
-                                        <span className="text-[var(--ink)]">/{commandName}</span>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑名称...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">名称</label>
+                            <div className={`w-full rounded-lg border px-4 py-2.5 ${
+                                isEditing
+                                    ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                    : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                            }`} onClick={!isEditing ? () => handleEdit('name') : undefined}>
+                                {isEditing ? (
+                                    <input
+                                        ref={nameInputRef}
+                                        type="text"
+                                        value={commandName}
+                                        onChange={(e) => setCommandName(e.target.value)}
+                                        placeholder="为指令起一个名字"
+                                        className="w-full border-none bg-transparent p-0 text-sm leading-relaxed text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <span className={`block text-sm leading-relaxed ${commandName ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}`}>
+                                        {commandName || '点击编辑名称...'}
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Description */}
+                        {/* Description - 1-4 lines with overflow scroll */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">描述</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="描述这个指令是做什么的"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {description ? (
-                                        <span className="text-[var(--ink)]">{description}</span>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">描述</label>
+                            <div
+                                className={`w-full rounded-lg border px-4 py-2.5 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                onClick={!isEditing ? () => handleEdit('description') : undefined}
+                            >
+                                {/* Fixed height container: min 1 line, max 4 lines (22px line-height * 4 = 88px) */}
+                                <div className="max-h-[88px] min-h-[22px] overflow-y-auto">
+                                    {isEditing ? (
+                                        <textarea
+                                            ref={(el) => {
+                                                (descriptionInputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+                                                if (el) {
+                                                    el.style.height = 'auto';
+                                                    el.style.height = Math.max(22, el.scrollHeight) + 'px';
+                                                }
+                                            }}
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="描述这个指令是做什么的"
+                                            className="block min-h-[22px] w-full resize-none border-none bg-transparent p-0 text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                            style={{ height: 'auto' }}
+                                            onInput={(e) => {
+                                                const target = e.target as HTMLTextAreaElement;
+                                                target.style.height = 'auto';
+                                                target.style.height = Math.max(22, target.scrollHeight) + 'px';
+                                            }}
+                                        />
                                     ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑描述...</span>
+                                        <div className="whitespace-pre-wrap text-sm leading-[22px]">
+                                            <span className={description ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}>
+                                                {description || '点击编辑描述...'}
+                                            </span>
+                                        </div>
                                     )}
                                 </div>
-                            )}
+                            </div>
                         </div>
 
-                        {/* Instructions */}
+                        {/* Instructions - same height for edit/preview, adapts to viewport */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">指令内容 (Instructions)</label>
-                            {isEditing ? (
-                                <textarea
-                                    value={body}
-                                    onChange={(e) => setBody(e.target.value)}
-                                    placeholder="在这里编写指令的详细内容..."
-                                    rows={16}
-                                    className="w-full resize-none rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-3 font-mono text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="min-h-[300px] w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-3 font-mono text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {body ? (
-                                        <pre className="m-0 whitespace-pre-wrap text-[var(--ink)]">{body}</pre>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑指令内容...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">指令内容 (Instructions)</label>
+                            <div
+                                className={`overflow-hidden rounded-lg border px-4 py-3 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                style={{ height: 'max(300px, calc(100vh - 420px))' }}
+                                onClick={!isEditing ? () => handleEdit('body') : undefined}
+                            >
+                                {isEditing ? (
+                                    <textarea
+                                        ref={bodyInputRef}
+                                        value={body}
+                                        onChange={(e) => setBody(e.target.value)}
+                                        placeholder="在这里编写指令的详细内容..."
+                                        className="h-full w-full resize-none overflow-auto border-none bg-transparent p-0 font-mono text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <div className="h-full overflow-auto">
+                                        {body ? (
+                                            <pre className="m-0 whitespace-pre-wrap font-mono text-sm leading-[22px] text-[var(--ink)]">{body}</pre>
+                                        ) : (
+                                            <span className="font-mono text-sm text-[var(--ink-muted)]/60">点击编辑指令内容...</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -372,7 +461,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 {showDeleteConfirm && (
                     <ConfirmDialog
                         title="删除指令"
-                        message={`确定要删除「/${commandName}」吗？此操作无法撤销。`}
+                        message={`确定要删除「${commandName}」吗？此操作无法撤销。`}
                         confirmText="删除"
                         confirmVariant="danger"
                         onConfirm={handleDelete}

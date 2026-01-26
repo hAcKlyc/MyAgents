@@ -2,7 +2,7 @@
   "name": "myagents",
   "description": "MyAgents - Desktop Claude Code for everyone. AI-powered productivity, not just for developers.",
   "type": "module",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "license": "Apache-2.0",
   "packageManager": "bun@1.3.2",
   "author": {
@@ -41,7 +41,8 @@
     "test": "bun test",
     "format": "prettier --experimental-cli --write .",
     "format:check": "prettier --experimental-cli --check --log-level warn .",
-    "clean": "rm -rf node_modules dist .turbo .eslintcache *.tsbuildinfo src-tauri/target"
+    "clean": "rm -rf node_modules dist .turbo .eslintcache *.tsbuildinfo src-tauri/target",
+    "version": "node scripts/sync-version.js && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.7",

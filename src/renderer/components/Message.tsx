@@ -73,7 +73,7 @@ export default function Message({ message, isLoading = false }: MessageProps) {
     const hasText = userContent.trim().length > 0;
 
     return (
-      <div className="flex justify-end px-1">
+      <div className="flex justify-end px-1" data-role="user" data-message-id={message.id}>
         <article className="relative max-w-[min(34rem,calc(100%-2rem))] rounded-2xl border border-[var(--line)] bg-[var(--paper-strong)] px-4 py-3 text-base leading-relaxed text-[var(--ink)] shadow-[var(--shadow-soft)]">
           {/* Images first (above text) - compact mode for 5 per row */}
           {hasAttachments && (

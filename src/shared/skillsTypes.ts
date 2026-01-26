@@ -21,7 +21,8 @@ export interface SkillItem {
  * Command item in list view
  */
 export interface CommandItem {
-    name: string;
+    name: string;           // Display name (from frontmatter or fallback to fileName)
+    fileName: string;       // Actual file name without .md extension
     description: string;
     scope: 'user' | 'project';
     path: string;
@@ -43,7 +44,8 @@ export interface SkillDetail {
  * Full command detail with frontmatter and body
  */
 export interface CommandDetail {
-    name: string;
+    name: string;           // Display name (from frontmatter or fallback to fileName)
+    fileName: string;       // Actual file name without .md extension
     path: string;
     scope: 'user' | 'project';
     frontmatter: Partial<CommandFrontmatter>;

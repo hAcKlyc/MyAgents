@@ -13,7 +13,7 @@ import { useToast } from '@/components/Toast';
 import { UnifiedLogsPanel } from '@/components/UnifiedLogsPanel';
 import PathInputDialog from '@/components/PathInputDialog';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { BrandSection, RecentTasks, WorkspaceCard } from '@/components/launcher';
+import { BrandSection, QuickAccess, RecentTasks, WorkspaceCard } from '@/components/launcher';
 import { useConfig } from '@/hooks/useConfig';
 import { type Project, type Provider } from '@/config/types';
 import { isBrowserDevMode, pickFolderForDialog } from '@/utils/browserMock';
@@ -224,6 +224,11 @@ export default function Launcher({ onLaunchProject, isStarting, startError, onOp
                     {/* Recent Tasks */}
                     <div className="flex-shrink-0 px-6 pt-6">
                         <RecentTasks projects={projects} onOpenTask={handleOpenTask} />
+                    </div>
+
+                    {/* Quick Access */}
+                    <div className="flex-shrink-0 px-6">
+                        <QuickAccess onOpenSettings={onOpenSettings} />
                     </div>
 
                     {/* Workspaces Header */}

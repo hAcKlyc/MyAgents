@@ -96,6 +96,8 @@ export interface TabContextValue extends TabState {
     // Tab-scoped API functions (use this Tab's Sidecar)
     apiGet: <T>(path: string) => Promise<T>;
     apiPost: <T>(path: string, body?: unknown) => Promise<T>;
+    apiPut: <T>(path: string, body?: unknown) => Promise<T>;
+    apiDelete: <T>(path: string) => Promise<T>;
 
     // Permission handling
     respondPermission: (decision: 'deny' | 'allow_once' | 'always_allow') => Promise<void>;
@@ -140,6 +142,8 @@ const defaultContextValue: TabContextValue = {
     resetSession: async () => false,
     apiGet: async () => { throw new Error('Not in TabProvider'); },
     apiPost: async () => { throw new Error('Not in TabProvider'); },
+    apiPut: async () => { throw new Error('Not in TabProvider'); },
+    apiDelete: async () => { throw new Error('Not in TabProvider'); },
     respondPermission: async () => { },
     respondAskUserQuestion: async () => { },
 };
@@ -162,6 +166,9 @@ export function useTabState(): TabContextValue {
 
 /**
  * Hook to check if inside a TabProvider (safe version)
+ *
+ * Returns the TabContext value if inside a TabProvider, null otherwise.
+ * Use this in components that may or may not be rendered within a Tab context.
  */
 export function useTabStateOptional(): TabContextValue | null {
     const context = useContext(TabContext);

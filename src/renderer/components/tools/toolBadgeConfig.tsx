@@ -15,7 +15,129 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import type { ToolUseSimple } from '@/types/chat';
+import type { SubagentToolCall, ToolInput, ToolUseSimple } from '@/types/chat';
+
+// 格式化时间 - 共享函数
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+// Type guards for safe property access
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+// Safe property extraction helpers
+function getStringProp(input: ToolInput | undefined, key: string): string | undefined {
+  if (!input || !isObject(input)) return undefined;
+  const value = input[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getArrayProp<T>(input: ToolInput | undefined, key: string): T[] | undefined {
+  if (!input || !isObject(input)) return undefined;
+  const value = input[key];
+  return Array.isArray(value) ? value as T[] : undefined;
+}
+
+// Helper to get string prop from either parsedInput or raw input
+function getSubagentStringProp(call: SubagentToolCall, key: string): string | undefined {
+  // Try parsedInput first
+  const fromParsed = getStringProp(call.parsedInput, key);
+  if (fromParsed) return fromParsed;
+  // Fall back to raw input
+  if (call.input && typeof call.input[key] === 'string') {
+    return call.input[key] as string;
+  }
+  return undefined;
+}
+
+// Generate label for subagent tool call (used in Task tool display)
+function getSubagentCallLabel(call: SubagentToolCall, maxLength = 35): string {
+  const { name } = call;
+  let label = name;
+
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit': {
+      const filePath = getSubagentStringProp(call, 'file_path');
+      if (filePath) {
+        const fileName = filePath.split('/').pop() || filePath;
+        label = `${name} ${fileName}`;
+      }
+      break;
+    }
+    case 'Bash': {
+      const desc = getSubagentStringProp(call, 'description');
+      if (desc) {
+        label = desc;
+      } else {
+        const cmd = getSubagentStringProp(call, 'command');
+        if (cmd) {
+          // Show first part of command
+          const firstPart = cmd.split('\n')[0].substring(0, 30);
+          label = firstPart.length < cmd.split('\n')[0].length ? `${firstPart}...` : firstPart;
+        }
+      }
+      break;
+    }
+    case 'Grep': {
+      const pattern = getSubagentStringProp(call, 'pattern');
+      if (pattern) {
+        label = `Search "${pattern}"`;
+      }
+      break;
+    }
+    case 'Glob': {
+      const pattern = getSubagentStringProp(call, 'pattern');
+      if (pattern) {
+        label = `Find ${pattern}`;
+      }
+      break;
+    }
+    case 'WebFetch': {
+      const url = getSubagentStringProp(call, 'url');
+      if (url) {
+        try {
+          const parsed = new URL(url);
+          label = `Fetch ${parsed.hostname}`;
+        } catch {
+          label = `Fetch ${url}`;
+        }
+      }
+      break;
+    }
+    case 'WebSearch': {
+      const query = getSubagentStringProp(call, 'query');
+      if (query) {
+        label = `Search "${query}"`;
+      }
+      break;
+    }
+    case 'Task': {
+      const desc = getSubagentStringProp(call, 'description');
+      if (desc) {
+        label = desc;
+      }
+      break;
+    }
+    default: {
+      // For unknown tools, try to use description if available
+      const desc = getSubagentStringProp(call, 'description');
+      if (desc) {
+        label = `${name} ${desc}`;
+      }
+    }
+  }
+
+  return label.length > maxLength ? `${label.substring(0, maxLength - 3)}...` : label;
+}
 
 export interface ToolBadgeConfig {
   icon: ReactNode;
@@ -212,6 +334,17 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
   }
 }
 
+// Get main label for tool (displayed as primary text in ProcessRow)
+// For Task tool, returns the subagent_type (e.g., "Explore", "Plan")
+// For other tools, returns the tool name
+export function getToolMainLabel(tool: ToolUseSimple): string {
+  if (tool.name === 'Task') {
+    const subagentType = getStringProp(tool.parsedInput, 'subagent_type');
+    return subagentType || 'Task';
+  }
+  return tool.name;
+}
+
 // Unified label generation logic - extracts compact label from tool
 export function getToolLabel(tool: ToolUseSimple): string {
   if (!tool.parsedInput) {
@@ -262,18 +395,19 @@ export function getToolLabel(tool: ToolUseSimple): string {
     case 'Read':
     case 'Write':
     case 'Edit': {
-      const input = tool.parsedInput as { file_path?: string };
-      if (input.file_path) {
-        const fileName = input.file_path.split('/').pop() || input.file_path;
+      const filePath = getStringProp(tool.parsedInput, 'file_path');
+      if (filePath) {
+        const fileName = filePath.split('/').pop() || filePath;
         return fileName.length > 20 ? `${fileName.substring(0, 17)}...` : fileName;
       }
       return tool.name;
     }
     case 'Bash': {
-      const input = tool.parsedInput as { command?: string; description?: string };
-      if (input.description) return input.description;
-      if (input.command) {
-        const cmd = input.command.split(' ')[0];
+      const description = getStringProp(tool.parsedInput, 'description');
+      if (description) return description;
+      const command = getStringProp(tool.parsedInput, 'command');
+      if (command) {
+        const cmd = command.split(' ')[0];
         return cmd.length > 15 ? `${cmd.substring(0, 12)}...` : cmd;
       }
       return 'Run command';
@@ -282,63 +416,72 @@ export function getToolLabel(tool: ToolUseSimple): string {
       return 'Bash Output';
     }
     case 'Grep': {
-      const input = tool.parsedInput as { pattern?: string };
-      if (input.pattern) {
-        const pattern =
-          input.pattern.length > 15 ? `${input.pattern.substring(0, 12)}...` : input.pattern;
-        return `Search "${pattern}"`;
+      const pattern = getStringProp(tool.parsedInput, 'pattern');
+      if (pattern) {
+        const truncated = pattern.length > 15 ? `${pattern.substring(0, 12)}...` : pattern;
+        return `Search "${truncated}"`;
       }
       return 'Search';
     }
     case 'Glob': {
-      const input = tool.parsedInput as { pattern?: string };
-      if (input.pattern) {
-        const pattern =
-          input.pattern.length > 15 ? `${input.pattern.substring(0, 12)}...` : input.pattern;
-        return `Find ${pattern}`;
+      const pattern = getStringProp(tool.parsedInput, 'pattern');
+      if (pattern) {
+        const truncated = pattern.length > 15 ? `${pattern.substring(0, 12)}...` : pattern;
+        return `Find ${truncated}`;
       }
       return 'Find';
     }
     case 'Task': {
-      const input = tool.parsedInput as { description?: string };
-      if (input.description) {
-        return input.description.length > 25 ?
-            `${input.description.substring(0, 22)}...`
-          : input.description;
+      const description = getStringProp(tool.parsedInput, 'description');
+      const subagentType = getStringProp(tool.parsedInput, 'subagent_type') || 'Task';
+      const isTaskRunning = tool.isLoading && !tool.result;
+
+      // When Task is running, show the latest subagent tool (running or most recent)
+      if (isTaskRunning && tool.subagentCalls && tool.subagentCalls.length > 0) {
+        // Prefer running tool, otherwise show the last tool
+        const runningCall = tool.subagentCalls.find(c => c.isLoading);
+        const latestCall = runningCall || tool.subagentCalls[tool.subagentCalls.length - 1];
+        if (latestCall) {
+          return getSubagentCallLabel(latestCall);
+        }
       }
-      return 'Task';
+      // When Task completed or no subagent calls yet, show the Task description
+      if (description) {
+        return description.length > 25 ? `${description.substring(0, 22)}...` : description;
+      }
+      return subagentType;
     }
     case 'WebFetch': {
-      const input = tool.parsedInput as { url?: string };
-      if (input.url) {
+      const urlStr = getStringProp(tool.parsedInput, 'url');
+      if (urlStr) {
         try {
-          const url = new URL(input.url);
+          const url = new URL(urlStr);
           return url.hostname.length > 20 ? `${url.hostname.substring(0, 17)}...` : url.hostname;
         } catch {
-          return input.url.length > 20 ? `${input.url.substring(0, 17)}...` : input.url;
+          return urlStr.length > 20 ? `${urlStr.substring(0, 17)}...` : urlStr;
         }
       }
       return 'Fetch';
     }
     case 'WebSearch': {
-      const input = tool.parsedInput as { query?: string };
-      if (input.query) {
-        return input.query.length > 20 ? `${input.query.substring(0, 17)}...` : input.query;
+      const query = getStringProp(tool.parsedInput, 'query');
+      if (query) {
+        return query.length > 20 ? `${query.substring(0, 17)}...` : query;
       }
       return 'Search';
     }
     case 'TodoWrite': {
-      const input = tool.parsedInput as { todos?: Array<{ status?: string }> };
-      if (input.todos && input.todos.length > 0) {
-        const completedCount = input.todos.filter((t) => t.status === 'completed').length;
-        return `Todo ${completedCount}/${input.todos.length}`;
+      const todos = getArrayProp<{ status?: string }>(tool.parsedInput, 'todos');
+      if (todos && todos.length > 0) {
+        const completedCount = todos.filter((t) => t.status === 'completed').length;
+        return `Todo ${completedCount}/${todos.length}`;
       }
       return 'Todo List';
     }
     case 'Skill': {
-      const input = tool.parsedInput as { skill?: string };
-      if (input.skill) {
-        return `Skill(${input.skill})`;
+      const skill = getStringProp(tool.parsedInput, 'skill');
+      if (skill) {
+        return `Skill(${skill})`;
       }
       return 'Skill';
     }
@@ -360,28 +503,28 @@ export function getToolExpandedLabel(tool: ToolUseSimple): string {
     case 'WebFetch':
       return 'Fetch';
     case 'Bash': {
-      const input = tool.parsedInput as { description?: string };
-      return input?.description || 'Run command';
+      const description = getStringProp(tool.parsedInput, 'description');
+      return description || 'Run command';
     }
     case 'BashOutput':
       return 'Bash Output';
     case 'TodoWrite':
       return 'Todo List';
     case 'Task': {
-      const input = tool.parsedInput as { description?: string };
-      return input?.description || 'Task';
+      const description = getStringProp(tool.parsedInput, 'description');
+      const subagentType = getStringProp(tool.parsedInput, 'subagent_type') || 'Task';
+      return description || subagentType;
     }
     case 'Read':
     case 'Write':
     case 'Edit':
       return tool.name;
     case 'Skill': {
-      const input = tool.parsedInput as { skill?: string };
-      return input?.skill ? `Skill(${input.skill})` : 'Skill';
+      const skill = getStringProp(tool.parsedInput, 'skill');
+      return skill ? `Skill(${skill})` : 'Skill';
     }
     case 'NotebookEdit': {
-      const input = tool.parsedInput as { edit_mode?: string };
-      const editMode = input?.edit_mode || 'replace';
+      const editMode = getStringProp(tool.parsedInput, 'edit_mode') || 'replace';
       return `${editMode.charAt(0).toUpperCase() + editMode.slice(1)} notebook cell`;
     }
     case 'KillShell':

@@ -1,11 +1,15 @@
 /**
  * SkillDetailPanel - Component for viewing and editing a Skill
  * Supports preview/edit mode with save confirmation
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context (GlobalSkillsPanel).
  */
 import { Save, FolderOpen, Loader2, ChevronDown, ChevronUp, Trash2, Edit2, X, Check } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 
-import { apiGetJson, apiPutJson, apiDelete, apiPostJson } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPutJson as globalApiPut, apiDelete as globalApiDelete, apiPostJson as globalApiPost } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type { SkillFrontmatter, SkillDetail, SkillDetailResponse, ApiSuccessResponse } from '../../shared/skillsTypes';
@@ -31,6 +35,28 @@ export interface SkillDetailPanelRef {
 const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
     function SkillDetailPanel({ name, scope, onBack, onSaved, onDeleted, startInEditMode = false, agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
+
+        // Use Tab-scoped API when available (in project workspace context)
+        const tabState = useTabStateOptional();
+
+        // Create stable API functions - only depend on the specific functions, not the whole tabState
+        const apiGet = tabState?.apiGet;
+        const apiPost = tabState?.apiPost;
+        const apiPut = tabState?.apiPut;
+        const apiDeleteFn = tabState?.apiDelete;
+
+        const api = useMemo(() => {
+            if (apiGet && apiPost && apiPut && apiDeleteFn) {
+                return { get: apiGet, post: apiPost, put: apiPut, delete: apiDeleteFn };
+            }
+            return { get: globalApiGet, post: globalApiPost, put: globalApiPut, delete: globalApiDelete };
+        }, [apiGet, apiPost, apiPut, apiDeleteFn]);
+
+        // Track if we're in tab context (stable boolean)
+        const isInTabContext = !!tabState;
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [skill, setSkill] = useState<SkillDetail | null>(null);
@@ -68,6 +94,13 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         const contextMenuRef = useRef<HTMLDivElement>(null);
         const agentMenuRef = useRef<HTMLDivElement>(null);
 
+        // 输入框 refs 用于焦点控制
+        const nameInputRef = useRef<HTMLInputElement>(null);
+        const descriptionInputRef = useRef<HTMLTextAreaElement>(null);
+        const bodyInputRef = useRef<HTMLTextAreaElement>(null);
+        // 跟踪进入编辑模式时应聚焦的字段
+        const [focusField, setFocusField] = useState<'name' | 'description' | 'body' | null>(null);
+
         // Expose isEditing to parent
         useImperativeHandle(ref, () => ({
             isEditing: () => isEditing
@@ -78,9 +111,10 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             const loadSkill = async () => {
                 setLoading(true);
                 try {
-                    // Include agentDir for project scope to ensure correct path resolution
-                    const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                    const response = await apiGetJson<{ success: boolean; skill: SkillDetail; error?: string }>(
+                    // When using Tab API, no need to pass agentDir (sidecar already has it)
+                    // When using global API, include agentDir for project scope
+                    const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    const response = await api.get<{ success: boolean; skill: SkillDetail; error?: string }>(
                         `/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                     );
                     if (response.success && response.skill) {
@@ -123,16 +157,16 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                             setIsEditing(true);
                         }
                     } else {
-                        toast.error(response.error || '加载失败');
+                        toastRef.current.error(response.error || '加载失败');
                     }
                 } catch (err) {
-                    toast.error('加载失败');
+                    toastRef.current.error('加载失败');
                 } finally {
                     setLoading(false);
                 }
             };
             loadSkill();
-        }, [name, scope, agentDir, toast, startInEditMode]);
+        }, [name, scope, agentDir, startInEditMode, api, isInTabContext]);
 
         // 点击外部关闭下拉菜单
         useEffect(() => {
@@ -148,16 +182,39 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             return () => document.removeEventListener('click', handleClickOutside);
         }, []);
 
-        const handleEdit = useCallback(() => {
+        const handleEdit = useCallback((field?: 'name' | 'description' | 'body') => {
+            setFocusField(field || 'name');
             setIsEditing(true);
         }, []);
+
+        // 处理进入编辑模式后的焦点
+        useEffect(() => {
+            if (isEditing && focusField) {
+                // 使用 setTimeout 确保 DOM 已更新
+                const timer = setTimeout(() => {
+                    switch (focusField) {
+                        case 'name':
+                            nameInputRef.current?.focus();
+                            break;
+                        case 'description':
+                            descriptionInputRef.current?.focus();
+                            break;
+                        case 'body':
+                            bodyInputRef.current?.focus();
+                            break;
+                    }
+                    setFocusField(null);
+                }, 0);
+                return () => clearTimeout(timer);
+            }
+        }, [isEditing, focusField]);
 
         const handleCancel = useCallback(async () => {
             if (isNewSkill) {
                 // 新创建的技能，取消时删除并返回列表
                 try {
-                    const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                    await apiDelete<{ success: boolean }>(`/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`);
+                    const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    await api.delete<{ success: boolean }>(`/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`);
                 } catch {
                     // 忽略删除失败
                 }
@@ -174,7 +231,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 setArgumentHint(originalArgumentHint);
                 setIsEditing(false);
             }
-        }, [isNewSkill, name, scope, originalSkillName, originalDescription, originalBody, originalInvocationMode, originalAllowedTools, originalContext, originalAgent, originalArgumentHint, onDeleted]);
+        }, [isNewSkill, name, scope, agentDir, originalSkillName, originalDescription, originalBody, originalInvocationMode, originalAllowedTools, originalContext, originalAgent, originalArgumentHint, onDeleted, api, isInTabContext]);
 
         // Get the expected new folder name based on current skill name
         const expectedFolderName = skillName.trim() ? sanitizeFolderName(skillName.trim()) : '';
@@ -182,7 +239,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         const handleSave = useCallback(async () => {
             if (!skill) return;
             if (!skillName.trim()) {
-                toast.error('技能名称不能为空');
+                toastRef.current.error('技能名称不能为空');
                 return;
             }
             setSaving(true);
@@ -207,22 +264,28 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 if (agent) frontmatter.agent = agent;
                 if (argumentHint) frontmatter['argument-hint'] = argumentHint;
 
-                // Check if folder should be renamed (based on sanitized skill name)
+                // Check if folder should be renamed (only if user modified name AND sanitized name differs from current folder)
                 const newFolderName = sanitizeFolderName(skillName.trim());
-                const shouldRename = newFolderName && newFolderName !== skill.folderName;
+                const nameWasModified = skillName.trim() !== originalSkillName;
+                const shouldRename = nameWasModified && newFolderName && newFolderName !== skill.folderName;
 
-                const response = await apiPutJson<{
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const payload = isInTabContext
+                    ? { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}) }
+                    : { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) };
+
+                const response = await api.put<{
                     success: boolean;
                     error?: string;
                     folderName?: string;
                     fullPath?: string;
                 }>(
                     `/api/skill/${encodeURIComponent(name)}`,
-                    { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) }
+                    payload
                 );
 
                 if (response.success) {
-                    toast.success('保存成功');
+                    toastRef.current.success('保存成功');
 
                     // If folder was renamed, always close detail view (name prop is now invalid)
                     const folderWasRenamed = response.folderName && response.folderName !== skill.folderName;
@@ -254,45 +317,45 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     // 新建技能保存后自动关闭详情返回列表
                     onSaved(wasNewSkill);
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch (err) {
-                toast.error('保存失败');
+                toastRef.current.error('保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [skill, name, scope, agentDir, skillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill]);
+        }, [skill, name, scope, agentDir, skillName, originalSkillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, onSaved, isNewSkill, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             setDeleting(true);
             try {
-                const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                const response = await apiDelete<{ success: boolean; error?: string }>(
+                const agentDirParam = (!isInTabContext && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                const response = await api.delete<{ success: boolean; error?: string }>(
                     `/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                 );
                 if (response.success) {
-                    toast.success('删除成功');
+                    toastRef.current.success('删除成功');
                     onDeleted();
                 } else {
-                    toast.error(response.error || '删除失败');
+                    toastRef.current.error(response.error || '删除失败');
                 }
             } catch (err) {
-                toast.error('删除失败');
+                toastRef.current.error('删除失败');
             } finally {
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [name, scope, agentDir, toast, onDeleted]);
+        }, [name, scope, agentDir, onDeleted, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!skill) return;
             try {
                 // Use full path from skill.path which is already correctly resolved by backend
-                await apiPostJson('/agent/open-path', { fullPath: skill.path });
+                await api.post('/agent/open-path', { fullPath: skill.path });
             } catch (err) {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [skill, toast]);
+        }, [skill, api]);
 
         if (loading) {
             return (
@@ -311,7 +374,9 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         }
 
         // Calculate preview path based on edited skill name
-        const pathChanged = isEditing && !!expectedFolderName && expectedFolderName !== skill.folderName;
+        // Only show "will rename" if user actually changed the name AND the sanitized folder name is different
+        const nameWasModified = skillName.trim() !== originalSkillName;
+        const pathChanged = isEditing && nameWasModified && !!expectedFolderName && expectedFolderName !== skill.folderName;
         const previewPath = pathChanged
             ? skill.path.replace(skill.folderName, expectedFolderName)
             : skill.path;
@@ -345,11 +410,11 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     </div>
                     <div className="flex items-center gap-2">
                         {isEditing ? (
-                            <>
+                            <div key="editing" className="flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setShowDeleteConfirm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--error)] hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     删除
@@ -357,7 +422,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                 <button
                                     type="button"
                                     onClick={handleCancel}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                 >
                                     <X className="h-4 w-4" />
                                     取消
@@ -371,11 +436,12 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                                     保存
                                 </button>
-                            </>
+                            </div>
                         ) : (
                             <button
+                                key="view"
                                 type="button"
-                                onClick={handleEdit}
+                                onClick={() => handleEdit('name')}
                                 className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-1.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 <Edit2 className="h-4 w-4" />
@@ -385,83 +451,109 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     </div>
                 </div>
 
-                {/* Content */}
+                {/* Content - scrollable area */}
                 <div className="flex-1 overflow-auto p-6">
-                    <div className="mx-auto max-w-4xl space-y-6">
+                    <div className="mx-auto max-w-4xl space-y-4">
                         {/* Skill Name */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">名称</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={skillName}
-                                    onChange={(e) => setSkillName(e.target.value)}
-                                    placeholder="为技能起一个名字"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                    autoFocus
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {skillName ? (
-                                        <span className="text-[var(--ink)]">{skillName}</span>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑名称...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">名称</label>
+                            <div className={`w-full rounded-lg border px-4 py-2.5 ${
+                                isEditing
+                                    ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                    : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                            }`} onClick={!isEditing ? () => handleEdit('name') : undefined}>
+                                {isEditing ? (
+                                    <input
+                                        ref={nameInputRef}
+                                        type="text"
+                                        value={skillName}
+                                        onChange={(e) => setSkillName(e.target.value)}
+                                        placeholder="为技能起一个名字"
+                                        className="w-full border-none bg-transparent p-0 text-sm leading-relaxed text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <span className={`block text-sm leading-relaxed ${skillName ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}`}>
+                                        {skillName || '点击编辑名称...'}
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
-                        {/* Description */}
+                        {/* Description - 1-4 lines with overflow scroll, same height for edit/preview */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">描述</label>
-                            {isEditing ? (
-                                <input
-                                    type="text"
-                                    value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="描述这个技能是做什么的，Claude 会根据此决定何时使用"
-                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-2.5 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-2.5 text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {description ? (
-                                        <span className="text-[var(--ink)]">{description}</span>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">描述</label>
+                            <div
+                                className={`w-full rounded-lg border px-4 py-2.5 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                onClick={!isEditing ? () => handleEdit('description') : undefined}
+                            >
+                                {/* Fixed height container: min 1 line, max 4 lines (22px line-height * 4 = 88px) */}
+                                <div className="max-h-[88px] min-h-[22px] overflow-y-auto">
+                                    {isEditing ? (
+                                        <textarea
+                                            ref={(el) => {
+                                                // 同时存储 ref 和调整高度
+                                                (descriptionInputRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+                                                if (el) {
+                                                    el.style.height = 'auto';
+                                                    el.style.height = Math.max(22, el.scrollHeight) + 'px';
+                                                }
+                                            }}
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="描述这个技能是做什么的，Claude 会根据此决定何时使用"
+                                            className="block min-h-[22px] w-full resize-none border-none bg-transparent p-0 text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                            style={{ height: 'auto' }}
+                                            onInput={(e) => {
+                                                const target = e.target as HTMLTextAreaElement;
+                                                target.style.height = 'auto';
+                                                target.style.height = Math.max(22, target.scrollHeight) + 'px';
+                                            }}
+                                        />
                                     ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑描述...</span>
+                                        <div className="whitespace-pre-wrap text-sm leading-[22px]">
+                                            <span className={description ? 'text-[var(--ink)]' : 'text-[var(--ink-muted)]/60'}>
+                                                {description || '点击编辑描述...'}
+                                            </span>
+                                        </div>
                                     )}
                                 </div>
-                            )}
+                            </div>
                         </div>
 
-                        {/* Instructions */}
+                        {/* Instructions - same height for edit/preview, adapts to viewport */}
                         <div>
-                            <label className="mb-2 block text-sm font-medium text-[var(--ink)]">技能内容 (Instructions)</label>
-                            {isEditing ? (
-                                <textarea
-                                    value={body}
-                                    onChange={(e) => setBody(e.target.value)}
-                                    placeholder="在这里编写技能的详细指令..."
-                                    rows={12}
-                                    className="w-full resize-none rounded-lg border border-[var(--line)] bg-[var(--paper)] px-4 py-3 font-mono text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                                />
-                            ) : (
-                                <div
-                                    onClick={handleEdit}
-                                    className="min-h-[200px] w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-4 py-3 font-mono text-sm transition-colors hover:border-[var(--ink-muted)]/50"
-                                >
-                                    {body ? (
-                                        <pre className="m-0 whitespace-pre-wrap text-[var(--ink)]">{body}</pre>
-                                    ) : (
-                                        <span className="text-[var(--ink-muted)]/60">点击编辑技能内容...</span>
-                                    )}
-                                </div>
-                            )}
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">技能内容 (Instructions)</label>
+                            <div
+                                className={`overflow-hidden rounded-lg border px-4 py-3 ${
+                                    isEditing
+                                        ? 'border-[var(--line)] bg-[var(--paper)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[var(--accent)]/20'
+                                        : 'cursor-pointer border-[var(--line)] bg-[var(--paper-contrast)]/30 transition-colors hover:border-[var(--ink-muted)]/50'
+                                }`}
+                                style={{ height: 'max(300px, calc(100vh - 420px))' }}
+                                onClick={!isEditing ? () => handleEdit('body') : undefined}
+                            >
+                                {isEditing ? (
+                                    <textarea
+                                        ref={bodyInputRef}
+                                        value={body}
+                                        onChange={(e) => setBody(e.target.value)}
+                                        placeholder="在这里编写技能的详细指令..."
+                                        className="h-full w-full resize-none overflow-auto border-none bg-transparent p-0 font-mono text-sm leading-[22px] text-[var(--ink)] placeholder-[var(--ink-muted)] outline-none"
+                                    />
+                                ) : (
+                                    <div className="h-full overflow-auto">
+                                        {body ? (
+                                            <pre className="m-0 whitespace-pre-wrap font-mono text-sm leading-[22px] text-[var(--ink)]">{body}</pre>
+                                        ) : (
+                                            <span className="font-mono text-sm text-[var(--ink-muted)]/60">点击编辑技能内容...</span>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Advanced Settings Toggle */}
@@ -527,7 +619,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                             className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none"
                                         />
                                     ) : (
-                                        <div onClick={handleEdit} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
+                                        <div onClick={() => handleEdit()} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
                                             {allowedTools || <span className="text-[var(--ink-muted)]/60">未设置 (不限制)</span>}
                                         </div>
                                     )}
@@ -656,7 +748,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                                             className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none"
                                         />
                                     ) : (
-                                        <div onClick={handleEdit} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
+                                        <div onClick={() => handleEdit()} className="w-full cursor-pointer rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)]/30 px-3 py-2 text-sm transition-colors hover:border-[var(--ink-muted)]/50">
                                             {argumentHint || <span className="text-[var(--ink-muted)]/60">未设置</span>}
                                         </div>
                                     )}

@@ -31,6 +31,10 @@ type DetailView =
 
 export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: externalRefreshKey = 0 }: WorkspaceConfigPanelProps) {
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
+
     const [activeTab, setActiveTab] = useState<Tab>('claude-md');
     const [detailView, setDetailView] = useState<DetailView>({ type: 'none' });
     const [internalRefreshKey, setInternalRefreshKey] = useState(0);
@@ -60,20 +64,20 @@ export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: ex
     // Handle close with editing check
     const handleClose = useCallback(() => {
         if (isAnyEditing()) {
-            toast.warning('请先保存或取消编辑');
+            toastRef.current.warning('请先保存或取消编辑');
             return;
         }
         onClose();
-    }, [isAnyEditing, onClose, toast]);
+    }, [isAnyEditing, onClose]);
 
     // Handle back with editing check
     const handleBackFromDetail = useCallback(() => {
         if (isAnyEditing()) {
-            toast.warning('请先保存或取消编辑');
+            toastRef.current.warning('请先保存或取消编辑');
             return;
         }
         setDetailView({ type: 'none' });
-    }, [isAnyEditing, toast]);
+    }, [isAnyEditing]);
 
     // Close on Escape key
     useEffect(() => {

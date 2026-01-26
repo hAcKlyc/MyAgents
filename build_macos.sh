@@ -26,6 +26,28 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # ========================================
+# 版本同步检查
+# ========================================
+PKG_VERSION=$(grep '"version"' "${PROJECT_DIR}/package.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+TAURI_VERSION=$(grep '"version"' "${PROJECT_DIR}/src-tauri/tauri.conf.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+CARGO_VERSION=$(grep '^version = ' "${PROJECT_DIR}/src-tauri/Cargo.toml" | head -1 | sed 's/version = "\([^"]*\)".*/\1/')
+
+if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
+    echo -e "${YELLOW}⚠ 版本号不一致:${NC}"
+    echo -e "  package.json:      ${CYAN}${PKG_VERSION}${NC}"
+    echo -e "  tauri.conf.json:   ${CYAN}${TAURI_VERSION}${NC}"
+    echo -e "  Cargo.toml:        ${CYAN}${CARGO_VERSION}${NC}"
+    echo ""
+    read -p "是否同步版本号到 ${PKG_VERSION}? (y/N) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        node "${PROJECT_DIR}/scripts/sync-version.js"
+        VERSION="$PKG_VERSION"  # 更新显示的版本号
+        echo ""
+    fi
+fi
+
+# ========================================
 # 加载环境变量 (签名配置)
 # ========================================
 echo -e "${BLUE}[1/8] 加载签名配置...${NC}"
@@ -218,9 +240,54 @@ echo -e "${GREEN}✓ 前端和服务端构建完成${NC}"
 echo ""
 
 # ========================================
+# 签名 Bun 可执行文件 (重要：确保与应用使用相同签名)
+# ========================================
+echo -e "${BLUE}[6/8] 签名外部二进制文件...${NC}"
+
+# 签名 Bun 可执行文件
+# 重要：Bun 默认使用官方签名 (Jarred Sumner)，需要重签名为应用签名
+# 否则 macOS TCC 会将 Bun 视为独立应用，每次访问受保护目录都需要单独授权
+# 参考：https://developer.apple.com/forums/thread/129494
+#       https://book.hacktricks.wiki/en/macos-hardening/macos-security-and-privilege-escalation/macos-security-protections/macos-tcc/
+echo -e "  ${CYAN}签名 Bun 可执行文件 (使用应用签名替换官方签名)...${NC}"
+BUN_BINARIES_DIR="${PROJECT_DIR}/src-tauri/binaries"
+BUN_SIGNED_COUNT=0
+BUN_FAILED_COUNT=0
+
+for bun_binary in "${BUN_BINARIES_DIR}"/bun-*-apple-darwin; do
+    if [ -f "$bun_binary" ]; then
+        echo -e "    ${CYAN}处理: $(basename "$bun_binary")${NC}"
+
+        # 1. 移除 quarantine 属性 (macOS 会标记下载的二进制文件)
+        # 参考：https://v2.tauri.app/develop/sidecar/
+        xattr -d com.apple.quarantine "$bun_binary" 2>/dev/null || true
+
+        # 2. 重签名：使用 --force 强制重签名，--options runtime 启用 hardened runtime
+        # --entitlements 使用应用的 entitlements 确保 JIT 等权限
+        # 这样 Bun 将与主应用共享相同的 Team ID，TCC 权限可以正确继承
+        if codesign --force --options runtime --timestamp \
+            --entitlements "${PROJECT_DIR}/src-tauri/Entitlements.plist" \
+            --sign "$APPLE_SIGNING_IDENTITY" "$bun_binary"; then
+            echo -e "    ${GREEN}✓ $(basename "$bun_binary") 签名成功${NC}"
+            ((BUN_SIGNED_COUNT++))
+        else
+            echo -e "    ${RED}✗ $(basename "$bun_binary") 签名失败${NC}"
+            ((BUN_FAILED_COUNT++))
+        fi
+    fi
+done
+
+if [ $BUN_FAILED_COUNT -gt 0 ]; then
+    echo -e "${RED}错误: Bun 签名失败，构建终止${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Bun 签名完成 (${BUN_SIGNED_COUNT} 个文件)${NC}"
+echo ""
+
+# ========================================
 # 签名 Vendor 二进制文件 (ripgrep)
 # ========================================
-echo -e "${BLUE}[6/8] 签名 Vendor 二进制文件...${NC}"
+echo -e "  ${CYAN}签名 Vendor 二进制文件 (ripgrep, .node)...${NC}"
 
 # 签名所有 macOS 二进制文件
 VENDOR_DIR="${SDK_DEST}/vendor"
@@ -229,12 +296,12 @@ FAILED_COUNT=0
 
 # 使用 process substitution 避免子 shell 问题
 while IFS= read -r binary; do
-    echo -e "  ${CYAN}签名: $(basename "$binary")${NC}"
+    echo -e "    ${CYAN}签名: $(basename "$binary")${NC}"
     if codesign --force --options runtime --timestamp \
         --sign "$APPLE_SIGNING_IDENTITY" "$binary" 2>/dev/null; then
         ((SIGNED_COUNT++))
     else
-        echo -e "  ${YELLOW}警告: 签名失败 - $binary${NC}"
+        echo -e "    ${YELLOW}警告: 签名失败 - $binary${NC}"
         ((FAILED_COUNT++))
     fi
 done < <(find "$VENDOR_DIR" -type f \( -name "*.node" -o -name "rg" \) -path "*darwin*")

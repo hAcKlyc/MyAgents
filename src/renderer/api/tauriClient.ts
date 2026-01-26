@@ -552,6 +552,15 @@ export function markGlobalSidecarReady(): void {
 }
 
 /**
+ * Reset global sidecar ready promise for retry scenarios
+ * Called from App.tsx when retrying sidecar startup
+ */
+export function resetGlobalSidecarReadyPromise(): void {
+    globalSidecarReadyPromise = null;
+    globalSidecarReadyResolve = null;
+}
+
+/**
  * Wait for global sidecar to be ready (with timeout)
  * @param timeoutMs - Maximum time to wait in milliseconds (default: 60000)
  * Note: Timeout is set higher to accommodate macOS permission dialogs

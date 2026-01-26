@@ -1,11 +1,15 @@
 /**
  * ClaudeMdEditor - Component for viewing and editing CLAUDE.md
  * Supports preview/edit mode with ref for parent to check editing state
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context.
  */
 import { Save, Edit2, X, FolderOpen, FileText, AlertCircle, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useMemo, useRef } from 'react';
 
-import { apiGetJson, apiPostJson } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPostJson as globalApiPost } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 
 interface ClaudeMdEditorProps {
@@ -27,6 +31,27 @@ interface ClaudeMdResponse {
 const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
     function ClaudeMdEditor({ agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
+
+        // Use Tab-scoped API when available (in project workspace context)
+        const tabState = useTabStateOptional();
+
+        // Create stable API functions - only depend on the specific functions, not the whole tabState
+        // This prevents re-creating the api object when unrelated tabState properties change
+        const apiGet = tabState?.apiGet;
+        const apiPost = tabState?.apiPost;
+
+        const api = useMemo(() => {
+            if (apiGet && apiPost) {
+                return { get: apiGet, post: apiPost };
+            }
+            return { get: globalApiGet, post: globalApiPost };
+        }, [apiGet, apiPost]);
+
+        // Track if we're in tab context (stable boolean that won't change)
+        const isInTabContext = !!tabState;
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [content, setContent] = useState('');
@@ -47,7 +72,11 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 setLoading(true);
                 setError(null);
                 try {
-                    const response = await apiGetJson<ClaudeMdResponse>(`/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`);
+                    // When using Tab API, no need to pass agentDir (sidecar already has it)
+                    const endpoint = isInTabContext
+                        ? '/api/claude-md'
+                        : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
+                    const response = await api.get<ClaudeMdResponse>(endpoint);
                     if (response.success) {
                         setContent(response.content);
                         setEditContent(response.content);
@@ -64,7 +93,7 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 }
             };
             loadContent();
-        }, [agentDir]);
+        }, [agentDir, api, isInTabContext]);
 
         const handleEdit = useCallback(() => {
             setEditContent(content);
@@ -79,31 +108,39 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
         const handleSave = useCallback(async () => {
             setSaving(true);
             try {
-                const response = await apiPostJson<{ success: boolean; error?: string }>(`/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`, {
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const endpoint = isInTabContext
+                    ? '/api/claude-md'
+                    : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
+                const response = await api.post<{ success: boolean; error?: string }>(endpoint, {
                     content: editContent
                 });
                 if (response.success) {
                     setContent(editContent);
                     setExists(true);
                     setIsEditing(false);
-                    toast.success('CLAUDE.md 保存成功');
+                    toastRef.current.success('CLAUDE.md 保存成功');
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : '保存失败');
+                toastRef.current.error(err instanceof Error ? err.message : '保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [editContent, toast]);
+        }, [editContent, agentDir, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             try {
-                await apiPostJson('/agent/open-in-finder', { path: 'CLAUDE.md', agentDir });
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const payload = isInTabContext
+                    ? { path: 'CLAUDE.md' }
+                    : { path: 'CLAUDE.md', agentDir };
+                await api.post('/agent/open-in-finder', payload);
             } catch (err) {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [agentDir, toast]);
+        }, [agentDir, api, isInTabContext]);
 
         if (loading) {
             return (
@@ -148,11 +185,11 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                         </div>
                         <div className="flex items-center gap-2">
                             {isEditing ? (
-                                <>
+                                <div key="editing" className="flex items-center gap-2">
                                     <button
                                         type="button"
                                         onClick={handleCancel}
-                                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                        className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]"
                                     >
                                         <X className="h-4 w-4" />
                                         取消
@@ -170,9 +207,10 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                                         )}
                                         保存
                                     </button>
-                                </>
+                                </div>
                             ) : (
                                 <button
+                                    key="view"
                                     type="button"
                                     onClick={handleEdit}
                                     className="flex items-center gap-1.5 rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"

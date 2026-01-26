@@ -2336,6 +2336,8 @@ async function startStreamingSession(): Promise<void> {
         }
       } else if (sdkMessage.type === 'assistant') {
         const assistantMessage = sdkMessage.message;
+        // Extract usage info for subagent stats
+        const usage = (assistantMessage as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
         if (sdkMessage.parent_tool_use_id && assistantMessage.content) {
           for (const block of assistantMessage.content) {
             if (
@@ -2358,7 +2360,8 @@ async function startStreamingSession(): Promise<void> {
               };
               broadcast('chat:subagent-tool-use', {
                 parentToolUseId: sdkMessage.parent_tool_use_id,
-                tool: payload
+                tool: payload,
+                usage: usage ? { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } : undefined
               });
               handleSubagentToolUseStart(sdkMessage.parent_tool_use_id, payload);
             }

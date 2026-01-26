@@ -1,11 +1,13 @@
 
 import { AlertCircle, Brain, ChevronDown, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import Markdown from '@/components/Markdown';
 import {
+    formatDuration,
     getToolBadgeConfig,
-    getToolLabel
+    getToolLabel,
+    getToolMainLabel
 } from '@/components/tools/toolBadgeConfig';
 import ToolUse from '@/components/ToolUse';
 import type { ContentBlock } from '@/types/chat';
@@ -23,57 +25,100 @@ export default function ProcessRow({
     totalBlocks,
     isStreaming = false
 }: ProcessRowProps) {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const [userManuallyOpened, setUserManuallyOpened] = useState(false);
-    const prevIsBlockActiveRef = useRef(false);
+    // User manually toggled state (null = not toggled, true/false = user choice)
+    const [userToggled, setUserToggled] = useState<boolean | null>(null);
+    // Task tool elapsed time (for running tasks)
+    const [taskElapsed, setTaskElapsed] = useState(0);
+    const taskTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
     const isThinking = block.type === 'thinking';
     const isTool = block.type === 'tool_use';
     const isLastBlock = index === totalBlocks - 1;
+    const isTaskTool = isTool && block.tool?.name === 'Task';
 
-    // Issue 1: 改进 loading 判断逻辑
-    // - Thinking: 没有 isComplete 就是 loading
-    // - Tool: 有下一个 block 就结束了，或者有 result 就结束了
+    // Thinking: 没有 isComplete 就是 active
     const isThinkingActive = isThinking && block.isComplete !== true;
 
-    // Tool loading 逻辑改进：
-    // 1. 如果不是最后一个 block，说明后面有更多内容了，这个工具已完成
-    // 2. 如果是最后一个 block 且正在 streaming，需要检查是否有 result
-    // 3. 有 result 就完成了
+    // Tool: 是最后一个 block 且正在 streaming 且没有 result 就是 active
     const isToolActive = isTool && isLastBlock && isStreaming && !block.tool?.result;
+    const isTaskRunning = isTaskTool && block.tool?.isLoading && !block.tool?.result;
 
     const isBlockActive = isThinkingActive || isToolActive;
 
-    // Issue 3: 自动展开/折叠逻辑
+    // Task tool timer - update elapsed time every second while running
     useEffect(() => {
-        const wasActive = prevIsBlockActiveRef.current;
-
-        if (isBlockActive && !wasActive) {
-            // Block just became active -> expand
-            setIsExpanded(true);
-        } else if (!isBlockActive && wasActive && !userManuallyOpened) {
-            // Block just completed and user didn't manually open -> collapse
-            setIsExpanded(false);
+        if (!isTaskRunning || !block.tool?.taskStartTime) {
+            if (taskTimerRef.current) {
+                clearInterval(taskTimerRef.current);
+                taskTimerRef.current = undefined;
+            }
+            return;
         }
 
-        prevIsBlockActiveRef.current = isBlockActive;
-    }, [isBlockActive, userManuallyOpened]);
+        const startTime = block.tool.taskStartTime;
 
-    // If this becomes the latest active block, auto expand
-    useEffect(() => {
-        if (isLastBlock && isStreaming && isBlockActive) {
-            setIsExpanded(true);
+        // Use requestAnimationFrame to set initial value asynchronously (avoids lint warning)
+        const rafId = requestAnimationFrame(() => {
+            setTaskElapsed(Date.now() - startTime);
+        });
+
+        // Update every second
+        taskTimerRef.current = setInterval(() => {
+            setTaskElapsed(Date.now() - startTime);
+        }, 1000);
+
+        return () => {
+            cancelAnimationFrame(rafId);
+            if (taskTimerRef.current) {
+                clearInterval(taskTimerRef.current);
+                taskTimerRef.current = undefined;
+            }
+        };
+    }, [isTaskRunning, block.tool?.taskStartTime]);
+
+    // Parse Task result once (memoized to avoid repeated JSON parsing)
+    const taskParsedResult = useMemo(() => {
+        if (!isTaskTool || !block.tool?.result) return null;
+        try {
+            return JSON.parse(block.tool.result) as { totalDurationMs?: number };
+        } catch {
+            return null;
         }
-    }, [isLastBlock, isStreaming, isBlockActive]);
+    }, [isTaskTool, block.tool?.result]);
 
-    // Handle user click - track manual interaction
+    // Get Task duration (running: from state, completed: from result)
+    const taskDuration = useMemo(() => {
+        if (!isTaskTool || !block.tool) return null;
+
+        if (isTaskRunning && taskElapsed > 0) {
+            return formatDuration(taskElapsed);
+        }
+
+        if (taskParsedResult?.totalDurationMs) {
+            return formatDuration(taskParsedResult.totalDurationMs);
+        }
+
+        return null;
+    }, [isTaskTool, block.tool, isTaskRunning, taskElapsed, taskParsedResult]);
+
+    // Check if block has expandable content
+    const hasContent =
+        (isThinking && block.thinking && block.thinking.length > 0) ||
+        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.subagentCalls?.length));
+
+    // 派生展开状态（无 useEffect，避免无限循环）
+    // 规则：
+    // 1. 如果用户手动切换过，使用用户的选择
+    // 2. 否则，thinking 块在 active 时自动展开
+    // 3. tool 块默认不展开
+    const isExpanded = userToggled !== null
+        ? userToggled
+        : (isThinking && isThinkingActive);
+
+    // Handle user click
     const handleToggle = () => {
         if (!hasContent) return;
-        const newState = !isExpanded;
-        setIsExpanded(newState);
-        if (newState) {
-            setUserManuallyOpened(true);
-        }
+        setUserToggled(prev => prev === null ? true : !prev);
     };
 
     // Build display content
@@ -82,7 +127,6 @@ export default function ProcessRow({
     let subLabel = '';
 
     if (isThinking) {
-        // Issue: 正确的思考标题 - "思考中…" vs "思考了 Xs"
         if (isThinkingActive) {
             mainLabel = '思考中…';
             icon = <Loader2 className="size-4 animate-spin" />;
@@ -95,11 +139,9 @@ export default function ProcessRow({
         const config = getToolBadgeConfig(block.tool.name);
         const toolLabel = getToolLabel(block.tool);
 
-        // 工具名在前（深色粗体），内容描述在后（浅色）
-        mainLabel = block.tool.name;
-        subLabel = toolLabel !== block.tool.name ? toolLabel : '';
+        mainLabel = getToolMainLabel(block.tool);
+        subLabel = toolLabel !== mainLabel ? toolLabel : '';
 
-        // Loading 判断：有后续 block 或有 result 就不 loading
         if (isToolActive) {
             icon = <Loader2 className="size-4 animate-spin" />;
         } else if (block.tool.isError) {
@@ -108,10 +150,6 @@ export default function ProcessRow({
             icon = config.icon;
         }
     }
-
-    const hasContent =
-        (isThinking && block.thinking && block.thinking.length > 0) ||
-        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.subagentCalls?.length));
 
     return (
         <div className={`group ${index < totalBlocks - 1 ? 'border-b border-[var(--line-subtle)]' : ''}`}>
@@ -146,8 +184,14 @@ export default function ProcessRow({
                         }`}>
                         {mainLabel}
                     </span>
+                    {/* Task duration - similar to thinking duration */}
+                    {taskDuration && (
+                        <span className="text-xs text-[var(--ink-muted)]">
+                            {taskDuration}
+                        </span>
+                    )}
                     {subLabel && subLabel !== mainLabel && (
-                        <span className="text-xs text-[var(--ink-muted)] font-mono">
+                        <span className="text-xs text-[var(--ink-muted)] font-mono truncate">
                             {subLabel}
                         </span>
                     )}
@@ -160,20 +204,27 @@ export default function ProcessRow({
                 )}
             </button>
 
-            {/* Expanded Body */}
-            {isExpanded && hasContent && (
-                <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
-                    <div className="ml-7">
-                        {isThinking && block.thinking && (
-                            <div className="text-[var(--ink-secondary)]">
-                                <Markdown compact>{block.thinking}</Markdown>
+            {/* Expanded Body - CSS Grid animation for smooth height transition */}
+            {hasContent && (
+                <div
+                    className="grid transition-[grid-template-rows] duration-200 ease-out"
+                    style={{ gridTemplateRows: isExpanded ? '1fr' : '0fr' }}
+                >
+                    <div className="overflow-hidden">
+                        <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
+                            <div className="ml-7">
+                                {isThinking && block.thinking && (
+                                    <div className="text-[var(--ink-secondary)]">
+                                        <Markdown compact>{block.thinking}</Markdown>
+                                    </div>
+                                )}
+                                {isTool && block.tool && (
+                                    <div className="w-full overflow-hidden">
+                                        <ToolUse tool={block.tool} />
+                                    </div>
+                                )}
                             </div>
-                        )}
-                        {isTool && block.tool && (
-                            <div className="w-full overflow-hidden">
-                                <ToolUse tool={block.tool} />
-                            </div>
-                        )}
+                        </div>
                     </div>
                 </div>
             )}

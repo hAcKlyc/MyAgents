@@ -1,12 +1,17 @@
 /**
  * SkillsCommandsList - Component for displaying Skills and Commands list
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context (GlobalSkillsPanel in Settings).
  */
 import { Plus, Sparkles, Terminal, ChevronRight, Loader2 } from 'lucide-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 
-import { apiGetJson, apiPostJson, apiDelete } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPostJson as globalApiPost, apiDelete as globalApiDelete } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import { CreateDialog, NewSkillChooser } from './SkillDialogs';
 import type { SkillItem, CommandItem } from '../../shared/skillsTypes';
 
 interface SkillsCommandsListProps {
@@ -19,12 +24,35 @@ interface SkillsCommandsListProps {
 
 export default function SkillsCommandsList({
     scope,
-    agentDir: _agentDir,  // Reserved for future project-scoped operations
+    agentDir,
     onSelectSkill,
     onSelectCommand,
     refreshKey = 0
 }: SkillsCommandsListProps) {
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
+
+    // Use Tab-scoped API when available (in project workspace context)
+    // Fall back to global API when not in Tab context (Settings page)
+    const tabState = useTabStateOptional();
+
+    // Create stable API functions - only depend on the specific functions, not the whole tabState
+    // This prevents re-creating the api object when unrelated tabState properties change
+    const apiGet = tabState?.apiGet;
+    const apiPost = tabState?.apiPost;
+    const apiDeleteFn = tabState?.apiDelete;
+
+    const api = useMemo(() => {
+        if (apiGet && apiPost && apiDeleteFn) {
+            return { get: apiGet, post: apiPost, delete: apiDeleteFn };
+        }
+        return { get: globalApiGet, post: globalApiPost, delete: globalApiDelete };
+    }, [apiGet, apiPost, apiDeleteFn]);
+
+    // Track if we're in tab context (stable boolean that won't change)
+    const isInTabContext = !!tabState;
     const [loading, setLoading] = useState(true);
     const [skills, setSkills] = useState<SkillItem[]>([]);
     const [commands, setCommands] = useState<CommandItem[]>([]);
@@ -41,8 +69,8 @@ export default function SkillsCommandsList({
         setLoading(true);
         try {
             const [skillsRes, commandsRes] = await Promise.all([
-                apiGetJson<{ success: boolean; skills: SkillItem[] }>(`/api/skills?scope=${scope === 'user' ? 'user' : 'all'}`),
-                apiGetJson<{ success: boolean; commands: CommandItem[] }>(`/api/command-items?scope=${scope === 'user' ? 'user' : 'all'}`)
+                api.get<{ success: boolean; skills: SkillItem[] }>(`/api/skills?scope=${scope === 'user' ? 'user' : 'all'}`),
+                api.get<{ success: boolean; commands: CommandItem[] }>(`/api/command-items?scope=${scope === 'user' ? 'user' : 'all'}`)
             ]);
 
             if (skillsRes.success) {
@@ -52,11 +80,11 @@ export default function SkillsCommandsList({
                 setCommands(commandsRes.commands);
             }
         } catch {
-            toast.error('加载失败');
+            toastRef.current.error('加载失败');
         } finally {
             setLoading(false);
         }
-    }, [scope, toast]);
+    }, [scope, api]);
 
     useEffect(() => {
         loadData();
@@ -66,22 +94,25 @@ export default function SkillsCommandsList({
     // 快速创建技能并立即进入编辑模式
     const handleQuickCreateSkill = useCallback(async (tempName: string) => {
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string }>('/api/skill/create', {
-                name: tempName,
-                scope,
-                description: ''
-            });
+            // When using Tab API, no need to pass agentDir (sidecar already has it)
+            // When using global API, pass agentDir for project scope
+            const payload = isInTabContext
+                ? { name: tempName, scope, description: '' }
+                : { name: tempName, scope, description: '', ...(scope === 'project' && agentDir ? { agentDir } : {}) };
+
+            const response = await api.post<{ success: boolean; error?: string; folderName?: string }>('/api/skill/create', payload);
             if (response.success) {
                 // 创建成功后直接进入详情页(编辑模式由详情页处理)
-                onSelectSkill(tempName, scope, true);
+                // 使用返回的 folderName（sanitized）而非 tempName
+                onSelectSkill(response.folderName || tempName, scope, true);
                 loadData();
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         }
-    }, [scope, toast, loadData, onSelectSkill]);
+    }, [scope, agentDir, loadData, onSelectSkill, api, isInTabContext]);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {
@@ -91,7 +122,7 @@ export default function SkillsCommandsList({
             reader.onload = async () => {
                 const base64Content = (reader.result as string).split(',')[1]; // 去除 data:xxx;base64, 前缀
                 try {
-                    const response = await apiPostJson<{
+                    const response = await api.post<{
                         success: boolean;
                         folderName?: string;
                         message?: string;
@@ -103,7 +134,7 @@ export default function SkillsCommandsList({
                     });
 
                     if (response.success) {
-                        toast.success(response.message || '技能导入成功');
+                        toastRef.current.success(response.message || '技能导入成功');
                         setShowNewSkillDialog(false);
                         loadData();
                         // 进入新创建的技能详情页
@@ -111,45 +142,45 @@ export default function SkillsCommandsList({
                             onSelectSkill(response.folderName, scope, true);
                         }
                     } else {
-                        toast.error(response.error || '导入失败');
+                        toastRef.current.error(response.error || '导入失败');
                     }
                 } catch {
-                    toast.error('导入失败');
+                    toastRef.current.error('导入失败');
                 }
             };
             reader.onerror = () => {
-                toast.error('读取文件失败');
+                toastRef.current.error('读取文件失败');
             };
             reader.readAsDataURL(file);
         } catch {
-            toast.error('上传失败');
+            toastRef.current.error('上传失败');
         }
-    }, [scope, toast, loadData, onSelectSkill]);
+    }, [scope, loadData, onSelectSkill, api]);
 
     const handleCreateCommand = useCallback(async () => {
         if (!newItemName.trim()) return;
         setCreating(true);
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string }>('/api/command-item/create', {
+            const response = await api.post<{ success: boolean; error?: string }>('/api/command-item/create', {
                 name: newItemName.trim(),
                 scope,
                 description: newItemDescription.trim() || undefined
             });
             if (response.success) {
-                toast.success('指令创建成功');
+                toastRef.current.success('指令创建成功');
                 setShowNewCommandDialog(false);
                 setNewItemName('');
                 setNewItemDescription('');
                 loadData();
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         } finally {
             setCreating(false);
         }
-    }, [newItemName, newItemDescription, scope, toast, loadData]);
+    }, [newItemName, newItemDescription, scope, loadData, api]);
 
     const handleDelete = useCallback(async () => {
         if (!deleteTarget) return;
@@ -159,20 +190,20 @@ export default function SkillsCommandsList({
                 ? `/api/skill/${encodeURIComponent(deleteTarget.name)}?scope=${deleteTarget.scope}`
                 : `/api/command-item/${encodeURIComponent(deleteTarget.name)}?scope=${deleteTarget.scope}`;
 
-            const response = await apiDelete<{ success: boolean; error?: string }>(endpoint);
+            const response = await api.delete<{ success: boolean; error?: string }>(endpoint);
             if (response.success) {
-                toast.success('删除成功');
+                toastRef.current.success('删除成功');
                 setDeleteTarget(null);
                 loadData();
             } else {
-                toast.error(response.error || '删除失败');
+                toastRef.current.error(response.error || '删除失败');
             }
         } catch {
-            toast.error('删除失败');
+            toastRef.current.error('删除失败');
         } finally {
             setDeleting(false);
         }
-    }, [deleteTarget, toast, loadData]);
+    }, [deleteTarget, loadData, api]);
 
     if (loading) {
         return (
@@ -279,9 +310,9 @@ export default function SkillsCommandsList({
                         <div className="space-y-2">
                             {projectCommands.map(cmd => (
                                 <CommandCard
-                                    key={`${cmd.scope}-${cmd.name}`}
+                                    key={`${cmd.scope}-${cmd.fileName}`}
                                     command={cmd}
-                                    onClick={() => onSelectCommand(cmd.name, cmd.scope)}
+                                    onClick={() => onSelectCommand(cmd.fileName, cmd.scope)}
                                 />
                             ))}
                         </div>
@@ -297,9 +328,9 @@ export default function SkillsCommandsList({
                         <div className="space-y-2">
                             {userCommands.map(cmd => (
                                 <CommandCard
-                                    key={`${cmd.scope}-${cmd.name}`}
+                                    key={`${cmd.scope}-${cmd.fileName}`}
                                     command={cmd}
-                                    onClick={() => onSelectCommand(cmd.name, cmd.scope)}
+                                    onClick={() => onSelectCommand(cmd.fileName, cmd.scope)}
                                 />
                             ))}
                         </div>
@@ -327,7 +358,6 @@ export default function SkillsCommandsList({
                     }}
                     onUploadSkill={handleUploadSkill}
                     onCancel={() => setShowNewSkillDialog(false)}
-                    scope={scope}
                 />
             )}
 
@@ -406,7 +436,7 @@ function CommandCard({ command, onClick }: { command: CommandItem; onClick: () =
                 </div>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="truncate font-medium text-[var(--ink)]">/{command.name}</span>
+                        <span className="truncate font-medium text-[var(--ink)]">{command.name}</span>
                         <span className="shrink-0 rounded bg-[var(--paper-contrast)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--ink-muted)]">
                             command
                         </span>
@@ -432,166 +462,4 @@ function EmptyState({ icon, title, description }: { icon: React.ReactNode; title
     );
 }
 
-// Create Dialog Component
-function CreateDialog({
-    title,
-    name,
-    description,
-    onNameChange,
-    onDescriptionChange,
-    onConfirm,
-    onCancel,
-    loading
-}: {
-    title: string;
-    name: string;
-    description: string;
-    onNameChange: (value: string) => void;
-    onDescriptionChange: (value: string) => void;
-    onConfirm: () => void;
-    onCancel: () => void;
-    loading: boolean;
-}) {
-    return (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl bg-[var(--paper)] p-6 shadow-2xl">
-                <h3 className="text-lg font-semibold text-[var(--ink)]">{title}</h3>
-                <div className="mt-4 space-y-4">
-                    <div>
-                        <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">名称</label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => onNameChange(e.target.value)}
-                            placeholder="例如：my-skill"
-                            className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                            autoFocus
-                        />
-                    </div>
-                    <div>
-                        <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">描述 (可选)</label>
-                        <input
-                            type="text"
-                            value={description}
-                            onChange={(e) => onDescriptionChange(e.target.value)}
-                            placeholder="简短描述这个技能/指令的用途"
-                            className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm text-[var(--ink)] placeholder-[var(--ink-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-                        />
-                    </div>
-                </div>
-                <div className="mt-6 flex justify-end gap-3">
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        className="rounded-lg px-4 py-2 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
-                    >
-                        取消
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onConfirm}
-                        disabled={!name.trim() || loading}
-                        className="flex items-center gap-2 rounded-lg bg-[var(--button-primary-bg)] px-4 py-2 text-sm font-medium text-[var(--button-primary-text)] transition-colors hover:bg-[var(--button-primary-bg-hover)] disabled:opacity-50"
-                    >
-                        {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                        创建
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// New Skill Chooser Component - 选择创建方式
-function NewSkillChooser({
-    onWriteSkill,
-    onUploadSkill,
-    onCancel,
-    scope: _scope  // Reserved for future use
-}: {
-    onWriteSkill: () => void;
-    onUploadSkill: (file: File) => void;
-    onCancel: () => void;
-    scope: 'user' | 'project';
-}) {
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-    const handleUploadClick = () => {
-        fileInputRef.current?.click();
-    };
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            onUploadSkill(file);
-        }
-        // Reset input so same file can be selected again
-        e.target.value = '';
-    };
-
-    return (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl bg-[var(--paper)] p-6 shadow-2xl">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold text-[var(--ink)]">新建技能</h3>
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
-                    >
-                        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-                <div className="mt-6 space-y-3">
-                    {/* Write Skill Option */}
-                    <button
-                        type="button"
-                        onClick={onWriteSkill}
-                        className="group flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 text-left transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
-                    >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--paper-contrast)] transition-colors group-hover:bg-[var(--paper-inset)]">
-                            <svg className="h-6 w-6 text-[var(--ink-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                        </div>
-                        <div>
-                            <div className="font-medium text-[var(--ink)]">直接编写技能</div>
-                            <p className="mt-0.5 text-sm text-[var(--ink-muted)]">适合简单易描述的技能</p>
-                        </div>
-                    </button>
-
-                    {/* Upload Skill Option */}
-                    <button
-                        type="button"
-                        onClick={handleUploadClick}
-                        className="group flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 text-left transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
-                    >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--paper-contrast)] transition-colors group-hover:bg-[var(--paper-inset)]">
-                            <svg className="h-6 w-6 text-[var(--ink-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="17 8 12 3 7 8" />
-                                <line x1="12" y1="3" x2="12" y2="15" />
-                            </svg>
-                        </div>
-                        <div>
-                            <div className="font-medium text-[var(--ink)]">上传技能</div>
-                            <p className="mt-0.5 text-sm text-[var(--ink-muted)]">导入 .zip、.skill 或 .md 文件</p>
-                        </div>
-                    </button>
-
-                    {/* Hidden file input */}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".zip,.skill,.md"
-                        onChange={handleFileChange}
-                        className="hidden"
-                    />
-                </div>
-            </div>
-        </div>
-    );
-}
+// CreateDialog and NewSkillChooser are imported from SkillDialogs.tsx

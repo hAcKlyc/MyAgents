@@ -17,7 +17,7 @@ import type { ImageAttachment } from '@/components/SimpleChatInput';
 import type { PermissionRequest } from '@/components/PermissionPrompt';
 import type { AskUserQuestionRequest, AskUserQuestion } from '../../shared/types/askUserQuestion';
 import { TabContext, type SessionState, type TabContextValue } from './TabContext';
-import type { Message, ContentBlock, ToolUseSimple, ToolInput } from '@/types/chat';
+import type { Message, ContentBlock, ToolUseSimple, ToolInput, TaskStats, SubagentToolCall } from '@/types/chat';
 import type { ToolUse } from '@/types/stream';
 import type { SystemInitInfo } from '../../shared/types/system';
 import type { LogEntry } from '@/types/log';
@@ -29,6 +29,38 @@ import type { PermissionMode } from '@/config/types';
 // File-modifying tools that should trigger workspace refresh
 const FILE_MODIFYING_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
 
+/**
+ * Helper to update subagent calls in a parent tool
+ * Reduces code duplication across subagent event handlers
+ */
+function updateSubagentCallsInMessages(
+    prev: Message[],
+    parentToolUseId: string,
+    updater: (calls: SubagentToolCall[], tool: ToolUseSimple) => { calls: SubagentToolCall[]; stats?: TaskStats }
+): Message[] {
+    const last = prev[prev.length - 1];
+    if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
+
+    const contentArray = last.content;
+    const idx = contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === parentToolUseId);
+    if (idx === -1) return prev;
+
+    const block = contentArray[idx];
+    if (block.type !== 'tool_use' || !block.tool) return prev;
+
+    const { calls, stats } = updater(block.tool.subagentCalls || [], block.tool);
+    const updated = [...contentArray];
+    updated[idx] = {
+        ...block,
+        tool: {
+            ...block.tool,
+            subagentCalls: calls,
+            ...(stats !== undefined && { taskStats: stats })
+        }
+    };
+    return [...prev.slice(0, -1), { ...last, content: updated }];
+}
+
 interface TabProviderProps {
     children: ReactNode;
     tabId: string;
@@ -38,6 +70,17 @@ interface TabProviderProps {
     isActive?: boolean;
     /** Callback when generating state changes (for close confirmation) */
     onGeneratingChange?: (isGenerating: boolean) => void;
+}
+
+/**
+ * Handle API response - check for errors and throw if not ok
+ */
+async function handleApiResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error((errorData as { error?: string }).error || `HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
 }
 
 /**
@@ -52,7 +95,7 @@ function createPostJson(tabId: string) {
             headers: { 'Content-Type': 'application/json' },
             body: body ? JSON.stringify(body) : undefined
         });
-        return (await response.json()) as T;
+        return handleApiResponse<T>(response);
     };
 }
 
@@ -64,7 +107,35 @@ function createApiGetJson(tabId: string) {
         const baseUrl = await getTabServerUrl(tabId);
         const url = `${baseUrl}${path}`;
         const response = await proxyFetch(url);
-        return (await response.json()) as T;
+        return handleApiResponse<T>(response);
+    };
+}
+
+/**
+ * Create a Tab-scoped PUT function
+ */
+function createApiPutJson(tabId: string) {
+    return async <T,>(path: string, body?: unknown): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        return handleApiResponse<T>(response);
+    };
+}
+
+/**
+ * Create a Tab-scoped DELETE function
+ */
+function createApiDelete(tabId: string) {
+    return async <T,>(path: string): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url, { method: 'DELETE' });
+        return handleApiResponse<T>(response);
     };
 }
 
@@ -79,6 +150,8 @@ export default function TabProvider({
     // Create Tab-scoped API functions
     const postJson = useMemo(() => createPostJson(tabId), [tabId]);
     const apiGetJson = useMemo(() => createApiGetJson(tabId), [tabId]);
+    const apiPutJson = useMemo(() => createApiPutJson(tabId), [tabId]);
+    const apiDeleteJson = useMemo(() => createApiDelete(tabId), [tabId]);
 
     // Core state
     const [messages, setMessages] = useState<Message[]>([]);
@@ -391,10 +464,14 @@ export default function TabProvider({
                     break;
                 }
                 const tool = data as ToolUse;
+                // For Task tool, add taskStartTime and initial taskStats
+                const toolSimple: ToolUseSimple = tool.name === 'Task'
+                    ? { ...tool, inputJson: '', isLoading: true, taskStartTime: Date.now(), taskStats: { toolCount: 0, inputTokens: 0, outputTokens: 0 } }
+                    : { ...tool, inputJson: '', isLoading: true };
                 setMessages(prev => {
                     const toolBlock: ContentBlock = {
                         type: 'tool_use',
-                        tool: { ...tool, inputJson: '', isLoading: true } as ToolUseSimple
+                        tool: toolSimple
                     };
                     const last = prev[prev.length - 1];
                     if (last?.role === 'assistant') {
@@ -583,16 +660,82 @@ export default function TabProvider({
                 break;
             }
 
-            // TODO: Implement Subagent event handling for nested tool calls
-            // These events are emitted by the Task tool when it spawns subagents
-            // Currently ignored - subagent calls will not be displayed in UI
-            case 'chat:subagent-tool-use':
-            case 'chat:subagent-tool-input-delta':
-            case 'chat:subagent-tool-result-start':
-            case 'chat:subagent-tool-result-delta':
+            // Subagent event handling for nested tool calls (Task tool)
+            case 'chat:subagent-tool-use': {
+                const payload = data as { parentToolUseId: string; tool: ToolUse; usage?: { input_tokens?: number; output_tokens?: number } };
+                setMessages(prev => updateSubagentCallsInMessages(prev, payload.parentToolUseId, (calls, tool) => {
+                    const inputJson = JSON.stringify(payload.tool.input ?? {}, null, 2);
+                    const existingIdx = calls.findIndex(c => c.id === payload.tool.id);
+
+                    const updatedCalls: SubagentToolCall[] = existingIdx !== -1
+                        ? calls.map(c => c.id === payload.tool.id
+                            ? { ...c, name: payload.tool.name, input: payload.tool.input ?? {}, inputJson, isLoading: true }
+                            : c)
+                        : [...calls, { id: payload.tool.id, name: payload.tool.name, input: payload.tool.input ?? {}, inputJson, isLoading: true }];
+
+                    // Update taskStats with new tool count and token usage
+                    const prevStats = tool.taskStats || { toolCount: 0, inputTokens: 0, outputTokens: 0 };
+                    const newStats: TaskStats = {
+                        toolCount: updatedCalls.length,
+                        inputTokens: prevStats.inputTokens + (payload.usage?.input_tokens || 0),
+                        outputTokens: prevStats.outputTokens + (payload.usage?.output_tokens || 0)
+                    };
+
+                    return { calls: updatedCalls, stats: newStats };
+                }));
+                break;
+            }
+
+            case 'chat:subagent-tool-input-delta': {
+                const payload = data as { parentToolUseId: string; toolId: string; delta: string };
+                setMessages(prev => updateSubagentCallsInMessages(prev, payload.parentToolUseId, (calls) => {
+                    const updatedCalls = calls.map(call => {
+                        if (call.id !== payload.toolId) return call;
+                        const nextInputJson = (call.inputJson || '') + payload.delta;
+                        const parsedInput = parsePartialJson<ToolInput>(nextInputJson);
+                        return { ...call, inputJson: nextInputJson, parsedInput: parsedInput || call.parsedInput };
+                    });
+                    return { calls: updatedCalls };
+                }));
+                break;
+            }
+
+            case 'chat:subagent-tool-result-start': {
+                const payload = data as { parentToolUseId: string; toolUseId: string; content: string; isError: boolean };
+                setMessages(prev => updateSubagentCallsInMessages(prev, payload.parentToolUseId, (calls) => {
+                    const updatedCalls = calls.map(call =>
+                        call.id === payload.toolUseId
+                            ? { ...call, result: payload.content, isError: payload.isError, isLoading: true }
+                            : call
+                    );
+                    return { calls: updatedCalls };
+                }));
+                break;
+            }
+
+            case 'chat:subagent-tool-result-delta': {
+                const payload = data as { parentToolUseId: string; toolUseId: string; delta: string };
+                setMessages(prev => updateSubagentCallsInMessages(prev, payload.parentToolUseId, (calls) => {
+                    const updatedCalls = calls.map(call =>
+                        call.id === payload.toolUseId
+                            ? { ...call, result: (call.result || '') + payload.delta, isLoading: true }
+                            : call
+                    );
+                    return { calls: updatedCalls };
+                }));
+                break;
+            }
+
             case 'chat:subagent-tool-result-complete': {
-                // See useClaudeChat.ts for reference implementation
-                console.debug(`[TabProvider] Subagent event ignored: ${eventName}`);
+                const payload = data as { parentToolUseId: string; toolUseId: string; content: string; isError?: boolean };
+                setMessages(prev => updateSubagentCallsInMessages(prev, payload.parentToolUseId, (calls) => {
+                    const updatedCalls = calls.map(call =>
+                        call.id === payload.toolUseId
+                            ? { ...call, result: payload.content, isError: payload.isError, isLoading: false }
+                            : call
+                    );
+                    return { calls: updatedCalls };
+                }));
                 break;
             }
 
@@ -903,13 +1046,15 @@ export default function TabProvider({
         // Tab-scoped API functions
         apiGet: apiGetJson,
         apiPost: postJson,
+        apiPut: apiPutJson,
+        apiDelete: apiDeleteJson,
         respondPermission,
         respondAskUserQuestion,
     }), [
         tabId, agentDir, sessionId, messages, isLoading, sessionState,
         logs, unifiedLogs, systemInitInfo, agentError, systemStatus, isActive, pendingPermission, pendingAskUserQuestion, toolCompleteCount, isConnected,
         appendLog, appendUnifiedLog, clearUnifiedLogs, connectSse, disconnectSse, sendMessage, stopResponse, loadSession, resetSession,
-        apiGetJson, postJson, respondPermission, respondAskUserQuestion
+        apiGetJson, postJson, apiPutJson, apiDeleteJson, respondPermission, respondAskUserQuestion
     ]);
 
     return (
