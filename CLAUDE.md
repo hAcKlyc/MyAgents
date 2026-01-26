@@ -1,5 +1,14 @@
 # MyAgents - Claude Agent Desktop Client
 
+> **开源项目** | 仓库地址：https://github.com/hAcKlyc/MyAgents | License: Apache-2.0
+>
+> 作为开源项目，请遵循以下规范：
+> - **代码质量**：保持代码可读性，添加必要注释，遵循项目既有风格
+> - **提交规范**：使用 Conventional Commits，提交信息清晰描述变更
+> - **安全意识**：不提交敏感信息（API Key、密码），不引入已知漏洞的依赖
+> - **文档同步**：重要功能变更需同步更新相关文档
+> - **向后兼容**：破坏性变更需谨慎，考虑用户升级路径
+
 ## 产品定位
 
 MyAgents 是一款基于 Claude Agent SDK 开发的**桌面端通用 Agent 产品**，目标是让非开发者也能使用强大的 AI Agent 能力。核心差异化：图形界面零门槛、多标签页并行工作、多模型供应商可选、数据本地存储保护隐私、开源免费。
