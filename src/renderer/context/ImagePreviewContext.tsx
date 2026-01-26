@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useState } from 'react';
+import { createContext, useContext, useCallback, useState, useMemo } from 'react';
 import type { ReactNode } from 'react';
 
 import ImagePreview from '@/components/ImagePreview';
@@ -26,8 +26,13 @@ export function ImagePreviewProvider({ children }: { children: ReactNode }) {
         setPreview(null);
     }, []);
 
+    // Memoize context value to prevent unnecessary re-renders of consumers
+    const contextValue = useMemo(() => ({
+        openPreview, closePreview
+    }), [openPreview, closePreview]);
+
     return (
-        <ImagePreviewContext.Provider value={{ openPreview, closePreview }}>
+        <ImagePreviewContext.Provider value={contextValue}>
             {children}
             {preview && (
                 <ImagePreview
