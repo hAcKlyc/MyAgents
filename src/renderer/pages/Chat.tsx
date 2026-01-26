@@ -279,16 +279,10 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     // connectSse/disconnectSse are stable from TabProvider's useCallback
   }, [agentDir, connectSse, disconnectSse]);
 
-  // Listen for skill copy events to refresh both panels:
-  // - WorkspaceConfigPanel (skills/commands list)
-  // - DirectoryPanel (file tree shows .claude/skills/)
-  // Listen for skill copy events to refresh DirectoryPanel
-  // Note: WorkspaceConfigPanel has its own listener for internalRefreshKey,
-  // so we only need to refresh DirectoryPanel here (not workspaceRefreshKey)
+  // Listen for skill copy events to refresh DirectoryPanel (file tree shows .claude/skills/)
+  // Note: WorkspaceConfigPanel has its own event listener for internalRefreshKey
   useEffect(() => {
     const handleSkillCopied = () => {
-      // Only trigger DirectoryPanel refresh to show newly copied skill folder
-      // WorkspaceConfigPanel handles its own refresh via internalRefreshKey
       setWorkspaceRefreshTrigger(k => k + 1);
     };
     window.addEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);
