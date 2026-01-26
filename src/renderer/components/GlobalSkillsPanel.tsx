@@ -2,12 +2,11 @@
  * GlobalSkillsPanel - User-level Skills & Commands management for Settings page
  * Refactored to reuse SkillDetailPanel and CommandDetailPanel for consistent UX
  */
-import { Plus, Sparkles, Terminal, Trash2, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
+import { Plus, Sparkles, Terminal, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 
-import { apiGetJson, apiPostJson, apiDelete } from '@/api/apiFetch';
+import { apiGetJson, apiPostJson } from '@/api/apiFetch';
 import { useToast } from '@/components/Toast';
-import ConfirmDialog from '@/components/ConfirmDialog';
 import SkillDetailPanel from './SkillDetailPanel';
 import type { SkillDetailPanelRef } from './SkillDetailPanel';
 import CommandDetailPanel from './CommandDetailPanel';
@@ -37,8 +36,10 @@ export default function GlobalSkillsPanel() {
     const [newItemName, setNewItemName] = useState('');
     const [newItemDescription, setNewItemDescription] = useState('');
     const [creating, setCreating] = useState(false);
-    const [deleteTarget, setDeleteTarget] = useState<{ type: 'skill' | 'command'; name: string } | null>(null);
-    const [deleting, setDeleting] = useState(false);
+
+    // Sync from Claude Code state
+    const [canSyncFromClaude, setCanSyncFromClaude] = useState(false);
+    const [syncableCount, setSyncableCount] = useState(0);
 
     // Check if any child is in editing mode
     const isAnyEditing = useCallback(() => {
@@ -55,13 +56,18 @@ export default function GlobalSkillsPanel() {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [skillsRes, commandsRes] = await Promise.all([
+            const [skillsRes, commandsRes, syncCheckRes] = await Promise.all([
                 apiGetJson<{ success: boolean; skills: SkillItem[] }>('/api/skills?scope=user'),
-                apiGetJson<{ success: boolean; commands: CommandItem[] }>('/api/command-items?scope=user')
+                apiGetJson<{ success: boolean; commands: CommandItem[] }>('/api/command-items?scope=user'),
+                apiGetJson<{ canSync: boolean; count: number; folders: string[] }>('/api/skill/sync-check')
             ]);
 
             if (skillsRes.success) setSkills(skillsRes.skills);
             if (commandsRes.success) setCommands(commandsRes.commands);
+
+            // Update sync state (with defensive checks for API errors)
+            setCanSyncFromClaude(syncCheckRes?.canSync ?? false);
+            setSyncableCount(syncCheckRes?.count ?? 0);
         } catch {
             toast.error('加载失败');
         } finally {
@@ -98,6 +104,34 @@ export default function GlobalSkillsPanel() {
             }
         } catch {
             toast.error('创建失败');
+        }
+    }, [toast]);
+
+    // 从 Claude Code 同步技能
+    const handleSyncFromClaude = useCallback(async () => {
+        try {
+            const response = await apiPostJson<{
+                success: boolean;
+                synced: number;
+                failed: number;
+                errors?: string[];
+            }>('/api/skill/sync-from-claude', {});
+
+            if (response.success) {
+                if (response.failed > 0) {
+                    toast.warning(`成功 ${response.synced} 个，失败 ${response.failed} 个`);
+                } else if (response.synced > 0) {
+                    toast.success(`成功同步 ${response.synced} 个技能`);
+                } else {
+                    toast.info('没有可同步的技能');
+                }
+                setShowNewSkillDialog(false);
+                setRefreshKey(k => k + 1);
+            } else {
+                toast.error('同步失败');
+            }
+        } catch {
+            toast.error('同步失败');
         }
     }, [toast]);
 
@@ -164,32 +198,6 @@ export default function GlobalSkillsPanel() {
             setCreating(false);
         }
     }, [newItemName, newItemDescription, toast]);
-
-    const handleDelete = useCallback(async () => {
-        if (!deleteTarget) return;
-        setDeleting(true);
-        try {
-            const endpoint = deleteTarget.type === 'skill'
-                ? `/api/skill/${encodeURIComponent(deleteTarget.name)}?scope=user`
-                : `/api/command-item/${encodeURIComponent(deleteTarget.name)}?scope=user`;
-
-            const response = await apiDelete<{ success: boolean; error?: string }>(endpoint);
-            if (response.success) {
-                toast.success('删除成功');
-                setDeleteTarget(null);
-                setRefreshKey(k => k + 1);
-                if (viewState.type !== 'list') {
-                    setViewState({ type: 'list' });
-                }
-            } else {
-                toast.error(response.error || '删除失败');
-            }
-        } catch {
-            toast.error('删除失败');
-        } finally {
-            setDeleting(false);
-        }
-    }, [deleteTarget, toast, viewState]);
 
     const handleItemSaved = useCallback((autoClose?: boolean) => {
         setRefreshKey(k => k + 1);
@@ -287,18 +295,18 @@ export default function GlobalSkillsPanel() {
                             <div
                                 key={skill.folderName}
                                 onClick={() => setViewState({ type: 'skill-detail', name: skill.folderName })}
-                                className="group flex cursor-pointer items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
+                                className="group flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
                             >
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--paper-contrast)]">
+                                <div className="flex min-w-0 flex-1 items-center gap-3">
+                                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--paper-contrast)]">
                                         <Sparkles className="h-4 w-4 text-[var(--ink-muted)]" />
                                     </div>
-                                    <div>
-                                        <div className="font-medium text-[var(--ink)]">{skill.name}</div>
-                                        <p className="text-xs text-[var(--ink-muted)] line-clamp-1">{skill.description || '暂无描述'}</p>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate font-medium text-[var(--ink)]">{skill.name}</div>
+                                        <p className="truncate text-xs text-[var(--ink-muted)]">{skill.description || '暂无描述'}</p>
                                     </div>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-[var(--ink-muted)]" />
+                                <ChevronRight className="h-4 w-4 flex-shrink-0 text-[var(--ink-muted)]" />
                             </div>
                         ))}
                     </div>
@@ -330,28 +338,20 @@ export default function GlobalSkillsPanel() {
                     <div className="space-y-2">
                         {commands.map(cmd => (
                             <div
-                                key={cmd.name}
-                                onClick={() => setViewState({ type: 'command-detail', name: cmd.name })}
+                                key={cmd.fileName}
+                                onClick={() => setViewState({ type: 'command-detail', name: cmd.fileName })}
                                 className="group flex cursor-pointer items-center justify-between rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
                             >
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--paper-contrast)]">
+                                <div className="flex min-w-0 flex-1 items-center gap-3">
+                                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--paper-contrast)]">
                                         <Terminal className="h-4 w-4 text-[var(--ink-muted)]" />
                                     </div>
-                                    <div>
-                                        <div className="font-medium text-[var(--ink)]">/{cmd.name}</div>
-                                        <p className="text-xs text-[var(--ink-muted)] line-clamp-1">{cmd.description || '暂无描述'}</p>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate font-medium text-[var(--ink)]">{cmd.name}</div>
+                                        <p className="truncate text-xs text-[var(--ink-muted)]">{cmd.description || '暂无描述'}</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); setDeleteTarget({ type: 'command', name: cmd.name }); }}
-                                        className="rounded p-1 text-[var(--ink-muted)] opacity-0 hover:bg-[var(--error-bg)] hover:text-[var(--error)] group-hover:opacity-100"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </button>
-                                    <ChevronRight className="h-4 w-4 text-[var(--ink-muted)]" />
-                                </div>
+                                <ChevronRight className="h-4 w-4 flex-shrink-0 text-[var(--ink-muted)]" />
                             </div>
                         ))}
                     </div>
@@ -372,6 +372,9 @@ export default function GlobalSkillsPanel() {
                         handleQuickCreateSkill(tempName);
                     }}
                     onUploadSkill={handleUploadSkill}
+                    onSyncFromClaude={handleSyncFromClaude}
+                    canSyncFromClaude={canSyncFromClaude}
+                    syncableCount={syncableCount}
                     onCancel={() => setShowNewSkillDialog(false)}
                     scope="user"
                 />
@@ -386,17 +389,6 @@ export default function GlobalSkillsPanel() {
                     onConfirm={handleCreateCommand}
                     onCancel={() => { setShowNewCommandDialog(false); setNewItemName(''); setNewItemDescription(''); }}
                     loading={creating}
-                />
-            )}
-            {deleteTarget && (
-                <ConfirmDialog
-                    title={`删除${deleteTarget.type === 'skill' ? '技能' : '指令'}`}
-                    message={`确定要删除「${deleteTarget.name}」吗？`}
-                    confirmText="删除"
-                    confirmVariant="danger"
-                    onConfirm={handleDelete}
-                    onCancel={() => setDeleteTarget(null)}
-                    loading={deleting}
                 />
             )}
 
@@ -461,15 +453,22 @@ function CreateDialog({
 function NewSkillChooser({
     onWriteSkill,
     onUploadSkill,
+    onSyncFromClaude,
+    canSyncFromClaude,
+    syncableCount,
     onCancel,
     scope: _scope  // Reserved for future use
 }: {
     onWriteSkill: () => void;
     onUploadSkill: (file: File) => void;
+    onSyncFromClaude: () => void;
+    canSyncFromClaude: boolean;
+    syncableCount: number;
     onCancel: () => void;
     scope: 'user' | 'project';
 }) {
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [syncing, setSyncing] = React.useState(false);
 
     const handleUploadClick = () => {
         fileInputRef.current?.click();
@@ -481,6 +480,15 @@ function NewSkillChooser({
             onUploadSkill(file);
         }
         e.target.value = '';
+    };
+
+    const handleSyncClick = async () => {
+        setSyncing(true);
+        try {
+            await onSyncFromClaude();
+        } finally {
+            setSyncing(false);
+        }
     };
 
     return (
@@ -535,6 +543,33 @@ function NewSkillChooser({
                             <p className="mt-0.5 text-sm text-[var(--ink-muted)]">导入 .zip、.skill 或 .md 文件</p>
                         </div>
                     </button>
+
+                    {/* Sync from Claude Code Option - Only show when there are syncable skills */}
+                    {canSyncFromClaude && (
+                        <button
+                            type="button"
+                            onClick={handleSyncClick}
+                            disabled={syncing}
+                            className="group flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 text-left transition-all hover:border-[var(--line-strong)] hover:shadow-sm disabled:opacity-50"
+                        >
+                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--paper-contrast)] transition-colors group-hover:bg-[var(--paper-inset)]">
+                                {syncing ? (
+                                    <Loader2 className="h-6 w-6 animate-spin text-[var(--ink-muted)]" />
+                                ) : (
+                                    <svg className="h-6 w-6 text-[var(--ink-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div>
+                                <div className="font-medium text-[var(--ink)]">
+                                    从 Claude Code 同步
+                                    <span className="ml-2 text-xs text-[var(--ink-muted)]">({syncableCount} 个可同步)</span>
+                                </div>
+                                <p className="mt-0.5 text-sm text-[var(--ink-muted)]">导入 ~/.claude/skills 中的技能</p>
+                            </div>
+                        </button>
+                    )}
 
                     {/* Hidden file input */}
                     <input

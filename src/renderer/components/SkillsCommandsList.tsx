@@ -279,9 +279,9 @@ export default function SkillsCommandsList({
                         <div className="space-y-2">
                             {projectCommands.map(cmd => (
                                 <CommandCard
-                                    key={`${cmd.scope}-${cmd.name}`}
+                                    key={`${cmd.scope}-${cmd.fileName}`}
                                     command={cmd}
-                                    onClick={() => onSelectCommand(cmd.name, cmd.scope)}
+                                    onClick={() => onSelectCommand(cmd.fileName, cmd.scope)}
                                 />
                             ))}
                         </div>
@@ -297,9 +297,9 @@ export default function SkillsCommandsList({
                         <div className="space-y-2">
                             {userCommands.map(cmd => (
                                 <CommandCard
-                                    key={`${cmd.scope}-${cmd.name}`}
+                                    key={`${cmd.scope}-${cmd.fileName}`}
                                     command={cmd}
-                                    onClick={() => onSelectCommand(cmd.name, cmd.scope)}
+                                    onClick={() => onSelectCommand(cmd.fileName, cmd.scope)}
                                 />
                             ))}
                         </div>
@@ -406,7 +406,7 @@ function CommandCard({ command, onClick }: { command: CommandItem; onClick: () =
                 </div>
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="truncate font-medium text-[var(--ink)]">/{command.name}</span>
+                        <span className="truncate font-medium text-[var(--ink)]">{command.name}</span>
                         <span className="shrink-0 rounded bg-[var(--paper-contrast)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--ink-muted)]">
                             command
                         </span>
