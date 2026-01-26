@@ -5,7 +5,7 @@
  * falls back to global API when not in Tab context (GlobalSkillsPanel in Settings).
  */
 import { Plus, Sparkles, Terminal, ChevronRight, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 
 import { apiGetJson as globalApiGet, apiPostJson as globalApiPost, apiDelete as globalApiDelete } from '@/api/apiFetch';
 import { useTabStateOptional } from '@/context/TabContext';
@@ -30,6 +30,9 @@ export default function SkillsCommandsList({
     refreshKey = 0
 }: SkillsCommandsListProps) {
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
 
     // Use Tab-scoped API when available (in project workspace context)
     // Fall back to global API when not in Tab context (Settings page)
@@ -77,11 +80,11 @@ export default function SkillsCommandsList({
                 setCommands(commandsRes.commands);
             }
         } catch {
-            toast.error('加载失败');
+            toastRef.current.error('加载失败');
         } finally {
             setLoading(false);
         }
-    }, [scope, toast, api]);
+    }, [scope, api]);
 
     useEffect(() => {
         loadData();
@@ -104,12 +107,12 @@ export default function SkillsCommandsList({
                 onSelectSkill(response.folderName || tempName, scope, true);
                 loadData();
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         }
-    }, [scope, agentDir, toast, loadData, onSelectSkill, api, isInTabContext]);
+    }, [scope, agentDir, loadData, onSelectSkill, api, isInTabContext]);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {
@@ -131,7 +134,7 @@ export default function SkillsCommandsList({
                     });
 
                     if (response.success) {
-                        toast.success(response.message || '技能导入成功');
+                        toastRef.current.success(response.message || '技能导入成功');
                         setShowNewSkillDialog(false);
                         loadData();
                         // 进入新创建的技能详情页
@@ -139,20 +142,20 @@ export default function SkillsCommandsList({
                             onSelectSkill(response.folderName, scope, true);
                         }
                     } else {
-                        toast.error(response.error || '导入失败');
+                        toastRef.current.error(response.error || '导入失败');
                     }
                 } catch {
-                    toast.error('导入失败');
+                    toastRef.current.error('导入失败');
                 }
             };
             reader.onerror = () => {
-                toast.error('读取文件失败');
+                toastRef.current.error('读取文件失败');
             };
             reader.readAsDataURL(file);
         } catch {
-            toast.error('上传失败');
+            toastRef.current.error('上传失败');
         }
-    }, [scope, toast, loadData, onSelectSkill, api]);
+    }, [scope, loadData, onSelectSkill, api]);
 
     const handleCreateCommand = useCallback(async () => {
         if (!newItemName.trim()) return;
@@ -164,20 +167,20 @@ export default function SkillsCommandsList({
                 description: newItemDescription.trim() || undefined
             });
             if (response.success) {
-                toast.success('指令创建成功');
+                toastRef.current.success('指令创建成功');
                 setShowNewCommandDialog(false);
                 setNewItemName('');
                 setNewItemDescription('');
                 loadData();
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         } finally {
             setCreating(false);
         }
-    }, [newItemName, newItemDescription, scope, toast, loadData, api]);
+    }, [newItemName, newItemDescription, scope, loadData, api]);
 
     const handleDelete = useCallback(async () => {
         if (!deleteTarget) return;
@@ -189,18 +192,18 @@ export default function SkillsCommandsList({
 
             const response = await api.delete<{ success: boolean; error?: string }>(endpoint);
             if (response.success) {
-                toast.success('删除成功');
+                toastRef.current.success('删除成功');
                 setDeleteTarget(null);
                 loadData();
             } else {
-                toast.error(response.error || '删除失败');
+                toastRef.current.error(response.error || '删除失败');
             }
         } catch {
-            toast.error('删除失败');
+            toastRef.current.error('删除失败');
         } finally {
             setDeleting(false);
         }
-    }, [deleteTarget, toast, loadData, api]);
+    }, [deleteTarget, loadData, api]);
 
     if (loading) {
         return (

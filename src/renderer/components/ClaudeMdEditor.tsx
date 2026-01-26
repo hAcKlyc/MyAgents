@@ -6,7 +6,7 @@
  * falls back to global API when not in Tab context.
  */
 import { Save, Edit2, X, FolderOpen, FileText, AlertCircle, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useMemo } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useMemo, useRef } from 'react';
 
 import { apiGetJson as globalApiGet, apiPostJson as globalApiPost } from '@/api/apiFetch';
 import { useTabStateOptional } from '@/context/TabContext';
@@ -31,6 +31,9 @@ interface ClaudeMdResponse {
 const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
     function ClaudeMdEditor({ agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
 
         // Use Tab-scoped API when available (in project workspace context)
         const tabState = useTabStateOptional();
@@ -116,16 +119,16 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                     setContent(editContent);
                     setExists(true);
                     setIsEditing(false);
-                    toast.success('CLAUDE.md 保存成功');
+                    toastRef.current.success('CLAUDE.md 保存成功');
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch (err) {
-                toast.error(err instanceof Error ? err.message : '保存失败');
+                toastRef.current.error(err instanceof Error ? err.message : '保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [editContent, toast, agentDir, api, isInTabContext]);
+        }, [editContent, agentDir, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             try {
@@ -135,9 +138,9 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                     : { path: 'CLAUDE.md', agentDir };
                 await api.post('/agent/open-in-finder', payload);
             } catch (err) {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [agentDir, toast, api, isInTabContext]);
+        }, [agentDir, api, isInTabContext]);
 
         if (loading) {
             return (

@@ -35,6 +35,9 @@ export interface SkillDetailPanelRef {
 const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
     function SkillDetailPanel({ name, scope, onBack, onSaved, onDeleted, startInEditMode = false, agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
 
         // Use Tab-scoped API when available (in project workspace context)
         const tabState = useTabStateOptional();
@@ -154,16 +157,16 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                             setIsEditing(true);
                         }
                     } else {
-                        toast.error(response.error || '加载失败');
+                        toastRef.current.error(response.error || '加载失败');
                     }
                 } catch (err) {
-                    toast.error('加载失败');
+                    toastRef.current.error('加载失败');
                 } finally {
                     setLoading(false);
                 }
             };
             loadSkill();
-        }, [name, scope, agentDir, toast, startInEditMode, api, isInTabContext]);
+        }, [name, scope, agentDir, startInEditMode, api, isInTabContext]);
 
         // 点击外部关闭下拉菜单
         useEffect(() => {
@@ -236,7 +239,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
         const handleSave = useCallback(async () => {
             if (!skill) return;
             if (!skillName.trim()) {
-                toast.error('技能名称不能为空');
+                toastRef.current.error('技能名称不能为空');
                 return;
             }
             setSaving(true);
@@ -282,7 +285,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 );
 
                 if (response.success) {
-                    toast.success('保存成功');
+                    toastRef.current.success('保存成功');
 
                     // If folder was renamed, always close detail view (name prop is now invalid)
                     const folderWasRenamed = response.folderName && response.folderName !== skill.folderName;
@@ -314,14 +317,14 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     // 新建技能保存后自动关闭详情返回列表
                     onSaved(wasNewSkill);
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch (err) {
-                toast.error('保存失败');
+                toastRef.current.error('保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [skill, name, scope, agentDir, skillName, originalSkillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill, api, isInTabContext]);
+        }, [skill, name, scope, agentDir, skillName, originalSkillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, onSaved, isNewSkill, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             setDeleting(true);
@@ -331,18 +334,18 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                     `/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                 );
                 if (response.success) {
-                    toast.success('删除成功');
+                    toastRef.current.success('删除成功');
                     onDeleted();
                 } else {
-                    toast.error(response.error || '删除失败');
+                    toastRef.current.error(response.error || '删除失败');
                 }
             } catch (err) {
-                toast.error('删除失败');
+                toastRef.current.error('删除失败');
             } finally {
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [name, scope, agentDir, toast, onDeleted, api, isInTabContext]);
+        }, [name, scope, agentDir, onDeleted, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!skill) return;
@@ -350,9 +353,9 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 // Use full path from skill.path which is already correctly resolved by backend
                 await api.post('/agent/open-path', { fullPath: skill.path });
             } catch (err) {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [skill, toast, api]);
+        }, [skill, api]);
 
         if (loading) {
             return (

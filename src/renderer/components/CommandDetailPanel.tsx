@@ -34,6 +34,9 @@ export interface CommandDetailPanelRef {
 const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelProps>(
     function CommandDetailPanel({ name, scope, onBack: _onBack, onSaved, onDeleted, agentDir }, ref) {
         const toast = useToast();
+        // Stabilize toast reference to avoid unnecessary effect re-runs
+        const toastRef = useRef(toast);
+        toastRef.current = toast;
 
         // Use Tab-scoped API when available (in project workspace context)
         const tabState = useTabStateOptional();
@@ -104,16 +107,16 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                         setOriginalDescription(desc);
                         setOriginalBody(bd);
                     } else {
-                        toast.error(response.error || '加载失败');
+                        toastRef.current.error(response.error || '加载失败');
                     }
                 } catch {
-                    toast.error('加载失败');
+                    toastRef.current.error('加载失败');
                 } finally {
                     setLoading(false);
                 }
             };
             loadCommand();
-        }, [name, scope, agentDir, toast, api, isInTabContext]);
+        }, [name, scope, agentDir, api, isInTabContext]);
 
         const handleEdit = useCallback((field?: 'name' | 'description' | 'body') => {
             setFocusField(field || 'name');
@@ -154,7 +157,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
         const handleSave = useCallback(async () => {
             if (!command) return;
             if (!commandName.trim()) {
-                toast.error('指令名称不能为空');
+                toastRef.current.error('指令名称不能为空');
                 return;
             }
             setSaving(true);
@@ -186,7 +189,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                 );
 
                 if (response.success) {
-                    toast.success('保存成功');
+                    toastRef.current.success('保存成功');
 
                     // If file was renamed, always close detail view (name prop is now invalid)
                     const fileWasRenamed = response.fileName && response.fileName !== currentFileName;
@@ -212,14 +215,14 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     setIsEditing(false);
                     onSaved();
                 } else {
-                    toast.error(response.error || '保存失败');
+                    toastRef.current.error(response.error || '保存失败');
                 }
             } catch {
-                toast.error('保存失败');
+                toastRef.current.error('保存失败');
             } finally {
                 setSaving(false);
             }
-        }, [command, name, scope, agentDir, commandName, originalCommandName, description, body, toast, onSaved, api, isInTabContext]);
+        }, [command, name, scope, agentDir, commandName, originalCommandName, description, body, onSaved, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             if (!command) return;
@@ -231,27 +234,27 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
                     `/api/command-item/${encodeURIComponent(currentFileName)}?scope=${scope}${agentDirParam}`
                 );
                 if (response.success) {
-                    toast.success('删除成功');
+                    toastRef.current.success('删除成功');
                     onDeleted();
                 } else {
-                    toast.error(response.error || '删除失败');
+                    toastRef.current.error(response.error || '删除失败');
                 }
             } catch {
-                toast.error('删除失败');
+                toastRef.current.error('删除失败');
             } finally {
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [command, name, scope, agentDir, toast, onDeleted, api, isInTabContext]);
+        }, [command, name, scope, agentDir, onDeleted, api, isInTabContext]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!command) return;
             try {
                 await api.post('/agent/open-path', { fullPath: command.path });
             } catch {
-                toast.error('无法打开目录');
+                toastRef.current.error('无法打开目录');
             }
-        }, [command, toast, api]);
+        }, [command, api]);
 
         if (loading) {
             return (

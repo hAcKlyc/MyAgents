@@ -102,6 +102,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         deleteCustomProvider: deleteCustomProviderService,
     } = useConfig();
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
 
     // Determine initial section: use initialSection if valid, otherwise default to 'providers'
     const getInitialSection = (): SettingsSection => {
@@ -193,10 +196,10 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     const downloaded = await invoke('check_and_download_update') as boolean;
                     if (downloaded) {
                         setUpdateStatus('ready');
-                        toast.success('下载完成，可以重启更新');
+                        toastRef.current.success('下载完成，可以重启更新');
                     } else {
                         setUpdateStatus('no-update');
-                        toast.info('没有可用更新');
+                        toastRef.current.info('没有可用更新');
                     }
                 }
             } else {
@@ -206,9 +209,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             console.error('[Settings] Update check failed:', err);
             setUpdateStatus('error');
             setUpdateError(String(err));
-            toast.error(`检查更新失败: ${err}`);
+            toastRef.current.error(`检查更新失败: ${err}`);
         }
-    }, [appVersion, toast]);
+    }, [appVersion]);
 
     // Restart to apply update
     const handleRestartUpdate = useCallback(async () => {
@@ -219,9 +222,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             await invoke('restart_app');
         } catch (err) {
             console.error('[Settings] Restart failed:', err);
-            toast.error(`重启失败: ${err}`);
+            toastRef.current.error(`重启失败: ${err}`);
         }
-    }, [toast]);
+    }, []);
 
     // Collect React logs for Settings page (since we don't have TabProvider)
     // Limit to 3000 logs to prevent memory issues (matches UnifiedLogsPanel MAX_DISPLAY_LOGS)
@@ -646,7 +649,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                 // Extract error message and show as toast
                 const errorMsg = result.error || '验证失败';
                 setVerifyError((prev) => ({ ...prev, [provider.id]: errorMsg }));
-                toast.error(`${provider.name}: ${errorMsg}`);
+                toastRef.current.error(`${provider.name}: ${errorMsg}`);
             }
         } catch (err) {
             console.error('[verifyProvider] Exception:', err);
@@ -656,11 +659,11 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                 ...prev,
                 [provider.id]: errorMsg
             }));
-            toast.error(`${provider.name}: ${errorMsg}`);
+            toastRef.current.error(`${provider.name}: ${errorMsg}`);
         } finally {
             setVerifyLoading((prev) => ({ ...prev, [provider.id]: false }));
         }
-    }, [saveProviderVerifyStatus, toast]);
+    }, [saveProviderVerifyStatus]);
 
     // Auto-verify when API key changes (with debounce)
     const handleSaveApiKey = useCallback(async (provider: Provider, key: string) => {

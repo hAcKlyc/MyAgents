@@ -3,7 +3,7 @@
  * Refactored to reuse SkillDetailPanel and CommandDetailPanel for consistent UX
  */
 import { Plus, Sparkles, Terminal, ChevronRight, Loader2, ChevronLeft } from 'lucide-react';
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 
 import { apiGetJson, apiPostJson } from '@/api/apiFetch';
 import { useToast } from '@/components/Toast';
@@ -21,6 +21,10 @@ type ViewState =
 
 export default function GlobalSkillsPanel() {
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
+
     const [viewState, setViewState] = useState<ViewState>({ type: 'list' });
     const [loading, setLoading] = useState(true);
     const [skills, setSkills] = useState<SkillItem[]>([]);
@@ -70,11 +74,11 @@ export default function GlobalSkillsPanel() {
             setCanSyncFromClaude(syncCheckRes?.canSync ?? false);
             setSyncableCount(syncCheckRes?.count ?? 0);
         } catch {
-            toast.error('加载失败');
+            toastRef.current.error('加载失败');
         } finally {
             setLoading(false);
         }
-    }, [toast]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -82,11 +86,11 @@ export default function GlobalSkillsPanel() {
 
     const handleBackToList = useCallback(() => {
         if (isAnyEditing()) {
-            toast.warning('请先保存或取消编辑');
+            toastRef.current.warning('请先保存或取消编辑');
             return;
         }
         setViewState({ type: 'list' });
-    }, [isAnyEditing, toast]);
+    }, [isAnyEditing]);
 
 
     // 快速创建技能并进入编辑模式
@@ -102,12 +106,12 @@ export default function GlobalSkillsPanel() {
                 setViewState({ type: 'skill-detail', name: response.folderName || tempName, isNewSkill: true });
                 setRefreshKey(k => k + 1);
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         }
-    }, [toast]);
+    }, []);
 
     // 从 Claude Code 同步技能
     const handleSyncFromClaude = useCallback(async () => {
@@ -121,21 +125,21 @@ export default function GlobalSkillsPanel() {
 
             if (response.success) {
                 if (response.failed > 0) {
-                    toast.warning(`成功 ${response.synced} 个，失败 ${response.failed} 个`);
+                    toastRef.current.warning(`成功 ${response.synced} 个，失败 ${response.failed} 个`);
                 } else if (response.synced > 0) {
-                    toast.success(`成功同步 ${response.synced} 个技能`);
+                    toastRef.current.success(`成功同步 ${response.synced} 个技能`);
                 } else {
-                    toast.info('没有可同步的技能');
+                    toastRef.current.info('没有可同步的技能');
                 }
                 setShowNewSkillDialog(false);
                 setRefreshKey(k => k + 1);
             } else {
-                toast.error('同步失败');
+                toastRef.current.error('同步失败');
             }
         } catch {
-            toast.error('同步失败');
+            toastRef.current.error('同步失败');
         }
-    }, [toast]);
+    }, []);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {
@@ -156,25 +160,25 @@ export default function GlobalSkillsPanel() {
                     });
 
                     if (response.success) {
-                        toast.success(response.message || '技能导入成功');
+                        toastRef.current.success(response.message || '技能导入成功');
                         setShowNewSkillDialog(false);
                         setRefreshKey(k => k + 1);
                         if (response.folderName) {
                             setViewState({ type: 'skill-detail', name: response.folderName });
                         }
                     } else {
-                        toast.error(response.error || '导入失败');
+                        toastRef.current.error(response.error || '导入失败');
                     }
                 } catch {
-                    toast.error('导入失败');
+                    toastRef.current.error('导入失败');
                 }
             };
-            reader.onerror = () => toast.error('读取文件失败');
+            reader.onerror = () => toastRef.current.error('读取文件失败');
             reader.readAsDataURL(file);
         } catch {
-            toast.error('上传失败');
+            toastRef.current.error('上传失败');
         }
-    }, [toast]);
+    }, []);
 
     const handleCreateCommand = useCallback(async () => {
         if (!newItemName.trim()) return;
@@ -186,20 +190,20 @@ export default function GlobalSkillsPanel() {
                 description: newItemDescription.trim() || undefined
             });
             if (response.success) {
-                toast.success('指令创建成功');
+                toastRef.current.success('指令创建成功');
                 setShowNewCommandDialog(false);
                 setNewItemName('');
                 setNewItemDescription('');
                 setRefreshKey(k => k + 1);
             } else {
-                toast.error(response.error || '创建失败');
+                toastRef.current.error(response.error || '创建失败');
             }
         } catch {
-            toast.error('创建失败');
+            toastRef.current.error('创建失败');
         } finally {
             setCreating(false);
         }
-    }, [newItemName, newItemDescription, toast]);
+    }, [newItemName, newItemDescription]);
 
     const handleItemSaved = useCallback((autoClose?: boolean) => {
         setRefreshKey(k => k + 1);

@@ -132,6 +132,10 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
   const apiPost = tabContext?.apiPost;
 
   const toast = useToast();
+  // Stabilize toast reference to avoid unnecessary effect re-runs
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   const { openPreview } = useImagePreview();
   // Use external ref if provided, otherwise use internal ref
   const internalRef = useRef<HTMLTextAreaElement>(null);
@@ -290,18 +294,18 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
         );
         if (response.success) {
           if (!response.alreadyExists) {
-            toast.success(`已将 skill "${skillName}" 添加到本项目`);
+            toastRef.current.success(`已将 skill "${skillName}" 添加到本项目`);
           }
           // Notify workspace config panel to refresh (if open)
           window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName } }));
           return true;
         } else {
-          toast.warning(response.error || `复制 skill "${skillName}" 失败`);
+          toastRef.current.warning(response.error || `复制 skill "${skillName}" 失败`);
           return false;
         }
       } catch (err) {
         console.error('[skill-copy] Error:', err);
-        toast.warning(`复制 skill "${skillName}" 失败`);
+        toastRef.current.warning(`复制 skill "${skillName}" 失败`);
         return false;
       } finally {
         // Clean up after completion
@@ -310,7 +314,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     })();
 
     pendingSkillCopiesRef.current.set(skillName, copyPromise);
-  }, [apiPost, agentDir, toast]);
+  }, [apiPost, agentDir]);
 
   // Handle user-level skill selection - trigger copy if needed
   const handleSkillSelect = useCallback((cmd: SlashCommand) => {
@@ -324,15 +328,15 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
   // Validate and add image
   const addImage = useCallback((file: File) => {
     if (images.length >= MAX_IMAGES) {
-      toast.warning(`最多只能上传 ${MAX_IMAGES} 张图片`);
+      toastRef.current.warning(`最多只能上传 ${MAX_IMAGES} 张图片`);
       return;
     }
     if (!ALLOWED_IMAGE_MIME_TYPES.includes(file.type)) {
-      toast.warning('不支持的图片格式，请使用 PNG/JPG/GIF/WebP');
+      toastRef.current.warning('不支持的图片格式，请使用 PNG/JPG/GIF/WebP');
       return;
     }
     if (file.size > MAX_IMAGE_SIZE) {
-      toast.warning('图片大小不能超过 5MB');
+      toastRef.current.warning('图片大小不能超过 5MB');
       return;
     }
 
@@ -376,7 +380,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
 
     if (!apiPost) {
       console.error('[SimpleChatInput] apiPost not available');
-      toast.error('无法处理文件：API 未就绪');
+      toastRef.current.error('无法处理文件：API 未就绪');
       return;
     }
 
@@ -450,16 +454,16 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
           });
         }
 
-        toast.success(`已添加 ${result.files.length} 个文件到工作区`);
+        toastRef.current.success(`已添加 ${result.files.length} 个文件到工作区`);
 
         // Refresh workspace to show new files
         onWorkspaceRefresh?.();
       } catch (err) {
         console.error('[SimpleChatInput] File upload error:', err);
-        toast.error(err instanceof Error ? err.message : '文件上传失败');
+        toastRef.current.error(err instanceof Error ? err.message : '文件上传失败');
       }
     }
-  }, [apiPost, addImage, inputValue, toast, textareaRef, undoStack, fileToBase64, onWorkspaceRefresh]);
+  }, [apiPost, addImage, inputValue, textareaRef, undoStack, fileToBase64, onWorkspaceRefresh]);
 
   // Process file paths from Tauri drag-drop (uses /api/files/copy)
   const processDroppedFilePaths = useCallback(async (paths: string[]) => {
@@ -469,7 +473,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
 
     if (!apiPost) {
       console.error('[SimpleChatInput] apiPost not available');
-      toast.error('无法处理文件：API 未就绪');
+      toastRef.current.error('无法处理文件：API 未就绪');
       return;
     }
 
@@ -584,19 +588,19 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
 
         // Show appropriate message
         if (successfulCopies.length < otherPaths.length) {
-          toast.warning(`已添加 ${successfulCopies.length}/${otherPaths.length} 个文件到工作区`);
+          toastRef.current.warning(`已添加 ${successfulCopies.length}/${otherPaths.length} 个文件到工作区`);
         } else {
-          toast.success(`已添加 ${successfulCopies.length} 个文件到工作区`);
+          toastRef.current.success(`已添加 ${successfulCopies.length} 个文件到工作区`);
         }
 
         // Refresh workspace to show new files
         onWorkspaceRefresh?.();
       } catch (err) {
         console.error('[SimpleChatInput] Tauri file copy error:', err);
-        toast.error(err instanceof Error ? err.message : '文件复制失败');
+        toastRef.current.error(err instanceof Error ? err.message : '文件复制失败');
       }
     }
-  }, [apiPost, addImage, inputValue, toast, textareaRef, undoStack, onWorkspaceRefresh]);
+  }, [apiPost, addImage, inputValue, textareaRef, undoStack, onWorkspaceRefresh]);
 
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
@@ -769,10 +773,10 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
 
     // Show warning toast for fullAgency mode (10 seconds)
     if (nextMode === 'fullAgency') {
-      toast.warning('自主行动已启用：Agent 可能做出不可挽回的操作，请谨慎使用', 5000);
+      toastRef.current.warning('自主行动已启用：Agent 可能做出不可挽回的操作，请谨慎使用', 5000);
     }
     onPermissionModeChange?.(nextMode);
-  }, [permissionMode, onPermissionModeChange, toast]);
+  }, [permissionMode, onPermissionModeChange]);
 
   // Global Shift+Tab handler with capture phase to prevent default Tab behavior
   useEffect(() => {
@@ -804,11 +808,11 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
           );
           const success = await Promise.race([promise, timeoutPromise]);
           if (!success) {
-            toast.warning(`Skill "${skillName}" 复制失败，请重试`);
+            toastRef.current.warning(`Skill "${skillName}" 复制失败，请重试`);
             return;
           }
         } catch (err) {
-          toast.warning(`Skill "${skillName}" 复制超时，请重试`);
+          toastRef.current.warning(`Skill "${skillName}" 复制超时，请重试`);
           return;
         }
       }
@@ -817,7 +821,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     onSend(text, images.length > 0 ? images : undefined);
     setInputValue(''); // Clear input after send
     setImages([]);
-  }, [isLoading, onSend, images, inputValue, toast]);
+  }, [isLoading, onSend, images, inputValue]);
 
   // Handle keyboard navigation in file search and slash menu
   const handleKeyDown = useCallback(async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -863,11 +867,11 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
 
           // Show appropriate message
           if (failCount === 0) {
-            toast.success(`已撤销 ${successCount} 个文件的添加`);
+            toastRef.current.success(`已撤销 ${successCount} 个文件的添加`);
           } else if (successCount > 0) {
-            toast.warning(`已撤销 ${successCount} 个文件，${failCount} 个文件删除失败`);
+            toastRef.current.warning(`已撤销 ${successCount} 个文件，${failCount} 个文件删除失败`);
           } else {
-            toast.warning('已移除引用，但文件删除失败');
+            toastRef.current.warning('已移除引用，但文件删除失败');
           }
         }
         return;
@@ -956,7 +960,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
         handleSend();
       }
     }
-  }, [cyclePermissionMode, undoStack, apiPost, toast, showSlashMenu, slashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, fileSearchResults, selectedFileIndex, inputValue, atPosition, fileSearchQuery, isLoading, images.length, handleSend, handleSkillSelect]);
+  }, [cyclePermissionMode, undoStack, apiPost, showSlashMenu, slashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, fileSearchResults, selectedFileIndex, inputValue, atPosition, fileSearchQuery, isLoading, images.length, handleSend, handleSkillSelect]);
 
   const toggleExpand = () => setIsExpanded((prev) => !prev);
 
@@ -1229,7 +1233,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                         onClick={(e) => {
                           e.stopPropagation();
                           if (mode.value === 'fullAgency') {
-                            toast.warning('自主行动已启用：Agent 可能做出不可挽回的操作，请谨慎使用', 5000);
+                            toastRef.current.warning('自主行动已启用：Agent 可能做出不可挽回的操作，请谨慎使用', 5000);
                           }
                           onPermissionModeChange?.(mode.value);
                           setShowModeMenu(false);

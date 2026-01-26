@@ -9,7 +9,7 @@
  * - Unsaved changes confirmation
  */
 import { Edit2, FileText, Loader2, Save, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -52,6 +52,10 @@ export default function FilePreviewModal({
     onSaved
 }: FilePreviewModalProps) {
     const toast = useToast();
+    // Stabilize toast reference to avoid unnecessary effect re-runs
+    const toastRef = useRef(toast);
+    toastRef.current = toast;
+
     const { apiPost } = useTabState();
 
     // State
@@ -112,18 +116,18 @@ export default function FilePreviewModal({
             );
 
             if (response.success) {
-                toast.success('文件保存成功');
+                toastRef.current.success('文件保存成功');
                 setIsEditing(false);
                 onSaved?.();
             } else {
-                toast.error(response.error ?? '保存失败');
+                toastRef.current.error(response.error ?? '保存失败');
             }
         } catch (err) {
-            toast.error(err instanceof Error ? err.message : '保存失败');
+            toastRef.current.error(err instanceof Error ? err.message : '保存失败');
         } finally {
             setIsSaving(false);
         }
-    }, [apiPost, path, editContent, toast, onSaved]);
+    }, [apiPost, path, editContent, onSaved]);
 
     // Handle backdrop click
     const handleBackdropClick = useCallback((e: React.MouseEvent) => {
