@@ -309,8 +309,9 @@ if (isDebugMode()) {
 2. **Commit 格式**：使用 Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`)
 3. **测试构建**：使用 `./build_dev.sh` 验证 Tauri 打包正确
 4. **分支策略**：功能分支 `dev/prd-x.x.x`，完成后合并到 `main`
-5. **发布流程**：
-   - 更新版本号 (`package.json` + `tauri.conf.json`)
+5. **版本管理**：`package.json` 是唯一数据源，运行 `npm version patch/minor/major` 自动同步到 `tauri.conf.json` 和 `Cargo.toml`（构建脚本会检测版本不一致并提示同步）
+6. **发布流程**：
+   - 运行 `npm version patch` 升级版本（自动同步所有配置）
    - 运行 `./build_macos.sh` 构建 (选择 Both 构建双架构)
    - 运行 `./publish_release.sh` 发布到 R2
    - 打 `v*` tag 推送到远程

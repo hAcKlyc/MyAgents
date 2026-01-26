@@ -26,6 +26,28 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # ========================================
+# 版本同步检查
+# ========================================
+PKG_VERSION=$(grep '"version"' "${PROJECT_DIR}/package.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+TAURI_VERSION=$(grep '"version"' "${PROJECT_DIR}/src-tauri/tauri.conf.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+CARGO_VERSION=$(grep '^version = ' "${PROJECT_DIR}/src-tauri/Cargo.toml" | head -1 | sed 's/version = "\([^"]*\)".*/\1/')
+
+if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
+    echo -e "${YELLOW}⚠ 版本号不一致:${NC}"
+    echo -e "  package.json:      ${CYAN}${PKG_VERSION}${NC}"
+    echo -e "  tauri.conf.json:   ${CYAN}${TAURI_VERSION}${NC}"
+    echo -e "  Cargo.toml:        ${CYAN}${CARGO_VERSION}${NC}"
+    echo ""
+    read -p "是否同步版本号到 ${PKG_VERSION}? (y/N) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        node "${PROJECT_DIR}/scripts/sync-version.js"
+        VERSION="$PKG_VERSION"  # 更新显示的版本号
+        echo ""
+    fi
+fi
+
+# ========================================
 # 加载环境变量 (签名配置)
 # ========================================
 echo -e "${BLUE}[1/8] 加载签名配置...${NC}"

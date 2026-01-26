@@ -29,6 +29,27 @@ echo -e "${CYAN}║${NC}  ${YELLOW}⚠ DevTools 启用 + 只构建 App${NC}     
 echo -e "${CYAN}╚═══════════════════════════════════════════════════════╝${NC}"
 echo ""
 
+# ========================================
+# 版本同步检查
+# ========================================
+PKG_VERSION=$(grep '"version"' "${PROJECT_DIR}/package.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+TAURI_VERSION=$(grep '"version"' "${PROJECT_DIR}/src-tauri/tauri.conf.json" | head -1 | sed 's/.*"version": "\([^"]*\)".*/\1/')
+CARGO_VERSION=$(grep '^version = ' "${PROJECT_DIR}/src-tauri/Cargo.toml" | head -1 | sed 's/version = "\([^"]*\)".*/\1/')
+
+if [ "$PKG_VERSION" != "$TAURI_VERSION" ] || [ "$PKG_VERSION" != "$CARGO_VERSION" ]; then
+    echo -e "${YELLOW}⚠ 版本号不一致:${NC}"
+    echo -e "  package.json:      ${CYAN}${PKG_VERSION}${NC}"
+    echo -e "  tauri.conf.json:   ${CYAN}${TAURI_VERSION}${NC}"
+    echo -e "  Cargo.toml:        ${CYAN}${CARGO_VERSION}${NC}"
+    echo ""
+    read -p "是否同步版本号到 ${PKG_VERSION}? (y/N) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        node "${PROJECT_DIR}/scripts/sync-version.js"
+        echo ""
+    fi
+fi
+
 # 杀死残留进程（避免"旧代码"问题）
 echo -e "${BLUE}[准备] 杀死残留进程...${NC}"
 pkill -f "bun run.*server" 2>/dev/null || true
