@@ -1,11 +1,15 @@
 /**
  * SkillDetailPanel - Component for viewing and editing a Skill
  * Supports preview/edit mode with save confirmation
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context (GlobalSkillsPanel).
  */
 import { Save, FolderOpen, Loader2, ChevronDown, ChevronUp, Trash2, Edit2, X, Check } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 
-import { apiGetJson, apiPutJson, apiDelete, apiPostJson } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPutJson as globalApiPut, apiDelete as globalApiDelete, apiPostJson as globalApiPost } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type { SkillFrontmatter, SkillDetail, SkillDetailResponse, ApiSuccessResponse } from '../../shared/skillsTypes';
@@ -31,6 +35,27 @@ export interface SkillDetailPanelRef {
 const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
     function SkillDetailPanel({ name, scope, onBack, onSaved, onDeleted, startInEditMode = false, agentDir }, ref) {
         const toast = useToast();
+
+        // Use Tab-scoped API when available (in project workspace context)
+        const tabState = useTabStateOptional();
+
+        // Create API functions that use Tab API when available
+        const api = useMemo(() => {
+            if (tabState) {
+                return {
+                    get: tabState.apiGet,
+                    post: tabState.apiPost,
+                    put: tabState.apiPut,
+                    delete: tabState.apiDelete,
+                };
+            }
+            return {
+                get: globalApiGet,
+                post: globalApiPost,
+                put: globalApiPut,
+                delete: globalApiDelete,
+            };
+        }, [tabState]);
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [skill, setSkill] = useState<SkillDetail | null>(null);
@@ -85,9 +110,10 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             const loadSkill = async () => {
                 setLoading(true);
                 try {
-                    // Include agentDir for project scope to ensure correct path resolution
-                    const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                    const response = await apiGetJson<{ success: boolean; skill: SkillDetail; error?: string }>(
+                    // When using Tab API, no need to pass agentDir (sidecar already has it)
+                    // When using global API, include agentDir for project scope
+                    const agentDirParam = (!tabState && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    const response = await api.get<{ success: boolean; skill: SkillDetail; error?: string }>(
                         `/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                     );
                     if (response.success && response.skill) {
@@ -139,7 +165,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 }
             };
             loadSkill();
-        }, [name, scope, agentDir, toast, startInEditMode]);
+        }, [name, scope, agentDir, toast, startInEditMode, api, tabState]);
 
         // 点击外部关闭下拉菜单
         useEffect(() => {
@@ -186,8 +212,8 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             if (isNewSkill) {
                 // 新创建的技能，取消时删除并返回列表
                 try {
-                    const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                    await apiDelete<{ success: boolean }>(`/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`);
+                    const agentDirParam = (!tabState && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                    await api.delete<{ success: boolean }>(`/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`);
                 } catch {
                     // 忽略删除失败
                 }
@@ -204,7 +230,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 setArgumentHint(originalArgumentHint);
                 setIsEditing(false);
             }
-        }, [isNewSkill, name, scope, originalSkillName, originalDescription, originalBody, originalInvocationMode, originalAllowedTools, originalContext, originalAgent, originalArgumentHint, onDeleted]);
+        }, [isNewSkill, name, scope, agentDir, originalSkillName, originalDescription, originalBody, originalInvocationMode, originalAllowedTools, originalContext, originalAgent, originalArgumentHint, onDeleted, api, tabState]);
 
         // Get the expected new folder name based on current skill name
         const expectedFolderName = skillName.trim() ? sanitizeFolderName(skillName.trim()) : '';
@@ -241,14 +267,19 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 const newFolderName = sanitizeFolderName(skillName.trim());
                 const shouldRename = newFolderName && newFolderName !== skill.folderName;
 
-                const response = await apiPutJson<{
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const payload = tabState
+                    ? { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}) }
+                    : { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) };
+
+                const response = await api.put<{
                     success: boolean;
                     error?: string;
                     folderName?: string;
                     fullPath?: string;
                 }>(
                     `/api/skill/${encodeURIComponent(name)}`,
-                    { scope, frontmatter, body, ...(shouldRename ? { newFolderName } : {}), ...(scope === 'project' && agentDir ? { agentDir } : {}) }
+                    payload
                 );
 
                 if (response.success) {
@@ -291,13 +322,13 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             } finally {
                 setSaving(false);
             }
-        }, [skill, name, scope, agentDir, skillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill]);
+        }, [skill, name, scope, agentDir, skillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill, api, tabState]);
 
         const handleDelete = useCallback(async () => {
             setDeleting(true);
             try {
-                const agentDirParam = scope === 'project' && agentDir ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
-                const response = await apiDelete<{ success: boolean; error?: string }>(
+                const agentDirParam = (!tabState && scope === 'project' && agentDir) ? `&agentDir=${encodeURIComponent(agentDir)}` : '';
+                const response = await api.delete<{ success: boolean; error?: string }>(
                     `/api/skill/${encodeURIComponent(name)}?scope=${scope}${agentDirParam}`
                 );
                 if (response.success) {
@@ -312,17 +343,17 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
                 setDeleting(false);
                 setShowDeleteConfirm(false);
             }
-        }, [name, scope, agentDir, toast, onDeleted]);
+        }, [name, scope, agentDir, toast, onDeleted, api, tabState]);
 
         const handleOpenInFinder = useCallback(async () => {
             if (!skill) return;
             try {
                 // Use full path from skill.path which is already correctly resolved by backend
-                await apiPostJson('/agent/open-path', { fullPath: skill.path });
+                await api.post('/agent/open-path', { fullPath: skill.path });
             } catch (err) {
                 toast.error('无法打开目录');
             }
-        }, [skill, toast]);
+        }, [skill, toast, api]);
 
         if (loading) {
             return (

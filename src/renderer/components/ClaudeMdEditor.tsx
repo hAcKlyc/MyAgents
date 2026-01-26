@@ -1,11 +1,15 @@
 /**
  * ClaudeMdEditor - Component for viewing and editing CLAUDE.md
  * Supports preview/edit mode with ref for parent to check editing state
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context.
  */
 import { Save, Edit2, X, FolderOpen, FileText, AlertCircle, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
+import { useCallback, useEffect, useState, useImperativeHandle, forwardRef, useMemo } from 'react';
 
-import { apiGetJson, apiPostJson } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPostJson as globalApiPost } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 
 interface ClaudeMdEditorProps {
@@ -27,6 +31,23 @@ interface ClaudeMdResponse {
 const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
     function ClaudeMdEditor({ agentDir }, ref) {
         const toast = useToast();
+
+        // Use Tab-scoped API when available (in project workspace context)
+        const tabState = useTabStateOptional();
+
+        // Create API functions that use Tab API when available
+        const api = useMemo(() => {
+            if (tabState) {
+                return {
+                    get: tabState.apiGet,
+                    post: tabState.apiPost,
+                };
+            }
+            return {
+                get: globalApiGet,
+                post: globalApiPost,
+            };
+        }, [tabState]);
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
         const [content, setContent] = useState('');
@@ -47,7 +68,11 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 setLoading(true);
                 setError(null);
                 try {
-                    const response = await apiGetJson<ClaudeMdResponse>(`/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`);
+                    // When using Tab API, no need to pass agentDir (sidecar already has it)
+                    const endpoint = tabState
+                        ? '/api/claude-md'
+                        : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
+                    const response = await api.get<ClaudeMdResponse>(endpoint);
                     if (response.success) {
                         setContent(response.content);
                         setEditContent(response.content);
@@ -64,7 +89,7 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
                 }
             };
             loadContent();
-        }, [agentDir]);
+        }, [agentDir, api, tabState]);
 
         const handleEdit = useCallback(() => {
             setEditContent(content);
@@ -79,7 +104,11 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
         const handleSave = useCallback(async () => {
             setSaving(true);
             try {
-                const response = await apiPostJson<{ success: boolean; error?: string }>(`/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`, {
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const endpoint = tabState
+                    ? '/api/claude-md'
+                    : `/api/claude-md?agentDir=${encodeURIComponent(agentDir)}`;
+                const response = await api.post<{ success: boolean; error?: string }>(endpoint, {
                     content: editContent
                 });
                 if (response.success) {
@@ -95,15 +124,19 @@ const ClaudeMdEditor = forwardRef<ClaudeMdEditorRef, ClaudeMdEditorProps>(
             } finally {
                 setSaving(false);
             }
-        }, [editContent, toast]);
+        }, [editContent, toast, agentDir, api, tabState]);
 
         const handleOpenInFinder = useCallback(async () => {
             try {
-                await apiPostJson('/agent/open-in-finder', { path: 'CLAUDE.md', agentDir });
+                // When using Tab API, no need to pass agentDir (sidecar already has it)
+                const payload = tabState
+                    ? { path: 'CLAUDE.md' }
+                    : { path: 'CLAUDE.md', agentDir };
+                await api.post('/agent/open-in-finder', payload);
             } catch (err) {
                 toast.error('无法打开目录');
             }
-        }, [agentDir, toast]);
+        }, [agentDir, toast, api, tabState]);
 
         if (loading) {
             return (

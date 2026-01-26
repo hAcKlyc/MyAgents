@@ -1,10 +1,14 @@
 /**
  * SkillsCommandsList - Component for displaying Skills and Commands list
+ *
+ * Uses Tab-scoped API when in Tab context (WorkspaceConfigPanel),
+ * falls back to global API when not in Tab context (GlobalSkillsPanel in Settings).
  */
 import { Plus, Sparkles, Terminal, ChevronRight, Loader2 } from 'lucide-react';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 
-import { apiGetJson, apiPostJson, apiDelete } from '@/api/apiFetch';
+import { apiGetJson as globalApiGet, apiPostJson as globalApiPost, apiDelete as globalApiDelete } from '@/api/apiFetch';
+import { useTabStateOptional } from '@/context/TabContext';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import type { SkillItem, CommandItem } from '../../shared/skillsTypes';
@@ -25,6 +29,26 @@ export default function SkillsCommandsList({
     refreshKey = 0
 }: SkillsCommandsListProps) {
     const toast = useToast();
+
+    // Use Tab-scoped API when available (in project workspace context)
+    // Fall back to global API when not in Tab context (Settings page)
+    const tabState = useTabStateOptional();
+
+    // Create API functions that use Tab API when available
+    const api = useMemo(() => {
+        if (tabState) {
+            return {
+                get: tabState.apiGet,
+                post: tabState.apiPost,
+                delete: tabState.apiDelete,
+            };
+        }
+        return {
+            get: globalApiGet,
+            post: globalApiPost,
+            delete: globalApiDelete,
+        };
+    }, [tabState]);
     const [loading, setLoading] = useState(true);
     const [skills, setSkills] = useState<SkillItem[]>([]);
     const [commands, setCommands] = useState<CommandItem[]>([]);
@@ -41,8 +65,8 @@ export default function SkillsCommandsList({
         setLoading(true);
         try {
             const [skillsRes, commandsRes] = await Promise.all([
-                apiGetJson<{ success: boolean; skills: SkillItem[] }>(`/api/skills?scope=${scope === 'user' ? 'user' : 'all'}`),
-                apiGetJson<{ success: boolean; commands: CommandItem[] }>(`/api/command-items?scope=${scope === 'user' ? 'user' : 'all'}`)
+                api.get<{ success: boolean; skills: SkillItem[] }>(`/api/skills?scope=${scope === 'user' ? 'user' : 'all'}`),
+                api.get<{ success: boolean; commands: CommandItem[] }>(`/api/command-items?scope=${scope === 'user' ? 'user' : 'all'}`)
             ]);
 
             if (skillsRes.success) {
@@ -56,7 +80,7 @@ export default function SkillsCommandsList({
         } finally {
             setLoading(false);
         }
-    }, [scope, toast]);
+    }, [scope, toast, api]);
 
     useEffect(() => {
         loadData();
@@ -66,12 +90,13 @@ export default function SkillsCommandsList({
     // 快速创建技能并立即进入编辑模式
     const handleQuickCreateSkill = useCallback(async (tempName: string) => {
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string; folderName?: string }>('/api/skill/create', {
-                name: tempName,
-                scope,
-                description: '',
-                ...(scope === 'project' && agentDir ? { agentDir } : {})
-            });
+            // When using Tab API, no need to pass agentDir (sidecar already has it)
+            // When using global API, pass agentDir for project scope
+            const payload = tabState
+                ? { name: tempName, scope, description: '' }
+                : { name: tempName, scope, description: '', ...(scope === 'project' && agentDir ? { agentDir } : {}) };
+
+            const response = await api.post<{ success: boolean; error?: string; folderName?: string }>('/api/skill/create', payload);
             if (response.success) {
                 // 创建成功后直接进入详情页(编辑模式由详情页处理)
                 // 使用返回的 folderName（sanitized）而非 tempName
@@ -83,7 +108,7 @@ export default function SkillsCommandsList({
         } catch {
             toast.error('创建失败');
         }
-    }, [scope, agentDir, toast, loadData, onSelectSkill]);
+    }, [scope, agentDir, toast, loadData, onSelectSkill, api, tabState]);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {
@@ -93,7 +118,7 @@ export default function SkillsCommandsList({
             reader.onload = async () => {
                 const base64Content = (reader.result as string).split(',')[1]; // 去除 data:xxx;base64, 前缀
                 try {
-                    const response = await apiPostJson<{
+                    const response = await api.post<{
                         success: boolean;
                         folderName?: string;
                         message?: string;
@@ -126,13 +151,13 @@ export default function SkillsCommandsList({
         } catch {
             toast.error('上传失败');
         }
-    }, [scope, toast, loadData, onSelectSkill]);
+    }, [scope, toast, loadData, onSelectSkill, api]);
 
     const handleCreateCommand = useCallback(async () => {
         if (!newItemName.trim()) return;
         setCreating(true);
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string }>('/api/command-item/create', {
+            const response = await api.post<{ success: boolean; error?: string }>('/api/command-item/create', {
                 name: newItemName.trim(),
                 scope,
                 description: newItemDescription.trim() || undefined
@@ -151,7 +176,7 @@ export default function SkillsCommandsList({
         } finally {
             setCreating(false);
         }
-    }, [newItemName, newItemDescription, scope, toast, loadData]);
+    }, [newItemName, newItemDescription, scope, toast, loadData, api]);
 
     const handleDelete = useCallback(async () => {
         if (!deleteTarget) return;
@@ -161,7 +186,7 @@ export default function SkillsCommandsList({
                 ? `/api/skill/${encodeURIComponent(deleteTarget.name)}?scope=${deleteTarget.scope}`
                 : `/api/command-item/${encodeURIComponent(deleteTarget.name)}?scope=${deleteTarget.scope}`;
 
-            const response = await apiDelete<{ success: boolean; error?: string }>(endpoint);
+            const response = await api.delete<{ success: boolean; error?: string }>(endpoint);
             if (response.success) {
                 toast.success('删除成功');
                 setDeleteTarget(null);
@@ -174,7 +199,7 @@ export default function SkillsCommandsList({
         } finally {
             setDeleting(false);
         }
-    }, [deleteTarget, toast, loadData]);
+    }, [deleteTarget, toast, loadData, api]);
 
     if (loading) {
         return (

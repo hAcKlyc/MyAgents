@@ -41,6 +41,17 @@ interface TabProviderProps {
 }
 
 /**
+ * Handle API response - check for errors and throw if not ok
+ */
+async function handleApiResponse<T>(response: Response): Promise<T> {
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error((errorData as { error?: string }).error || `HTTP ${response.status}`);
+    }
+    return (await response.json()) as T;
+}
+
+/**
  * Create a Tab-scoped POST function
  */
 function createPostJson(tabId: string) {
@@ -52,7 +63,7 @@ function createPostJson(tabId: string) {
             headers: { 'Content-Type': 'application/json' },
             body: body ? JSON.stringify(body) : undefined
         });
-        return (await response.json()) as T;
+        return handleApiResponse<T>(response);
     };
 }
 
@@ -64,7 +75,35 @@ function createApiGetJson(tabId: string) {
         const baseUrl = await getTabServerUrl(tabId);
         const url = `${baseUrl}${path}`;
         const response = await proxyFetch(url);
-        return (await response.json()) as T;
+        return handleApiResponse<T>(response);
+    };
+}
+
+/**
+ * Create a Tab-scoped PUT function
+ */
+function createApiPutJson(tabId: string) {
+    return async <T,>(path: string, body?: unknown): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined
+        });
+        return handleApiResponse<T>(response);
+    };
+}
+
+/**
+ * Create a Tab-scoped DELETE function
+ */
+function createApiDelete(tabId: string) {
+    return async <T,>(path: string): Promise<T> => {
+        const baseUrl = await getTabServerUrl(tabId);
+        const url = `${baseUrl}${path}`;
+        const response = await proxyFetch(url, { method: 'DELETE' });
+        return handleApiResponse<T>(response);
     };
 }
 
@@ -79,6 +118,8 @@ export default function TabProvider({
     // Create Tab-scoped API functions
     const postJson = useMemo(() => createPostJson(tabId), [tabId]);
     const apiGetJson = useMemo(() => createApiGetJson(tabId), [tabId]);
+    const apiPutJson = useMemo(() => createApiPutJson(tabId), [tabId]);
+    const apiDeleteJson = useMemo(() => createApiDelete(tabId), [tabId]);
 
     // Core state
     const [messages, setMessages] = useState<Message[]>([]);
@@ -903,13 +944,15 @@ export default function TabProvider({
         // Tab-scoped API functions
         apiGet: apiGetJson,
         apiPost: postJson,
+        apiPut: apiPutJson,
+        apiDelete: apiDeleteJson,
         respondPermission,
         respondAskUserQuestion,
     }), [
         tabId, agentDir, sessionId, messages, isLoading, sessionState,
         logs, unifiedLogs, systemInitInfo, agentError, systemStatus, isActive, pendingPermission, pendingAskUserQuestion, toolCompleteCount, isConnected,
         appendLog, appendUnifiedLog, clearUnifiedLogs, connectSse, disconnectSse, sendMessage, stopResponse, loadSession, resetSession,
-        apiGetJson, postJson, respondPermission, respondAskUserQuestion
+        apiGetJson, postJson, apiPutJson, apiDeleteJson, respondPermission, respondAskUserQuestion
     ]);
 
     return (
