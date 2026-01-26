@@ -56,6 +56,13 @@ export interface SubagentToolCall {
   isError?: boolean;
 }
 
+// Task 工具运行统计
+export interface TaskStats {
+  toolCount: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface ToolUseSimple extends ToolUse {
   // Raw input as it streams in - no parsing, just accumulate the raw string
   inputJson?: string;
@@ -69,6 +76,10 @@ export interface ToolUseSimple extends ToolUse {
   isError?: boolean;
   // Nested tool calls emitted by subagents (Task tool)
   subagentCalls?: SubagentToolCall[];
+  // Task tool specific: start time for duration calculation
+  taskStartTime?: number;
+  // Task tool specific: running statistics
+  taskStats?: TaskStats;
 }
 
 export interface ContentBlock {

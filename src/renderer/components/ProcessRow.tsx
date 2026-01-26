@@ -5,7 +5,8 @@ import { useState } from 'react';
 import Markdown from '@/components/Markdown';
 import {
     getToolBadgeConfig,
-    getToolLabel
+    getToolLabel,
+    getToolMainLabel
 } from '@/components/tools/toolBadgeConfig';
 import ToolUse from '@/components/ToolUse';
 import type { ContentBlock } from '@/types/chat';
@@ -76,8 +77,8 @@ export default function ProcessRow({
         const config = getToolBadgeConfig(block.tool.name);
         const toolLabel = getToolLabel(block.tool);
 
-        mainLabel = block.tool.name;
-        subLabel = toolLabel !== block.tool.name ? toolLabel : '';
+        mainLabel = getToolMainLabel(block.tool);
+        subLabel = toolLabel !== mainLabel ? toolLabel : '';
 
         if (isToolActive) {
             icon = <Loader2 className="size-4 animate-spin" />;
