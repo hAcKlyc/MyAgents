@@ -17,6 +17,16 @@ import type { ReactNode } from 'react';
 
 import type { SubagentToolCall, ToolInput, ToolUseSimple } from '@/types/chat';
 
+// 格式化时间 - 共享函数
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
 // Type guards for safe property access
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

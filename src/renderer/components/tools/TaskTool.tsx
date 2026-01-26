@@ -2,6 +2,7 @@
 import type { AgentInput, SubagentToolCall, ToolUseSimple, TaskStats } from '@/types/chat';
 
 import Markdown from '@/components/Markdown';
+import { formatDuration } from '@/components/tools/toolBadgeConfig';
 import { CheckCircle, ChevronDown, ChevronRight, Clock, Coins, Loader2, Terminal, Wrench, XCircle } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -31,16 +32,6 @@ interface TaskResult {
     input_tokens?: number;
     output_tokens?: number;
   };
-}
-
-// 格式化时间
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}m ${remainingSeconds}s`;
 }
 
 // 格式化 Token 数

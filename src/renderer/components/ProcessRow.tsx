@@ -1,9 +1,10 @@
 
 import { AlertCircle, Brain, ChevronDown, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import Markdown from '@/components/Markdown';
 import {
+    formatDuration,
     getToolBadgeConfig,
     getToolLabel,
     getToolMainLabel
@@ -26,18 +27,72 @@ export default function ProcessRow({
 }: ProcessRowProps) {
     // User manually toggled state (null = not toggled, true/false = user choice)
     const [userToggled, setUserToggled] = useState<boolean | null>(null);
+    // Task tool elapsed time (for running tasks)
+    const [taskElapsed, setTaskElapsed] = useState(0);
+    const taskTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
     const isThinking = block.type === 'thinking';
     const isTool = block.type === 'tool_use';
     const isLastBlock = index === totalBlocks - 1;
+    const isTaskTool = isTool && block.tool?.name === 'Task';
 
     // Thinking: 没有 isComplete 就是 active
     const isThinkingActive = isThinking && block.isComplete !== true;
 
     // Tool: 是最后一个 block 且正在 streaming 且没有 result 就是 active
     const isToolActive = isTool && isLastBlock && isStreaming && !block.tool?.result;
+    const isTaskRunning = isTaskTool && block.tool?.isLoading && !block.tool?.result;
 
     const isBlockActive = isThinkingActive || isToolActive;
+
+    // Task tool timer - update elapsed time every second while running
+    useEffect(() => {
+        if (!isTaskRunning || !block.tool?.taskStartTime) {
+            if (taskTimerRef.current) {
+                clearInterval(taskTimerRef.current);
+                taskTimerRef.current = undefined;
+            }
+            return;
+        }
+
+        const startTime = block.tool.taskStartTime;
+        setTaskElapsed(Date.now() - startTime);
+        taskTimerRef.current = setInterval(() => {
+            setTaskElapsed(Date.now() - startTime);
+        }, 1000);
+
+        return () => {
+            if (taskTimerRef.current) {
+                clearInterval(taskTimerRef.current);
+                taskTimerRef.current = undefined;
+            }
+        };
+    }, [isTaskRunning, block.tool?.taskStartTime]);
+
+    // Parse Task result once (memoized to avoid repeated JSON parsing)
+    const taskParsedResult = useMemo(() => {
+        if (!isTaskTool || !block.tool?.result) return null;
+        try {
+            return JSON.parse(block.tool.result) as { totalDurationMs?: number };
+        } catch {
+            return null;
+        }
+    }, [isTaskTool, block.tool?.result]);
+
+    // Get Task duration (running: elapsed, completed: from result)
+    const taskDuration = useMemo(() => {
+        if (!isTaskTool || !block.tool) return null;
+
+        if (isTaskRunning && taskElapsed > 0) {
+            return formatDuration(taskElapsed);
+        }
+
+        if (taskParsedResult?.totalDurationMs) {
+            return formatDuration(taskParsedResult.totalDurationMs);
+        }
+
+        return null;
+    }, [isTaskTool, block.tool, isTaskRunning, taskElapsed, taskParsedResult]);
 
     // Check if block has expandable content
     const hasContent =
@@ -122,8 +177,14 @@ export default function ProcessRow({
                         }`}>
                         {mainLabel}
                     </span>
+                    {/* Task duration - similar to thinking duration */}
+                    {taskDuration && (
+                        <span className="text-xs text-[var(--ink-muted)]">
+                            {taskDuration}
+                        </span>
+                    )}
                     {subLabel && subLabel !== mainLabel && (
-                        <span className="text-xs text-[var(--ink-muted)] font-mono">
+                        <span className="text-xs text-[var(--ink-muted)] font-mono truncate">
                             {subLabel}
                         </span>
                     )}
