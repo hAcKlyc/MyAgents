@@ -219,7 +219,7 @@ const CommandDetailPanel = forwardRef<CommandDetailPanelRef, CommandDetailPanelP
             } finally {
                 setSaving(false);
             }
-        }, [command, name, scope, agentDir, commandName, description, body, toast, onSaved, api, isInTabContext]);
+        }, [command, name, scope, agentDir, commandName, originalCommandName, description, body, toast, onSaved, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             if (!command) return;

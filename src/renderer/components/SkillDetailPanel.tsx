@@ -321,7 +321,7 @@ const SkillDetailPanel = forwardRef<SkillDetailPanelRef, SkillDetailPanelProps>(
             } finally {
                 setSaving(false);
             }
-        }, [skill, name, scope, agentDir, skillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill, api, isInTabContext]);
+        }, [skill, name, scope, agentDir, skillName, originalSkillName, description, body, invocationMode, allowedTools, context, agent, argumentHint, toast, onSaved, isNewSkill, api, isInTabContext]);
 
         const handleDelete = useCallback(async () => {
             setDeleting(true);
