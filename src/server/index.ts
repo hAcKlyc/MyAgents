@@ -296,6 +296,41 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Recursively copy a directory (synchronous version)
+ * Security: Skips symbolic links to prevent following links to sensitive locations
+ * @param src Source directory path
+ * @param dest Destination directory path
+ * @param logPrefix Optional prefix for log messages
+ */
+function copyDirRecursiveSync(src: string, dest: string, logPrefix = '[copyDir]'): void {
+  mkdirSync(dest, { recursive: true });
+  const entries = readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+
+    // Security: Skip symbolic links to prevent following links to sensitive locations
+    if (entry.isSymbolicLink()) {
+      console.warn(`${logPrefix} Skipping symlink: ${srcPath}`);
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      copyDirRecursiveSync(srcPath, destPath, logPrefix);
+    } else {
+      copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+/**
+ * Validate folder name for security (no path traversal)
+ */
+function isValidFolderName(name: string): boolean {
+  return !name.includes('..') && !name.includes('/') && !name.includes('\\') && name.length > 0;
+}
+
 async function serveStatic(pathname: string): Promise<Response | null> {
   const distRoot = resolve(process.cwd(), 'dist');
   const resolvedPath = pathname === '/' ? 'index.html' : pathname.slice(1);
@@ -2052,6 +2087,135 @@ async function main() {
         }
       }
 
+      // GET /api/skill/sync-check - Check if there are skills to sync from Claude Code
+      // NOTE: This route MUST be before /api/skill/:name to avoid being captured by the wildcard
+      if (pathname === '/api/skill/sync-check' && request.method === 'GET') {
+        try {
+          const claudeSkillsDir = join(homeDir, '.claude', 'skills');
+
+          // Check if Claude Code skills directory exists
+          if (!existsSync(claudeSkillsDir)) {
+            return jsonResponse({ canSync: false, count: 0, folders: [] });
+          }
+
+          // Get folders in Claude Code skills directory
+          const claudeFolders = readdirSync(claudeSkillsDir, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => entry.name);
+
+          if (claudeFolders.length === 0) {
+            return jsonResponse({ canSync: false, count: 0, folders: [] });
+          }
+
+          // Get existing folders in MyAgents skills directory
+          const myagentsFolders = new Set<string>();
+          if (existsSync(userSkillsBaseDir)) {
+            const entries = readdirSync(userSkillsBaseDir, { withFileTypes: true });
+            for (const entry of entries) {
+              if (entry.isDirectory()) {
+                myagentsFolders.add(entry.name);
+              }
+            }
+          }
+
+          // Find folders that can be synced (exist in Claude but not in MyAgents)
+          const syncableFolders = claudeFolders.filter(folder => !myagentsFolders.has(folder));
+
+          return jsonResponse({
+            canSync: syncableFolders.length > 0,
+            count: syncableFolders.length,
+            folders: syncableFolders
+          });
+        } catch (error) {
+          console.error('[api/skill/sync-check] Error:', error);
+          return jsonResponse(
+            { canSync: false, count: 0, folders: [], error: error instanceof Error ? error.message : 'Check failed' },
+            500
+          );
+        }
+      }
+
+      // POST /api/skill/sync-from-claude - Sync skills from Claude Code to MyAgents
+      // NOTE: This route MUST be before /api/skill/:name to avoid being captured by the wildcard
+      if (pathname === '/api/skill/sync-from-claude' && request.method === 'POST') {
+        try {
+          const claudeSkillsDir = join(homeDir, '.claude', 'skills');
+
+          // Check if Claude Code skills directory exists
+          if (!existsSync(claudeSkillsDir)) {
+            return jsonResponse({ success: false, synced: 0, failed: 0, error: 'Claude Code skills directory not found' }, 404);
+          }
+
+          // Get folders in Claude Code skills directory
+          const claudeFolders = readdirSync(claudeSkillsDir, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => entry.name);
+
+          if (claudeFolders.length === 0) {
+            return jsonResponse({ success: true, synced: 0, failed: 0, message: 'No skills to sync' });
+          }
+
+          // Ensure MyAgents skills directory exists
+          if (!existsSync(userSkillsBaseDir)) {
+            mkdirSync(userSkillsBaseDir, { recursive: true });
+          }
+
+          // Get existing folders in MyAgents skills directory
+          const myagentsFolders = new Set<string>();
+          const entries = readdirSync(userSkillsBaseDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (entry.isDirectory()) {
+              myagentsFolders.add(entry.name);
+            }
+          }
+
+          // Find folders that can be synced (filter out invalid folder names for security)
+          const syncableFolders = claudeFolders.filter(folder =>
+            !myagentsFolders.has(folder) && isValidFolderName(folder)
+          );
+
+          if (syncableFolders.length === 0) {
+            return jsonResponse({ success: true, synced: 0, failed: 0, message: 'All skills already exist' });
+          }
+
+          // Copy each syncable folder
+          let synced = 0;
+          let failed = 0;
+          const errors: string[] = [];
+
+          for (const folder of syncableFolders) {
+            const srcDir = join(claudeSkillsDir, folder);
+            const destDir = join(userSkillsBaseDir, folder);
+
+            try {
+              copyDirRecursiveSync(srcDir, destDir, '[api/skill/sync-from-claude]');
+              synced++;
+              if (process.env.DEBUG === '1') {
+                console.log(`[api/skill/sync-from-claude] Synced skill "${folder}"`);
+              }
+            } catch (copyError) {
+              failed++;
+              const errorMsg = copyError instanceof Error ? copyError.message : 'Unknown error';
+              errors.push(`${folder}: ${errorMsg}`);
+              console.error(`[api/skill/sync-from-claude] Failed to copy "${folder}":`, copyError);
+            }
+          }
+
+          return jsonResponse({
+            success: true,
+            synced,
+            failed,
+            errors: errors.length > 0 ? errors : undefined
+          });
+        } catch (error) {
+          console.error('[api/skill/sync-from-claude] Error:', error);
+          return jsonResponse(
+            { success: false, synced: 0, failed: 0, error: error instanceof Error ? error.message : 'Sync failed' },
+            500
+          );
+        }
+      }
+
       // GET /api/skill/:name - Get skill detail
       if (pathname.startsWith('/api/skill/') && request.method === 'GET') {
         try {
@@ -2296,30 +2460,8 @@ async function main() {
           // Create destination directory structure
           mkdirSync(destBaseDir, { recursive: true });
 
-          // Recursive copy function (skips symlinks for security)
-          const copyDirRecursive = (src: string, dest: string) => {
-            mkdirSync(dest, { recursive: true });
-            const entries = readdirSync(src, { withFileTypes: true });
-            for (const entry of entries) {
-              const srcPath = join(src, entry.name);
-              const destPath = join(dest, entry.name);
-
-              // Security: Skip symbolic links to prevent following links to sensitive locations
-              if (entry.isSymbolicLink()) {
-                console.warn(`[api/skill/copy] Skipping symlink: ${srcPath}`);
-                continue;
-              }
-
-              if (entry.isDirectory()) {
-                copyDirRecursive(srcPath, destPath);
-              } else {
-                copyFileSync(srcPath, destPath);
-              }
-            }
-          };
-
-          // Copy the skill directory
-          copyDirRecursive(srcDir, destDir);
+          // Copy the skill directory using shared utility
+          copyDirRecursiveSync(srcDir, destDir, '[api/skill/copy]');
 
           if (process.env.DEBUG === '1') {
             console.log(`[api/skill/copy] Copied skill "${payload.skillName}" to ${destDir}`);
@@ -2506,6 +2648,7 @@ async function main() {
           const scope = url.searchParams.get('scope') || 'all';
           const commandItems: Array<{
             name: string;
+            fileName: string;
             description: string;
             scope: 'user' | 'project';
             path: string;
@@ -2519,10 +2662,12 @@ async function main() {
                 if (!file.endsWith('.md')) continue;
                 const filePath = join(dir, file);
                 const content = readFileSync(filePath, 'utf-8');
-                const { description } = parseYamlFrontmatter(content);
+                const { frontmatter } = parseFullCommandContent(content);
+                const fileName = extractCommandName(file);
                 commandItems.push({
-                  name: extractCommandName(file),
-                  description: description || '',
+                  name: frontmatter.name || fileName,  // Prefer frontmatter name
+                  fileName,  // Always include actual file name for reference
+                  description: frontmatter.description || '',
                   scope: scopeType,
                   path: filePath,
                 });
@@ -2574,7 +2719,8 @@ async function main() {
           return jsonResponse({
             success: true,
             command: {
-              name: cmdName,
+              name: frontmatter.name || cmdName,  // Prefer frontmatter name over file name
+              fileName: cmdName,  // Always return the actual file name for reference
               path: cmdPath,
               scope,
               frontmatter,
@@ -2711,8 +2857,8 @@ async function main() {
             return jsonResponse({ success: false, error: 'Name is required' }, 400);
           }
 
-          // Sanitize name for filename
-          const fileName = payload.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+          // Sanitize name for filename (supports Unicode characters like Chinese)
+          const fileName = sanitizeFolderName(payload.name);
           const baseDir = payload.scope === 'user' ? userCommandsBaseDir : projectCommandsBaseDir;
 
           // Ensure directory exists
@@ -2728,9 +2874,10 @@ async function main() {
 
           // Create command file with default content
           const frontmatter: Partial<CommandFrontmatter> = {
-            description: payload.description || `Description for ${payload.name}`,
+            name: payload.name,
+            description: payload.description || '',
           };
-          const body = `# ${payload.name}\n\nDescribe your command instructions here.`;
+          const body = `在这里编写指令的详细内容...`;
           const content = serializeCommandContent(frontmatter, body);
 
           writeFileSync(cmdPath, content, 'utf-8');

@@ -33,6 +33,7 @@ export interface SkillFrontmatter {
  * Complete Command frontmatter interface
  */
 export interface CommandFrontmatter {
+    name?: string;
     description: string;
 }
 
@@ -101,17 +102,27 @@ export function parseYamlFrontmatter(content: string): { description?: string } 
 export function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
     try {
         const extracted = extractFrontmatter(content);
-        if (!extracted) {
-            return {};
+        let name: string | undefined;
+        let description: string | undefined;
+
+        if (extracted) {
+            const parsed = yamlLoad(extracted.frontmatterStr) as Record<string, unknown> | null;
+            if (parsed && typeof parsed === 'object') {
+                name = typeof parsed.name === 'string' ? parsed.name : undefined;
+                description = typeof parsed.description === 'string' ? parsed.description : undefined;
+            }
         }
-        const parsed = yamlLoad(extracted.frontmatterStr) as Record<string, unknown> | null;
-        if (!parsed || typeof parsed !== 'object') {
-            return {};
+
+        // If name is not in frontmatter, try to extract from first # heading in body
+        if (!name) {
+            const bodyContent = extracted?.body || content;
+            const headingMatch = bodyContent.match(/^#\s+(.+)$/m);
+            if (headingMatch) {
+                name = headingMatch[1].trim();
+            }
         }
-        return {
-            name: typeof parsed.name === 'string' ? parsed.name : undefined,
-            description: typeof parsed.description === 'string' ? parsed.description : undefined
-        };
+
+        return { name, description };
     } catch (e) {
         console.warn('Failed to parse skill frontmatter:', e);
         return {};
@@ -175,6 +186,7 @@ export function parseFullSkillContent(content: string): {
 /**
  * Parse complete Command file content
  * Returns both frontmatter and markdown body content
+ * If name is not in frontmatter, tries to extract from first # heading in body
  */
 export function parseFullCommandContent(content: string): {
     frontmatter: Partial<CommandFrontmatter>;
@@ -183,7 +195,10 @@ export function parseFullCommandContent(content: string): {
     try {
         const extracted = extractFrontmatter(content);
         if (!extracted) {
-            return { frontmatter: {}, body: content };
+            // No frontmatter, try to extract name from # heading
+            const headingMatch = content.match(/^#\s+(.+)$/m);
+            const name = headingMatch ? headingMatch[1].trim() : undefined;
+            return { frontmatter: name ? { name } : {}, body: content };
         }
 
         const parsed = yamlLoad(extracted.frontmatterStr) as Record<string, unknown> | null;
@@ -192,8 +207,19 @@ export function parseFullCommandContent(content: string): {
         }
 
         const frontmatter: Partial<CommandFrontmatter> = {};
+        if (typeof parsed.name === 'string') {
+            frontmatter.name = parsed.name;
+        }
         if (typeof parsed.description === 'string') {
             frontmatter.description = parsed.description;
+        }
+
+        // If name is not in frontmatter, try to extract from first # heading in body
+        if (!frontmatter.name) {
+            const headingMatch = extracted.body.match(/^#\s+(.+)$/m);
+            if (headingMatch) {
+                frontmatter.name = headingMatch[1].trim();
+            }
         }
 
         return { frontmatter, body: extracted.body };
@@ -235,6 +261,10 @@ export function serializeSkillContent(frontmatter: Partial<SkillFrontmatter>, bo
 export function serializeCommandContent(frontmatter: Partial<CommandFrontmatter>, body: string): string {
     const lines: string[] = ['---'];
 
+    // Always quote name to handle special characters (colons, quotes, etc.)
+    if (frontmatter.name) {
+        lines.push(`name: "${frontmatter.name.replace(/"/g, '\\"')}"`);
+    }
     if (frontmatter.description) {
         lines.push(`description: "${frontmatter.description.replace(/"/g, '\\"')}"`);
     }
