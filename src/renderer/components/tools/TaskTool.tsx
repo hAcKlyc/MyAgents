@@ -113,11 +113,18 @@ function TaskRunningStats({
   const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
-    setElapsed(Date.now() - startTime);
+    // Use requestAnimationFrame to set initial value asynchronously
+    // This avoids "synchronous setState in effect" lint warning
+    const rafId = requestAnimationFrame(() => {
+      setElapsed(Date.now() - startTime);
+    });
+
     intervalRef.current = setInterval(() => {
       setElapsed(Date.now() - startTime);
     }, 1000);
+
     return () => {
+      cancelAnimationFrame(rafId);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [startTime]);
@@ -432,7 +439,7 @@ export default function TaskTool({ tool }: TaskToolProps) {
         <div className="rounded-lg bg-[var(--accent-cool)]/10 p-3">
           <CollapsibleContent maxLines={DEFAULT_MAX_LINES}>
             <div className="italic text-[var(--ink-secondary)]">
-              "{input.prompt}"
+              &ldquo;{input.prompt}&rdquo;
             </div>
           </CollapsibleContent>
         </div>
