@@ -19,7 +19,7 @@ interface SkillsCommandsListProps {
 
 export default function SkillsCommandsList({
     scope,
-    agentDir: _agentDir,  // Reserved for future project-scoped operations
+    agentDir,
     onSelectSkill,
     onSelectCommand,
     refreshKey = 0
@@ -66,14 +66,16 @@ export default function SkillsCommandsList({
     // 快速创建技能并立即进入编辑模式
     const handleQuickCreateSkill = useCallback(async (tempName: string) => {
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string }>('/api/skill/create', {
+            const response = await apiPostJson<{ success: boolean; error?: string; folderName?: string }>('/api/skill/create', {
                 name: tempName,
                 scope,
-                description: ''
+                description: '',
+                ...(scope === 'project' && agentDir ? { agentDir } : {})
             });
             if (response.success) {
                 // 创建成功后直接进入详情页(编辑模式由详情页处理)
-                onSelectSkill(tempName, scope, true);
+                // 使用返回的 folderName（sanitized）而非 tempName
+                onSelectSkill(response.folderName || tempName, scope, true);
                 loadData();
             } else {
                 toast.error(response.error || '创建失败');
@@ -81,7 +83,7 @@ export default function SkillsCommandsList({
         } catch {
             toast.error('创建失败');
         }
-    }, [scope, toast, loadData, onSelectSkill]);
+    }, [scope, agentDir, toast, loadData, onSelectSkill]);
 
     // 上传技能文件
     const handleUploadSkill = useCallback(async (file: File) => {

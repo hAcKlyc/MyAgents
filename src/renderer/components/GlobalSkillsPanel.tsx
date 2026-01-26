@@ -91,13 +91,14 @@ export default function GlobalSkillsPanel() {
     // 快速创建技能并进入编辑模式
     const handleQuickCreateSkill = useCallback(async (tempName: string) => {
         try {
-            const response = await apiPostJson<{ success: boolean; error?: string }>('/api/skill/create', {
+            const response = await apiPostJson<{ success: boolean; error?: string; folderName?: string }>('/api/skill/create', {
                 name: tempName,
                 scope: 'user',
                 description: ''
             });
             if (response.success) {
-                setViewState({ type: 'skill-detail', name: tempName, isNewSkill: true });
+                // 使用返回的 folderName（sanitized）而非 tempName
+                setViewState({ type: 'skill-detail', name: response.folderName || tempName, isNewSkill: true });
                 setRefreshKey(k => k + 1);
             } else {
                 toast.error(response.error || '创建失败');
