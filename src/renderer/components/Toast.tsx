@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useState } from 'react';
+import { createContext, useContext, useCallback, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { AlertCircle, CheckCircle, Info, X, AlertTriangle } from 'lucide-react';
@@ -101,8 +101,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const warning = useCallback((message: string, duration?: number) => showToast(message, 'warning', duration), [showToast]);
     const info = useCallback((message: string, duration?: number) => showToast(message, 'info', duration), [showToast]);
 
+    // Memoize context value to prevent unnecessary re-renders of consumers
+    // Without this, every toast shown would cause all useToast() consumers to re-render
+    // and re-trigger their useEffects that depend on toast
+    const contextValue = useMemo(() => ({
+        showToast, success, error, warning, info
+    }), [showToast, success, error, warning, info]);
+
     return (
-        <ToastContext.Provider value={{ showToast, success, error, warning, info }}>
+        <ToastContext.Provider value={contextValue}>
             {children}
             {/* Toast container - use portal to ensure it's above all modals */}
             {createPortal(

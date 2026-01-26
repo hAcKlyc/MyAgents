@@ -99,15 +99,30 @@ echo -e "${BLUE}[3/3] 构建 Tauri 应用 (Debug 模式, 仅 App)...${NC}"
 # 强制移除旧的可执行文件，防止 cargo 偷懒不重新链接
 rm -f "${PROJECT_DIR}/src-tauri/target/debug/app"
 
-# 禁用 Apple 签名和公证 (开发版不需要，且会很慢)
-unset APPLE_SIGNING_IDENTITY
-unset APPLE_TEAM_ID
+# 保留签名但禁用公证 (签名是必需的，否则 TCC 权限无法持久化)
+# 参考: https://developer.apple.com/forums/thread/698337
+# Ad hoc signing 会导致 TCC 无法正确追踪权限
 unset APPLE_API_ISSUER
 unset APPLE_API_KEY
 unset APPLE_API_KEY_PATH
-unset APPLE_CERTIFICATE
-unset APPLE_CERTIFICATE_PASSWORD
-echo -e "${YELLOW}⚠ 已禁用 Apple 代码签名 (开发版)${NC}"
+echo -e "${YELLOW}⚠ 已禁用 Apple 公证 (开发版，保留签名)${NC}"
+
+# 确保签名 Bun 可执行文件 (与 build_macos.sh 相同逻辑)
+if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+    echo -e "  ${CYAN}签名 Bun 可执行文件...${NC}"
+    BUN_BINARIES_DIR="${PROJECT_DIR}/src-tauri/binaries"
+    for bun_binary in "${BUN_BINARIES_DIR}"/bun-*-apple-darwin; do
+        if [ -f "$bun_binary" ]; then
+            xattr -d com.apple.quarantine "$bun_binary" 2>/dev/null || true
+            codesign --force --options runtime --timestamp \
+                --entitlements "${PROJECT_DIR}/src-tauri/Entitlements.plist" \
+                --sign "$APPLE_SIGNING_IDENTITY" "$bun_binary" 2>/dev/null || true
+        fi
+    done
+    echo -e "  ${GREEN}✓ Bun 签名完成${NC}"
+else
+    echo -e "${YELLOW}⚠ 未设置 APPLE_SIGNING_IDENTITY，跳过 Bun 签名${NC}"
+fi
 
 echo -e "${YELLOW}这可能需要几分钟...${NC}"
 # 如果没有设置 TAURI_SIGNING_PRIVATE_KEY，跳过签名错误
