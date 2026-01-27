@@ -59,21 +59,24 @@ pub fn run() {
             updater::test_update_connectivity,
         ])
         .setup(|app| {
-            // Initialize logging in debug mode
-            if cfg!(debug_assertions) {
-                use tauri_plugin_log::{Target, TargetKind};
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)  // Capture all debug logs
-                        .target(Target::new(TargetKind::Stdout))
-                        .target(Target::new(TargetKind::LogDir { file_name: None }))
-                        .filter(|metadata| {
-                            // Allow all logs in debug mode (including third-party crates)
-                            metadata.level() <= log::Level::Debug
-                        })
-                        .build(),
-                )?;
-            }
+            // Initialize logging for all builds
+            // Debug builds: DEBUG level for verbose output including third-party crates
+            // Production builds: INFO level for important events only
+            use tauri_plugin_log::{Target, TargetKind};
+
+            let log_level = if cfg!(debug_assertions) {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            };
+
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log_level)
+                    .target(Target::new(TargetKind::Stdout))
+                    .target(Target::new(TargetKind::LogDir { file_name: None }))
+                    .build(),
+            )?;
 
             // Open DevTools in debug builds
             #[cfg(debug_assertions)]
@@ -85,10 +88,14 @@ pub fn run() {
             }
 
             // Start background update check (5 second delay to let app initialize)
+            log::info!("[App] Setup complete, spawning background update check task...");
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                log::info!("[App] Background update task started, waiting 5 seconds...");
                 updater::check_update_on_startup(app_handle).await;
+                log::info!("[App] Background update task completed");
             });
+            log::info!("[App] Background update task spawned successfully");
 
             Ok(())
         })

@@ -109,7 +109,7 @@ export default function CustomTitleBar({
                 {updateReady && (
                     <button
                         onClick={onRestartAndUpdate}
-                        className="flex h-7 items-center gap-1.5 px-2.5 rounded-md text-xs font-medium text-white bg-[var(--primary)] transition-all hover:bg-[var(--primary-hover)]"
+                        className="flex h-7 items-center gap-1.5 px-3 rounded-full text-xs font-medium text-white bg-emerald-600 shadow-sm transition-all hover:bg-emerald-700 active:scale-95"
                         title={updateVersion ? `更新到 v${updateVersion}` : '重启并更新'}
                     >
                         <RefreshCw className="h-3.5 w-3.5" />

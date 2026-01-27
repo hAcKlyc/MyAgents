@@ -13,6 +13,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { relaunch } from '@tauri-apps/plugin-process';
 
 import { isTauriEnvironment } from '@/utils/browserMock';
+import { isDebugMode } from '@/utils/debug';
 
 export interface UpdateReadyInfo {
     version: string;
@@ -60,18 +61,37 @@ export function useUpdater(): UseUpdaterResult {
 
     // Listen for update ready event from Rust
     useEffect(() => {
-        if (!isTauriEnvironment()) return;
+        if (!isTauriEnvironment()) {
+            if (isDebugMode()) {
+                console.log('[useUpdater] Not in Tauri environment, skipping event listener setup');
+            }
+            return;
+        }
 
+        if (isDebugMode()) {
+            console.log('[useUpdater] Setting up event listener for updater:ready-to-restart...');
+        }
         let isMounted = true;
         let unlisten: UnlistenFn | null = null;
 
         const setup = async () => {
-            unlisten = await listen<UpdateReadyInfo>('updater:ready-to-restart', (event) => {
-                if (!isMounted) return;
-                console.log('[useUpdater] Update ready:', event.payload.version);
-                setUpdateVersion(event.payload.version);
-                setUpdateReady(true);
-            });
+            try {
+                unlisten = await listen<UpdateReadyInfo>('updater:ready-to-restart', (event) => {
+                    if (isDebugMode()) {
+                        console.log('[useUpdater] Event received: updater:ready-to-restart', event.payload);
+                    }
+                    if (!isMounted) {
+                        return;
+                    }
+                    setUpdateVersion(event.payload.version);
+                    setUpdateReady(true);
+                });
+                if (isDebugMode()) {
+                    console.log('[useUpdater] Event listener registered successfully');
+                }
+            } catch (err) {
+                console.error('[useUpdater] Failed to setup event listener:', err);
+            }
         };
 
         void setup();

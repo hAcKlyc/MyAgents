@@ -7,11 +7,68 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::thread;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, Runtime};
+
+// Ensure file descriptor limit is increased only once
+static RLIMIT_INIT: Once = Once::new();
+
+/// Increase file descriptor limit to prevent "low max file descriptors" error from Bun
+/// This is especially important on macOS where the default soft limit is often 2560
+#[cfg(unix)]
+fn ensure_high_file_descriptor_limit() {
+    RLIMIT_INIT.call_once(|| {
+        use libc::{getrlimit, setrlimit, rlimit, RLIMIT_NOFILE};
+
+        unsafe {
+            let mut rlim = rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+
+            // Get current limits
+            if getrlimit(RLIMIT_NOFILE, &mut rlim) == 0 {
+                let old_soft = rlim.rlim_cur;
+                let hard_limit = rlim.rlim_max;
+
+                // Only increase if current soft limit is below a reasonable threshold
+                // Target: at least 65536, or hard limit if lower
+                let target = std::cmp::min(65536, hard_limit);
+
+                if old_soft < target {
+                    rlim.rlim_cur = target;
+
+                    if setrlimit(RLIMIT_NOFILE, &rlim) == 0 {
+                        log::info!(
+                            "[sidecar] Increased file descriptor limit: {} -> {} (hard limit: {})",
+                            old_soft, target, hard_limit
+                        );
+                    } else {
+                        log::warn!(
+                            "[sidecar] Failed to increase file descriptor limit (current: {}, target: {})",
+                            old_soft, target
+                        );
+                    }
+                } else {
+                    log::info!(
+                        "[sidecar] File descriptor limit already sufficient: {} (hard: {})",
+                        old_soft, hard_limit
+                    );
+                }
+            } else {
+                log::warn!("[sidecar] Failed to get current file descriptor limit");
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn ensure_high_file_descriptor_limit() {
+    // No-op on non-Unix systems
+}
 
 // Configuration constants
 const BASE_PORT: u16 = 31415;
@@ -25,53 +82,79 @@ const PORT_RANGE: u16 = 500;
 // Special identifier for global sidecar (used by Settings page)
 pub const GLOBAL_SIDECAR_ID: &str = "__global__";
 // Process identification marker (used to identify our sidecar processes)
-#[allow(dead_code)] // Reserved for future process identification
+// This marker is added to all sidecar commands for reliable process identification
 const SIDECAR_MARKER: &str = "--myagents-sidecar";
 
 /// Cleanup stale sidecar processes from previous app instances
 /// This should be called on app startup before creating the SidecarManager
-/// Optimized: Only uses pgrep, no port scanning (much faster)
+/// Uses SIDECAR_MARKER for precise identification (won't affect other apps' bun processes)
 pub fn cleanup_stale_sidecars() {
     log::info!("[sidecar] Cleaning up stale sidecar processes...");
 
     #[cfg(unix)]
     {
-        // Use pgrep to find bun processes with our server script pattern
-        // This is fast and doesn't require port scanning
-        if let Ok(output) = Command::new("pgrep")
-            .args(["-f", "bun.*server.*--port 314"])
-            .output()
-        {
-            if output.status.success() {
-                let pids = String::from_utf8_lossy(&output.stdout);
-                let mut killed_count = 0;
-                for pid_str in pids.lines() {
-                    if let Ok(pid) = pid_str.trim().parse::<i32>() {
-                        log::info!("[sidecar] Killing stale process: {}", pid);
-                        unsafe {
-                            libc::kill(pid, libc::SIGTERM);
-                        }
-                        killed_count += 1;
-                    }
-                }
-                // Only wait if we actually killed processes
-                if killed_count > 0 {
-                    thread::sleep(Duration::from_millis(200));
+        // Use pgrep to find bun processes with our marker
+        // This is precise and won't match other apps' bun processes
+        let find_pids = || -> Vec<i32> {
+            Command::new("pgrep")
+                .args(["-f", SIDECAR_MARKER])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .filter_map(|s| s.trim().parse::<i32>().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let pids = find_pids();
+        if pids.is_empty() {
+            log::info!("[sidecar] No stale processes found");
+        } else {
+            log::info!("[sidecar] Found {} stale processes, sending SIGTERM...", pids.len());
+
+            // First try SIGTERM for graceful shutdown
+            for pid in &pids {
+                unsafe {
+                    libc::kill(*pid, libc::SIGTERM);
                 }
             }
+
+            // Wait briefly for graceful shutdown
+            thread::sleep(Duration::from_millis(300));
+
+            // Check if any processes survived, use SIGKILL if needed
+            let remaining = find_pids();
+            if !remaining.is_empty() {
+                log::warn!(
+                    "[sidecar] {} processes didn't respond to SIGTERM, using SIGKILL...",
+                    remaining.len()
+                );
+                for pid in &remaining {
+                    unsafe {
+                        libc::kill(*pid, libc::SIGKILL);
+                    }
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+
+            log::info!("[sidecar] Cleanup complete, killed {} processes", pids.len());
         }
     }
 
     #[cfg(windows)]
     {
-        // Windows: use taskkill
+        // Windows: use taskkill with our marker
+        // Note: This is less precise than Unix, may need refinement
         let _ = Command::new("taskkill")
             .args(["/F", "/IM", "bun.exe"])
             .output();
         thread::sleep(Duration::from_millis(200));
+        log::info!("[sidecar] Windows cleanup complete");
     }
-
-    log::info!("[sidecar] Stale process cleanup complete");
 }
 
 
@@ -466,6 +549,9 @@ pub fn start_tab_sidecar<R: Runtime>(
     tab_id: &str,
     agent_dir: Option<PathBuf>,
 ) -> Result<u16, String> {
+    // Ensure file descriptor limit is high enough for Bun
+    ensure_high_file_descriptor_limit();
+
     let mut manager_guard = manager.lock().map_err(|e| e.to_string())?;
 
     // Check if already running for this tab
@@ -494,8 +580,12 @@ pub fn start_tab_sidecar<R: Runtime>(
     );
 
     // Build command - 直接用 bun <script> 而非 bun run <script>（更稳定）
+    // Add SIDECAR_MARKER for reliable process identification and cleanup
     let mut cmd = Command::new(&bun_path);
-    cmd.arg(&script_path).arg("--port").arg(port.to_string());
+    cmd.arg(&script_path)
+        .arg("--port")
+        .arg(port.to_string())
+        .arg(SIDECAR_MARKER);
 
     // Determine if this is a global sidecar and handle agent directory
     let is_global = agent_dir.is_none();

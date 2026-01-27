@@ -48,9 +48,17 @@ pub async fn check_update_on_startup(app: AppHandle) {
                 format!("[Updater] Update v{} downloaded and ready to install", version),
             );
             // Only notify frontend when download is complete
-            let info = UpdateReadyInfo { version };
-            if let Err(e) = app.emit("updater:ready-to-restart", info) {
-                logger::error(&app, format!("[Updater] Failed to emit ready event: {}", e));
+            let info = UpdateReadyInfo {
+                version: version.clone(),
+            };
+            logger::info(&app, "[Updater] Emitting 'updater:ready-to-restart' event to frontend...");
+            match app.emit("updater:ready-to-restart", info) {
+                Ok(_) => {
+                    logger::info(&app, format!("[Updater] Event emitted successfully for v{}", version));
+                }
+                Err(e) => {
+                    logger::error(&app, format!("[Updater] Failed to emit ready event: {}", e));
+                }
             }
         }
         Ok(None) => {
@@ -174,8 +182,12 @@ pub async fn check_and_download_update(app: AppHandle) -> Result<bool, String> {
                 format!("[Updater] Update v{} downloaded and ready", version),
             );
             // Notify frontend
-            let info = UpdateReadyInfo { version };
-            let _ = app.emit("updater:ready-to-restart", info);
+            let info = UpdateReadyInfo {
+                version: version.clone(),
+            };
+            if let Err(e) = app.emit("updater:ready-to-restart", info) {
+                logger::error(&app, format!("[Updater] Failed to emit event: {}", e));
+            }
             Ok(true)
         }
         Ok(None) => Ok(false),

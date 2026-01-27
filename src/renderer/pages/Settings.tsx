@@ -247,10 +247,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     useEffect(() => {
         if (!isTauriEnvironment()) return;
 
+        let isMounted = true;
         let unlisten: (() => void) | null = null;
 
         (async () => {
             const { listen } = await import('@tauri-apps/api/event');
+            // 防止组件卸载后设置监听器（竞态条件）
+            if (!isMounted) return;
             unlisten = await listen<LogEntry>('log:rust', (event) => {
                 setSseLogs(prev => {
                     const next = [...prev, event.payload];
@@ -260,6 +263,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         })();
 
         return () => {
+            isMounted = false;
             if (unlisten) unlisten();
         };
     }, []);
