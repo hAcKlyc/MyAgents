@@ -226,7 +226,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         }
     }, []);
 
-    // Collect React logs for Settings page (since we don't have TabProvider)
+    // Collect React and Rust logs for Settings page (since we don't have TabProvider)
     // Limit to 3000 logs to prevent memory issues (matches UnifiedLogsPanel MAX_DISPLAY_LOGS)
     const MAX_LOGS = 3000;
     useEffect(() => {
@@ -240,6 +240,27 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         window.addEventListener(REACT_LOG_EVENT, handleReactLog);
         return () => {
             window.removeEventListener(REACT_LOG_EVENT, handleReactLog);
+        };
+    }, []);
+
+    // Listen for Rust logs (Tauri only)
+    useEffect(() => {
+        if (!isTauriEnvironment()) return;
+
+        let unlisten: (() => void) | null = null;
+
+        (async () => {
+            const { listen } = await import('@tauri-apps/api/event');
+            unlisten = await listen<LogEntry>('log:rust', (event) => {
+                setSseLogs(prev => {
+                    const next = [...prev, event.payload];
+                    return next.length > MAX_LOGS ? next.slice(-MAX_LOGS) : next;
+                });
+            });
+        })();
+
+        return () => {
+            if (unlisten) unlisten();
         };
     }, []);
 

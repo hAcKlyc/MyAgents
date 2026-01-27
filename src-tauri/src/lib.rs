@@ -61,9 +61,16 @@ pub fn run() {
         .setup(|app| {
             // Initialize logging in debug mode
             if cfg!(debug_assertions) {
+                use tauri_plugin_log::{Target, TargetKind};
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
+                        .level(log::LevelFilter::Debug)  // Capture all debug logs
+                        .target(Target::new(TargetKind::Stdout))
+                        .target(Target::new(TargetKind::LogDir { file_name: None }))
+                        .filter(|metadata| {
+                            // Allow all logs in debug mode (including third-party crates)
+                            metadata.level() <= log::Level::Debug
+                        })
                         .build(),
                 )?;
             }

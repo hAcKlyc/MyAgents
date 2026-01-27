@@ -75,14 +75,17 @@ async fn check_and_download_silently(app: &AppHandle) -> Result<Option<String>, 
     // RAII guard ensures flag is reset even if function panics/errors
     let _guard = UpdateGuard;
 
+    // Get platform target (e.g., "darwin-aarch64", "darwin-x86_64")
+    let target = get_update_target();
+    let current_version = app.package_info().version.to_string();
+
+    // Build updater with explicit target to override {{target}} template variable
+    // Without this, tauri-plugin-updater only uses OS name (e.g., "darwin" instead of "darwin-aarch64")
     let updater = app
         .updater_builder()
+        .target(target.to_string())
         .build()
         .map_err(|e| format!("Failed to build updater: {}", e))?;
-
-    // Log current version for debugging
-    let current_version = app.package_info().version.to_string();
-    let target = get_update_target();
     logger::info(
         app,
         format!(
@@ -189,6 +192,9 @@ pub fn restart_app(app: AppHandle) {
 }
 
 /// Expected JSON structure for Tauri v2 updater (per-platform file)
+/// Reference: https://v2.tauri.app/plugin/updater/
+/// Required fields: version, signature, url
+/// Optional fields: notes, pub_date
 #[derive(Clone, Serialize, serde::Deserialize, Debug)]
 struct UpdateJsonFormat {
     version: String,
@@ -196,9 +202,6 @@ struct UpdateJsonFormat {
     notes: Option<String>,
     #[serde(default)]
     pub_date: Option<String>,
-    /// Platform identifier for validation (e.g., "darwin-aarch64", "darwin-x86_64", "windows-x86_64")
-    #[serde(default)]
-    platform: Option<String>,
     signature: String,
     url: String,
 }
@@ -272,17 +275,9 @@ pub async fn test_update_connectivity(app: AppHandle) -> Result<String, String> 
     // Try to parse as expected JSON format
     let json_parse_result = match serde_json::from_str::<UpdateJsonFormat>(&body) {
         Ok(parsed) => {
-            // Validate platform field if present
-            let platform_check = match &parsed.platform {
-                Some(p) if p == target => format!("✓ platform: {} (matches)", p),
-                Some(p) => format!("⚠ platform: {} (expected: {}) - MISMATCH!", p, target),
-                None => "⚠ platform: not specified (recommended to add for validation)".to_string(),
-            };
-
             format!(
-                "✓ JSON valid!\n  version: {}\n  {}\n  url: {}\n  signature length: {} chars",
+                "✓ JSON valid!\n  version: {}\n  url: {}\n  signature length: {} chars",
                 parsed.version,
-                platform_check,
                 parsed.url,
                 parsed.signature.len()
             )
