@@ -76,6 +76,10 @@ interface ProviderEditForm {
     provider: Provider;
     customModels: string[];  // 用户添加的自定义模型
     newModelInput: string;
+    // 自定义供应商编辑字段
+    editName?: string;
+    editCloudProvider?: string;
+    editBaseUrl?: string;
 }
 
 interface SettingsProps {
@@ -97,6 +101,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         config,
         updateConfig,
         providers,
+        projects,
+        updateProject,
         addCustomProvider,
         updateCustomProvider,
         deleteCustomProvider: deleteCustomProviderService,
@@ -131,6 +137,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     const [customForm, setCustomForm] = useState<CustomProviderForm>(EMPTY_CUSTOM_FORM);
     // Provider edit/manage panel state
     const [editingProvider, setEditingProvider] = useState<ProviderEditForm | null>(null);
+    // 删除确认弹窗状态
+    const [deleteConfirmProvider, setDeleteConfirmProvider] = useState<Provider | null>(null);
 
     // UI-only loading state (not persisted)
     const [verifyLoading, setVerifyLoading] = useState<Record<string, boolean>>({});
@@ -756,8 +764,29 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         setShowCustomForm(false);
     };
 
-    const handleDeleteCustomProvider = async (providerId: string) => {
+    // 确认删除自定义供应商
+    const confirmDeleteCustomProvider = async () => {
+        if (!deleteConfirmProvider) return;
+        const providerId = deleteConfirmProvider.id;
+
         try {
+            // 检查是否有项目正在使用该供应商，如果有则切换到其他供应商
+            const affectedProjects = projects.filter(p => p.providerId === providerId);
+            if (affectedProjects.length > 0) {
+                // 找到第一个可用的其他供应商
+                const alternativeProvider = providers.find(p => p.id !== providerId);
+                if (alternativeProvider) {
+                    // 更新所有受影响的项目
+                    for (const project of affectedProjects) {
+                        await updateProject({
+                            ...project,
+                            providerId: alternativeProvider.id,
+                        });
+                    }
+                    console.log(`[Settings] Switched ${affectedProjects.length} project(s) to ${alternativeProvider.name}`);
+                }
+            }
+
             // Delete from disk, remove API key, and refresh providers list
             await deleteCustomProviderService(providerId);
             toast.success('服务商已删除');
@@ -765,6 +794,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             console.error('[Settings] Failed to delete custom provider:', error);
             toast.error('删除服务商失败');
         }
+        setDeleteConfirmProvider(null);
         setEditingProvider(null);
     };
 
@@ -776,6 +806,12 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             provider,
             customModels: [],  // TODO: Load from persisted custom models if any
             newModelInput: '',
+            // 为自定义供应商初始化编辑字段
+            ...(provider.isBuiltin ? {} : {
+                editName: provider.name,
+                editCloudProvider: provider.cloudProvider,
+                editBaseUrl: provider.config.baseUrl || '',
+            }),
         });
     };
 
@@ -808,16 +844,33 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     // Save provider edits
     const saveProviderEdits = async () => {
         if (!editingProvider) return;
-        const { provider, customModels } = editingProvider;
+        const { provider, customModels, editName, editCloudProvider, editBaseUrl } = editingProvider;
 
         if (provider.isBuiltin) {
             // For preset providers, we only add custom models
             // TODO: Persist custom models for preset providers
             toast.info('自定义模型已添加');
         } else {
+            // 验证必填字段
+            if (!editName?.trim() || !editBaseUrl?.trim()) {
+                toast.error('名称和 Base URL 不能为空');
+                return;
+            }
+            // 验证 Base URL 格式
+            const trimmedUrl = editBaseUrl.trim();
+            if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+                toast.error('Base URL 必须以 http:// 或 https:// 开头');
+                return;
+            }
             // For custom providers, update the provider and persist to disk
             const updatedProvider: Provider = {
                 ...provider,
+                name: editName.trim(),
+                cloudProvider: editCloudProvider?.trim() || '自定义',
+                config: {
+                    ...provider.config,
+                    baseUrl: editBaseUrl.trim(),
+                },
                 models: [
                     ...provider.models,
                     ...customModels.map((m) => ({
@@ -1839,22 +1892,57 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                         </div>
 
                         <div className="space-y-4">
-                            {/* Provider info (read-only for preset) */}
+                            {/* Provider info - editable for custom, read-only for preset */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">供应商名称</label>
-                                <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)]">
-                                    {editingProvider.provider.name}
-                                </div>
+                                {editingProvider.provider.isBuiltin ? (
+                                    <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)]">
+                                        {editingProvider.provider.name}
+                                    </div>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editName || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editName: e.target.value } : null)}
+                                        placeholder="输入供应商名称"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
+                                )}
                             </div>
 
-                            {editingProvider.provider.config.baseUrl && (
+                            {/* 云服务商标签 - only for custom providers */}
+                            {!editingProvider.provider.isBuiltin && (
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">API Base URL</label>
-                                    <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)] font-mono text-xs break-all">
-                                        {editingProvider.provider.config.baseUrl}
-                                    </div>
+                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">云服务商标签</label>
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editCloudProvider || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editCloudProvider: e.target.value } : null)}
+                                        placeholder="例如：自定义、代理"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
                                 </div>
                             )}
+
+                            {/* Base URL */}
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">API Base URL</label>
+                                {editingProvider.provider.isBuiltin ? (
+                                    editingProvider.provider.config.baseUrl && (
+                                        <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)] font-mono text-xs break-all">
+                                            {editingProvider.provider.config.baseUrl}
+                                        </div>
+                                    )
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editBaseUrl || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editBaseUrl: e.target.value } : null)}
+                                        placeholder="https://api.example.com"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
+                                )}
+                            </div>
 
                             {/* Existing models */}
                             <div>
@@ -1931,7 +2019,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             {/* Delete button (only for custom providers) */}
                             {!editingProvider.provider.isBuiltin ? (
                                 <button
-                                    onClick={() => handleDeleteCustomProvider(editingProvider.provider.id)}
+                                    onClick={() => setDeleteConfirmProvider(editingProvider.provider)}
                                     className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
@@ -1955,6 +2043,37 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     保存
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {deleteConfirmProvider && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+                    <div className="mx-4 w-full max-w-sm rounded-2xl bg-[var(--paper-elevated)] p-6 shadow-xl">
+                        <div className="mb-4 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--error-bg)]">
+                                <Trash2 className="h-5 w-5 text-[var(--error)]" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-[var(--ink)]">删除供应商</h3>
+                        </div>
+                        <p className="mb-6 text-sm text-[var(--ink-muted)]">
+                            确定要删除「{deleteConfirmProvider.name}」吗？此操作无法撤销。
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setDeleteConfirmProvider(null)}
+                                className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={confirmDeleteCustomProvider}
+                                className="flex-1 rounded-lg bg-[var(--error)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:brightness-110"
+                            >
+                                删除
+                            </button>
                         </div>
                     </div>
                 </div>

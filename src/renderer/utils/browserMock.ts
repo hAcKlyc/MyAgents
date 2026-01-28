@@ -174,6 +174,7 @@ function getSmartDefaultProjectDir(): string {
  */
 export async function pickFolderForDialog(): Promise<{ folderName: string; defaultPath: string } | null> {
     let folderName = 'my-project';
+    let userCancelled = false;
 
     if ('showDirectoryPicker' in window) {
         try {
@@ -183,12 +184,17 @@ export async function pickFolderForDialog(): Promise<{ folderName: string; defau
             console.log('[browserMock] Selected directory name:', folderName);
         } catch (err) {
             if ((err as Error).name === 'AbortError') {
-                console.log('[browserMock] User cancelled directory selection');
-                return null;
+                // In some environments (e.g., Playwright, some browsers), showDirectoryPicker
+                // may be automatically cancelled. We still show the path dialog in this case.
+                console.log('[browserMock] Directory picker cancelled, showing path dialog instead');
+                userCancelled = false; // Don't treat as user cancellation, show dialog anyway
             }
             // Fall through with default folder name
         }
     }
+
+    // Always show path dialog in browser dev mode (even if directory picker was cancelled)
+    // This allows users to manually enter paths when the native picker doesn't work
 
     // Get smart default directory based on existing projects
     const defaultParentDir = getSmartDefaultProjectDir();

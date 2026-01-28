@@ -179,6 +179,8 @@ export default function TabProvider({
     // Refs for SSE handling
     const sseRef = useRef<SseConnection | null>(null);
     const isStreamingRef = useRef(false);
+    // Ref for stop timeout cleanup
+    const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const seenIdsRef = useRef<Set<string>>(new Set());
     // Flag to skip message-replay after user clicks "new session"
     const isNewSessionRef = useRef(false);
@@ -615,12 +617,22 @@ export default function TabProvider({
             case 'chat:message-stopped': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                // Clear stop timeout since we received confirmation
+                if (stopTimeoutRef.current) {
+                    clearTimeout(stopTimeoutRef.current);
+                    stopTimeoutRef.current = null;
+                }
                 break;
             }
 
             case 'chat:message-error': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                // Clear stop timeout on error too
+                if (stopTimeoutRef.current) {
+                    clearTimeout(stopTimeoutRef.current);
+                    stopTimeoutRef.current = null;
+                }
                 break;
             }
 
@@ -875,13 +887,34 @@ export default function TabProvider({
         }
     }, [tabId]);
 
-    // Stop response
+    // Stop response with timeout fallback
     const stopResponse = useCallback(async (): Promise<boolean> => {
+        // Clear any existing stop timeout
+        if (stopTimeoutRef.current) {
+            clearTimeout(stopTimeoutRef.current);
+            stopTimeoutRef.current = null;
+        }
+
         try {
             const response = await postJson<{ success: boolean; error?: string }>('/chat/stop');
-            return response.success;
+            if (response.success) {
+                // 设置 5 秒超时，如果没有收到 SSE 事件确认则强制恢复 UI
+                stopTimeoutRef.current = setTimeout(() => {
+                    if (isStreamingRef.current) {
+                        console.warn(`[TabProvider ${tabId}] Stop timeout - forcing UI recovery`);
+                        isStreamingRef.current = false;
+                        setIsLoading(false);
+                    }
+                    stopTimeoutRef.current = null;
+                }, 5000);
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error(`[TabProvider ${tabId}] Stop response failed:`, error);
+            // 请求失败也强制恢复 UI
+            isStreamingRef.current = false;
+            setIsLoading(false);
             return false;
         }
     }, [tabId]);

@@ -1932,6 +1932,13 @@ export function isSessionActive(): boolean {
 
 export async function interruptCurrentResponse(): Promise<boolean> {
   if (!querySession) {
+    // 即使没有 querySession，如果 isStreamingMessage 为 true，也需要重置状态
+    if (isStreamingMessage) {
+      console.log('[agent] No querySession but streaming flag set, resetting state');
+      broadcast('chat:message-stopped', null);
+      handleMessageStopped();
+      return true;
+    }
     return false;
   }
 
@@ -1941,7 +1948,19 @@ export async function interruptCurrentResponse(): Promise<boolean> {
 
   isInterruptingResponse = true;
   try {
-    await querySession.interrupt();
+    // 使用 Promise.race 添加 10 秒超时
+    const interruptPromise = querySession.interrupt();
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Interrupt timeout')), 10000);
+    });
+
+    try {
+      await Promise.race([interruptPromise, timeoutPromise]);
+    } catch (error) {
+      console.error('[agent] Interrupt error or timeout:', error);
+      // 超时或出错时也要清理状态，避免 UI 卡住
+    }
+
     broadcast('chat:message-stopped', null);
     handleMessageStopped();
     return true;

@@ -1,4 +1,5 @@
 import {
+  AtSign,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -52,6 +53,8 @@ interface DirectoryPanelProps {
   refreshTrigger?: number;
   /** Whether Tauri drag is active over this panel */
   isTauriDragActive?: boolean;
+  /** Called when user clicks "引用" to insert @path reference into chat input */
+  onInsertReference?: (paths: string[]) => void;
 }
 
 type FilePreview = {
@@ -186,6 +189,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   onOpenConfig,
   refreshTrigger,
   isTauriDragActive = false,
+  onInsertReference,
 }, ref) {
   const [directoryInfo, setDirectoryInfo] = useState<DirectoryTree | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -841,6 +845,13 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           }
         },
         {
+          label: `引用 (${selectedNodes.length})`,
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => {
+            onInsertReference?.(selectedNodes.map(n => n.path));
+          }
+        },
+        {
           label: `删除 (${selectedNodes.length})`,
           icon: <Trash2 className="h-4 w-4" />,
           danger: true,
@@ -907,6 +918,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           onClick: () => handleOpenInFinder(node.path)
         },
         {
+          label: '引用',
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => onInsertReference?.([node.path])
+        },
+        {
           label: '重命名',
           icon: <Pencil className="h-4 w-4" />,
           onClick: () => setDialog({ type: 'rename', node })
@@ -929,6 +945,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
               void handlePreview(node);
             }
           }
+        },
+        {
+          label: '引用',
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => onInsertReference?.([node.path])
         },
         {
           label: '打开所在文件夹',

@@ -89,6 +89,9 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
   // Ref for DirectoryPanel to trigger refresh
   const directoryPanelRef = useRef<DirectoryPanelHandle>(null);
 
+  // Ref for tracking previous isActive state (for config sync on tab switch)
+  const prevIsActiveRef = useRef(isActive);
+
   // Ref for chat content area (for Tauri drop zone)
   const chatContentRef = useRef<HTMLDivElement>(null);
 
@@ -264,6 +267,48 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
       }, 50);
     }
   }, [isActive]);
+
+  // Sync config when Tab becomes active (from inactive)
+  // This ensures settings changes are picked up when switching back to Chat Tab
+  useEffect(() => {
+    const wasInactive = !prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+
+    // Only sync when Tab becomes active (was inactive, now active)
+    if (!wasInactive || !isActive) return;
+
+    const syncConfigOnTabActivate = async () => {
+      try {
+        // 1. Refresh provider data (providers list, API keys, verify status)
+        await refreshProviderData();
+
+        // 2. Reload MCP config and sync to backend
+        const servers = await getAllMcpServers();
+        const enabledIds = await getEnabledMcpServerIds();
+        setMcpServers(servers);
+        setGlobalMcpEnabled(enabledIds);
+
+        // 3. Sync effective MCP servers to backend for next message
+        const workspaceEnabled = currentProject?.mcpEnabledServers ?? [];
+        const effectiveServers = servers.filter(s =>
+          enabledIds.includes(s.id) && workspaceEnabled.includes(s.id)
+        );
+        await apiPost('/api/mcp/set', { servers: effectiveServers });
+
+        if (isDebugMode()) {
+          console.log('[Chat] Config synced on tab activate:', {
+            providers: providers.length,
+            mcpServers: servers.length,
+            effectiveMcp: effectiveServers.map(s => s.id).join(', ') || 'none',
+          });
+        }
+      } catch (err) {
+        console.error('[Chat] Failed to sync config on tab activate:', err);
+      }
+    };
+
+    void syncConfigOnTabActivate();
+  }, [isActive, refreshProviderData, currentProject?.mcpEnabledServers, apiPost]);
 
   // Connect SSE when component mounts
   useEffect(() => {
@@ -553,6 +598,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
             onOpenConfig={() => setShowWorkspaceConfig(true)}
             refreshTrigger={toolCompleteCount + workspaceRefreshTrigger}
             isTauriDragActive={isTauriDragging && activeZoneId === 'directory-panel'}
+            onInsertReference={(paths) => chatInputRef.current?.insertReferences(paths)}
           />
         </div>
       )}

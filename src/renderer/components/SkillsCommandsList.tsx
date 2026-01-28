@@ -13,6 +13,7 @@ import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { CreateDialog, NewSkillChooser } from './SkillDialogs';
 import type { SkillItem, CommandItem } from '../../shared/skillsTypes';
+import { CUSTOM_EVENTS } from '../../shared/constants';
 
 interface SkillsCommandsListProps {
     scope: 'user' | 'project';
@@ -106,6 +107,8 @@ export default function SkillsCommandsList({
                 // 使用返回的 folderName（sanitized）而非 tempName
                 onSelectSkill(response.folderName || tempName, scope, true);
                 loadData();
+                // Notify SimpleChatInput to refresh slash commands
+                window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName: response.folderName || tempName } }));
             } else {
                 toastRef.current.error(response.error || '创建失败');
             }
@@ -141,6 +144,8 @@ export default function SkillsCommandsList({
                         if (response.folderName) {
                             onSelectSkill(response.folderName, scope, true);
                         }
+                        // Notify SimpleChatInput to refresh slash commands
+                        window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName: response.folderName } }));
                     } else {
                         toastRef.current.error(response.error || '导入失败');
                     }
