@@ -103,7 +103,7 @@ description: |
 ---
 
 ## v0.1.1
-**Date**: 2026-01-25
+**Date**: 2026-01-26
 
 ### 1. 订阅验证修复
 - 修复 Anthropic 订阅检测逻辑（`~/.claude.json` 中的 `oauthAccount`）
