@@ -159,3 +159,41 @@ if (providerChanged && querySession) {
 - **SDK 层 session 重建**：`querySession` 重新创建
 - **状态清理**：`streamIndexToToolId`、`toolResultIndexToId` 需清理
 
+---
+
+## ⚠️ 关键陷阱：订阅模式与 API Key 模式切换
+
+### 问题
+
+从 API Key 模式（如 GLM）切换到 Anthropic 订阅模式时报错：`Invalid signature in thinking block`
+
+### 根因
+
+订阅模式的 Provider 配置是 `config: {}`（空对象），前端构建的 providerEnv 变成：
+
+```typescript
+// 实际发送的对象
+{ baseUrl: undefined, apiKey: undefined, authType: undefined }
+```
+
+后端检查 `providerEnv && (providerEnv.baseUrl !== ...)` 为 true（因为对象存在），误判为 provider 变化，触发 resume session。但不同 provider 的 thinking block signature 不兼容。
+
+### 解决方案
+
+前端判断 provider 类型，**订阅模式不发送 providerEnv**：
+
+```typescript
+// Before: 只要 currentProvider 存在就发送
+const providerEnv = currentProvider ? { ... } : undefined;
+
+// After: 订阅模式发送 undefined
+const providerEnv = currentProvider && currentProvider.type !== 'subscription'
+  ? { baseUrl: ..., apiKey: ..., authType: ... }
+  : undefined;
+```
+
+### 原则
+
+- `providerEnv = undefined`：使用 SDK 默认认证（订阅）
+- `providerEnv = { baseUrl, apiKey }`：使用第三方 API
+
