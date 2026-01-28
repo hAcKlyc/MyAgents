@@ -266,6 +266,7 @@ if (isDebugMode()) console.log('[module] debug message');
 3. **分支策略**：功能分支 `dev/prd-x.x.x` → 合并到 `main`
 4. **版本管理**：`npm version patch/minor/major` 自动同步所有配置
 5. **发布流程**：`npm version` → `./build_macos.sh` → `./publish_release.sh` → push tag
+6. **版本发布**：发布前**先更新 [version.md](./specs/version.md)，再打 tag**，tag message 从 version.md 复制
 
 ---
 
@@ -285,6 +286,7 @@ if (isDebugMode()) console.log('[module] debug message');
 
 | 场景 | 文档 |
 |------|------|
+| **版本发布记录** | [version.md](./specs/version.md) |
 | 整体架构、数据流 | [architecture.md](./specs/tech_docs/architecture.md) |
 | 集成新 LLM 供应商 | [third_party_providers.md](./specs/tech_docs/third_party_providers.md) |
 | Bun Sidecar 打包机制 | [bundled_bun.md](./specs/tech_docs/bundled_bun.md) |
