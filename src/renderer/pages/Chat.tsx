@@ -348,7 +348,8 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
 
     try {
       // Build provider env from current provider config
-      const providerEnv = currentProvider ? {
+      // For subscription type, don't send providerEnv (use SDK's default auth)
+      const providerEnv = currentProvider && currentProvider.type !== 'subscription' ? {
         baseUrl: currentProvider.config.baseUrl,
         apiKey: apiKeys[currentProvider.id], // Get from stored apiKeys, not provider object
         authType: currentProvider.authType,
