@@ -277,7 +277,7 @@ export default function Markdown({ children, compact = false, preserveNewlines =
   const processedContent = preprocessContent(children);
 
   return (
-    <div className={compact ? 'text-sm' : 'text-base'}>
+    <div className={`break-words ${compact ? 'text-sm' : 'text-base'}`}>
       <ReactMarkdown
         remarkPlugins={preserveNewlines ? REMARK_PLUGINS_WITH_BREAKS : REMARK_PLUGINS_DEFAULT}
         rehypePlugins={REHYPE_PLUGINS}
