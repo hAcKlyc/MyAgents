@@ -1,5 +1,5 @@
 
-import { AlertCircle, Brain, ChevronDown, Loader2 } from 'lucide-react';
+import { AlertCircle, Brain, ChevronDown, Loader2, XCircle, StopCircle } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import Markdown from '@/components/Markdown';
@@ -127,11 +127,17 @@ export default function ProcessRow({
     let subLabel = '';
 
     if (isThinking) {
+        const durationSec = block.thinkingDurationMs ? Math.round(block.thinkingDurationMs / 1000) : 0;
         if (isThinkingActive) {
             mainLabel = '思考中…';
             icon = <Loader2 className="size-4 animate-spin" />;
+        } else if (block.isFailed) {
+            mainLabel = durationSec > 0 ? `思考失败 (${durationSec}s)` : '思考失败';
+            icon = <XCircle className="size-4 text-[var(--error)]" />;
+        } else if (block.isStopped) {
+            mainLabel = durationSec > 0 ? `思考中断 (${durationSec}s)` : '思考中断';
+            icon = <StopCircle className="size-4 text-[var(--warning)]" />;
         } else {
-            const durationSec = block.thinkingDurationMs ? Math.round(block.thinkingDurationMs / 1000) : 0;
             mainLabel = durationSec > 0 ? `思考了 ${durationSec}s` : '思考完成';
             icon = <Brain className="size-4" />;
         }
@@ -144,6 +150,10 @@ export default function ProcessRow({
 
         if (isToolActive) {
             icon = <Loader2 className="size-4 animate-spin" />;
+        } else if (block.tool.isFailed) {
+            icon = <XCircle className="size-4 text-[var(--error)]" />;
+        } else if (block.tool.isStopped) {
+            icon = <StopCircle className="size-4 text-[var(--warning)]" />;
         } else if (block.tool.isError) {
             icon = <AlertCircle className="size-4 text-[var(--error)]" />;
         } else {
@@ -163,9 +173,13 @@ export default function ProcessRow({
                 {/* Left indicator dot - smaller */}
                 <div className={`flex size-1.5 shrink-0 rounded-full ${isBlockActive
                     ? 'bg-[var(--warning)] animate-pulse'
-                    : isThinking
-                        ? 'bg-[var(--accent-cool)]'
-                        : 'bg-[var(--ink-muted)]/40'
+                    : block.isFailed || block.tool?.isFailed
+                        ? 'bg-[var(--error)]'
+                        : block.isStopped || block.tool?.isStopped
+                            ? 'bg-[var(--warning)]'
+                            : isThinking
+                                ? 'bg-[var(--accent-cool)]'
+                                : 'bg-[var(--ink-muted)]/40'
                     }`} />
 
                 {/* Icon - fixed size container */}

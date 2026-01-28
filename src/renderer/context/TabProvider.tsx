@@ -297,6 +297,43 @@ export default function TabProvider({
         };
     }, [appendUnifiedLog]);
 
+    // Helper: Mark all incomplete thinking/tool blocks as finished (stopped or failed)
+    const markIncompleteBlocksAsFinished = useCallback((status: 'stopped' | 'failed') => {
+        setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'assistant' || typeof last.content === 'string') return prev;
+            const hasIncomplete = last.content.some(b =>
+                (b.type === 'thinking' && !b.isComplete) ||
+                (b.type === 'tool_use' && b.tool?.isLoading)
+            );
+            if (!hasIncomplete) return prev;
+            const updatedContent = last.content.map(block => {
+                if (block.type === 'thinking' && !block.isComplete) {
+                    return {
+                        ...block,
+                        isComplete: true,
+                        ...(status === 'stopped' ? { isStopped: true } : { isFailed: true }),
+                        thinkingDurationMs: block.thinkingStartedAt
+                            ? Date.now() - block.thinkingStartedAt
+                            : undefined
+                    };
+                }
+                if (block.type === 'tool_use' && block.tool?.isLoading) {
+                    return {
+                        ...block,
+                        tool: {
+                            ...block.tool,
+                            isLoading: false,
+                            ...(status === 'stopped' ? { isStopped: true } : { isFailed: true })
+                        }
+                    };
+                }
+                return block;
+            });
+            return [...prev.slice(0, -1), { ...last, content: updatedContent }];
+        });
+    }, []);
+
     // Handle SSE events
     const handleSseEvent = useCallback((eventName: string, data: unknown) => {
         switch (eventName) {
@@ -622,6 +659,8 @@ export default function TabProvider({
                     clearTimeout(stopTimeoutRef.current);
                     stopTimeoutRef.current = null;
                 }
+                // Mark all incomplete thinking blocks and tool_use blocks as stopped
+                markIncompleteBlocksAsFinished('stopped');
                 break;
             }
 
@@ -633,6 +672,8 @@ export default function TabProvider({
                     clearTimeout(stopTimeoutRef.current);
                     stopTimeoutRef.current = null;
                 }
+                // Mark all incomplete thinking blocks and tool_use blocks as failed
+                markIncompleteBlocksAsFinished('failed');
                 break;
             }
 
@@ -787,7 +828,7 @@ export default function TabProvider({
                 }
             }
         }
-    }, [appendLog, appendUnifiedLog, tabId]);
+    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished]);
 
     // Connect SSE
     const connectSse = useCallback(async () => {
