@@ -3,7 +3,8 @@
  * Extracted from SkillsCommandsList and GlobalSkillsPanel to avoid duplication
  */
 import React, { useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, FolderOpen } from 'lucide-react';
+import { isTauriEnvironment } from '@/utils/browserMock';
 
 interface CreateDialogProps {
     title: string;
@@ -79,6 +80,8 @@ export function CreateDialog({
 interface NewSkillChooserProps {
     onWriteSkill: () => void;
     onUploadSkill: (file: File) => void;
+    /** Import skill from a folder path (Tauri only) */
+    onImportFolder?: (folderPath: string) => void;
     onCancel: () => void;
     /** Optional: sync from Claude Code functionality */
     syncConfig?: {
@@ -91,6 +94,7 @@ interface NewSkillChooserProps {
 export function NewSkillChooser({
     onWriteSkill,
     onUploadSkill,
+    onImportFolder,
     onCancel,
     syncConfig
 }: NewSkillChooserProps) {
@@ -110,6 +114,26 @@ export function NewSkillChooser({
         e.target.value = '';
     };
 
+    const handleFolderClick = async () => {
+        if (!onImportFolder) return;
+
+        try {
+            // Use Tauri dialog to select folder
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const selected = await open({
+                directory: true,
+                multiple: false,
+                title: '选择技能文件夹（需包含 SKILL.md）',
+            });
+
+            if (selected && typeof selected === 'string') {
+                onImportFolder(selected);
+            }
+        } catch (err) {
+            console.error('[SkillDialogs] Failed to open folder dialog:', err);
+        }
+    };
+
     const handleSyncClick = async () => {
         if (!syncConfig) return;
         setSyncing(true);
@@ -119,6 +143,9 @@ export function NewSkillChooser({
             setSyncing(false);
         }
     };
+
+    // Check if folder import is available (Tauri environment + handler provided)
+    const canImportFolder = isTauriEnvironment() && !!onImportFolder;
 
     return (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
@@ -172,6 +199,23 @@ export function NewSkillChooser({
                             <p className="mt-0.5 text-sm text-[var(--ink-muted)]">导入 .zip、.skill 或 .md 文件</p>
                         </div>
                     </button>
+
+                    {/* Import Folder Option - Only show in Tauri environment */}
+                    {canImportFolder && (
+                        <button
+                            type="button"
+                            onClick={handleFolderClick}
+                            className="group flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 text-left transition-all hover:border-[var(--line-strong)] hover:shadow-sm"
+                        >
+                            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--paper-contrast)] transition-colors group-hover:bg-[var(--paper-inset)]">
+                                <FolderOpen className="h-6 w-6 text-[var(--ink-muted)]" />
+                            </div>
+                            <div>
+                                <div className="font-medium text-[var(--ink)]">导入文件夹</div>
+                                <p className="mt-0.5 text-sm text-[var(--ink-muted)]">选择包含 SKILL.md 的技能文件夹</p>
+                            </div>
+                        </button>
+                    )}
 
                     {/* Sync from Claude Code Option - Only show when configured and has syncable skills */}
                     {syncConfig?.canSync && (

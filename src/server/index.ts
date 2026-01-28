@@ -2492,6 +2492,11 @@ async function main() {
           const ext = extname(payload.filename).toLowerCase();
           const baseDir = payload.scope === 'user' ? userSkillsBaseDir : projectSkillsBaseDir;
 
+          // Validate target directory is available
+          if (!baseDir) {
+            return jsonResponse({ success: false, error: '请先设置工作目录' }, 400);
+          }
+
           // Decode base64 content to buffer
           const fileBuffer = Buffer.from(payload.content, 'base64');
 
@@ -2636,6 +2641,110 @@ async function main() {
           console.error('[api/skill/upload] Error:', error);
           return jsonResponse(
             { success: false, error: error instanceof Error ? error.message : 'Failed to upload skill' },
+            500
+          );
+        }
+      }
+
+      // POST /api/skill/import-folder - Import skill from a local folder path (Tauri only)
+      if (pathname === '/api/skill/import-folder' && request.method === 'POST') {
+        try {
+          const payload = await request.json() as {
+            folderPath: string;
+            scope: 'user' | 'project';
+          };
+
+          if (!payload.folderPath) {
+            return jsonResponse({ success: false, error: 'Folder path is required' }, 400);
+          }
+
+          const sourcePath = payload.folderPath;
+          const baseDir = payload.scope === 'user' ? userSkillsBaseDir : projectSkillsBaseDir;
+
+          // Validate target directory is available
+          if (!baseDir) {
+            return jsonResponse({ success: false, error: '请先设置工作目录' }, 400);
+          }
+
+          // Validate source folder exists
+          if (!existsSync(sourcePath)) {
+            return jsonResponse({ success: false, error: '指定的文件夹不存在' }, 400);
+          }
+
+          // Check if it's a directory
+          try {
+            const stats = statSync(sourcePath);
+            if (!stats.isDirectory()) {
+              return jsonResponse({ success: false, error: '指定的路径不是文件夹' }, 400);
+            }
+          } catch {
+            return jsonResponse({ success: false, error: '无法读取文件夹信息' }, 400);
+          }
+
+          // Check for SKILL.md at root
+          const skillMdPath = join(sourcePath, 'SKILL.md');
+          if (!existsSync(skillMdPath)) {
+            return jsonResponse({ success: false, error: '文件夹中未找到 SKILL.md 文件' }, 400);
+          }
+
+          // Read SKILL.md to get the skill name
+          const skillMdContent = readFileSync(skillMdPath, 'utf-8');
+          let folderName = basename(sourcePath);
+
+          // Try to extract name from SKILL.md frontmatter
+          try {
+            const parsed = parseFullSkillContent(skillMdContent);
+            if (parsed.frontmatter.name) {
+              folderName = parsed.frontmatter.name;
+            }
+          } catch {
+            // Use folder name as fallback
+          }
+
+          // Sanitize folder name
+          folderName = sanitizeFolderName(folderName);
+          const targetDir = join(baseDir, folderName);
+
+          // Check if skill already exists
+          if (existsSync(targetDir)) {
+            return jsonResponse({ success: false, error: `技能 "${folderName}" 已存在` }, 409);
+          }
+
+          // Copy folder recursively
+          const copyDir = (src: string, dest: string) => {
+            mkdirSync(dest, { recursive: true });
+            const entries = readdirSync(src);
+
+            for (const entry of entries) {
+              // Skip hidden files and __MACOSX
+              if (entry.startsWith('.') || entry === '__MACOSX') continue;
+
+              const srcPath = join(src, entry);
+              const destPath = join(dest, entry);
+              const stats = statSync(srcPath);
+
+              if (stats.isDirectory()) {
+                copyDir(srcPath, destPath);
+              } else {
+                // Copy file
+                copyFileSync(srcPath, destPath);
+              }
+            }
+          };
+
+          copyDir(sourcePath, targetDir);
+
+          return jsonResponse({
+            success: true,
+            folderName,
+            path: targetDir,
+            message: `已成功导入技能 "${folderName}"`
+          });
+
+        } catch (error) {
+          console.error('[api/skill/import-folder] Error:', error);
+          return jsonResponse(
+            { success: false, error: error instanceof Error ? error.message : 'Failed to import skill folder' },
             500
           );
         }
