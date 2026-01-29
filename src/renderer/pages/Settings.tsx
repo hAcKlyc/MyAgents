@@ -97,10 +97,14 @@ const ModelTagList = React.memo(function ModelTagList({
     provider,
     removedModels,
     onRemove,
+    customModels,
+    onRemoveCustomModel,
 }: {
     provider: Provider;
     removedModels: string[];
     onRemove: (modelId: string) => void;
+    customModels: string[];           // Newly added models (not yet saved)
+    onRemoveCustomModel: (modelId: string) => void;
 }) {
     // For preset providers, determine which models are preset vs user-added
     const presetModelIds = useMemo(() => {
@@ -116,6 +120,7 @@ const ModelTagList = React.memo(function ModelTagList({
 
     return (
         <>
+            {/* Existing saved models */}
             {visibleModels.map((model) => {
                 const isPresetModel = presetModelIds.has(model.model);
                 const canDelete = !isPresetModel;
@@ -144,6 +149,22 @@ const ModelTagList = React.memo(function ModelTagList({
                     </div>
                 );
             })}
+            {/* Newly added models (not yet saved) */}
+            {customModels.map((model) => (
+                <div
+                    key={`custom-${model}`}
+                    className="group flex items-center gap-1 rounded-md bg-[var(--paper-contrast)] px-2 py-1 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper-inset)]"
+                >
+                    <span>{model}</span>
+                    <button
+                        type="button"
+                        onClick={() => onRemoveCustomModel(model)}
+                        className="ml-0.5 rounded p-0.5 text-[var(--ink-muted)] opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] group-hover:opacity-100"
+                    >
+                        <X className="h-3 w-3" />
+                    </button>
+                </div>
+            ))}
         </>
     );
 });
@@ -2052,6 +2073,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         provider={editingProvider.provider}
                                         removedModels={editingProvider.removedModels}
                                         onRemove={removeExistingModel}
+                                        customModels={editingProvider.customModels}
+                                        onRemoveCustomModel={removeCustomModelFromProvider}
                                     />
                                 </div>
                             </div>
@@ -2084,26 +2107,6 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         <Plus className="h-4 w-4" />
                                     </button>
                                 </div>
-                                {/* Custom model tags */}
-                                {editingProvider.customModels.length > 0 && (
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {editingProvider.customModels.map((model) => (
-                                            <div
-                                                key={model}
-                                                className="flex items-center gap-1 rounded-md bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)]"
-                                            >
-                                                <span>{model}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeCustomModelFromProvider(model)}
-                                                    className="ml-0.5 rounded p-0.5 text-[var(--accent)] hover:bg-[var(--accent)]/20"
-                                                >
-                                                    <X className="h-3 w-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         </div>
 
