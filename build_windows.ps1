@@ -1,4 +1,4 @@
-# MyAgents Windows 正式发布构建脚本
+﻿# MyAgents Windows 正式发布构建脚本
 # 构建 NSIS 安装包和便携版 ZIP
 # 支持 Windows x64
 
