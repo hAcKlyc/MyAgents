@@ -40,7 +40,8 @@
     "active": true,
     "targets": [
       "dmg",
-      "app"
+      "app",
+      "nsis"
     ],
     "createUpdaterArtifacts": "v1Compatible",
     "icon": [
@@ -78,6 +79,21 @@
           "width": 660,
           "height": 400
         }
+      }
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "timestampUrl": null,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null,
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
       }
     }
   },

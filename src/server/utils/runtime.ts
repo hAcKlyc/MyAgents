@@ -26,16 +26,41 @@ export function getScriptDir(): string {
 }
 
 /**
+ * Check if running on Windows
+ */
+function isWindows(): boolean {
+  return process.platform === 'win32';
+}
+
+/**
+ * Get the bun executable name based on platform
+ */
+function getBunExecutableName(): string {
+  return isWindows() ? 'bun.exe' : 'bun';
+}
+
+/**
  * Get bundled bun paths inside the app bundle.
  * These are the primary paths we check first.
  */
 function getBundledBunPaths(): string[] {
   const scriptDir = getScriptDir();
+  const bunExe = getBunExecutableName();
+
+  if (isWindows()) {
+    // Windows: bun.exe is in the same directory as the main executable
+    // scriptDir = .../<app>/resources (where server-dist.js is)
+    // Bun should be at .../<app>/bun.exe or .../<app>/bun-x86_64-pc-windows-msvc.exe
+    return [
+      resolve(scriptDir, '..', bunExe),
+      resolve(scriptDir, '..', 'bun-x86_64-pc-windows-msvc.exe'),
+    ];
+  }
+
+  // macOS: bun is in Contents/MacOS
+  // In bundled app: scriptDir = .../Contents/Resources
+  // So MacOS is at .../Contents/MacOS
   return [
-    // In bundled app: scriptDir = .../Contents/Resources
-    // So MacOS is at .../Contents/MacOS
-    scriptDir.replace('/Resources', '/MacOS') + '/bun',
-    // Use resolve() to normalize the path
     resolve(scriptDir, '..', 'MacOS', 'bun'),
   ];
 }
@@ -44,20 +69,39 @@ function getBundledBunPaths(): string[] {
  * Get system bun paths (user-installed).
  */
 function getSystemBunPaths(): string[] {
-  const homeDir = process.env.HOME;
   const paths: string[] = [];
 
-  // User's bun installation
-  if (homeDir) {
-    paths.push(`${homeDir}/.bun/bin/bun`);
+  if (isWindows()) {
+    // Windows paths
+    const userProfile = process.env.USERPROFILE;
+    const localAppData = process.env.LOCALAPPDATA;
+    const programFiles = process.env.PROGRAMFILES;
+
+    if (userProfile) {
+      paths.push(resolve(userProfile, '.bun', 'bin', 'bun.exe'));
+    }
+    if (localAppData) {
+      paths.push(resolve(localAppData, 'bun', 'bin', 'bun.exe'));
+    }
+    if (programFiles) {
+      paths.push(resolve(programFiles, 'bun', 'bun.exe'));
+    }
+  } else {
+    // Unix paths (macOS/Linux)
+    const homeDir = process.env.HOME;
+
+    // User's bun installation
+    if (homeDir) {
+      paths.push(`${homeDir}/.bun/bin/bun`);
+    }
+
+    // macOS Homebrew paths
+    paths.push('/opt/homebrew/bin/bun');
+
+    // Linux paths
+    paths.push('/usr/local/bin/bun');
+    paths.push('/usr/bin/bun');
   }
-
-  // macOS Homebrew paths
-  paths.push('/opt/homebrew/bin/bun');
-
-  // Linux paths
-  paths.push('/usr/local/bin/bun');
-  paths.push('/usr/bin/bun');
 
   return paths;
 }
@@ -66,6 +110,15 @@ function getSystemBunPaths(): string[] {
  * Get system node paths (user-installed).
  */
 function getSystemNodePaths(): string[] {
+  if (isWindows()) {
+    const programFiles = process.env.PROGRAMFILES;
+    const paths: string[] = [];
+    if (programFiles) {
+      paths.push(resolve(programFiles, 'nodejs', 'node.exe'));
+    }
+    return paths;
+  }
+
   return [
     '/opt/homebrew/bin/node',
     '/usr/local/bin/node',
@@ -77,6 +130,15 @@ function getSystemNodePaths(): string[] {
  * Get system npm paths (user-installed).
  */
 function getSystemNpmPaths(): string[] {
+  if (isWindows()) {
+    const programFiles = process.env.PROGRAMFILES;
+    const paths: string[] = [];
+    if (programFiles) {
+      paths.push(resolve(programFiles, 'nodejs', 'npm.cmd'));
+    }
+    return paths;
+  }
+
   return [
     '/opt/homebrew/bin/npm',
     '/usr/local/bin/npm',
@@ -100,9 +162,12 @@ function findExistingPath(paths: string[]): string | null {
  * Check if a path is a bun executable (not just contains 'bun' in path).
  */
 export function isBunRuntime(runtimePath: string): boolean {
-  // Check if the executable name is 'bun'
-  const execName = runtimePath.split('/').pop() || '';
-  return execName === 'bun';
+  // Get the executable name from the path (handle both / and \ separators)
+  const separator = isWindows() ? /[\\/]/ : /\//;
+  const parts = runtimePath.split(separator);
+  const execName = (parts.pop() || '').toLowerCase();
+  // Check if the executable name is 'bun' or 'bun.exe' or starts with 'bun-'
+  return execName === 'bun' || execName === 'bun.exe' || execName.startsWith('bun-');
 }
 
 /**
