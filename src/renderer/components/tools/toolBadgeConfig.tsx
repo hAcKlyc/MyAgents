@@ -292,17 +292,17 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
           iconColor: 'text-indigo-500 dark:text-indigo-400'
         }
       };
-    // Skills - Pink/Rose
+    // Skills - Sky blue (friendly, non-error)
     case 'Skill':
       return {
         icon: <Sparkles className="size-2.5" />,
         colors: {
-          border: 'border-rose-200/60 dark:border-rose-500/30',
-          bg: 'bg-rose-50/80 dark:bg-rose-500/10',
-          text: 'text-rose-600 dark:text-rose-400',
-          hoverBg: 'hover:bg-rose-100/80 dark:hover:bg-rose-500/20',
-          chevron: 'text-rose-400 dark:text-rose-500',
-          iconColor: 'text-rose-500 dark:text-rose-400'
+          border: 'border-sky-200/60 dark:border-sky-500/30',
+          bg: 'bg-sky-50/80 dark:bg-sky-500/10',
+          text: 'text-sky-600 dark:text-sky-400',
+          hoverBg: 'hover:bg-sky-100/80 dark:hover:bg-sky-500/20',
+          chevron: 'text-sky-400 dark:text-sky-500',
+          iconColor: 'text-sky-500 dark:text-sky-400'
         }
       };
     // Notebook - Teal
