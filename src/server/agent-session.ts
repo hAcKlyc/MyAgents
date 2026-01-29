@@ -1645,20 +1645,32 @@ function clearMessageState(): void {
 
 /**
  * Reset the current session for "new conversation" functionality
- * This stops any ongoing response and clears all message state
+ * This FULLY terminates the SDK session and clears all state
  * Call this from frontend when user clicks "新对话"
+ *
+ * IMPORTANT: Must properly terminate SDK session to prevent context leakage.
+ * Simply interrupting is not enough - we must wait for the session to fully end.
  */
 export async function resetSession(): Promise<void> {
   console.log('[agent] resetSession: starting new conversation');
 
-  // 1. Interrupt any ongoing response
-  if (querySession) {
-    try {
-      await querySession.interrupt();
-      console.log('[agent] resetSession: interrupted ongoing response');
-    } catch (error) {
-      console.warn('[agent] resetSession: interrupt failed (may already be stopped):', error);
+  // 1. Properly terminate the SDK session (same pattern as switchToSession)
+  // Must set shouldAbortSession so the messageGenerator exits its polling loop
+  if (querySession || sessionTerminationPromise) {
+    console.log('[agent] resetSession: terminating existing SDK session');
+    shouldAbortSession = true;
+    messageQueue.length = 0; // Clear queue so old session doesn't pick up stale messages
+
+    // Wait for the session to fully terminate
+    if (sessionTerminationPromise) {
+      try {
+        await sessionTerminationPromise;
+        console.log('[agent] resetSession: SDK session terminated');
+      } catch (error) {
+        console.warn('[agent] resetSession: session termination error:', error);
+      }
     }
+    querySession = null;
   }
 
   // 2. Clear all message state (shared with initializeAgent)
@@ -1668,13 +1680,23 @@ export async function resetSession(): Promise<void> {
   sessionId = randomUUID();
   hasInitialPrompt = false; // Reset so first message creates a new session in SessionStore
 
-  // 4. Reset session state
+  // 4. Clear SDK resume state - CRITICAL: prevents SDK from resuming old context!
+  resumeSessionId = undefined;
+  systemInitInfo = null; // Clear old system info so new session gets fresh init
+
+  // 5. Clear SDK ready signal state (same as switchToSession)
+  sdkReadyResolve = null;
+  sdkReadyPromise = null;
+
+  // 7. Reset processing state
+  shouldAbortSession = false;
+  isProcessing = false;
   setSessionState('idle');
 
-  // 5. Clear session-scoped permissions
+  // 8. Clear session-scoped permissions
   clearSessionPermissions();
 
-  // 6. Broadcast empty state to frontend
+  // 9. Broadcast empty state to frontend
   broadcast('chat:init', { agentDir, sessionState: 'idle', hasInitialPrompt: false });
 
   console.log('[agent] resetSession: complete, new sessionId=' + sessionId);
