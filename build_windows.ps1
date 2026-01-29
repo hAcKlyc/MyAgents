@@ -141,7 +141,8 @@ try {
 
     $conf = Get-Content $TauriConfPath -Raw | ConvertFrom-Json
     $conf.app.security.csp = "default-src 'self' ipc: tauri:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: blob:;"
-    $conf | ConvertTo-Json -Depth 10 | Set-Content $TauriConfPath -Encoding UTF8
+    $jsonContent = $conf | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($TauriConfPath, $jsonContent, [System.Text.UTF8Encoding]::new($false))
 
     Write-Host "  OK - CSP 已配置" -ForegroundColor Green
     Write-Host ""
