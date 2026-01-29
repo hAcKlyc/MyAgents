@@ -1904,10 +1904,11 @@ async function main() {
       if (pathname === '/api/commands' && request.method === 'GET') {
         try {
           // Start with empty array, builtin commands added at the end
-          // Order: custom commands -> skills -> builtin (so custom can override builtin)
+          // Order: project commands -> user commands -> skills -> builtin (so custom can override builtin)
           const commands: SlashCommand[] = [];
+          const homeDir = process.env.HOME || '/tmp';
 
-          // Read custom commands from .claude/commands/ (project-level)
+          // Read custom commands from .claude/commands/ (project-level) - highest priority
           const claudeCommandsDir = join(currentAgentDir, '.claude', 'commands');
           if (existsSync(claudeCommandsDir)) {
             try {
@@ -1928,6 +1929,30 @@ async function main() {
               }
             } catch (err) {
               console.warn('[api/commands] Error reading .claude/commands:', err);
+            }
+          }
+
+          // Read custom commands from ~/.myagents/commands/ (user-level)
+          const userCommandsDir = join(homeDir, '.myagents', 'commands');
+          if (existsSync(userCommandsDir)) {
+            try {
+              const files = readdirSync(userCommandsDir);
+              for (const file of files) {
+                if (file.endsWith('.md')) {
+                  const filePath = join(userCommandsDir, file);
+                  const content = readFileSync(filePath, 'utf-8');
+                  const { description } = parseYamlFrontmatter(content);
+                  commands.push({
+                    name: extractCommandName(file),
+                    description: description || '',
+                    source: 'custom',
+                    scope: 'user',
+                    path: filePath,
+                  });
+                }
+              }
+            } catch (err) {
+              console.warn('[api/commands] Error reading ~/.myagents/commands:', err);
             }
           }
 
@@ -1969,7 +1994,6 @@ async function main() {
           scanSkillsDir(projectSkillsDir, 'project');
 
           // 2. Scan user-level skills (~/.myagents/skills/) - lower priority
-          const homeDir = process.env.HOME || '/tmp';
           const userSkillsDir = join(homeDir, '.myagents', 'skills');
           scanSkillsDir(userSkillsDir, 'user');
           // ===== END SKILLS SCANNING =====
