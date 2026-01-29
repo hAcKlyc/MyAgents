@@ -1,6 +1,6 @@
 import { Check, KeyRound, Loader2, Plus, RefreshCw, Trash2, X, AlertCircle, Globe, ExternalLink as ExternalLinkIcon, Settings2 } from 'lucide-react';
 import { ExternalLink } from '@/components/ExternalLink';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 
 import { apiGetJson, apiPostJson } from '@/api/apiFetch';
@@ -75,6 +75,7 @@ const EMPTY_CUSTOM_FORM: CustomProviderForm = {
 interface ProviderEditForm {
     provider: Provider;
     customModels: string[];  // 用户添加的自定义模型
+    removedModels: string[]; // 用户标记删除的已保存模型（model ID）
     newModelInput: string;
     // 自定义供应商编辑字段
     editName?: string;
@@ -91,6 +92,62 @@ interface SettingsProps {
 
 const VALID_SECTIONS: SettingsSection[] = ['providers', 'mcp', 'skills', 'about'];
 
+// Memoized component for model tag list to avoid recreating presetModelIds on every render
+const ModelTagList = React.memo(function ModelTagList({
+    provider,
+    removedModels,
+    onRemove,
+}: {
+    provider: Provider;
+    removedModels: string[];
+    onRemove: (modelId: string) => void;
+}) {
+    // For preset providers, determine which models are preset vs user-added
+    const presetModelIds = useMemo(() => {
+        if (!provider.isBuiltin) return new Set<string>();
+        const presetProvider = PRESET_PROVIDERS.find(p => p.id === provider.id);
+        return new Set(presetProvider?.models.map(m => m.model) ?? []);
+    }, [provider.id, provider.isBuiltin]);
+
+    const visibleModels = useMemo(
+        () => provider.models.filter(m => !removedModels.includes(m.model)),
+        [provider.models, removedModels]
+    );
+
+    return (
+        <>
+            {visibleModels.map((model) => {
+                const isPresetModel = presetModelIds.has(model.model);
+                const canDelete = !isPresetModel;
+
+                return (
+                    <div
+                        key={model.model}
+                        className={`group flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--ink)] ${
+                            canDelete
+                                ? 'bg-[var(--paper-contrast)] hover:bg-[var(--paper-inset)]'
+                                : 'bg-[var(--paper-contrast)]'
+                        }`}
+                    >
+                        <span>{model.modelName}</span>
+                        {isPresetModel ? (
+                            <span className="text-[9px] text-[var(--ink-muted)]">预设</span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => onRemove(model.model)}
+                                className="ml-0.5 rounded p-0.5 text-[var(--ink-muted)] opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] group-hover:opacity-100"
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        )}
+                    </div>
+                );
+            })}
+        </>
+    );
+});
+
 export default function Settings({ initialSection, onSectionChange }: SettingsProps) {
     const {
         apiKeys,
@@ -106,6 +163,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         addCustomProvider,
         updateCustomProvider,
         deleteCustomProvider: deleteCustomProviderService,
+        savePresetCustomModels,
+        removePresetCustomModel,
     } = useConfig();
     const toast = useToast();
     // Stabilize toast reference to avoid unnecessary effect re-runs
@@ -805,6 +864,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         setEditingProvider({
             provider,
             customModels: [],  // TODO: Load from persisted custom models if any
+            removedModels: [], // 标记要删除的已保存模型
             newModelInput: '',
             // 为自定义供应商初始化编辑字段
             ...(provider.isBuiltin ? {} : {
@@ -841,15 +901,46 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         });
     };
 
+    // Remove existing (saved) model from editing provider
+    // For custom providers: any model can be removed
+    // For preset providers: only user-added models can be removed (not preset models)
+    const removeExistingModel = (modelId: string) => {
+        if (!editingProvider) return;
+        setEditingProvider({
+            ...editingProvider,
+            removedModels: [...editingProvider.removedModels, modelId],
+        });
+    };
+
     // Save provider edits
     const saveProviderEdits = async () => {
         if (!editingProvider) return;
-        const { provider, customModels, editName, editCloudProvider, editBaseUrl } = editingProvider;
+        const { provider, customModels, removedModels, editName, editCloudProvider, editBaseUrl } = editingProvider;
 
         if (provider.isBuiltin) {
-            // For preset providers, we only add custom models
-            // TODO: Persist custom models for preset providers
-            toast.info('自定义模型已添加');
+            // For preset providers: save user-added custom models
+            // 1. Get existing user-added models (from config.presetCustomModels)
+            const existingCustomModels = config.presetCustomModels?.[provider.id] ?? [];
+            // 2. Filter out removed models
+            const remainingCustomModels = existingCustomModels.filter(m => !removedModels.includes(m.model));
+            // 3. Add newly added models
+            const newCustomModels = customModels.map(m => ({
+                model: m,
+                modelName: m,
+                modelSeries: 'custom' as const,
+            }));
+            const finalCustomModels = [...remainingCustomModels, ...newCustomModels];
+            // 4. Save
+            try {
+                await savePresetCustomModels(provider.id, finalCustomModels);
+                if (customModels.length > 0 || removedModels.length > 0) {
+                    toast.success('模型配置已更新');
+                }
+            } catch (error) {
+                console.error('[Settings] Failed to save preset custom models:', error);
+                toast.error('保存失败');
+                return;
+            }
         } else {
             // 验证必填字段
             if (!editName?.trim() || !editBaseUrl?.trim()) {
@@ -862,6 +953,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                 toast.error('Base URL 必须以 http:// 或 https:// 开头');
                 return;
             }
+            // Filter out removed models from existing list, then add new custom models
+            const remainingModels = provider.models.filter(m => !removedModels.includes(m.model));
+            // Validate: at least one model must remain
+            if (remainingModels.length === 0 && customModels.length === 0) {
+                toast.error('供应商至少需要保留一个模型');
+                return;
+            }
             // For custom providers, update the provider and persist to disk
             const updatedProvider: Provider = {
                 ...provider,
@@ -872,7 +970,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     baseUrl: editBaseUrl.trim(),
                 },
                 models: [
-                    ...provider.models,
+                    ...remainingModels,
                     ...customModels.map((m) => ({
                         model: m,
                         modelName: m,
@@ -1947,20 +2045,14 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             {/* Existing models */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                    {editingProvider.provider.isBuiltin ? '预设模型' : '模型列表'}
+                                    模型列表
                                 </label>
                                 <div className="flex flex-wrap gap-1.5">
-                                    {editingProvider.provider.models.map((model) => (
-                                        <div
-                                            key={model.model}
-                                            className="flex items-center gap-1 rounded-md bg-[var(--paper-contrast)] px-2 py-1 text-xs font-medium text-[var(--ink)]"
-                                        >
-                                            <span>{model.modelName}</span>
-                                            {editingProvider.provider.isBuiltin && (
-                                                <span className="text-[9px] text-[var(--ink-muted)]">预设</span>
-                                            )}
-                                        </div>
-                                    ))}
+                                    <ModelTagList
+                                        provider={editingProvider.provider}
+                                        removedModels={editingProvider.removedModels}
+                                        onRemove={removeExistingModel}
+                                    />
                                 </div>
                             </div>
 

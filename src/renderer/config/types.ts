@@ -181,6 +181,12 @@ export interface AppConfig {
   // Key is provider ID (e.g., 'anthropic-sub', 'deepseek')
   providerVerifyStatus?: Record<string, ProviderVerifyStatus>;
 
+  // ===== Provider Custom Models =====
+  // User-added custom models for preset providers (key = provider ID)
+  // These are merged with preset models at runtime, allowing users to add models
+  // while keeping preset definitions unchanged (updated with app releases)
+  presetCustomModels?: Record<string, ModelEntity[]>;
+
   // ===== MCP Configuration =====
   // Custom MCP servers added by user (merged with presets)
   mcpServers?: McpServerDefinition[];
