@@ -301,6 +301,15 @@ body::before {
   box-shadow: none;
 }
 
+/* Global button cursor - all buttons should show pointer on hover */
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 /* Custom scrollbar styling - cross-platform */
 * {
   scrollbar-width: thin;
