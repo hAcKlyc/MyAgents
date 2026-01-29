@@ -659,6 +659,7 @@ export default function TabProvider({
             case 'chat:message-complete': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle
                 setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
                 // Defensively mark any remaining incomplete thinking/tool blocks as complete.
                 // Normally content_block_stop handles this, but third-party providers may not
@@ -670,6 +671,7 @@ export default function TabProvider({
             case 'chat:message-stopped': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle
                 setSystemStatus(null);  // Clear system status when user stops response
                 // Clear stop timeout since we received confirmation
                 if (stopTimeoutRef.current) {
@@ -684,6 +686,7 @@ export default function TabProvider({
             case 'chat:message-error': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle on error
                 setSystemStatus(null);  // Clear system status on error
                 // Clear stop timeout on error too
                 if (stopTimeoutRef.current) {
