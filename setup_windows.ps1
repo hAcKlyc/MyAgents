@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     MyAgents Windows 开发环境初始化脚本
 .DESCRIPTION
