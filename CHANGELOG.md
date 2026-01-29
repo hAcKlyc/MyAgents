@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.5] - 2026-01-29
+
+### Added
+- 添加网络代理设置功能（开发者模式）
+  - 支持 HTTP/SOCKS5 协议
+  - 设置入口：设置 → 关于 → 点击 Logo 5次 → 开发者区域
+  - Sidecar 启动时自动注入 HTTP_PROXY/HTTPS_PROXY 环境变量
+
+### Changed
+- 升级 Claude Agent SDK 从 0.2.7 到 0.2.23
+- 建立 E2E 测试基础设施（Anthropic/Moonshot 双供应商测试）
+- 统一 `/api/commands` 端点的命令解析逻辑
+  - 使用 `parseFullCommandContent()` 替代 `parseYamlFrontmatter()`
+  - 优先使用 frontmatter.name，回退到文件名
+  - 提取 `scanCommandsDir()` 消除代码重复
+- 统一版本记录到 CHANGELOG.md（移除 specs/version.md）
+
+### Fixed
+- 修复全局用户指令在对话 `/` 菜单中不显示的问题
+  - `/api/commands` 端点新增扫描 `~/.myagents/commands/` 目录
+
+### Technical
+- 代理设置提取 `PROXY_DEFAULTS` 常量，消除魔数
+- 添加 `isValidProxyHost()` 验证函数
+- Rust 侧同步添加默认值常量
+
+---
+
 ## [0.1.4] - 2026-01-29
 
 ### Added
