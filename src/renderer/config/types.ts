@@ -170,6 +170,24 @@ export function isVerifyExpired(verifiedAt: string): boolean {
 export type ProxyProtocol = 'http' | 'socks5';
 
 /**
+ * Network proxy default values
+ */
+export const PROXY_DEFAULTS = {
+  protocol: 'http' as ProxyProtocol,
+  host: '127.0.0.1',
+  port: 7897,
+} as const;
+
+/**
+ * Validate proxy host (localhost, IP address, or hostname)
+ */
+export function isValidProxyHost(host: string): boolean {
+  if (!host || host.length > 253) return false;
+  // localhost, IPv4, or valid hostname
+  return /^(localhost|(\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9][-a-zA-Z0-9]*(\.[a-zA-Z0-9][-a-zA-Z0-9]*)*)$/.test(host);
+}
+
+/**
  * Network proxy settings (developer feature)
  */
 export interface ProxySettings {

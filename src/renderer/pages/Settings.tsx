@@ -19,6 +19,8 @@ import {
     type McpInstallState,
     isVerifyExpired,
     SUBSCRIPTION_PROVIDER_ID,
+    PROXY_DEFAULTS,
+    isValidProxyHost,
 } from '@/config/types';
 import {
     getAllMcpServers,
@@ -1370,9 +1372,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                         updateConfig({
                                                             proxySettings: {
                                                                 enabled: !current?.enabled,
-                                                                protocol: current?.protocol || 'http',
-                                                                host: current?.host || '127.0.0.1',
-                                                                port: current?.port || 7897,
+                                                                protocol: current?.protocol || PROXY_DEFAULTS.protocol,
+                                                                host: current?.host || PROXY_DEFAULTS.host,
+                                                                port: current?.port || PROXY_DEFAULTS.port,
                                                             }
                                                         });
                                                     }}
@@ -1391,7 +1393,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                     <div className="flex items-center gap-3">
                                                         <label className="w-16 text-xs text-[var(--ink-muted)]">协议</label>
                                                         <select
-                                                            value={config.proxySettings?.protocol || 'http'}
+                                                            value={config.proxySettings?.protocol || PROXY_DEFAULTS.protocol}
                                                             onChange={(e) => {
                                                                 updateConfig({
                                                                     proxySettings: {
@@ -1412,16 +1414,21 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                         <label className="w-16 text-xs text-[var(--ink-muted)]">服务器</label>
                                                         <input
                                                             type="text"
-                                                            value={config.proxySettings?.host || '127.0.0.1'}
+                                                            value={config.proxySettings?.host || PROXY_DEFAULTS.host}
                                                             onChange={(e) => {
-                                                                updateConfig({
-                                                                    proxySettings: {
-                                                                        ...config.proxySettings!,
-                                                                        host: e.target.value,
-                                                                    }
-                                                                });
+                                                                const host = e.target.value.trim();
+                                                                // Allow typing (validate on blur or save)
+                                                                // Only update if valid or empty (will use default)
+                                                                if (host === '' || isValidProxyHost(host)) {
+                                                                    updateConfig({
+                                                                        proxySettings: {
+                                                                            ...config.proxySettings!,
+                                                                            host: host || PROXY_DEFAULTS.host,
+                                                                        }
+                                                                    });
+                                                                }
                                                             }}
-                                                            placeholder="127.0.0.1"
+                                                            placeholder={PROXY_DEFAULTS.host}
                                                             className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
                                                         />
                                                     </div>
@@ -1431,10 +1438,23 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                         <label className="w-16 text-xs text-[var(--ink-muted)]">端口</label>
                                                         <input
                                                             type="number"
-                                                            value={config.proxySettings?.port || 7897}
+                                                            min={1}
+                                                            max={65535}
+                                                            value={config.proxySettings?.port || PROXY_DEFAULTS.port}
                                                             onChange={(e) => {
-                                                                const port = parseInt(e.target.value, 10);
-                                                                if (!isNaN(port) && port > 0 && port <= 65535) {
+                                                                const value = e.target.value;
+                                                                // Empty input: restore default
+                                                                if (value === '') {
+                                                                    updateConfig({
+                                                                        proxySettings: {
+                                                                            ...config.proxySettings!,
+                                                                            port: PROXY_DEFAULTS.port,
+                                                                        }
+                                                                    });
+                                                                    return;
+                                                                }
+                                                                const port = parseInt(value, 10);
+                                                                if (!isNaN(port) && port >= 1 && port <= 65535) {
                                                                     updateConfig({
                                                                         proxySettings: {
                                                                             ...config.proxySettings!,
@@ -1443,7 +1463,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                                     });
                                                                 }
                                                             }}
-                                                            placeholder="7897"
+                                                            placeholder={String(PROXY_DEFAULTS.port)}
                                                             className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
                                                         />
                                                     </div>
@@ -1452,7 +1472,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                     <div className="mt-2 rounded-lg bg-[var(--paper-inset)] px-3 py-2">
                                                         <span className="text-xs text-[var(--ink-muted)]">代理地址: </span>
                                                         <code className="text-xs font-mono text-[var(--ink)]">
-                                                            {config.proxySettings?.protocol || 'http'}://{config.proxySettings?.host || '127.0.0.1'}:{config.proxySettings?.port || 7897}
+                                                            {config.proxySettings?.protocol || PROXY_DEFAULTS.protocol}://{config.proxySettings?.host || PROXY_DEFAULTS.host}:{config.proxySettings?.port || PROXY_DEFAULTS.port}
                                                         </code>
                                                     </div>
 

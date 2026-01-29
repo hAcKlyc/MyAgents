@@ -87,6 +87,12 @@ pub const GLOBAL_SIDECAR_ID: &str = "__global__";
 // This marker is added to all sidecar commands for reliable process identification
 const SIDECAR_MARKER: &str = "--myagents-sidecar";
 
+// ===== Proxy Configuration =====
+// Default values (must match TypeScript PROXY_DEFAULTS in types.ts)
+const DEFAULT_PROXY_PROTOCOL: &str = "http";
+const DEFAULT_PROXY_HOST: &str = "127.0.0.1";
+const DEFAULT_PROXY_PORT: u16 = 7897;
+
 /// Proxy settings from ~/.myagents/config.json
 #[derive(Debug, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -117,9 +123,9 @@ fn read_proxy_settings() -> Option<ProxySettings> {
 
 /// Get proxy URL string from settings
 fn get_proxy_url(settings: &ProxySettings) -> String {
-    let protocol = settings.protocol.as_deref().unwrap_or("http");
-    let host = settings.host.as_deref().unwrap_or("127.0.0.1");
-    let port = settings.port.unwrap_or(7897);
+    let protocol = settings.protocol.as_deref().unwrap_or(DEFAULT_PROXY_PROTOCOL);
+    let host = settings.host.as_deref().unwrap_or(DEFAULT_PROXY_HOST);
+    let port = settings.port.unwrap_or(DEFAULT_PROXY_PORT);
 
     format!("{}://{}:{}", protocol, host, port)
 }
