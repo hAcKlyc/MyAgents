@@ -1088,7 +1088,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                         type="button"
                         onClick={() => verifyProvider(provider, apiKeys[provider.id])}
                         disabled={isLoading}
-                        className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] disabled:opacity-50"
+                        className="flex h-10 w-10 items-center justify-center cursor-pointer rounded-lg text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] disabled:opacity-50"
                         title="重新验证"
                     >
                         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -1115,7 +1115,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     {config.showDevTools && (
                         <button
                             onClick={() => setShowLogs(true)}
-                            className="rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
+                            className="cursor-pointer rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
                             title="查看 Rust 日志"
                         >
                             Logs
@@ -1126,7 +1126,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                 <nav className="space-y-1">
                     <button
                         onClick={() => setActiveSection('providers')}
-                        className={`w-full rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'providers'
+                        className={`w-full cursor-pointer rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'providers'
                             ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'
                             : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
                             }`}
@@ -1135,7 +1135,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     </button>
                     <button
                         onClick={() => setActiveSection('skills')}
-                        className={`w-full rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'skills'
+                        className={`w-full cursor-pointer rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'skills'
                             ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'
                             : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
                             }`}
@@ -1144,7 +1144,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     </button>
                     <button
                         onClick={() => setActiveSection('mcp')}
-                        className={`w-full rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'mcp'
+                        className={`w-full cursor-pointer rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'mcp'
                             ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'
                             : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
                             }`}
@@ -1153,7 +1153,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     </button>
                     <button
                         onClick={() => setActiveSection('about')}
-                        className={`w-full rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'about'
+                        className={`w-full cursor-pointer rounded-lg px-3 py-2.5 text-left text-[15px] font-medium transition-colors ${activeSection === 'about'
                             ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'
                             : 'text-[var(--ink-muted)] hover:text-[var(--ink)]'
                             }`}
@@ -1259,7 +1259,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 </div>
                                                 <button
                                                     onClick={() => updateConfig({ showDevTools: !config.showDevTools })}
-                                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${config.showDevTools ? 'bg-[var(--success)]' : 'bg-[var(--paper-inset)]'
+                                                    className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${config.showDevTools ? 'bg-[var(--success)]' : 'bg-[var(--paper-inset)]'
                                                         }`}
                                                 >
                                                     <span
@@ -1337,7 +1337,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             {updateStatus === 'ready' ? (
                                                 <button
                                                     onClick={handleRestartUpdate}
-                                                    className="rounded-lg bg-[var(--success)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90"
+                                                    className="cursor-pointer rounded-lg bg-[var(--success)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90"
                                                 >
                                                     重启并更新
                                                 </button>
@@ -1345,7 +1345,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 <button
                                                     onClick={handleCheckUpdate}
                                                     disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
-                                                    className="rounded-lg bg-[var(--paper-inset)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-strong)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    className="cursor-pointer rounded-lg bg-[var(--paper-inset)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-strong)] disabled:opacity-50 disabled:cursor-not-allowed"
                                                 >
                                                     {updateStatus === 'checking' && '检查中...'}
                                                     {updateStatus === 'downloading' && '下载中...'}
@@ -1365,7 +1365,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 <h2 className="text-lg font-semibold text-[var(--ink)]">模型供应商</h2>
                                 <button
                                     onClick={() => setShowCustomForm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
+                                    className="flex items-center gap-1.5 cursor-pointer rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
                                 >
                                     <Plus className="h-3.5 w-3.5" />
                                     添加
@@ -1398,7 +1398,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             </div>
                                             <button
                                                 onClick={() => openProviderManage(provider)}
-                                                className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
+                                                className="cursor-pointer rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
                                                 title="管理"
                                             >
                                                 <Settings2 className="h-4 w-4" />
@@ -1487,7 +1487,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 <h2 className="text-lg font-semibold text-[var(--ink)]">工具 & MCP</h2>
                                 <button
                                     onClick={() => setShowMcpForm(true)}
-                                    className="flex items-center gap-1.5 rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
+                                    className="flex items-center gap-1.5 cursor-pointer rounded-lg bg-[var(--ink)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
                                 >
                                     <Plus className="h-3.5 w-3.5" />
                                     添加
@@ -1553,7 +1553,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                     {!server.isBuiltin && (
                                                         <button
                                                             onClick={() => handleDeleteMcp(server.id)}
-                                                            className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--error-bg)] hover:text-[var(--error)]"
+                                                            className="cursor-pointer rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--error-bg)] hover:text-[var(--error)]"
                                                             title="删除"
                                                         >
                                                             <Trash2 className="h-4 w-4" />
@@ -1562,7 +1562,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                     <button
                                                         onClick={() => handleMcpToggle(server, !isEnabled)}
                                                         disabled={isInstalling}
-                                                        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${isInstalling
+                                                        className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${isInstalling
                                                             ? 'bg-[var(--info)]/60 cursor-wait'
                                                             : isEnabled
                                                                 ? 'bg-[var(--success)]'
@@ -1617,7 +1617,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 env: {}, newEnvKey: '', newEnvValue: ''
                                             });
                                         }}
-                                        className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                        className="cursor-pointer rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
                                     >
                                         <X className="h-5 w-5" />
                                     </button>
@@ -1637,7 +1637,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 <button
                                                     key={t.type}
                                                     onClick={() => setMcpForm((p) => ({ ...p, type: t.type }))}
-                                                    className={`flex flex-col items-center rounded-xl border p-3 transition-all ${mcpForm.type === t.type
+                                                    className={`flex flex-col items-center cursor-pointer rounded-xl border p-3 transition-all ${mcpForm.type === t.type
                                                         ? 'border-[var(--ink)] bg-[var(--paper-contrast)]'
                                                         : 'border-[var(--line)] hover:border-[var(--ink-muted)]'
                                                         }`}
@@ -1737,7 +1737,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                                     delete newEnv[key];
                                                                     setMcpForm((p) => ({ ...p, env: newEnv }));
                                                                 }}
-                                                                className="rounded-lg p-2 text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                                                className="cursor-pointer rounded-lg p-2 text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
                                                             >
                                                                 <Trash2 className="h-4 w-4" />
                                                             </button>
@@ -1773,7 +1773,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                                 }
                                                             }}
                                                             disabled={!mcpForm.newEnvKey}
-                                                            className="flex items-center gap-1.5 rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="flex items-center gap-1.5 cursor-pointer rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:cursor-not-allowed disabled:opacity-50"
                                                         >
                                                             <Plus className="h-4 w-4" />
                                                             添加
@@ -1814,7 +1814,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 env: {}, newEnvKey: '', newEnvValue: ''
                                             });
                                         }}
-                                        className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                        className="flex-1 cursor-pointer rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                                     >
                                         取消
                                     </button>
@@ -1825,7 +1825,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             (mcpForm.type === 'stdio' && !mcpForm.command) ||
                                             ((mcpForm.type === 'http' || mcpForm.type === 'sse') && !mcpForm.url)
                                         }
-                                        className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="flex-1 cursor-pointer rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         添加服务器
                                     </button>
@@ -1847,7 +1847,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     setShowCustomForm(false);
                                     setCustomForm(EMPTY_CUSTOM_FORM);
                                 }}
-                                className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                className="cursor-pointer rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -1929,7 +1929,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             }
                                         }}
                                         disabled={!customForm.newModelInput.trim()}
-                                        className="rounded-lg bg-[var(--paper-contrast)] px-3 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)] disabled:opacity-50"
+                                        className="cursor-pointer rounded-lg bg-[var(--paper-contrast)] px-3 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)] disabled:opacity-50"
                                     >
                                         <Plus className="h-4 w-4" />
                                     </button>
@@ -1978,14 +1978,14 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     setShowCustomForm(false);
                                     setCustomForm(EMPTY_CUSTOM_FORM);
                                 }}
-                                className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                className="flex-1 cursor-pointer rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 取消
                             </button>
                             <button
                                 onClick={handleAddCustomProvider}
                                 disabled={!customForm.name || !customForm.baseUrl || customForm.models.length === 0}
-                                className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex-1 cursor-pointer rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 添加
                             </button>
@@ -2004,7 +2004,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             </h3>
                             <button
                                 onClick={() => setEditingProvider(null)}
-                                className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                className="cursor-pointer rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 <X className="h-5 w-5" />
                             </button>
@@ -2102,7 +2102,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         type="button"
                                         onClick={addCustomModelToProvider}
                                         disabled={!editingProvider.newModelInput.trim()}
-                                        className="rounded-lg bg-[var(--paper-contrast)] px-3 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)] disabled:opacity-50"
+                                        className="cursor-pointer rounded-lg bg-[var(--paper-contrast)] px-3 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)] disabled:opacity-50"
                                     >
                                         <Plus className="h-4 w-4" />
                                     </button>
@@ -2115,7 +2115,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             {!editingProvider.provider.isBuiltin ? (
                                 <button
                                     onClick={() => setDeleteConfirmProvider(editingProvider.provider)}
-                                    className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                    className="flex items-center gap-1.5 cursor-pointer rounded-lg px-3 py-2 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
                                     删除
@@ -2127,13 +2127,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             <div className="flex gap-3">
                                 <button
                                     onClick={() => setEditingProvider(null)}
-                                    className="rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                    className="cursor-pointer rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                                 >
                                     取消
                                 </button>
                                 <button
                                     onClick={saveProviderEdits}
-                                    className="rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
+                                    className="cursor-pointer rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)]"
                                 >
                                     保存
                                 </button>
@@ -2159,13 +2159,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setDeleteConfirmProvider(null)}
-                                className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                                className="flex-1 cursor-pointer rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
                             >
                                 取消
                             </button>
                             <button
                                 onClick={confirmDeleteCustomProvider}
-                                className="flex-1 rounded-lg bg-[var(--error)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:brightness-110"
+                                className="flex-1 cursor-pointer rounded-lg bg-[var(--error)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:brightness-110"
                             >
                                 删除
                             </button>
