@@ -218,6 +218,7 @@ export default function TabProvider({
         isNewSessionRef.current = true;
         isStreamingRef.current = false;
         setIsLoading(false);
+        setSystemStatus(null);  // Clear system status for new conversation
         setAgentError(null);
         setUnifiedLogs([]); // Clear logs for new conversation
         setLogs([]);
@@ -367,6 +368,7 @@ export default function TabProvider({
                         console.debug(`[TabProvider ${tabId}] chat:init state=idle, syncing isLoading`);
                         isStreamingRef.current = false;
                         setIsLoading(false);
+                        setSystemStatus(null);  // Also clear system status when syncing to idle
                     }
                 }
                 break;
@@ -409,6 +411,7 @@ export default function TabProvider({
                         console.debug(`[TabProvider ${tabId}] chat:status=idle, syncing isLoading`);
                         isStreamingRef.current = false;
                         setIsLoading(false);
+                        setSystemStatus(null);  // Also clear system status when syncing to idle
                     }
                 }
                 break;
@@ -657,6 +660,7 @@ export default function TabProvider({
                 console.debug(`[TabProvider ${tabId}] chat:message-complete received`);
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
                 // Defensively mark any remaining incomplete thinking/tool blocks as complete.
                 // Normally content_block_stop handles this, but third-party providers may not
                 // send it, leaving blocks stuck in loading state.
@@ -667,6 +671,7 @@ export default function TabProvider({
             case 'chat:message-stopped': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSystemStatus(null);  // Clear system status when user stops response
                 // Clear stop timeout since we received confirmation
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);
@@ -680,6 +685,7 @@ export default function TabProvider({
             case 'chat:message-error': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSystemStatus(null);  // Clear system status on error
                 // Clear stop timeout on error too
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);
@@ -962,6 +968,7 @@ export default function TabProvider({
                         console.warn(`[TabProvider ${tabId}] Stop timeout - forcing UI recovery`);
                         isStreamingRef.current = false;
                         setIsLoading(false);
+                        setSystemStatus(null);  // Clear system status on timeout
                     }
                     stopTimeoutRef.current = null;
                 }, 5000);
@@ -973,6 +980,7 @@ export default function TabProvider({
             // 请求失败也强制恢复 UI
             isStreamingRef.current = false;
             setIsLoading(false);
+            setSystemStatus(null);  // Clear system status on error
             return false;
         }
     }, [tabId]);
@@ -1024,7 +1032,10 @@ export default function TabProvider({
             // Clear current state and load new messages
             seenIdsRef.current.clear();
             isNewSessionRef.current = false; // Allow SSE replays again
+            isStreamingRef.current = false;  // Stop any streaming state
             setMessages(loadedMessages);
+            setIsLoading(false);  // Ensure loading state is cleared
+            setSystemStatus(null);  // Clear system status when loading historical session
             setAgentError(null);
             // Update current session ID to reflect the loaded session
             setCurrentSessionId(targetSessionId);
