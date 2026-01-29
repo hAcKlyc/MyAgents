@@ -125,12 +125,19 @@ try {
     }
     Write-Host "OK - 前端依赖安装完成" -ForegroundColor Green
 
-    Write-Host "`nStep 4/5: 检查 Rust 依赖" -ForegroundColor Blue
+    Write-Host "`nStep 4/5: 下载 Rust 依赖" -ForegroundColor Blue
+    Write-Host "  正在下载 Rust 依赖包，请稍候..." -ForegroundColor Cyan
     Push-Location (Join-Path $ProjectDir "src-tauri")
-    & cargo check --quiet 2>$null
-    if ($LASTEXITCODE -ne 0) { & cargo fetch }
+    & cargo fetch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Rust 依赖下载失败" -ForegroundColor Red
+        Pop-Location
+        Write-Host "`n按回车键退出..." -ForegroundColor Yellow
+        Read-Host
+        exit 1
+    }
     Pop-Location
-    Write-Host "OK - Rust 依赖准备完成" -ForegroundColor Green
+    Write-Host "OK - Rust 依赖下载完成" -ForegroundColor Green
 
     Write-Host "`nStep 5/5: 初始化完成!" -ForegroundColor Blue
     Write-Host "`n=========================================" -ForegroundColor Green
