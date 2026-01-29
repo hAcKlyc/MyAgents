@@ -85,6 +85,7 @@ import {
   deleteSession,
   getAllSessionMetadata,
   getSessionData,
+  getSessionMetadata,
   getSessionsByAgentDir,
   updateSessionMetadata,
   updateSessionTitleFromMessage,
@@ -512,6 +513,87 @@ async function main() {
 
         const session = createSession(agentDirValue);
         return jsonResponse({ success: true, session });
+      }
+
+      // GET /sessions/:id/stats - Get detailed session statistics
+      // NOTE: This route must be BEFORE /sessions/:id to avoid being caught by the generic route
+      if (pathname.match(/^\/sessions\/[^/]+\/stats$/) && request.method === 'GET') {
+        const sessionId = pathname.replace('/sessions/', '').replace('/stats', '');
+        if (!sessionId) {
+          return jsonResponse({ success: false, error: 'Session ID required.' }, 400);
+        }
+
+        const session = getSessionData(sessionId);
+        if (!session) {
+          return jsonResponse({ success: false, error: 'Session not found.' }, 404);
+        }
+
+        // Group stats by model
+        const byModel: Record<string, {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheCreationTokens: number;
+          count: number;
+        }> = {};
+
+        // Build message details
+        const messageDetails: Array<{
+          userQuery: string;
+          model?: string;
+          inputTokens: number;
+          outputTokens: number;
+          toolCount?: number;
+          durationMs?: number;
+        }> = [];
+
+        let currentUserQuery = '';
+        for (const msg of session.messages) {
+          if (msg.role === 'user') {
+            currentUserQuery = typeof msg.content === 'string'
+              ? msg.content.slice(0, 100)
+              : JSON.stringify(msg.content).slice(0, 100);
+          } else if (msg.role === 'assistant' && msg.usage) {
+            const model = msg.usage.model || 'unknown';
+            if (!byModel[model]) {
+              byModel[model] = {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
+                count: 0,
+              };
+            }
+            byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
+            byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
+            byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
+            byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
+            byModel[model].count++;
+
+            messageDetails.push({
+              userQuery: currentUserQuery,
+              model: msg.usage.model,
+              inputTokens: msg.usage.inputTokens ?? 0,
+              outputTokens: msg.usage.outputTokens ?? 0,
+              toolCount: msg.toolCount,
+              durationMs: msg.durationMs,
+            });
+          }
+        }
+
+        const metadata = getSessionMetadata(sessionId);
+        return jsonResponse({
+          success: true,
+          stats: {
+            summary: metadata?.stats ?? {
+              messageCount: 0,
+              totalInputTokens: 0,
+              totalOutputTokens: 0,
+            },
+            byModel,
+            messageDetails,
+          },
+        });
       }
 
       // GET /sessions/:id - Get session details
@@ -2492,6 +2574,11 @@ async function main() {
           const ext = extname(payload.filename).toLowerCase();
           const baseDir = payload.scope === 'user' ? userSkillsBaseDir : projectSkillsBaseDir;
 
+          // Validate target directory is available
+          if (!baseDir) {
+            return jsonResponse({ success: false, error: '请先设置工作目录' }, 400);
+          }
+
           // Decode base64 content to buffer
           const fileBuffer = Buffer.from(payload.content, 'base64');
 
@@ -2636,6 +2723,110 @@ async function main() {
           console.error('[api/skill/upload] Error:', error);
           return jsonResponse(
             { success: false, error: error instanceof Error ? error.message : 'Failed to upload skill' },
+            500
+          );
+        }
+      }
+
+      // POST /api/skill/import-folder - Import skill from a local folder path (Tauri only)
+      if (pathname === '/api/skill/import-folder' && request.method === 'POST') {
+        try {
+          const payload = await request.json() as {
+            folderPath: string;
+            scope: 'user' | 'project';
+          };
+
+          if (!payload.folderPath) {
+            return jsonResponse({ success: false, error: 'Folder path is required' }, 400);
+          }
+
+          const sourcePath = payload.folderPath;
+          const baseDir = payload.scope === 'user' ? userSkillsBaseDir : projectSkillsBaseDir;
+
+          // Validate target directory is available
+          if (!baseDir) {
+            return jsonResponse({ success: false, error: '请先设置工作目录' }, 400);
+          }
+
+          // Validate source folder exists
+          if (!existsSync(sourcePath)) {
+            return jsonResponse({ success: false, error: '指定的文件夹不存在' }, 400);
+          }
+
+          // Check if it's a directory
+          try {
+            const stats = statSync(sourcePath);
+            if (!stats.isDirectory()) {
+              return jsonResponse({ success: false, error: '指定的路径不是文件夹' }, 400);
+            }
+          } catch {
+            return jsonResponse({ success: false, error: '无法读取文件夹信息' }, 400);
+          }
+
+          // Check for SKILL.md at root
+          const skillMdPath = join(sourcePath, 'SKILL.md');
+          if (!existsSync(skillMdPath)) {
+            return jsonResponse({ success: false, error: '文件夹中未找到 SKILL.md 文件' }, 400);
+          }
+
+          // Read SKILL.md to get the skill name
+          const skillMdContent = readFileSync(skillMdPath, 'utf-8');
+          let folderName = basename(sourcePath);
+
+          // Try to extract name from SKILL.md frontmatter
+          try {
+            const parsed = parseFullSkillContent(skillMdContent);
+            if (parsed.frontmatter.name) {
+              folderName = parsed.frontmatter.name;
+            }
+          } catch {
+            // Use folder name as fallback
+          }
+
+          // Sanitize folder name
+          folderName = sanitizeFolderName(folderName);
+          const targetDir = join(baseDir, folderName);
+
+          // Check if skill already exists
+          if (existsSync(targetDir)) {
+            return jsonResponse({ success: false, error: `技能 "${folderName}" 已存在` }, 409);
+          }
+
+          // Copy folder recursively
+          const copyDir = (src: string, dest: string) => {
+            mkdirSync(dest, { recursive: true });
+            const entries = readdirSync(src);
+
+            for (const entry of entries) {
+              // Skip hidden files and __MACOSX
+              if (entry.startsWith('.') || entry === '__MACOSX') continue;
+
+              const srcPath = join(src, entry);
+              const destPath = join(dest, entry);
+              const stats = statSync(srcPath);
+
+              if (stats.isDirectory()) {
+                copyDir(srcPath, destPath);
+              } else {
+                // Copy file
+                copyFileSync(srcPath, destPath);
+              }
+            }
+          };
+
+          copyDir(sourcePath, targetDir);
+
+          return jsonResponse({
+            success: true,
+            folderName,
+            path: targetDir,
+            message: `已成功导入技能 "${folderName}"`
+          });
+
+        } catch (error) {
+          console.error('[api/skill/import-folder] Error:', error);
+          return jsonResponse(
+            { success: false, error: error instanceof Error ? error.message : 'Failed to import skill folder' },
             500
           );
         }

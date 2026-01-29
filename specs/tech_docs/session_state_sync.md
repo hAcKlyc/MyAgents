@@ -201,3 +201,98 @@ const sendMessage = async (text) => {
 1. `chat:message-replay` 事件能正常显示用户消息
 2. 新的 AI 响应可以正常显示
 3. 时序正确：标志重置 → API 调用 → SSE 事件到达
+
+---
+
+## 对话结束状态管理
+
+### 状态变量
+
+| 变量 | 用途 | UI 依赖 |
+|-----|------|--------|
+| `isLoading` | 流式输出中 | 停止按钮、Loading 文字 |
+| `sessionState` | 会话状态 ('idle'/'running') | 停止按钮（与 isLoading 联合判断） |
+| `systemStatus` | 系统任务状态 (如 'compacting') | 禁用发送按钮、Loading 文字 |
+| `isStreamingRef` | 内部跟踪流状态 | - |
+
+### UI 按钮状态逻辑
+
+```typescript
+// SimpleChatInput 按钮逻辑
+{systemStatus ? (
+  // 系统任务 - 禁用发送按钮（不可中断）
+  <button disabled title="正在执行系统任务，请稍等">
+    <Send />
+  </button>
+) : isLoading || sessionState === 'running' ? (
+  // AI 回复中 - 停止按钮
+  <button onClick={onStop}>
+    <Square />
+  </button>
+) : (
+  // 正常状态 - 发送按钮
+  <button onClick={handleSend}>
+    <Send />
+  </button>
+)}
+
+// MessageList Loading 文字
+const showStatus = isLoading || !!systemStatus;
+{showStatus && <div>Loading...</div>}
+```
+
+### 所有 9 种结束场景
+
+每个场景都必须重置 **全部三个状态**：
+
+```typescript
+// 统一重置模式
+isStreamingRef.current = false;
+setIsLoading(false);
+setSessionState('idle');
+setSystemStatus(null);
+```
+
+| # | 场景 | 触发时机 |
+|---|------|---------|
+| 1 | `chat:message-complete` | AI 正常完成回复 |
+| 2 | `chat:message-stopped` | 用户点击停止，后端确认 |
+| 3 | `chat:message-error` | AI 回复出错 |
+| 4 | `chat:init` 同步 | SSE 重连，后端状态为 idle |
+| 5 | `chat:status` 同步 | 后端广播状态变为 idle |
+| 6 | stopResponse 超时 | 停止请求发出 5s 后无 SSE 确认 |
+| 7 | stopResponse 失败 | 停止请求网络错误 |
+| 8 | resetSession | 用户点击「新对话」 |
+| 9 | loadSession | 用户加载历史会话 |
+
+### 常见遗漏场景
+
+开发中最容易遗漏的是 fallback 场景（6-9）：
+
+```typescript
+// ❌ 错误：只重置 isLoading
+setIsLoading(false);
+
+// ✅ 正确：重置所有状态
+setIsLoading(false);
+setSessionState('idle');  // 容易遗漏！
+setSystemStatus(null);
+```
+
+### Loading 文字渲染方式
+
+推荐使用**条件渲染**而非 CSS opacity：
+
+```typescript
+// ❌ 可能出问题：CSS opacity 过渡
+<div className={showStatus ? 'opacity-100' : 'opacity-0'}>
+  Loading...
+</div>
+
+// ✅ 推荐：条件渲染
+{showStatus && (
+  <div>Loading...</div>
+)}
+```
+
+CSS opacity 方式在某些场景下可能因过渡动画未完成而导致元素仍然可见。

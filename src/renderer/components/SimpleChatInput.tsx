@@ -27,6 +27,8 @@ interface SimpleChatInputProps {
   onSend: (text: string, images?: ImageAttachment[], permissionMode?: PermissionMode) => void;
   onStop?: () => void; // Called when stop button is clicked
   isLoading: boolean;
+  /** System status (e.g., 'compacting') - when set, shows disabled send button instead of stop */
+  systemStatus?: string | null;
   agentDir?: string; // For @file search
   // Provider/Model selection
   provider?: Provider | null; // Current provider for model selection
@@ -66,6 +68,8 @@ export interface SimpleChatInputHandle {
   processDroppedFiles: (files: File[]) => Promise<void>;
   /** Process dropped file paths from Tauri - copies to myagents_files and inserts @references */
   processDroppedFilePaths?: (paths: string[]) => Promise<void>;
+  /** Insert @references at cursor position or end of input */
+  insertReferences: (paths: string[]) => void;
 }
 
 // File search result type
@@ -81,6 +85,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
   onSend,
   onStop,
   isLoading,
+  systemStatus,
   agentDir,
   provider,
   providers = [],
@@ -149,6 +154,10 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
   // Undo stack for file reference insertions
   const undoStack = useUndoStack({ maxSize: 20 });
 
+  // Ref for latest inputValue (for stable insertReferences callback)
+  const inputValueRef = useRef(inputValue);
+  inputValueRef.current = inputValue;
+
   // Plus menu
   const [showPlusMenu, setShowPlusMenu] = useState(false);
 
@@ -192,14 +201,12 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     setShowToolMenu(false);
   }, []);
 
-  // Click outside to close all menus
+  // Close all menus when clicking outside (toolbar buttons use stopPropagation to prevent this)
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      // Check if click is outside the toolbar area
-      const target = e.target as HTMLElement;
-      if (!target.closest('.toolbar-menus')) {
-        closeAllMenus();
-      }
+    const handleClickOutside = () => {
+      closeAllMenus();
+      setShowSlashMenu(false);
+      setSlashPosition(null);
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
@@ -224,46 +231,17 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     }
   }, [inputValue, isExpanded]);
 
-  // Close menus when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => {
-      setShowPlusMenu(false);
-      setShowModeMenu(false);
-      setShowModelMenu(false);
-      setShowSlashMenu(false);
-      setSlashPosition(null);
-      setShowToolMenu(false);
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
+  // Fetch slash commands function (extracted for reuse)
+  const fetchCommands = useCallback(async () => {
+    if (!apiGet) return;
 
-  // Fetch slash commands on mount or when agentDir changes
-  useEffect(() => {
-    if (!apiGet) return; // Wait for Tab context
-
-    const fetchCommands = async () => {
-      try {
-        const response = await apiGet<{ success: boolean; commands: SlashCommand[] }>('/api/commands');
-        if (response.success && response.commands.length > 0) {
-          setSlashCommands(response.commands);
-        } else {
-          // Fallback to builtin commands imported from SlashCommandMenu
-          console.warn('[slash-commands] API returned empty, using builtin fallback');
-          setSlashCommands([
-            { name: 'compact', description: '压缩对话历史，释放上下文空间', source: 'builtin' },
-            { name: 'context', description: '显示或管理当前上下文', source: 'builtin' },
-            { name: 'cost', description: '查看 token 使用量和费用', source: 'builtin' },
-            { name: 'init', description: '初始化项目配置 (.CLAUDE.md)', source: 'builtin' },
-            { name: 'pr-comments', description: '生成 Pull Request 评论', source: 'builtin' },
-            { name: 'release-notes', description: '根据最近提交生成发布说明', source: 'builtin' },
-            { name: 'review', description: '对代码进行审查', source: 'builtin' },
-            { name: 'security-review', description: '进行安全相关的代码审查', source: 'builtin' },
-          ]);
-        }
-      } catch (err) {
-        console.error('Failed to fetch slash commands, using fallback:', err);
-        // Fallback to builtin commands
+    try {
+      const response = await apiGet<{ success: boolean; commands: SlashCommand[] }>('/api/commands');
+      if (response.success && response.commands.length > 0) {
+        setSlashCommands(response.commands);
+      } else {
+        // Fallback to builtin commands imported from SlashCommandMenu
+        console.warn('[slash-commands] API returned empty, using builtin fallback');
         setSlashCommands([
           { name: 'compact', description: '压缩对话历史，释放上下文空间', source: 'builtin' },
           { name: 'context', description: '显示或管理当前上下文', source: 'builtin' },
@@ -275,9 +253,38 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
           { name: 'security-review', description: '进行安全相关的代码审查', source: 'builtin' },
         ]);
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch slash commands, using fallback:', err);
+      // Fallback to builtin commands
+      setSlashCommands([
+        { name: 'compact', description: '压缩对话历史，释放上下文空间', source: 'builtin' },
+        { name: 'context', description: '显示或管理当前上下文', source: 'builtin' },
+        { name: 'cost', description: '查看 token 使用量和费用', source: 'builtin' },
+        { name: 'init', description: '初始化项目配置 (.CLAUDE.md)', source: 'builtin' },
+        { name: 'pr-comments', description: '生成 Pull Request 评论', source: 'builtin' },
+        { name: 'release-notes', description: '根据最近提交生成发布说明', source: 'builtin' },
+        { name: 'review', description: '对代码进行审查', source: 'builtin' },
+        { name: 'security-review', description: '进行安全相关的代码审查', source: 'builtin' },
+      ]);
+    }
+  }, [apiGet]);
+
+  // Fetch slash commands on mount or when agentDir changes
+  useEffect(() => {
     fetchCommands();
-  }, [agentDir, apiGet]);
+  }, [agentDir, fetchCommands]);
+
+  // Listen for skill copy events to refresh commands list
+  useEffect(() => {
+    const handleSkillCopied = () => {
+      // Delay slightly to ensure file system is updated
+      setTimeout(() => {
+        fetchCommands();
+      }, 100);
+    };
+    window.addEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);
+    return () => window.removeEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);
+  }, [fetchCommands]);
 
   // Copy user-level skill to project directory (SDK only reads from <project>/.claude/skills/)
   const triggerSkillCopy = useCallback((skillName: string) => {
@@ -602,11 +609,43 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     }
   }, [apiPost, addImage, inputValue, textareaRef, undoStack, onWorkspaceRefresh]);
 
+  // Insert @references at cursor position or end of input
+  // Uses inputValueRef for stable callback (avoids rebuilding on every input change)
+  const insertReferences = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+
+    const currentInput = inputValueRef.current;
+
+    // Build reference string with @paths separated by spaces
+    const references = paths.map(p => `@${p}`).join(' ');
+
+    // Get cursor position (or end if no focus)
+    const cursorPos = textareaRef.current?.selectionStart ?? currentInput.length;
+    const before = currentInput.slice(0, cursorPos);
+    const after = currentInput.slice(cursorPos);
+
+    // Add space before if needed (not at start, not after space/newline)
+    const needsSpaceBefore = before.length > 0 && !/[\s]$/.test(before);
+    // Add space after if needed (not at end, not before space/newline)
+    const needsSpaceAfter = after.length > 0 && !/^[\s]/.test(after);
+
+    const newValue = `${before}${needsSpaceBefore ? ' ' : ''}${references}${needsSpaceAfter ? ' ' : ''}${after}`;
+    setInputValue(newValue);
+
+    // Focus textarea and set cursor after the inserted references
+    const newCursorPos = cursorPos + (needsSpaceBefore ? 1 : 0) + references.length + (needsSpaceAfter ? 1 : 0);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  }, [textareaRef]);
+
   // Expose methods to parent via ref
   useImperativeHandle(ref, () => ({
     processDroppedFiles,
     processDroppedFilePaths,
-  }), [processDroppedFiles, processDroppedFilePaths]);
+    insertReferences,
+  }), [processDroppedFiles, processDroppedFilePaths, insertReferences]);
 
   // Handle file input change
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1255,34 +1294,34 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                 )}
               </div>
 
-              {/* Tool/MCP Dropdown */}
-              {globalMcpEnabled.length > 0 && (
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowToolMenu(!showToolMenu);
-                      setShowModeMenu(false);
-                      setShowModelMenu(false);
-                      setShowPlusMenu(false);
-                    }}
-                    className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
-                    title="工具"
-                  >
-                    <Wrench className="h-3.5 w-3.5" />
-                    {workspaceMcpEnabled.length > 0 && (
-                      <span className="text-[9px] text-[var(--ink-muted)]">
-                        {workspaceMcpEnabled.length}
-                      </span>
-                    )}
-                  </button>
-                  {showToolMenu && (
-                    <div className="absolute left-0 bottom-full mb-1 w-64 rounded-lg border border-[var(--line)] bg-[var(--paper)] shadow-xl py-1">
-                      <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
-                        工具 (在此对话中启用)
-                      </div>
-                      {mcpServers
+              {/* Tool/MCP Dropdown - always visible */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowToolMenu(!showToolMenu);
+                    setShowModeMenu(false);
+                    setShowModelMenu(false);
+                    setShowPlusMenu(false);
+                  }}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
+                  title="工具"
+                >
+                  <Wrench className="h-3.5 w-3.5" />
+                  {workspaceMcpEnabled.length > 0 && (
+                    <span className="text-[9px] text-[var(--ink-muted)]">
+                      {workspaceMcpEnabled.length}
+                    </span>
+                  )}
+                </button>
+                {showToolMenu && (
+                  <div className="absolute left-0 bottom-full mb-1 w-64 rounded-lg border border-[var(--line)] bg-[var(--paper)] shadow-xl py-1">
+                    <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
+                      工具 (在此对话中启用)
+                    </div>
+                    {globalMcpEnabled.length > 0 ? (
+                      mcpServers
                         .filter(s => globalMcpEnabled.includes(s.id))
                         .map((server) => {
                           const isEnabled = workspaceMcpEnabled.includes(server.id);
@@ -1317,16 +1356,28 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                               </button>
                             </div>
                           );
-                        })}
-                      {mcpServers.filter(s => globalMcpEnabled.includes(s.id)).length === 0 && (
-                        <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">
-                          暂无可用工具，请在设置中启用
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                        })
+                    ) : (
+                      <div className="px-3 py-3 text-sm text-[var(--ink-muted)]">
+                        在
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowToolMenu(false);
+                            // Dispatch custom event to open Settings with MCP section
+                            window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, { detail: { section: 'mcp' } }));
+                          }}
+                          className="mx-1 text-[var(--accent)] hover:underline"
+                        >
+                          设置页面
+                        </button>
+                        安装开启 MCP 工具，即可使用浏览器等更多功能
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Right side - model selector + send/stop button */}
@@ -1442,7 +1493,19 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                 )}
               </div>
 
-              {isLoading ? (
+              {/* Button states: system task (disabled send) → AI responding (stop) → normal (send) */}
+              {systemStatus ? (
+                // System task running (e.g., compacting) - not interruptible
+                <button
+                  type="button"
+                  disabled
+                  className="rounded-lg bg-[var(--ink-muted)]/15 p-2 text-[var(--ink-muted)]/60"
+                  title="正在执行系统任务，请稍等"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              ) : isLoading ? (
+                // AI responding - can be stopped
                 <button
                   type="button"
                   onClick={onStop}
@@ -1452,6 +1515,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                   <Square className="h-4 w-4" />
                 </button>
               ) : (
+                // Normal state - can send
                 <button
                   type="button"
                   onClick={handleSend}

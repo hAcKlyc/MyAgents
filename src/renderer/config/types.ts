@@ -181,6 +181,12 @@ export interface AppConfig {
   // Key is provider ID (e.g., 'anthropic-sub', 'deepseek')
   providerVerifyStatus?: Record<string, ProviderVerifyStatus>;
 
+  // ===== Provider Custom Models =====
+  // User-added custom models for preset providers (key = provider ID)
+  // These are merged with preset models at runtime, allowing users to add models
+  // while keeping preset definitions unchanged (updated with app releases)
+  presetCustomModels?: Record<string, ModelEntity[]>;
+
   // ===== MCP Configuration =====
   // Custom MCP servers added by user (merged with presets)
   mcpServers?: McpServerDefinition[];
@@ -274,6 +280,7 @@ export const PRESET_PROVIDERS: Provider[] = [
       baseUrl: 'https://api.moonshot.cn/anthropic',
     },
     models: [
+      { model: 'kimi-k2.5', modelName: 'Kimi K2.5', modelSeries: 'moonshot' },
       { model: 'kimi-k2-thinking-turbo', modelName: 'Kimi K2 Thinking', modelSeries: 'moonshot' },
       { model: 'kimi-k2-0711', modelName: 'Kimi K2', modelSeries: 'moonshot' },
     ],

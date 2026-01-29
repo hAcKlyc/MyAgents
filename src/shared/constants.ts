@@ -48,4 +48,6 @@ export const Z_INDEX = {
 export const CUSTOM_EVENTS = {
     /** Fired when a user-level skill is copied to project directory */
     SKILL_COPIED_TO_PROJECT: 'skill-copied-to-project',
+    /** Fired to open Settings page with optional section (e.g., 'mcp', 'providers') */
+    OPEN_SETTINGS: 'open-settings',
 } as const;

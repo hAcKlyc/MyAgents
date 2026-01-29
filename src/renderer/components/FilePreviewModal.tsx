@@ -61,29 +61,76 @@ export default function FilePreviewModal({
     // State
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(content);
+    const [previewContent, setPreviewContent] = useState(content); // Content displayed in preview mode, updated after save
     const [isSaving, setIsSaving] = useState(false);
     const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+    // Track if content is ready to render (avoids blank flash while SyntaxHighlighter computes)
+    const [isContentReady, setIsContentReady] = useState(false);
 
-    // Sync edit content when content prop changes
+    // Sync content when prop changes (e.g., when file is reloaded externally)
+    // Use requestAnimationFrame to let loading state render first before heavy SyntaxHighlighter
     useEffect(() => {
         setEditContent(content);
+        setPreviewContent(content);
+        setIsContentReady(false);
+
+        // Defer content ready to next frame so loading spinner shows first
+        const rafId = requestAnimationFrame(() => {
+            setIsContentReady(true);
+        });
+        return () => cancelAnimationFrame(rafId);
     }, [content]);
 
-    // Derived state
+    // Derived state - compare with previewContent (the last saved state)
     const hasUnsavedChanges = useMemo(() => {
-        return isEditing && editContent !== content;
-    }, [isEditing, editContent, content]);
+        return isEditing && editContent !== previewContent;
+    }, [isEditing, editContent, previewContent]);
 
     const language = useMemo(() => getPrismLanguage(name), [name]);
     const monacoLanguage = useMemo(() => getMonacoLanguage(name), [name]);
     const showLineNumbers = useMemo(() => shouldShowLineNumbers(name), [name]);
     const isMarkdown = useMemo(() => isMarkdownFile(name), [name]);
 
+    // Memoize the syntax highlighted content to avoid re-computation on every render
+    // SyntaxHighlighter is expensive - only recompute when content or language changes
+    const syntaxHighlightedContent = useMemo(() => {
+        if (isMarkdown || isEditing) return null; // Not used in these modes
+        return (
+            <SyntaxHighlighter
+                language={language}
+                style={oneLight}
+                showLineNumbers={showLineNumbers}
+                lineNumberStyle={{
+                    minWidth: '3em',
+                    paddingRight: '1em',
+                    color: 'var(--ink-muted)',
+                    fontSize: '12px',
+                    userSelect: 'none',
+                }}
+                customStyle={{
+                    margin: 0,
+                    padding: '1.5rem',
+                    background: 'transparent',
+                    fontSize: '13px',
+                    lineHeight: '1.6',
+                    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                }}
+                codeTagProps={{
+                    style: {
+                        fontFamily: 'inherit',
+                    }
+                }}
+            >
+                {previewContent}
+            </SyntaxHighlighter>
+        );
+    }, [previewContent, language, showLineNumbers, isMarkdown, isEditing]);
+
     // Handlers
     const handleEdit = useCallback(() => {
-        setEditContent(content);
+        setEditContent(previewContent); // Start editing from current preview content
         setIsEditing(true);
-    }, [content]);
+    }, [previewContent]);
 
     const handleCancel = useCallback(() => {
         if (hasUnsavedChanges) {
@@ -95,9 +142,9 @@ export default function FilePreviewModal({
 
     const handleDiscardChanges = useCallback(() => {
         setShowUnsavedConfirm(false);
-        setEditContent(content);
+        setEditContent(previewContent); // Revert to current preview content
         setIsEditing(false);
-    }, [content]);
+    }, [previewContent]);
 
     const handleClose = useCallback(() => {
         if (hasUnsavedChanges) {
@@ -117,6 +164,7 @@ export default function FilePreviewModal({
 
             if (response.success) {
                 toastRef.current.success('文件保存成功');
+                setPreviewContent(editContent); // Update preview content after successful save
                 setIsEditing(false);
                 onSaved?.();
             } else {
@@ -138,11 +186,11 @@ export default function FilePreviewModal({
 
     // Render preview content based on file type
     const renderPreviewContent = () => {
-        if (isLoading) {
+        // Show loading spinner while fetching or while content is preparing to render
+        if (isLoading || !isContentReady) {
             return (
-                <div className="flex h-full items-center justify-center gap-2 text-[var(--ink-muted)]">
+                <div className="flex h-full items-center justify-center text-[var(--ink-muted)]">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-sm">加载中...</span>
                 </div>
             );
         }
@@ -174,42 +222,16 @@ export default function FilePreviewModal({
             return (
                 <div className="h-full overflow-auto p-6 bg-[var(--paper-reading)]">
                     <div className="prose prose-stone max-w-none dark:prose-invert">
-                        <Markdown>{content}</Markdown>
+                        <Markdown>{previewContent}</Markdown>
                     </div>
                 </div>
             );
         }
 
-        // Preview mode: Code files with syntax highlighting
+        // Preview mode: Code files with syntax highlighting (memoized)
         return (
             <div className="h-full overflow-auto bg-[var(--paper-reading)]">
-                <SyntaxHighlighter
-                    language={language}
-                    style={oneLight}
-                    showLineNumbers={showLineNumbers}
-                    lineNumberStyle={{
-                        minWidth: '3em',
-                        paddingRight: '1em',
-                        color: 'var(--ink-muted)',
-                        fontSize: '12px',
-                        userSelect: 'none',
-                    }}
-                    customStyle={{
-                        margin: 0,
-                        padding: '1.5rem',
-                        background: 'transparent',
-                        fontSize: '13px',
-                        lineHeight: '1.6',
-                        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-                    }}
-                    codeTagProps={{
-                        style: {
-                            fontFamily: 'inherit',
-                        }
-                    }}
-                >
-                    {content}
-                </SyntaxHighlighter>
+                {syntaxHighlightedContent}
             </div>
         );
     };

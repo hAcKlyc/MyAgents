@@ -17,6 +17,7 @@ import {
 import { type Tab, createNewTab, getFolderName, MAX_TABS } from '@/types/tab';
 import { isBrowserDevMode, isTauriEnvironment } from '@/utils/browserMock';
 import { forceFlushLogs, setLogServerUrl, clearLogServerUrl } from '@/utils/frontendLogger';
+import { CUSTOM_EVENTS } from '../shared/constants';
 
 export default function App() {
   // Auto-update state (silent background updates)
@@ -334,6 +335,17 @@ export default function App() {
 
     // Global Sidecar is now started on App mount, no need to start here
   }, [tabs]);
+
+  // Listen for OPEN_SETTINGS custom event from child components
+  useEffect(() => {
+    const handleOpenSettingsEvent = (event: CustomEvent<{ section?: string }>) => {
+      handleOpenSettings(event.detail?.section);
+    };
+    window.addEventListener(CUSTOM_EVENTS.OPEN_SETTINGS, handleOpenSettingsEvent as EventListener);
+    return () => {
+      window.removeEventListener(CUSTOM_EVENTS.OPEN_SETTINGS, handleOpenSettingsEvent as EventListener);
+    };
+  }, [handleOpenSettings]);
 
   return (
     <div className="flex h-screen flex-col bg-[var(--paper)]">

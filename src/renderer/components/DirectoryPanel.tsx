@@ -1,4 +1,5 @@
 import {
+  AtSign,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -16,20 +17,24 @@ import {
   Upload,
   PanelRightClose
 } from 'lucide-react';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Tree } from 'react-arborist';
 
 import { apiFetch } from '@/api/apiFetch';
 import { useTabState } from '@/context/TabContext';
 import type { DirectoryTreeNode, DirectoryTree, ExpandDirectoryResult } from '../../shared/dir-types';
 
-import ConfirmDialog from './ConfirmDialog';
-import ContextMenu, { type ContextMenuItem } from './ContextMenu';
-import FilePreviewModal from './FilePreviewModal';
-import RenameDialog from './RenameDialog';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { type Provider } from '@/config/types';
 import { isDebugMode } from '@/utils/debug';
+
+import ConfirmDialog from './ConfirmDialog';
+import ContextMenu, { type ContextMenuItem } from './ContextMenu';
+import RenameDialog from './RenameDialog';
+
+// Lazy load FilePreviewModal - it includes heavy SyntaxHighlighter
+const FilePreviewModal = lazy(() => import('./FilePreviewModal'));
+
 
 /** Imperative handle for DirectoryPanel */
 export interface DirectoryPanelHandle {
@@ -52,6 +57,8 @@ interface DirectoryPanelProps {
   refreshTrigger?: number;
   /** Whether Tauri drag is active over this panel */
   isTauriDragActive?: boolean;
+  /** Called when user clicks "引用" to insert @path reference into chat input */
+  onInsertReference?: (paths: string[]) => void;
 }
 
 type FilePreview = {
@@ -186,6 +193,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   onOpenConfig,
   refreshTrigger,
   isTauriDragActive = false,
+  onInsertReference,
 }, ref) {
   const [directoryInfo, setDirectoryInfo] = useState<DirectoryTree | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -421,13 +429,14 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
       return;
     }
 
+    // Batch state updates: only set loading, clear others on success/error
     setIsPreviewLoading(true);
-    setPreview(null);
-    setPreviewError(null);
 
     try {
       const payload = await apiGet<Omit<FilePreview, 'path'>>(`/agent/file?path=${encodeURIComponent(node.path)}`);
+      // Batch: set preview and clear loading/error together
       setPreview({ ...payload, path: node.path });
+      setPreviewError(null);
     } catch (err) {
       setPreview(null);
       setPreviewError(err instanceof Error ? err.message : 'Failed to preview file.');
@@ -841,6 +850,13 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           }
         },
         {
+          label: `引用 (${selectedNodes.length})`,
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => {
+            onInsertReference?.(selectedNodes.map(n => n.path));
+          }
+        },
+        {
           label: `删除 (${selectedNodes.length})`,
           icon: <Trash2 className="h-4 w-4" />,
           danger: true,
@@ -907,6 +923,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           onClick: () => handleOpenInFinder(node.path)
         },
         {
+          label: '引用',
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => onInsertReference?.([node.path])
+        },
+        {
           label: '重命名',
           icon: <Pencil className="h-4 w-4" />,
           onClick: () => setDialog({ type: 'rename', node })
@@ -929,6 +950,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
               void handlePreview(node);
             }
           }
+        },
+        {
+          label: '引用',
+          icon: <AtSign className="h-4 w-4" />,
+          onClick: () => onInsertReference?.([node.path])
         },
         {
           label: '打开所在文件夹',
@@ -1316,21 +1342,23 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
         />
       )}
 
-      {/* Preview modal */}
+      {/* Preview modal - lazy loaded, no fallback (modal appears after module loads) */}
       {(preview || previewError || isPreviewLoading) && (
-        <FilePreviewModal
-          name={preview?.name ?? 'Preview'}
-          content={preview?.content ?? ''}
-          size={preview?.size ?? 0}
-          path={preview?.path ?? ''}
-          isLoading={isPreviewLoading}
-          error={previewError}
-          onClose={() => {
-            setPreview(null);
-            setPreviewError(null);
-          }}
-          onSaved={refresh}
-        />
+        <Suspense fallback={null}>
+          <FilePreviewModal
+            name={preview?.name ?? 'Preview'}
+            content={preview?.content ?? ''}
+            size={preview?.size ?? 0}
+            path={preview?.path ?? ''}
+            isLoading={isPreviewLoading}
+            error={previewError}
+            onClose={() => {
+              setPreview(null);
+              setPreviewError(null);
+            }}
+            onSaved={refresh}
+          />
+        </Suspense>
       )}
     </div>
   );

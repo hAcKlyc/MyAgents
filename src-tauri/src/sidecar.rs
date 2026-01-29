@@ -87,74 +87,116 @@ const SIDECAR_MARKER: &str = "--myagents-sidecar";
 
 /// Cleanup stale sidecar processes from previous app instances
 /// This should be called on app startup before creating the SidecarManager
-/// Uses SIDECAR_MARKER for precise identification (won't affect other apps' bun processes)
+/// Cleans up:
+/// 1. Bun sidecar processes (identified by SIDECAR_MARKER)
+/// 2. SDK child processes (claude-agent-sdk/cli.js)
+/// 3. MCP child processes (~/.myagents/mcp/)
 pub fn cleanup_stale_sidecars() {
     log::info!("[sidecar] Cleaning up stale sidecar processes...");
 
     #[cfg(unix)]
     {
-        // Use pgrep to find bun processes with our marker
-        // This is precise and won't match other apps' bun processes
-        let find_pids = || -> Vec<i32> {
-            Command::new("pgrep")
-                .args(["-f", SIDECAR_MARKER])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| {
-                    String::from_utf8_lossy(&o.stdout)
-                        .lines()
-                        .filter_map(|s| s.trim().parse::<i32>().ok())
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
+        // 1. Clean up bun sidecar processes (our main sidecar)
+        kill_processes_by_pattern("sidecar", SIDECAR_MARKER, true);
 
-        let pids = find_pids();
-        if pids.is_empty() {
-            log::info!("[sidecar] No stale processes found");
-        } else {
-            log::info!("[sidecar] Found {} stale processes, sending SIGTERM...", pids.len());
+        // 2. Clean up SDK child processes
+        // These are spawned by SDK and don't have our marker
+        // Pattern matches: bun .../claude-agent-sdk/cli.js
+        kill_processes_by_pattern("SDK", "claude-agent-sdk/cli.js", true);
 
-            // First try SIGTERM for graceful shutdown
-            for pid in &pids {
-                unsafe {
-                    libc::kill(*pid, libc::SIGTERM);
-                }
-            }
-
-            // Wait briefly for graceful shutdown
-            thread::sleep(Duration::from_millis(300));
-
-            // Check if any processes survived, use SIGKILL if needed
-            let remaining = find_pids();
-            if !remaining.is_empty() {
-                log::warn!(
-                    "[sidecar] {} processes didn't respond to SIGTERM, using SIGKILL...",
-                    remaining.len()
-                );
-                for pid in &remaining {
-                    unsafe {
-                        libc::kill(*pid, libc::SIGKILL);
-                    }
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-
-            log::info!("[sidecar] Cleanup complete, killed {} processes", pids.len());
-        }
+        // 3. Clean up MCP child processes from our installation
+        // Pattern matches: bun ~/.myagents/mcp/.../cli.js
+        // This is specific to our MCP installation path, won't affect other apps
+        kill_processes_by_pattern("MCP", ".myagents/mcp/", true);
     }
 
     #[cfg(windows)]
     {
-        // Windows: use taskkill with our marker
-        // Note: This is less precise than Unix, may need refinement
-        let _ = Command::new("taskkill")
-            .args(["/F", "/IM", "bun.exe"])
-            .output();
+        // Windows: use wmic to find processes with our marker (more precise than taskkill)
+        // This only kills bun processes that have our marker in their command line
+        if let Ok(output) = Command::new("wmic")
+            .args(["process", "where", &format!("commandline like '%{}%'", SIDECAR_MARKER), "get", "processid"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(200));
         log::info!("[sidecar] Windows cleanup complete");
     }
+}
+
+/// Find PIDs by command line pattern, excluding current process
+#[cfg(unix)]
+fn find_pids_by_pattern(pattern: &str) -> Vec<i32> {
+    let current_pid = std::process::id() as i32;
+
+    Command::new("pgrep")
+        .args(["-f", pattern])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|s| s.trim().parse::<i32>().ok())
+                // Exclude current process to avoid self-kill
+                .filter(|&pid| pid != current_pid)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Kill processes by pattern with optional SIGKILL fallback
+/// - name: descriptive name for logging
+/// - pattern: command line pattern to match
+/// - force_kill: if true, use SIGKILL for processes that don't respond to SIGTERM
+#[cfg(unix)]
+fn kill_processes_by_pattern(name: &str, pattern: &str, force_kill: bool) {
+    let pids = find_pids_by_pattern(pattern);
+    if pids.is_empty() {
+        return;
+    }
+
+    log::info!("[sidecar] Found {} {} processes, sending SIGTERM...", pids.len(), name);
+
+    // First try SIGTERM for graceful shutdown
+    for pid in &pids {
+        unsafe {
+            libc::kill(*pid, libc::SIGTERM);
+        }
+    }
+
+    if !force_kill {
+        return;
+    }
+
+    // Wait briefly for graceful shutdown
+    thread::sleep(Duration::from_millis(300));
+
+    // Check if any processes survived, use SIGKILL if needed
+    let remaining = find_pids_by_pattern(pattern);
+    if !remaining.is_empty() {
+        log::warn!(
+            "[sidecar] {} {} processes didn't respond to SIGTERM, using SIGKILL...",
+            remaining.len(), name
+        );
+        for pid in &remaining {
+            unsafe {
+                libc::kill(*pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    let final_remaining = find_pids_by_pattern(pattern);
+    let killed_count = pids.len() - final_remaining.len();
+    log::info!("[sidecar] {} cleanup complete, killed {}/{} processes", name, killed_count, pids.len());
 }
 
 
@@ -775,11 +817,39 @@ pub fn start_global_sidecar<R: Runtime>(
     start_tab_sidecar(app_handle, manager, GLOBAL_SIDECAR_ID, None)
 }
 
-/// Stop all sidecar instances
+/// Stop all sidecar instances and clean up child processes
+/// This should be called when the app is closing
 pub fn stop_all_sidecars(manager: &ManagedSidecarManager) -> Result<(), String> {
+    log::info!("[sidecar] Stopping all sidecars and cleaning up child processes...");
+
+    // 1. Stop all managed sidecar instances (kills bun sidecars via Drop)
     let mut manager_guard = manager.lock().map_err(|e| e.to_string())?;
     manager_guard.stop_all();
+    drop(manager_guard);
+
+    // 2. Clean up any orphaned child processes (SDK and MCP)
+    // This is necessary because SDK spawns child processes that don't die
+    // when the parent bun sidecar is killed
+    cleanup_child_processes();
+
     Ok(())
+}
+
+/// Clean up SDK and MCP child processes
+/// Called on app shutdown to ensure no orphaned processes remain
+#[cfg(unix)]
+fn cleanup_child_processes() {
+    // Clean up SDK child processes (with SIGKILL fallback for app shutdown)
+    kill_processes_by_pattern("SDK", "claude-agent-sdk/cli.js", true);
+
+    // Clean up MCP child processes (with SIGKILL fallback for app shutdown)
+    kill_processes_by_pattern("MCP", ".myagents/mcp/", true);
+}
+
+#[cfg(not(unix))]
+fn cleanup_child_processes() {
+    // Windows cleanup is handled by process termination cascading
+    // TODO: Implement Windows-specific cleanup if needed
 }
 
 // ============= Legacy Compatibility Functions =============

@@ -2,6 +2,8 @@
 // Dropdown menu for slash commands selection
 // Supports builtin commands, custom commands, and skills
 
+import { useEffect, useRef } from 'react';
+
 // Import SlashCommand type from shared module to avoid duplication
 import type { SlashCommand } from '../../shared/slashCommands';
 
@@ -21,6 +23,19 @@ export default function SlashCommandMenu({
     onSelect,
     isEmpty = false,
 }: SlashCommandMenuProps) {
+    // Ref to track the selected item for auto-scroll
+    const selectedItemRef = useRef<HTMLDivElement>(null);
+
+    // Auto-scroll to keep selected item visible when navigating with keyboard
+    useEffect(() => {
+        if (selectedItemRef.current) {
+            selectedItemRef.current.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth',
+            });
+        }
+    }, [selectedIndex]);
+
     // Empty state: show "未找到指令" when no matches
     if (isEmpty || commands.length === 0) {
         return (
@@ -37,6 +52,7 @@ export default function SlashCommandMenu({
             {commands.map((cmd, index) => (
                 <div
                     key={`${cmd.source}-${cmd.name}`}
+                    ref={index === selectedIndex ? selectedItemRef : null}
                     className={`flex items-center gap-3 px-3 py-2 cursor-pointer text-sm ${index === selectedIndex
                         ? 'bg-[var(--accent)]/10 text-[var(--ink)]'
                         : 'text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)]'

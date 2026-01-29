@@ -180,6 +180,34 @@ export default function GlobalSkillsPanel() {
         }
     }, []);
 
+    // 导入文件夹
+    const handleImportFolder = useCallback(async (folderPath: string) => {
+        try {
+            const response = await apiPostJson<{
+                success: boolean;
+                folderName?: string;
+                message?: string;
+                error?: string;
+            }>('/api/skill/import-folder', {
+                folderPath,
+                scope: 'user'
+            });
+
+            if (response.success) {
+                toastRef.current.success(response.message || '技能导入成功');
+                setShowNewSkillDialog(false);
+                setRefreshKey(k => k + 1);
+                if (response.folderName) {
+                    setViewState({ type: 'skill-detail', name: response.folderName });
+                }
+            } else {
+                toastRef.current.error(response.error || '导入失败');
+            }
+        } catch {
+            toastRef.current.error('导入失败');
+        }
+    }, []);
+
     const handleCreateCommand = useCallback(async () => {
         if (!newItemName.trim()) return;
         setCreating(true);
@@ -378,6 +406,7 @@ export default function GlobalSkillsPanel() {
                         handleQuickCreateSkill(tempName);
                     }}
                     onUploadSkill={handleUploadSkill}
+                    onImportFolder={handleImportFolder}
                     onCancel={() => setShowNewSkillDialog(false)}
                     syncConfig={canSyncFromClaude ? {
                         onSync: handleSyncFromClaude,

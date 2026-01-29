@@ -1,6 +1,6 @@
 import { Check, KeyRound, Loader2, Plus, RefreshCw, Trash2, X, AlertCircle, Globe, ExternalLink as ExternalLinkIcon, Settings2 } from 'lucide-react';
 import { ExternalLink } from '@/components/ExternalLink';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 
 import { apiGetJson, apiPostJson } from '@/api/apiFetch';
@@ -75,7 +75,12 @@ const EMPTY_CUSTOM_FORM: CustomProviderForm = {
 interface ProviderEditForm {
     provider: Provider;
     customModels: string[];  // 用户添加的自定义模型
+    removedModels: string[]; // 用户标记删除的已保存模型（model ID）
     newModelInput: string;
+    // 自定义供应商编辑字段
+    editName?: string;
+    editCloudProvider?: string;
+    editBaseUrl?: string;
 }
 
 interface SettingsProps {
@@ -87,6 +92,83 @@ interface SettingsProps {
 
 const VALID_SECTIONS: SettingsSection[] = ['providers', 'mcp', 'skills', 'about'];
 
+// Memoized component for model tag list to avoid recreating presetModelIds on every render
+const ModelTagList = React.memo(function ModelTagList({
+    provider,
+    removedModels,
+    onRemove,
+    customModels,
+    onRemoveCustomModel,
+}: {
+    provider: Provider;
+    removedModels: string[];
+    onRemove: (modelId: string) => void;
+    customModels: string[];           // Newly added models (not yet saved)
+    onRemoveCustomModel: (modelId: string) => void;
+}) {
+    // For preset providers, determine which models are preset vs user-added
+    const presetModelIds = useMemo(() => {
+        if (!provider.isBuiltin) return new Set<string>();
+        const presetProvider = PRESET_PROVIDERS.find(p => p.id === provider.id);
+        return new Set(presetProvider?.models.map(m => m.model) ?? []);
+    }, [provider.id, provider.isBuiltin]);
+
+    const visibleModels = useMemo(
+        () => provider.models.filter(m => !removedModels.includes(m.model)),
+        [provider.models, removedModels]
+    );
+
+    return (
+        <>
+            {/* Existing saved models */}
+            {visibleModels.map((model) => {
+                const isPresetModel = presetModelIds.has(model.model);
+                const canDelete = !isPresetModel;
+
+                return (
+                    <div
+                        key={model.model}
+                        className={`group flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[var(--ink)] ${
+                            canDelete
+                                ? 'bg-[var(--paper-contrast)] hover:bg-[var(--paper-inset)]'
+                                : 'bg-[var(--paper-contrast)]'
+                        }`}
+                    >
+                        <span>{model.modelName}</span>
+                        {isPresetModel ? (
+                            <span className="text-[9px] text-[var(--ink-muted)]">预设</span>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={() => onRemove(model.model)}
+                                className="ml-0.5 rounded p-0.5 text-[var(--ink-muted)] opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] group-hover:opacity-100"
+                            >
+                                <X className="h-3 w-3" />
+                            </button>
+                        )}
+                    </div>
+                );
+            })}
+            {/* Newly added models (not yet saved) */}
+            {customModels.map((model) => (
+                <div
+                    key={`custom-${model}`}
+                    className="group flex items-center gap-1 rounded-md bg-[var(--paper-contrast)] px-2 py-1 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper-inset)]"
+                >
+                    <span>{model}</span>
+                    <button
+                        type="button"
+                        onClick={() => onRemoveCustomModel(model)}
+                        className="ml-0.5 rounded p-0.5 text-[var(--ink-muted)] opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] group-hover:opacity-100"
+                    >
+                        <X className="h-3 w-3" />
+                    </button>
+                </div>
+            ))}
+        </>
+    );
+});
+
 export default function Settings({ initialSection, onSectionChange }: SettingsProps) {
     const {
         apiKeys,
@@ -97,9 +179,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         config,
         updateConfig,
         providers,
+        projects,
+        updateProject,
         addCustomProvider,
         updateCustomProvider,
         deleteCustomProvider: deleteCustomProviderService,
+        savePresetCustomModels,
+        removePresetCustomModel,
     } = useConfig();
     const toast = useToast();
     // Stabilize toast reference to avoid unnecessary effect re-runs
@@ -131,6 +217,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     const [customForm, setCustomForm] = useState<CustomProviderForm>(EMPTY_CUSTOM_FORM);
     // Provider edit/manage panel state
     const [editingProvider, setEditingProvider] = useState<ProviderEditForm | null>(null);
+    // 删除确认弹窗状态
+    const [deleteConfirmProvider, setDeleteConfirmProvider] = useState<Provider | null>(null);
 
     // UI-only loading state (not persisted)
     const [verifyLoading, setVerifyLoading] = useState<Record<string, boolean>>({});
@@ -756,8 +844,29 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         setShowCustomForm(false);
     };
 
-    const handleDeleteCustomProvider = async (providerId: string) => {
+    // 确认删除自定义供应商
+    const confirmDeleteCustomProvider = async () => {
+        if (!deleteConfirmProvider) return;
+        const providerId = deleteConfirmProvider.id;
+
         try {
+            // 检查是否有项目正在使用该供应商，如果有则切换到其他供应商
+            const affectedProjects = projects.filter(p => p.providerId === providerId);
+            if (affectedProjects.length > 0) {
+                // 找到第一个可用的其他供应商
+                const alternativeProvider = providers.find(p => p.id !== providerId);
+                if (alternativeProvider) {
+                    // 更新所有受影响的项目
+                    for (const project of affectedProjects) {
+                        await updateProject({
+                            ...project,
+                            providerId: alternativeProvider.id,
+                        });
+                    }
+                    console.log(`[Settings] Switched ${affectedProjects.length} project(s) to ${alternativeProvider.name}`);
+                }
+            }
+
             // Delete from disk, remove API key, and refresh providers list
             await deleteCustomProviderService(providerId);
             toast.success('服务商已删除');
@@ -765,6 +874,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             console.error('[Settings] Failed to delete custom provider:', error);
             toast.error('删除服务商失败');
         }
+        setDeleteConfirmProvider(null);
         setEditingProvider(null);
     };
 
@@ -775,7 +885,14 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         setEditingProvider({
             provider,
             customModels: [],  // TODO: Load from persisted custom models if any
+            removedModels: [], // 标记要删除的已保存模型
             newModelInput: '',
+            // 为自定义供应商初始化编辑字段
+            ...(provider.isBuiltin ? {} : {
+                editName: provider.name,
+                editCloudProvider: provider.cloudProvider,
+                editBaseUrl: provider.config.baseUrl || '',
+            }),
         });
     };
 
@@ -805,21 +922,76 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         });
     };
 
+    // Remove existing (saved) model from editing provider
+    // For custom providers: any model can be removed
+    // For preset providers: only user-added models can be removed (not preset models)
+    const removeExistingModel = (modelId: string) => {
+        if (!editingProvider) return;
+        setEditingProvider({
+            ...editingProvider,
+            removedModels: [...editingProvider.removedModels, modelId],
+        });
+    };
+
     // Save provider edits
     const saveProviderEdits = async () => {
         if (!editingProvider) return;
-        const { provider, customModels } = editingProvider;
+        const { provider, customModels, removedModels, editName, editCloudProvider, editBaseUrl } = editingProvider;
 
         if (provider.isBuiltin) {
-            // For preset providers, we only add custom models
-            // TODO: Persist custom models for preset providers
-            toast.info('自定义模型已添加');
+            // For preset providers: save user-added custom models
+            // 1. Get existing user-added models (from config.presetCustomModels)
+            const existingCustomModels = config.presetCustomModels?.[provider.id] ?? [];
+            // 2. Filter out removed models
+            const remainingCustomModels = existingCustomModels.filter(m => !removedModels.includes(m.model));
+            // 3. Add newly added models
+            const newCustomModels = customModels.map(m => ({
+                model: m,
+                modelName: m,
+                modelSeries: 'custom' as const,
+            }));
+            const finalCustomModels = [...remainingCustomModels, ...newCustomModels];
+            // 4. Save
+            try {
+                await savePresetCustomModels(provider.id, finalCustomModels);
+                if (customModels.length > 0 || removedModels.length > 0) {
+                    toast.success('模型配置已更新');
+                }
+            } catch (error) {
+                console.error('[Settings] Failed to save preset custom models:', error);
+                toast.error('保存失败');
+                return;
+            }
         } else {
+            // 验证必填字段
+            if (!editName?.trim() || !editBaseUrl?.trim()) {
+                toast.error('名称和 Base URL 不能为空');
+                return;
+            }
+            // 验证 Base URL 格式
+            const trimmedUrl = editBaseUrl.trim();
+            if (!trimmedUrl.startsWith('http://') && !trimmedUrl.startsWith('https://')) {
+                toast.error('Base URL 必须以 http:// 或 https:// 开头');
+                return;
+            }
+            // Filter out removed models from existing list, then add new custom models
+            const remainingModels = provider.models.filter(m => !removedModels.includes(m.model));
+            // Validate: at least one model must remain
+            if (remainingModels.length === 0 && customModels.length === 0) {
+                toast.error('供应商至少需要保留一个模型');
+                return;
+            }
             // For custom providers, update the provider and persist to disk
             const updatedProvider: Provider = {
                 ...provider,
+                name: editName.trim(),
+                cloudProvider: editCloudProvider?.trim() || '自定义',
+                config: {
+                    ...provider.config,
+                    baseUrl: editBaseUrl.trim(),
+                },
                 models: [
-                    ...provider.models,
+                    ...remainingModels,
                     ...customModels.map((m) => ({
                         model: m,
                         modelName: m,
@@ -1173,7 +1345,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 <button
                                                     onClick={handleCheckUpdate}
                                                     disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
-                                                    className="rounded-lg bg-[var(--paper-inset)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-strong)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    className="rounded-lg bg-[var(--paper-inset)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-strong)] disabled:opacity-50"
                                                 >
                                                     {updateStatus === 'checking' && '检查中...'}
                                                     {updateStatus === 'downloading' && '下载中...'}
@@ -1601,7 +1773,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                                 }
                                                             }}
                                                             disabled={!mcpForm.newEnvKey}
-                                                            className="flex items-center gap-1.5 rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:cursor-not-allowed disabled:opacity-50"
+                                                            className="flex items-center gap-1.5 rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:opacity-50"
                                                         >
                                                             <Plus className="h-4 w-4" />
                                                             添加
@@ -1653,7 +1825,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             (mcpForm.type === 'stdio' && !mcpForm.command) ||
                                             ((mcpForm.type === 'http' || mcpForm.type === 'sse') && !mcpForm.url)
                                         }
-                                        className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:opacity-50"
                                     >
                                         添加服务器
                                     </button>
@@ -1813,7 +1985,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             <button
                                 onClick={handleAddCustomProvider}
                                 disabled={!customForm.name || !customForm.baseUrl || customForm.models.length === 0}
-                                className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex-1 rounded-lg bg-[var(--ink)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[var(--ink-strong)] disabled:opacity-50"
                             >
                                 添加
                             </button>
@@ -1839,40 +2011,71 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                         </div>
 
                         <div className="space-y-4">
-                            {/* Provider info (read-only for preset) */}
+                            {/* Provider info - editable for custom, read-only for preset */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">供应商名称</label>
-                                <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)]">
-                                    {editingProvider.provider.name}
-                                </div>
+                                {editingProvider.provider.isBuiltin ? (
+                                    <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)]">
+                                        {editingProvider.provider.name}
+                                    </div>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editName || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editName: e.target.value } : null)}
+                                        placeholder="输入供应商名称"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
+                                )}
                             </div>
 
-                            {editingProvider.provider.config.baseUrl && (
+                            {/* 云服务商标签 - only for custom providers */}
+                            {!editingProvider.provider.isBuiltin && (
                                 <div>
-                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">API Base URL</label>
-                                    <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)] font-mono text-xs break-all">
-                                        {editingProvider.provider.config.baseUrl}
-                                    </div>
+                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">云服务商标签</label>
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editCloudProvider || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editCloudProvider: e.target.value } : null)}
+                                        placeholder="例如：自定义、代理"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
                                 </div>
                             )}
+
+                            {/* Base URL */}
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">API Base URL</label>
+                                {editingProvider.provider.isBuiltin ? (
+                                    editingProvider.provider.config.baseUrl && (
+                                        <div className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-sm text-[var(--ink-muted)] font-mono text-xs break-all">
+                                            {editingProvider.provider.config.baseUrl}
+                                        </div>
+                                    )
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={editingProvider.editBaseUrl || ''}
+                                        onChange={(e) => setEditingProvider((p) => p ? { ...p, editBaseUrl: e.target.value } : null)}
+                                        placeholder="https://api.example.com"
+                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                    />
+                                )}
+                            </div>
 
                             {/* Existing models */}
                             <div>
                                 <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                    {editingProvider.provider.isBuiltin ? '预设模型' : '模型列表'}
+                                    模型列表
                                 </label>
                                 <div className="flex flex-wrap gap-1.5">
-                                    {editingProvider.provider.models.map((model) => (
-                                        <div
-                                            key={model.model}
-                                            className="flex items-center gap-1 rounded-md bg-[var(--paper-contrast)] px-2 py-1 text-xs font-medium text-[var(--ink)]"
-                                        >
-                                            <span>{model.modelName}</span>
-                                            {editingProvider.provider.isBuiltin && (
-                                                <span className="text-[9px] text-[var(--ink-muted)]">预设</span>
-                                            )}
-                                        </div>
-                                    ))}
+                                    <ModelTagList
+                                        provider={editingProvider.provider}
+                                        removedModels={editingProvider.removedModels}
+                                        onRemove={removeExistingModel}
+                                        customModels={editingProvider.customModels}
+                                        onRemoveCustomModel={removeCustomModelFromProvider}
+                                    />
                                 </div>
                             </div>
 
@@ -1904,26 +2107,6 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         <Plus className="h-4 w-4" />
                                     </button>
                                 </div>
-                                {/* Custom model tags */}
-                                {editingProvider.customModels.length > 0 && (
-                                    <div className="mt-2 flex flex-wrap gap-1.5">
-                                        {editingProvider.customModels.map((model) => (
-                                            <div
-                                                key={model}
-                                                className="flex items-center gap-1 rounded-md bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)]"
-                                            >
-                                                <span>{model}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeCustomModelFromProvider(model)}
-                                                    className="ml-0.5 rounded p-0.5 text-[var(--accent)] hover:bg-[var(--accent)]/20"
-                                                >
-                                                    <X className="h-3 w-3" />
-                                                </button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
                             </div>
                         </div>
 
@@ -1931,7 +2114,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             {/* Delete button (only for custom providers) */}
                             {!editingProvider.provider.isBuiltin ? (
                                 <button
-                                    onClick={() => handleDeleteCustomProvider(editingProvider.provider.id)}
+                                    onClick={() => setDeleteConfirmProvider(editingProvider.provider)}
                                     className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
                                 >
                                     <Trash2 className="h-4 w-4" />
@@ -1955,6 +2138,37 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     保存
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Modal */}
+            {deleteConfirmProvider && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+                    <div className="mx-4 w-full max-w-sm rounded-2xl bg-[var(--paper-elevated)] p-6 shadow-xl">
+                        <div className="mb-4 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--error-bg)]">
+                                <Trash2 className="h-5 w-5 text-[var(--error)]" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-[var(--ink)]">删除供应商</h3>
+                        </div>
+                        <p className="mb-6 text-sm text-[var(--ink-muted)]">
+                            确定要删除「{deleteConfirmProvider.name}」吗？此操作无法撤销。
+                        </p>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setDeleteConfirmProvider(null)}
+                                className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"
+                            >
+                                取消
+                            </button>
+                            <button
+                                onClick={confirmDeleteCustomProvider}
+                                className="flex-1 rounded-lg bg-[var(--error)] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:brightness-110"
+                            >
+                                删除
+                            </button>
                         </div>
                     </div>
                 </div>

@@ -58,6 +58,7 @@ coverage/
 
 .agent/
 .claude/
+.playwright-mcp/
 specs/prd/
 
 publish_release.sh

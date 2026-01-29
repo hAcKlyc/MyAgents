@@ -13,6 +13,7 @@ import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { CreateDialog, NewSkillChooser } from './SkillDialogs';
 import type { SkillItem, CommandItem } from '../../shared/skillsTypes';
+import { CUSTOM_EVENTS } from '../../shared/constants';
 
 interface SkillsCommandsListProps {
     scope: 'user' | 'project';
@@ -106,6 +107,8 @@ export default function SkillsCommandsList({
                 // 使用返回的 folderName（sanitized）而非 tempName
                 onSelectSkill(response.folderName || tempName, scope, true);
                 loadData();
+                // Notify SimpleChatInput to refresh slash commands
+                window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName: response.folderName || tempName } }));
             } else {
                 toastRef.current.error(response.error || '创建失败');
             }
@@ -141,6 +144,8 @@ export default function SkillsCommandsList({
                         if (response.folderName) {
                             onSelectSkill(response.folderName, scope, true);
                         }
+                        // Notify SimpleChatInput to refresh slash commands
+                        window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName: response.folderName } }));
                     } else {
                         toastRef.current.error(response.error || '导入失败');
                     }
@@ -154,6 +159,37 @@ export default function SkillsCommandsList({
             reader.readAsDataURL(file);
         } catch {
             toastRef.current.error('上传失败');
+        }
+    }, [scope, loadData, onSelectSkill, api]);
+
+    // 导入文件夹
+    const handleImportFolder = useCallback(async (folderPath: string) => {
+        try {
+            const response = await api.post<{
+                success: boolean;
+                folderName?: string;
+                message?: string;
+                error?: string;
+            }>('/api/skill/import-folder', {
+                folderPath,
+                scope
+            });
+
+            if (response.success) {
+                toastRef.current.success(response.message || '技能导入成功');
+                setShowNewSkillDialog(false);
+                loadData();
+                // 进入新创建的技能详情页
+                if (response.folderName) {
+                    onSelectSkill(response.folderName, scope, true);
+                }
+                // Notify SimpleChatInput to refresh slash commands
+                window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, { detail: { skillName: response.folderName } }));
+            } else {
+                toastRef.current.error(response.error || '导入失败');
+            }
+        } catch {
+            toastRef.current.error('导入失败');
         }
     }, [scope, loadData, onSelectSkill, api]);
 
@@ -357,6 +393,7 @@ export default function SkillsCommandsList({
                         handleQuickCreateSkill(tempName);
                     }}
                     onUploadSkill={handleUploadSkill}
+                    onImportFolder={handleImportFolder}
                     onCancel={() => setShowNewSkillDialog(false)}
                 />
             )}

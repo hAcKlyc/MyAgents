@@ -154,6 +154,8 @@ export default function TabProvider({
     const apiDeleteJson = useMemo(() => createApiDelete(tabId), [tabId]);
 
     // Core state
+    // currentSessionId tracks the actual loaded session (starts from prop, updated by loadSession)
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId);
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [sessionState, setSessionState] = useState<SessionState>('idle');
@@ -167,6 +169,11 @@ export default function TabProvider({
     const [pendingAskUserQuestion, setPendingAskUserQuestion] = useState<AskUserQuestionRequest | null>(null);
     const [toolCompleteCount, setToolCompleteCount] = useState(0);
 
+    // Sync currentSessionId when prop changes (e.g., from parent re-initializing)
+    useEffect(() => {
+        setCurrentSessionId(sessionId);
+    }, [sessionId]);
+
     // Store callback in ref to avoid triggering effect on every render
     const onGeneratingChangeRef = useRef(onGeneratingChange);
     onGeneratingChangeRef.current = onGeneratingChange;
@@ -179,6 +186,8 @@ export default function TabProvider({
     // Refs for SSE handling
     const sseRef = useRef<SseConnection | null>(null);
     const isStreamingRef = useRef(false);
+    // Ref for stop timeout cleanup
+    const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const seenIdsRef = useRef<Set<string>>(new Set());
     // Flag to skip message-replay after user clicks "new session"
     const isNewSessionRef = useRef(false);
@@ -209,8 +218,10 @@ export default function TabProvider({
         isNewSessionRef.current = true;
         isStreamingRef.current = false;
         setIsLoading(false);
+        setSessionState('idle');  // Reset session state for new conversation
+        setSystemStatus(null);
         setAgentError(null);
-        setUnifiedLogs([]); // Clear logs for new conversation
+        setUnifiedLogs([]);
         setLogs([]);
         // Clear pending prompts to prevent stale UI
         setPendingPermission(null);
@@ -295,6 +306,45 @@ export default function TabProvider({
         };
     }, [appendUnifiedLog]);
 
+    // Helper: Mark all incomplete thinking/tool blocks as finished (stopped or failed)
+    const markIncompleteBlocksAsFinished = useCallback((status: 'completed' | 'stopped' | 'failed') => {
+        setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'assistant' || typeof last.content === 'string') return prev;
+            const hasIncomplete = last.content.some(b =>
+                (b.type === 'thinking' && !b.isComplete) ||
+                (b.type === 'tool_use' && b.tool?.isLoading)
+            );
+            if (!hasIncomplete) return prev;
+            // 'completed' = normal finish (no extra flags)
+            // 'stopped'  = user interrupted (isStopped: true, yellow icon)
+            // 'failed'   = error occurred (isFailed: true, red icon)
+            const statusFlags = status === 'stopped' ? { isStopped: true }
+                : status === 'failed' ? { isFailed: true }
+                : {};
+            const updatedContent = last.content.map(block => {
+                if (block.type === 'thinking' && !block.isComplete) {
+                    return {
+                        ...block,
+                        isComplete: true,
+                        ...statusFlags,
+                        thinkingDurationMs: block.thinkingStartedAt
+                            ? Date.now() - block.thinkingStartedAt
+                            : undefined
+                    };
+                }
+                if (block.type === 'tool_use' && block.tool?.isLoading) {
+                    return {
+                        ...block,
+                        tool: { ...block.tool, isLoading: false, ...statusFlags }
+                    };
+                }
+                return block;
+            });
+            return [...prev.slice(0, -1), { ...last, content: updatedContent }];
+        });
+    }, []);
+
     // Handle SSE events
     const handleSseEvent = useCallback((eventName: string, data: unknown) => {
         switch (eventName) {
@@ -319,6 +369,7 @@ export default function TabProvider({
                         console.debug(`[TabProvider ${tabId}] chat:init state=idle, syncing isLoading`);
                         isStreamingRef.current = false;
                         setIsLoading(false);
+                        setSystemStatus(null);  // Also clear system status when syncing to idle
                     }
                 }
                 break;
@@ -361,6 +412,7 @@ export default function TabProvider({
                         console.debug(`[TabProvider ${tabId}] chat:status=idle, syncing isLoading`);
                         isStreamingRef.current = false;
                         setIsLoading(false);
+                        setSystemStatus(null);  // Also clear system status when syncing to idle
                     }
                 }
                 break;
@@ -606,21 +658,44 @@ export default function TabProvider({
             }
 
             case 'chat:message-complete': {
-                console.debug(`[TabProvider ${tabId}] chat:message-complete received`);
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle
+                setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
+                // Defensively mark any remaining incomplete thinking/tool blocks as complete.
+                // Normally content_block_stop handles this, but third-party providers may not
+                // send it, leaving blocks stuck in loading state.
+                markIncompleteBlocksAsFinished('completed');
                 break;
             }
 
             case 'chat:message-stopped': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle
+                setSystemStatus(null);  // Clear system status when user stops response
+                // Clear stop timeout since we received confirmation
+                if (stopTimeoutRef.current) {
+                    clearTimeout(stopTimeoutRef.current);
+                    stopTimeoutRef.current = null;
+                }
+                // Mark all incomplete thinking blocks and tool_use blocks as stopped
+                markIncompleteBlocksAsFinished('stopped');
                 break;
             }
 
             case 'chat:message-error': {
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                setSessionState('idle');  // Reset session state to idle on error
+                setSystemStatus(null);  // Clear system status on error
+                // Clear stop timeout on error too
+                if (stopTimeoutRef.current) {
+                    clearTimeout(stopTimeoutRef.current);
+                    stopTimeoutRef.current = null;
+                }
+                // Mark all incomplete thinking blocks and tool_use blocks as failed
+                markIncompleteBlocksAsFinished('failed');
                 break;
             }
 
@@ -775,7 +850,7 @@ export default function TabProvider({
                 }
             }
         }
-    }, [appendLog, appendUnifiedLog, tabId]);
+    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished]);
 
     // Connect SSE
     const connectSse = useCallback(async () => {
@@ -809,11 +884,15 @@ export default function TabProvider({
     const agentDirRef = useRef(agentDir);
     agentDirRef.current = agentDir;
 
-    // Cleanup on unmount - disconnect SSE and stop Tab's Sidecar
+    // Cleanup on unmount - disconnect SSE, clear pending timers, and stop Tab's Sidecar
     useEffect(() => {
         return () => {
             if (sseRef.current) {
                 void sseRef.current.disconnect();
+            }
+            if (stopTimeoutRef.current) {
+                clearTimeout(stopTimeoutRef.current);
+                stopTimeoutRef.current = null;
             }
             // Only stop Sidecar if this Tab had one (i.e., was running a project)
             // Settings/Launcher tabs don't have sidecars (agentDir is empty string)
@@ -875,13 +954,38 @@ export default function TabProvider({
         }
     }, [tabId]);
 
-    // Stop response
+    // Stop response with timeout fallback
     const stopResponse = useCallback(async (): Promise<boolean> => {
+        // Clear any existing stop timeout
+        if (stopTimeoutRef.current) {
+            clearTimeout(stopTimeoutRef.current);
+            stopTimeoutRef.current = null;
+        }
+
         try {
             const response = await postJson<{ success: boolean; error?: string }>('/chat/stop');
-            return response.success;
+            if (response.success) {
+                // 设置 5 秒超时，如果没有收到 SSE 事件确认则强制恢复 UI
+                stopTimeoutRef.current = setTimeout(() => {
+                    if (isStreamingRef.current) {
+                        console.warn(`[TabProvider ${tabId}] Stop timeout - forcing UI recovery`);
+                        isStreamingRef.current = false;
+                        setIsLoading(false);
+                        setSessionState('idle');  // Reset session state on timeout
+                        setSystemStatus(null);
+                    }
+                    stopTimeoutRef.current = null;
+                }, 5000);
+                return true;
+            }
+            return false;
         } catch (error) {
             console.error(`[TabProvider ${tabId}] Stop response failed:`, error);
+            // 请求失败也强制恢复 UI
+            isStreamingRef.current = false;
+            setIsLoading(false);
+            setSessionState('idle');  // Reset session state on error
+            setSystemStatus(null);
             return false;
         }
     }, [tabId]);
@@ -933,8 +1037,14 @@ export default function TabProvider({
             // Clear current state and load new messages
             seenIdsRef.current.clear();
             isNewSessionRef.current = false; // Allow SSE replays again
+            isStreamingRef.current = false;  // Stop any streaming state
             setMessages(loadedMessages);
+            setIsLoading(false);
+            setSessionState('idle');  // Reset session state when loading historical session
+            setSystemStatus(null);
             setAgentError(null);
+            // Update current session ID to reflect the loaded session
+            setCurrentSessionId(targetSessionId);
 
             // Also update backend to switch session (for continuity)
             await postJson('/sessions/switch', { sessionId: targetSessionId });
@@ -1011,11 +1121,11 @@ export default function TabProvider({
         }
     }, [pendingAskUserQuestion, postJson]);
 
-    // Context value
+    // Context value - use currentSessionId (which tracks the actually loaded session)
     const contextValue: TabContextValue = useMemo(() => ({
         tabId,
         agentDir,
-        sessionId,
+        sessionId: currentSessionId,
         messages,
         isLoading,
         sessionState,
@@ -1051,7 +1161,7 @@ export default function TabProvider({
         respondPermission,
         respondAskUserQuestion,
     }), [
-        tabId, agentDir, sessionId, messages, isLoading, sessionState,
+        tabId, agentDir, currentSessionId, messages, isLoading, sessionState,
         logs, unifiedLogs, systemInitInfo, agentError, systemStatus, isActive, pendingPermission, pendingAskUserQuestion, toolCompleteCount, isConnected,
         appendLog, appendUnifiedLog, clearUnifiedLogs, connectSse, disconnectSse, sendMessage, stopResponse, loadSession, resetSession,
         apiGetJson, postJson, apiPutJson, apiDeleteJson, respondPermission, respondAskUserQuestion

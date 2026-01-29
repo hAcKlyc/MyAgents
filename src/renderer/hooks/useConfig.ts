@@ -1,5 +1,5 @@
 // React hook for managing app configuration
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
     addProject as addProjectService,
@@ -21,6 +21,7 @@ import {
 import {
     type AppConfig,
     DEFAULT_CONFIG,
+    type ModelEntity,
     type Project,
     type Provider,
     type ProviderVerifyStatus,
@@ -40,12 +41,16 @@ interface UseConfigResult {
     removeProject: (projectId: string) => Promise<void>;
     touchProject: (projectId: string) => Promise<void>;
 
-    // Providers
+    // Providers (preset providers have custom models merged)
     providers: Provider[];
     addCustomProvider: (provider: Provider) => Promise<void>;
     updateCustomProvider: (provider: Provider) => Promise<void>;
     deleteCustomProvider: (providerId: string) => Promise<void>;
     refreshProviders: () => Promise<void>;
+
+    // Preset provider custom models (user-added models for preset providers)
+    savePresetCustomModels: (providerId: string, models: ModelEntity[]) => Promise<void>;
+    removePresetCustomModel: (providerId: string, modelId: string) => Promise<void>;
 
     // API Keys
     apiKeys: Record<string, string>;
@@ -66,14 +71,40 @@ interface UseConfigResult {
     refreshProviderData: () => Promise<void>;
 }
 
+// Helper: Merge preset custom models into providers
+function mergePresetCustomModels(
+    providers: Provider[],
+    presetCustomModels: Record<string, ModelEntity[]> | undefined
+): Provider[] {
+    if (!presetCustomModels || Object.keys(presetCustomModels).length === 0) {
+        return providers;
+    }
+    return providers.map(provider => {
+        if (!provider.isBuiltin) return provider;
+        const customModels = presetCustomModels[provider.id];
+        if (!customModels || customModels.length === 0) return provider;
+        // Merge: preset models first, then user custom models
+        return {
+            ...provider,
+            models: [...provider.models, ...customModels],
+        };
+    });
+}
+
 export function useConfig(): UseConfigResult {
     const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
     const [projects, setProjects] = useState<Project[]>([]);
-    const [providers, setProviders] = useState<Provider[]>(PRESET_PROVIDERS);
+    const [rawProviders, setRawProviders] = useState<Provider[]>(PRESET_PROVIDERS);
     const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
     const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, ProviderVerifyStatus>>({});
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    // Merge preset custom models into providers for consumers (memoized to avoid unnecessary recalculations)
+    const providers = useMemo(
+        () => mergePresetCustomModels(rawProviders, config.presetCustomModels),
+        [rawProviders, config.presetCustomModels]
+    );
 
     const load = useCallback(async () => {
         setIsLoading(true);
@@ -90,7 +121,7 @@ export function useConfig(): UseConfigResult {
 
             setConfig(loadedConfig);
             setProjects(loadedProjects);
-            setProviders(loadedProviders);
+            setRawProviders(loadedProviders);
             setApiKeys(loadedApiKeys);
             setProviderVerifyStatus(loadedVerifyStatus);
         } catch (err) {
@@ -196,7 +227,7 @@ export function useConfig(): UseConfigResult {
     const refreshProviders = useCallback(async () => {
         try {
             const loadedProviders = await getAllProviders();
-            setProviders(loadedProviders);
+            setRawProviders(loadedProviders);
         } catch (err) {
             console.error('[useConfig] Failed to refresh providers:', err);
         }
@@ -236,6 +267,28 @@ export function useConfig(): UseConfigResult {
         });
     }, [refreshProviders]);
 
+    // Save custom models for a preset provider
+    const savePresetCustomModels = useCallback(async (providerId: string, models: ModelEntity[]) => {
+        const newPresetCustomModels = {
+            ...config.presetCustomModels,
+            [providerId]: models,
+        };
+        // Remove entry if empty
+        if (models.length === 0) {
+            delete newPresetCustomModels[providerId];
+        }
+        const newConfig = { ...config, presetCustomModels: newPresetCustomModels };
+        setConfig(newConfig);
+        await saveAppConfig(newConfig);
+    }, [config]);
+
+    // Remove a single custom model from a preset provider
+    const removePresetCustomModel = useCallback(async (providerId: string, modelId: string) => {
+        const currentModels = config.presetCustomModels?.[providerId] ?? [];
+        const newModels = currentModels.filter(m => m.model !== modelId);
+        await savePresetCustomModels(providerId, newModels);
+    }, [config.presetCustomModels, savePresetCustomModels]);
+
     return {
         config,
         isLoading,
@@ -250,6 +303,8 @@ export function useConfig(): UseConfigResult {
         updateCustomProvider,
         deleteCustomProvider,
         refreshProviders,
+        savePresetCustomModels,
+        removePresetCustomModel,
         apiKeys,
         saveApiKey,
         deleteApiKey,

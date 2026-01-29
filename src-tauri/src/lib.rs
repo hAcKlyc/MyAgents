@@ -9,21 +9,30 @@ mod updater;
 
 use sidecar::{cleanup_stale_sidecars, create_sidecar_state, stop_all_sidecars};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // IMPORTANT: Clean up stale sidecar processes from previous app instances
     // This prevents "No available port found" errors caused by orphaned processes
     cleanup_stale_sidecars();
-    
+
     // Create managed sidecar state (now supports multiple instances)
     let sidecar_state = create_sidecar_state();
-    let sidecar_state_cleanup = sidecar_state.clone();
-    
+    let sidecar_state_for_window = sidecar_state.clone();
+    let sidecar_state_for_exit = sidecar_state.clone();
+
+    // Track if cleanup has been performed to avoid duplicate cleanup
+    let cleanup_done = Arc::new(AtomicBool::new(false));
+    let cleanup_done_for_window = cleanup_done.clone();
+    let cleanup_done_for_exit = cleanup_done.clone();
+
     // Create SSE proxy state
     let sse_proxy_state = Arc::new(sse_proxy::SseProxyState::default());
 
-    tauri::Builder::default()
+    // Build the app first, then run with event handler
+    // This allows us to handle RunEvent::ExitRequested for Cmd+Q and Dock quit
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -100,11 +109,29 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(move |_window, event| {
-            // Clean up ALL sidecar instances when main window closes
+            // Clean up when main window is destroyed (X button, Cmd+W)
             if let tauri::WindowEvent::Destroyed = event {
-                let _ = stop_all_sidecars(&sidecar_state_cleanup);
+                // Only cleanup once (Relaxed is sufficient for simple flag)
+                use std::sync::atomic::Ordering::Relaxed;
+                if !cleanup_done_for_window.swap(true, Relaxed) {
+                    log::info!("[App] Window destroyed, cleaning up sidecars...");
+                    let _ = stop_all_sidecars(&sidecar_state_for_window);
+                }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Run with event handler to catch Cmd+Q and Dock quit
+    app.run(move |_app_handle, event| {
+        // Handle app exit events (Cmd+Q, Dock right-click quit, etc.)
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            // Only cleanup once (Relaxed is sufficient for simple flag)
+            use std::sync::atomic::Ordering::Relaxed;
+            if !cleanup_done_for_exit.swap(true, Relaxed) {
+                log::info!("[App] Exit requested (Cmd+Q or Dock quit), cleaning up sidecars...");
+                let _ = stop_all_sidecars(&sidecar_state_for_exit);
+            }
+        }
+    });
 }

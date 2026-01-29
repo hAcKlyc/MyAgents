@@ -74,6 +74,10 @@ export interface ToolUseSimple extends ToolUse {
   isLoading?: boolean;
   // Whether tool result is an error
   isError?: boolean;
+  // Whether tool was stopped by user (interrupted)
+  isStopped?: boolean;
+  // Whether tool failed due to error
+  isFailed?: boolean;
   // Nested tool calls emitted by subagents (Task tool)
   subagentCalls?: SubagentToolCall[];
   // Task tool specific: start time for duration calculation
@@ -93,6 +97,10 @@ export interface ContentBlock {
   thinkingStreamIndex?: number;
   // Whether this thinking block is complete (received content_block_stop)
   isComplete?: boolean;
+  // Whether this block was stopped by user (interrupted)
+  isStopped?: boolean;
+  // Whether this block failed due to error
+  isFailed?: boolean;
 }
 
 export interface MessageAttachment {
