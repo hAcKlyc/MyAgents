@@ -1,4 +1,4 @@
-# MyAgents Windows 发布脚本
+﻿# MyAgents Windows 发布脚本
 # 将构建产物上传到 Cloudflare R2，并生成更新清单
 #
 # 前置条件：
