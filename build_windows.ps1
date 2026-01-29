@@ -224,8 +224,9 @@ try {
     Copy-Item "$sdkSrc\vendor" $sdkDest -Recurse -Force
     Write-Host "    OK - SDK 依赖复制完成" -ForegroundColor Green
 
-    # 构建前端
+    # 构建前端 (增加内存限制避免 OOM)
     Write-Host "  构建前端..." -ForegroundColor Cyan
+    $env:NODE_OPTIONS = "--max-old-space-size=4096"
     & bun run build:web
     if ($LASTEXITCODE -ne 0) {
         throw "前端构建失败"
