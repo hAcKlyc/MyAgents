@@ -64,11 +64,21 @@ export default function FilePreviewModal({
     const [previewContent, setPreviewContent] = useState(content); // Content displayed in preview mode, updated after save
     const [isSaving, setIsSaving] = useState(false);
     const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
+    // Track if content is ready to render (avoids blank flash while SyntaxHighlighter computes)
+    const [isContentReady, setIsContentReady] = useState(false);
 
     // Sync content when prop changes (e.g., when file is reloaded externally)
+    // Use requestAnimationFrame to let loading state render first before heavy SyntaxHighlighter
     useEffect(() => {
         setEditContent(content);
         setPreviewContent(content);
+        setIsContentReady(false);
+
+        // Defer content ready to next frame so loading spinner shows first
+        const rafId = requestAnimationFrame(() => {
+            setIsContentReady(true);
+        });
+        return () => cancelAnimationFrame(rafId);
     }, [content]);
 
     // Derived state - compare with previewContent (the last saved state)
@@ -176,7 +186,8 @@ export default function FilePreviewModal({
 
     // Render preview content based on file type
     const renderPreviewContent = () => {
-        if (isLoading) {
+        // Show loading while fetching or while content is preparing to render
+        if (isLoading || !isContentReady) {
             return (
                 <div className="flex h-full items-center justify-center gap-2 text-[var(--ink-muted)]">
                     <Loader2 className="h-5 w-5 animate-spin" />
