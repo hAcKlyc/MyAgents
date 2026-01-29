@@ -27,6 +27,8 @@ interface SimpleChatInputProps {
   onSend: (text: string, images?: ImageAttachment[], permissionMode?: PermissionMode) => void;
   onStop?: () => void; // Called when stop button is clicked
   isLoading: boolean;
+  /** System status (e.g., 'compacting') - when set, shows disabled send button instead of stop */
+  systemStatus?: string | null;
   agentDir?: string; // For @file search
   // Provider/Model selection
   provider?: Provider | null; // Current provider for model selection
@@ -83,6 +85,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
   onSend,
   onStop,
   isLoading,
+  systemStatus,
   agentDir,
   provider,
   providers = [],
@@ -1490,7 +1493,19 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                 )}
               </div>
 
-              {isLoading ? (
+              {/* Button states: system task (disabled send) → AI responding (stop) → normal (send) */}
+              {systemStatus ? (
+                // System task running (e.g., compacting) - not interruptible
+                <button
+                  type="button"
+                  disabled
+                  className="rounded-lg bg-[var(--ink-muted)]/15 p-2 text-[var(--ink-muted)]/60"
+                  title="正在执行系统任务，请稍等"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              ) : isLoading ? (
+                // AI responding - can be stopped
                 <button
                   type="button"
                   onClick={onStop}
@@ -1500,6 +1515,7 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
                   <Square className="h-4 w-4" />
                 </button>
               ) : (
+                // Normal state - can send
                 <button
                   type="button"
                   onClick={handleSend}

@@ -552,6 +552,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
               }
             }}
             isLoading={isLoading || sessionState === 'running'}
+            systemStatus={systemStatus}
             agentDir={agentDir}
             provider={currentProvider}
             providers={providers}
