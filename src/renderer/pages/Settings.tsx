@@ -1353,6 +1353,115 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                 </button>
                                             )}
                                         </div>
+
+                                        {/* Network Proxy Settings */}
+                                        <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
+                                            <h3 className="mb-3 text-sm font-medium text-[var(--ink)]">网络代理</h3>
+                                            <p className="mb-4 text-xs text-[var(--ink-muted)]">
+                                                配置 HTTP/SOCKS5 代理，用于外部 API 请求（如 Clash、V2Ray 等）
+                                            </p>
+
+                                            {/* Enable toggle */}
+                                            <div className="mb-4 flex items-center justify-between">
+                                                <span className="text-xs text-[var(--ink-secondary)]">启用代理</span>
+                                                <button
+                                                    onClick={() => {
+                                                        const current = config.proxySettings;
+                                                        updateConfig({
+                                                            proxySettings: {
+                                                                enabled: !current?.enabled,
+                                                                protocol: current?.protocol || 'http',
+                                                                host: current?.host || '127.0.0.1',
+                                                                port: current?.port || 7897,
+                                                            }
+                                                        });
+                                                    }}
+                                                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${config.proxySettings?.enabled ? 'bg-[var(--success)]' : 'bg-[var(--paper-inset)]'}`}
+                                                >
+                                                    <span
+                                                        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-[var(--paper-elevated)] shadow transition-transform ${config.proxySettings?.enabled ? 'translate-x-5' : 'translate-x-0'}`}
+                                                    />
+                                                </button>
+                                            </div>
+
+                                            {/* Proxy settings form */}
+                                            {config.proxySettings?.enabled && (
+                                                <div className="space-y-3 border-t border-[var(--line)] pt-4">
+                                                    {/* Protocol */}
+                                                    <div className="flex items-center gap-3">
+                                                        <label className="w-16 text-xs text-[var(--ink-muted)]">协议</label>
+                                                        <select
+                                                            value={config.proxySettings?.protocol || 'http'}
+                                                            onChange={(e) => {
+                                                                updateConfig({
+                                                                    proxySettings: {
+                                                                        ...config.proxySettings!,
+                                                                        protocol: e.target.value as 'http' | 'socks5',
+                                                                    }
+                                                                });
+                                                            }}
+                                                            className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+                                                        >
+                                                            <option value="http">HTTP</option>
+                                                            <option value="socks5">SOCKS5</option>
+                                                        </select>
+                                                    </div>
+
+                                                    {/* Host */}
+                                                    <div className="flex items-center gap-3">
+                                                        <label className="w-16 text-xs text-[var(--ink-muted)]">服务器</label>
+                                                        <input
+                                                            type="text"
+                                                            value={config.proxySettings?.host || '127.0.0.1'}
+                                                            onChange={(e) => {
+                                                                updateConfig({
+                                                                    proxySettings: {
+                                                                        ...config.proxySettings!,
+                                                                        host: e.target.value,
+                                                                    }
+                                                                });
+                                                            }}
+                                                            placeholder="127.0.0.1"
+                                                            className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
+                                                        />
+                                                    </div>
+
+                                                    {/* Port */}
+                                                    <div className="flex items-center gap-3">
+                                                        <label className="w-16 text-xs text-[var(--ink-muted)]">端口</label>
+                                                        <input
+                                                            type="number"
+                                                            value={config.proxySettings?.port || 7897}
+                                                            onChange={(e) => {
+                                                                const port = parseInt(e.target.value, 10);
+                                                                if (!isNaN(port) && port > 0 && port <= 65535) {
+                                                                    updateConfig({
+                                                                        proxySettings: {
+                                                                            ...config.proxySettings!,
+                                                                            port,
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }}
+                                                            placeholder="7897"
+                                                            className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
+                                                        />
+                                                    </div>
+
+                                                    {/* Preview */}
+                                                    <div className="mt-2 rounded-lg bg-[var(--paper-inset)] px-3 py-2">
+                                                        <span className="text-xs text-[var(--ink-muted)]">代理地址: </span>
+                                                        <code className="text-xs font-mono text-[var(--ink)]">
+                                                            {config.proxySettings?.protocol || 'http'}://{config.proxySettings?.host || '127.0.0.1'}:{config.proxySettings?.port || 7897}
+                                                        </code>
+                                                    </div>
+
+                                                    <p className="text-[10px] text-[var(--ink-faint)]">
+                                                        注意：修改后需要重启应用或切换标签页才能生效
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}

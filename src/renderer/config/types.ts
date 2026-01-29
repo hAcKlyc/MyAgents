@@ -165,6 +165,21 @@ export function isVerifyExpired(verifiedAt: string): boolean {
 }
 
 /**
+ * Network proxy protocol type
+ */
+export type ProxyProtocol = 'http' | 'socks5';
+
+/**
+ * Network proxy settings (developer feature)
+ */
+export interface ProxySettings {
+  enabled: boolean;
+  protocol: ProxyProtocol;
+  host: string;
+  port: number;
+}
+
+/**
  * App-level configuration
  */
 export interface AppConfig {
@@ -196,6 +211,10 @@ export interface AppConfig {
   mcpServerEnv?: Record<string, Record<string, string>>;
   // Installation status for each MCP server (key = server ID)
   mcpInstallStatus?: Record<string, McpInstallState>;
+
+  // ===== Network Proxy (Developer) =====
+  // HTTP/SOCKS5 proxy settings for external network requests
+  proxySettings?: ProxySettings;
 }
 
 /**
@@ -273,7 +292,7 @@ export const PRESET_PROVIDERS: Provider[] = [
     vendor: 'Moonshot',
     cloudProvider: '模型官方',
     type: 'api',
-    primaryModel: 'kimi-k2-thinking-turbo',
+    primaryModel: 'kimi-k2.5',
     isBuiltin: true,
     authType: 'auth_token',
     config: {
