@@ -85,6 +85,7 @@ import {
   deleteSession,
   getAllSessionMetadata,
   getSessionData,
+  getSessionMetadata,
   getSessionsByAgentDir,
   updateSessionMetadata,
   updateSessionTitleFromMessage,
@@ -512,6 +513,87 @@ async function main() {
 
         const session = createSession(agentDirValue);
         return jsonResponse({ success: true, session });
+      }
+
+      // GET /sessions/:id/stats - Get detailed session statistics
+      // NOTE: This route must be BEFORE /sessions/:id to avoid being caught by the generic route
+      if (pathname.match(/^\/sessions\/[^/]+\/stats$/) && request.method === 'GET') {
+        const sessionId = pathname.replace('/sessions/', '').replace('/stats', '');
+        if (!sessionId) {
+          return jsonResponse({ success: false, error: 'Session ID required.' }, 400);
+        }
+
+        const session = getSessionData(sessionId);
+        if (!session) {
+          return jsonResponse({ success: false, error: 'Session not found.' }, 404);
+        }
+
+        // Group stats by model
+        const byModel: Record<string, {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheCreationTokens: number;
+          count: number;
+        }> = {};
+
+        // Build message details
+        const messageDetails: Array<{
+          userQuery: string;
+          model?: string;
+          inputTokens: number;
+          outputTokens: number;
+          toolCount?: number;
+          durationMs?: number;
+        }> = [];
+
+        let currentUserQuery = '';
+        for (const msg of session.messages) {
+          if (msg.role === 'user') {
+            currentUserQuery = typeof msg.content === 'string'
+              ? msg.content.slice(0, 100)
+              : JSON.stringify(msg.content).slice(0, 100);
+          } else if (msg.role === 'assistant' && msg.usage) {
+            const model = msg.usage.model || 'unknown';
+            if (!byModel[model]) {
+              byModel[model] = {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheCreationTokens: 0,
+                count: 0,
+              };
+            }
+            byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
+            byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
+            byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
+            byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
+            byModel[model].count++;
+
+            messageDetails.push({
+              userQuery: currentUserQuery,
+              model: msg.usage.model,
+              inputTokens: msg.usage.inputTokens ?? 0,
+              outputTokens: msg.usage.outputTokens ?? 0,
+              toolCount: msg.toolCount,
+              durationMs: msg.durationMs,
+            });
+          }
+        }
+
+        const metadata = getSessionMetadata(sessionId);
+        return jsonResponse({
+          success: true,
+          stats: {
+            summary: metadata?.stats ?? {
+              messageCount: 0,
+              totalInputTokens: 0,
+              totalOutputTokens: 0,
+            },
+            byModel,
+            messageDetails,
+          },
+        });
       }
 
       // GET /sessions/:id - Get session details

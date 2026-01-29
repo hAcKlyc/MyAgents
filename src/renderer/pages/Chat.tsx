@@ -431,6 +431,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
             <div className="relative">
               <button
                 type="button"
+                onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setShowHistory((prev) => !prev)}
                 className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] font-medium transition-colors ${showHistory
                   ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'

@@ -293,6 +293,7 @@ if (isDebugMode()) console.log('[module] debug message');
 | 自动更新、CI/CD | [auto_update.md](./specs/tech_docs/auto_update.md) |
 | 工具权限控制 | [sdk_canUseTool_guide.md](./specs/tech_docs/sdk_canUseTool_guide.md) |
 | SSE 状态同步 | [session_state_sync.md](./specs/tech_docs/session_state_sync.md) |
+| Session 存储架构 | [session_storage.md](./specs/tech_docs/session_storage.md) |
 | 日志系统 | [unified_logging.md](./specs/tech_docs/unified_logging.md) |
 | UI/设计规范 | [design_guide.md](./specs/guides/design_guide.md) |
 | macOS 签名、公证 | [macos_distribution_guide.md](./specs/guides/macos_distribution_guide.md) |

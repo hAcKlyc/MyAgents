@@ -135,18 +135,24 @@ interface Provider {
 
 ### 解决方案
 
-检测供应商变化时，**终止当前会话并重启**：
+检测供应商变化时，**终止当前 SDK 会话并重启**，根据目标 provider 类型决定是否 resume：
 
 ```typescript
 if (providerChanged && querySession) {
+  // Resume 策略：Anthropic 官方会校验 thinking block 签名
+  // 三方 → 官方：不 resume（签名不兼容）
+  // 其他组合：resume（保留上下文）
+  const switchingFromThirdPartyToAnthropic = currentProviderEnv?.baseUrl && !providerEnv?.baseUrl;
+  resumeSessionId = switchingFromThirdPartyToAnthropic ? undefined : systemInitInfo?.session_id;
+
   currentProviderEnv = providerEnv;
   shouldAbortSession = true;
-  
+
   // 等待旧会话完全终止，避免竞态条件
   if (sessionTerminationPromise) {
     await sessionTerminationPromise;
   }
-  
+
   querySession = null;
   isProcessing = false;
   // 新消息会触发 startStreamingSession() 使用新环境变量
@@ -158,42 +164,56 @@ if (providerChanged && querySession) {
 - **应用层 session 保留**：`sessionId`、`messages` 不变
 - **SDK 层 session 重建**：`querySession` 重新创建
 - **状态清理**：`streamIndexToToolId`、`toolResultIndexToId` 需清理
+- **`switchToSession` 必须终止旧 session**：设置 `shouldAbortSession = true`，否则旧 session 的 `messageGenerator` 不会退出，新消息被旧 session 处理
 
 ---
 
-## ⚠️ 关键陷阱：订阅模式与 API Key 模式切换
+## ⚠️ 关键陷阱：Thinking Block 签名与 Resume
 
 ### 问题
 
-从 API Key 模式（如 GLM）切换到 Anthropic 订阅模式时报错：`Invalid signature in thinking block`
+Anthropic 官方 API 会在 thinking block 中嵌入签名，resume session 时校验签名。第三方供应商（DeepSeek、GLM 等）不校验签名。
 
-### 根因
+从第三方供应商切换到 Anthropic 官方后 resume session 会报错：`Invalid signature in thinking block`
 
-订阅模式的 Provider 配置是 `config: {}`（空对象），前端构建的 providerEnv 变成：
+### Resume 规则
+
+| From | To | Resume | 原因 |
+|------|-----|--------|------|
+| 三方（有 baseUrl） | Anthropic 官方（无 baseUrl） | ❌ 新 session | 签名不兼容 |
+| Anthropic 官方 | 三方 | ✅ resume | 三方不校验签名 |
+| 三方 A | 三方 B | ✅ resume | 三方不校验签名 |
+| Anthropic 订阅 | Anthropic API Key | ✅ resume | 签名兼容 |
+
+### 区分标准
 
 ```typescript
-// 实际发送的对象
-{ baseUrl: undefined, apiKey: undefined, authType: undefined }
+// 有 baseUrl = 第三方兼容供应商
+// 无 baseUrl = Anthropic 官方（订阅或 API Key 模式）
+const isThirdParty = !!providerEnv?.baseUrl;
 ```
 
-后端检查 `providerEnv && (providerEnv.baseUrl !== ...)` 为 true（因为对象存在），误判为 provider 变化，触发 resume session。但不同 provider 的 thinking block signature 不兼容。
+---
 
-### 解决方案
+## ⚠️ 关键陷阱：订阅模式的 providerEnv
 
-前端判断 provider 类型，**订阅模式不发送 providerEnv**：
+### 原则
+
+- `providerEnv = undefined`：使用 SDK 默认认证（Anthropic 订阅）
+- `providerEnv = { baseUrl, apiKey }`：使用第三方 API
+
+前端构建 `providerEnv` 时，**订阅模式不发送 providerEnv**：
 
 ```typescript
-// Before: 只要 currentProvider 存在就发送
-const providerEnv = currentProvider ? { ... } : undefined;
-
-// After: 订阅模式发送 undefined
 const providerEnv = currentProvider && currentProvider.type !== 'subscription'
   ? { baseUrl: ..., apiKey: ..., authType: ... }
   : undefined;
 ```
 
-### 原则
+后端检测订阅切换：
 
-- `providerEnv = undefined`：使用 SDK 默认认证（订阅）
-- `providerEnv = { baseUrl, apiKey }`：使用第三方 API
+```typescript
+// 从 API 模式切换到订阅模式
+const switchingToSubscription = !providerEnv && currentProviderEnv;
+```
 

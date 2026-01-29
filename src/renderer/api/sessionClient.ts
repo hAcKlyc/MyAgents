@@ -4,12 +4,29 @@
 
 import { apiFetch, apiGetJson, apiPostJson } from './apiFetch';
 
+export interface SessionStats {
+    messageCount: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCacheReadTokens?: number;
+    totalCacheCreationTokens?: number;
+}
+
+export interface MessageUsage {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    model?: string;
+}
+
 export interface SessionMetadata {
     id: string;
     agentDir: string;
     title: string;
     createdAt: string;
     lastActiveAt: string;
+    stats?: SessionStats;
 }
 
 export interface SessionMessage {
@@ -17,10 +34,32 @@ export interface SessionMessage {
     role: 'user' | 'assistant';
     content: string;
     timestamp: string;
+    usage?: MessageUsage;
+    toolCount?: number;
+    durationMs?: number;
 }
 
 export interface SessionData extends SessionMetadata {
     messages: SessionMessage[];
+}
+
+export interface SessionDetailedStats {
+    summary: SessionStats;
+    byModel: Record<string, {
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheCreationTokens: number;
+        count: number;
+    }>;
+    messageDetails: Array<{
+        userQuery: string;
+        model?: string;
+        inputTokens: number;
+        outputTokens: number;
+        toolCount?: number;
+        durationMs?: number;
+    }>;
 }
 
 /**
@@ -86,6 +125,20 @@ export async function updateSession(
         });
         const data = await result.json() as { success: boolean; session: SessionMetadata };
         return data.session ?? null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Get detailed session statistics
+ */
+export async function getSessionStats(sessionId: string): Promise<SessionDetailedStats | null> {
+    try {
+        const result = await apiGetJson<{ success: boolean; stats: SessionDetailedStats }>(
+            `/sessions/${sessionId}/stats`
+        );
+        return result.stats ?? null;
     } catch {
         return null;
     }

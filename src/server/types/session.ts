@@ -1,4 +1,15 @@
 /**
+ * Session statistics for tracking usage
+ */
+export interface SessionStats {
+    messageCount: number;        // Number of user messages (queries)
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCacheReadTokens?: number;
+    totalCacheCreationTokens?: number;
+}
+
+/**
  * Session metadata stored in sessions.json
  */
 export interface SessionMetadata {
@@ -9,6 +20,8 @@ export interface SessionMetadata {
     lastActiveAt: string;
     /** SDK's internal session_id for resume functionality */
     sdkSessionId?: string;
+    /** Session statistics */
+    stats?: SessionStats;
 }
 
 /**
@@ -29,6 +42,17 @@ export interface MessageAttachment {
 }
 
 /**
+ * Usage information for assistant messages
+ */
+export interface MessageUsage {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    model?: string;
+}
+
+/**
  * Simplified message format for storage
  */
 export interface SessionMessage {
@@ -37,6 +61,12 @@ export interface SessionMessage {
     content: string;
     timestamp: string;
     attachments?: MessageAttachment[];
+    /** Usage info (only for assistant messages) */
+    usage?: MessageUsage;
+    /** Tool call count in this response */
+    toolCount?: number;
+    /** Response duration in milliseconds */
+    durationMs?: number;
 }
 
 /**

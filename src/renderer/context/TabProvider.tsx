@@ -154,6 +154,8 @@ export default function TabProvider({
     const apiDeleteJson = useMemo(() => createApiDelete(tabId), [tabId]);
 
     // Core state
+    // currentSessionId tracks the actual loaded session (starts from prop, updated by loadSession)
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(sessionId);
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [sessionState, setSessionState] = useState<SessionState>('idle');
@@ -166,6 +168,11 @@ export default function TabProvider({
     const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null);
     const [pendingAskUserQuestion, setPendingAskUserQuestion] = useState<AskUserQuestionRequest | null>(null);
     const [toolCompleteCount, setToolCompleteCount] = useState(0);
+
+    // Sync currentSessionId when prop changes (e.g., from parent re-initializing)
+    useEffect(() => {
+        setCurrentSessionId(sessionId);
+    }, [sessionId]);
 
     // Store callback in ref to avoid triggering effect on every render
     const onGeneratingChangeRef = useRef(onGeneratingChange);
@@ -862,11 +869,15 @@ export default function TabProvider({
     const agentDirRef = useRef(agentDir);
     agentDirRef.current = agentDir;
 
-    // Cleanup on unmount - disconnect SSE and stop Tab's Sidecar
+    // Cleanup on unmount - disconnect SSE, clear pending timers, and stop Tab's Sidecar
     useEffect(() => {
         return () => {
             if (sseRef.current) {
                 void sseRef.current.disconnect();
+            }
+            if (stopTimeoutRef.current) {
+                clearTimeout(stopTimeoutRef.current);
+                stopTimeoutRef.current = null;
             }
             // Only stop Sidecar if this Tab had one (i.e., was running a project)
             // Settings/Launcher tabs don't have sidecars (agentDir is empty string)
@@ -1009,6 +1020,8 @@ export default function TabProvider({
             isNewSessionRef.current = false; // Allow SSE replays again
             setMessages(loadedMessages);
             setAgentError(null);
+            // Update current session ID to reflect the loaded session
+            setCurrentSessionId(targetSessionId);
 
             // Also update backend to switch session (for continuity)
             await postJson('/sessions/switch', { sessionId: targetSessionId });
@@ -1085,11 +1098,11 @@ export default function TabProvider({
         }
     }, [pendingAskUserQuestion, postJson]);
 
-    // Context value
+    // Context value - use currentSessionId (which tracks the actually loaded session)
     const contextValue: TabContextValue = useMemo(() => ({
         tabId,
         agentDir,
-        sessionId,
+        sessionId: currentSessionId,
         messages,
         isLoading,
         sessionState,
@@ -1125,7 +1138,7 @@ export default function TabProvider({
         respondPermission,
         respondAskUserQuestion,
     }), [
-        tabId, agentDir, sessionId, messages, isLoading, sessionState,
+        tabId, agentDir, currentSessionId, messages, isLoading, sessionState,
         logs, unifiedLogs, systemInitInfo, agentError, systemStatus, isActive, pendingPermission, pendingAskUserQuestion, toolCompleteCount, isConnected,
         appendLog, appendUnifiedLog, clearUnifiedLogs, connectSse, disconnectSse, sendMessage, stopResponse, loadSession, resetSession,
         apiGetJson, postJson, apiPutJson, apiDeleteJson, respondPermission, respondAskUserQuestion

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Clock, MessageSquare, Trash2 } from 'lucide-react';
+import { BarChart2, Clock, Trash2 } from 'lucide-react';
 
 import { deleteSession, getSessions, type SessionMetadata } from '@/api/sessionClient';
+import { formatTokens } from '@/utils/formatTokens';
+
+import SessionStatsModal from './SessionStatsModal';
 
 interface SessionHistoryDropdownProps {
     agentDir: string;
@@ -11,6 +14,9 @@ interface SessionHistoryDropdownProps {
     onClose: () => void;
 }
 
+// Track fetch state: null = not fetched, empty array = fetched but empty
+type FetchState = SessionMetadata[] | null;
+
 export default function SessionHistoryDropdown({
     agentDir,
     currentSessionId,
@@ -18,33 +24,50 @@ export default function SessionHistoryDropdown({
     isOpen,
     onClose,
 }: SessionHistoryDropdownProps) {
-    const [sessions, setSessions] = useState<SessionMetadata[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
+    const [sessions, setSessions] = useState<FetchState>(null);
+    const [statsSession, setStatsSession] = useState<{ id: string; title: string } | null>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const onCloseRef = useRef(onClose);
+
+    // Keep onClose ref updated via effect
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
 
     // Load sessions when opened
     useEffect(() => {
         if (!isOpen || !agentDir) return;
 
-        setIsLoading(true);
-        getSessions(agentDir)
-            .then(setSessions)
-            .finally(() => setIsLoading(false));
+        let cancelled = false;
+
+        (async () => {
+            const data = await getSessions(agentDir);
+            if (!cancelled) {
+                setSessions(data);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            // Reset state when closing or agentDir changes
+            setSessions(null);
+            setStatsSession(null);
+        };
     }, [isOpen, agentDir]);
 
-    // Close on outside click
+    // Close on outside click (using stable ref to avoid re-attaching listener)
     useEffect(() => {
         if (!isOpen) return;
 
         const handleClickOutside = (e: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-                onClose();
+                onCloseRef.current();
             }
         };
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [isOpen, onClose]);
+    }, [isOpen]);
 
     const handleDelete = async (e: React.MouseEvent, sessionId: string) => {
         e.stopPropagation();
@@ -52,8 +75,13 @@ export default function SessionHistoryDropdown({
 
         const success = await deleteSession(sessionId);
         if (success) {
-            setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+            setSessions((prev) => prev?.filter((s) => s.id !== sessionId) ?? null);
         }
+    };
+
+    const handleShowStats = (e: React.MouseEvent, session: SessionMetadata) => {
+        e.stopPropagation();
+        setStatsSession({ id: session.id, title: session.title });
     };
 
     const formatTime = (isoString: string) => {
@@ -75,74 +103,110 @@ export default function SessionHistoryDropdown({
 
     if (!isOpen) return null;
 
-    return (
-        <div
-            ref={dropdownRef}
-            className="absolute right-0 top-full z-50 mt-1 w-72 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--paper)] shadow-lg"
-        >
-            {/* Header */}
-            <div className="border-b border-[var(--line)] px-4 py-2">
-                <h3 className="text-sm font-semibold text-[var(--ink)]">历史记录</h3>
-            </div>
+    // Derive loading state: open but sessions not yet fetched
+    const isLoading = sessions === null;
 
-            {/* Session list */}
-            <div className="max-h-80 overflow-y-auto">
-                {isLoading ? (
-                    <div className="px-4 py-8 text-center text-sm text-[var(--ink-muted)]">
-                        加载中...
-                    </div>
-                ) : sessions.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-sm text-[var(--ink-muted)]">
-                        暂无历史记录
-                    </div>
-                ) : (
-                    sessions.map((session) => {
-                        const isCurrent = session.id === currentSessionId;
-                        return (
-                            <div
-                                key={session.id}
-                                className={`group flex cursor-pointer items-center gap-3 px-4 py-3 transition-colors ${isCurrent
-                                    ? 'bg-[var(--accent)]/10'
-                                    : 'hover:bg-[var(--paper-contrast)]'
-                                    }`}
-                                onClick={() => {
-                                    if (!isCurrent) {
-                                        onSelectSession(session.id);
-                                        onClose();
-                                    }
-                                }}
-                            >
-                                <MessageSquare className="h-4 w-4 flex-shrink-0 text-[var(--ink-muted)]" />
-                                <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className={`truncate text-sm ${isCurrent ? 'font-medium text-[var(--accent)]' : 'text-[var(--ink)]'}`}>
-                                            {session.title}
-                                        </span>
-                                        {isCurrent && (
-                                            <span className="rounded bg-[var(--accent)]/20 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
-                                                当前
+    return (
+        <>
+            <div
+                ref={dropdownRef}
+                className="absolute right-0 top-full z-50 mt-1 w-96 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--paper)] shadow-lg"
+            >
+                {/* Header */}
+                <div className="border-b border-[var(--line)] px-4 py-2">
+                    <h3 className="text-sm font-semibold text-[var(--ink)]">历史记录</h3>
+                </div>
+
+                {/* Session list */}
+                <div className="max-h-80 overflow-y-auto">
+                    {isLoading ? (
+                        <div className="px-4 py-8 text-center text-sm text-[var(--ink-muted)]">
+                            加载中...
+                        </div>
+                    ) : sessions.length === 0 ? (
+                        <div className="px-4 py-8 text-center text-sm text-[var(--ink-muted)]">
+                            暂无历史记录
+                        </div>
+                    ) : (
+                        sessions.map((session) => {
+                            const isCurrent = session.id === currentSessionId;
+                            const stats = session.stats;
+                            const hasStats = stats && (stats.messageCount > 0 || stats.totalInputTokens > 0);
+                            const totalTokens = (stats?.totalInputTokens ?? 0) + (stats?.totalOutputTokens ?? 0);
+
+                            return (
+                                <div
+                                    key={session.id}
+                                    className={`group flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors ${isCurrent
+                                        ? 'bg-[var(--accent)]/10'
+                                        : 'hover:bg-[var(--paper-contrast)]'
+                                        }`}
+                                    onClick={() => {
+                                        if (!isCurrent) {
+                                            onSelectSession(session.id);
+                                            onClose();
+                                        }
+                                    }}
+                                >
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2">
+                                            {isCurrent && (
+                                                <span className="flex-shrink-0 rounded bg-[var(--accent)]/20 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                                                    当前
+                                                </span>
+                                            )}
+                                            <span className={`truncate text-sm ${isCurrent ? 'font-medium text-[var(--accent)]' : 'text-[var(--ink)]'}`}>
+                                                {session.title}
                                             </span>
+                                        </div>
+                                        <div className="mt-1 flex items-center gap-2 text-xs text-[var(--ink-muted)]">
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="h-3 w-3" />
+                                                {formatTime(session.lastActiveAt)}
+                                            </span>
+                                            {hasStats && (
+                                                <>
+                                                    <span>·</span>
+                                                    <span>{stats.messageCount} 条消息</span>
+                                                    <span>·</span>
+                                                    <span>{formatTokens(totalTokens)} tokens</span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-shrink-0 items-center gap-1">
+                                        <button
+                                            className="flex h-6 w-6 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] group-hover:opacity-100"
+                                            onClick={(e) => handleShowStats(e, session)}
+                                            title="查看统计"
+                                        >
+                                            <BarChart2 className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+                                        </button>
+                                        {!isCurrent && (
+                                            <button
+                                                className="flex h-6 w-6 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[var(--error-bg)] group-hover:opacity-100"
+                                                onClick={(e) => handleDelete(e, session.id)}
+                                                title="删除"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5 text-[var(--error)]" />
+                                            </button>
                                         )}
                                     </div>
-                                    <div className="flex items-center gap-1 text-xs text-[var(--ink-muted)]">
-                                        <Clock className="h-3 w-3" />
-                                        <span>{formatTime(session.lastActiveAt)}</span>
-                                    </div>
                                 </div>
-                                {!isCurrent && (
-                                    <button
-                                        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[var(--error-bg)] group-hover:opacity-100"
-                                        onClick={(e) => handleDelete(e, session.id)}
-                                        title="删除"
-                                    >
-                                        <Trash2 className="h-3.5 w-3.5 text-[var(--error)]" />
-                                    </button>
-                                )}
-                            </div>
-                        );
-                    })
-                )}
+                            );
+                        })
+                    )}
+                </div>
             </div>
-        </div>
+
+            {/* Stats Modal */}
+            {statsSession && (
+                <SessionStatsModal
+                    sessionId={statsSession.id}
+                    sessionTitle={statsSession.title}
+                    onClose={() => setStatsSession(null)}
+                />
+            )}
+        </>
     );
 }

@@ -198,14 +198,12 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     setShowToolMenu(false);
   }, []);
 
-  // Click outside to close all menus
+  // Close all menus when clicking outside (toolbar buttons use stopPropagation to prevent this)
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      // Check if click is outside the toolbar area
-      const target = e.target as HTMLElement;
-      if (!target.closest('.toolbar-menus')) {
-        closeAllMenus();
-      }
+    const handleClickOutside = () => {
+      closeAllMenus();
+      setShowSlashMenu(false);
+      setSlashPosition(null);
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
@@ -229,20 +227,6 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
       textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
     }
   }, [inputValue, isExpanded]);
-
-  // Close menus when clicking outside
-  useEffect(() => {
-    const handleClickOutside = () => {
-      setShowPlusMenu(false);
-      setShowModeMenu(false);
-      setShowModelMenu(false);
-      setShowSlashMenu(false);
-      setSlashPosition(null);
-      setShowToolMenu(false);
-    };
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, []);
 
   // Fetch slash commands function (extracted for reuse)
   const fetchCommands = useCallback(async () => {

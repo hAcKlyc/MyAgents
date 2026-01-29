@@ -8,8 +8,8 @@ import { getScriptDir, getBundledRuntimePath, isBunRuntime } from './utils/runti
 import type { ToolInput } from '../renderer/types/chat';
 import { parsePartialJson } from '../shared/parsePartialJson';
 import type { SystemInitInfo } from '../shared/types/system';
-import { saveSessionMetadata, updateSessionTitleFromMessage, saveSessionMessages, saveAttachment, updateSessionMetadata, getSessionMetadata } from './SessionStore';
-import { createSessionMetadata, type SessionMessage, type MessageAttachment } from './types/session';
+import { saveSessionMetadata, updateSessionTitleFromMessage, saveSessionMessages, saveAttachment, updateSessionMetadata, getSessionMetadata, getSessionData } from './SessionStore';
+import { createSessionMetadata, type SessionMessage, type MessageAttachment, type MessageUsage } from './types/session';
 import { broadcast } from './sse';
 import { initLogger, appendLog, getLogLines as getLogLinesFromLogger, cleanupOldLogs } from './AgentLogger';
 
@@ -145,6 +145,32 @@ let resumeSessionId: string | undefined = undefined;
 // SDK ready signal - prevents messageGenerator from yielding before SDK's ProcessTransport is ready
 let sdkReadyResolve: (() => void) | null = null;
 let sdkReadyPromise: Promise<void> | null = null;
+
+// ===== Turn-level Usage Tracking =====
+// Accumulated usage for the current turn (reset when new user message starts)
+let currentTurnUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  model: undefined as string | undefined,
+};
+// Timestamp when current assistant response started
+let currentTurnStartTime: number | null = null;
+// Tool count for current turn
+let currentTurnToolCount = 0;
+
+function resetTurnUsage(): void {
+  currentTurnUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    model: undefined,
+  };
+  currentTurnStartTime = null;
+  currentTurnToolCount = 0;
+}
 
 // ===== MCP Configuration =====
 import type { McpServerDefinition } from '../renderer/config/types';
@@ -776,20 +802,34 @@ export function clearSessionPermissions(): void {
 
 /**
  * Persist messages to SessionStore for session recovery
+ * @param lastAssistantUsage - Usage info for the last assistant message (on message complete)
+ * @param lastAssistantToolCount - Tool count for the last assistant message
+ * @param lastAssistantDurationMs - Duration for the last assistant response
  */
-function persistMessagesToStorage(): void {
-  const sessionMessages: SessionMessage[] = messages.map((msg) => ({
-    id: msg.id,
-    role: msg.role,
-    content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-    timestamp: msg.timestamp,
-    attachments: msg.attachments?.map((att) => ({
-      id: att.id,
-      name: att.name,
-      mimeType: att.mimeType,
-      path: att.relativePath ?? '', // Map relativePath to path for storage
-    })),
-  }));
+function persistMessagesToStorage(
+  lastAssistantUsage?: MessageUsage,
+  lastAssistantToolCount?: number,
+  lastAssistantDurationMs?: number
+): void {
+  const sessionMessages: SessionMessage[] = messages.map((msg, index) => {
+    const isLastAssistant = index === messages.length - 1 && msg.role === 'assistant';
+    return {
+      id: msg.id,
+      role: msg.role,
+      content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
+      timestamp: msg.timestamp,
+      attachments: msg.attachments?.map((att) => ({
+        id: att.id,
+        name: att.name,
+        mimeType: att.mimeType,
+        path: att.relativePath ?? '', // Map relativePath to path for storage
+      })),
+      // Attach usage info only to the last assistant message if provided
+      usage: isLastAssistant && lastAssistantUsage ? lastAssistantUsage : undefined,
+      toolCount: isLastAssistant && lastAssistantToolCount ? lastAssistantToolCount : undefined,
+      durationMs: isLastAssistant && lastAssistantDurationMs ? lastAssistantDurationMs : undefined,
+    };
+  });
   saveSessionMessages(sessionId, sessionMessages);
   // Update lastActiveAt
   updateSessionMetadata(sessionId, { lastActiveAt: new Date().toISOString() });
@@ -1119,6 +1159,8 @@ function handleToolUseStart(tool: {
       inputJson: ''
     }
   });
+  // Increment tool count for this turn
+  currentTurnToolCount++;
 }
 
 function handleSubagentToolUseStart(
@@ -1281,8 +1323,18 @@ function handleToolResultComplete(toolUseId: string, content: string, isError?: 
 function handleMessageComplete(): void {
   isStreamingMessage = false;
   setSessionState('idle');
-  // Persist messages after AI response completes
-  persistMessagesToStorage();
+
+  // Calculate duration for this turn
+  const durationMs = currentTurnStartTime ? Date.now() - currentTurnStartTime : undefined;
+
+  // Persist messages with usage info after AI response completes
+  persistMessagesToStorage({
+    inputTokens: currentTurnUsage.inputTokens,
+    outputTokens: currentTurnUsage.outputTokens,
+    cacheReadTokens: currentTurnUsage.cacheReadTokens || undefined,
+    cacheCreationTokens: currentTurnUsage.cacheCreationTokens || undefined,
+    model: currentTurnUsage.model,
+  }, currentTurnToolCount, durationMs);
 }
 
 function handleMessageStopped(): void {
@@ -1668,13 +1720,21 @@ export async function switchToSession(targetSessionId: string): Promise<boolean>
     return false;
   }
 
-  // Clear current session state (but don't abort - let it finish naturally)
-  if (querySession) {
-    console.log('[agent] switchToSession: clearing current session');
+  // Properly terminate the old session if one is running
+  // Must set shouldAbortSession so the messageGenerator exits its polling loop
+  // Otherwise the old session continues processing messages with stale settings
+  if (querySession || sessionTerminationPromise) {
+    console.log('[agent] switchToSession: aborting current session');
+    shouldAbortSession = true;
+    messageQueue.length = 0; // Clear queue before waiting so old session doesn't pick up stale messages
+    if (sessionTerminationPromise) {
+      await sessionTerminationPromise;
+    }
     querySession = null;
   }
 
   // Reset all runtime state
+  shouldAbortSession = false;
   isProcessing = false;
   setSessionState('idle');
   messages.length = 0;
@@ -1690,6 +1750,51 @@ export async function switchToSession(targetSessionId: string): Promise<boolean>
 
   // Preserve target sessionId so new messages are saved to the same session
   sessionId = targetSessionId as `${string}-${string}-${string}-${string}-${string}`;
+
+  // Load existing messages from storage into memory
+  // This is critical for incremental save logic in saveSessionMessages
+  const sessionData = getSessionData(targetSessionId);
+  if (sessionData?.messages) {
+    for (const storedMsg of sessionData.messages) {
+      // Convert SessionMessage to MessageWire format
+      // Content may be JSON-stringified ContentBlock[] or plain text
+      let parsedContent: string | ContentBlock[] = storedMsg.content;
+      if (storedMsg.content.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(storedMsg.content);
+          if (Array.isArray(parsed)) {
+            parsedContent = parsed as ContentBlock[];
+          }
+        } catch {
+          // Keep as string if parse fails
+        }
+      }
+
+      const msgWire: MessageWire = {
+        id: storedMsg.id,
+        role: storedMsg.role,
+        content: parsedContent,
+        timestamp: storedMsg.timestamp,
+        attachments: storedMsg.attachments?.map((att) => ({
+          id: att.id,
+          name: att.name,
+          size: 0,
+          mimeType: att.mimeType,
+          relativePath: att.path,
+        })),
+      };
+      messages.push(msgWire);
+    }
+    // Update messageSequence to continue from the last message
+    if (sessionData.messages.length > 0) {
+      const lastMsgId = sessionData.messages[sessionData.messages.length - 1].id;
+      const parsedId = parseInt(lastMsgId, 10);
+      if (!isNaN(parsedId)) {
+        messageSequence = parsedId + 1;
+      }
+    }
+    console.log(`[agent] switchToSession: loaded ${sessionData.messages.length} existing messages`);
+  }
 
   // Set SDK session ID for resume (if available)
   if (sessionMeta.sdkSessionId) {
@@ -1770,21 +1875,38 @@ export async function enqueueUserMessage(
     return;
   }
 
+  // Reset turn usage tracking for this new user message
+  resetTurnUsage();
+  currentTurnStartTime = Date.now();
+
   // Check if provider has changed (requires session restart since environment vars can't be updated)
-  const providerChanged = providerEnv && (
-    providerEnv.baseUrl !== currentProviderEnv?.baseUrl ||
+  // Also detect switching TO subscription (providerEnv=undefined) FROM an API provider
+  const switchingToSubscription = !providerEnv && currentProviderEnv;
+  const baseUrlChanged = switchingToSubscription ||
+    (providerEnv && providerEnv.baseUrl !== currentProviderEnv?.baseUrl);
+  const providerChanged = baseUrlChanged || (providerEnv && (
     providerEnv.apiKey !== currentProviderEnv?.apiKey
-  );
+  ));
 
   if (providerChanged && querySession) {
-    if (isDebugMode) console.log(`[agent] provider changed from ${currentProviderEnv?.baseUrl ?? 'anthropic'} to ${providerEnv?.baseUrl ?? 'anthropic'}, restarting session with resume`);
-    // Save current SDK session_id for resume so conversation context is preserved
-    if (systemInitInfo?.session_id) {
+    const fromLabel = currentProviderEnv?.baseUrl ?? 'anthropic';
+    const toLabel = providerEnv?.baseUrl ?? 'anthropic';
+    if (isDebugMode) console.log(`[agent] provider changed from ${fromLabel} to ${toLabel}, restarting session`);
+
+    // Resume logic: Anthropic official validates thinking block signatures, third-party providers don't.
+    // Only skip resume when switching FROM third-party (has baseUrl) TO Anthropic official (no baseUrl).
+    // All other transitions (official→third-party, third-party→third-party, official→official) can safely resume.
+    const switchingFromThirdPartyToAnthropic = currentProviderEnv?.baseUrl && !providerEnv?.baseUrl;
+    if (switchingFromThirdPartyToAnthropic || !systemInitInfo?.session_id) {
+      resumeSessionId = undefined;
+      console.log(`[agent] Starting fresh session (no resume): ${switchingFromThirdPartyToAnthropic ? 'third-party → Anthropic official (signature incompatible)' : 'no existing session to resume'}`);
+    } else {
       resumeSessionId = systemInitInfo.session_id;
       if (isDebugMode) console.log(`[agent] Will resume from SDK session: ${resumeSessionId}`);
     }
+
     // Update provider env BEFORE terminating so the new session picks it up
-    currentProviderEnv = providerEnv;
+    currentProviderEnv = providerEnv; // undefined for subscription, object for API
     // Terminate current session - it will restart automatically when processing the message
     shouldAbortSession = true;
     // Wait for the current session to fully terminate before proceeding
@@ -1803,9 +1925,12 @@ export async function enqueueUserMessage(
     toolResultIndexToId.clear();
     if (isDebugMode) console.log(`[agent] session terminated for provider switch`);
   } else if (providerEnv) {
-    // Provider not changed (or first message), just update tracking
+    // Provider not changed (or first message with API provider), just update tracking
     currentProviderEnv = providerEnv;
     if (isDebugMode) console.log(`[agent] provider env set: baseUrl=${providerEnv.baseUrl ?? 'anthropic'}`);
+  } else if (!providerEnv && !currentProviderEnv) {
+    // Both undefined — subscription mode, no change needed
+    if (isDebugMode) console.log('[agent] subscription mode, no provider env');
   }
 
   // Apply runtime config changes if session is active (model/permission changes don't require restart)
@@ -2355,8 +2480,28 @@ async function startStreamingSession(): Promise<void> {
         }
       } else if (sdkMessage.type === 'assistant') {
         const assistantMessage = sdkMessage.message;
-        // Extract usage info for subagent stats
-        const usage = (assistantMessage as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+        // Extract usage info for stats tracking
+        const usage = (assistantMessage as {
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+          model?: string;
+        }).usage;
+        const model = (assistantMessage as { model?: string }).model;
+
+        // Accumulate usage for this turn (only for top-level assistant messages)
+        if (usage && !sdkMessage.parent_tool_use_id) {
+          currentTurnUsage.inputTokens += usage.input_tokens ?? 0;
+          currentTurnUsage.outputTokens += usage.output_tokens ?? 0;
+          currentTurnUsage.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+          currentTurnUsage.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
+          if (model) {
+            currentTurnUsage.model = model;
+          }
+        }
         if (sdkMessage.parent_tool_use_id && assistantMessage.content) {
           for (const block of assistantMessage.content) {
             if (
