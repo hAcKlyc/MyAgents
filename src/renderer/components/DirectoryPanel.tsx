@@ -120,8 +120,9 @@ function isImageFile(name: string): boolean {
 
 function getFolderName(path: string): string {
   if (!path) return 'Workspace';
-  const trimmed = path.replace(/\/+$/, '');
-  const parts = trimmed.split('/');
+  // Normalize path separators (support both / and \) and trim trailing slashes
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/');
   return parts[parts.length - 1] || 'Workspace';
 }
 

@@ -779,6 +779,14 @@ pub fn start_tab_sidecar<R: Runtime>(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
+    // Windows: Hide console window for GUI app
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
     // 关键诊断日志：打印当前可执行文件路径，确认运行的是正确版本
     log::info!("[sidecar] current_exe = {:?}", std::env::current_exe().ok());
 

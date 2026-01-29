@@ -406,8 +406,9 @@ export async function addProject(path: string): Promise<Project> {
         return existing;
     }
 
-    // Create new project
-    const name = path.split('/').pop() || 'Unknown';
+    // Create new project (support both / and \ path separators)
+    const normalizedPath = path.replace(/\\/g, '/');
+    const name = normalizedPath.split('/').pop() || 'Unknown';
     const newProject: Project = {
         id: crypto.randomUUID(),
         name,
