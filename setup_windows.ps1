@@ -1,6 +1,6 @@
 # MyAgents Windows 开发环境初始化脚本
 # 首次 clone 仓库后运行此脚本
-# PowerShell 7+ 推荐
+# PowerShell 5.1+ 支持
 
 $ErrorActionPreference = "Stop"
 
@@ -26,16 +26,15 @@ function Test-Dependency {
 
     Write-Host "  检查 $Name... " -NoNewline
     try {
-        # 使用 Invoke-Expression 安全执行命令字符串
-        $null = Invoke-Expression $Command 2>&1
+        $output = Invoke-Expression $Command 2>&1
         if ($LASTEXITCODE -eq 0 -or $?) {
-            Write-Host "[OK]" -ForegroundColor Green
+            Write-Host "OK" -ForegroundColor Green
             return $true
         }
     }
     catch {}
 
-    Write-Host "[X]" -ForegroundColor Red
+    Write-Host "X" -ForegroundColor Red
     Write-Host "    请安装: $InstallHint" -ForegroundColor Yellow
     return $false
 }
@@ -71,7 +70,7 @@ function Get-BunBinary {
             $ExtractedBun = Join-Path $TempDir "bun-windows-x64\bun.exe"
             if (Test-Path $ExtractedBun) {
                 Copy-Item -Path $ExtractedBun -Destination $WinFile -Force
-                Write-Host "  [OK] Windows x64" -ForegroundColor Green
+                Write-Host "  OK - Windows x64" -ForegroundColor Green
             }
             else {
                 throw "解压后找不到 bun.exe"
@@ -84,10 +83,10 @@ function Get-BunBinary {
         }
     }
     else {
-        Write-Host "  [OK] Windows x64 (已存在)" -ForegroundColor Green
+        Write-Host "  OK - Windows x64 (已存在)" -ForegroundColor Green
     }
 
-    Write-Host "[OK] Bun 运行时准备完成" -ForegroundColor Green
+    Write-Host "OK - Bun 运行时准备完成" -ForegroundColor Green
 }
 
 # 检查 MSVC 工具链
@@ -97,31 +96,31 @@ function Test-MSVC {
     # 检查 cl.exe 是否在 PATH 中
     $cl = Get-Command cl.exe -ErrorAction SilentlyContinue
     if ($cl) {
-        Write-Host "[OK]" -ForegroundColor Green
+        Write-Host "OK" -ForegroundColor Green
         return $true
     }
 
     # 检查 Visual Studio 安装目录
-    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
     $vsWhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vsWhere) {
         $vsPath = & $vsWhere -latest -property installationPath 2>$null
         if ($vsPath) {
-            Write-Host "[OK] (VS: $vsPath)" -ForegroundColor Green
+            Write-Host "OK (VS: $vsPath)" -ForegroundColor Green
             return $true
         }
     }
 
-    Write-Host "[X]" -ForegroundColor Red
+    Write-Host "X" -ForegroundColor Red
     Write-Host "    请安装 Visual Studio Build Tools:" -ForegroundColor Yellow
     Write-Host "    https://visualstudio.microsoft.com/visual-cpp-build-tools/" -ForegroundColor Yellow
-    Write-Host "    安装时选择 'Desktop development with C++' 工作负载" -ForegroundColor Yellow
+    Write-Host "    安装时选择 Desktop development with C++ 工作负载" -ForegroundColor Yellow
     return $false
 }
 
 # ========== 开始初始化 ==========
 
-Write-Host "[1/5] 检查依赖" -ForegroundColor Blue
+Write-Host "(1/5) 检查依赖" -ForegroundColor Blue
 $Missing = $false
 
 if (-not (Test-Dependency "Node.js" "node --version" "https://nodejs.org")) { $Missing = $true }
@@ -140,33 +139,33 @@ if ($Missing) {
 
 # 下载 Bun 二进制
 Write-Host ""
-Write-Host "[2/5] 下载 Bun 运行时" -ForegroundColor Blue
+Write-Host "(2/5) 下载 Bun 运行时" -ForegroundColor Blue
 Get-BunBinary
 Write-Host ""
 
 # 安装前端依赖
-Write-Host "[3/5] 安装前端依赖" -ForegroundColor Blue
+Write-Host "(3/5) 安装前端依赖" -ForegroundColor Blue
 & bun install
 if ($LASTEXITCODE -ne 0) {
     Write-Host "前端依赖安装失败" -ForegroundColor Red
     exit 1
 }
-Write-Host "[OK] 前端依赖安装完成" -ForegroundColor Green
+Write-Host "OK - 前端依赖安装完成" -ForegroundColor Green
 Write-Host ""
 
 # 安装 Rust 依赖
-Write-Host "[4/5] 检查 Rust 依赖" -ForegroundColor Blue
+Write-Host "(4/5) 检查 Rust 依赖" -ForegroundColor Blue
 Set-Location (Join-Path $ProjectDir "src-tauri")
 & cargo check --quiet 2>$null
 if ($LASTEXITCODE -ne 0) {
     & cargo fetch
 }
 Set-Location $ProjectDir
-Write-Host "[OK] Rust 依赖准备完成" -ForegroundColor Green
+Write-Host "OK - Rust 依赖准备完成" -ForegroundColor Green
 Write-Host ""
 
 # 完成
-Write-Host "[5/5] 初始化完成!" -ForegroundColor Blue
+Write-Host "(5/5) 初始化完成!" -ForegroundColor Blue
 Write-Host ""
 Write-Host "=========================================" -ForegroundColor Green
 Write-Host "  开发环境准备就绪!" -ForegroundColor Green
