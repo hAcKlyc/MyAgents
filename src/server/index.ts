@@ -1904,32 +1904,47 @@ async function main() {
       if (pathname === '/api/commands' && request.method === 'GET') {
         try {
           // Start with empty array, builtin commands added at the end
-          // Order: custom commands -> skills -> builtin (so custom can override builtin)
+          // Order: project commands -> user commands -> skills -> builtin (so custom can override builtin)
           const commands: SlashCommand[] = [];
+          const homeDir = process.env.HOME || '/tmp';
 
-          // Read custom commands from .claude/commands/ (project-level)
-          const claudeCommandsDir = join(currentAgentDir, '.claude', 'commands');
-          if (existsSync(claudeCommandsDir)) {
+          // ===== COMMANDS SCANNING =====
+          // Helper function to scan commands from a directory
+          const scanCommandsDir = (commandsDir: string, scope: 'user' | 'project') => {
+            if (!existsSync(commandsDir)) return;
             try {
-              const files = readdirSync(claudeCommandsDir);
+              const files = readdirSync(commandsDir);
               for (const file of files) {
-                if (file.endsWith('.md')) {
-                  const filePath = join(claudeCommandsDir, file);
+                if (!file.endsWith('.md')) continue;
+                const filePath = join(commandsDir, file);
+                try {
                   const content = readFileSync(filePath, 'utf-8');
-                  const { description } = parseYamlFrontmatter(content);
+                  const { frontmatter } = parseFullCommandContent(content);
+                  const fileName = extractCommandName(file);
                   commands.push({
-                    name: extractCommandName(file),
-                    description: description || '',
+                    name: frontmatter.name || fileName,  // Prefer frontmatter name
+                    description: frontmatter.description || '',
                     source: 'custom',
-                    scope: 'project',
+                    scope,
                     path: filePath,
                   });
+                } catch (err) {
+                  console.warn(`[api/commands] Error reading command ${file}:`, err);
                 }
               }
             } catch (err) {
-              console.warn('[api/commands] Error reading .claude/commands:', err);
+              console.warn(`[api/commands] Error scanning commands dir ${commandsDir}:`, err);
             }
-          }
+          };
+
+          // 1. Scan project-level commands (.claude/commands/) - highest priority
+          const claudeCommandsDir = join(currentAgentDir, '.claude', 'commands');
+          scanCommandsDir(claudeCommandsDir, 'project');
+
+          // 2. Scan user-level commands (~/.myagents/commands/)
+          const userCommandsDir = join(homeDir, '.myagents', 'commands');
+          scanCommandsDir(userCommandsDir, 'user');
+          // ===== END COMMANDS SCANNING =====
 
           // ===== SKILLS SCANNING =====
           // Helper function to scan skills from a directory
@@ -1969,7 +1984,6 @@ async function main() {
           scanSkillsDir(projectSkillsDir, 'project');
 
           // 2. Scan user-level skills (~/.myagents/skills/) - lower priority
-          const homeDir = process.env.HOME || '/tmp';
           const userSkillsDir = join(homeDir, '.myagents', 'skills');
           scanSkillsDir(userSkillsDir, 'user');
           // ===== END SKILLS SCANNING =====

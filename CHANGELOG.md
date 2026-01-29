@@ -5,10 +5,178 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2025-01-23
+---
+
+## [0.1.5] - 2026-01-29
 
 ### Added
+- 添加网络代理设置功能（开发者模式）
+  - 支持 HTTP/SOCKS5 协议
+  - 设置入口：设置 → 关于 → 点击 Logo 5次 → 开发者区域
+  - Sidecar 启动时自动注入 HTTP_PROXY/HTTPS_PROXY 环境变量
 
+### Changed
+- 升级 Claude Agent SDK 从 0.2.7 到 0.2.23
+- 建立 E2E 测试基础设施（Anthropic/Moonshot 双供应商测试）
+- 统一 `/api/commands` 端点的命令解析逻辑
+  - 使用 `parseFullCommandContent()` 替代 `parseYamlFrontmatter()`
+  - 优先使用 frontmatter.name，回退到文件名
+  - 提取 `scanCommandsDir()` 消除代码重复
+- 统一版本记录到 CHANGELOG.md（移除 specs/version.md）
+
+### Fixed
+- 修复全局用户指令在对话 `/` 菜单中不显示的问题
+  - `/api/commands` 端点新增扫描 `~/.myagents/commands/` 目录
+
+### Technical
+- 代理设置提取 `PROXY_DEFAULTS` 常量，消除魔数
+- 添加 `isValidProxyHost()` 验证函数
+- Rust 侧同步添加默认值常量
+
+---
+
+## [0.1.4] - 2026-01-29
+
+### Added
+- 支持编辑自定义供应商的名称、云服务商标签、Base URL、模型列表
+- 编辑面板内增加「删除」按钮，附确认弹窗
+- 删除供应商时自动切换受影响项目到其他可用供应商
+- 模型标签 hover 显示删除按钮（用户添加的模型可删除）
+- 预设供应商支持用户添加自定义模型
+- 预设模型显示「预设」标签，不可删除
+- 历史记录显示消息数和 Token 消耗统计
+- 新增统计详情弹窗（按模型分组、消息明细）
+- 无 MCP 工具时显示引导文案，链接至设置页面
+- 工作区右键菜单「引用」（文件/文件夹/多选均支持插入 `@路径`）
+- 新建技能对话框增加「导入文件夹」选项（桌面端）
+- Moonshot 供应商新增 Kimi K2.5 模型
+
+### Changed
+- 消息存储升级为 JSONL 格式（O(1) 追加，崩溃容错）
+- 增量统计计算、行数缓存、文件锁机制
+- Tab 切换时自动同步供应商、API Key、MCP 配置
+- Slash 命令菜单键盘导航时自动滚动保持选中项可见
+
+### Fixed
+- 修复消息中断后 Thinking Block 卡在加载状态
+- 修复 API Key 模式切换到订阅模式报错（`Invalid signature in thinking block`）
+- 修复长文本（如 JSON）在消息气泡中不换行
+- 修复历史记录「当前」标签不更新
+- 修复历史记录按钮点击无法关闭
+- 修复加载历史会话后新消息统计不更新
+- 修复 switchToSession 未终止旧 session 导致模型/供应商切换失效
+- 修复三方供应商切换到 Anthropic 官方时 thinking block 签名冲突
+- 修复第三方供应商模型切换后 UI 卡住（thinking/tool 块加载状态未结束）
+- 修复 AI 回复完成后 Loading 指示器和停止按钮卡住（补全 9 种结束场景的 sessionState 重置）
+- 修复发送消息后不自动滚动到底部
+- 修复系统任务（如 Compact）期间显示停止按钮的误导
+- 修复进程泄露问题（SDK/MCP 子进程随应用关闭正确清理）
+- 优化文件预览性能（React.lazy + useMemo 缓存）
+
+### Technical
+- 应用退出支持 Cmd+Q 和 Dock 右键退出的进程清理（RunEvent::ExitRequested）
+- 进程清理函数重构，统一 SIGTERM → SIGKILL 两阶段关闭
+- 启动时清理扩展至 SDK 和 MCP 子进程
+
+**详见**: [specs/prd/prd_0.1.4.md](./specs/prd/prd_0.1.4.md)
+
+---
+
+## [0.1.3] - 2026-01-27
+
+### Added
+- 支持从 Claude Code 同步 Skills 配置（`~/.claude/skills/` → `~/.myagents/skills/`）
+- ProcessRow 显示任务运行时间
+- 展开状态显示实时统计信息（工具调用次数、Token 消耗）
+- 新增 Trace 列表查看子代理工具调用记录
+- Settings 页面增加 Rust 日志监听
+
+### Changed
+- 技能/指令详情页焦点控制优化
+- 描述区域支持多行输入
+- 内容区域高度自适应视口
+
+### Fixed
+- 修复 Toast/ImagePreview Context 稳定性问题
+- 统一 useEffect 依赖数组规范
+- 统一定时器初始化模式
+- 修复权限弹框重复弹出问题
+- 修复 Settings 页面事件监听竞态条件
+- 修复 tauri-plugin-updater 架构目标识别问题
+- 移除非标准 platform 字段，符合 Tauri v2 官方 schema
+- 修复事件发射错误处理
+- 修复更新按钮样式（emerald 配色 + rounded-full）
+
+### Technical
+- 增加文件描述符限制至 65536，防止 Bun 启动失败
+- 添加 `--myagents-sidecar` 标记精确识别进程
+- 实现两阶段清理机制（SIGTERM → SIGKILL）
+- 明确 Tab Sidecar 与 Global Sidecar 使用边界
+- Settings/Launcher 不再包裹 TabProvider
+- Release 构建启用 INFO 级别日志支持诊断
+- 调试日志包装 `isDebugMode()` 避免生产环境刷屏
+
+**详见**: [specs/prd/prd_0.1.3.md](./specs/prd/prd_0.1.3.md)
+
+---
+
+## [0.1.2] - 2026-01-25
+
+### Added
+- 实现自定义服务商完整的 CRUD 功能
+- 服务商配置持久化到 `~/.myagents/providers/`
+
+### Fixed
+- 修复 MCP 开关状态与实际请求不一致问题
+- 初始化时始终同步 MCP 配置（包括空数组）
+- MCP 变化时正确重启 SDK 会话
+- 切换配置时保持对话上下文（通过 resume session_id）
+- 修复 AI "失忆" 问题
+- 实现用户级 Skill 按需复制到项目目录
+- `/` 菜单去重（项目级优先）
+- 修复详情页交互问题（保存后自动关闭、名称字段、路径重命名）
+- 修复 `/cost` 和 `/context` 命令输出不显示问题
+- 正确处理 `<local-command-stdout>` 包裹的字符串内容
+
+### Changed
+- 设置页版本号动态读取
+- 日志规范化（生产环境不输出调试日志）
+
+**详见**: [specs/prd/prd_0.1.2.md](./specs/prd/prd_0.1.2.md)
+
+---
+
+## [0.1.1] - 2026-01-26
+
+### Added
+- 添加订阅凭证真实验证功能
+- 设置页显示验证状态（验证中/已验证/验证失败）
+- 支持拖拽文件到工作区文件夹
+- 支持 Cmd+V 粘贴文件到工作区
+- 支持拖拽/粘贴文件到对话输入框（自动复制到 `myagents_files/`）
+- AskUserQuestion 工具向导式问答 UI
+- 单选自动跳转 / 多选手动确认
+- 自定义输入框支持
+- 进度指示器和回退修改
+- Agent 日志懒加载创建
+- 日志存储到 `~/.myagents/logs/`
+- React/Bun/Rust 日志统一到 UnifiedLogs 面板
+
+### Fixed
+- 修复 Anthropic 订阅检测逻辑（`~/.claude.json` 中的 `oauthAccount`）
+
+### Changed
+- 文件名冲突自动重命名
+- Cmd+Z 撤销支持
+- 30 天日志自动清理
+
+**详见**: [specs/prd/prd_0.1.1.md](./specs/prd/prd_0.1.1.md)
+
+---
+
+## [0.1.0] - 2026-01-24
+
+### Added
 - Initial open source release
 - Native macOS desktop application with Tauri v2
 - Multi-tab support with independent Sidecar processes
@@ -30,8 +198,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Local data storage in `~/.myagents/`
 
 ### Technical
-
 - React 19 + TypeScript frontend
 - Bun runtime bundled in app
 - Rust HTTP/SSE proxy layer
 - Chrome-style frameless window
+- 零外部依赖（内置 Bun 运行时）
+
+**详见**: [specs/prd/prd_0.1.0/](./specs/prd/prd_0.1.0/) (21 个迭代 PRD)
+
+---
