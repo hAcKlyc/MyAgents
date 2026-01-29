@@ -118,18 +118,13 @@ export default function MessageList({
             />
           </div>
         )}
-        {/* Unified status indicator with fade transition
-            Uses CSS transition with different durations for show/hide to prevent flicker */}
-        <div
-          className={`flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--ink-muted)] ${
-            showStatus && statusMessage
-              ? 'opacity-100 transition-opacity duration-75'
-              : 'opacity-0 pointer-events-none transition-opacity duration-200 delay-100'
-          }`}
-        >
-          <Loader2 className="h-3 w-3 animate-spin" />
-          <span>{statusMessage}</span>
-        </div>
+        {/* Unified status indicator - only render when active */}
+        {showStatus && (
+          <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--ink-muted)]">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span>{statusMessage}</span>
+          </div>
+        )}
       </div>
       {/* Scroll anchor - helps browser maintain scroll position during content changes */}
       <div className="scroll-anchor h-px" aria-hidden="true" />

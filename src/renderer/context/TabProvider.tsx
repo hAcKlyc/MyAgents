@@ -657,7 +657,6 @@ export default function TabProvider({
             }
 
             case 'chat:message-complete': {
-                console.debug(`[TabProvider ${tabId}] chat:message-complete received`);
                 isStreamingRef.current = false;
                 setIsLoading(false);
                 setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
