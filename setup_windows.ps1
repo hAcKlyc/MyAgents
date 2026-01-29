@@ -102,7 +102,8 @@ function Test-MSVC {
     }
 
     # 检查 Visual Studio 安装目录
-    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    $programFilesX86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $vsWhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vsWhere) {
         $vsPath = & $vsWhere -latest -property installationPath 2>$null
         if ($vsPath) {
