@@ -186,12 +186,11 @@ export default function FilePreviewModal({
 
     // Render preview content based on file type
     const renderPreviewContent = () => {
-        // Show loading while fetching or while content is preparing to render
+        // Show loading spinner while fetching or while content is preparing to render
         if (isLoading || !isContentReady) {
             return (
-                <div className="flex h-full items-center justify-center gap-2 text-[var(--ink-muted)]">
+                <div className="flex h-full items-center justify-center text-[var(--ink-muted)]">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    <span className="text-sm">加载中...</span>
                 </div>
             );
         }

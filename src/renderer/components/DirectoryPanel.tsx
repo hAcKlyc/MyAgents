@@ -35,15 +35,6 @@ import RenameDialog from './RenameDialog';
 // Lazy load FilePreviewModal - it includes heavy SyntaxHighlighter
 const FilePreviewModal = lazy(() => import('./FilePreviewModal'));
 
-// Static fallback for Suspense - defined outside component to avoid recreation
-const PreviewModalFallback = (
-  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-    <div className="flex items-center gap-2 text-white">
-      <Loader2 className="h-5 w-5 animate-spin" />
-      <span className="text-sm">加载预览组件...</span>
-    </div>
-  </div>
-);
 
 /** Imperative handle for DirectoryPanel */
 export interface DirectoryPanelHandle {
@@ -1351,9 +1342,9 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
         />
       )}
 
-      {/* Preview modal - lazy loaded */}
+      {/* Preview modal - lazy loaded, no fallback (modal appears after module loads) */}
       {(preview || previewError || isPreviewLoading) && (
-        <Suspense fallback={PreviewModalFallback}>
+        <Suspense fallback={null}>
           <FilePreviewModal
             name={preview?.name ?? 'Preview'}
             content={preview?.content ?? ''}
