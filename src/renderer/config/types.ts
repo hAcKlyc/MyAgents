@@ -274,6 +274,7 @@ export const PRESET_PROVIDERS: Provider[] = [
       baseUrl: 'https://api.moonshot.cn/anthropic',
     },
     models: [
+      { model: 'kimi-k2.5', modelName: 'Kimi K2.5', modelSeries: 'moonshot' },
       { model: 'kimi-k2-thinking-turbo', modelName: 'Kimi K2 Thinking', modelSeries: 'moonshot' },
       { model: 'kimi-k2-0711', modelName: 'Kimi K2', modelSeries: 'moonshot' },
     ],
