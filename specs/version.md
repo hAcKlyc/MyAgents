@@ -68,6 +68,10 @@ description: |
 - 修复 switchToSession 未终止旧 session 导致模型/供应商切换失效
 - 修复三方供应商切换到 Anthropic 官方时 thinking block 签名冲突
 - 修复第三方供应商模型切换后 UI 卡住（thinking/tool 块加载状态未结束）
+- 修复 AI 回复完成后 Loading 指示器和停止按钮卡住（补全 9 种结束场景的 sessionState 重置）
+- 修复发送消息后不自动滚动到底部
+- 修复系统任务（如 Compact）期间显示停止按钮的误导
+- 优化文件预览性能（React.lazy + useMemo 缓存）
 
 **详见**: [specs/prd/prd_0.1.4.md](./prd/prd_0.1.4.md)
 
