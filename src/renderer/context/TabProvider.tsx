@@ -305,7 +305,7 @@ export default function TabProvider({
     }, [appendUnifiedLog]);
 
     // Helper: Mark all incomplete thinking/tool blocks as finished (stopped or failed)
-    const markIncompleteBlocksAsFinished = useCallback((status: 'stopped' | 'failed') => {
+    const markIncompleteBlocksAsFinished = useCallback((status: 'completed' | 'stopped' | 'failed') => {
         setMessages(prev => {
             const last = prev[prev.length - 1];
             if (!last || last.role !== 'assistant' || typeof last.content === 'string') return prev;
@@ -314,12 +314,18 @@ export default function TabProvider({
                 (b.type === 'tool_use' && b.tool?.isLoading)
             );
             if (!hasIncomplete) return prev;
+            // 'completed' = normal finish (no extra flags)
+            // 'stopped'  = user interrupted (isStopped: true, yellow icon)
+            // 'failed'   = error occurred (isFailed: true, red icon)
+            const statusFlags = status === 'stopped' ? { isStopped: true }
+                : status === 'failed' ? { isFailed: true }
+                : {};
             const updatedContent = last.content.map(block => {
                 if (block.type === 'thinking' && !block.isComplete) {
                     return {
                         ...block,
                         isComplete: true,
-                        ...(status === 'stopped' ? { isStopped: true } : { isFailed: true }),
+                        ...statusFlags,
                         thinkingDurationMs: block.thinkingStartedAt
                             ? Date.now() - block.thinkingStartedAt
                             : undefined
@@ -328,11 +334,7 @@ export default function TabProvider({
                 if (block.type === 'tool_use' && block.tool?.isLoading) {
                     return {
                         ...block,
-                        tool: {
-                            ...block.tool,
-                            isLoading: false,
-                            ...(status === 'stopped' ? { isStopped: true } : { isFailed: true })
-                        }
+                        tool: { ...block.tool, isLoading: false, ...statusFlags }
                     };
                 }
                 return block;
@@ -655,6 +657,10 @@ export default function TabProvider({
                 console.debug(`[TabProvider ${tabId}] chat:message-complete received`);
                 isStreamingRef.current = false;
                 setIsLoading(false);
+                // Defensively mark any remaining incomplete thinking/tool blocks as complete.
+                // Normally content_block_stop handles this, but third-party providers may not
+                // send it, leaving blocks stuck in loading state.
+                markIncompleteBlocksAsFinished('completed');
                 break;
             }
 
