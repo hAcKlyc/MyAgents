@@ -61,18 +61,20 @@ export default function FilePreviewModal({
     // State
     const [isEditing, setIsEditing] = useState(false);
     const [editContent, setEditContent] = useState(content);
+    const [previewContent, setPreviewContent] = useState(content); // Content displayed in preview mode, updated after save
     const [isSaving, setIsSaving] = useState(false);
     const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false);
 
-    // Sync edit content when content prop changes
+    // Sync content when prop changes (e.g., when file is reloaded externally)
     useEffect(() => {
         setEditContent(content);
+        setPreviewContent(content);
     }, [content]);
 
-    // Derived state
+    // Derived state - compare with previewContent (the last saved state)
     const hasUnsavedChanges = useMemo(() => {
-        return isEditing && editContent !== content;
-    }, [isEditing, editContent, content]);
+        return isEditing && editContent !== previewContent;
+    }, [isEditing, editContent, previewContent]);
 
     const language = useMemo(() => getPrismLanguage(name), [name]);
     const monacoLanguage = useMemo(() => getMonacoLanguage(name), [name]);
@@ -81,9 +83,9 @@ export default function FilePreviewModal({
 
     // Handlers
     const handleEdit = useCallback(() => {
-        setEditContent(content);
+        setEditContent(previewContent); // Start editing from current preview content
         setIsEditing(true);
-    }, [content]);
+    }, [previewContent]);
 
     const handleCancel = useCallback(() => {
         if (hasUnsavedChanges) {
@@ -95,9 +97,9 @@ export default function FilePreviewModal({
 
     const handleDiscardChanges = useCallback(() => {
         setShowUnsavedConfirm(false);
-        setEditContent(content);
+        setEditContent(previewContent); // Revert to current preview content
         setIsEditing(false);
-    }, [content]);
+    }, [previewContent]);
 
     const handleClose = useCallback(() => {
         if (hasUnsavedChanges) {
@@ -117,6 +119,7 @@ export default function FilePreviewModal({
 
             if (response.success) {
                 toastRef.current.success('文件保存成功');
+                setPreviewContent(editContent); // Update preview content after successful save
                 setIsEditing(false);
                 onSaved?.();
             } else {
@@ -174,7 +177,7 @@ export default function FilePreviewModal({
             return (
                 <div className="h-full overflow-auto p-6 bg-[var(--paper-reading)]">
                     <div className="prose prose-stone max-w-none dark:prose-invert">
-                        <Markdown>{content}</Markdown>
+                        <Markdown>{previewContent}</Markdown>
                     </div>
                 </div>
             );
@@ -208,7 +211,7 @@ export default function FilePreviewModal({
                         }
                     }}
                 >
-                    {content}
+                    {previewContent}
                 </SyntaxHighlighter>
             </div>
         );
