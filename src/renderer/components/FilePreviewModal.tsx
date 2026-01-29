@@ -81,6 +81,41 @@ export default function FilePreviewModal({
     const showLineNumbers = useMemo(() => shouldShowLineNumbers(name), [name]);
     const isMarkdown = useMemo(() => isMarkdownFile(name), [name]);
 
+    // Memoize the syntax highlighted content to avoid re-computation on every render
+    // SyntaxHighlighter is expensive - only recompute when content or language changes
+    const syntaxHighlightedContent = useMemo(() => {
+        if (isMarkdown || isEditing) return null; // Not used in these modes
+        return (
+            <SyntaxHighlighter
+                language={language}
+                style={oneLight}
+                showLineNumbers={showLineNumbers}
+                lineNumberStyle={{
+                    minWidth: '3em',
+                    paddingRight: '1em',
+                    color: 'var(--ink-muted)',
+                    fontSize: '12px',
+                    userSelect: 'none',
+                }}
+                customStyle={{
+                    margin: 0,
+                    padding: '1.5rem',
+                    background: 'transparent',
+                    fontSize: '13px',
+                    lineHeight: '1.6',
+                    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                }}
+                codeTagProps={{
+                    style: {
+                        fontFamily: 'inherit',
+                    }
+                }}
+            >
+                {previewContent}
+            </SyntaxHighlighter>
+        );
+    }, [previewContent, language, showLineNumbers, isMarkdown, isEditing]);
+
     // Handlers
     const handleEdit = useCallback(() => {
         setEditContent(previewContent); // Start editing from current preview content
@@ -183,36 +218,10 @@ export default function FilePreviewModal({
             );
         }
 
-        // Preview mode: Code files with syntax highlighting
+        // Preview mode: Code files with syntax highlighting (memoized)
         return (
             <div className="h-full overflow-auto bg-[var(--paper-reading)]">
-                <SyntaxHighlighter
-                    language={language}
-                    style={oneLight}
-                    showLineNumbers={showLineNumbers}
-                    lineNumberStyle={{
-                        minWidth: '3em',
-                        paddingRight: '1em',
-                        color: 'var(--ink-muted)',
-                        fontSize: '12px',
-                        userSelect: 'none',
-                    }}
-                    customStyle={{
-                        margin: 0,
-                        padding: '1.5rem',
-                        background: 'transparent',
-                        fontSize: '13px',
-                        lineHeight: '1.6',
-                        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-                    }}
-                    codeTagProps={{
-                        style: {
-                            fontFamily: 'inherit',
-                        }
-                    }}
-                >
-                    {previewContent}
-                </SyntaxHighlighter>
+                {syntaxHighlightedContent}
             </div>
         );
     };

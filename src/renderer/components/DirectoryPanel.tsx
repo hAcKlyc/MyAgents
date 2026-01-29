@@ -17,20 +17,33 @@ import {
   Upload,
   PanelRightClose
 } from 'lucide-react';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Tree } from 'react-arborist';
 
 import { apiFetch } from '@/api/apiFetch';
 import { useTabState } from '@/context/TabContext';
 import type { DirectoryTreeNode, DirectoryTree, ExpandDirectoryResult } from '../../shared/dir-types';
 
-import ConfirmDialog from './ConfirmDialog';
-import ContextMenu, { type ContextMenuItem } from './ContextMenu';
-import FilePreviewModal from './FilePreviewModal';
-import RenameDialog from './RenameDialog';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { type Provider } from '@/config/types';
 import { isDebugMode } from '@/utils/debug';
+
+import ConfirmDialog from './ConfirmDialog';
+import ContextMenu, { type ContextMenuItem } from './ContextMenu';
+import RenameDialog from './RenameDialog';
+
+// Lazy load FilePreviewModal - it includes heavy SyntaxHighlighter
+const FilePreviewModal = lazy(() => import('./FilePreviewModal'));
+
+// Static fallback for Suspense - defined outside component to avoid recreation
+const PreviewModalFallback = (
+  <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div className="flex items-center gap-2 text-white">
+      <Loader2 className="h-5 w-5 animate-spin" />
+      <span className="text-sm">加载预览组件...</span>
+    </div>
+  </div>
+);
 
 /** Imperative handle for DirectoryPanel */
 export interface DirectoryPanelHandle {
@@ -425,13 +438,14 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
       return;
     }
 
+    // Batch state updates: only set loading, clear others on success/error
     setIsPreviewLoading(true);
-    setPreview(null);
-    setPreviewError(null);
 
     try {
       const payload = await apiGet<Omit<FilePreview, 'path'>>(`/agent/file?path=${encodeURIComponent(node.path)}`);
+      // Batch: set preview and clear loading/error together
       setPreview({ ...payload, path: node.path });
+      setPreviewError(null);
     } catch (err) {
       setPreview(null);
       setPreviewError(err instanceof Error ? err.message : 'Failed to preview file.');
@@ -1337,21 +1351,23 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
         />
       )}
 
-      {/* Preview modal */}
+      {/* Preview modal - lazy loaded */}
       {(preview || previewError || isPreviewLoading) && (
-        <FilePreviewModal
-          name={preview?.name ?? 'Preview'}
-          content={preview?.content ?? ''}
-          size={preview?.size ?? 0}
-          path={preview?.path ?? ''}
-          isLoading={isPreviewLoading}
-          error={previewError}
-          onClose={() => {
-            setPreview(null);
-            setPreviewError(null);
-          }}
-          onSaved={refresh}
-        />
+        <Suspense fallback={PreviewModalFallback}>
+          <FilePreviewModal
+            name={preview?.name ?? 'Preview'}
+            content={preview?.content ?? ''}
+            size={preview?.size ?? 0}
+            path={preview?.path ?? ''}
+            isLoading={isPreviewLoading}
+            error={previewError}
+            onClose={() => {
+              setPreview(null);
+              setPreviewError(null);
+            }}
+            onSaved={refresh}
+          />
+        </Suspense>
       )}
     </div>
   );
