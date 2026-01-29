@@ -592,6 +592,8 @@ fn find_bun_executable<R: Runtime>(app_handle: &AppHandle<R>) -> Option<PathBuf>
             log::info!("Using bun from PATH: {:?}", path);
             return Some(path);
         }
+
+        return None;
     }
 
     #[cfg(not(target_os = "windows"))]
