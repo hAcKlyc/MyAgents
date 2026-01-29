@@ -256,7 +256,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     }
   }, [currentProvider?.id, currentProvider?.primaryModel]);
 
-  const { containerRef: messagesContainerRef } = useAutoScroll(isLoading, messages);
+  const { containerRef: messagesContainerRef, scrollToBottom } = useAutoScroll(isLoading, messages);
 
   // Auto-focus input when Tab becomes active
   useEffect(() => {
@@ -341,6 +341,11 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     if ((!text && (!images || images.length === 0)) || isLoading || sessionState === 'running') {
       return;
     }
+
+    // Scroll to bottom immediately so user sees their query
+    // This also re-enables auto-scroll if user had scrolled up
+    scrollToBottom();
+
     setIsLoading(true);
 
     // Note: User message is added by SSE replay from backend

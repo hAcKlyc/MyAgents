@@ -18,6 +18,11 @@ export interface AutoScrollControls {
    * @param duration Duration in ms to pause (default: 250ms)
    */
   pauseAutoScroll: (duration?: number) => void;
+  /**
+   * Force scroll to bottom and re-enable auto-scroll
+   * Use this when user sends a message to ensure they see their query
+   */
+  scrollToBottom: () => void;
 }
 
 export function useAutoScroll(
@@ -151,6 +156,25 @@ export function useAutoScroll(
     element.scrollTop = element.scrollHeight;
   }, []);
 
+  /**
+   * Force scroll to bottom and re-enable auto-scroll
+   * Used when user sends a message to ensure they see their query
+   */
+  const scrollToBottom = useCallback(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    // Re-enable auto-scroll regardless of current state
+    isAutoScrollEnabledRef.current = true;
+    isPausedRef.current = false;
+
+    // Scroll to bottom immediately
+    element.scrollTop = element.scrollHeight;
+
+    // Start smooth scroll animation to catch any new content
+    startSmoothScroll();
+  }, [startSmoothScroll]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -262,5 +286,5 @@ export function useAutoScroll(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only run on mount
   }, []);
 
-  return { containerRef, pauseAutoScroll };
+  return { containerRef, pauseAutoScroll, scrollToBottom };
 }
