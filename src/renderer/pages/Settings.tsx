@@ -46,6 +46,9 @@ import { compareVersions } from '../../shared/utils';
 // Settings sub-sections
 type SettingsSection = 'providers' | 'mcp' | 'skills' | 'about';
 
+// External resource URLs
+const USER_COMMUNITY_QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
+
 import type { SubscriptionStatusWithVerify } from '@/types/subscription';
 
 // Verification status for each provider
@@ -1215,28 +1218,20 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 </div>
                             </div>
 
-                            {/* User Community QR Code - Only show when image loads successfully */}
-                            {qrCodeLoaded && (
-                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
-                                    <div className="flex flex-col items-center text-center">
-                                        <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
-                                        <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
-                                        <img
-                                            src="https://download.myagents.io/assets/feedback_qr_code.png"
-                                            alt="用户交流群二维码"
-                                            className="mt-4 h-36 w-36 rounded-lg"
-                                        />
-                                    </div>
+                            {/* User Community QR Code - Hidden until image loads successfully */}
+                            <div className={`rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5 ${qrCodeLoaded ? '' : 'hidden'}`}>
+                                <div className="flex flex-col items-center text-center">
+                                    <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
+                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
+                                    <img
+                                        src={USER_COMMUNITY_QR_CODE_URL}
+                                        alt="用户交流群二维码"
+                                        className="mt-4 h-36 w-36 rounded-lg"
+                                        onLoad={() => setQrCodeLoaded(true)}
+                                        onError={() => setQrCodeLoaded(false)}
+                                    />
                                 </div>
-                            )}
-                            {/* Hidden image to detect load status */}
-                            <img
-                                src="https://download.myagents.io/assets/feedback_qr_code.png"
-                                alt=""
-                                className="hidden"
-                                onLoad={() => setQrCodeLoaded(true)}
-                                onError={() => setQrCodeLoaded(false)}
-                            />
+                            </div>
 
                             {/* Contact & Links */}
                             <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
