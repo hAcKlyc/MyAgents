@@ -38,6 +38,7 @@ const JSON_EVENTS = new Set([
     'chat:subagent-tool-result-delta',
     'chat:subagent-tool-result-complete',
     'chat:system-init',
+    'chat:system-status', // SDK system status (e.g., 'compacting')
     'chat:logs',
     'chat:status',
     'chat:agent-error',
@@ -122,7 +123,10 @@ export class SseConnection {
      * Handle SSE event - parse and emit to handler
      */
     private handleSseEvent(eventName: string, data: string): void {
-        if (!this.eventHandler) return;
+        if (!this.eventHandler) {
+            console.warn(`[SSE ${this.connectionId}] Event received but no handler: ${eventName}`);
+            return;
+        }
 
         // Handle null-payload events (message-complete, message-stopped)
         if (NULL_EVENTS.has(eventName)) {
@@ -135,7 +139,8 @@ export class SseConnection {
             try {
                 const parsed = JSON.parse(data);
                 this.eventHandler(eventName, parsed);
-            } catch {
+            } catch (e) {
+                console.warn(`[SSE ${this.connectionId}] Failed to parse JSON for ${eventName}:`, e);
                 this.eventHandler(eventName, null);
             }
             return;
@@ -143,7 +148,11 @@ export class SseConnection {
 
         if (STRING_EVENTS.has(eventName)) {
             this.eventHandler(eventName, data);
+            return;
         }
+
+        // Unrecognized event - log warning to help identify missing event registrations
+        console.warn(`[SSE ${this.connectionId}] Unrecognized event dropped: ${eventName}`);
     }
 
     /**

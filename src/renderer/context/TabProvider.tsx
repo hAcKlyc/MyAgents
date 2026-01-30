@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
 
 import { createSseConnection, type SseConnection } from '@/api/SseConnection';
@@ -668,10 +669,15 @@ export default function TabProvider({
             }
 
             case 'chat:message-complete': {
+                console.log(`[TabProvider ${tabId}] message-complete received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle
-                setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
+                // Use flushSync to immediately update UI, bypassing React batching
+                // This prevents UI from getting stuck in loading state during rapid event streams
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle
+                    setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
+                });
                 // Defensively mark any remaining incomplete thinking/tool blocks as complete.
                 // Normally content_block_stop handles this, but third-party providers may not
                 // send it, leaving blocks stuck in loading state.
@@ -680,10 +686,14 @@ export default function TabProvider({
             }
 
             case 'chat:message-stopped': {
+                console.log(`[TabProvider ${tabId}] message-stopped received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle
-                setSystemStatus(null);  // Clear system status when user stops response
+                // Use flushSync to immediately update UI
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle
+                    setSystemStatus(null);  // Clear system status when user stops response
+                });
                 // Clear stop timeout since we received confirmation
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);
@@ -695,10 +705,14 @@ export default function TabProvider({
             }
 
             case 'chat:message-error': {
+                console.log(`[TabProvider ${tabId}] message-error received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle on error
-                setSystemStatus(null);  // Clear system status on error
+                // Use flushSync to immediately update UI
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle on error
+                    setSystemStatus(null);  // Clear system status on error
+                });
                 // Clear stop timeout on error too
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);
