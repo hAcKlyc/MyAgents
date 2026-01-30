@@ -104,13 +104,23 @@ Write-Host ""
 # ========================================
 Write-Host "[2/7] 检查 rclone..." -ForegroundColor Blue
 
-$rclone = Get-Command rclone -ErrorAction SilentlyContinue
-if (-not $rclone) {
-    Write-Host "[X] rclone 未安装" -ForegroundColor Red
-    Write-Host "请从 https://rclone.org/downloads/ 下载安装" -ForegroundColor Yellow
-    throw "rclone 未安装"
+# 优先检查项目目录下的 rclone.exe
+$localRclone = Join-Path $ProjectDir "rclone.exe"
+if (Test-Path $localRclone) {
+    $rclonePath = $localRclone
+    Write-Host "[OK] 使用项目目录 rclone.exe" -ForegroundColor Green
+} else {
+    # 检查系统 PATH
+    $rclone = Get-Command rclone -ErrorAction SilentlyContinue
+    if (-not $rclone) {
+        Write-Host "[X] rclone 未找到" -ForegroundColor Red
+        Write-Host "请将 rclone.exe 放到项目根目录，或添加到系统 PATH" -ForegroundColor Yellow
+        Write-Host "下载地址: https://rclone.org/downloads/" -ForegroundColor Yellow
+        throw "rclone 未找到"
+    }
+    $rclonePath = $rclone.Source
+    Write-Host "[OK] 使用系统 rclone" -ForegroundColor Green
 }
-Write-Host "[OK] rclone 已就绪" -ForegroundColor Green
 
 # 创建临时 rclone 配置 (凭证通过环境变量传递，更安全)
 $rcloneConfig = [System.IO.Path]::GetTempFileName()
@@ -334,7 +344,7 @@ $uploadFailed = 0
 # 上传 NSIS 安装包
 if ($NsisExe) {
     Write-Host "  上传 NSIS 安装包..." -ForegroundColor Cyan
-    & rclone --config=$rcloneConfig copy $NsisExe.FullName "r2:$R2Bucket/releases/v$Version/" --s3-no-check-bucket --progress
+    & $rclonePath --config=$rcloneConfig copy $NsisExe.FullName "r2:$R2Bucket/releases/v$Version/" --s3-no-check-bucket --progress
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    [OK] $($NsisExe.Name)" -ForegroundColor Green
         $uploadSuccess++
@@ -348,7 +358,7 @@ if ($NsisExe) {
 # 上传便携版 ZIP
 if ($PortableZip) {
     Write-Host "  上传便携版 ZIP..." -ForegroundColor Cyan
-    & rclone --config=$rcloneConfig copy $PortableZip.FullName "r2:$R2Bucket/releases/v$Version/" --s3-no-check-bucket --progress
+    & $rclonePath --config=$rcloneConfig copy $PortableZip.FullName "r2:$R2Bucket/releases/v$Version/" --s3-no-check-bucket --progress
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    [OK] $($PortableZip.Name)" -ForegroundColor Green
         $uploadSuccess++
@@ -362,7 +372,7 @@ if ($PortableZip) {
 # 上传更新包 (使用新文件名)
 if ($UpdateZip) {
     Write-Host "  上传更新包..." -ForegroundColor Cyan
-    & rclone --config=$rcloneConfig copyto $UpdateZip.FullName "r2:$R2Bucket/releases/v$Version/$UpdateUploadName" --s3-no-check-bucket --progress
+    & $rclonePath --config=$rcloneConfig copyto $UpdateZip.FullName "r2:$R2Bucket/releases/v$Version/$UpdateUploadName" --s3-no-check-bucket --progress
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    [OK] $UpdateUploadName" -ForegroundColor Green
         $uploadSuccess++
@@ -377,7 +387,7 @@ if ($UpdateZip) {
 if ($SigFile) {
     Write-Host "  上传签名文件..." -ForegroundColor Cyan
     $sigUploadName = "MyAgents_${Version}_x86_64.nsis.zip.sig"
-    & rclone --config=$rcloneConfig copyto $SigFile.FullName "r2:$R2Bucket/releases/v$Version/$sigUploadName" --s3-no-check-bucket --progress
+    & $rclonePath --config=$rcloneConfig copyto $SigFile.FullName "r2:$R2Bucket/releases/v$Version/$sigUploadName" --s3-no-check-bucket --progress
     if ($LASTEXITCODE -eq 0) {
         Write-Host "    [OK] $sigUploadName" -ForegroundColor Green
         $uploadSuccess++
@@ -402,7 +412,7 @@ Write-Host ""
 # ========================================
 Write-Host "[7/7] 上传更新清单..." -ForegroundColor Blue
 
-& rclone --config=$rcloneConfig copy "$ManifestDir/" "r2:$R2Bucket/update/" --s3-no-check-bucket --progress
+& $rclonePath --config=$rcloneConfig copy "$ManifestDir/" "r2:$R2Bucket/update/" --s3-no-check-bucket --progress
 if ($LASTEXITCODE -eq 0) {
     Write-Host "[OK] 清单已上传" -ForegroundColor Green
 }
