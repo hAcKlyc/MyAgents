@@ -1,6 +1,5 @@
 import {
   AtSign,
-  ChevronDown,
   ChevronRight,
   ChevronUp,
   Eye,
@@ -132,70 +131,11 @@ function getFolderName(path: string): string {
   return parts[parts.length - 1] || 'Workspace';
 }
 
-// Inline ProviderDropdown for DirectoryPanel header
-function ProviderDropdown({
-  provider,
-  providers,
-  onSelect
-}: {
-  provider: Provider;
-  providers: Provider[];
-  onSelect: (id: string) => void;
-}) {
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    const close = () => setShow(false);
-    if (show) {
-      document.addEventListener('click', close);
-      return () => document.removeEventListener('click', close);
-    }
-  }, [show]);
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShow(!show);
-        }}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
-        title="切换模型供应商"
-      >
-        <span>{provider.name}</span>
-        <ChevronDown className="h-2.5 w-2.5" />
-      </button>
-      {show && (
-        <div
-          className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] py-1 shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {providers.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => {
-                onSelect(p.id);
-                setShow(false);
-              }}
-              className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--paper-contrast)] ${p.id === provider.id ? 'text-[var(--accent)]' : 'text-[var(--ink)]'
-                }`}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(function DirectoryPanel({
   agentDir,
-  provider,
-  providers = [],
-  onProviderChange,
+  provider: _provider,
+  providers: _providers = [],
+  onProviderChange: _onProviderChange,
   onCollapse,
   onOpenConfig,
   refreshTrigger,
@@ -367,7 +307,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     apiGet<{ branch: string | null }>('/api/git/branch')
       .then((data) => setGitBranch(data.branch))
       .catch(() => setGitBranch(null));
-  }, [agentDir, apiGet]);
+  }, [agentDir, apiGet, refresh]);
 
   // Respond to external refresh trigger (e.g., when file-modifying tools complete)
   useEffect(() => {
