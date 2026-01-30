@@ -153,7 +153,9 @@ export default function Launcher({ onLaunchProject, isStarting, startError, onOp
         try {
             const project = await addProject(path);
             console.log('[Launcher] Project added:', project);
-            const parentDir = path.split('/').slice(0, -1).join('/');
+            // Normalize path separators for cross-platform support
+            const normalizedPath = path.replace(/\\/g, '/');
+            const parentDir = normalizedPath.split('/').slice(0, -1).join('/');
             if (parentDir) {
                 localStorage.setItem('myagents:lastProjectDir', parentDir);
             }
