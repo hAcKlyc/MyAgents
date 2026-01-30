@@ -2381,21 +2381,18 @@ async function startStreamingSession(): Promise<void> {
               }
               appendToolResultDelta(sdkMessage.parent_tool_use_id, streamEvent.delta.text);
             } else {
-              // Filter out decorative text from third-party APIs before broadcasting
-              const decorativeCheck = checkDecorativeToolText(streamEvent.delta.text);
-              if (!decorativeCheck.filtered) {
-                // Skip chunks that contain ONLY newlines (no actual content)
-                // These cause empty paragraphs in Markdown rendering
-                // But preserve chunks with spaces (normal word separators) or other content
-                const isOnlyNewlines = /^[\n\r]+$/.test(streamEvent.delta.text);
-                if (isOnlyNewlines) {
-                  console.log('[agent] Skipping newline-only chunk');
-                } else {
+              // Skip empty chunks (null, undefined, '')
+              if (!streamEvent.delta.text) {
+                console.log('[agent] Skipping empty chunk');
+              } else {
+                // Filter out decorative text from third-party APIs before broadcasting
+                const decorativeCheck = checkDecorativeToolText(streamEvent.delta.text);
+                if (!decorativeCheck.filtered) {
                   broadcast('chat:message-chunk', streamEvent.delta.text);
                   appendTextChunk(streamEvent.delta.text);
+                } else {
+                  console.log(`[agent] Filtered decorative text from stream (${decorativeCheck.reason})`);
                 }
-              } else {
-                console.log(`[agent] Filtered decorative text from stream (${decorativeCheck.reason})`);
               }
             }
           } else if (streamEvent.delta.type === 'thinking_delta') {
