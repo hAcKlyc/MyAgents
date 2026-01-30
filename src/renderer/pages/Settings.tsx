@@ -46,9 +46,6 @@ import { compareVersions } from '../../shared/utils';
 // Settings sub-sections
 type SettingsSection = 'providers' | 'mcp' | 'skills' | 'about';
 
-// External resource URLs
-const USER_COMMUNITY_QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
-
 import type { SubscriptionStatusWithVerify } from '@/types/subscription';
 
 // Verification status for each provider
@@ -243,8 +240,24 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }, []);
 
-    // QR code load status for user community section (only show when image loads successfully)
-    const [qrCodeLoaded, setQrCodeLoaded] = useState(false);
+    // QR code data URL for user community section (fetched via backend to bypass CSP)
+    const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+
+    // Fetch QR code when entering about section
+    useEffect(() => {
+        if (activeSection !== 'about') return;
+        // Reset and fetch fresh each time
+        setQrCodeDataUrl(null);
+        apiGetJson<{ success: boolean; dataUrl?: string }>('/api/assets/qr-code')
+            .then(result => {
+                if (result.success && result.dataUrl) {
+                    setQrCodeDataUrl(result.dataUrl);
+                }
+            })
+            .catch(() => {
+                // Silently fail - QR code section will remain hidden
+            });
+    }, [activeSection]);
 
     // Manual update state (Developer section)
     type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'no-update' | 'error';
@@ -1224,19 +1237,19 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             </div>
 
                             {/* User Community QR Code - Hidden until image loads successfully */}
-                            <div className={`rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5 ${qrCodeLoaded ? '' : 'hidden'}`}>
-                                <div className="flex flex-col items-center text-center">
-                                    <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
-                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
-                                    <img
-                                        src={USER_COMMUNITY_QR_CODE_URL}
-                                        alt="用户交流群二维码"
-                                        className="mt-4 h-36 w-36 rounded-lg"
-                                        onLoad={() => setQrCodeLoaded(true)}
-                                        onError={() => setQrCodeLoaded(false)}
-                                    />
+                            {qrCodeDataUrl && (
+                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
+                                    <div className="flex flex-col items-center text-center">
+                                        <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
+                                        <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
+                                        <img
+                                            src={qrCodeDataUrl}
+                                            alt="用户交流群二维码"
+                                            className="mt-4 h-36 w-36 rounded-lg"
+                                        />
+                                    </div>
                                 </div>
-                            </div>
+                            )}
 
                             {/* Contact & Links */}
                             <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">

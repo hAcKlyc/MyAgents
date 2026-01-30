@@ -1670,6 +1670,31 @@ async function main() {
         }
       }
 
+      // GET /api/assets/qr-code - Fetch QR code image and return as base64
+      // Downloads from CDN each time to bypass WebView CSP restrictions
+      if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
+        try {
+          const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
+          const response = await fetch(QR_CODE_URL);
+          if (!response.ok) {
+            return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString('base64');
+          const mimeType = response.headers.get('content-type') || 'image/png';
+          return jsonResponse({
+            success: true,
+            dataUrl: `data:${mimeType};base64,${base64}`
+          });
+        } catch (error) {
+          console.error('[api/assets/qr-code] Error:', error);
+          return jsonResponse(
+            { success: false, error: error instanceof Error ? error.message : 'Fetch failed' },
+            500
+          );
+        }
+      }
+
       // ============= END PROVIDER VERIFICATION API =============
 
       // ============= MCP API =============
