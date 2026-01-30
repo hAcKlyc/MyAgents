@@ -1,3 +1,5 @@
+import { memo } from 'react';
+
 import AttachmentPreviewList from '@/components/AttachmentPreviewList';
 import BlockGroup from '@/components/BlockGroup';
 import Markdown from '@/components/Markdown';
@@ -7,6 +9,33 @@ import type { ContentBlock, Message as MessageType } from '@/types/chat';
 interface MessageProps {
   message: MessageType;
   isLoading?: boolean;
+}
+
+/**
+ * Deep compare message content for memo optimization.
+ * Returns true if content is equal (skip re-render), false otherwise.
+ */
+function areMessagesEqual(prev: MessageProps, next: MessageProps): boolean {
+  // Different loading state -> must re-render
+  if (prev.isLoading !== next.isLoading) return false;
+
+  const prevMsg = prev.message;
+  const nextMsg = next.message;
+
+  // Same reference -> definitely equal (fast path for history messages)
+  if (prevMsg === nextMsg) return true;
+
+  // Different ID -> different message
+  if (prevMsg.id !== nextMsg.id) return false;
+
+  // For streaming messages, check content changes
+  if (typeof prevMsg.content === 'string' && typeof nextMsg.content === 'string') {
+    return prevMsg.content === nextMsg.content;
+  }
+
+  // ContentBlock array - compare by reference (streaming updates create new arrays)
+  // This allows streaming message to re-render while history messages stay stable
+  return prevMsg.content === nextMsg.content;
 }
 
 /**
@@ -34,7 +63,11 @@ function formatLocalCommandOutput(content: string): string {
   return content.replace(/\$/g, '\\$');
 }
 
-export default function Message({ message, isLoading = false }: MessageProps) {
+/**
+ * Message component with memo optimization.
+ * History messages won't re-render when streaming message updates.
+ */
+const Message = memo(function Message({ message, isLoading = false }: MessageProps) {
   const { openPreview } = useImagePreview();
 
   if (message.role === 'user') {
@@ -193,4 +226,6 @@ export default function Message({ message, isLoading = false }: MessageProps) {
       </article>
     </div>
   );
-}
+}, areMessagesEqual);
+
+export default Message;

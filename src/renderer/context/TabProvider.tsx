@@ -209,6 +209,13 @@ export default function TabProvider({
         isImage: boolean;
     }[] | null>(null);
 
+    // Chunk throttling for streaming performance optimization
+    // Accumulate chunks and flush at intervals to reduce React re-renders
+    const CHUNK_FLUSH_INTERVAL_MS = 50;  // 50ms is imperceptible to human eye
+    const CHUNK_FLUSH_SIZE_THRESHOLD = 200;  // Flush immediately if accumulated > 200 chars
+    const pendingChunksRef = useRef<string>('');
+    const chunkFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
     /**
      * Reset session for "新对话" functionality
      * This synchronizes frontend AND backend state:
@@ -225,6 +232,12 @@ export default function TabProvider({
         seenIdsRef.current.clear();
         isNewSessionRef.current = true;
         isStreamingRef.current = false;
+        // Clear any pending chunks and timer
+        pendingChunksRef.current = '';
+        if (chunkFlushTimerRef.current) {
+            clearTimeout(chunkFlushTimerRef.current);
+            chunkFlushTimerRef.current = null;
+        }
         setIsLoading(false);
         setSessionState('idle');  // Reset session state for new conversation
         setSystemStatus(null);
@@ -353,6 +366,54 @@ export default function TabProvider({
         });
     }, []);
 
+    /**
+     * Flush accumulated text chunks to state.
+     * This batches multiple rapid chunks into single state update,
+     * reducing React re-renders while maintaining smooth visual streaming.
+     */
+    const flushPendingChunks = useCallback(() => {
+        const chunks = pendingChunksRef.current;
+        if (!chunks) return;
+
+        pendingChunksRef.current = '';
+
+        // Clear any pending timer
+        if (chunkFlushTimerRef.current) {
+            clearTimeout(chunkFlushTimerRef.current);
+            chunkFlushTimerRef.current = null;
+        }
+
+        setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (last?.role === 'assistant' && isStreamingRef.current) {
+                if (typeof last.content === 'string') {
+                    return [...prev.slice(0, -1), { ...last, content: last.content + chunks }];
+                }
+                const contentArray = last.content;
+                const lastBlock = contentArray[contentArray.length - 1];
+                if (lastBlock?.type === 'text') {
+                    return [...prev.slice(0, -1), {
+                        ...last,
+                        content: [...contentArray.slice(0, -1), { type: 'text', text: (lastBlock.text || '') + chunks }]
+                    }];
+                }
+                return [...prev.slice(0, -1), {
+                    ...last,
+                    content: [...contentArray, { type: 'text', text: chunks }]
+                }];
+            }
+            // First chunk - create new assistant message
+            isStreamingRef.current = true;
+            setIsLoading(true);
+            return [...prev, {
+                id: Date.now().toString(),
+                role: 'assistant',
+                content: chunks,
+                timestamp: new Date()
+            }];
+        });
+    }, []);
+
     // Handle SSE events
     const handleSseEvent = useCallback((eventName: string, data: unknown) => {
         switch (eventName) {
@@ -440,35 +501,22 @@ export default function TabProvider({
                     console.log('[TabProvider] Skipping message-chunk (new session, stale event)');
                     break;
                 }
+
+                // Throttle chunk updates: accumulate chunks and flush at intervals
+                // This reduces React re-renders from ~30-50/sec to ~20/sec while
+                // maintaining smooth visual streaming (50ms is imperceptible)
                 const chunk = data as string;
-                setMessages(prev => {
-                    const last = prev[prev.length - 1];
-                    if (last?.role === 'assistant' && isStreamingRef.current) {
-                        if (typeof last.content === 'string') {
-                            return [...prev.slice(0, -1), { ...last, content: last.content + chunk }];
-                        }
-                        const contentArray = last.content;
-                        const lastBlock = contentArray[contentArray.length - 1];
-                        if (lastBlock?.type === 'text') {
-                            return [...prev.slice(0, -1), {
-                                ...last,
-                                content: [...contentArray.slice(0, -1), { type: 'text', text: (lastBlock.text || '') + chunk }]
-                            }];
-                        }
-                        return [...prev.slice(0, -1), {
-                            ...last,
-                            content: [...contentArray, { type: 'text', text: chunk }]
-                        }];
-                    }
-                    isStreamingRef.current = true;
-                    setIsLoading(true);
-                    return [...prev, {
-                        id: Date.now().toString(),
-                        role: 'assistant',
-                        content: chunk,
-                        timestamp: new Date()
-                    }];
-                });
+                pendingChunksRef.current += chunk;
+
+                // Flush immediately if accumulated enough, or schedule a flush
+                if (pendingChunksRef.current.length >= CHUNK_FLUSH_SIZE_THRESHOLD) {
+                    flushPendingChunks();
+                } else if (!chunkFlushTimerRef.current) {
+                    chunkFlushTimerRef.current = setTimeout(() => {
+                        chunkFlushTimerRef.current = null;
+                        flushPendingChunks();
+                    }, CHUNK_FLUSH_INTERVAL_MS);
+                }
                 break;
             }
 
@@ -670,6 +718,8 @@ export default function TabProvider({
 
             case 'chat:message-complete': {
                 console.log(`[TabProvider ${tabId}] message-complete received`);
+                // Flush any remaining accumulated chunks before completing
+                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI, bypassing React batching
                 // This prevents UI from getting stuck in loading state during rapid event streams
@@ -687,6 +737,8 @@ export default function TabProvider({
 
             case 'chat:message-stopped': {
                 console.log(`[TabProvider ${tabId}] message-stopped received`);
+                // Flush any remaining accumulated chunks before stopping
+                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI
                 flushSync(() => {
@@ -706,6 +758,8 @@ export default function TabProvider({
 
             case 'chat:message-error': {
                 console.log(`[TabProvider ${tabId}] message-error received`);
+                // Flush any remaining accumulated chunks before error
+                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI
                 flushSync(() => {
@@ -874,7 +928,7 @@ export default function TabProvider({
                 }
             }
         }
-    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished]);
+    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished, flushPendingChunks]);
 
     // Connect SSE
     const connectSse = useCallback(async () => {
