@@ -13,6 +13,34 @@
 # 4. 安装 rclone: https://rclone.org/downloads/
 
 $ErrorActionPreference = "Stop"
+$PublishSuccess = $false
+
+# 用于清理的临时文件路径
+$script:rcloneConfig = $null
+$script:ManifestDir = $null
+
+function Exit-WithPause {
+    param([int]$Code = 0)
+    Write-Host ""
+    if ($Code -eq 0) {
+        Write-Host "按回车键退出..." -ForegroundColor Cyan
+    } else {
+        Write-Host "按回车键退出..." -ForegroundColor Yellow
+    }
+    Read-Host
+    exit $Code
+}
+
+function Cleanup-TempFiles {
+    if ($script:rcloneConfig -and (Test-Path $script:rcloneConfig)) {
+        Remove-Item $script:rcloneConfig -Force -ErrorAction SilentlyContinue
+    }
+    if ($script:ManifestDir -and (Test-Path $script:ManifestDir)) {
+        Remove-Item $script:ManifestDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+try {
 
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectDir
@@ -41,7 +69,7 @@ Write-Host "[1/7] 加载配置..." -ForegroundColor Blue
 
 if (-not (Test-Path $EnvFile)) {
     Write-Host "[X] .env 文件不存在!" -ForegroundColor Red
-    exit 1
+    throw ".env 文件不存在"
 }
 
 # 加载 .env
@@ -66,7 +94,7 @@ if (-not $R2AccessKeyId -or -not $R2SecretAccessKey -or -not $R2AccountId) {
     Write-Host "  R2_ACCESS_KEY_ID=xxx"
     Write-Host "  R2_SECRET_ACCESS_KEY=xxx"
     Write-Host "  R2_ACCOUNT_ID=xxx"
-    exit 1
+    throw "R2 配置不完整"
 }
 Write-Host "[OK] R2 配置已验证" -ForegroundColor Green
 Write-Host ""
@@ -80,12 +108,13 @@ $rclone = Get-Command rclone -ErrorAction SilentlyContinue
 if (-not $rclone) {
     Write-Host "[X] rclone 未安装" -ForegroundColor Red
     Write-Host "请从 https://rclone.org/downloads/ 下载安装" -ForegroundColor Yellow
-    exit 1
+    throw "rclone 未安装"
 }
 Write-Host "[OK] rclone 已就绪" -ForegroundColor Green
 
 # 创建临时 rclone 配置 (凭证通过环境变量传递，更安全)
 $rcloneConfig = [System.IO.Path]::GetTempFileName()
+$script:rcloneConfig = $rcloneConfig
 @"
 [r2]
 type = s3
@@ -152,8 +181,7 @@ Write-Host ""
 if (-not $NsisExe) {
     Write-Host "[X] NSIS 安装包缺失，无法继续" -ForegroundColor Red
     Write-Host "请先运行 .\build_windows.ps1 完成构建" -ForegroundColor Yellow
-    Remove-Item $rcloneConfig -Force -ErrorAction SilentlyContinue
-    exit 1
+    throw "NSIS 安装包缺失"
 }
 
 if (-not $UpdateZip) {
@@ -161,8 +189,7 @@ if (-not $UpdateZip) {
     $continue = Read-Host "是否继续? (y/N)"
     if ($continue -ne "y" -and $continue -ne "Y") {
         Write-Host "发布已取消" -ForegroundColor Red
-        Remove-Item $rcloneConfig -Force -ErrorAction SilentlyContinue
-        exit 1
+        throw "用户取消发布"
     }
 }
 
@@ -174,6 +201,7 @@ Write-Host ""
 Write-Host "[4/7] 生成更新清单..." -ForegroundColor Blue
 
 $ManifestDir = [System.IO.Path]::GetTempPath() + "myagents-manifest-" + [System.Guid]::NewGuid().ToString("N")
+$script:ManifestDir = $ManifestDir
 New-Item -ItemType Directory -Path $ManifestDir -Force | Out-Null
 
 $PubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -290,9 +318,7 @@ Write-Host ""
 $confirm = Read-Host "确认上传? (Y/n)"
 if ($confirm -eq "n" -or $confirm -eq "N") {
     Write-Host "发布已取消" -ForegroundColor Red
-    Remove-Item $rcloneConfig -Force -ErrorAction SilentlyContinue
-    Remove-Item $ManifestDir -Recurse -Force -ErrorAction SilentlyContinue
-    exit 1
+    throw "用户取消发布"
 }
 
 Write-Host ""
@@ -439,8 +465,10 @@ Write-Host ""
 # ========================================
 # 清理临时文件
 # ========================================
-Remove-Item $rcloneConfig -Force -ErrorAction SilentlyContinue
-Remove-Item $ManifestDir -Recurse -Force -ErrorAction SilentlyContinue
+Cleanup-TempFiles
+
+# 标记发布成功
+$PublishSuccess = $true
 
 # ========================================
 # 完成
@@ -471,3 +499,25 @@ Write-Host "  验证命令:" -ForegroundColor Blue
 Write-Host "    curl -s $DownloadBaseUrl/update/windows-x86_64.json | jq ." -ForegroundColor White
 Write-Host "    curl -s $DownloadBaseUrl/update/latest_win.json | jq ." -ForegroundColor White
 Write-Host ""
+
+} catch {
+    Write-Host ""
+    Write-Host "=========================================" -ForegroundColor Red
+    Write-Host "  发布失败!" -ForegroundColor Red
+    Write-Host "=========================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "错误: $_" -ForegroundColor Red
+    Write-Host ""
+    Cleanup-TempFiles
+}
+
+# ========================================
+# 暂停退出 (防止窗口直接关闭)
+# ========================================
+Write-Host ""
+if ($PublishSuccess) {
+    Write-Host "按回车键退出..." -ForegroundColor Cyan
+} else {
+    Write-Host "按回车键退出..." -ForegroundColor Yellow
+}
+Read-Host
