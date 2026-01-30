@@ -4,9 +4,12 @@
  * Key insight: data-tauri-drag-region must be on SPECIFIC draggable elements,
  * not just the parent container. Also, -webkit-app-region CSS CONFLICTS with
  * Tauri's mechanism on macOS WebKit.
+ *
+ * Windows: Custom window controls (minimize, maximize, close) are added since
+ * we use decorations: false on Windows for custom title bar styling.
  */
 
-import { RefreshCw, Settings } from 'lucide-react';
+import { Minus, Square, X, RefreshCw, Settings, Copy } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { isTauri } from '@/api/tauriClient';
 
@@ -24,6 +27,9 @@ interface CustomTitleBarProps {
 // macOS traffic lights (close/minimize/maximize) width + padding
 const MACOS_TRAFFIC_LIGHTS_WIDTH = 78;
 
+// Detect platform
+const isWindows = typeof navigator !== 'undefined' && navigator.platform?.includes('Win');
+
 export default function CustomTitleBar({
     children,
     onSettingsClick,
@@ -32,6 +38,7 @@ export default function CustomTitleBar({
     onRestartAndUpdate,
 }: CustomTitleBarProps) {
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isMaximized, setIsMaximized] = useState(false);
 
     // Listen for fullscreen changes
     useEffect(() => {
@@ -39,26 +46,30 @@ export default function CustomTitleBar({
 
         let mounted = true;
 
-        const checkFullscreen = async () => {
+        const checkWindowState = async () => {
             if (!mounted) return;
             try {
                 const { getCurrentWindow } = await import('@tauri-apps/api/window');
                 const win = getCurrentWindow();
                 const fs = await win.isFullscreen();
-                if (mounted) setIsFullscreen(fs);
+                const max = await win.isMaximized();
+                if (mounted) {
+                    setIsFullscreen(fs);
+                    setIsMaximized(max);
+                }
             } catch (e) {
-                console.error('Failed to check fullscreen:', e);
+                console.error('Failed to check window state:', e);
             }
         };
 
         // Initial check
-        checkFullscreen();
+        checkWindowState();
 
         // Use resize event listener with debounce instead of polling
         let resizeTimeout: NodeJS.Timeout;
         const onResize = () => {
             clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(checkFullscreen, 200);
+            resizeTimeout = setTimeout(checkWindowState, 200);
         };
 
         window.addEventListener('resize', onResize);
@@ -70,18 +81,59 @@ export default function CustomTitleBar({
         };
     }, []);
 
-    // NOTE: Double-click to maximize/restore is handled natively by macOS
-    // when using titleBarStyle: "Overlay". No custom handler needed.
+    // Windows window control handlers
+    const handleMinimize = async () => {
+        if (!isTauri()) return;
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            await getCurrentWindow().minimize();
+        } catch (e) {
+            console.error('Failed to minimize:', e);
+        }
+    };
+
+    const handleMaximize = async () => {
+        if (!isTauri()) return;
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            const win = getCurrentWindow();
+            if (await win.isMaximized()) {
+                await win.unmaximize();
+            } else {
+                await win.maximize();
+            }
+        } catch (e) {
+            console.error('Failed to toggle maximize:', e);
+        }
+    };
+
+    const handleClose = async () => {
+        if (!isTauri()) return;
+        try {
+            const { getCurrentWindow } = await import('@tauri-apps/api/window');
+            await getCurrentWindow().close();
+        } catch (e) {
+            console.error('Failed to close:', e);
+        }
+    };
 
     return (
         <div
             className="custom-titlebar flex h-11 flex-shrink-0 items-center border-b border-[var(--line)] bg-gradient-to-b from-[var(--paper)] to-[var(--paper-contrast)]/30"
         >
-            {/* macOS traffic lights spacer - DRAGGABLE */}
-            {!isFullscreen && (
+            {/* macOS traffic lights spacer - DRAGGABLE (hidden on Windows) */}
+            {!isWindows && !isFullscreen && (
                 <div
                     className="flex-shrink-0 h-full"
                     style={{ width: MACOS_TRAFFIC_LIGHTS_WIDTH }}
+                    data-tauri-drag-region
+                />
+            )}
+
+            {/* Windows: Small left padding for drag area */}
+            {isWindows && (
+                <div
+                    className="flex-shrink-0 h-full w-3"
                     data-tauri-drag-region
                 />
             )}
@@ -124,6 +176,37 @@ export default function CustomTitleBar({
                     <Settings className="h-4 w-4" />
                 </button>
             </div>
+
+            {/* Windows window controls */}
+            {isWindows && (
+                <div className="flex h-full items-stretch" data-no-drag>
+                    <button
+                        onClick={handleMinimize}
+                        className="flex w-11 items-center justify-center text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] transition-colors"
+                        title="最小化"
+                    >
+                        <Minus className="h-4 w-4" />
+                    </button>
+                    <button
+                        onClick={handleMaximize}
+                        className="flex w-11 items-center justify-center text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] transition-colors"
+                        title={isMaximized ? "还原" : "最大化"}
+                    >
+                        {isMaximized ? (
+                            <Copy className="h-3.5 w-3.5" />
+                        ) : (
+                            <Square className="h-3.5 w-3.5" />
+                        )}
+                    </button>
+                    <button
+                        onClick={handleClose}
+                        className="flex w-11 items-center justify-center text-[var(--ink-muted)] hover:bg-red-500 hover:text-white transition-colors"
+                        title="关闭"
+                    >
+                        <X className="h-4 w-4" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

@@ -994,6 +994,9 @@ fn cleanup_child_processes() {
 
 #[cfg(windows)]
 fn kill_windows_processes_by_pattern(pattern: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
     // Use PowerShell Get-CimInstance (wmic is deprecated in Windows 10/11)
     // Fallback to wmic for older systems
     let ps_command = format!(
@@ -1003,6 +1006,7 @@ fn kill_windows_processes_by_pattern(pattern: &str) {
 
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", &ps_command])
+        .creation_flags(CREATE_NO_WINDOW)
         .output();
 
     let pids: Vec<u32> = match output {
@@ -1017,6 +1021,7 @@ fn kill_windows_processes_by_pattern(pattern: &str) {
             log::info!("[sidecar] PowerShell failed, falling back to wmic");
             Command::new("wmic")
                 .args(["process", "where", &format!("commandline like '%{}%'", pattern), "get", "processid"])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output()
                 .ok()
                 .map(|o| {
@@ -1036,11 +1041,10 @@ fn kill_windows_processes_by_pattern(pattern: &str) {
 
     let mut killed = 0;
     for pid in &pids {
-        if Command::new("taskkill")
-            .args(["/F", "/PID", &pid.to_string()])
-            .output()
-            .is_ok()
-        {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW);
+        if cmd.output().is_ok() {
             killed += 1;
         }
     }

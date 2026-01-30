@@ -96,6 +96,16 @@ pub fn run() {
                 }
             }
 
+            // Windows: Remove system decorations for custom title bar
+            #[cfg(target_os = "windows")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                    log::info!("[App] Windows: Disabled system decorations for custom title bar");
+                }
+            }
+
             // Start background update check (5 second delay to let app initialize)
             log::info!("[App] Setup complete, spawning background update check task...");
             let app_handle = app.handle().clone();
