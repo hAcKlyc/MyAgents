@@ -29,8 +29,10 @@ import type { PermissionMode } from '@/config/types';
 
 // Chunk throttling constants for streaming performance optimization
 // Defined outside component to avoid recreation on each render
-const CHUNK_FLUSH_INTERVAL_MS = 50;  // 50ms is imperceptible to human eye
-const CHUNK_FLUSH_SIZE_THRESHOLD = 200;  // Flush immediately if accumulated > 200 chars
+// Note: Keep interval short (16ms ≈ 1 frame at 60fps) to maintain responsiveness
+// The main benefit is batching rapid successive chunks, not adding delay
+const CHUNK_FLUSH_INTERVAL_MS = 16;  // ~1 frame at 60fps, imperceptible delay
+const CHUNK_FLUSH_SIZE_THRESHOLD = 100;  // Flush immediately if accumulated > 100 chars
 
 // File-modifying tools that should trigger workspace refresh
 // These tools can create, modify, or delete files in the workspace
@@ -505,15 +507,19 @@ export default function TabProvider({
                 }
 
                 // Throttle chunk updates: accumulate chunks and flush at intervals
-                // This reduces React re-renders from ~30-50/sec to ~20/sec while
-                // maintaining smooth visual streaming (50ms is imperceptible)
+                // This reduces React re-renders while maintaining smooth visual streaming
                 const chunk = data as string;
                 pendingChunksRef.current += chunk;
 
-                // Flush immediately if accumulated enough, or schedule a flush
+                // Flush immediately if accumulated enough
                 if (pendingChunksRef.current.length >= CHUNK_FLUSH_SIZE_THRESHOLD) {
                     flushPendingChunks();
-                } else if (!chunkFlushTimerRef.current) {
+                } else {
+                    // Reset timer on each chunk to ensure flush happens shortly after last chunk
+                    // This prevents stale timers from causing delays when chunks arrive unevenly
+                    if (chunkFlushTimerRef.current) {
+                        clearTimeout(chunkFlushTimerRef.current);
+                    }
                     chunkFlushTimerRef.current = setTimeout(() => {
                         chunkFlushTimerRef.current = null;
                         flushPendingChunks();
