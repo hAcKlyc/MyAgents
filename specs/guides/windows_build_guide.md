@@ -20,9 +20,11 @@ MyAgents Windows 版本支持 **x86_64 (64位)** 架构，提供两种分发格�
 ```
 myagents-releases/
 ├── update/
-│   ├── darwin-aarch64.json     # macOS ARM
-│   ├── darwin-x86_64.json      # macOS Intel
-│   └── windows-x86_64.json     # Windows x64
+│   ├── darwin-aarch64.json     # macOS ARM (Tauri Updater)
+│   ├── darwin-x86_64.json      # macOS Intel (Tauri Updater)
+│   ├── windows-x86_64.json     # Windows x64 (Tauri Updater)
+│   ├── latest.json             # macOS 网站下载 API
+│   └── latest_win.json         # Windows 网站下载 API
 └── releases/
     └── v{VERSION}/
         ├── MyAgents_{VERSION}_x64-setup.exe       # NSIS 安装包
@@ -144,7 +146,7 @@ src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/
 1. **加载配置** - 读取 R2 凭证
 2. **检查 rclone** - 确保上传工具可用
 3. **物料完整性检查** - 验证所有文件存在
-4. **生成更新清单** - 创建 `windows-x86_64.json`
+4. **生成更新清单** - 创建 `windows-x86_64.json` (Tauri Updater) 和 `latest_win.json` (网站下载 API)
 5. **上传确认** - 显示文件列表，等待确认
 6. **上传构建产物** - 上传到 R2
 7. **上传更新清单** - 上传 JSON 文件
@@ -250,7 +252,11 @@ ls $env:APPDATA\MyAgents
 
 **验证更新清单**：
 ```powershell
+# Tauri Updater (客户端自动更新)
 curl -s https://download.myagents.io/update/windows-x86_64.json
+
+# 网站下载 API
+curl -s https://download.myagents.io/update/latest_win.json
 ```
 
 ---

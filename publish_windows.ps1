@@ -224,6 +224,29 @@ else {
     Write-Host "  [!] 跳过更新清单生成 (无更新包)" -ForegroundColor Yellow
 }
 
+# 生成 latest_win.json (网站下载页 API)
+# 注意：只发布 NSIS 安装包，便携版暂不对外发布
+if ($NsisExe) {
+    $latestWinDownloads = @{
+        "win_x64" = @{
+            name = "Windows x64"
+            url  = "$DownloadBaseUrl/releases/v$Version/$($NsisExe.Name)"
+        }
+    }
+
+    $latestWinManifest = @{
+        version       = $Version
+        pub_date      = $PubDate
+        release_notes = "MyAgents v$Version"
+        downloads     = $latestWinDownloads
+    }
+
+    $latestWinJson = $latestWinManifest | ConvertTo-Json -Depth 5
+    $latestWinJson | Set-Content (Join-Path $ManifestDir "latest_win.json") -Encoding UTF8
+
+    Write-Host "  [OK] latest_win.json 已生成" -ForegroundColor Green
+}
+
 Write-Host ""
 
 # ========================================
@@ -256,7 +279,8 @@ if ($SigFile) {
 
 Write-Host ""
 Write-Host "  即将上传的清单:" -ForegroundColor Cyan
-Write-Host "    - windows-x86_64.json"
+Write-Host "    - windows-x86_64.json (Tauri Updater)"
+Write-Host "    - latest_win.json (网站下载 API)"
 Write-Host ""
 Write-Host "  目标位置:" -ForegroundColor Cyan
 Write-Host "    - 文件: $DownloadBaseUrl/releases/v$Version/"
@@ -372,7 +396,8 @@ if ($CfZoneId -and $CfApiToken) {
     Write-Host "清除 Cloudflare CDN 缓存..." -ForegroundColor Cyan
 
     $purgeUrls = @(
-        "$DownloadBaseUrl/update/windows-x86_64.json"
+        "$DownloadBaseUrl/update/windows-x86_64.json",
+        "$DownloadBaseUrl/update/latest_win.json"
     )
 
     if ($NsisExe) {
@@ -436,9 +461,13 @@ if ($PortableZip) {
     Write-Host "    $DownloadBaseUrl/releases/v$Version/$($PortableZip.Name)" -ForegroundColor Cyan
 }
 Write-Host ""
-Write-Host "  自动更新清单:" -ForegroundColor Blue
+Write-Host "  自动更新清单 (Tauri Updater):" -ForegroundColor Blue
 Write-Host "    $DownloadBaseUrl/update/windows-x86_64.json" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  网站下载 API:" -ForegroundColor Blue
+Write-Host "    $DownloadBaseUrl/update/latest_win.json" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  验证命令:" -ForegroundColor Blue
 Write-Host "    curl -s $DownloadBaseUrl/update/windows-x86_64.json | jq ." -ForegroundColor White
+Write-Host "    curl -s $DownloadBaseUrl/update/latest_win.json | jq ." -ForegroundColor White
 Write-Host ""
