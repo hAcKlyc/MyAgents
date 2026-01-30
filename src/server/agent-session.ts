@@ -412,13 +412,20 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
             const runtimePath = getBundledRuntimePath();
             console.log(`[agent] MCP ${server.id}: Using local install at ${entryPoint} with runtime ${runtimePath}`);
 
+            // Cross-platform environment variables
+            const isWin = process.platform === 'win32';
+            const home = isWin ? (process.env.USERPROFILE || '') : (process.env.HOME || '');
+            const user = process.env.USER || process.env.USERNAME || '';
+
             result[server.id] = {
               command: runtimePath,
               args: [entryPoint],
               env: {
                 ...process.env,  // Pass all env vars to ensure nothing is missing
-                HOME: process.env.HOME || '',
-                USER: process.env.USER || '',
+                HOME: home,
+                USERPROFILE: home,
+                USER: user,
+                USERNAME: user,
                 ...(server.env || {}),
               },
             };
@@ -436,15 +443,22 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
 
       // For bun, use "bun x" (bunx) to run packages without installing
       // For node fallback, this won't work but we log a clear error
+      const isWindows = process.platform === 'win32';
+      const homeDir = isWindows ? (process.env.USERPROFILE || '') : (process.env.HOME || '');
+      const tempDir = isWindows ? (process.env.TEMP || process.env.TMP || '') : (process.env.TMPDIR || '/tmp');
+
       if (isBunRuntime(runtimePath)) {
         result[server.id] = {
           command: runtimePath,
           args: ['x', ...args],
           env: {
             ...process.env,
-            HOME: process.env.HOME || '',
-            USER: process.env.USER || '',
-            TMPDIR: process.env.TMPDIR || '/tmp',
+            HOME: homeDir,
+            USERPROFILE: homeDir,
+            USER: process.env.USER || process.env.USERNAME || '',
+            TMPDIR: tempDir,
+            TEMP: tempDir,
+            TMP: tempDir,
             ...(server.env || {}),
           },
         };
@@ -457,9 +471,12 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
           args: argsWithY,
           env: {
             ...process.env,
-            HOME: process.env.HOME || '',
-            USER: process.env.USER || '',
-            TMPDIR: process.env.TMPDIR || '/tmp',
+            HOME: homeDir,
+            USERPROFILE: homeDir,
+            USER: process.env.USER || process.env.USERNAME || '',
+            TMPDIR: tempDir,
+            TEMP: tempDir,
+            TMP: tempDir,
             npm_config_loglevel: 'error',
             npm_config_update_notifier: 'false',
             ...(server.env || {}),
@@ -874,7 +891,8 @@ export function resolveClaudeCodeCli(): string {
 export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.ProcessEnv {
   // Ensure essential paths are always present, even when launched from Finder
   // (Finder launches via launchd which doesn't inherit shell environment variables)
-  const home = process.env.HOME || '';
+  // Cross-platform: use USERPROFILE on Windows, HOME on macOS/Linux
+  const home = process.env.HOME || process.env.USERPROFILE || '';
   const isDebug = process.env.DEBUG === '1' || process.env.NODE_ENV === 'development';
 
   // Cross-platform PATH separator

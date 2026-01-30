@@ -1688,7 +1688,7 @@ async function main() {
           const { existsSync, readFileSync } = await import('fs');
           const { join } = await import('path');
 
-          const homeDir = process.env.HOME || '/tmp';
+          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
           const serverDir = join(homeDir, '.myagents', 'mcp', payload.serverId);
 
           // Extract package name from args
@@ -1738,8 +1738,8 @@ async function main() {
           const { existsSync, mkdirSync, writeFileSync, readFileSync } = await import('fs');
           const { join } = await import('path');
 
-          // Determine MCP install directory
-          const homeDir = process.env.HOME || '/tmp';
+          // Determine MCP install directory (cross-platform)
+          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
           const mcpBaseDir = join(homeDir, '.myagents', 'mcp');
           const serverDir = join(mcpBaseDir, payload.serverId);
 
@@ -1906,7 +1906,7 @@ async function main() {
           // Start with empty array, builtin commands added at the end
           // Order: project commands -> user commands -> skills -> builtin (so custom can override builtin)
           const commands: SlashCommand[] = [];
-          const homeDir = process.env.HOME || '/tmp';
+          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
 
           // ===== COMMANDS SCANNING =====
           // Helper function to scan commands from a directory
@@ -2103,7 +2103,8 @@ async function main() {
         return true;
       };
 
-      const homeDir = process.env.HOME || '/tmp';
+      // Cross-platform home directory for user skills/commands
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
       const userSkillsBaseDir = join(homeDir, '.myagents', 'skills');
       const userCommandsBaseDir = join(homeDir, '.myagents', 'commands');
 
