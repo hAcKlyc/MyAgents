@@ -897,7 +897,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     } else {
       return [
         {
-          label: '快速预览',
+          label: '预览',
           icon: <Eye className="h-4 w-4" />,
           disabled: !canPreview,
           onClick: () => {
