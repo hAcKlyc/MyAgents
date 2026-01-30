@@ -58,6 +58,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     respondPermission,
     respondAskUserQuestion,
     apiPost,
+    setSessionState,
   } = useTabState();
 
   // Get config to find current project provider
@@ -369,7 +370,10 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
           timestamp: new Date()
         };
         setMessages((prev) => [...prev, errorMessage]);
+        // Reset both isLoading and sessionState to ensure UI recovers
+        // sessionState may be 'running' if SSE received status update before API timeout
         setIsLoading(false);
+        setSessionState('idle');
       }
     } catch (error) {
       const errorMessage = {
@@ -379,7 +383,9 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
         timestamp: new Date()
       };
       setMessages((prev) => [...prev, errorMessage]);
+      // Reset both isLoading and sessionState to ensure UI recovers
       setIsLoading(false);
+      setSessionState('idle');
     }
   };
 

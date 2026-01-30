@@ -159,8 +159,11 @@ async fn connect_sse(
     // IMPORTANT: Do NOT use timeout() which is total request time - SSE connections are meant to be long-lived
     // Use read_timeout instead: if no data received within this time, connection is considered dead
     // Backend sends heartbeat every 15s, so 60s read_timeout gives 4x margin
+    // CRITICAL: Enable tcp_nodelay to disable Nagle's algorithm for immediate packet transmission
+    // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
+        .tcp_nodelay(true)
         .build()?;
     
     let response = client
@@ -319,8 +322,10 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     logger::info(&app, format!("[proxy] {} {} - Starting", request.method, request.url));
     
     // Build client with configurable timeout
+    // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
+        .tcp_nodelay(true)
         .build()
         .map_err(|e| {
             let err = format!("[proxy] Failed to create client: {}", e);
