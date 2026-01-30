@@ -4,6 +4,7 @@ import { join, resolve } from 'path';
 import { createRequire } from 'module';
 import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { getScriptDir, getBundledRuntimePath, isBunRuntime } from './utils/runtime';
+import { getCrossPlatformEnv, buildCrossPlatformEnv } from './utils/platform';
 
 import type { ToolInput } from '../renderer/types/chat';
 import { parsePartialJson } from '../shared/parsePartialJson';
@@ -27,7 +28,9 @@ const MYAGENTS_USER_DIR = '.myagents';
  * All user configs (MCP, providers, projects, etc.) are stored here
  */
 export function getMyAgentsUserDir(): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
+  const { home } = getCrossPlatformEnv();
+  // Fallback to /tmp only if home is not available (should be rare)
+  const homeDir = home || '/tmp';
   return join(homeDir, MYAGENTS_USER_DIR);
 }
 
@@ -412,22 +415,10 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
             const runtimePath = getBundledRuntimePath();
             console.log(`[agent] MCP ${server.id}: Using local install at ${entryPoint} with runtime ${runtimePath}`);
 
-            // Cross-platform environment variables
-            const isWin = process.platform === 'win32';
-            const home = isWin ? (process.env.USERPROFILE || '') : (process.env.HOME || '');
-            const user = process.env.USER || process.env.USERNAME || '';
-
             result[server.id] = {
               command: runtimePath,
               args: [entryPoint],
-              env: {
-                ...process.env,  // Pass all env vars to ensure nothing is missing
-                HOME: home,
-                USERPROFILE: home,
-                USER: user,
-                USERNAME: user,
-                ...(server.env || {}),
-              },
+              env: buildCrossPlatformEnv(server.env),
             };
             continue;
           }
@@ -443,24 +434,11 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
 
       // For bun, use "bun x" (bunx) to run packages without installing
       // For node fallback, this won't work but we log a clear error
-      const isWindows = process.platform === 'win32';
-      const homeDir = isWindows ? (process.env.USERPROFILE || '') : (process.env.HOME || '');
-      const tempDir = isWindows ? (process.env.TEMP || process.env.TMP || '') : (process.env.TMPDIR || '/tmp');
-
       if (isBunRuntime(runtimePath)) {
         result[server.id] = {
           command: runtimePath,
           args: ['x', ...args],
-          env: {
-            ...process.env,
-            HOME: homeDir,
-            USERPROFILE: homeDir,
-            USER: process.env.USER || process.env.USERNAME || '',
-            TMPDIR: tempDir,
-            TEMP: tempDir,
-            TMP: tempDir,
-            ...(server.env || {}),
-          },
+          env: buildCrossPlatformEnv(server.env),
         };
       } else {
         // Node fallback - try npx but may fail if not installed
@@ -469,18 +447,11 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
         result[server.id] = {
           command: 'npx',
           args: argsWithY,
-          env: {
-            ...process.env,
-            HOME: homeDir,
-            USERPROFILE: homeDir,
-            USER: process.env.USER || process.env.USERNAME || '',
-            TMPDIR: tempDir,
-            TEMP: tempDir,
-            TMP: tempDir,
+          env: buildCrossPlatformEnv({
             npm_config_loglevel: 'error',
             npm_config_update_notifier: 'false',
-            ...(server.env || {}),
-          },
+            ...server.env,
+          }),
         };
       }
     } else if ((server.type === 'sse' || server.type === 'http') && server.url) {
@@ -891,8 +862,7 @@ export function resolveClaudeCodeCli(): string {
 export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.ProcessEnv {
   // Ensure essential paths are always present, even when launched from Finder
   // (Finder launches via launchd which doesn't inherit shell environment variables)
-  // Cross-platform: use USERPROFILE on Windows, HOME on macOS/Linux
-  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const { home } = getCrossPlatformEnv();
   const isDebug = process.env.DEBUG === '1' || process.env.NODE_ENV === 'development';
 
   // Cross-platform PATH separator

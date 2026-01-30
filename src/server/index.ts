@@ -79,6 +79,7 @@ import {
   resetSession,
 } from './agent-session';
 import { getPackageManagerPath } from './utils/runtime';
+import { getHomeDirOrNull } from './utils/platform';
 import { buildDirectoryTree, expandDirectory } from './dir-info';
 import {
   createSession,
@@ -142,7 +143,7 @@ function parseArgs(argv: string[]): { agentDir: string; initialPrompt?: string; 
  */
 function expandTilde(path: string): string {
   if (path.startsWith('~/') || path === '~') {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const homeDir = getHomeDirOrNull() || '';
     return path.replace(/^~/, homeDir);
   }
   return path;
@@ -168,7 +169,7 @@ async function ensureAgentDir(dir: string): Promise<string> {
 function isValidAgentDir(dir: string): { valid: boolean; reason?: string } {
   const expanded = expandTilde(dir);
   const resolved = resolve(expanded);
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const homeDir = getHomeDirOrNull() || '';
 
   // Must be an absolute path
   if (!resolved.startsWith('/') && !resolved.match(/^[A-Z]:\\/i)) {
@@ -1146,7 +1147,7 @@ async function main() {
           }
 
           // Security: Only allow paths under home directory or temp directories
-          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const homeDir = getHomeDirOrNull() || '';
           const resolvedPath = resolve(fullPath);
           // Normalize both paths for comparison (handles Windows paths)
           const normalizedResolved = resolvedPath.toLowerCase().replace(/\\/g, '/');
@@ -1688,7 +1689,7 @@ async function main() {
           const { existsSync, readFileSync } = await import('fs');
           const { join } = await import('path');
 
-          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const homeDir = getHomeDirOrNull() || '';
           const serverDir = join(homeDir, '.myagents', 'mcp', payload.serverId);
 
           // Extract package name from args
@@ -1739,7 +1740,7 @@ async function main() {
           const { join } = await import('path');
 
           // Determine MCP install directory (cross-platform)
-          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const homeDir = getHomeDirOrNull() || '';
           const mcpBaseDir = join(homeDir, '.myagents', 'mcp');
           const serverDir = join(mcpBaseDir, payload.serverId);
 
@@ -1906,7 +1907,7 @@ async function main() {
           // Start with empty array, builtin commands added at the end
           // Order: project commands -> user commands -> skills -> builtin (so custom can override builtin)
           const commands: SlashCommand[] = [];
-          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const homeDir = getHomeDirOrNull() || '';
 
           // ===== COMMANDS SCANNING =====
           // Helper function to scan commands from a directory
@@ -2104,7 +2105,7 @@ async function main() {
       };
 
       // Cross-platform home directory for user skills/commands
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const homeDir = getHomeDirOrNull() || '';
       const userSkillsBaseDir = join(homeDir, '.myagents', 'skills');
       const userCommandsBaseDir = join(homeDir, '.myagents', 'commands');
 
