@@ -1675,7 +1675,12 @@ async function main() {
       if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
         try {
           const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
-          const response = await fetch(QR_CODE_URL);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+          const response = await fetch(QR_CODE_URL, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
           if (!response.ok) {
             return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
           }
@@ -1688,9 +1693,10 @@ async function main() {
           });
         } catch (error) {
           console.error('[api/assets/qr-code] Error:', error);
+          const isTimeout = error instanceof Error && error.name === 'AbortError';
           return jsonResponse(
-            { success: false, error: error instanceof Error ? error.message : 'Fetch failed' },
-            500
+            { success: false, error: isTimeout ? 'Request timeout' : (error instanceof Error ? error.message : 'Fetch failed') },
+            isTimeout ? 504 : 500
           );
         }
       }

@@ -246,10 +246,13 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     // Fetch QR code when entering about section
     useEffect(() => {
         if (activeSection !== 'about') return;
-        // Reset and fetch fresh each time
+
+        let cancelled = false;
         setQrCodeDataUrl(null);
+
         apiGetJson<{ success: boolean; dataUrl?: string }>('/api/assets/qr-code')
             .then(result => {
+                if (cancelled) return;
                 if (result.success && result.dataUrl) {
                     setQrCodeDataUrl(result.dataUrl);
                 }
@@ -257,6 +260,10 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             .catch(() => {
                 // Silently fail - QR code section will remain hidden
             });
+
+        return () => {
+            cancelled = true;
+        };
     }, [activeSection]);
 
     // Manual update state (Developer section)
