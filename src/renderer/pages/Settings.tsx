@@ -240,6 +240,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }, []);
 
+    // QR code load status for user community section (only show when image loads successfully)
+    const [qrCodeLoaded, setQrCodeLoaded] = useState(false);
+
     // Manual update state (Developer section)
     type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'no-update' | 'error';
     const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
@@ -1211,6 +1214,29 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     </p>
                                 </div>
                             </div>
+
+                            {/* User Community QR Code - Only show when image loads successfully */}
+                            {qrCodeLoaded && (
+                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
+                                    <div className="flex flex-col items-center text-center">
+                                        <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
+                                        <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
+                                        <img
+                                            src="https://download.myagents.io/assets/feedback_qr_code.png"
+                                            alt="用户交流群二维码"
+                                            className="mt-4 h-36 w-36 rounded-lg"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                            {/* Hidden image to detect load status */}
+                            <img
+                                src="https://download.myagents.io/assets/feedback_qr_code.png"
+                                alt=""
+                                className="hidden"
+                                onLoad={() => setQrCodeLoaded(true)}
+                                onError={() => setQrCodeLoaded(false)}
+                            />
 
                             {/* Contact & Links */}
                             <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
