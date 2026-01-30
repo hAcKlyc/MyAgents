@@ -42,9 +42,15 @@ const JSON_EVENTS = new Set([
     'chat:logs',
     'chat:status',
     'chat:agent-error',
-    'chat:log', // Unified logger sends LogEntry objects
     'permission:request', // Permission prompt for tool usage
     'ask-user-question:request', // AskUserQuestion tool prompt
+]);
+
+// Event types that can be JSON or plain string
+// These are tried as JSON first, fallback to string if parsing fails
+// Used when backend sends both formats for the same event type
+const JSON_OR_STRING_EVENTS = new Set([
+    'chat:log', // agent-session sends strings, logger sends LogEntry objects
 ]);
 
 // Event types that should be passed as raw strings
@@ -58,7 +64,7 @@ const STRING_EVENTS = new Set([
 const NULL_EVENTS = new Set(['chat:message-complete', 'chat:message-stopped']);
 
 // All event types
-const ALL_EVENTS = [...JSON_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS];
+const ALL_EVENTS = [...JSON_EVENTS, ...JSON_OR_STRING_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS];
 
 export type SseEventHandler = (eventName: string, data: unknown) => void;
 export type SseConnectionStatusHandler = (status: 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
@@ -142,6 +148,18 @@ export class SseConnection {
             } catch (e) {
                 console.warn(`[SSE ${this.connectionId}] Failed to parse JSON for ${eventName}:`, e);
                 this.eventHandler(eventName, null);
+            }
+            return;
+        }
+
+        // JSON_OR_STRING_EVENTS: try JSON first, fallback to raw string
+        if (JSON_OR_STRING_EVENTS.has(eventName)) {
+            try {
+                const parsed = JSON.parse(data);
+                this.eventHandler(eventName, parsed);
+            } catch {
+                // Not valid JSON, pass as raw string (this is expected for legacy log format)
+                this.eventHandler(eventName, data);
             }
             return;
         }
