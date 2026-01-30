@@ -217,3 +217,96 @@ const providerEnv = currentProvider && currentProvider.type !== 'subscription'
 const switchingToSubscription = !providerEnv && currentProviderEnv;
 ```
 
+---
+
+## ⚠️ 关键陷阱：智谱 GLM-4.7 的 server_tool_use
+
+### 背景
+
+智谱 GLM-4.7 支持服务端工具调用（如 `webReader`、`analyze_image`），返回 `server_tool_use` 类型的内容块，与 Claude 的 `tool_use`（客户端工具）不同：
+
+| 类型 | 执行位置 | 示例工具 |
+|------|----------|----------|
+| `tool_use` | 客户端（本地 Sidecar） | MCP 服务器工具 |
+| `server_tool_use` | 服务端（API 提供商） | webReader, analyze_image |
+
+### 问题 1：input 是 JSON 字符串
+
+智谱返回的 `server_tool_use.input` 是 **JSON 字符串**，而非对象：
+
+```json
+{
+  "type": "server_tool_use",
+  "input": "{\"url\": \"https://example.com\", \"type\": \"markdown\"}"
+}
+```
+
+**解决方案**：
+
+```typescript
+let parsedInput: Record<string, unknown> = {};
+if (typeof serverToolBlock.input === 'string') {
+  try {
+    parsedInput = JSON.parse(serverToolBlock.input);
+  } catch {
+    parsedInput = { raw: serverToolBlock.input };
+  }
+} else {
+  parsedInput = serverToolBlock.input || {};
+}
+```
+
+### 问题 2：装饰性文本包裹
+
+智谱会在 `server_tool_use` 前后插入装饰性文本块，如果不过滤会显示为普通内容：
+
+```
+🌐 Z.ai Built-in Tool: mcp__web_reader__webReader
+**Input:**
+```json
+{"url": "https://example.com", "type": "markdown"}
+```
+Executing on server side...
+```
+
+以及结果包裹：
+
+```
+**Output:** webReader_result_summary:[{"title":"..."}]
+```
+
+**解决方案**：在后端 `agent-session.ts` 中过滤这类文本：
+
+```typescript
+// 检测并过滤装饰性工具文本
+function checkDecorativeToolText(text: string): { filtered: boolean; reason?: string } {
+  if (!text || text.length < 50 || text.length > 5000) {
+    return { filtered: false };
+  }
+  const trimmed = text.trim();
+
+  // Pattern 1: 智谱 tool invocation wrapper - requires ALL markers
+  const hasZaiToolMarker = trimmed.includes('Z.ai Built-in Tool:');
+  const hasInputMarker = trimmed.includes('**Input:**');
+  const hasJsonBlock = trimmed.includes('```json') || trimmed.includes('Executing on server');
+  if (hasZaiToolMarker && hasInputMarker && hasJsonBlock) {
+    return { filtered: true, reason: 'zhipu-tool-invocation-wrapper' };
+  }
+
+  // Pattern 2: 智谱 tool output wrapper - requires ALL markers
+  if (trimmed.startsWith('**Output:**') && trimmed.includes('_result_summary:')) {
+    const hasJsonContent = trimmed.includes('[{') || trimmed.includes('{"');
+    if (hasJsonContent) {
+      return { filtered: true, reason: 'zhipu-tool-output-wrapper' };
+    }
+  }
+
+  return { filtered: false };
+}
+```
+
+**注意事项**：
+- 使用**多条件匹配**，避免误伤正常内容
+- 添加长度限制（50-5000 字符），进一步降低误判风险
+- 记录过滤日志，便于调试
+

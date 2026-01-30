@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `build_windows.ps1` - 构建脚本
   - `publish_windows.ps1` - 发布脚本
 - 新增 `src/server/utils/platform.ts` 跨平台工具模块
+- **支持 `server_tool_use` 内容块类型**（第三方 API 如智谱 GLM-4.7 的服务端工具调用）
+- **设置页面添加用户交流群二维码**
+  - 位于「关于」页面，从 R2 动态加载
+  - 网络异常时自动隐藏
+  - 新增 `upload_qr_code.sh` 上传脚本
 
 ### Changed
 - `runtime.ts` 支持 Windows 路径检测 (`bun.exe`, `%USERPROFILE%\.bun`, etc.)
@@ -30,11 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复 UI 卡在 loading 状态（`chat:system-status` 事件未注册 + React 批量更新延迟）
 - 修复 `MultiEdit` 工具完成后工作区不刷新
 - 修复 MCP 服务器和命令系统的 Windows 跨平台路径问题
+- 修复智谱 GLM-4.7 `server_tool_use` 的输入解析（JSON 字符串 → 对象）
+- 过滤智谱 API 返回的装饰性工具文本（避免干扰正常内容显示）
 
 ### Technical
 - Windows 数据目录：`%APPDATA%\MyAgents\`
 - 添加 `buildCrossPlatformEnv()` 统一子进程环境变量构建
 - 使用 `flushSync` 强制同步关键 UI 状态更新
+- 装饰性文本过滤使用多条件匹配，避免误伤正常内容
 
 **详见**: [specs/prd/prd_0.1.6.md](./specs/prd/prd_0.1.6.md)
 
