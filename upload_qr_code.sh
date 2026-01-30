@@ -25,8 +25,8 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Configuration - uses download-myagents bucket (public assets bucket)
-R2_BUCKET="download-myagents"
+# Configuration - same bucket as publish_release.sh (download.myagents.io domain)
+R2_BUCKET="myagents-releases"
 TARGET_PATH="assets/feedback_qr_code.png"
 PUBLIC_URL="https://download.myagents.io/${TARGET_PATH}"
 
