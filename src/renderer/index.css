@@ -208,10 +208,9 @@ body::before {
 
 .glass-panel {
   border: 1px solid var(--line);
-  background: rgb(253 248 241 / 0.78);
+  background: var(--paper-elevated);
   box-shadow: var(--shadow-strong);
   border-radius: 28px;
-  backdrop-filter: blur(18px);
 }
 
 .soft-panel {

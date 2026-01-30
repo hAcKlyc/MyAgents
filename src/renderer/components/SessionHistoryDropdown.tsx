@@ -176,11 +176,11 @@ export default function SessionHistoryDropdown({
                                     </div>
                                     <div className="flex flex-shrink-0 items-center gap-1">
                                         <button
-                                            className="flex h-6 w-6 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[var(--paper-contrast)] group-hover:opacity-100"
+                                            className="flex h-6 w-6 items-center justify-center rounded text-[var(--ink-muted)] opacity-0 transition-all hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)] group-hover:opacity-100"
                                             onClick={(e) => handleShowStats(e, session)}
                                             title="查看统计"
                                         >
-                                            <BarChart2 className="h-3.5 w-3.5 text-[var(--ink-muted)]" />
+                                            <BarChart2 className="h-3.5 w-3.5" />
                                         </button>
                                         {!isCurrent && (
                                             <button

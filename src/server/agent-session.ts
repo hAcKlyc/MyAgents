@@ -2646,15 +2646,24 @@ async function startStreamingSession(): Promise<void> {
       } else if (sdkMessage.type === 'assistant') {
         const assistantMessage = sdkMessage.message;
         // Extract usage info for stats tracking
-        const usage = (assistantMessage as {
+        // Support both Anthropic format (input_tokens/output_tokens) and OpenAI format (prompt_tokens/completion_tokens)
+        const rawUsage = (assistantMessage as {
           usage?: {
             input_tokens?: number;
             output_tokens?: number;
+            prompt_tokens?: number;
+            completion_tokens?: number;
             cache_read_input_tokens?: number;
             cache_creation_input_tokens?: number;
           };
           model?: string;
         }).usage;
+        const usage = rawUsage ? {
+          input_tokens: rawUsage.input_tokens ?? rawUsage.prompt_tokens,
+          output_tokens: rawUsage.output_tokens ?? rawUsage.completion_tokens,
+          cache_read_input_tokens: rawUsage.cache_read_input_tokens,
+          cache_creation_input_tokens: rawUsage.cache_creation_input_tokens,
+        } : undefined;
         const model = (assistantMessage as { model?: string }).model;
 
         // Accumulate usage for this turn (only for top-level assistant messages)
@@ -2666,6 +2675,12 @@ async function startStreamingSession(): Promise<void> {
           if (model) {
             currentTurnUsage.model = model;
           }
+          if (isDebugMode) {
+            console.log(`[agent] Token usage accumulated: input=${usage.input_tokens}, output=${usage.output_tokens}, model=${model}`);
+          }
+        } else if (!sdkMessage.parent_tool_use_id && isDebugMode) {
+          // Debug: log when assistant message has no usage data
+          console.log(`[agent] Assistant message without usage data:`, JSON.stringify(assistantMessage).slice(0, 200));
         }
         if (sdkMessage.parent_tool_use_id && assistantMessage.content) {
           for (const block of assistantMessage.content) {
