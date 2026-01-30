@@ -544,6 +544,8 @@ async function main() {
           model?: string;
           inputTokens: number;
           outputTokens: number;
+          cacheReadTokens?: number;
+          cacheCreationTokens?: number;
           toolCount?: number;
           durationMs?: number;
         }> = [];
@@ -598,6 +600,8 @@ async function main() {
               model: msg.usage.model,
               inputTokens: msg.usage.inputTokens ?? 0,
               outputTokens: msg.usage.outputTokens ?? 0,
+              cacheReadTokens: msg.usage.cacheReadTokens,
+              cacheCreationTokens: msg.usage.cacheCreationTokens,
               toolCount: msg.toolCount,
               durationMs: msg.durationMs,
             });

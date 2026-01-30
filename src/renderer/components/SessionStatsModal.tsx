@@ -135,13 +135,13 @@ export default function SessionStatsModal({
                                 <div className="rounded-lg border border-[var(--line)] bg-[var(--paper-contrast)] p-4">
                                     <div className="flex items-center gap-2 text-[var(--ink-muted)]">
                                         <Clock className="h-4 w-4" />
-                                        <span className="text-xs">缓存</span>
+                                        <span className="text-xs">输入缓存</span>
                                     </div>
                                     <div className="mt-2 text-2xl font-semibold text-[var(--ink)]">
-                                        {formatTokens(stats.summary.totalCacheReadTokens ?? 0)}
+                                        {formatTokens((stats.summary.totalCacheReadTokens ?? 0) + (stats.summary.totalCacheCreationTokens ?? 0))}
                                     </div>
                                     <div className="mt-1 text-xs text-[var(--ink-muted)]">
-                                        读取缓存 tokens
+                                        输入缓存 tokens
                                     </div>
                                 </div>
                             </div>
@@ -166,7 +166,7 @@ export default function SessionStatsModal({
                                                         输出
                                                     </th>
                                                     <th className="px-4 py-2 text-right text-xs font-medium text-[var(--ink-muted)]">
-                                                        缓存读取
+                                                        输入缓存
                                                     </th>
                                                     <th className="px-4 py-2 text-right text-xs font-medium text-[var(--ink-muted)]">
                                                         次数
@@ -187,7 +187,7 @@ export default function SessionStatsModal({
                                                                 {formatTokens(data.outputTokens)}
                                                             </td>
                                                             <td className="px-4 py-2 text-right text-[var(--ink-muted)]">
-                                                                {formatTokens(data.cacheReadTokens)}
+                                                                {formatTokens((data.cacheReadTokens ?? 0) + (data.cacheCreationTokens ?? 0))}
                                                             </td>
                                                             <td className="px-4 py-2 text-right text-[var(--ink-muted)]">
                                                                 {data.count}
@@ -222,6 +222,9 @@ export default function SessionStatsModal({
                                                             输出
                                                         </th>
                                                         <th className="px-4 py-2 text-right text-xs font-medium text-[var(--ink-muted)]">
+                                                            输入缓存
+                                                        </th>
+                                                        <th className="px-4 py-2 text-right text-xs font-medium text-[var(--ink-muted)]">
                                                             <Wrench className="inline h-3 w-3" />
                                                         </th>
                                                         <th className="px-4 py-2 text-right text-xs font-medium text-[var(--ink-muted)]">
@@ -243,6 +246,9 @@ export default function SessionStatsModal({
                                                             </td>
                                                             <td className="px-4 py-2 text-right text-[var(--ink-muted)]">
                                                                 {formatTokens(detail.outputTokens)}
+                                                            </td>
+                                                            <td className="px-4 py-2 text-right text-[var(--ink-muted)]">
+                                                                {formatTokens((detail.cacheReadTokens ?? 0) + (detail.cacheCreationTokens ?? 0))}
                                                             </td>
                                                             <td className="px-4 py-2 text-right text-[var(--ink-muted)]">
                                                                 {detail.toolCount ?? '-'}

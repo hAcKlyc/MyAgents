@@ -57,6 +57,8 @@ export interface SessionDetailedStats {
         model?: string;
         inputTokens: number;
         outputTokens: number;
+        cacheReadTokens?: number;
+        cacheCreationTokens?: number;
         toolCount?: number;
         durationMs?: number;
     }>;
