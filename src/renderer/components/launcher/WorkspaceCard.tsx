@@ -80,17 +80,17 @@ export default function WorkspaceCard({
     }, [isMenuOpen, onMenuToggle]);
 
     return (
-        <div className="rounded-xl border border-[var(--line)]/70 bg-[var(--paper-strong)] p-4">
+        <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 shadow-[0_2px_8px_-4px_rgba(28,22,18,0.05)] transition-all hover:border-[var(--line-strong)] hover:shadow-[0_4px_12px_-4px_rgba(28,22,18,0.08)]">
             {/* Header: folder icon + name + more menu */}
-            <div className="mb-4 flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-cool)]/8">
-                    <FolderOpen className="h-4 w-4 text-[var(--accent-cool)]/80" />
+            <div className="mb-3.5 flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-warm)]/8">
+                    <FolderOpen className="h-4 w-4 text-[var(--accent-warm)]/70" />
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5">
                     <h3 className="truncate text-[13px] font-medium text-[var(--ink)]">
                         {project.name}
                     </h3>
-                    <p className="mt-0.5 truncate text-[12px] text-[var(--ink-muted)]">
+                    <p className="mt-0.5 truncate text-[11px] text-[var(--ink-muted)]/70">
                         {project.path}
                     </p>
                 </div>

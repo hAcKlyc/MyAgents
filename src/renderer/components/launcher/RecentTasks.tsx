@@ -24,7 +24,7 @@ const RETRY_DELAY_MS = 2000;
 // Section header component (defined outside to avoid recreation on each render)
 function SectionHeader() {
     return (
-        <h3 className="mb-4 text-[13px] font-medium uppercase tracking-widest text-[var(--ink-muted)]">
+        <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]/60">
             最近任务
         </h3>
     );
@@ -110,7 +110,7 @@ export default function RecentTasks({ projects, onOpenTask }: RecentTasksProps) 
         return (
             <div className="mb-8">
                 <SectionHeader />
-                <div className="py-4 text-[13px] text-[var(--ink-muted)]">加载中...</div>
+                <div className="py-4 text-[13px] text-[var(--ink-muted)]/70">加载中...</div>
             </div>
         );
     }
@@ -119,12 +119,12 @@ export default function RecentTasks({ projects, onOpenTask }: RecentTasksProps) 
         return (
             <div className="mb-8">
                 <SectionHeader />
-                <div className="rounded-xl border border-dashed border-[var(--line)]/60 px-4 py-5 text-center">
+                <div className="rounded-xl border border-dashed border-[var(--line)] px-4 py-5 text-center">
                     <AlertCircle className="mx-auto mb-2 h-4 w-4 text-amber-500/70" />
                     <p className="mb-2 text-[13px] text-[var(--ink-muted)]">{error}</p>
                     <button
                         onClick={handleManualRetry}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink-muted)]"
+                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)]"
                     >
                         <RefreshCw className="h-3.5 w-3.5" />
                         重试
@@ -138,9 +138,9 @@ export default function RecentTasks({ projects, onOpenTask }: RecentTasksProps) 
         return (
             <div className="mb-8">
                 <SectionHeader />
-                <div className="rounded-xl border border-dashed border-[var(--line)]/60 px-4 py-5 text-center">
-                    <MessageSquare className="mx-auto mb-2 h-4 w-4 text-[var(--ink-muted)]/60" />
-                    <p className="text-[13px] text-[var(--ink-muted)]">暂无最近任务</p>
+                <div className="rounded-xl border border-dashed border-[var(--line)] px-4 py-5 text-center">
+                    <MessageSquare className="mx-auto mb-2 h-4 w-4 text-[var(--ink-muted)]/50" />
+                    <p className="text-[13px] text-[var(--ink-muted)]/70">暂无最近任务</p>
                 </div>
             </div>
         );
@@ -158,21 +158,21 @@ export default function RecentTasks({ projects, onOpenTask }: RecentTasksProps) 
                         <button
                             key={session.id}
                             onClick={() => onOpenTask(session, project)}
-                            className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--paper-contrast)]"
+                            className="group flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all hover:bg-[var(--paper-inset)]"
                         >
                             {/* Time - fixed width to prevent layout shift */}
-                            <div className="flex w-14 shrink-0 items-center gap-1 text-[11px] text-[var(--ink-muted)]/60">
+                            <div className="flex w-14 shrink-0 items-center gap-1 text-[11px] text-[var(--ink-muted)]/50">
                                 <Clock className="h-2.5 w-2.5" />
                                 <span>{formatTime(session.lastActiveAt)}</span>
                             </div>
 
                             {/* Session title */}
-                            <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ink-muted)] transition-colors group-hover:text-[var(--ink)]">
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ink-secondary)] transition-colors group-hover:text-[var(--ink)]">
                                 {session.title}
                             </span>
 
                             {/* Workspace info */}
-                            <div className="flex shrink-0 items-center gap-1.5 text-[12px] text-[var(--ink-muted)]/50">
+                            <div className="flex shrink-0 items-center gap-1.5 text-[11px] text-[var(--ink-muted)]/45">
                                 <FolderOpen className="h-3 w-3" />
                                 <span className="max-w-[80px] truncate">{project.name}</span>
                             </div>

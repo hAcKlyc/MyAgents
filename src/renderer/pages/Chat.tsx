@@ -432,7 +432,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
             <button
               type="button"
               onClick={handleNewSession}
-              className="flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
               title="新建对话"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -444,7 +444,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
                 type="button"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setShowHistory((prev) => !prev)}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[13px] font-medium transition-colors ${showHistory
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${showHistory
                   ? 'bg-[var(--paper-contrast)] text-[var(--ink)]'
                   : 'text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]'
                   }`}

@@ -1005,7 +1005,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           <div className="border-b border-[var(--line)] px-4 py-3">
             {/* First row: folder icon, name, git branch, and stats */}
             <div className="flex items-center gap-2">
-              <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--accent-cool)]" />
+              <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--accent-warm)]" />
               <span className="truncate text-sm font-semibold text-[var(--ink)]">{folderName}</span>
               {gitBranch && (
                 <span className="flex items-center gap-1 rounded bg-[var(--paper-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--ink-muted)]">
@@ -1176,7 +1176,9 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                       // Already selected as single item - no state change needed
                       lastClickedNodeRef.current = data;
                     } else {
-                      // Normal click: delay selection to allow double-click detection
+                      // Normal click: immediately clear old selection, delay new selection
+                      // This prevents visual lag when clicking between items
+                      setSelectedNodes([]);
                       clickTimerRef.current = setTimeout(() => {
                         setSelectedNodes([data]);
                         lastClickedNodeRef.current = data;
@@ -1220,11 +1222,9 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                       </span>
                       <Icon
                         className={`h-3.5 w-3.5 flex-shrink-0 ${
-                          isMyAgentsFiles
-                            ? 'text-[var(--accent-warm)]'
-                            : isDir
-                              ? 'text-[var(--accent-cool)]'
-                              : 'text-[var(--accent)]'
+                          isDir
+                            ? 'text-[var(--accent-warm)]/70'
+                            : 'text-[var(--accent-warm)]'
                           }`}
                       />
                       <span className="min-w-0 flex-1 truncate font-medium select-none">{data.name}</span>

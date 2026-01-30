@@ -1194,7 +1194,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             <div className="rounded-2xl border border-[var(--line)] bg-gradient-to-br from-[var(--paper-contrast)] to-[var(--paper)] p-8">
                                 <div className="flex flex-col items-center text-center">
                                     <h1
-                                        className="text-[3rem] font-extralight tracking-tight text-[var(--ink)] cursor-default select-none"
+                                        className="text-[3rem] font-light tracking-tight text-[var(--ink)] cursor-default select-none"
                                         onClick={handleLogoTap}
                                     >
                                         MyAgents
@@ -1536,7 +1536,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 {allProviders.map((provider) => (
                                     <div
                                         key={provider.id}
-                                        className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5"
+                                        className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5 transition-all hover:shadow-sm"
                                     >
                                         {/* Provider header */}
                                         <div className="mb-4 flex items-start justify-between">
@@ -1669,7 +1669,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
-                                                        <Globe className="h-4 w-4 text-[var(--ink-muted)]" />
+                                                        <Globe className="h-4 w-4 text-[var(--accent-warm)]/70" />
                                                         <h3 className="font-medium text-[var(--ink)]">{server.name}</h3>
                                                         {server.isBuiltin && (
                                                             <span className="rounded bg-[var(--info-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--info)]">

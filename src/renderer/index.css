@@ -304,13 +304,34 @@ body::before {
   box-shadow: none;
 }
 
-/* Global button cursor - all buttons should show pointer on hover */
+/* Global button cursor and interaction feedback */
 button {
   cursor: pointer;
+  /* Always include transform in transition for smooth active feedback */
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Subtle press feedback - makes interactions feel responsive */
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 button:disabled {
   cursor: not-allowed;
+}
+
+/* Clickable row press feedback (file tree, list items, etc.) */
+[data-tree-row] {
+  transition-property: color, background-color, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 100ms;
+}
+
+[data-tree-row]:active {
+  transform: scale(0.995);
+  background-color: var(--paper-inset) !important;
 }
 
 /* Custom scrollbar styling - cross-platform */
