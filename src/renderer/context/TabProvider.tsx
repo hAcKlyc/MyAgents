@@ -27,7 +27,14 @@ import { getTabServerUrl, proxyFetch, stopTabSidecar, isTauri } from '@/api/taur
 import type { PermissionMode } from '@/config/types';
 
 // File-modifying tools that should trigger workspace refresh
-const FILE_MODIFYING_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
+// These tools can create, modify, or delete files in the workspace
+const FILE_MODIFYING_TOOLS = new Set([
+    'Bash',         // Shell commands can modify files
+    'Edit',         // Single file edit
+    'MultiEdit',    // Multiple file edits
+    'Write',        // Create/overwrite files
+    'NotebookEdit', // Jupyter notebook edits
+]);
 
 /**
  * Helper to update subagent calls in a parent tool
@@ -643,8 +650,11 @@ export default function TabProvider({
                     }
 
                     // Mark for workspace refresh when file-modifying tool completes
-                    if (eventName === 'chat:tool-result-complete' && block.tool.name && FILE_MODIFYING_TOOLS.has(block.tool.name)) {
-                        shouldTriggerRefresh = true;
+                    if (eventName === 'chat:tool-result-complete' && block.tool.name) {
+                        if (FILE_MODIFYING_TOOLS.has(block.tool.name)) {
+                            shouldTriggerRefresh = true;
+                            console.log(`[TabProvider] File-modifying tool completed: ${block.tool.name}, triggering workspace refresh`);
+                        }
                     }
 
                     return [...prev.slice(0, -1), { ...last, content: updated }];

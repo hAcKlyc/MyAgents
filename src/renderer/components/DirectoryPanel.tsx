@@ -275,9 +275,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     apiGet<DirectoryTree>('/agent/dir')
       .then((data) => {
         setDirectoryInfo(data);
+        console.log(`[DirectoryPanel] Directory tree refreshed: ${data.tree?.children?.length || 0} items`);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load directory info');
+        console.error('[DirectoryPanel] Failed to refresh:', err);
       });
   }, [apiGet]);
 
@@ -359,6 +361,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   // Respond to external refresh trigger (e.g., when file-modifying tools complete)
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
+      console.log(`[DirectoryPanel] Refresh triggered by file-modifying tool (trigger=${refreshTrigger})`);
       refresh();
     }
   }, [refreshTrigger, refresh]);
