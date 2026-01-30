@@ -27,6 +27,11 @@ import { REACT_LOG_EVENT } from '@/utils/frontendLogger';
 import { getTabServerUrl, proxyFetch, stopTabSidecar, isTauri } from '@/api/tauriClient';
 import type { PermissionMode } from '@/config/types';
 
+// Chunk throttling constants for streaming performance optimization
+// Defined outside component to avoid recreation on each render
+const CHUNK_FLUSH_INTERVAL_MS = 50;  // 50ms is imperceptible to human eye
+const CHUNK_FLUSH_SIZE_THRESHOLD = 200;  // Flush immediately if accumulated > 200 chars
+
 // File-modifying tools that should trigger workspace refresh
 // These tools can create, modify, or delete files in the workspace
 const FILE_MODIFYING_TOOLS = new Set([
@@ -209,10 +214,7 @@ export default function TabProvider({
         isImage: boolean;
     }[] | null>(null);
 
-    // Chunk throttling for streaming performance optimization
-    // Accumulate chunks and flush at intervals to reduce React re-renders
-    const CHUNK_FLUSH_INTERVAL_MS = 50;  // 50ms is imperceptible to human eye
-    const CHUNK_FLUSH_SIZE_THRESHOLD = 200;  // Flush immediately if accumulated > 200 chars
+    // Chunk throttling refs for streaming performance optimization
     const pendingChunksRef = useRef<string>('');
     const chunkFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
