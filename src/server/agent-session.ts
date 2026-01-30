@@ -1095,7 +1095,32 @@ function ensureContentArray(message: MessageWire): ContentBlock[] {
   return message.content;
 }
 
+/**
+ * Check if text is a decorative wrapper from third-party APIs (e.g., 智谱 GLM-4.7)
+ * These APIs wrap server_tool_use with decorative text blocks that shouldn't be displayed
+ */
+function isDecorativeToolText(text: string): boolean {
+  const trimmed = text.trim();
+  // 智谱 GLM-4.7 adds decorative text before server_tool_use
+  // e.g., "**🌐 Z.ai Built-in Tool: webReader**\n\n**Input:**\n```json\n{...}\n```\n\n*Executing on server...*"
+  if (trimmed.includes('🌐 Z.ai Built-in Tool:') || trimmed.includes('Z.ai Built-in Tool:')) {
+    return true;
+  }
+  // 智谱 GLM-4.7 adds decorative text for tool output
+  // e.g., "**Output:**\n**webReader_result_summary:** [...]"
+  if (trimmed.startsWith('**Output:**') && trimmed.includes('_result_summary:')) {
+    return true;
+  }
+  return false;
+}
+
 function appendTextChunk(chunk: string): void {
+  // Filter out decorative text from third-party APIs (e.g., 智谱 GLM-4.7)
+  if (isDecorativeToolText(chunk)) {
+    console.log('[agent] Filtered decorative tool text from third-party API');
+    return;
+  }
+
   const message = ensureAssistantMessage();
   if (typeof message.content === 'string') {
     message.content += chunk;
@@ -2308,8 +2333,13 @@ async function startStreamingSession(): Promise<void> {
               }
               appendToolResultDelta(sdkMessage.parent_tool_use_id, streamEvent.delta.text);
             } else {
-              broadcast('chat:message-chunk', streamEvent.delta.text);
-              appendTextChunk(streamEvent.delta.text);
+              // Filter out decorative text from third-party APIs before broadcasting
+              if (!isDecorativeToolText(streamEvent.delta.text)) {
+                broadcast('chat:message-chunk', streamEvent.delta.text);
+                appendTextChunk(streamEvent.delta.text);
+              } else {
+                console.log('[agent] Filtered decorative tool text from stream');
+              }
             }
           } else if (streamEvent.delta.type === 'thinking_delta') {
             broadcast('chat:thinking-chunk', {
@@ -2368,13 +2398,27 @@ async function startStreamingSession(): Promise<void> {
               type: 'server_tool_use';
               id: string;
               name: string;
-              input: Record<string, unknown>;
+              input: Record<string, unknown> | string; // Some APIs return input as JSON string
             };
             streamIndexToToolId.set(streamEvent.index, serverToolBlock.id);
+
+            // Parse input if it's a JSON string (智谱 GLM-4.7 returns input as string)
+            let parsedInput: Record<string, unknown> = {};
+            if (typeof serverToolBlock.input === 'string') {
+              try {
+                parsedInput = JSON.parse(serverToolBlock.input);
+              } catch {
+                // If parsing fails, wrap the string as-is
+                parsedInput = { raw: serverToolBlock.input };
+              }
+            } else {
+              parsedInput = serverToolBlock.input || {};
+            }
+
             const toolPayload = {
               id: serverToolBlock.id,
               name: serverToolBlock.name,
-              input: serverToolBlock.input || {},
+              input: parsedInput,
               streamIndex: streamEvent.index
             };
             // Server tools are always top-level (no subagent concept)
