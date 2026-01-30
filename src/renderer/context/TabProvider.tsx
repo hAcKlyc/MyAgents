@@ -38,6 +38,12 @@ const FILE_MODIFYING_TOOLS = new Set([
 ]);
 
 /**
+ * Check if a content block is a tool block (either local tool_use or server_tool_use)
+ * Used to unify handling of both tool types in event handlers
+ */
+const isToolBlock = (b: ContentBlock): boolean => b.type === 'tool_use' || b.type === 'server_tool_use';
+
+/**
  * Helper to update subagent calls in a parent tool
  * Reduces code duplication across subagent event handlers
  */
@@ -585,6 +591,8 @@ export default function TabProvider({
             }
 
             case 'chat:tool-input-delta': {
+                // Note: Only handle tool_use, NOT server_tool_use
+                // server_tool_use comes with complete input, no streaming delta needed
                 const { toolId, delta } = data as { index: number; toolId: string; delta: string };
                 setMessages(prev => {
                     const last = prev[prev.length - 1];
@@ -631,7 +639,6 @@ export default function TabProvider({
                     }
 
                     // Check tool block (both tool_use and server_tool_use)
-                    const isToolBlock = (b: ContentBlock) => b.type === 'tool_use' || b.type === 'server_tool_use';
                     const toolIdx = toolId
                         ? contentArray.findIndex(b => isToolBlock(b) && b.tool?.id === toolId)
                         : contentArray.findIndex(b => isToolBlock(b) && b.tool?.streamIndex === index);
@@ -666,7 +673,6 @@ export default function TabProvider({
                     if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
                     const contentArray = last.content;
                     // Find tool block (both tool_use and server_tool_use)
-                    const isToolBlock = (b: ContentBlock) => b.type === 'tool_use' || b.type === 'server_tool_use';
                     const idx = contentArray.findIndex(b => isToolBlock(b) && b.tool?.id === payload.toolUseId);
                     if (idx === -1) return prev;
                     const block = contentArray[idx];
