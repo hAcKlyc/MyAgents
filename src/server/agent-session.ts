@@ -17,6 +17,11 @@ import { initLogger, appendLog, getLogLines as getLogLinesFromLogger, cleanupOld
 // Module-level debug mode check (avoids repeated environment variable access)
 const isDebugMode = process.env.DEBUG === '1' || process.env.NODE_ENV === 'development';
 
+// Decorative text filter thresholds (for third-party API wrappers like 智谱 GLM-4.7)
+// Decorative blocks are typically 100-2000 chars; we use wider range for safety margin
+const DECORATIVE_TEXT_MIN_LENGTH = 50;
+const DECORATIVE_TEXT_MAX_LENGTH = 5000;
+
 // ===== Product Directory Configuration =====
 // Our product (MyAgents) uses ~/.myagents/ for user configuration
 // This is SEPARATE from Claude CLI's ~/.claude/ directory
@@ -1106,8 +1111,7 @@ function ensureContentArray(message: MessageWire): ContentBlock[] {
  */
 function checkDecorativeToolText(text: string): { filtered: boolean; reason?: string } {
   // Safety: never filter very short or very long text
-  // Decorative blocks are typically 100-2000 chars
-  if (!text || text.length < 50 || text.length > 5000) {
+  if (!text || text.length < DECORATIVE_TEXT_MIN_LENGTH || text.length > DECORATIVE_TEXT_MAX_LENGTH) {
     return { filtered: false };
   }
 
@@ -1140,14 +1144,6 @@ function checkDecorativeToolText(text: string): { filtered: boolean; reason?: st
   }
 
   return { filtered: false };
-}
-
-/**
- * Legacy wrapper for backward compatibility
- * @deprecated Use checkDecorativeToolText for more detailed info
- */
-function isDecorativeToolText(text: string): boolean {
-  return checkDecorativeToolText(text).filtered;
 }
 
 function appendTextChunk(chunk: string): void {
