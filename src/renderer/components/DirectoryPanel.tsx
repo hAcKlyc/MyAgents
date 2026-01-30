@@ -1,6 +1,5 @@
 import {
   AtSign,
-  ChevronDown,
   ChevronRight,
   ChevronUp,
   Eye,
@@ -20,11 +19,12 @@ import {
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Tree } from 'react-arborist';
 
-import { apiFetch } from '@/api/apiFetch';
 import { useTabState } from '@/context/TabContext';
+import { getTabServerUrl, proxyFetch, isTauri } from '@/api/tauriClient';
 import type { DirectoryTreeNode, DirectoryTree, ExpandDirectoryResult } from '../../shared/dir-types';
 
 import { useImagePreview } from '@/context/ImagePreviewContext';
+import { useToast } from '@/components/Toast';
 import { type Provider } from '@/config/types';
 import { isDebugMode } from '@/utils/debug';
 
@@ -98,7 +98,12 @@ const IMAGE_EXTENSIONS = new Set([
 
 // Delay for single-click selection to allow double-click detection
 // Without this delay, React re-render from setSelectedNodes breaks onDoubleClick
-const SINGLE_CLICK_DELAY_MS = 200;
+const SINGLE_CLICK_DELAY_MS = 250;
+
+// Double-click detection threshold (ms) - must be greater than SINGLE_CLICK_DELAY_MS
+// We use custom double-click detection because React's onDoubleClick is unreliable
+// when state updates cause re-renders between clicks
+const DOUBLE_CLICK_THRESHOLD_MS = 400;
 
 function getFileExtension(name: string): string {
   const parts = name.split('.');
@@ -120,75 +125,17 @@ function isImageFile(name: string): boolean {
 
 function getFolderName(path: string): string {
   if (!path) return 'Workspace';
-  const trimmed = path.replace(/\/+$/, '');
-  const parts = trimmed.split('/');
+  // Normalize path separators (support both / and \) and trim trailing slashes
+  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const parts = normalized.split('/');
   return parts[parts.length - 1] || 'Workspace';
-}
-
-// Inline ProviderDropdown for DirectoryPanel header
-function ProviderDropdown({
-  provider,
-  providers,
-  onSelect
-}: {
-  provider: Provider;
-  providers: Provider[];
-  onSelect: (id: string) => void;
-}) {
-  const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    const close = () => setShow(false);
-    if (show) {
-      document.addEventListener('click', close);
-      return () => document.removeEventListener('click', close);
-    }
-  }, [show]);
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShow(!show);
-        }}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]"
-        title="切换模型供应商"
-      >
-        <span>{provider.name}</span>
-        <ChevronDown className="h-2.5 w-2.5" />
-      </button>
-      {show && (
-        <div
-          className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] py-1 shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {providers.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => {
-                onSelect(p.id);
-                setShow(false);
-              }}
-              className={`w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--paper-contrast)] ${p.id === provider.id ? 'text-[var(--accent)]' : 'text-[var(--ink)]'
-                }`}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(function DirectoryPanel({
   agentDir,
-  provider,
-  providers = [],
-  onProviderChange,
+  provider: _provider,
+  providers: _providers = [],
+  onProviderChange: _onProviderChange,
   onCollapse,
   onOpenConfig,
   refreshTrigger,
@@ -201,6 +148,8 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   const [selectedNodes, setSelectedNodes] = useState<DirectoryTreeNode[]>([]);
   const lastClickedNodeRef = useRef<DirectoryTreeNode | null>(null); // Anchor for shift-select
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Delay single-click to allow double-click
+  // Custom double-click detection (more reliable than React's onDoubleClick during state updates)
+  const lastClickRef = useRef<{ path: string; time: number } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -230,8 +179,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   // Image preview context
   const { openPreview } = useImagePreview();
 
-  // Get Tab-scoped API functions
-  const { apiGet, apiPost } = useTabState();
+  // Toast for notifications
+  const toast = useToast();
+
+  // Get Tab-scoped API functions and tabId
+  const { apiGet, apiPost, tabId } = useTabState();
 
   // Narrow mode collapse state (for responsive layout)
   const [isNarrowMode, setIsNarrowMode] = useState(false);
@@ -274,9 +226,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     apiGet<DirectoryTree>('/agent/dir')
       .then((data) => {
         setDirectoryInfo(data);
+        console.log(`[DirectoryPanel] Directory tree refreshed: ${data.tree?.children?.length || 0} items`);
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load directory info');
+        console.error('[DirectoryPanel] Failed to refresh:', err);
       });
   }, [apiGet]);
 
@@ -353,11 +307,12 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     apiGet<{ branch: string | null }>('/api/git/branch')
       .then((data) => setGitBranch(data.branch))
       .catch(() => setGitBranch(null));
-  }, [agentDir, apiGet]);
+  }, [agentDir, apiGet, refresh]);
 
   // Respond to external refresh trigger (e.g., when file-modifying tools complete)
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
+      console.log(`[DirectoryPanel] Refresh triggered by file-modifying tool (trigger=${refreshTrigger})`);
       refresh();
     }
   }, [refreshTrigger, refresh]);
@@ -942,7 +897,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
     } else {
       return [
         {
-          label: '快速预览',
+          label: '预览',
           icon: <Eye className="h-4 w-4" />,
           disabled: !canPreview,
           onClick: () => {
@@ -1050,7 +1005,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
           <div className="border-b border-[var(--line)] px-4 py-3">
             {/* First row: folder icon, name, git branch, and stats */}
             <div className="flex items-center gap-2">
-              <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--accent-cool)]" />
+              <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--accent-warm)]" />
               <span className="truncate text-sm font-semibold text-[var(--ink)]">{folderName}</span>
               {gitBranch && (
                 <span className="flex items-center gap-1 rounded bg-[var(--paper-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--ink-muted)]">
@@ -1132,14 +1087,71 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                   const isDropTarget = isDir && dropTargetPath === data.path && isExternalDrop;
                   const isSelected = isNodeSelected(data);
 
-                  // Unified selection handler with multi-select support
+                  // Helper to execute file preview (extracted for reuse)
+                  const executeFilePreview = async () => {
+                    // Select the file immediately
+                    setSelectedNodes([data]);
+                    lastClickedNodeRef.current = data;
+
+                    // Preview based on file type
+                    if (isImageFile(data.name)) {
+                      try {
+                        // Use Tab-scoped fetch to ensure correct Sidecar in multi-Tab scenarios
+                        const endpoint = `/agent/download?path=${encodeURIComponent(data.path)}`;
+                        let response: Response;
+                        if (isTauri()) {
+                          const baseUrl = await getTabServerUrl(tabId);
+                          response = await proxyFetch(`${baseUrl}${endpoint}`);
+                        } else {
+                          response = await fetch(endpoint);
+                        }
+                        const blob = await response.blob();
+                        const dataUrl = await new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(reader.result as string);
+                          reader.readAsDataURL(blob);
+                        });
+                        openPreview(dataUrl, data.name);
+                      } catch (err) {
+                        console.error('[DirectoryPanel] Failed to load image:', err);
+                        toast.error('图片加载失败');
+                      }
+                    } else if (isPreviewable(data.name)) {
+                      void handlePreview(data);
+                    } else {
+                      // File type not supported for preview
+                      toast.info('暂不支持预览此文件类型，可右键进入文件夹打开');
+                    }
+                  };
+
+                  // Unified click handler with custom double-click detection
+                  // We implement our own double-click detection because React's onDoubleClick
+                  // is unreliable when state updates cause re-renders between clicks
                   const handleRowClick = (e: React.MouseEvent) => {
-                    // Clear any pending click timer first
+                    const now = Date.now();
+                    const lastClick = lastClickRef.current;
+
+                    // Check if this is a double-click (same path, within threshold)
+                    const isDoubleClick = lastClick &&
+                      lastClick.path === data.path &&
+                      (now - lastClick.time) < DOUBLE_CLICK_THRESHOLD_MS;
+
+                    // Update last click info for next click detection
+                    lastClickRef.current = { path: data.path, time: now };
+
+                    // Clear any pending single-click timer
                     if (clickTimerRef.current) {
                       clearTimeout(clickTimerRef.current);
                       clickTimerRef.current = null;
                     }
 
+                    // Handle double-click on files (not directories)
+                    if (isDoubleClick && !isDir) {
+                      void executeFilePreview();
+                      return;
+                    }
+
+                    // Handle single-click (selection logic)
                     const isMeta = e.metaKey || e.ctrlKey;
                     const isShift = e.shiftKey;
 
@@ -1161,10 +1173,12 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                         setSelectedNodes(flattenedNodes.slice(from, to + 1));
                       }
                     } else if (isSelected && selectedNodes.length === 1) {
-                      // Already selected as single item - no state change needed, skip delay
+                      // Already selected as single item - no state change needed
                       lastClickedNodeRef.current = data;
                     } else {
-                      // Normal click: delay selection to allow double-click detection
+                      // Normal click: immediately clear old selection, delay new selection
+                      // This prevents visual lag when clicking between items
+                      setSelectedNodes([]);
                       clickTimerRef.current = setTimeout(() => {
                         setSelectedNodes([data]);
                         lastClickedNodeRef.current = data;
@@ -1181,41 +1195,6 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                     }
                   };
 
-                  // Double-click handler for file preview
-                  const handleRowDoubleClick = async () => {
-                    // Cancel any pending single-click selection
-                    if (clickTimerRef.current) {
-                      clearTimeout(clickTimerRef.current);
-                      clickTimerRef.current = null;
-                    }
-
-                    if (isDir) return;
-
-                    // Select the file immediately
-                    if (!isSelected) {
-                      setSelectedNodes([data]);
-                      lastClickedNodeRef.current = data;
-                    }
-
-                    // Preview based on file type
-                    if (isImageFile(data.name)) {
-                      try {
-                        const response = await apiFetch(`/agent/download?path=${encodeURIComponent(data.path)}&agentDir=${encodeURIComponent(agentDir)}`);
-                        const blob = await response.blob();
-                        const dataUrl = await new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = () => resolve(reader.result as string);
-                          reader.readAsDataURL(blob);
-                        });
-                        openPreview(dataUrl, data.name);
-                      } catch (err) {
-                        console.error('[DirectoryPanel] Failed to load image:', err);
-                      }
-                    } else if (isPreviewable(data.name)) {
-                      void handlePreview(data);
-                    }
-                  };
-
                   return (
                     <div
                       style={style}
@@ -1228,7 +1207,6 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                             : 'text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]'
                         }`}
                       onClick={handleRowClick}
-                      onDoubleClick={handleRowDoubleClick}
                       onContextMenu={(e) => handleContextMenu(e, data)}
                       onDragEnter={(e) => handleRowDragEnter(e, data.path, isDir)}
                       onDragLeave={handleRowDragLeave}
@@ -1244,11 +1222,9 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                       </span>
                       <Icon
                         className={`h-3.5 w-3.5 flex-shrink-0 ${
-                          isMyAgentsFiles
-                            ? 'text-[var(--accent-warm)]'
-                            : isDir
-                              ? 'text-[var(--accent-cool)]'
-                              : 'text-[var(--accent)]'
+                          isDir
+                            ? 'text-[var(--accent-warm)]/70'
+                            : 'text-[var(--accent-warm)]'
                           }`}
                       />
                       <span className="min-w-0 flex-1 truncate font-medium select-none">{data.name}</span>

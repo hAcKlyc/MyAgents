@@ -240,6 +240,32 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }, []);
 
+    // QR code data URL for user community section (fetched via backend to bypass CSP)
+    const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+
+    // Fetch QR code when entering about section
+    useEffect(() => {
+        if (activeSection !== 'about') return;
+
+        let cancelled = false;
+        setQrCodeDataUrl(null);
+
+        apiGetJson<{ success: boolean; dataUrl?: string }>('/api/assets/qr-code')
+            .then(result => {
+                if (cancelled) return;
+                if (result.success && result.dataUrl) {
+                    setQrCodeDataUrl(result.dataUrl);
+                }
+            })
+            .catch(() => {
+                // Silently fail - QR code section will remain hidden
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeSection]);
+
     // Manual update state (Developer section)
     type UpdateStatus = 'idle' | 'checking' | 'downloading' | 'ready' | 'no-update' | 'error';
     const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
@@ -417,21 +443,25 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         name: string;
         type: McpServerType;
         command: string;
-        args: string;
+        args: string[];
+        newArg: string;
         url: string;
         env: Record<string, string>;
         newEnvKey: string;
-        newEnvValue: string;
+        headers: Record<string, string>;
+        newHeaderKey: string;
     }>({
         id: '',
         name: '',
         type: 'stdio',
         command: '',
-        args: '',
+        args: [],
+        newArg: '',
         url: '',
         env: {},
         newEnvKey: '',
-        newEnvValue: '',
+        headers: {},
+        newHeaderKey: '',
     });
 
     // Load MCP config on mount
@@ -577,20 +607,21 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             // stdio fields
             ...(mcpForm.type === 'stdio' && {
                 command: mcpForm.command,
-                args: mcpForm.args ? mcpForm.args.split(' ').filter(Boolean) : undefined,
+                args: mcpForm.args.length > 0 ? mcpForm.args : undefined,
                 env: Object.keys(mcpForm.env).length > 0 ? mcpForm.env : undefined,
             }),
             // http/sse fields
             ...((mcpForm.type === 'http' || mcpForm.type === 'sse') && {
                 url: mcpForm.url,
+                headers: Object.keys(mcpForm.headers).length > 0 ? mcpForm.headers : undefined,
             }),
         };
         try {
             await addCustomMcpServer(newServer);
             setMcpServersState(prev => [...prev, newServer]);
             setMcpForm({
-                id: '', name: '', type: 'stdio', command: '', args: '', url: '',
-                env: {}, newEnvKey: '', newEnvValue: ''
+                id: '', name: '', type: 'stdio', command: '', args: [], newArg: '', url: '',
+                env: {}, newEnvKey: '', headers: {}, newHeaderKey: ''
             });
             setShowMcpForm(false);
 
@@ -1183,7 +1214,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                             <div className="rounded-2xl border border-[var(--line)] bg-gradient-to-br from-[var(--paper-contrast)] to-[var(--paper)] p-8">
                                 <div className="flex flex-col items-center text-center">
                                     <h1
-                                        className="text-[3rem] font-extralight tracking-tight text-[var(--ink)] cursor-default select-none"
+                                        className="text-[3rem] font-light tracking-tight text-[var(--ink)] cursor-default select-none"
                                         onClick={handleLogoTap}
                                     >
                                         MyAgents
@@ -1211,6 +1242,21 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                     </p>
                                 </div>
                             </div>
+
+                            {/* User Community QR Code - Hidden until image loads successfully */}
+                            {qrCodeDataUrl && (
+                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
+                                    <div className="flex flex-col items-center text-center">
+                                        <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
+                                        <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
+                                        <img
+                                            src={qrCodeDataUrl}
+                                            alt="用户交流群二维码"
+                                            className="mt-4 h-36 w-36 rounded-lg"
+                                        />
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Contact & Links */}
                             <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
@@ -1510,7 +1556,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 {allProviders.map((provider) => (
                                     <div
                                         key={provider.id}
-                                        className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5"
+                                        className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5 transition-all hover:shadow-sm"
                                     >
                                         {/* Provider header */}
                                         <div className="mb-4 flex items-start justify-between">
@@ -1643,7 +1689,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
                                                     <div className="flex items-center gap-2">
-                                                        <Globe className="h-4 w-4 text-[var(--ink-muted)]" />
+                                                        <Globe className="h-4 w-4 text-[var(--accent-warm)]/70" />
                                                         <h3 className="font-medium text-[var(--ink)]">{server.name}</h3>
                                                         {server.isBuiltin && (
                                                             <span className="rounded bg-[var(--info-bg)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--info)]">
@@ -1742,8 +1788,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         onClick={() => {
                                             setShowMcpForm(false);
                                             setMcpForm({
-                                                id: '', name: '', type: 'stdio', command: '', args: '', url: '',
-                                                env: {}, newEnvKey: '', newEnvValue: ''
+                                                id: '', name: '', type: 'stdio', command: '', args: [], newArg: '', url: '',
+                                                env: {}, newEnvKey: '', headers: {}, newHeaderKey: ''
                                             });
                                         }}
                                         className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-contrast)]"
@@ -1785,7 +1831,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         {/* ID - Common */}
                                         <div>
                                             <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                                ID <span className="text-[var(--error)]">*</span>
+                                                <span className="font-mono">ID</span> <span className="text-[var(--error)]">*</span>
                                             </label>
                                             <input
                                                 type="text"
@@ -1800,7 +1846,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         {/* Name - Common */}
                                         <div>
                                             <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                                名称 <span className="text-[var(--error)]">*</span>
+                                                名称 <span className="font-mono text-[var(--ink-muted)]">name</span> <span className="text-[var(--error)]">*</span>
                                             </label>
                                             <input
                                                 type="text"
@@ -1816,7 +1862,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                             <>
                                                 <div>
                                                     <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                                        命令 <span className="text-[var(--error)]">*</span>
+                                                        命令 <span className="font-mono text-[var(--ink-muted)]">command</span> <span className="text-[var(--error)]">*</span>
                                                     </label>
                                                     <input
                                                         type="text"
@@ -1828,22 +1874,79 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                     <p className="mt-1 text-xs text-[var(--ink-muted)]">启动服务器的命令</p>
                                                 </div>
 
-                                                <div>
-                                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">参数</label>
-                                                    <input
-                                                        type="text"
-                                                        value={mcpForm.args}
-                                                        onChange={(e) => setMcpForm((p) => ({ ...p, args: e.target.value }))}
-                                                        placeholder="例如: @playwright/mcp@latest --headless"
-                                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
-                                                    />
-                                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">多个参数用空格分隔</p>
+                                                {/* Args - array input */}
+                                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-4">
+                                                    <label className="mb-3 block text-sm font-medium text-[var(--ink)]">
+                                                        参数 <span className="font-mono text-[var(--ink-muted)]">args</span>
+                                                    </label>
+
+                                                    {/* Existing args */}
+                                                    {mcpForm.args.length > 0 && (
+                                                        <div className="mb-3 flex flex-wrap gap-2">
+                                                            {mcpForm.args.map((arg, index) => (
+                                                                <div key={index} className="flex items-center gap-1 rounded-lg bg-[var(--paper-elevated)] px-2.5 py-1.5 text-xs font-mono text-[var(--ink)]">
+                                                                    <span>{arg}</span>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setMcpForm((p) => ({
+                                                                                ...p,
+                                                                                args: p.args.filter((_, i) => i !== index)
+                                                                            }));
+                                                                        }}
+                                                                        className="ml-1 text-[var(--ink-muted)] hover:text-[var(--error)]"
+                                                                    >
+                                                                        <X className="h-3 w-3" />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Add new arg */}
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={mcpForm.newArg}
+                                                            onChange={(e) => setMcpForm((p) => ({ ...p, newArg: e.target.value }))}
+                                                            placeholder="例如: @playwright/mcp@latest"
+                                                            className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    if (mcpForm.newArg.trim()) {
+                                                                        setMcpForm((p) => ({
+                                                                            ...p,
+                                                                            args: [...p.args, p.newArg.trim()],
+                                                                            newArg: ''
+                                                                        }));
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                if (mcpForm.newArg.trim()) {
+                                                                    setMcpForm((p) => ({
+                                                                        ...p,
+                                                                        args: [...p.args, p.newArg.trim()],
+                                                                        newArg: ''
+                                                                    }));
+                                                                }
+                                                            }}
+                                                            disabled={!mcpForm.newArg.trim()}
+                                                            className="flex items-center gap-1.5 rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:opacity-50"
+                                                        >
+                                                            <Plus className="h-4 w-4" />
+                                                            添加
+                                                        </button>
+                                                    </div>
+                                                    <p className="mt-2 text-xs text-[var(--ink-muted)]">一次填写一个参数，按 Enter 或点击添加</p>
                                                 </div>
 
                                                 {/* Environment Variables */}
                                                 <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-4">
                                                     <label className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--ink)]">
-                                                        <span>🔐</span> 环境变量（可选）
+                                                        <span>🔐</span> 环境变量 <span className="font-mono text-[var(--ink-muted)]">env</span>（可选）
                                                     </label>
 
                                                     {/* Existing env vars */}
@@ -1882,12 +1985,15 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                                             placeholder="变量名（如 API_KEY）"
                                                             className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
                                                             onKeyDown={(e) => {
-                                                                if (e.key === 'Enter' && mcpForm.newEnvKey) {
-                                                                    setMcpForm((p) => ({
-                                                                        ...p,
-                                                                        env: { ...p.env, [p.newEnvKey]: '' },
-                                                                        newEnvKey: ''
-                                                                    }));
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    if (mcpForm.newEnvKey) {
+                                                                        setMcpForm((p) => ({
+                                                                            ...p,
+                                                                            env: { ...p.env, [p.newEnvKey]: '' },
+                                                                            newEnvKey: ''
+                                                                        }));
+                                                                    }
                                                                 }
                                                             }}
                                                         />
@@ -1914,21 +2020,97 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
 
                                         {/* HTTP/SSE Fields */}
                                         {(mcpForm.type === 'http' || mcpForm.type === 'sse') && (
-                                            <div>
-                                                <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                                                    服务器 URL <span className="text-[var(--error)]">*</span>
-                                                </label>
-                                                <input
-                                                    type="url"
-                                                    value={mcpForm.url}
-                                                    onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
-                                                    placeholder={mcpForm.type === 'sse' ? "例如: https://example.com/sse" : "例如: https://example.com/mcp"}
-                                                    className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
-                                                />
-                                                <p className="mt-1 text-xs text-[var(--ink-muted)]">
-                                                    {mcpForm.type === 'sse' ? 'SSE 事件流端点地址' : 'MCP 服务器的 HTTP 端点地址'}
-                                                </p>
-                                            </div>
+                                            <>
+                                                <div>
+                                                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
+                                                        服务器 <span className="font-mono text-[var(--ink-muted)]">url</span> <span className="text-[var(--error)]">*</span>
+                                                    </label>
+                                                    <input
+                                                        type="url"
+                                                        value={mcpForm.url}
+                                                        onChange={(e) => setMcpForm((p) => ({ ...p, url: e.target.value }))}
+                                                        placeholder={mcpForm.type === 'sse' ? "例如: https://example.com/sse" : "例如: https://example.com/mcp"}
+                                                        className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                                    />
+                                                    <p className="mt-1 text-xs text-[var(--ink-muted)]">
+                                                        {mcpForm.type === 'sse' ? 'SSE 事件流端点地址' : 'MCP 服务器的 HTTP 端点地址'}
+                                                    </p>
+                                                </div>
+
+                                                {/* HTTP Headers */}
+                                                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-4">
+                                                    <label className="mb-3 flex items-center gap-2 text-sm font-medium text-[var(--ink)]">
+                                                        <span>🔑</span> 请求头 <span className="font-mono text-[var(--ink-muted)]">headers</span>（可选）
+                                                    </label>
+
+                                                    {/* Existing headers */}
+                                                    {Object.entries(mcpForm.headers).map(([key, value]) => (
+                                                        <div key={key} className="mb-2 flex items-center gap-2">
+                                                            <span className="min-w-[100px] text-xs font-mono text-[var(--success)]">{key}</span>
+                                                            <input
+                                                                type="text"
+                                                                value={value}
+                                                                onChange={(e) => setMcpForm((p) => ({
+                                                                    ...p,
+                                                                    headers: { ...p.headers, [key]: e.target.value }
+                                                                }))}
+                                                                placeholder="值"
+                                                                className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-sm transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                                            />
+                                                            <button
+                                                                onClick={() => {
+                                                                    const newHeaders = { ...mcpForm.headers };
+                                                                    delete newHeaders[key];
+                                                                    setMcpForm((p) => ({ ...p, headers: newHeaders }));
+                                                                }}
+                                                                className="rounded-lg p-2 text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]"
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+
+                                                    {/* Add new header */}
+                                                    <div className="flex items-center gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={mcpForm.newHeaderKey}
+                                                            onChange={(e) => setMcpForm((p) => ({ ...p, newHeaderKey: e.target.value }))}
+                                                            placeholder="头名称（如 Authorization）"
+                                                            className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-sm font-mono transition-colors focus:border-[var(--ink)] focus:outline-none"
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    if (mcpForm.newHeaderKey) {
+                                                                        setMcpForm((p) => ({
+                                                                            ...p,
+                                                                            headers: { ...p.headers, [p.newHeaderKey]: '' },
+                                                                            newHeaderKey: ''
+                                                                        }));
+                                                                    }
+                                                                }
+                                                            }}
+                                                        />
+                                                        <button
+                                                            onClick={() => {
+                                                                if (mcpForm.newHeaderKey) {
+                                                                    setMcpForm((p) => ({
+                                                                        ...p,
+                                                                        headers: { ...p.headers, [p.newHeaderKey]: '' },
+                                                                        newHeaderKey: ''
+                                                                    }));
+                                                                }
+                                                            }}
+                                                            disabled={!mcpForm.newHeaderKey}
+                                                            className="flex items-center gap-1.5 rounded-lg border border-[var(--ink)] px-3 py-2 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)] disabled:opacity-50"
+                                                        >
+                                                            <Plus className="h-4 w-4" />
+                                                            添加
+                                                        </button>
+                                                    </div>
+                                                    <p className="mt-2 text-xs text-[var(--ink-muted)]">用于认证的 HTTP 请求头，如 Bearer Token</p>
+                                                </div>
+                                            </>
                                         )}
                                     </div>
                                 </div>
@@ -1939,8 +2121,8 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                         onClick={() => {
                                             setShowMcpForm(false);
                                             setMcpForm({
-                                                id: '', name: '', type: 'stdio', command: '', args: '', url: '',
-                                                env: {}, newEnvKey: '', newEnvValue: ''
+                                                id: '', name: '', type: 'stdio', command: '', args: [], newArg: '', url: '',
+                                                env: {}, newEnvKey: '', headers: {}, newHeaderKey: ''
                                             });
                                         }}
                                         className="flex-1 rounded-lg border border-[var(--line)] px-4 py-2.5 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--paper-contrast)]"

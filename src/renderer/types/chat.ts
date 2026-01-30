@@ -87,7 +87,7 @@ export interface ToolUseSimple extends ToolUse {
 }
 
 export interface ContentBlock {
-  type: 'text' | 'tool_use' | 'thinking';
+  type: 'text' | 'tool_use' | 'thinking' | 'server_tool_use';
   text?: string;
   tool?: ToolUseSimple;
   thinking?: string;

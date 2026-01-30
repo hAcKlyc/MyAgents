@@ -35,9 +35,11 @@ export function generateSessionTitle(firstMessage: string): string {
     return trimmed.slice(0, maxLength) + '...';
 }
 
-// Get folder name from path
+// Get folder name from path (supports both / and \ separators)
 export function getFolderName(path: string): string {
-    const parts = path.split('/').filter(Boolean);
+    // Normalize path separators and split
+    const normalized = path.replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
     return parts[parts.length - 1] || path;
 }
 

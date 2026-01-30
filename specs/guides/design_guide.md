@@ -1,7 +1,7 @@
 # MyAgents Design Guide
 
-> **Version**: 1.3.0
-> **Last Updated**: 2026-01-22
+> **Version**: 1.4.0
+> **Last Updated**: 2026-01-30
 > **Status**: Active
 > **Platform**: macOS / Windows Desktop Client
 
@@ -89,6 +89,34 @@ MyAgents 是一款 AI Agent 桌面客户端，采用**温暖纸张质感**的设
 | `--button-secondary-bg` | `#efe6d9` | 次按钮背景 |
 | `--button-secondary-bg-hover` | `#e4ddd0` | 次按钮 hover |
 | `--button-secondary-text` | `#1c1612` | 次按钮文字 |
+
+### 1.4 透明度层级 (Opacity Levels)
+
+在需要更细腻的层次区分时，可对颜色 token 使用透明度修饰符：
+
+| 透明度 | 用途 |
+|--------|------|
+| `/70` | 次要描述文字、弱化路径 |
+| `/60` | Section 标题、辅助标签 |
+| `/50` | 时间戳、极弱化文字 |
+| `/45` | 附属信息、最弱化提示 |
+
+**使用原则**：
+- 优先使用 `--ink-muted`、`--ink-subtle` 等语义化 token
+- 透明度修饰符用于同一 token 内需要更细层次的场景
+- 常用组合：`text-[var(--ink-muted)]/60`
+
+**示例**：
+```jsx
+// Section 标题 - 使用 /60 透明度
+<h3 className="text-[var(--ink-muted)]/60">工作区</h3>
+
+// 路径文字 - 使用 /70 透明度
+<p className="text-[var(--ink-muted)]/70">/Users/project/path</p>
+
+// 时间戳 - 使用 /50 透明度
+<span className="text-[var(--ink-muted)]/50">20:53</span>
+```
 
 ---
 
@@ -345,6 +373,30 @@ Item 选中: 文字 var(--accent-warm)
 滑块: 20px 白色圆形
 ```
 
+### 6.7 Section 标题 (Section Headers)
+
+用于 Launcher、Settings 等页面的区块标题，统一样式确保页面一致性。
+
+```
+字号: 11px (--text-xs)
+字重: 600 (font-semibold)
+样式: uppercase (大写)
+字间距: 0.12em
+颜色: var(--ink-muted) / 60%
+下边距: 12px (mb-3)
+```
+
+**Tailwind 类名**：
+```jsx
+<h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]/60">
+  工作区
+</h3>
+```
+
+**使用场景**：
+- Launcher 页面：「最近任务」「快捷功能」「工作区」
+- Settings 页面：各设置区块标题
+
 ---
 
 ## 7. 布局规范
@@ -405,6 +457,11 @@ transition: background var(--duration-fast),
             border-color var(--duration-fast),
             transform var(--duration-fast);
 
+/* 按钮点击反馈 (全局生效) */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 /* 下拉菜单出现 */
 transition: opacity var(--duration-normal),
             transform var(--duration-normal);
@@ -414,6 +471,19 @@ transform-origin: top;
 transition: opacity var(--duration-slow),
             transform var(--duration-slow);
 ```
+
+### 8.4 交互反馈原则
+
+所有可交互元素都应有明确的状态反馈：
+
+| 状态 | 反馈方式 |
+|------|----------|
+| Hover | 背景色变化、文字颜色加深 |
+| Active/Press | 轻微缩放 `scale(0.97)` |
+| Focus | 边框高亮或轮廓 |
+| Disabled | 降低不透明度、禁用光标 |
+
+**按钮点击动效已全局配置**，无需在各组件中单独添加。
 
 ---
 
@@ -441,8 +511,7 @@ transition: opacity var(--duration-slow),
 
 - 默认: `var(--ink-muted)`
 - Hover: `var(--ink)`
-- 文件夹: `var(--accent-cool)`
-- 文件: `var(--accent-warm)`
+- 文件夹/文件: `var(--accent-warm)` (统一暖色调，保持页面视觉一致性)
 - 成功: `var(--success)`
 - 错误: `var(--error)`
 
@@ -863,10 +932,143 @@ body {
 
 ---
 
+## 15. Launcher 页面规范
+
+Launcher 是应用的启动页，采用左右分栏布局，需要兼顾品牌展示和功能入口。
+
+### 15.1 布局结构
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    Tauri Title Bar                      │
+├──────────────────────────┬─────────────────────────────┤
+│                          │  最近任务                    │
+│                          │  ────────────────────────── │
+│        MyAgents          │  快捷功能                    │
+│  Your Universal AI       │  [模型] [技能] [工具]       │
+│       Assistant          │  ────────────────────────── │
+│                          │  工作区                      │
+│        (60%)             │  [项目卡片...]    (40%)     │
+└──────────────────────────┴─────────────────────────────┘
+```
+
+**分栏比例**：左侧 60%（品牌区） / 右侧 40%（功能区，最小宽度 320px）
+
+### 15.2 品牌区域
+
+```
+标题 "MyAgents":
+  - 字号: 4.5rem (桌面) / 3.5rem (移动)
+  - 字重: 200 (font-light，保持品牌独特感)
+  - 渐变: linear-gradient(145deg, var(--ink), var(--ink-muted))
+
+英文标语 "Your Universal AI Assistant":
+  - 字号: 17px (桌面) / 15px (移动)
+  - 字重: 300 (font-light)
+  - 字间距: 0.06em
+  - 颜色: var(--ink-secondary)
+
+中文标语 "让每个人都有一个智能助手":
+  - 字号: 14px (桌面) / 13px (移动)
+  - 字重: 400 (font-normal)
+  - 字间距: 0.08em
+  - 颜色: var(--ink-muted) / 70%
+  - 与英文标语间距: 10px (mt-2.5)
+```
+
+### 15.3 功能区域
+
+**区域内边距**：24px (px-6, pt-6, pb-6)
+
+**Section 间距**：
+| Section | 下边距 |
+|---------|--------|
+| 最近任务 | 32px (mb-8) |
+| 快捷功能 | 24px (mb-6) |
+| 工作区标题 | 16px (py-4) |
+| 工作区卡片间距 | 16px (space-y-4) |
+
+### 15.4 快捷功能卡片
+
+```
+布局: flex, gap-2.5
+单个卡片:
+  - 背景: var(--paper-elevated) / 60%
+  - 边框: 1px solid var(--line)
+  - 圆角: var(--radius-xl) / 12px
+  - 内边距: py-3.5 px-3
+  - 阴影: 0 2px 8px -4px rgba(28,22,18,0.06)
+
+Hover 状态:
+  - 边框: var(--line-strong)
+  - 阴影: 0 4px 12px -4px rgba(28,22,18,0.1)
+  - 图标背景: var(--accent-warm) / 12%
+  - 图标颜色: var(--accent-warm)
+
+图标容器:
+  - 尺寸: 32px (h-8 w-8)
+  - 背景: var(--paper-inset)
+  - 圆角: var(--radius-lg)
+  - 图标尺寸: 16px (h-4 w-4)
+```
+
+### 15.5 工作区卡片
+
+```
+背景: var(--paper-elevated)
+边框: 1px solid var(--line)
+圆角: var(--radius-xl) / 12px
+内边距: 16px (p-4)
+阴影: 0 2px 8px -4px rgba(28,22,18,0.05)
+
+Hover 状态:
+  - 边框: var(--line-strong)
+  - 阴影: 0 4px 12px -4px rgba(28,22,18,0.08)
+
+文件夹图标:
+  - 容器: 36px (h-9 w-9), 圆角 var(--radius-lg)
+  - 背景: var(--accent-warm) / 8%
+  - 图标: 16px, var(--accent-warm) / 70%
+
+项目名称: 13px, font-medium, var(--ink)
+项目路径: 11px, var(--ink-muted) / 70%
+
+启动按钮:
+  - 样式: Primary Button, rounded-full
+  - 尺寸: py-2 px-4
+```
+
+### 15.6 最近任务列表
+
+```
+列表项:
+  - 内边距: py-2 px-3
+  - 圆角: var(--radius-lg)
+  - Hover 背景: var(--paper-inset)
+
+时间:
+  - 字号: 11px
+  - 颜色: var(--ink-muted) / 50%
+  - 固定宽度: 56px (w-14)
+
+任务标题:
+  - 字号: 13px
+  - 颜色: var(--ink-secondary)
+  - Hover: var(--ink)
+
+工作区名称:
+  - 字号: 11px
+  - 颜色: var(--ink-muted) / 45%
+  - 最大宽度: 80px (truncate)
+```
+
+---
+
 ## 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| 1.4.0 | 2026-01-30 | 新增 Launcher 页面规范、Section 标题规范、透明度层级规范；统一文件夹图标为暖色调 |
 | 1.3.0 | 2026-01-22 | 按钮尺寸规范：工具栏按钮 13px + h-3.5 图标，主按钮 14px |
 | 1.2.0 | 2026-01-22 | 字号体系重构：以 16px 为正文基准，H1-H6 标题 22/20/18/16px |
 | 1.1.0 | 2026-01-22 | 新增 AI 内容规范、跨平台规范、字体 fallback |

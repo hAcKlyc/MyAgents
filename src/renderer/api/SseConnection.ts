@@ -27,6 +27,7 @@ const JSON_EVENTS = new Set([
     'chat:thinking-start',
     'chat:thinking-chunk',
     'chat:tool-use-start',
+    'chat:server-tool-use-start', // Server-side tool use (e.g., 智谱 GLM-4.7's webReader)
     'chat:tool-input-delta',
     'chat:content-block-stop',
     'chat:tool-result-start',
@@ -38,12 +39,19 @@ const JSON_EVENTS = new Set([
     'chat:subagent-tool-result-delta',
     'chat:subagent-tool-result-complete',
     'chat:system-init',
+    'chat:system-status', // SDK system status (e.g., 'compacting')
     'chat:logs',
     'chat:status',
     'chat:agent-error',
-    'chat:log', // Unified logger sends LogEntry objects
     'permission:request', // Permission prompt for tool usage
     'ask-user-question:request', // AskUserQuestion tool prompt
+]);
+
+// Event types that can be JSON or plain string
+// These are tried as JSON first, fallback to string if parsing fails
+// Used when backend sends both formats for the same event type
+const JSON_OR_STRING_EVENTS = new Set([
+    'chat:log', // agent-session sends strings, logger sends LogEntry objects
 ]);
 
 // Event types that should be passed as raw strings
@@ -57,7 +65,7 @@ const STRING_EVENTS = new Set([
 const NULL_EVENTS = new Set(['chat:message-complete', 'chat:message-stopped']);
 
 // All event types
-const ALL_EVENTS = [...JSON_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS];
+const ALL_EVENTS = [...JSON_EVENTS, ...JSON_OR_STRING_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS];
 
 export type SseEventHandler = (eventName: string, data: unknown) => void;
 export type SseConnectionStatusHandler = (status: 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
@@ -122,7 +130,10 @@ export class SseConnection {
      * Handle SSE event - parse and emit to handler
      */
     private handleSseEvent(eventName: string, data: string): void {
-        if (!this.eventHandler) return;
+        if (!this.eventHandler) {
+            console.warn(`[SSE ${this.connectionId}] Event received but no handler: ${eventName}`);
+            return;
+        }
 
         // Handle null-payload events (message-complete, message-stopped)
         if (NULL_EVENTS.has(eventName)) {
@@ -135,15 +146,32 @@ export class SseConnection {
             try {
                 const parsed = JSON.parse(data);
                 this.eventHandler(eventName, parsed);
-            } catch {
+            } catch (e) {
+                console.warn(`[SSE ${this.connectionId}] Failed to parse JSON for ${eventName}:`, e);
                 this.eventHandler(eventName, null);
+            }
+            return;
+        }
+
+        // JSON_OR_STRING_EVENTS: try JSON first, fallback to raw string
+        if (JSON_OR_STRING_EVENTS.has(eventName)) {
+            try {
+                const parsed = JSON.parse(data);
+                this.eventHandler(eventName, parsed);
+            } catch {
+                // Not valid JSON, pass as raw string (this is expected for legacy log format)
+                this.eventHandler(eventName, data);
             }
             return;
         }
 
         if (STRING_EVENTS.has(eventName)) {
             this.eventHandler(eventName, data);
+            return;
         }
+
+        // Unrecognized event - log warning to help identify missing event registrations
+        console.warn(`[SSE ${this.connectionId}] Unrecognized event dropped: ${eventName}`);
     }
 
     /**

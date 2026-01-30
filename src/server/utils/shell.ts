@@ -2,16 +2,33 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { readdirSync, existsSync } from 'fs';
 
+const isWindows = process.platform === 'win32';
+const PATH_SEPARATOR = isWindows ? ';' : ':';
+
 /**
- * Common binary paths for macOS to look for if shell detection fails
+ * Common binary paths for the current platform
  */
 function getFallbackPaths(): string[] {
+    if (isWindows) {
+        const userProfile = process.env.USERPROFILE || '';
+        const localAppData = process.env.LOCALAPPDATA || '';
+        const programFiles = process.env.PROGRAMFILES || '';
+
+        return [
+            userProfile ? join(userProfile, '.bun', 'bin') : '',
+            localAppData ? join(localAppData, 'bun', 'bin') : '',
+            programFiles ? join(programFiles, 'nodejs') : '',
+            userProfile ? join(userProfile, 'AppData', 'Roaming', 'npm') : '',
+        ].filter(Boolean);
+    }
+
+    // macOS/Linux paths
     const paths = [
         '/opt/homebrew/bin',
         '/usr/local/bin',
         process.env.HOME ? `${process.env.HOME}/.bun/bin` : '',
-        process.env.HOME ? `${process.env.HOME}/.npm-global/bin` : '', // npm global without nvm
-        process.env.HOME ? `${process.env.HOME}/Library/pnpm` : '', // pnpm
+        process.env.HOME ? `${process.env.HOME}/.npm-global/bin` : '',
+        process.env.HOME ? `${process.env.HOME}/Library/pnpm` : '',
     ];
 
     // Attempt to resolve NVM path manually if exists
@@ -19,13 +36,9 @@ function getFallbackPaths(): string[] {
         const nvmDir = join(process.env.HOME, '.nvm', 'versions', 'node');
         if (existsSync(nvmDir)) {
             try {
-                // Find the latest version directory
                 const versions = readdirSync(nvmDir)
                     .filter(v => v.startsWith('v'))
-                    .sort((a, b) => {
-                        // Simple sort by version desc (string compare works for v20 vs v19, but v20 vs v9 needs numeric)
-                        return b.localeCompare(a, undefined, { numeric: true });
-                    });
+                    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 
                 if (versions.length > 0) {
                     const nvmBin = join(nvmDir, versions[0], 'bin');
@@ -50,11 +63,18 @@ let cachedPath: string | null = null;
 export function getShellPath(): string {
     if (cachedPath) return cachedPath;
 
-    // Always calculate fallback/common paths
-    const fallback = getFallbackPaths().join(':');
+    const fallback = getFallbackPaths().join(PATH_SEPARATOR);
 
+    // On Windows, just use existing PATH with fallback paths prepended
+    if (isWindows) {
+        const existing = process.env.PATH || '';
+        cachedPath = existing ? `${fallback}${PATH_SEPARATOR}${existing}` : fallback;
+        console.log('[shell] Windows PATH configured');
+        return cachedPath;
+    }
+
+    // macOS/Linux: Try to detect shell PATH
     try {
-        // execute shell with login flag (-l) and command (-c) to print PATH
         const shell = process.env.SHELL || '/bin/zsh';
         const detectedPath = execSync(`${shell} -l -c 'echo $PATH'`, {
             encoding: 'utf-8',
@@ -63,10 +83,8 @@ export function getShellPath(): string {
         }).trim();
 
         if (detectedPath && detectedPath.length > 10) {
-            console.log('[shell] Detected user PATH via zsh');
-            // CRITICAL FIX: Merge fallback into detected path to ensure npx is found 
-            // even if zsh profile is incomplete or non-interactive
-            cachedPath = `${fallback}:${detectedPath}`;
+            console.log('[shell] Detected user PATH via shell');
+            cachedPath = `${fallback}${PATH_SEPARATOR}${detectedPath}`;
             console.log('[shell] Final Merged PATH:', cachedPath);
             return cachedPath;
         }
@@ -74,12 +92,10 @@ export function getShellPath(): string {
         console.warn('[shell] Failed to detect shell PATH via spawn:', error);
     }
 
-    // 2. Fallback configuration
+    // Fallback
     console.log('[shell] Using fallback PATH construction ONLY');
     const existing = process.env.PATH || '';
-
-    // Put additional paths FIRST
-    cachedPath = existing ? `${fallback}:${existing}` : fallback;
+    cachedPath = existing ? `${fallback}${PATH_SEPARATOR}${existing}` : fallback;
     console.log('[shell] Fallback PATH:', cachedPath);
     return cachedPath!;
 }

@@ -489,7 +489,8 @@ const SimpleChatInput = forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(
     const otherPaths: string[] = [];
 
     for (const path of paths) {
-      const filename = path.split('/').pop() || path;
+      // Support both / and \ path separators
+      const filename = path.split(/[\\/]/).pop() || path;
       if (isImageFile(filename)) {
         imagePaths.push(path);
       } else {

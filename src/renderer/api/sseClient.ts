@@ -11,6 +11,7 @@ const JSON_EVENTS = new Set([
   'chat:thinking-start',
   'chat:thinking-chunk',
   'chat:tool-use-start',
+  'chat:server-tool-use-start', // Server-side tool use (e.g., 智谱 GLM-4.7's webReader)
   'chat:tool-input-delta',
   'chat:content-block-stop',
   'chat:tool-result-start',

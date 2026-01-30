@@ -56,12 +56,15 @@
   /* 中文: macOS 苹方 → Windows 微软雅黑 */
   --font-chinese: 'PingFang SC', 'Microsoft YaHei',
                   'Hiragino Sans GB', sans-serif;
-  /* 等宽: 跨平台 */
-  --font-mono: 'SF Mono', 'Cascadia Code', 'Consolas',
+  /* 等宽(纯): 代码编辑器、语法高亮 */
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas',
                'Monaco', 'Fira Code', monospace;
+  /* 等宽+中文: 代码中包含中文注释时使用 */
+  --font-mono-chinese: var(--font-mono), var(--font-chinese);
   /* 组合使用 */
   --font-body: var(--font-sans), var(--font-chinese);
   --font-display: var(--font-sans), var(--font-chinese);
+  --font-code: var(--font-mono-chinese);  /* 统一代码字体入口 */
 
   /* ========== Typography: Size ========== */
   /* 基于 16px 正文的字号体系 */
@@ -205,10 +208,9 @@ body::before {
 
 .glass-panel {
   border: 1px solid var(--line);
-  background: rgb(253 248 241 / 0.78);
+  background: var(--paper-elevated);
   box-shadow: var(--shadow-strong);
   border-radius: 28px;
-  backdrop-filter: blur(18px);
 }
 
 .soft-panel {
@@ -301,13 +303,34 @@ body::before {
   box-shadow: none;
 }
 
-/* Global button cursor - all buttons should show pointer on hover */
+/* Global button cursor and interaction feedback */
 button {
   cursor: pointer;
+  /* Always include transform in transition for smooth active feedback */
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* Subtle press feedback - makes interactions feel responsive */
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 button:disabled {
   cursor: not-allowed;
+}
+
+/* Clickable row press feedback (file tree, list items, etc.) */
+[data-tree-row] {
+  transition-property: color, background-color, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 100ms;
+}
+
+[data-tree-row]:active {
+  transform: scale(0.995);
+  background-color: var(--paper-inset) !important;
 }
 
 /* Custom scrollbar styling - cross-platform */
@@ -354,9 +377,14 @@ button:disabled {
 }
 
 
+/* Override Tailwind's font-mono to use our CSS variable with Chinese fallback */
+.font-mono {
+  font-family: var(--font-code) !important;
+}
+
 /* Terminal-like monospace typography for tool calls */
 .tool-input {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
   font-size: 13px;
   line-height: 1.6;
   letter-spacing: -0.01em;
@@ -369,7 +397,7 @@ button:disabled {
 
 /* Clean code block styling */
 pre code {
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
   font-size: 13px;
   line-height: 1.6;
   letter-spacing: -0.01em;
@@ -561,7 +589,7 @@ pre code {
 .inline-code {
   background: var(--paper-inset);
   color: var(--ink);
-  font-family: var(--font-mono);
+  font-family: var(--font-code);
   font-size: 0.9em;
   border-radius: var(--radius-sm);
   padding: 2px 6px;

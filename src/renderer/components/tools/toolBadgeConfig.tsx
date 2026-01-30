@@ -10,6 +10,7 @@ import {
   SearchCode,
   Sparkles,
   Terminal,
+  Wrench,
   XCircle,
   Zap
 } from 'lucide-react';
@@ -318,10 +319,10 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
           iconColor: 'text-teal-500 dark:text-teal-400'
         }
       };
-    // Default - Blue (fallback)
+    // Default - Blue (fallback for unknown tools like MCP tools, server_tool_use)
     default:
       return {
-        icon: null,
+        icon: <Wrench className="size-2.5" />,
         colors: {
           border: 'border-blue-200/60 dark:border-blue-500/30',
           bg: 'bg-blue-50/80 dark:bg-blue-500/10',

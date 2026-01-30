@@ -79,6 +79,7 @@ import {
   resetSession,
 } from './agent-session';
 import { getPackageManagerPath } from './utils/runtime';
+import { getHomeDirOrNull } from './utils/platform';
 import { buildDirectoryTree, expandDirectory } from './dir-info';
 import {
   createSession,
@@ -142,7 +143,7 @@ function parseArgs(argv: string[]): { agentDir: string; initialPrompt?: string; 
  */
 function expandTilde(path: string): string {
   if (path.startsWith('~/') || path === '~') {
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    const homeDir = getHomeDirOrNull() || '';
     return path.replace(/^~/, homeDir);
   }
   return path;
@@ -168,7 +169,7 @@ async function ensureAgentDir(dir: string): Promise<string> {
 function isValidAgentDir(dir: string): { valid: boolean; reason?: string } {
   const expanded = expandTilde(dir);
   const resolved = resolve(expanded);
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  const homeDir = getHomeDirOrNull() || '';
 
   // Must be an absolute path
   if (!resolved.startsWith('/') && !resolved.match(/^[A-Z]:\\/i)) {
@@ -543,6 +544,8 @@ async function main() {
           model?: string;
           inputTokens: number;
           outputTokens: number;
+          cacheReadTokens?: number;
+          cacheCreationTokens?: number;
           toolCount?: number;
           durationMs?: number;
         }> = [];
@@ -554,27 +557,51 @@ async function main() {
               ? msg.content.slice(0, 100)
               : JSON.stringify(msg.content).slice(0, 100);
           } else if (msg.role === 'assistant' && msg.usage) {
-            const model = msg.usage.model || 'unknown';
-            if (!byModel[model]) {
-              byModel[model] = {
-                inputTokens: 0,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                cacheCreationTokens: 0,
-                count: 0,
-              };
+            // Use modelUsage for per-model breakdown if available, fallback to single model
+            if (msg.usage.modelUsage) {
+              for (const [model, stats] of Object.entries(msg.usage.modelUsage)) {
+                if (!byModel[model]) {
+                  byModel[model] = {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0,
+                    count: 0,
+                  };
+                }
+                byModel[model].inputTokens += stats.inputTokens ?? 0;
+                byModel[model].outputTokens += stats.outputTokens ?? 0;
+                byModel[model].cacheReadTokens += stats.cacheReadTokens ?? 0;
+                byModel[model].cacheCreationTokens += stats.cacheCreationTokens ?? 0;
+                byModel[model].count++;
+              }
+            } else {
+              // Fallback for older messages without modelUsage
+              const model = msg.usage.model || 'unknown';
+              if (!byModel[model]) {
+                byModel[model] = {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cacheReadTokens: 0,
+                  cacheCreationTokens: 0,
+                  count: 0,
+                };
+              }
+              byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
+              byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
+              byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
+              byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
+              byModel[model].count++;
             }
-            byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
-            byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
-            byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
-            byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
-            byModel[model].count++;
 
+            // Message details always use aggregate values
             messageDetails.push({
               userQuery: currentUserQuery,
               model: msg.usage.model,
               inputTokens: msg.usage.inputTokens ?? 0,
               outputTokens: msg.usage.outputTokens ?? 0,
+              cacheReadTokens: msg.usage.cacheReadTokens,
+              cacheCreationTokens: msg.usage.cacheCreationTokens,
               toolCount: msg.toolCount,
               durationMs: msg.durationMs,
             });
@@ -1146,7 +1173,7 @@ async function main() {
           }
 
           // Security: Only allow paths under home directory or temp directories
-          const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+          const homeDir = getHomeDirOrNull() || '';
           const resolvedPath = resolve(fullPath);
           // Normalize both paths for comparison (handles Windows paths)
           const normalizedResolved = resolvedPath.toLowerCase().replace(/\\/g, '/');
@@ -1643,6 +1670,37 @@ async function main() {
         }
       }
 
+      // GET /api/assets/qr-code - Fetch QR code image and return as base64
+      // Downloads from CDN each time to bypass WebView CSP restrictions
+      if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
+        try {
+          const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+          const response = await fetch(QR_CODE_URL, { signal: controller.signal });
+          clearTimeout(timeoutId);
+
+          if (!response.ok) {
+            return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString('base64');
+          const mimeType = response.headers.get('content-type') || 'image/png';
+          return jsonResponse({
+            success: true,
+            dataUrl: `data:${mimeType};base64,${base64}`
+          });
+        } catch (error) {
+          console.error('[api/assets/qr-code] Error:', error);
+          const isTimeout = error instanceof Error && error.name === 'AbortError';
+          return jsonResponse(
+            { success: false, error: isTimeout ? 'Request timeout' : (error instanceof Error ? error.message : 'Fetch failed') },
+            isTimeout ? 504 : 500
+          );
+        }
+      }
+
       // ============= END PROVIDER VERIFICATION API =============
 
       // ============= MCP API =============
@@ -1688,7 +1746,7 @@ async function main() {
           const { existsSync, readFileSync } = await import('fs');
           const { join } = await import('path');
 
-          const homeDir = process.env.HOME || '/tmp';
+          const homeDir = getHomeDirOrNull() || '';
           const serverDir = join(homeDir, '.myagents', 'mcp', payload.serverId);
 
           // Extract package name from args
@@ -1738,8 +1796,8 @@ async function main() {
           const { existsSync, mkdirSync, writeFileSync, readFileSync } = await import('fs');
           const { join } = await import('path');
 
-          // Determine MCP install directory
-          const homeDir = process.env.HOME || '/tmp';
+          // Determine MCP install directory (cross-platform)
+          const homeDir = getHomeDirOrNull() || '';
           const mcpBaseDir = join(homeDir, '.myagents', 'mcp');
           const serverDir = join(mcpBaseDir, payload.serverId);
 
@@ -1906,7 +1964,7 @@ async function main() {
           // Start with empty array, builtin commands added at the end
           // Order: project commands -> user commands -> skills -> builtin (so custom can override builtin)
           const commands: SlashCommand[] = [];
-          const homeDir = process.env.HOME || '/tmp';
+          const homeDir = getHomeDirOrNull() || '';
 
           // ===== COMMANDS SCANNING =====
           // Helper function to scan commands from a directory
@@ -2103,7 +2161,8 @@ async function main() {
         return true;
       };
 
-      const homeDir = process.env.HOME || '/tmp';
+      // Cross-platform home directory for user skills/commands
+      const homeDir = getHomeDirOrNull() || '';
       const userSkillsBaseDir = join(homeDir, '.myagents', 'skills');
       const userCommandsBaseDir = join(homeDir, '.myagents', 'commands');
 

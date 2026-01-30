@@ -15,6 +15,7 @@ interface CodeBlockProps {
 }
 
 // Custom theme based on oneDark with warm tones to match app aesthetic
+// Uses CSS variable --font-code for consistent font across all code rendering
 const customTheme = {
     ...oneDark,
     'pre[class*="language-"]': {
@@ -31,7 +32,7 @@ const customTheme = {
         background: 'transparent',
         fontSize: '13px',
         lineHeight: '1.6',
-        fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace",
+        fontFamily: 'var(--font-code)',
     },
 };
 

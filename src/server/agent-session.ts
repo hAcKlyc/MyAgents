@@ -4,6 +4,7 @@ import { join, resolve } from 'path';
 import { createRequire } from 'module';
 import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { getScriptDir, getBundledRuntimePath, isBunRuntime } from './utils/runtime';
+import { getCrossPlatformEnv, buildCrossPlatformEnv } from './utils/platform';
 
 import type { ToolInput } from '../renderer/types/chat';
 import { parsePartialJson } from '../shared/parsePartialJson';
@@ -16,6 +17,11 @@ import { initLogger, appendLog, getLogLines as getLogLinesFromLogger, cleanupOld
 // Module-level debug mode check (avoids repeated environment variable access)
 const isDebugMode = process.env.DEBUG === '1' || process.env.NODE_ENV === 'development';
 
+// Decorative text filter thresholds (for third-party API wrappers like 智谱 GLM-4.7)
+// Decorative blocks are typically 100-2000 chars; we use wider range for safety margin
+const DECORATIVE_TEXT_MIN_LENGTH = 50;
+const DECORATIVE_TEXT_MAX_LENGTH = 5000;
+
 // ===== Product Directory Configuration =====
 // Our product (MyAgents) uses ~/.myagents/ for user configuration
 // This is SEPARATE from Claude CLI's ~/.claude/ directory
@@ -27,7 +33,9 @@ const MYAGENTS_USER_DIR = '.myagents';
  * All user configs (MCP, providers, projects, etc.) are stored here
  */
 export function getMyAgentsUserDir(): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
+  const { home } = getCrossPlatformEnv();
+  // Fallback to /tmp only if home is not available (should be rare)
+  const homeDir = home || '/tmp';
   return join(homeDir, MYAGENTS_USER_DIR);
 }
 
@@ -77,7 +85,7 @@ type SubagentToolCall = {
 };
 
 type ContentBlock = {
-  type: 'text' | 'tool_use' | 'thinking';
+  type: 'text' | 'tool_use' | 'thinking' | 'server_tool_use';
   text?: string;
   tool?: ToolUseState;
   thinking?: string;
@@ -147,13 +155,16 @@ let sdkReadyResolve: (() => void) | null = null;
 let sdkReadyPromise: Promise<void> | null = null;
 
 // ===== Turn-level Usage Tracking =====
-// Accumulated usage for the current turn (reset when new user message starts)
+// Token usage for the current turn, extracted from SDK result message
+import type { ModelUsageEntry } from './types/session';
+
 let currentTurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheCreationTokens: 0,
   model: undefined as string | undefined,
+  modelUsage: undefined as Record<string, ModelUsageEntry> | undefined,
 };
 // Timestamp when current assistant response started
 let currentTurnStartTime: number | null = null;
@@ -167,6 +178,7 @@ function resetTurnUsage(): void {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     model: undefined,
+    modelUsage: undefined,
   };
   currentTurnStartTime = null;
   currentTurnToolCount = 0;
@@ -262,7 +274,15 @@ export function setMcpServers(servers: McpServerDefinition[]): void {
   const mcpChanged = currentIds !== newIds;
 
   currentMcpServers = servers;
-  if (isDebugMode) console.log(`[agent] MCP servers set: ${servers.map(s => s.id).join(', ') || 'none'}`);
+  if (isDebugMode) {
+    console.log(`[agent] MCP servers set: ${servers.map(s => s.id).join(', ') || 'none'}`);
+    // Log servers with custom env vars for debugging
+    for (const s of servers) {
+      if (s.env && Object.keys(s.env).length > 0) {
+        console.log(`[agent] MCP ${s.id}: Has custom env vars: ${Object.keys(s.env).join(', ')}`);
+      }
+    }
+  }
 
   // If MCP changed and session is running, restart with resume to apply new config
   if (mcpChanged && querySession) {
@@ -379,6 +399,11 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
   const result: Record<string, SdkMcpServerConfig> = {};
 
   for (const server of servers) {
+    // Log server env for debugging
+    if (isDebugMode && server.env && Object.keys(server.env).length > 0) {
+      console.log(`[agent] MCP ${server.id}: Custom env vars: ${Object.keys(server.env).join(', ')}`);
+    }
+
     if (server.type === 'stdio' && server.command) {
       const serverDir = join(mcpBaseDir, server.id);
       const args = server.args || [];
@@ -415,12 +440,7 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
             result[server.id] = {
               command: runtimePath,
               args: [entryPoint],
-              env: {
-                ...process.env,  // Pass all env vars to ensure nothing is missing
-                HOME: process.env.HOME || '',
-                USER: process.env.USER || '',
-                ...(server.env || {}),
-              },
+              env: buildCrossPlatformEnv(server.env),
             };
             continue;
           }
@@ -440,13 +460,7 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
         result[server.id] = {
           command: runtimePath,
           args: ['x', ...args],
-          env: {
-            ...process.env,
-            HOME: process.env.HOME || '',
-            USER: process.env.USER || '',
-            TMPDIR: process.env.TMPDIR || '/tmp',
-            ...(server.env || {}),
-          },
+          env: buildCrossPlatformEnv(server.env),
         };
       } else {
         // Node fallback - try npx but may fail if not installed
@@ -455,15 +469,11 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
         result[server.id] = {
           command: 'npx',
           args: argsWithY,
-          env: {
-            ...process.env,
-            HOME: process.env.HOME || '',
-            USER: process.env.USER || '',
-            TMPDIR: process.env.TMPDIR || '/tmp',
+          env: buildCrossPlatformEnv({
             npm_config_loglevel: 'error',
             npm_config_update_notifier: 'false',
-            ...(server.env || {}),
-          },
+            ...server.env,
+          }),
         };
       }
     } else if ((server.type === 'sse' || server.type === 'http') && server.url) {
@@ -874,7 +884,7 @@ export function resolveClaudeCodeCli(): string {
 export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.ProcessEnv {
   // Ensure essential paths are always present, even when launched from Finder
   // (Finder launches via launchd which doesn't inherit shell environment variables)
-  const home = process.env.HOME || '';
+  const { home } = getCrossPlatformEnv();
   const isDebug = process.env.DEBUG === '1' || process.env.NODE_ENV === 'development';
 
   // Cross-platform PATH separator
@@ -1107,7 +1117,60 @@ function ensureContentArray(message: MessageWire): ContentBlock[] {
   return message.content;
 }
 
+/**
+ * Check if text is a decorative wrapper from third-party APIs (e.g., 智谱 GLM-4.7)
+ * These APIs wrap server_tool_use with decorative text blocks that shouldn't be displayed
+ *
+ * IMPORTANT: This function must be very precise to avoid filtering legitimate content.
+ * We require MULTIPLE specific markers to be present before filtering.
+ *
+ * @returns { filtered: boolean, reason?: string } - reason is for debugging
+ */
+function checkDecorativeToolText(text: string): { filtered: boolean; reason?: string } {
+  // Safety: never filter very short or very long text
+  if (!text || text.length < DECORATIVE_TEXT_MIN_LENGTH || text.length > DECORATIVE_TEXT_MAX_LENGTH) {
+    return { filtered: false };
+  }
+
+  const trimmed = text.trim();
+
+  // Pattern 1: 智谱 GLM-4.7 tool invocation wrapper
+  // Must have ALL of these markers (very specific combination):
+  // - "🌐 Z.ai Built-in Tool:" or "Z.ai Built-in Tool:"
+  // - "**Input:**" (markdown bold)
+  // - Either "```json" or "Executing on server"
+  const hasZaiToolMarker = trimmed.includes('Z.ai Built-in Tool:');
+  const hasInputMarker = trimmed.includes('**Input:**');
+  const hasJsonBlock = trimmed.includes('```json') || trimmed.includes('Executing on server');
+
+  if (hasZaiToolMarker && hasInputMarker && hasJsonBlock) {
+    return { filtered: true, reason: 'zhipu-tool-invocation-wrapper' };
+  }
+
+  // Pattern 2: 智谱 GLM-4.7 tool output wrapper
+  // Must have ALL of these markers:
+  // - Starts with "**Output:**"
+  // - Contains "_result_summary:" (specific to Zhipu's format)
+  // - Contains JSON-like content (starts with "[" or "{")
+  if (trimmed.startsWith('**Output:**') && trimmed.includes('_result_summary:')) {
+    // Additional check: should contain JSON-like structure
+    const hasJsonContent = trimmed.includes('[{') || trimmed.includes('{"');
+    if (hasJsonContent) {
+      return { filtered: true, reason: 'zhipu-tool-output-wrapper' };
+    }
+  }
+
+  return { filtered: false };
+}
+
 function appendTextChunk(chunk: string): void {
+  // Filter out decorative text from third-party APIs (e.g., 智谱 GLM-4.7)
+  const decorativeCheck = checkDecorativeToolText(chunk);
+  if (decorativeCheck.filtered) {
+    console.log(`[agent] Filtered decorative text (${decorativeCheck.reason}), length=${chunk.length}`);
+    return;
+  }
+
   const message = ensureAssistantMessage();
   if (typeof message.content === 'string') {
     message.content += chunk;
@@ -1160,6 +1223,31 @@ function handleToolUseStart(tool: {
     }
   });
   // Increment tool count for this turn
+  currentTurnToolCount++;
+}
+
+/**
+ * Handle server_tool_use content block start
+ * server_tool_use is a tool executed by the API provider (e.g., 智谱 GLM-4.7's webReader)
+ * Unlike tool_use (client-side MCP tools), these run on the server and results come back in the stream
+ */
+function handleServerToolUseStart(tool: {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  streamIndex: number;
+}): void {
+  const message = ensureAssistantMessage();
+  const contentArray = ensureContentArray(message);
+  contentArray.push({
+    type: 'server_tool_use',
+    tool: {
+      ...tool,
+      inputJson: JSON.stringify(tool.input, null, 2), // Server tools come with complete input
+      parsedInput: tool.input as unknown as ToolInput
+    }
+  });
+  // Server tools also count towards tool usage
   currentTurnToolCount++;
 }
 
@@ -1334,6 +1422,7 @@ function handleMessageComplete(): void {
     cacheReadTokens: currentTurnUsage.cacheReadTokens || undefined,
     cacheCreationTokens: currentTurnUsage.cacheCreationTokens || undefined,
     model: currentTurnUsage.model,
+    modelUsage: currentTurnUsage.modelUsage,
   }, currentTurnToolCount, durationMs);
 }
 
@@ -1364,6 +1453,21 @@ function handleMessageStopped(): void {
 function handleMessageError(error: string): void {
   isStreamingMessage = false;
   setSessionState('idle');
+
+  // Don't persist expected termination signals as errors
+  // These occur during normal session switching or app shutdown
+  const isExpectedTermination =
+    error.includes('SIGTERM') ||
+    error.includes('SIGKILL') ||
+    error.includes('SIGINT') ||
+    error.includes('process terminated') ||
+    error.includes('AbortError');
+
+  if (isExpectedTermination) {
+    console.log('[agent] Skipping error persistence for expected termination:', error);
+    return;
+  }
+
   messages.push({
     id: String(messageSequence++),
     role: 'assistant',
@@ -2295,8 +2399,19 @@ async function startStreamingSession(): Promise<void> {
               }
               appendToolResultDelta(sdkMessage.parent_tool_use_id, streamEvent.delta.text);
             } else {
-              broadcast('chat:message-chunk', streamEvent.delta.text);
-              appendTextChunk(streamEvent.delta.text);
+              // Skip empty chunks (null, undefined, '')
+              if (!streamEvent.delta.text) {
+                console.log('[agent] Skipping empty chunk');
+              } else {
+                // Filter out decorative text from third-party APIs before broadcasting
+                const decorativeCheck = checkDecorativeToolText(streamEvent.delta.text);
+                if (!decorativeCheck.filtered) {
+                  broadcast('chat:message-chunk', streamEvent.delta.text);
+                  appendTextChunk(streamEvent.delta.text);
+                } else {
+                  console.log(`[agent] Filtered decorative text from stream (${decorativeCheck.reason})`);
+                }
+              }
             }
           } else if (streamEvent.delta.type === 'thinking_delta') {
             broadcast('chat:thinking-chunk', {
@@ -2348,6 +2463,39 @@ async function startStreamingSession(): Promise<void> {
               broadcast('chat:tool-use-start', toolPayload);
               handleToolUseStart(toolPayload);
             }
+          } else if (streamEvent.content_block.type === 'server_tool_use') {
+            // Server-side tool use (e.g., 智谱 GLM-4.7's webReader, analyze_image)
+            // These are executed by the API provider, not locally
+            const serverToolBlock = streamEvent.content_block as {
+              type: 'server_tool_use';
+              id: string;
+              name: string;
+              input: Record<string, unknown> | string; // Some APIs return input as JSON string
+            };
+            streamIndexToToolId.set(streamEvent.index, serverToolBlock.id);
+
+            // Parse input if it's a JSON string (智谱 GLM-4.7 returns input as string)
+            let parsedInput: Record<string, unknown> = {};
+            if (typeof serverToolBlock.input === 'string') {
+              try {
+                parsedInput = JSON.parse(serverToolBlock.input);
+              } catch {
+                // If parsing fails, wrap the string as-is
+                parsedInput = { raw: serverToolBlock.input };
+              }
+            } else {
+              parsedInput = serverToolBlock.input || {};
+            }
+
+            const toolPayload = {
+              id: serverToolBlock.id,
+              name: serverToolBlock.name,
+              input: parsedInput,
+              streamIndex: streamEvent.index
+            };
+            // Server tools are always top-level (no subagent concept)
+            broadcast('chat:server-tool-use-start', toolPayload);
+            handleServerToolUseStart(toolPayload);
           } else if (
             (streamEvent.content_block.type === 'web_search_tool_result' ||
               streamEvent.content_block.type === 'web_fetch_tool_result' ||
@@ -2502,28 +2650,21 @@ async function startStreamingSession(): Promise<void> {
         }
       } else if (sdkMessage.type === 'assistant') {
         const assistantMessage = sdkMessage.message;
-        // Extract usage info for stats tracking
-        const usage = (assistantMessage as {
+        // Main turn token usage is extracted from result message (more reliable across providers)
+        // Here we extract usage only for subagent tool broadcasts (Task tool runtime stats)
+        const rawUsage = (assistantMessage as {
           usage?: {
             input_tokens?: number;
             output_tokens?: number;
-            cache_read_input_tokens?: number;
-            cache_creation_input_tokens?: number;
+            prompt_tokens?: number;
+            completion_tokens?: number;
           };
-          model?: string;
         }).usage;
-        const model = (assistantMessage as { model?: string }).model;
+        const subagentUsage = rawUsage ? {
+          input_tokens: rawUsage.input_tokens ?? rawUsage.prompt_tokens,
+          output_tokens: rawUsage.output_tokens ?? rawUsage.completion_tokens,
+        } : undefined;
 
-        // Accumulate usage for this turn (only for top-level assistant messages)
-        if (usage && !sdkMessage.parent_tool_use_id) {
-          currentTurnUsage.inputTokens += usage.input_tokens ?? 0;
-          currentTurnUsage.outputTokens += usage.output_tokens ?? 0;
-          currentTurnUsage.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-          currentTurnUsage.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
-          if (model) {
-            currentTurnUsage.model = model;
-          }
-        }
         if (sdkMessage.parent_tool_use_id && assistantMessage.content) {
           for (const block of assistantMessage.content) {
             if (
@@ -2547,7 +2688,7 @@ async function startStreamingSession(): Promise<void> {
               broadcast('chat:subagent-tool-use', {
                 parentToolUseId: sdkMessage.parent_tool_use_id,
                 tool: payload,
-                usage: usage ? { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } : undefined
+                usage: subagentUsage
               });
               handleSubagentToolUseStart(sdkMessage.parent_tool_use_id, payload);
             }
@@ -2632,6 +2773,84 @@ async function startStreamingSession(): Promise<void> {
           }
         }
       } else if (sdkMessage.type === 'result') {
+        // Extract token usage from result message
+        // SDK result contains modelUsage (per-model stats) and/or usage (aggregate)
+        // This is the authoritative source for token statistics
+        const resultMessage = sdkMessage as {
+          type: 'result';
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+          modelUsage?: Record<string, {
+            inputTokens?: number;
+            outputTokens?: number;
+            cacheReadInputTokens?: number;
+            cacheCreationInputTokens?: number;
+          }>;
+        };
+
+        // Prefer modelUsage (per-model breakdown), fallback to aggregate usage
+        if (resultMessage.modelUsage) {
+          let totalInput = 0;
+          let totalOutput = 0;
+          let totalCacheRead = 0;
+          let totalCacheCreation = 0;
+          let primaryModel: string | undefined;
+          let maxModelTokens = 0;
+          const modelUsageMap: Record<string, ModelUsageEntry> = {};
+
+          for (const [model, stats] of Object.entries(resultMessage.modelUsage)) {
+            const modelInput = stats.inputTokens ?? 0;
+            const modelOutput = stats.outputTokens ?? 0;
+            const modelCacheRead = stats.cacheReadInputTokens ?? 0;
+            const modelCacheCreation = stats.cacheCreationInputTokens ?? 0;
+
+            totalInput += modelInput;
+            totalOutput += modelOutput;
+            totalCacheRead += modelCacheRead;
+            totalCacheCreation += modelCacheCreation;
+
+            // Save per-model breakdown
+            modelUsageMap[model] = {
+              inputTokens: modelInput,
+              outputTokens: modelOutput,
+              cacheReadTokens: modelCacheRead || undefined,
+              cacheCreationTokens: modelCacheCreation || undefined,
+            };
+
+            // Track primary model (highest token usage)
+            const modelTotal = modelInput + modelOutput;
+            if (modelTotal > maxModelTokens) {
+              maxModelTokens = modelTotal;
+              primaryModel = model;
+            }
+          }
+
+          currentTurnUsage.inputTokens = totalInput;
+          currentTurnUsage.outputTokens = totalOutput;
+          currentTurnUsage.cacheReadTokens = totalCacheRead;
+          currentTurnUsage.cacheCreationTokens = totalCacheCreation;
+          currentTurnUsage.model = primaryModel;
+          currentTurnUsage.modelUsage = modelUsageMap;
+
+          if (isDebugMode) {
+            console.log(`[agent] Token usage from result.modelUsage: input=${totalInput}, output=${totalOutput}, models=${Object.keys(modelUsageMap).join(', ')}`);
+          }
+        } else if (resultMessage.usage) {
+          currentTurnUsage.inputTokens = resultMessage.usage.input_tokens ?? 0;
+          currentTurnUsage.outputTokens = resultMessage.usage.output_tokens ?? 0;
+          currentTurnUsage.cacheReadTokens = resultMessage.usage.cache_read_input_tokens ?? 0;
+          currentTurnUsage.cacheCreationTokens = resultMessage.usage.cache_creation_input_tokens ?? 0;
+          if (isDebugMode) {
+            console.log(`[agent] Token usage from result.usage: input=${currentTurnUsage.inputTokens}, output=${currentTurnUsage.outputTokens}`);
+          }
+        } else {
+          console.warn('[agent] Result message has no usage data, token statistics may be incomplete');
+        }
+
         console.log('[agent][sdk] Broadcasting chat:message-complete');
         broadcast('chat:message-complete', null);
         handleMessageComplete();

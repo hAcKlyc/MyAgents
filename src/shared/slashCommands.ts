@@ -132,9 +132,10 @@ export function parseSkillFrontmatter(content: string): { name?: string; descrip
 /**
  * Extract command name from file path
  * e.g., "/path/to/review-code.md" -> "review-code"
+ * Supports both / and \ path separators for cross-platform compatibility
  */
 export function extractCommandName(filePath: string): string {
-    const fileName = filePath.split('/').pop() || '';
+    const fileName = filePath.split(/[\\/]/).pop() || '';
     return fileName.replace(/\.md$/, '');
 }
 

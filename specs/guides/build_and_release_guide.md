@@ -6,7 +6,16 @@
 
 ## 概览
 
-MyAgents 目前支持 **macOS** 平台，包括 Apple Silicon (ARM64) 和 Intel (x86_64) 两种架构。
+MyAgents 支持 **macOS** 和 **Windows** 平台：
+
+| 平台 | 架构 | 构建脚本 | 发布脚本 |
+|------|------|---------|---------|
+| macOS | ARM64 (M1/M2), x86_64 (Intel) | `build_macos.sh` | `publish_release.sh` |
+| Windows | x86_64 | `build_windows.ps1` | `publish_windows.ps1` |
+
+> **Windows 用户**：请参阅 [Windows 构建与测试指南](./windows_build_guide.md)
+
+本文档主要描述 **macOS** 版本的构建流程。macOS 支持 Apple Silicon (ARM64) 和 Intel (x86_64) 两种架构。
 
 ### 分发渠道
 
@@ -304,7 +313,7 @@ APPLE_API_KEY_PATH="/path/to/AuthKey_XXXXXXXXXX.p8"
 # === Tauri 更新签名 ===
 # 注意: 私钥必须是单行格式，换行符用 \n 表示
 # 可以用以下命令转换: cat key.pem | tr '\n' '\\n'
-TAURI_SIGNING_PRIVATE_KEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHNlY3JldCBrZXk..."
+TAURI_SIGNING_PRIVATE_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD="your-password"
 
 # === Cloudflare R2 ===
@@ -365,6 +374,7 @@ npx tauri signer generate -w ~/.tauri/myagents.key
 
 ## 相关文档
 
+- [Windows 构建与测试指南](./windows_build_guide.md) - Windows 版本构建流程
 - [自动更新系统](../tech_docs/auto_update.md) - 静默更新流程、CI/CD 配置
 - [macOS 分发指南](./macos_distribution_guide.md) - 代码签名、公证详解
 - [Bun Sidecar 打包](../tech_docs/bundled_bun.md) - 运行时打包机制

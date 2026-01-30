@@ -42,6 +42,16 @@ export interface MessageAttachment {
 }
 
 /**
+ * Per-model usage breakdown
+ */
+export interface ModelUsageEntry {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+}
+
+/**
  * Usage information for assistant messages
  */
 export interface MessageUsage {
@@ -49,7 +59,10 @@ export interface MessageUsage {
     outputTokens: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
+    /** Primary model (for backwards compatibility and simple display) */
     model?: string;
+    /** Per-model breakdown (for detailed statistics) */
+    modelUsage?: Record<string, ModelUsageEntry>;
 }
 
 /**

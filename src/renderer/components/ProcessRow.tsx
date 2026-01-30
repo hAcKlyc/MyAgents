@@ -32,9 +32,10 @@ export default function ProcessRow({
     const taskTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
     const isThinking = block.type === 'thinking';
-    const isTool = block.type === 'tool_use';
+    const isTool = block.type === 'tool_use' || block.type === 'server_tool_use';
+    const isServerTool = block.type === 'server_tool_use';
     const isLastBlock = index === totalBlocks - 1;
-    const isTaskTool = isTool && block.tool?.name === 'Task';
+    const isTaskTool = isTool && !isServerTool && block.tool?.name === 'Task';
 
     // Thinking: 没有 isComplete 就是 active
     const isThinkingActive = isThinking && block.isComplete !== true;

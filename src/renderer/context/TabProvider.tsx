@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
 
 import { createSseConnection, type SseConnection } from '@/api/SseConnection';
@@ -27,7 +28,20 @@ import { getTabServerUrl, proxyFetch, stopTabSidecar, isTauri } from '@/api/taur
 import type { PermissionMode } from '@/config/types';
 
 // File-modifying tools that should trigger workspace refresh
-const FILE_MODIFYING_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
+// These tools can create, modify, or delete files in the workspace
+const FILE_MODIFYING_TOOLS = new Set([
+    'Bash',         // Shell commands can modify files
+    'Edit',         // Single file edit
+    'MultiEdit',    // Multiple file edits
+    'Write',        // Create/overwrite files
+    'NotebookEdit', // Jupyter notebook edits
+]);
+
+/**
+ * Check if a content block is a tool block (either local tool_use or server_tool_use)
+ * Used to unify handling of both tool types in event handlers
+ */
+const isToolBlock = (b: ContentBlock): boolean => b.type === 'tool_use' || b.type === 'server_tool_use';
 
 /**
  * Helper to update subagent calls in a parent tool
@@ -344,7 +358,6 @@ export default function TabProvider({
             return [...prev.slice(0, -1), { ...last, content: updatedContent }];
         });
     }, []);
-
     // Handle SSE events
     const handleSseEvent = useCallback((eventName: string, data: unknown) => {
         switch (eventName) {
@@ -432,6 +445,9 @@ export default function TabProvider({
                     console.log('[TabProvider] Skipping message-chunk (new session, stale event)');
                     break;
                 }
+
+                // Directly update message state - React.memo on Message component
+                // ensures only the streaming message re-renders, not history
                 const chunk = data as string;
                 setMessages(prev => {
                     const last = prev[prev.length - 1];
@@ -452,6 +468,7 @@ export default function TabProvider({
                             content: [...contentArray, { type: 'text', text: chunk }]
                         }];
                     }
+                    // First chunk - create new assistant message
                     isStreamingRef.current = true;
                     setIsLoading(true);
                     return [...prev, {
@@ -539,7 +556,43 @@ export default function TabProvider({
                 break;
             }
 
+            case 'chat:server-tool-use-start': {
+                // Server-side tool use (e.g., 智谱 GLM-4.7's webReader, analyze_image)
+                // These are executed by the API provider, not locally
+                if (isNewSessionRef.current) {
+                    console.log('[TabProvider] Skipping server-tool-use-start (new session, stale event)');
+                    break;
+                }
+                const tool = data as ToolUse;
+                // Server tools come with complete input, no streaming
+                const toolSimple: ToolUseSimple = {
+                    ...tool,
+                    inputJson: JSON.stringify(tool.input, null, 2),
+                    parsedInput: tool.input as unknown as ToolInput,
+                    isLoading: true
+                };
+                setMessages(prev => {
+                    const toolBlock: ContentBlock = {
+                        type: 'server_tool_use',
+                        tool: toolSimple
+                    };
+                    const last = prev[prev.length - 1];
+                    if (last?.role === 'assistant') {
+                        const content = typeof last.content === 'string'
+                            ? [{ type: 'text' as const, text: last.content }]
+                            : last.content;
+                        return [...prev.slice(0, -1), { ...last, content: [...content, toolBlock] }];
+                    }
+                    isStreamingRef.current = true;
+                    setIsLoading(true);
+                    return [...prev, { id: Date.now().toString(), role: 'assistant', content: [toolBlock], timestamp: new Date() }];
+                });
+                break;
+            }
+
             case 'chat:tool-input-delta': {
+                // Note: Only handle tool_use, NOT server_tool_use
+                // server_tool_use comes with complete input, no streaming delta needed
                 const { toolId, delta } = data as { index: number; toolId: string; delta: string };
                 setMessages(prev => {
                     const last = prev[prev.length - 1];
@@ -585,13 +638,13 @@ export default function TabProvider({
                         }
                     }
 
-                    // Check tool block
+                    // Check tool block (both tool_use and server_tool_use)
                     const toolIdx = toolId
-                        ? contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === toolId)
-                        : contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.streamIndex === index);
+                        ? contentArray.findIndex(b => isToolBlock(b) && b.tool?.id === toolId)
+                        : contentArray.findIndex(b => isToolBlock(b) && b.tool?.streamIndex === index);
                     if (toolIdx !== -1) {
                         const block = contentArray[toolIdx];
-                        if (block.type === 'tool_use' && block.tool?.inputJson) {
+                        if (isToolBlock(block) && block.tool?.inputJson) {
                             let parsedInput: ToolInput | undefined;
                             try {
                                 parsedInput = JSON.parse(block.tool.inputJson);
@@ -619,10 +672,11 @@ export default function TabProvider({
                     const last = prev[prev.length - 1];
                     if (last?.role !== 'assistant' || typeof last.content === 'string') return prev;
                     const contentArray = last.content;
-                    const idx = contentArray.findIndex(b => b.type === 'tool_use' && b.tool?.id === payload.toolUseId);
+                    // Find tool block (both tool_use and server_tool_use)
+                    const idx = contentArray.findIndex(b => isToolBlock(b) && b.tool?.id === payload.toolUseId);
                     if (idx === -1) return prev;
                     const block = contentArray[idx];
-                    if (block.type !== 'tool_use' || !block.tool) return prev;
+                    if (!isToolBlock(block) || !block.tool) return prev;
 
                     const updated = [...contentArray];
                     if (eventName === 'chat:tool-result-delta') {
@@ -643,8 +697,11 @@ export default function TabProvider({
                     }
 
                     // Mark for workspace refresh when file-modifying tool completes
-                    if (eventName === 'chat:tool-result-complete' && block.tool.name && FILE_MODIFYING_TOOLS.has(block.tool.name)) {
-                        shouldTriggerRefresh = true;
+                    if (eventName === 'chat:tool-result-complete' && block.tool.name) {
+                        if (FILE_MODIFYING_TOOLS.has(block.tool.name)) {
+                            shouldTriggerRefresh = true;
+                            console.log(`[TabProvider] File-modifying tool completed: ${block.tool.name}, triggering workspace refresh`);
+                        }
                     }
 
                     return [...prev.slice(0, -1), { ...last, content: updated }];
@@ -658,10 +715,15 @@ export default function TabProvider({
             }
 
             case 'chat:message-complete': {
+                console.log(`[TabProvider ${tabId}] message-complete received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle
-                setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
+                // Use flushSync to immediately update UI, bypassing React batching
+                // This prevents UI from getting stuck in loading state during rapid event streams
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle
+                    setSystemStatus(null);  // Clear system status (e.g., 'compacting') when message completes
+                });
                 // Defensively mark any remaining incomplete thinking/tool blocks as complete.
                 // Normally content_block_stop handles this, but third-party providers may not
                 // send it, leaving blocks stuck in loading state.
@@ -670,10 +732,14 @@ export default function TabProvider({
             }
 
             case 'chat:message-stopped': {
+                console.log(`[TabProvider ${tabId}] message-stopped received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle
-                setSystemStatus(null);  // Clear system status when user stops response
+                // Use flushSync to immediately update UI
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle
+                    setSystemStatus(null);  // Clear system status when user stops response
+                });
                 // Clear stop timeout since we received confirmation
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);
@@ -685,10 +751,14 @@ export default function TabProvider({
             }
 
             case 'chat:message-error': {
+                console.log(`[TabProvider ${tabId}] message-error received`);
                 isStreamingRef.current = false;
-                setIsLoading(false);
-                setSessionState('idle');  // Reset session state to idle on error
-                setSystemStatus(null);  // Clear system status on error
+                // Use flushSync to immediately update UI
+                flushSync(() => {
+                    setIsLoading(false);
+                    setSessionState('idle');  // Reset session state to idle on error
+                    setSystemStatus(null);  // Clear system status on error
+                });
                 // Clear stop timeout on error too
                 if (stopTimeoutRef.current) {
                     clearTimeout(stopTimeoutRef.current);

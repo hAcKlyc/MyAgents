@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.6] - 2026-01-30
+
+### Added
+- **Windows 客户端支持**
+  - NSIS 安装包 (`MyAgents_x.x.x_x64-setup.exe`)
+  - 便携版 ZIP (`MyAgents_x.x.x_x86_64-portable.zip`)
+  - 自动更新支持（共用 Tauri 签名密钥）
+- 新增 Windows 构建脚本
+  - `setup_windows.ps1` - 环境初始化
+  - `build_windows.ps1` - 构建脚本
+  - `publish_windows.ps1` - 发布脚本（含 `latest_win.json` 生成）
+- 新增 `src/server/utils/platform.ts` 跨平台工具模块
+- **支持 `server_tool_use` 内容块类型**（第三方 API 如智谱 GLM-4.7 的服务端工具调用）
+- **设置页面添加用户交流群二维码**
+  - 位于「关于」页面，从 R2 动态加载
+  - 网络异常时自动隐藏
+  - 新增 `upload_qr_code.sh` 上传脚本
+- **MCP 表单 UI 改进**
+  - 优化服务器配置表单交互体验
+
+### Changed
+- `runtime.ts` 支持 Windows 路径检测 (`bun.exe`, `%USERPROFILE%\.bun`, etc.)
+- `sidecar.rs` 支持 Windows 进程管理 (`wmic` + `taskkill`)
+- 统一跨平台环境变量处理（消除 10+ 处重复代码）
+- **全局视觉优化与设计规范更新**
+- 工作区右键菜单「快速预览」改为「预览」
+- **会话统计 UI 优化**
+  - 「缓存读取」改为「输入缓存」（= cache_read + cache_creation）
+  - 消息明细新增「输入缓存」列
+
+### Fixed
+- 修复 Windows 自定义标题栏按钮无效（缺少 Tauri 权限）
+- 修复 UI 卡在 loading 状态（`chat:system-status` 事件未注册 + React 批量更新延迟）
+- 修复 `MultiEdit` 工具完成后工作区不刷新
+- 修复 MCP 服务器和命令系统的 Windows 跨平台路径问题
+- 修复智谱 GLM-4.7 `server_tool_use` 的输入解析（JSON 字符串 → 对象）
+- 过滤智谱 API 返回的装饰性工具文本（避免干扰正常内容显示）
+- **Token 统计修复**
+  - 从 SDK result 消息提取统计数据（更可靠）
+  - 支持多模型分别统计（新增 `modelUsage` 字段）
+  - 修复智谱/Anthropic 等供应商统计数据为 0 的问题
+- 修复流式输出中空白 chunk 过滤（保留有效换行和空格）
+- 修复进程终止信号被错误保存为错误消息
+- 为未知工具添加兜底图标 (Wrench)
+
+### Technical
+- Windows 数据目录：`%APPDATA%\MyAgents\`
+- 添加 `buildCrossPlatformEnv()` 统一子进程环境变量构建
+- 使用 `flushSync` 强制同步关键 UI 状态更新
+- 装饰性文本过滤使用多条件匹配，避免误伤正常内容
+- 新增 `ModelUsageEntry` 类型支持按模型分组存储 token 统计
+
+**详见**: [specs/prd/prd_0.1.6.md](./specs/prd/prd_0.1.6.md)
+
+---
+
 ## [0.1.5] - 2026-01-29
 
 ### Added

@@ -157,21 +157,16 @@ pub fn cleanup_stale_sidecars() {
 
     #[cfg(windows)]
     {
-        // Windows: use wmic to find processes with our marker (more precise than taskkill)
-        // This only kills bun processes that have our marker in their command line
-        if let Ok(output) = Command::new("wmic")
-            .args(["process", "where", &format!("commandline like '%{}%'", SIDECAR_MARKER), "get", "processid"])
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines().skip(1) {
-                if let Ok(pid) = line.trim().parse::<u32>() {
-                    let _ = Command::new("taskkill")
-                        .args(["/F", "/PID", &pid.to_string()])
-                        .output();
-                }
-            }
-        }
+        // Windows: Clean up all related processes
+        // 1. Clean up bun sidecar processes (our main sidecar)
+        kill_windows_processes_by_pattern(SIDECAR_MARKER);
+
+        // 2. Clean up SDK child processes
+        kill_windows_processes_by_pattern("claude-agent-sdk");
+
+        // 3. Clean up MCP child processes
+        kill_windows_processes_by_pattern(".myagents\\mcp\\");
+
         thread::sleep(Duration::from_millis(200));
         log::info!("[sidecar] Windows cleanup complete");
     }
@@ -482,13 +477,12 @@ fn is_port_available(port: u16) -> bool {
 
 /// Find the bun executable path
 fn find_bun_executable<R: Runtime>(app_handle: &AppHandle<R>) -> Option<PathBuf> {
-    // First, try to find bundled bun in Contents/MacOS/
-    // externalBin produces files with platform suffix: bun-aarch64-apple-darwin
+    // First, try to find bundled bun
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        if let Some(contents_dir) = resource_dir.parent() {
-            // externalBin places binaries in MacOS/ with platform suffix
-            #[cfg(target_os = "macos")]
-            {
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(contents_dir) = resource_dir.parent() {
+                // externalBin places binaries in MacOS/ with platform suffix
                 #[cfg(target_arch = "aarch64")]
                 let macos_bun = contents_dir.join("MacOS").join("bun-aarch64-apple-darwin");
                 #[cfg(target_arch = "x86_64")]
@@ -508,8 +502,33 @@ fn find_bun_executable<R: Runtime>(app_handle: &AppHandle<R>) -> Option<PathBuf>
             }
         }
 
+        #[cfg(target_os = "windows")]
+        {
+            // Windows: bun.exe is in the same directory as the main executable
+            // resource_dir = .../MyAgents/resources (where server-dist.js is)
+            // Bun should be at .../MyAgents/bun-x86_64-pc-windows-msvc.exe
+            if let Some(app_dir) = resource_dir.parent() {
+                let win_bun = app_dir.join("bun-x86_64-pc-windows-msvc.exe");
+                if win_bun.exists() {
+                    log::info!("Using bundled bun from app dir: {:?}", win_bun);
+                    return Some(win_bun);
+                }
+
+                // Also check without suffix
+                let win_bun_simple = app_dir.join("bun.exe");
+                if win_bun_simple.exists() {
+                    log::info!("Using bundled bun from app dir (simple): {:?}", win_bun_simple);
+                    return Some(win_bun_simple);
+                }
+            }
+        }
+
         // Check in resource_dir/binaries/ for development mode
+        #[cfg(target_os = "windows")]
+        let bundled_bun = resource_dir.join("binaries").join("bun.exe");
+        #[cfg(not(target_os = "windows"))]
         let bundled_bun = resource_dir.join("binaries").join("bun");
+
         if bundled_bun.exists() {
             log::info!("Using bundled bun: {:?}", bundled_bun);
             return Some(bundled_bun);
@@ -527,29 +546,78 @@ fn find_bun_executable<R: Runtime>(app_handle: &AppHandle<R>) -> Option<PathBuf>
                 return Some(platform_bun);
             }
         }
-    }
 
-
-    // Fallback: system locations
-    let candidates = [
-        "/opt/homebrew/bin/bun",
-        "/usr/local/bin/bun",
-        &format!(
-            "{}/.bun/bin/bun",
-            std::env::var("HOME").unwrap_or_default()
-        ),
-        "bun",
-    ];
-
-    for candidate in candidates {
-        let path = PathBuf::from(candidate);
-        if path.exists() || which::which(candidate).is_ok() {
-            log::info!("Using system bun: {:?}", path);
-            return Some(path);
+        #[cfg(target_os = "windows")]
+        {
+            let platform_bun = resource_dir.join("binaries").join("bun-x86_64-pc-windows-msvc.exe");
+            if platform_bun.exists() {
+                log::info!("Using bundled platform bun: {:?}", platform_bun);
+                return Some(platform_bun);
+            }
         }
     }
 
-    which::which("bun").ok()
+    // Fallback: system locations
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = [
+            format!(
+                "{}\\.bun\\bin\\bun.exe",
+                std::env::var("USERPROFILE").unwrap_or_default()
+            ),
+            format!(
+                "{}\\bun\\bin\\bun.exe",
+                std::env::var("LOCALAPPDATA").unwrap_or_default()
+            ),
+            format!(
+                "{}\\bun\\bun.exe",
+                std::env::var("PROGRAMFILES").unwrap_or_default()
+            ),
+        ];
+
+        for candidate in candidates {
+            let path = PathBuf::from(&candidate);
+            if path.exists() {
+                log::info!("Using system bun: {:?}", path);
+                return Some(path);
+            }
+        }
+
+        // Try to find bun.exe in PATH
+        if let Ok(path) = which::which("bun.exe") {
+            log::info!("Using bun from PATH: {:?}", path);
+            return Some(path);
+        }
+        if let Ok(path) = which::which("bun") {
+            log::info!("Using bun from PATH: {:?}", path);
+            return Some(path);
+        }
+
+        return None;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let candidates = [
+            "/opt/homebrew/bin/bun",
+            "/usr/local/bin/bun",
+            &format!(
+                "{}/.bun/bin/bun",
+                std::env::var("HOME").unwrap_or_default()
+            ),
+            "bun",
+        ];
+
+        for candidate in candidates {
+            let path = PathBuf::from(candidate);
+            if path.exists() || which::which(candidate).is_ok() {
+                log::info!("Using system bun: {:?}", path);
+                return Some(path);
+            }
+        }
+
+        which::which("bun").ok()
+    }
 }
 
 /// Find the server script path
@@ -710,6 +778,14 @@ pub fn start_tab_sidecar<R: Runtime>(
     cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+
+    // Windows: Hide console window for GUI app
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     // 关键诊断日志：打印当前可执行文件路径，确认运行的是正确版本
     log::info!("[sidecar] current_exe = {:?}", std::env::current_exe().ok());
@@ -904,10 +980,83 @@ fn cleanup_child_processes() {
     kill_processes_by_pattern("MCP", ".myagents/mcp/", true);
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn cleanup_child_processes() {
-    // Windows cleanup is handled by process termination cascading
-    // TODO: Implement Windows-specific cleanup if needed
+    // Windows: Clean up SDK and MCP child processes using wmic + taskkill
+    log::info!("[sidecar] Cleaning up child processes on Windows...");
+
+    // Clean up SDK child processes
+    kill_windows_processes_by_pattern("claude-agent-sdk");
+
+    // Clean up MCP child processes
+    kill_windows_processes_by_pattern(".myagents\\mcp\\");
+}
+
+#[cfg(windows)]
+fn kill_windows_processes_by_pattern(pattern: &str) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Use PowerShell Get-CimInstance (wmic is deprecated in Windows 10/11)
+    // Fallback to wmic for older systems
+    let ps_command = format!(
+        "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' }} | Select-Object -ExpandProperty ProcessId",
+        pattern.replace("'", "''")  // Escape single quotes for PowerShell
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_command])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    let pids: Vec<u32> = match output {
+        Ok(ref o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|s| s.trim().parse::<u32>().ok())
+                .collect()
+        }
+        _ => {
+            // Fallback to wmic for older Windows versions
+            log::info!("[sidecar] PowerShell failed, falling back to wmic");
+            Command::new("wmic")
+                .args(["process", "where", &format!("commandline like '%{}%'", pattern), "get", "processid"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .ok()
+                .map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .lines()
+                        .skip(1)
+                        .filter_map(|s| s.trim().parse::<u32>().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    };
+
+    if pids.is_empty() {
+        return;
+    }
+
+    let mut killed = 0;
+    for pid in &pids {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/F", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW);
+        if cmd.output().is_ok() {
+            killed += 1;
+        }
+    }
+
+    if killed > 0 {
+        log::info!("[sidecar] Killed {} processes matching '{}'", killed, pattern);
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn cleanup_child_processes() {
+    // No-op on other platforms
 }
 
 // ============= Legacy Compatibility Functions =============

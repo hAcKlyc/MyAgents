@@ -153,7 +153,9 @@ export default function Launcher({ onLaunchProject, isStarting, startError, onOp
         try {
             const project = await addProject(path);
             console.log('[Launcher] Project added:', project);
-            const parentDir = path.split('/').slice(0, -1).join('/');
+            // Normalize path separators for cross-platform support
+            const normalizedPath = path.replace(/\\/g, '/');
+            const parentDir = normalizedPath.split('/').slice(0, -1).join('/');
             if (parentDir) {
                 localStorage.setItem('myagents:lastProjectDir', parentDir);
             }
@@ -232,8 +234,8 @@ export default function Launcher({ onLaunchProject, isStarting, startError, onOp
                     </div>
 
                     {/* Workspaces Header */}
-                    <div className="flex flex-shrink-0 items-center justify-between border-t border-[var(--line)]/60 px-6 py-4">
-                        <h2 className="text-[13px] font-medium uppercase tracking-widest text-[var(--ink-muted)]/70">
+                    <div className="flex flex-shrink-0 items-center justify-between border-t border-[var(--line)] px-6 py-4">
+                        <h2 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--ink-muted)]/60">
                             工作区
                         </h2>
                         <div className="flex items-center gap-3">
@@ -263,17 +265,17 @@ export default function Launcher({ onLaunchProject, isStarting, startError, onOp
                         {isLoading ? (
                             <div className="flex flex-col items-center justify-center py-16">
                                 <Loader2 className="h-5 w-5 animate-spin text-[var(--ink-muted)]/50" />
-                                <p className="mt-4 text-[13px] text-[var(--ink-muted)]">加载中...</p>
+                                <p className="mt-4 text-[13px] text-[var(--ink-muted)]/70">加载中...</p>
                             </div>
                         ) : projects.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--paper-contrast)]/60">
+                                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--paper-inset)]">
                                     <FolderOpen className="h-6 w-6 text-[var(--ink-muted)]/50" />
                                 </div>
-                                <h3 className="mb-1.5 text-[13px] font-medium text-[var(--ink)]">
+                                <h3 className="mb-1.5 text-[14px] font-medium text-[var(--ink)]">
                                     还没有工作区
                                 </h3>
-                                <p className="mb-5 max-w-[200px] text-[13px] leading-relaxed text-[var(--ink-muted)]/70">
+                                <p className="mb-5 max-w-[200px] text-[13px] leading-relaxed text-[var(--ink-muted)]/60">
                                     添加一个工作目录开始使用 Agent
                                 </p>
                                 <button
