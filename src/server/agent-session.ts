@@ -270,7 +270,15 @@ export function setMcpServers(servers: McpServerDefinition[]): void {
   const mcpChanged = currentIds !== newIds;
 
   currentMcpServers = servers;
-  if (isDebugMode) console.log(`[agent] MCP servers set: ${servers.map(s => s.id).join(', ') || 'none'}`);
+  if (isDebugMode) {
+    console.log(`[agent] MCP servers set: ${servers.map(s => s.id).join(', ') || 'none'}`);
+    // Log servers with custom env vars for debugging
+    for (const s of servers) {
+      if (s.env && Object.keys(s.env).length > 0) {
+        console.log(`[agent] MCP ${s.id}: Has custom env vars: ${Object.keys(s.env).join(', ')}`);
+      }
+    }
+  }
 
   // If MCP changed and session is running, restart with resume to apply new config
   if (mcpChanged && querySession) {
@@ -387,6 +395,11 @@ function buildSdkMcpServers(): Record<string, SdkMcpServerConfig> {
   const result: Record<string, SdkMcpServerConfig> = {};
 
   for (const server of servers) {
+    // Log server env for debugging
+    if (isDebugMode && server.env && Object.keys(server.env).length > 0) {
+      console.log(`[agent] MCP ${server.id}: Custom env vars: ${Object.keys(server.env).join(', ')}`);
+    }
+
     if (server.type === 'stdio' && server.command) {
       const serverDir = join(mcpBaseDir, server.id);
       const args = server.args || [];
