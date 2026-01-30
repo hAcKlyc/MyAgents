@@ -2384,8 +2384,14 @@ async function startStreamingSession(): Promise<void> {
               // Filter out decorative text from third-party APIs before broadcasting
               const decorativeCheck = checkDecorativeToolText(streamEvent.delta.text);
               if (!decorativeCheck.filtered) {
-                broadcast('chat:message-chunk', streamEvent.delta.text);
-                appendTextChunk(streamEvent.delta.text);
+                // Skip chunks that are only whitespace/newlines (some third-party APIs send these)
+                const trimmedChunk = streamEvent.delta.text.trim();
+                if (trimmedChunk.length === 0 && streamEvent.delta.text.length > 0) {
+                  console.log('[agent] Skipping whitespace-only chunk');
+                } else {
+                  broadcast('chat:message-chunk', streamEvent.delta.text);
+                  appendTextChunk(streamEvent.delta.text);
+                }
               } else {
                 console.log(`[agent] Filtered decorative text from stream (${decorativeCheck.reason})`);
               }
