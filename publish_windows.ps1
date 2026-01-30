@@ -72,12 +72,21 @@ if (-not (Test-Path $EnvFile)) {
     throw ".env 文件不存在"
 }
 
-# 加载 .env
+# 加载 .env (支持行内注释)
 Get-Content $EnvFile | ForEach-Object {
     if ($_ -match '^([^#=]+)=(.*)$') {
         $name = $Matches[1].Trim()
         $value = $Matches[2].Trim()
-        $value = $value -replace '^["'']|["'']$', ''
+
+        # 处理带引号的值（提取引号内的内容，忽略引号外的注释）
+        if ($value -match '^"([^"]*)"' -or $value -match "^'([^']*)'") {
+            $value = $Matches[1]
+        } else {
+            # 无引号的值，移除行内注释
+            $value = $value -replace '\s+#.*$', ''
+            $value = $value.Trim()
+        }
+
         [Environment]::SetEnvironmentVariable($name, $value, "Process")
     }
 }
