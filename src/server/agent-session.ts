@@ -2384,10 +2384,12 @@ async function startStreamingSession(): Promise<void> {
               // Filter out decorative text from third-party APIs before broadcasting
               const decorativeCheck = checkDecorativeToolText(streamEvent.delta.text);
               if (!decorativeCheck.filtered) {
-                // Skip chunks that are only whitespace/newlines (some third-party APIs send these)
-                const trimmedChunk = streamEvent.delta.text.trim();
-                if (trimmedChunk.length === 0 && streamEvent.delta.text.length > 0) {
-                  console.log('[agent] Skipping whitespace-only chunk');
+                // Skip chunks that contain ONLY newlines (no actual content)
+                // These cause empty paragraphs in Markdown rendering
+                // But preserve chunks with spaces (normal word separators) or other content
+                const isOnlyNewlines = /^[\n\r]+$/.test(streamEvent.delta.text);
+                if (isOnlyNewlines) {
+                  console.log('[agent] Skipping newline-only chunk');
                 } else {
                   broadcast('chat:message-chunk', streamEvent.delta.text);
                   appendTextChunk(streamEvent.delta.text);
