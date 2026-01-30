@@ -297,4 +297,5 @@ if (isDebugMode()) console.log('[module] debug message');
 | 日志系统 | [unified_logging.md](./specs/tech_docs/unified_logging.md) |
 | UI/设计规范 | [design_guide.md](./specs/guides/design_guide.md) |
 | macOS 签名、公证 | [macos_distribution_guide.md](./specs/guides/macos_distribution_guide.md) |
-| 构建、发布流程 | [build_and_release_guide.md](./specs/guides/build_and_release_guide.md) |
+| macOS 构建、发布 | [build_and_release_guide.md](./specs/guides/build_and_release_guide.md) |
+| **Windows 构建、发布** | [windows_build_guide.md](./specs/guides/windows_build_guide.md) |

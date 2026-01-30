@@ -180,7 +180,35 @@ Tab2 apiPost() ──► getTabServerUrl(tab2) ──► Rust proxy ──► Si
 - **Tauri Capabilities**: 最小权限原则
 - **本地绑定**: Sidecar 仅监听 `127.0.0.1`
 
+## 跨平台工具模块 (`src/server/utils/platform.ts`)
+
+统一的跨平台环境变量处理：
+
+| 函数 | 用途 |
+|------|------|
+| `isWindows()` | 检测 Windows 平台 |
+| `getCrossPlatformEnv()` | 获取 home/user/temp 目录 |
+| `buildCrossPlatformEnv()` | 构建子进程环境变量 |
+| `getHomeDirOrNull()` | 安全获取 home 目录 |
+
+**环境变量映射**：
+
+| 用途 | macOS/Linux | Windows |
+|------|-------------|---------|
+| Home 目录 | `HOME` | `USERPROFILE` |
+| 用户名 | `USER` | `USERNAME` |
+| 临时目录 | `TMPDIR` | `TEMP`/`TMP` |
+
+`buildCrossPlatformEnv()` 自动设置双平台变量，确保子进程兼容：
+
+```typescript
+const env = buildCrossPlatformEnv({ MY_VAR: 'value' });
+// 结果包含: HOME, USERPROFILE, USER, USERNAME, TMPDIR, TEMP, TMP, MY_VAR
+```
+
 ## 开发脚本
+
+### macOS
 
 | 脚本 | 用途 |
 |------|------|
@@ -188,3 +216,13 @@ Tab2 apiPost() ──► getTabServerUrl(tab2) ──► Rust proxy ──► Si
 | `start_dev.sh` | 浏览器开发模式 |
 | `build_dev.sh` | Debug 构建 (含 DevTools) |
 | `build_macos.sh` | 生产 DMG 构建 |
+
+### Windows
+
+| 脚本 | 用途 |
+|------|------|
+| `setup_windows.ps1` | 首次环境初始化 |
+| `build_windows.ps1` | 生产构建 (NSIS + 便携版) |
+| `publish_windows.ps1` | 发布到 R2 |
+
+详见 [Windows 构建指南](../guides/windows_build_guide.md)。

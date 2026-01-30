@@ -259,13 +259,10 @@ curl -s https://download.myagents.io/update/windows-x86_64.json
 
 ### 窗口标题栏
 
-当前配置使用 `titleBarStyle: "Overlay"`，这是 macOS 风格。在 Windows 上可能显示不同，需要观察：
+当前配置使用 `titleBarStyle: "Overlay"`，这是 macOS 风格。在 Windows 上需要额外配置：
 
-- 标题栏按钮位置是否正确
-- 窗口拖拽是否正常
-- 最大化/最小化行为是否符合预期
-
-如发现问题，可能需要针对 Windows 调整窗口配置。
+- 自定义标题栏按钮需要 Tauri 权限：`core:window:allow-minimize`、`core:window:allow-close`
+- 这些权限已在 `src-tauri/capabilities/default.json` 中配置
 
 ### WebView2 依赖
 
@@ -314,6 +311,26 @@ bun : 无法将"bun"项识别为 cmdlet...
 解决：
 1. 确认 Bun 已安装：https://bun.sh
 2. 重新打开 PowerShell 以刷新 PATH
+
+**前端构建 OOM**
+
+```
+FATAL ERROR: Reached heap limit Allocation failed
+```
+
+解决：`build_windows.ps1` 已设置 `NODE_OPTIONS=--max-old-space-size=4096`，如仍不够可增大此值。
+
+**PowerShell 脚本中文乱码**
+
+解决：所有 `.ps1` 脚本已添加 UTF-8 BOM，如手动创建脚本需确保编码正确。
+
+**tauri.conf.json 解析错误**
+
+```
+Error: Invalid JSON
+```
+
+可能原因：Node.js 写入文件时添加了 BOM。解决方法见 `build_windows.ps1` 中的 BOM 移除逻辑。
 
 ### 运行问题
 
