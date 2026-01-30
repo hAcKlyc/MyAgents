@@ -555,22 +555,44 @@ async function main() {
               ? msg.content.slice(0, 100)
               : JSON.stringify(msg.content).slice(0, 100);
           } else if (msg.role === 'assistant' && msg.usage) {
-            const model = msg.usage.model || 'unknown';
-            if (!byModel[model]) {
-              byModel[model] = {
-                inputTokens: 0,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                cacheCreationTokens: 0,
-                count: 0,
-              };
+            // Use modelUsage for per-model breakdown if available, fallback to single model
+            if (msg.usage.modelUsage) {
+              for (const [model, stats] of Object.entries(msg.usage.modelUsage)) {
+                if (!byModel[model]) {
+                  byModel[model] = {
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheReadTokens: 0,
+                    cacheCreationTokens: 0,
+                    count: 0,
+                  };
+                }
+                byModel[model].inputTokens += stats.inputTokens ?? 0;
+                byModel[model].outputTokens += stats.outputTokens ?? 0;
+                byModel[model].cacheReadTokens += stats.cacheReadTokens ?? 0;
+                byModel[model].cacheCreationTokens += stats.cacheCreationTokens ?? 0;
+                byModel[model].count++;
+              }
+            } else {
+              // Fallback for older messages without modelUsage
+              const model = msg.usage.model || 'unknown';
+              if (!byModel[model]) {
+                byModel[model] = {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cacheReadTokens: 0,
+                  cacheCreationTokens: 0,
+                  count: 0,
+                };
+              }
+              byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
+              byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
+              byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
+              byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
+              byModel[model].count++;
             }
-            byModel[model].inputTokens += msg.usage.inputTokens ?? 0;
-            byModel[model].outputTokens += msg.usage.outputTokens ?? 0;
-            byModel[model].cacheReadTokens += msg.usage.cacheReadTokens ?? 0;
-            byModel[model].cacheCreationTokens += msg.usage.cacheCreationTokens ?? 0;
-            byModel[model].count++;
 
+            // Message details always use aggregate values
             messageDetails.push({
               userQuery: currentUserQuery,
               model: msg.usage.model,

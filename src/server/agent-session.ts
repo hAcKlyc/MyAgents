@@ -155,13 +155,16 @@ let sdkReadyResolve: (() => void) | null = null;
 let sdkReadyPromise: Promise<void> | null = null;
 
 // ===== Turn-level Usage Tracking =====
-// Accumulated usage for the current turn (reset when new user message starts)
+// Token usage for the current turn, extracted from SDK result message
+import type { ModelUsageEntry } from './types/session';
+
 let currentTurnUsage = {
   inputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheCreationTokens: 0,
   model: undefined as string | undefined,
+  modelUsage: undefined as Record<string, ModelUsageEntry> | undefined,
 };
 // Timestamp when current assistant response started
 let currentTurnStartTime: number | null = null;
@@ -175,6 +178,7 @@ function resetTurnUsage(): void {
     cacheReadTokens: 0,
     cacheCreationTokens: 0,
     model: undefined,
+    modelUsage: undefined,
   };
   currentTurnStartTime = null;
   currentTurnToolCount = 0;
@@ -1418,6 +1422,7 @@ function handleMessageComplete(): void {
     cacheReadTokens: currentTurnUsage.cacheReadTokens || undefined,
     cacheCreationTokens: currentTurnUsage.cacheCreationTokens || undefined,
     model: currentTurnUsage.model,
+    modelUsage: currentTurnUsage.modelUsage,
   }, currentTurnToolCount, durationMs);
 }
 
@@ -2645,43 +2650,21 @@ async function startStreamingSession(): Promise<void> {
         }
       } else if (sdkMessage.type === 'assistant') {
         const assistantMessage = sdkMessage.message;
-        // Extract usage info for stats tracking
-        // Support both Anthropic format (input_tokens/output_tokens) and OpenAI format (prompt_tokens/completion_tokens)
+        // Main turn token usage is extracted from result message (more reliable across providers)
+        // Here we extract usage only for subagent tool broadcasts (Task tool runtime stats)
         const rawUsage = (assistantMessage as {
           usage?: {
             input_tokens?: number;
             output_tokens?: number;
             prompt_tokens?: number;
             completion_tokens?: number;
-            cache_read_input_tokens?: number;
-            cache_creation_input_tokens?: number;
           };
-          model?: string;
         }).usage;
-        const usage = rawUsage ? {
+        const subagentUsage = rawUsage ? {
           input_tokens: rawUsage.input_tokens ?? rawUsage.prompt_tokens,
           output_tokens: rawUsage.output_tokens ?? rawUsage.completion_tokens,
-          cache_read_input_tokens: rawUsage.cache_read_input_tokens,
-          cache_creation_input_tokens: rawUsage.cache_creation_input_tokens,
         } : undefined;
-        const model = (assistantMessage as { model?: string }).model;
 
-        // Accumulate usage for this turn (only for top-level assistant messages)
-        if (usage && !sdkMessage.parent_tool_use_id) {
-          currentTurnUsage.inputTokens += usage.input_tokens ?? 0;
-          currentTurnUsage.outputTokens += usage.output_tokens ?? 0;
-          currentTurnUsage.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-          currentTurnUsage.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
-          if (model) {
-            currentTurnUsage.model = model;
-          }
-          if (isDebugMode) {
-            console.log(`[agent] Token usage accumulated: input=${usage.input_tokens}, output=${usage.output_tokens}, model=${model}`);
-          }
-        } else if (!sdkMessage.parent_tool_use_id && isDebugMode) {
-          // Debug: log when assistant message has no usage data
-          console.log(`[agent] Assistant message without usage data:`, JSON.stringify(assistantMessage).slice(0, 200));
-        }
         if (sdkMessage.parent_tool_use_id && assistantMessage.content) {
           for (const block of assistantMessage.content) {
             if (
@@ -2705,7 +2688,7 @@ async function startStreamingSession(): Promise<void> {
               broadcast('chat:subagent-tool-use', {
                 parentToolUseId: sdkMessage.parent_tool_use_id,
                 tool: payload,
-                usage: usage ? { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens } : undefined
+                usage: subagentUsage
               });
               handleSubagentToolUseStart(sdkMessage.parent_tool_use_id, payload);
             }
@@ -2790,6 +2773,84 @@ async function startStreamingSession(): Promise<void> {
           }
         }
       } else if (sdkMessage.type === 'result') {
+        // Extract token usage from result message
+        // SDK result contains modelUsage (per-model stats) and/or usage (aggregate)
+        // This is the authoritative source for token statistics
+        const resultMessage = sdkMessage as {
+          type: 'result';
+          usage?: {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+          modelUsage?: Record<string, {
+            inputTokens?: number;
+            outputTokens?: number;
+            cacheReadInputTokens?: number;
+            cacheCreationInputTokens?: number;
+          }>;
+        };
+
+        // Prefer modelUsage (per-model breakdown), fallback to aggregate usage
+        if (resultMessage.modelUsage) {
+          let totalInput = 0;
+          let totalOutput = 0;
+          let totalCacheRead = 0;
+          let totalCacheCreation = 0;
+          let primaryModel: string | undefined;
+          let maxModelTokens = 0;
+          const modelUsageMap: Record<string, ModelUsageEntry> = {};
+
+          for (const [model, stats] of Object.entries(resultMessage.modelUsage)) {
+            const modelInput = stats.inputTokens ?? 0;
+            const modelOutput = stats.outputTokens ?? 0;
+            const modelCacheRead = stats.cacheReadInputTokens ?? 0;
+            const modelCacheCreation = stats.cacheCreationInputTokens ?? 0;
+
+            totalInput += modelInput;
+            totalOutput += modelOutput;
+            totalCacheRead += modelCacheRead;
+            totalCacheCreation += modelCacheCreation;
+
+            // Save per-model breakdown
+            modelUsageMap[model] = {
+              inputTokens: modelInput,
+              outputTokens: modelOutput,
+              cacheReadTokens: modelCacheRead || undefined,
+              cacheCreationTokens: modelCacheCreation || undefined,
+            };
+
+            // Track primary model (highest token usage)
+            const modelTotal = modelInput + modelOutput;
+            if (modelTotal > maxModelTokens) {
+              maxModelTokens = modelTotal;
+              primaryModel = model;
+            }
+          }
+
+          currentTurnUsage.inputTokens = totalInput;
+          currentTurnUsage.outputTokens = totalOutput;
+          currentTurnUsage.cacheReadTokens = totalCacheRead;
+          currentTurnUsage.cacheCreationTokens = totalCacheCreation;
+          currentTurnUsage.model = primaryModel;
+          currentTurnUsage.modelUsage = modelUsageMap;
+
+          if (isDebugMode) {
+            console.log(`[agent] Token usage from result.modelUsage: input=${totalInput}, output=${totalOutput}, models=${Object.keys(modelUsageMap).join(', ')}`);
+          }
+        } else if (resultMessage.usage) {
+          currentTurnUsage.inputTokens = resultMessage.usage.input_tokens ?? 0;
+          currentTurnUsage.outputTokens = resultMessage.usage.output_tokens ?? 0;
+          currentTurnUsage.cacheReadTokens = resultMessage.usage.cache_read_input_tokens ?? 0;
+          currentTurnUsage.cacheCreationTokens = resultMessage.usage.cache_creation_input_tokens ?? 0;
+          if (isDebugMode) {
+            console.log(`[agent] Token usage from result.usage: input=${currentTurnUsage.inputTokens}, output=${currentTurnUsage.outputTokens}`);
+          }
+        } else {
+          console.warn('[agent] Result message has no usage data, token statistics may be incomplete');
+        }
+
         console.log('[agent][sdk] Broadcasting chat:message-complete');
         broadcast('chat:message-complete', null);
         handleMessageComplete();
