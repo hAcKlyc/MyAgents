@@ -27,13 +27,6 @@ import { REACT_LOG_EVENT } from '@/utils/frontendLogger';
 import { getTabServerUrl, proxyFetch, stopTabSidecar, isTauri } from '@/api/tauriClient';
 import type { PermissionMode } from '@/config/types';
 
-// Chunk throttling constants for streaming performance optimization
-// Defined outside component to avoid recreation on each render
-// Note: Keep interval short (16ms ≈ 1 frame at 60fps) to maintain responsiveness
-// The main benefit is batching rapid successive chunks, not adding delay
-const CHUNK_FLUSH_INTERVAL_MS = 16;  // ~1 frame at 60fps, imperceptible delay
-const CHUNK_FLUSH_SIZE_THRESHOLD = 100;  // Flush immediately if accumulated > 100 chars
-
 // File-modifying tools that should trigger workspace refresh
 // These tools can create, modify, or delete files in the workspace
 const FILE_MODIFYING_TOOLS = new Set([
@@ -216,10 +209,6 @@ export default function TabProvider({
         isImage: boolean;
     }[] | null>(null);
 
-    // Chunk throttling refs for streaming performance optimization
-    const pendingChunksRef = useRef<string>('');
-    const chunkFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
     /**
      * Reset session for "新对话" functionality
      * This synchronizes frontend AND backend state:
@@ -236,12 +225,6 @@ export default function TabProvider({
         seenIdsRef.current.clear();
         isNewSessionRef.current = true;
         isStreamingRef.current = false;
-        // Clear any pending chunks and timer
-        pendingChunksRef.current = '';
-        if (chunkFlushTimerRef.current) {
-            clearTimeout(chunkFlushTimerRef.current);
-            chunkFlushTimerRef.current = null;
-        }
         setIsLoading(false);
         setSessionState('idle');  // Reset session state for new conversation
         setSystemStatus(null);
@@ -369,55 +352,6 @@ export default function TabProvider({
             return [...prev.slice(0, -1), { ...last, content: updatedContent }];
         });
     }, []);
-
-    /**
-     * Flush accumulated text chunks to state.
-     * This batches multiple rapid chunks into single state update,
-     * reducing React re-renders while maintaining smooth visual streaming.
-     */
-    const flushPendingChunks = useCallback(() => {
-        const chunks = pendingChunksRef.current;
-        if (!chunks) return;
-
-        pendingChunksRef.current = '';
-
-        // Clear any pending timer
-        if (chunkFlushTimerRef.current) {
-            clearTimeout(chunkFlushTimerRef.current);
-            chunkFlushTimerRef.current = null;
-        }
-
-        setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'assistant' && isStreamingRef.current) {
-                if (typeof last.content === 'string') {
-                    return [...prev.slice(0, -1), { ...last, content: last.content + chunks }];
-                }
-                const contentArray = last.content;
-                const lastBlock = contentArray[contentArray.length - 1];
-                if (lastBlock?.type === 'text') {
-                    return [...prev.slice(0, -1), {
-                        ...last,
-                        content: [...contentArray.slice(0, -1), { type: 'text', text: (lastBlock.text || '') + chunks }]
-                    }];
-                }
-                return [...prev.slice(0, -1), {
-                    ...last,
-                    content: [...contentArray, { type: 'text', text: chunks }]
-                }];
-            }
-            // First chunk - create new assistant message
-            isStreamingRef.current = true;
-            setIsLoading(true);
-            return [...prev, {
-                id: Date.now().toString(),
-                role: 'assistant',
-                content: chunks,
-                timestamp: new Date()
-            }];
-        });
-    }, []);
-
     // Handle SSE events
     const handleSseEvent = useCallback((eventName: string, data: unknown) => {
         switch (eventName) {
@@ -506,25 +440,38 @@ export default function TabProvider({
                     break;
                 }
 
-                // Throttle chunk updates: accumulate chunks and flush at intervals
-                // This reduces React re-renders while maintaining smooth visual streaming
+                // Directly update message state - React.memo on Message component
+                // ensures only the streaming message re-renders, not history
                 const chunk = data as string;
-                pendingChunksRef.current += chunk;
-
-                // Flush immediately if accumulated enough
-                if (pendingChunksRef.current.length >= CHUNK_FLUSH_SIZE_THRESHOLD) {
-                    flushPendingChunks();
-                } else {
-                    // Reset timer on each chunk to ensure flush happens shortly after last chunk
-                    // This prevents stale timers from causing delays when chunks arrive unevenly
-                    if (chunkFlushTimerRef.current) {
-                        clearTimeout(chunkFlushTimerRef.current);
+                setMessages(prev => {
+                    const last = prev[prev.length - 1];
+                    if (last?.role === 'assistant' && isStreamingRef.current) {
+                        if (typeof last.content === 'string') {
+                            return [...prev.slice(0, -1), { ...last, content: last.content + chunk }];
+                        }
+                        const contentArray = last.content;
+                        const lastBlock = contentArray[contentArray.length - 1];
+                        if (lastBlock?.type === 'text') {
+                            return [...prev.slice(0, -1), {
+                                ...last,
+                                content: [...contentArray.slice(0, -1), { type: 'text', text: (lastBlock.text || '') + chunk }]
+                            }];
+                        }
+                        return [...prev.slice(0, -1), {
+                            ...last,
+                            content: [...contentArray, { type: 'text', text: chunk }]
+                        }];
                     }
-                    chunkFlushTimerRef.current = setTimeout(() => {
-                        chunkFlushTimerRef.current = null;
-                        flushPendingChunks();
-                    }, CHUNK_FLUSH_INTERVAL_MS);
-                }
+                    // First chunk - create new assistant message
+                    isStreamingRef.current = true;
+                    setIsLoading(true);
+                    return [...prev, {
+                        id: Date.now().toString(),
+                        role: 'assistant',
+                        content: chunk,
+                        timestamp: new Date()
+                    }];
+                });
                 break;
             }
 
@@ -726,8 +673,6 @@ export default function TabProvider({
 
             case 'chat:message-complete': {
                 console.log(`[TabProvider ${tabId}] message-complete received`);
-                // Flush any remaining accumulated chunks before completing
-                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI, bypassing React batching
                 // This prevents UI from getting stuck in loading state during rapid event streams
@@ -745,8 +690,6 @@ export default function TabProvider({
 
             case 'chat:message-stopped': {
                 console.log(`[TabProvider ${tabId}] message-stopped received`);
-                // Flush any remaining accumulated chunks before stopping
-                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI
                 flushSync(() => {
@@ -766,8 +709,6 @@ export default function TabProvider({
 
             case 'chat:message-error': {
                 console.log(`[TabProvider ${tabId}] message-error received`);
-                // Flush any remaining accumulated chunks before error
-                flushPendingChunks();
                 isStreamingRef.current = false;
                 // Use flushSync to immediately update UI
                 flushSync(() => {
@@ -936,7 +877,7 @@ export default function TabProvider({
                 }
             }
         }
-    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished, flushPendingChunks]);
+    }, [appendLog, appendUnifiedLog, tabId, markIncompleteBlocksAsFinished]);
 
     // Connect SSE
     const connectSse = useCallback(async () => {
