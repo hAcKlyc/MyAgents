@@ -142,7 +142,9 @@ export default function MonacoEditor({
         wordWrap: 'on' as const,
         wrappingStrategy: 'advanced' as const,
         fontSize: 13,
-        fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+        // Use expanded font stack for Chinese character support in comments
+        // Note: Monaco doesn't support CSS variables, so we inline the --font-code equivalent
+        fontFamily: "ui-monospace, 'SF Mono', 'Cascadia Code', 'Consolas', 'Monaco', 'Fira Code', 'PingFang SC', 'Microsoft YaHei', monospace",
         tabSize: 2,
         automaticLayout: true,
         padding: { top: 16, bottom: 16 },

@@ -113,7 +113,7 @@ export default function FilePreviewModal({
                     background: 'transparent',
                     fontSize: '13px',
                     lineHeight: '1.6',
-                    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+                    fontFamily: 'var(--font-code)',
                 }}
                 codeTagProps={{
                     style: {
@@ -187,9 +187,10 @@ export default function FilePreviewModal({
     // Render preview content based on file type
     const renderPreviewContent = () => {
         // Show loading spinner while fetching or while content is preparing to render
+        // Use same background as content area to avoid color flash during transition
         if (isLoading || !isContentReady) {
             return (
-                <div className="flex h-full items-center justify-center text-[var(--ink-muted)]">
+                <div className="flex h-full items-center justify-center bg-[var(--paper-reading)] text-[var(--ink-muted)]">
                     <Loader2 className="h-5 w-5 animate-spin" />
                 </div>
             );
