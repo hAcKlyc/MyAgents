@@ -20,11 +20,12 @@ import {
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Tree } from 'react-arborist';
 
-import { apiFetch } from '@/api/apiFetch';
 import { useTabState } from '@/context/TabContext';
+import { getTabServerUrl, proxyFetch, isTauri } from '@/api/tauriClient';
 import type { DirectoryTreeNode, DirectoryTree, ExpandDirectoryResult } from '../../shared/dir-types';
 
 import { useImagePreview } from '@/context/ImagePreviewContext';
+import { useToast } from '@/components/Toast';
 import { type Provider } from '@/config/types';
 import { isDebugMode } from '@/utils/debug';
 
@@ -98,7 +99,12 @@ const IMAGE_EXTENSIONS = new Set([
 
 // Delay for single-click selection to allow double-click detection
 // Without this delay, React re-render from setSelectedNodes breaks onDoubleClick
-const SINGLE_CLICK_DELAY_MS = 200;
+const SINGLE_CLICK_DELAY_MS = 250;
+
+// Double-click detection threshold (ms) - must be greater than SINGLE_CLICK_DELAY_MS
+// We use custom double-click detection because React's onDoubleClick is unreliable
+// when state updates cause re-renders between clicks
+const DOUBLE_CLICK_THRESHOLD_MS = 400;
 
 function getFileExtension(name: string): string {
   const parts = name.split('.');
@@ -202,6 +208,8 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   const [selectedNodes, setSelectedNodes] = useState<DirectoryTreeNode[]>([]);
   const lastClickedNodeRef = useRef<DirectoryTreeNode | null>(null); // Anchor for shift-select
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Delay single-click to allow double-click
+  // Custom double-click detection (more reliable than React's onDoubleClick during state updates)
+  const lastClickRef = useRef<{ path: string; time: number } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -231,8 +239,11 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
   // Image preview context
   const { openPreview } = useImagePreview();
 
-  // Get Tab-scoped API functions
-  const { apiGet, apiPost } = useTabState();
+  // Toast for notifications
+  const toast = useToast();
+
+  // Get Tab-scoped API functions and tabId
+  const { apiGet, apiPost, tabId } = useTabState();
 
   // Narrow mode collapse state (for responsive layout)
   const [isNarrowMode, setIsNarrowMode] = useState(false);
@@ -1136,14 +1147,71 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                   const isDropTarget = isDir && dropTargetPath === data.path && isExternalDrop;
                   const isSelected = isNodeSelected(data);
 
-                  // Unified selection handler with multi-select support
+                  // Helper to execute file preview (extracted for reuse)
+                  const executeFilePreview = async () => {
+                    // Select the file immediately
+                    setSelectedNodes([data]);
+                    lastClickedNodeRef.current = data;
+
+                    // Preview based on file type
+                    if (isImageFile(data.name)) {
+                      try {
+                        // Use Tab-scoped fetch to ensure correct Sidecar in multi-Tab scenarios
+                        const endpoint = `/agent/download?path=${encodeURIComponent(data.path)}`;
+                        let response: Response;
+                        if (isTauri()) {
+                          const baseUrl = await getTabServerUrl(tabId);
+                          response = await proxyFetch(`${baseUrl}${endpoint}`);
+                        } else {
+                          response = await fetch(endpoint);
+                        }
+                        const blob = await response.blob();
+                        const dataUrl = await new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(reader.result as string);
+                          reader.readAsDataURL(blob);
+                        });
+                        openPreview(dataUrl, data.name);
+                      } catch (err) {
+                        console.error('[DirectoryPanel] Failed to load image:', err);
+                        toast.error('图片加载失败');
+                      }
+                    } else if (isPreviewable(data.name)) {
+                      void handlePreview(data);
+                    } else {
+                      // File type not supported for preview
+                      toast.info('暂不支持预览此文件类型，可右键进入文件夹打开');
+                    }
+                  };
+
+                  // Unified click handler with custom double-click detection
+                  // We implement our own double-click detection because React's onDoubleClick
+                  // is unreliable when state updates cause re-renders between clicks
                   const handleRowClick = (e: React.MouseEvent) => {
-                    // Clear any pending click timer first
+                    const now = Date.now();
+                    const lastClick = lastClickRef.current;
+
+                    // Check if this is a double-click (same path, within threshold)
+                    const isDoubleClick = lastClick &&
+                      lastClick.path === data.path &&
+                      (now - lastClick.time) < DOUBLE_CLICK_THRESHOLD_MS;
+
+                    // Update last click info for next click detection
+                    lastClickRef.current = { path: data.path, time: now };
+
+                    // Clear any pending single-click timer
                     if (clickTimerRef.current) {
                       clearTimeout(clickTimerRef.current);
                       clickTimerRef.current = null;
                     }
 
+                    // Handle double-click on files (not directories)
+                    if (isDoubleClick && !isDir) {
+                      void executeFilePreview();
+                      return;
+                    }
+
+                    // Handle single-click (selection logic)
                     const isMeta = e.metaKey || e.ctrlKey;
                     const isShift = e.shiftKey;
 
@@ -1165,7 +1233,7 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                         setSelectedNodes(flattenedNodes.slice(from, to + 1));
                       }
                     } else if (isSelected && selectedNodes.length === 1) {
-                      // Already selected as single item - no state change needed, skip delay
+                      // Already selected as single item - no state change needed
                       lastClickedNodeRef.current = data;
                     } else {
                       // Normal click: delay selection to allow double-click detection
@@ -1185,41 +1253,6 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                     }
                   };
 
-                  // Double-click handler for file preview
-                  const handleRowDoubleClick = async () => {
-                    // Cancel any pending single-click selection
-                    if (clickTimerRef.current) {
-                      clearTimeout(clickTimerRef.current);
-                      clickTimerRef.current = null;
-                    }
-
-                    if (isDir) return;
-
-                    // Select the file immediately
-                    if (!isSelected) {
-                      setSelectedNodes([data]);
-                      lastClickedNodeRef.current = data;
-                    }
-
-                    // Preview based on file type
-                    if (isImageFile(data.name)) {
-                      try {
-                        const response = await apiFetch(`/agent/download?path=${encodeURIComponent(data.path)}&agentDir=${encodeURIComponent(agentDir)}`);
-                        const blob = await response.blob();
-                        const dataUrl = await new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = () => resolve(reader.result as string);
-                          reader.readAsDataURL(blob);
-                        });
-                        openPreview(dataUrl, data.name);
-                      } catch (err) {
-                        console.error('[DirectoryPanel] Failed to load image:', err);
-                      }
-                    } else if (isPreviewable(data.name)) {
-                      void handlePreview(data);
-                    }
-                  };
-
                   return (
                     <div
                       style={style}
@@ -1232,7 +1265,6 @@ const DirectoryPanel = forwardRef<DirectoryPanelHandle, DirectoryPanelProps>(fun
                             : 'text-[var(--ink-muted)] hover:bg-[var(--paper-contrast)] hover:text-[var(--ink)]'
                         }`}
                       onClick={handleRowClick}
-                      onDoubleClick={handleRowDoubleClick}
                       onContextMenu={(e) => handleContextMenu(e, data)}
                       onDragEnter={(e) => handleRowDragEnter(e, data.path, isDir)}
                       onDragLeave={handleRowDragLeave}
