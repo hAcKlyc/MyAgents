@@ -1,6 +1,7 @@
 import { AlertTriangle, ArrowLeft, History, Plus, PanelRightOpen } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { track } from '@/analytics';
 import DirectoryPanel, { type DirectoryPanelHandle } from '@/components/DirectoryPanel';
 import DropZoneOverlay from '@/components/DropZoneOverlay';
 import MessageList from '@/components/MessageList';
@@ -335,6 +336,35 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
     return () => window.removeEventListener(CUSTOM_EVENTS.SKILL_COPIED_TO_PROJECT, handleSkillCopied);
   }, []);
 
+  // Handle provider change with analytics tracking
+  const handleProviderChange = useCallback((providerId: string) => {
+    // Skip if selecting the same provider
+    if (currentProject?.providerId === providerId) {
+      return;
+    }
+
+    // Track provider_switch event
+    track('provider_switch', { provider_id: providerId });
+
+    // Update project's provider (via useConfig)
+    if (currentProject) {
+      void updateProject({ ...currentProject, providerId });
+    }
+  }, [currentProject, updateProject]);
+
+  // Handle model change with analytics tracking
+  const handleModelChange = useCallback((model: string) => {
+    // Skip if selecting the same model
+    if (selectedModel === model) {
+      return;
+    }
+
+    // Track model_switch event
+    track('model_switch', { model });
+
+    setSelectedModel(model);
+  }, [selectedModel]);
+
   // PERFORMANCE: text is now passed from SimpleChatInput (which manages its own state)
   // This avoids re-rendering Chat on every keystroke
   const handleSendMessage = async (text: string, images?: ImageAttachment[]) => {
@@ -456,6 +486,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
                 agentDir={agentDir}
                 currentSessionId={sessionId}
                 onSelectSession={(id) => {
+                  track('session_switch');
                   void loadSession(id);
                 }}
                 isOpen={showHistory}
@@ -567,14 +598,9 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
             agentDir={agentDir}
             provider={currentProvider}
             providers={providers}
-            onProviderChange={(providerId) => {
-              // Update project's provider (via useConfig)
-              if (currentProject) {
-                void updateProject({ ...currentProject, providerId });
-              }
-            }}
+            onProviderChange={handleProviderChange}
             selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            onModelChange={handleModelChange}
             permissionMode={permissionMode}
             onPermissionModeChange={setPermissionMode}
             apiKeys={apiKeys}
@@ -602,12 +628,7 @@ export default function Chat({ onBack, onNewSession }: ChatProps) {
             agentDir={agentDir}
             provider={currentProvider}
             providers={providers}
-            onProviderChange={(providerId) => {
-              // Update project's provider (via useConfig)
-              if (currentProject) {
-                void updateProject({ ...currentProject, providerId });
-              }
-            }}
+            onProviderChange={handleProviderChange}
             onCollapse={() => setShowWorkspace(false)}
             onOpenConfig={() => setShowWorkspaceConfig(true)}
             refreshTrigger={toolCompleteCount + workspaceRefreshTrigger}
