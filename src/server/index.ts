@@ -1,6 +1,7 @@
 import { appendFileSync, copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, rmSync, renameSync } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import { basename, dirname, join, relative, resolve, extname } from 'path';
+import { tmpdir } from 'os';
 import AdmZip from 'adm-zip';
 import {
   BUILTIN_SLASH_COMMANDS,
@@ -1670,23 +1671,67 @@ async function main() {
         }
       }
 
-      // GET /api/assets/qr-code - Fetch QR code image and return as base64
-      // Downloads from CDN each time to bypass WebView CSP restrictions
+      // GET /api/assets/qr-code - Fetch QR code image with local caching
+      // Downloads from CDN on first launch and caches locally for subsequent requests
+      // Cache refreshes daily to get updated QR codes from cloud
       if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
         try {
           const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+          const CACHE_DIR = join(tmpdir(), 'myagents-cache');
+          const CACHE_FILE = join(CACHE_DIR, 'feedback_qr_code.png');
+          const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-          const response = await fetch(QR_CODE_URL, { signal: controller.signal });
-          clearTimeout(timeoutId);
+          let needsDownload = true;
 
-          if (!response.ok) {
-            return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
+          // Check if cached file exists and is fresh
+          if (existsSync(CACHE_FILE)) {
+            const stats = statSync(CACHE_FILE);
+            const age = Date.now() - stats.mtimeMs;
+            if (age < CACHE_MAX_AGE_MS) {
+              needsDownload = false;
+              console.log('[api/assets/qr-code] Using cached QR code');
+            } else {
+              console.log('[api/assets/qr-code] Cache expired, re-downloading');
+            }
+          } else {
+            console.log('[api/assets/qr-code] No cache found, downloading');
           }
-          const arrayBuffer = await response.arrayBuffer();
-          const base64 = Buffer.from(arrayBuffer).toString('base64');
-          const mimeType = response.headers.get('content-type') || 'image/png';
+
+          // Download if needed
+          if (needsDownload) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+            const response = await fetch(QR_CODE_URL, { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+              // If download fails but cache exists, use stale cache
+              if (existsSync(CACHE_FILE)) {
+                console.warn('[api/assets/qr-code] Download failed, using stale cache');
+              } else {
+                return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
+              }
+            } else {
+              // Save to cache
+              const arrayBuffer = await response.arrayBuffer();
+              const buffer = Buffer.from(arrayBuffer);
+
+              // Ensure cache directory exists
+              if (!existsSync(CACHE_DIR)) {
+                mkdirSync(CACHE_DIR, { recursive: true });
+              }
+
+              writeFileSync(CACHE_FILE, buffer);
+              console.log('[api/assets/qr-code] QR code cached successfully');
+            }
+          }
+
+          // Read from cache and return as base64
+          const imageBuffer = readFileSync(CACHE_FILE);
+          const base64 = imageBuffer.toString('base64');
+          const mimeType = 'image/png';
+
           return jsonResponse({
             success: true,
             dataUrl: `data:${mimeType};base64,${base64}`

@@ -240,29 +240,40 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
         getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }, []);
 
-    // QR code data URL for user community section (fetched via backend to bypass CSP)
+    // QR code URL for user community section
+    // Tauri: Downloads on first launch and caches locally, CDN in browser
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
 
-    // Fetch QR code when entering about section
+    // Load QR code when entering about section
     useEffect(() => {
         if (activeSection !== 'about') return;
 
         let cancelled = false;
-        setQrCodeDataUrl(null);
 
-        apiGetJson<{ success: boolean; dataUrl?: string }>('/api/assets/qr-code')
-            .then(result => {
-                if (cancelled) return;
-                if (result.success && result.dataUrl) {
-                    setQrCodeDataUrl(result.dataUrl);
-                }
-            })
-            .catch(() => {
-                // Silently fail - QR code section will remain hidden
-            });
+        if (isTauriEnvironment()) {
+            // Tauri mode: Call backend API to download & cache QR code
+            // The API downloads from CDN on first call, then serves from cache
+            apiGetJson<{ success: boolean; dataUrl?: string }>('/api/assets/qr-code')
+                .then(result => {
+                    if (cancelled) return;
+                    if (result.success && result.dataUrl) {
+                        setQrCodeDataUrl(result.dataUrl);
+                    }
+                })
+                .catch((error) => {
+                    console.error('[Settings] Failed to load QR code:', error);
+                    // Silently fail - QR code section will remain hidden
+                });
+        } else {
+            // Browser mode: Direct CDN URL
+            setQrCodeDataUrl('https://download.myagents.io/assets/feedback_qr_code.png');
+        }
 
         return () => {
             cancelled = true;
+            if (!isTauriEnvironment()) {
+                setQrCodeDataUrl(null);
+            }
         };
     }, [activeSection]);
 
