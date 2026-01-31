@@ -19,12 +19,22 @@ const FLUSH_DELAY_MS = 500;     // 防抖延迟
 const MAX_QUEUE_SIZE = 50;      // 队列满发送阈值
 const MAX_BATCH_SIZE = 100;     // 单次最大发送数量
 
+// 重试配置
+const MAX_RETRY_COUNT = 5;           // 最大重试次数
+const RETRY_BASE_DELAY_MS = 1000;    // 重试基础延迟（指数退避）
+const MAX_FAILED_EVENTS = 500;       // 失败事件最大保留数量（防止内存泄漏）
+
 // 节流配置
 const THROTTLE_WINDOW_MS = 60_000;  // 滑动窗口时长：1 分钟
 const MAX_EVENTS_PER_WINDOW = 200;  // 窗口内最大事件数
 
 // 滑动窗口计数器：存储事件时间戳
 const eventTimestamps: number[] = [];
+
+// 重试状态
+let retryCount = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let isRetrying = false;
 
 /**
  * 检查是否超过节流限制
@@ -79,10 +89,15 @@ export function enqueue(event: TrackEvent): void {
  * 立即发送队列中的事件
  */
 export async function flush(): Promise<void> {
-  // 清除定时器
+  // 清除防抖定时器
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
+  }
+
+  // 如果正在重试中，跳过（避免并发）
+  if (isRetrying) {
+    return;
   }
 
   // 队列为空则跳过
@@ -96,10 +111,50 @@ export async function flush(): Promise<void> {
   // 发送请求
   try {
     await sendEvents(events);
+    // 成功：重置重试计数
+    retryCount = 0;
   } catch (error) {
-    // 静默失败，仅在调试模式下输出
     console.debug('[Analytics] Failed to send events:', error);
+
+    // 失败：将事件放回队列头部
+    if (retryCount < MAX_RETRY_COUNT) {
+      // 放回队列头部（限制总数防止内存泄漏）
+      const eventsToRestore = eventQueue.length + events.length > MAX_FAILED_EVENTS
+        ? events.slice(0, MAX_FAILED_EVENTS - eventQueue.length)
+        : events;
+
+      if (eventsToRestore.length > 0) {
+        eventQueue.unshift(...eventsToRestore);
+      }
+
+      // 指数退避重试
+      retryCount++;
+      const delay = RETRY_BASE_DELAY_MS * Math.pow(2, retryCount - 1);
+      console.debug(`[Analytics] Scheduling retry ${retryCount}/${MAX_RETRY_COUNT} in ${delay}ms`);
+
+      scheduleRetry(delay);
+    } else {
+      // 超过最大重试次数，丢弃事件
+      console.debug(`[Analytics] Max retries (${MAX_RETRY_COUNT}) exceeded, dropping ${events.length} events`);
+      retryCount = 0;
+    }
   }
+}
+
+/**
+ * 调度重试
+ */
+function scheduleRetry(delay: number): void {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+  }
+
+  isRetrying = true;
+  retryTimer = setTimeout(async () => {
+    isRetrying = false;
+    retryTimer = null;
+    await flush();
+  }, delay);
 }
 
 /**
