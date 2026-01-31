@@ -77,21 +77,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 并发下载安全性（文件锁 + 原子写入）
 - **NO_PROXY 列表不完整**
   - 扩展到 6 个 localhost 变体：`localhost`, `localhost.localdomain`, `127.0.0.1`, `127.0.0.0/8`, `::1`, `[::1]`
+- **Code Review 修复（Critical & High）**
+  - test_connection.ps1 变量未定义错误
+  - 端口验证逻辑（移除 u16 范围检查警告）
+  - Windows 进程清理竞态条件（验证循环替代硬编码 sleep）
+  - CSP 验证逻辑增强（检查 fetch-src 包含 http://ipc.localhost）
+- **Code Review 修复（Medium & Low）**
+  - SSE 客户端构建错误处理改进
+  - Sidecar 代理错误处理细化（error/debug 日志分级）
+  - build_windows.ps1 进程清理验证与目录清理容错
+  - rebuild_clean.ps1 卸载失败警告
+  - build_dev_win.ps1 同步应用改进逻辑
+- **Windows 安装器升级体验**
+  - tauri.conf.json 添加 `allowDowngrades: true`
+  - 支持直接覆盖安装，无需先卸载旧版本
 
 ### Technical
 - **代码质量提升**
   - 消除 40 行重复代理配置代码
   - 添加代理配置单元测试（5 个测试用例）
-  - 改进错误处理和日志记录
-  - 详细的代码注释和文档引用
+  - 改进错误处理和日志记录（所有模块添加 `[module-name]` 前缀）
+  - 详细的代码注释和文档引用（proxy_config.rs 添加模块级文档）
+  - 日志级别优化（连接已存在、正常关闭等改为 debug 级别）
+  - 超时常量文档化（记录设计意图和未来改进方向）
 - **文档完善**
   - `specs/tech_docs/proxy_config.md` - 代理配置技术文档
   - `specs/tech_docs/build_troubleshooting.md` - 构建问题排查
   - `specs/tech_docs/windows_platform_guide.md` - Windows 平台指南
+  - `specs/guides/windows_build_guide.md` 添加升级体验问题排查
 - **构建脚本健壮性**
-  - CSP 配置验证（而非覆盖）
-  - Resources 缓存清理
-  - 进程清理避免文件锁定
+  - CSP 配置验证（而非覆盖）+ fetch-src 指令专项检查
+  - Resources 缓存清理 + 清理失败容错处理
+  - 进程清理验证循环（最多等待 1-2 秒）+ 记录耗时
+  - 目录清理失败改为警告而非中断构建
+  - 卸载失败时提示手动操作而非抛出异常
 
 **详见**: [specs/prd/prd_0.1.7.md](./specs/prd/prd_0.1.7.md)
 
