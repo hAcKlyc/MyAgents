@@ -52,6 +52,9 @@ export async function initAnalytics(): Promise<void> {
   initialized = true;
 }
 
+// 序列化值的最大长度（防止产生过大字符串）
+const MAX_SERIALIZED_VALUE_LENGTH = 500;
+
 /**
  * 清理参数对象，只保留可序列化的简单值
  */
@@ -62,9 +65,12 @@ function sanitizeParams(params: EventParams): EventParams {
     if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
       result[key] = value;
     } else if (typeof value === 'object') {
-      // 对象类型尝试转为字符串，忽略失败
+      // 对象类型尝试转为字符串，限制长度防止产生过大字符串
       try {
-        result[key] = JSON.stringify(value);
+        const str = JSON.stringify(value);
+        result[key] = str.length > MAX_SERIALIZED_VALUE_LENGTH
+          ? '[Object:truncated]'
+          : str;
       } catch {
         result[key] = '[Object]';
       }
@@ -78,13 +84,11 @@ function sanitizeParams(params: EventParams): EventParams {
  * 追踪事件
  * @param event - 事件名称
  * @param params - 事件参数（可选）
+ *
+ * 注意：启用状态检查由 enqueue() 统一处理（使用缓存版本），
+ * 此处不再重复检查，避免每次调用都读取环境变量。
  */
 export function track(event: EventName | string, params: EventParams = {}): void {
-  // 检查是否启用
-  if (!isAnalyticsEnabled()) {
-    return;
-  }
-
   // 清理参数，确保可序列化
   const safeParams = sanitizeParams(params);
 
@@ -98,7 +102,7 @@ export function track(event: EventName | string, params: EventParams = {}): void
     client_timestamp: new Date().toISOString(),
   };
 
-  // 加入队列
+  // 加入队列（enqueue 内部使用缓存检查启用状态）
   enqueue(trackEvent);
 }
 

@@ -310,7 +310,7 @@ export function flushSync(): void {
         'Content-Type': 'application/json',
         'X-API-Key': apiKey,
       },
-      body: JSON.stringify({ events }),
+      body: safeStringify({ events }),
       keepalive: true,
     }).catch(() => {
       // 静默失败
