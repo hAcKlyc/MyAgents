@@ -123,21 +123,26 @@ export default function App() {
 
   // Close tab with confirmation if generating
   const closeTabWithConfirmation = useCallback((tabId: string) => {
-    // Use setTabs to get the latest tab state (avoid stale closure)
-    setTabs((currentTabs) => {
-      const tab = currentTabs.find(t => t.id === tabId);
+    // Step 1: Read current tab state (outside setState to avoid side effects in updater)
+    const tab = tabs.find(t => t.id === tabId);
 
-      // Check if generating and ask for confirmation
-      if (tab?.isGenerating) {
-        const confirmed = window.confirm('内容生成中，确认要关闭么？');
-        if (!confirmed) {
-          // User cancelled - don't close the tab
-          return currentTabs;
-        }
+    // Step 2: Execute side effect (window.confirm) outside setState
+    if (tab?.isGenerating) {
+      const confirmed = window.confirm('内容生成中，确认要关闭么？');
+      if (!confirmed) {
+        // User cancelled - abort the close operation
+        return;
       }
+    }
+
+    // Step 3: Pure function state update
+    setTabs((currentTabs) => {
+      // Double-check: tab might have been removed during confirmation
+      const latestTab = currentTabs.find(t => t.id === tabId);
+      if (!latestTab) return currentTabs;
 
       // Stop this Tab's Sidecar when closing (only if it has an agentDir)
-      if (tab?.agentDir) {
+      if (latestTab.agentDir) {
         void stopTabSidecar(tabId);
       }
 
@@ -158,7 +163,7 @@ export default function App() {
 
       return newTabs;
     });
-  }, [activeTabId]);
+  }, [tabs, activeTabId]);
 
   // Close current active tab (for Cmd+W)
   const closeCurrentTab = useCallback(() => {
