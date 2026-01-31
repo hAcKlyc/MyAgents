@@ -3,6 +3,7 @@
 // Supports multiple connections (one per Tab)
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
@@ -162,10 +163,12 @@ async fn connect_sse(
     // CRITICAL: Enable tcp_nodelay to disable Nagle's algorithm for immediate packet transmission
     // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
+    // Disable connection pooling to avoid stale connection issues on Windows
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
         .tcp_nodelay(true)
         .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
+        .pool_max_idle_per_host(0)  // Disable connection pooling
         .build()?;
     
     let response = client
@@ -326,10 +329,12 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     // Build client with configurable timeout
     // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
+    // Disable connection pooling to avoid stale connection issues on Windows
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
         .tcp_nodelay(true)
         .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
+        .pool_max_idle_per_host(0)  // Disable connection pooling - create fresh connection each time
         .build()
         .map_err(|e| {
             let err = format!("[proxy] Failed to create client: {}", e);
@@ -365,9 +370,29 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
 
     logger::info(&app, format!("[proxy] {} {} - Sending request...", request.method, request.url));
     
-    // Send request
+    // Send request with detailed error logging
     let response = req_builder.send().await.map_err(|e| {
-        let err = format!("[proxy] Request failed: {}", e);
+        let mut err = format!("[proxy] Request failed: {}", e);
+
+        // Add detailed error information for debugging
+        if e.is_connect() {
+            err.push_str(" (Connection error - cannot establish connection)");
+        }
+        if e.is_timeout() {
+            err.push_str(" (Timeout error - request took too long)");
+        }
+        if e.is_request() {
+            err.push_str(" (Request error - invalid request)");
+        }
+        if e.is_body() {
+            err.push_str(" (Body error - failed to read response body)");
+        }
+
+        // Try to get the source error
+        if let Some(source) = e.source() {
+            err.push_str(&format!(" | Source: {}", source));
+        }
+
         logger::error(&app, &err);
         e.to_string()
     })?;
