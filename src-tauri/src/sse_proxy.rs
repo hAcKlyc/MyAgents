@@ -161,9 +161,11 @@ async fn connect_sse(
     // Backend sends heartbeat every 15s, so 60s read_timeout gives 4x margin
     // CRITICAL: Enable tcp_nodelay to disable Nagle's algorithm for immediate packet transmission
     // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
+    // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
         .tcp_nodelay(true)
+        .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
         .build()?;
     
     let response = client
@@ -323,9 +325,11 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     
     // Build client with configurable timeout
     // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
+    // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
         .tcp_nodelay(true)
+        .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
         .build()
         .map_err(|e| {
             let err = format!("[proxy] Failed to create client: {}", e);
