@@ -33,7 +33,11 @@ export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: ex
     const toast = useToast();
     // Stabilize toast reference to avoid unnecessary effect re-runs
     const toastRef = useRef(toast);
-    toastRef.current = toast;
+
+    // Update ref in useEffect to comply with React rules
+    useEffect(() => {
+        toastRef.current = toast;
+    }, [toast]);
 
     const [activeTab, setActiveTab] = useState<Tab>('claude-md');
     const [detailView, setDetailView] = useState<DetailView>({ type: 'none' });

@@ -69,7 +69,7 @@ function getSubagentCallLabel(call: SubagentToolCall, maxLength = 35): string {
     case 'Edit': {
       const filePath = getSubagentStringProp(call, 'file_path');
       if (filePath) {
-        const fileName = filePath.split('/').pop() || filePath;
+        const fileName = filePath.split(/[/\\]/).pop() || filePath;
         label = `${name} ${fileName}`;
       }
       break;
@@ -354,7 +354,7 @@ export function getToolLabel(tool: ToolUseSimple): string {
       try {
         const parsed = JSON.parse(tool.inputJson);
         if (tool.name === 'Read' || tool.name === 'Write' || tool.name === 'Edit') {
-          return parsed.file_path ? `${tool.name} ${parsed.file_path.split('/').pop()}` : tool.name;
+          return parsed.file_path ? `${tool.name} ${parsed.file_path.split(/[/\\]/).pop()}` : tool.name;
         }
         if (tool.name === 'Bash') {
           return parsed.description || parsed.command ?
@@ -398,7 +398,7 @@ export function getToolLabel(tool: ToolUseSimple): string {
     case 'Edit': {
       const filePath = getStringProp(tool.parsedInput, 'file_path');
       if (filePath) {
-        const fileName = filePath.split('/').pop() || filePath;
+        const fileName = filePath.split(/[/\\]/).pop() || filePath;
         return fileName.length > 20 ? `${fileName.substring(0, 17)}...` : fileName;
       }
       return tool.name;
