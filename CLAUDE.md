@@ -1,4 +1,4 @@
-# MyAgents - Claude Agent Desktop Client
+# MyAgents - Desktop AI Agent
 
 > **开源项目** | 仓库地址：https://github.com/hAcKlyc/MyAgents | License: Apache-2.0
 >
@@ -275,6 +275,7 @@ if (isDebugMode()) console.log('[module] debug message');
 **每次 `git commit` 前必须先执行查看当前分支，确保当前分支处于开发分支内**：
 - `dev/*` 开发分支：正常提交（按 feature/fix 粒度）
 - `main` 主分支：**禁止直接提交**，必须通过合并
+- 如果无本需求相关的分支存在，则新建分支
 
 ### 合并到 main
 
