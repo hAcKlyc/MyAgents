@@ -259,7 +259,8 @@ if ($UpdateZip) {
     }
 
     $manifestJson = $manifest | ConvertTo-Json -Depth 5
-    $manifestJson | Set-Content (Join-Path $ManifestDir "windows-x86_64.json") -Encoding UTF8
+    # 使用 .NET 写入无 BOM 的 UTF-8（PowerShell 5.x 的 -Encoding UTF8 会添加 BOM，导致 JSON 解析失败）
+    [System.IO.File]::WriteAllText((Join-Path $ManifestDir "windows-x86_64.json"), $manifestJson, [System.Text.UTF8Encoding]::new($false))
 
     Write-Host "  [OK] windows-x86_64.json 已生成" -ForegroundColor Green
 
@@ -289,7 +290,8 @@ if ($NsisExe) {
     }
 
     $latestWinJson = $latestWinManifest | ConvertTo-Json -Depth 5
-    $latestWinJson | Set-Content (Join-Path $ManifestDir "latest_win.json") -Encoding UTF8
+    # 使用 .NET 写入无 BOM 的 UTF-8
+    [System.IO.File]::WriteAllText((Join-Path $ManifestDir "latest_win.json"), $latestWinJson, [System.Text.UTF8Encoding]::new($false))
 
     Write-Host "  [OK] latest_win.json 已生成" -ForegroundColor Green
 }
