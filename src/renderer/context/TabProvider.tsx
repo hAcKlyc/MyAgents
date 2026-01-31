@@ -752,17 +752,16 @@ export default function TabProvider({
                     tool_count?: number;
                     duration_ms?: number;
                 } | null;
-                if (completePayload) {
-                    track('message_complete', {
-                        model: completePayload.model,
-                        input_tokens: completePayload.input_tokens ?? 0,
-                        output_tokens: completePayload.output_tokens ?? 0,
-                        cache_read_tokens: completePayload.cache_read_tokens ?? 0,
-                        cache_creation_tokens: completePayload.cache_creation_tokens ?? 0,
-                        tool_count: completePayload.tool_count ?? 0,
-                        duration_ms: completePayload.duration_ms ?? 0,
-                    });
-                }
+                // Always track message_complete, use defaults if payload is missing
+                track('message_complete', {
+                    model: completePayload?.model,
+                    input_tokens: completePayload?.input_tokens ?? 0,
+                    output_tokens: completePayload?.output_tokens ?? 0,
+                    cache_read_tokens: completePayload?.cache_read_tokens ?? 0,
+                    cache_creation_tokens: completePayload?.cache_creation_tokens ?? 0,
+                    tool_count: completePayload?.tool_count ?? 0,
+                    duration_ms: completePayload?.duration_ms ?? 0,
+                });
                 break;
             }
 
