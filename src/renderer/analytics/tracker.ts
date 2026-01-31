@@ -5,7 +5,7 @@
 
 import { isTauriEnvironment } from '@/utils/browserMock';
 import { isAnalyticsEnabled } from './config';
-import { getDeviceId, getPlatform, getAppVersionSync, preloadAppVersion, preloadPlatform } from './device';
+import { getDeviceId, getPlatform, getAppVersionSync, preloadAppVersion, preloadPlatform, preloadDeviceId } from './device';
 import { enqueue, flush, flushSync } from './queue';
 import type { EventName, EventParams, TrackEvent } from './types';
 
@@ -21,8 +21,8 @@ export async function initAnalytics(): Promise<void> {
     return;
   }
 
-  // 并行预加载版本号和平台信息
-  await Promise.all([preloadAppVersion(), preloadPlatform()]);
+  // 并行预加载设备ID、版本号和平台信息
+  await Promise.all([preloadDeviceId(), preloadAppVersion(), preloadPlatform()]);
 
   // 注册页面卸载/隐藏事件
   if (typeof window !== 'undefined') {

@@ -38,3 +38,4 @@ tokio = { version = "1.49.0", features = ["rt", "sync", "time"] }
 chrono = "0.4"
 base64 = "0.22"
 dirs = "6.0"
+uuid = { version = "1.11", features = ["v4"] }

@@ -7,19 +7,38 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { isTauriEnvironment } from '@/utils/browserMock';
 
+// localStorage key (fallback for browser dev mode)
 const DEVICE_ID_KEY = 'myagents_device_id';
 
-// 缓存的版本号
+// 缓存值
+let cachedDeviceId: string | null = null;
 let cachedAppVersion: string | null = null;
-
-// 缓存的平台信息（异步检测结果）
 let cachedPlatform: string | null = null;
 
 /**
- * 获取或生成设备 ID
- * 使用 localStorage 持久化存储，确保同一设备 ID 不变
+ * 异步获取设备 ID（使用 Tauri Rust 命令）
+ * Tauri 环境：从 ~/.myagents/device_id 文件读取或生成
+ * 浏览器环境：使用 localStorage（开发模式 fallback）
  */
-export function getDeviceId(): string {
+async function loadDeviceIdAsync(): Promise<string> {
+  try {
+    if (isTauriEnvironment()) {
+      // 调用 Rust 命令，从文件系统读取或生成
+      const id = await invoke<string>('cmd_get_device_id');
+      return id;
+    }
+    // 浏览器开发模式：使用 localStorage
+    return getDeviceIdFromLocalStorage();
+  } catch (e) {
+    console.warn('[Analytics] Failed to load device_id from Rust:', e);
+    return getDeviceIdFromLocalStorage();
+  }
+}
+
+/**
+ * 从 localStorage 获取或生成设备 ID（浏览器 fallback）
+ */
+function getDeviceIdFromLocalStorage(): string {
   try {
     let id = localStorage.getItem(DEVICE_ID_KEY);
     if (!id) {
@@ -31,6 +50,27 @@ export function getDeviceId(): string {
     // localStorage 不可用时返回临时 ID
     return `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
+}
+
+/**
+ * 预加载设备 ID（应用启动时调用）
+ */
+export async function preloadDeviceId(): Promise<void> {
+  if (!cachedDeviceId) {
+    cachedDeviceId = await loadDeviceIdAsync();
+  }
+}
+
+/**
+ * 同步获取设备 ID（返回缓存值）
+ * 注意：必须先调用 preloadDeviceId() 才能返回正确值
+ */
+export function getDeviceId(): string {
+  // 如果缓存不存在，使用 localStorage fallback
+  if (!cachedDeviceId) {
+    cachedDeviceId = getDeviceIdFromLocalStorage();
+  }
+  return cachedDeviceId;
 }
 
 /**
