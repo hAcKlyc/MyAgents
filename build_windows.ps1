@@ -143,24 +143,51 @@ try {
     Write-Host ""
 
     # ========================================
-    # 配置生产 CSP
+    # 验证 CSP 配置（不再覆盖）
     # ========================================
-    Write-Host "[3/7] 配置生产环境 CSP..." -ForegroundColor Blue
-
-    Copy-Item $TauriConfPath "$TauriConfPath.bak" -Force
+    Write-Host "[3/7] 验证 CSP 配置..." -ForegroundColor Blue
 
     $conf = Get-Content $TauriConfPath -Raw | ConvertFrom-Json
-    $conf.app.security.csp = "default-src 'self' ipc: tauri:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: blob:;"
-    $jsonContent = $conf | ConvertTo-Json -Depth 10
-    [System.IO.File]::WriteAllText($TauriConfPath, $jsonContent, [System.Text.UTF8Encoding]::new($false))
+    $currentCsp = $conf.app.security.csp
 
-    Write-Host "  OK - CSP 已配置" -ForegroundColor Green
+    # 验证关键 CSP 指令是否存在
+    $requiredCspParts = @(
+        "http://ipc.localhost",
+        "asset:",
+        "fetch-src",
+        "https://download.myagents.io"
+    )
+
+    $missingParts = @()
+    foreach ($part in $requiredCspParts) {
+        if ($currentCsp -notlike "*$part*") {
+            $missingParts += $part
+        }
+    }
+
+    if ($missingParts.Count -gt 0) {
+        Write-Host "  警告: CSP 配置缺少以下部分:" -ForegroundColor Yellow
+        $missingParts | ForEach-Object { Write-Host "    - $_" -ForegroundColor Yellow }
+        Write-Host "  请检查 tauri.conf.json 中的 CSP 配置" -ForegroundColor Yellow
+        Write-Host ""
+        $continue = Read-Host "是否继续构建? (Y/n)"
+        if ($continue -eq "n" -or $continue -eq "N") {
+            throw "CSP 配置不完整"
+        }
+    } else {
+        Write-Host "  OK - CSP 配置完整" -ForegroundColor Green
+    }
     Write-Host ""
 
     # ========================================
-    # 清理旧构建
+    # 清理旧构建（包括缓存的 resources）
     # ========================================
     Write-Host "[准备] 清理旧构建..." -ForegroundColor Blue
+
+    # 杀死残留进程（避免文件锁定）
+    Get-Process | Where-Object { $_.ProcessName -eq "bun" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
 
     if (Test-Path "dist") {
         Remove-Item -Recurse -Force "dist"
@@ -171,7 +198,13 @@ try {
         Remove-Item -Recurse -Force $bundleDir
     }
 
-    Write-Host "  OK - 清理完成" -ForegroundColor Green
+    # CRITICAL: 清理 resources 目录确保 tauri.conf.json 等配置被重新读取
+    $resourcesDir = "src-tauri\target\x86_64-pc-windows-msvc\release\resources"
+    if (Test-Path $resourcesDir) {
+        Remove-Item -Recurse -Force $resourcesDir
+    }
+
+    Write-Host "  OK - 清理完成（含 resources 缓存）" -ForegroundColor Green
     Write-Host ""
 
     # ========================================
