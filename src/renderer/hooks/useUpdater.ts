@@ -12,6 +12,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { relaunch } from '@tauri-apps/plugin-process';
 
+import { track } from '@/analytics';
 import { isTauriEnvironment } from '@/utils/browserMock';
 import { isDebugMode } from '@/utils/debug';
 
@@ -46,6 +47,13 @@ export function useUpdater(): UseUpdaterResult {
     const restartAndUpdate = useCallback(async () => {
         if (!isTauriEnvironment()) return;
 
+        // Track update_install event before restarting
+        if (updateVersion) {
+            track('update_install', { version: updateVersion });
+        } else {
+            track('update_install');
+        }
+
         try {
             await relaunch();
         } catch (err) {
@@ -57,7 +65,7 @@ export function useUpdater(): UseUpdaterResult {
                 console.error('[useUpdater] Rust restart also failed:', e);
             }
         }
-    }, []);
+    }, [updateVersion]);
 
     // Listen for update ready event from Rust
     useEffect(() => {
@@ -112,6 +120,8 @@ export function useUpdater(): UseUpdaterResult {
             if (updateReadyRef.current) return;
             try {
                 await invoke('check_and_download_update');
+                // Track update_check event only after successful check
+                track('update_check');
             } catch (err) {
                 // Silent failure - don't bother user
                 console.error('[useUpdater] Periodic check failed:', err);

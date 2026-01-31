@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { track } from '@/analytics';
 import { isDebugMode } from '@/utils/debug';
 
 interface FileDropZoneOptions {
@@ -131,6 +132,10 @@ export function useFileDropZone(options: FileDropZoneOptions): FileDropZoneResul
       if (isDebugMode()) {
         console.log('[useFileDropZone] Dropped', filteredFiles.length, 'files');
       }
+
+      // Track file_drop event
+      track('file_drop', { file_count: filteredFiles.length });
+
       onFilesDropped(filteredFiles);
     }
   }, [filterFiles, onFilesDropped]);
