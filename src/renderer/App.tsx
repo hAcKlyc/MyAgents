@@ -123,28 +123,33 @@ export default function App() {
 
   // Close tab with confirmation if generating
   const closeTabWithConfirmation = useCallback((tabId: string) => {
-    const tab = tabs.find(t => t.id === tabId);
-    if (tab?.isGenerating) {
-      const confirmed = window.confirm('内容生成中，确认要关闭么？');
-      if (!confirmed) return;
-    }
+    // Use setTabs to get the latest tab state (avoid stale closure)
+    setTabs((currentTabs) => {
+      const tab = currentTabs.find(t => t.id === tabId);
 
-    // Stop this Tab's Sidecar when closing (only if it has an agentDir, i.e., was running a project)
-    // Settings/Launcher tabs don't have sidecars, so skip for them
-    if (tab?.agentDir) {
-      void stopTabSidecar(tabId);
-    }
+      // Check if generating and ask for confirmation
+      if (tab?.isGenerating) {
+        const confirmed = window.confirm('内容生成中，确认要关闭么？');
+        if (!confirmed) {
+          // User cancelled - don't close the tab
+          return currentTabs;
+        }
+      }
 
-    // Perform close
-    setTabs((prev) => {
-      const newTabs = prev.filter((t) => t.id !== tabId);
+      // Stop this Tab's Sidecar when closing (only if it has an agentDir)
+      if (tab?.agentDir) {
+        void stopTabSidecar(tabId);
+      }
 
-      // If closing the active tab, switch to the last tab
+      // Perform close
+      const newTabs = currentTabs.filter((t) => t.id !== tabId);
+
+      // If closing the active tab, switch to the last remaining tab
       if (tabId === activeTabId && newTabs.length > 0) {
         setActiveTabId(newTabs[newTabs.length - 1].id);
       }
 
-      // If no tabs left, create a new one (launcher page)
+      // If no tabs left, create a new launcher tab
       if (newTabs.length === 0) {
         const newTab = createNewTab();
         setActiveTabId(newTab.id);
@@ -153,7 +158,7 @@ export default function App() {
 
       return newTabs;
     });
-  }, [activeTabId, tabs]);
+  }, [activeTabId]);
 
   // Close current active tab (for Cmd+W)
   const closeCurrentTab = useCallback(() => {
@@ -161,7 +166,7 @@ export default function App() {
 
     const activeTab = tabs.find(t => t.id === activeTabId);
 
-    // If on launcher page and it's the only tab, close the window
+    // Special case: If on launcher page and it's the only tab, close the window
     if (activeTab?.view === 'launcher' && tabs.length === 1) {
       if (isTauriEnvironment()) {
         void getCurrentWindow().close();
@@ -169,6 +174,28 @@ export default function App() {
       return;
     }
 
+    // Special case: If this is the last tab (non-launcher), replace with launcher instead of closing
+    // This prevents the app from closing on Windows when the last tab is closed
+    if (tabs.length === 1) {
+      // Check if generating - ask for confirmation first
+      if (activeTab?.isGenerating) {
+        const confirmed = window.confirm('内容生成中，确认要关闭么？');
+        if (!confirmed) return;
+      }
+
+      // Create new launcher tab first (before cleanup to avoid empty state)
+      const newTab = createNewTab();
+      setTabs([newTab]);
+      setActiveTabId(newTab.id);
+
+      // Clean up the old tab's sidecar if needed
+      if (activeTab?.agentDir) {
+        void stopTabSidecar(activeTabId);
+      }
+      return;
+    }
+
+    // Normal case: close with confirmation (multiple tabs exist)
     closeTabWithConfirmation(activeTabId);
   }, [activeTabId, tabs, closeTabWithConfirmation]);
 
