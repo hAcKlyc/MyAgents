@@ -3,6 +3,7 @@ import { ExternalLink } from '@/components/ExternalLink';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 
+import { track } from '@/analytics';
 import { apiGetJson, apiPostJson } from '@/api/apiFetch';
 import { useToast } from '@/components/Toast';
 import { UnifiedLogsPanel } from '@/components/UnifiedLogsPanel';
@@ -642,6 +643,9 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             });
             setShowMcpForm(false);
 
+            // Track mcp_add event
+            track('mcp_add', { type: mcpForm.type });
+
             if (mcpForm.type === 'stdio') {
                 toast.success('MCP 服务器已添加，开始安装...');
                 await installMcp(newServer);
@@ -659,6 +663,10 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
             await deleteCustomMcpServer(serverId);
             setMcpServersState(prev => prev.filter(s => s.id !== serverId));
             setMcpEnabledIds(prev => prev.filter(id => id !== serverId));
+
+            // Track mcp_remove event
+            track('mcp_remove');
+
             toast.success('已删除');
         } catch (err) {
             toast.error('删除失败');

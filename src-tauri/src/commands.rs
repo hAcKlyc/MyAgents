@@ -238,3 +238,85 @@ fn find_available_port() -> Option<u16> {
 fn is_port_available(port: u16) -> bool {
     std::net::TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok()
 }
+
+// ============= Platform & Device Info Commands =============
+
+/// Command: Get platform identifier (matches build target naming)
+/// Returns: darwin-aarch64, darwin-x86_64, windows-x86_64, linux-x86_64, etc.
+#[tauri::command]
+pub fn cmd_get_platform() -> String {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "darwin-aarch64".to_string();
+
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "darwin-x86_64".to_string();
+
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return "windows-x86_64".to_string();
+
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    return "windows-aarch64".to_string();
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "linux-x86_64".to_string();
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    return "linux-aarch64".to_string();
+
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+    )))]
+    return "unknown".to_string();
+}
+
+/// Command: Get or create device ID
+/// Stored in ~/.myagents/device_id to persist across app reinstalls
+/// Only regenerates if the file is deleted by user
+#[tauri::command]
+pub fn cmd_get_device_id() -> Result<String, String> {
+    use std::fs;
+    use uuid::Uuid;
+
+    // Get home directory
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Failed to get home directory".to_string())?;
+
+    // ~/.myagents/ directory
+    let myagents_dir = home_dir.join(".myagents");
+    let device_id_file = myagents_dir.join("device_id");
+
+    // Try to read existing device_id
+    if device_id_file.exists() {
+        match fs::read_to_string(&device_id_file) {
+            Ok(id) => {
+                let id = id.trim().to_string();
+                if !id.is_empty() {
+                    return Ok(id);
+                }
+            }
+            Err(_) => {
+                // File exists but can't read, will regenerate
+            }
+        }
+    }
+
+    // Generate new UUID
+    let new_id = Uuid::new_v4().to_string();
+
+    // Ensure directory exists
+    if !myagents_dir.exists() {
+        fs::create_dir_all(&myagents_dir)
+            .map_err(|e| format!("Failed to create ~/.myagents directory: {}", e))?;
+    }
+
+    // Write device_id to file
+    fs::write(&device_id_file, &new_id)
+        .map_err(|e| format!("Failed to write device_id file: {}", e))?;
+
+    Ok(new_id)
+}

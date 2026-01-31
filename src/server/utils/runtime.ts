@@ -42,18 +42,29 @@ function getBunExecutableName(): string {
 /**
  * Get bundled bun paths inside the app bundle.
  * These are the primary paths we check first.
+ *
+ * Directory structure:
+ * - Windows: Flat structure, bun.exe and server-dist.js in same directory
+ *   C:\Users\xxx\AppData\Local\MyAgents\
+ *   ├── bun.exe
+ *   ├── server-dist.js
+ *   └── myagents.exe
+ *
+ * - macOS: App bundle structure
+ *   MyAgents.app/Contents/
+ *   ├── MacOS/bun         <- bundled bun
+ *   └── Resources/server-dist.js  <- scriptDir
  */
 function getBundledBunPaths(): string[] {
   const scriptDir = getScriptDir();
   const bunExe = getBunExecutableName();
 
   if (isWindows()) {
-    // Windows: bun.exe is in the same directory as the main executable
-    // scriptDir = .../<app>/resources (where server-dist.js is)
-    // Bun should be at .../<app>/bun.exe or .../<app>/bun-x86_64-pc-windows-msvc.exe
+    // Windows: Flat structure - bun.exe is in the same directory as server-dist.js
+    // scriptDir = C:\Users\xxx\AppData\Local\MyAgents (installation directory)
     return [
-      resolve(scriptDir, '..', bunExe),
-      resolve(scriptDir, '..', 'bun-x86_64-pc-windows-msvc.exe'),
+      resolve(scriptDir, bunExe),
+      resolve(scriptDir, 'bun-x86_64-pc-windows-msvc.exe'),
     ];
   }
 
@@ -63,6 +74,39 @@ function getBundledBunPaths(): string[] {
   return [
     resolve(scriptDir, '..', 'MacOS', 'bun'),
   ];
+}
+
+/**
+ * Get the directory containing bundled bun executable.
+ * Returns null if bundled bun is not found.
+ *
+ * This is used by agent-session.ts to add the bundled bun directory to PATH.
+ */
+export function getBundledBunDir(): string | null {
+  const scriptDir = getScriptDir();
+  const bunExe = getBunExecutableName();
+
+  if (isWindows()) {
+    // Windows: Check same directory as server-dist.js
+    const bunPath = resolve(scriptDir, bunExe);
+    if (existsSync(bunPath)) {
+      return scriptDir;
+    }
+    // Also check for alternative bun naming
+    const altBunPath = resolve(scriptDir, 'bun-x86_64-pc-windows-msvc.exe');
+    if (existsSync(altBunPath)) {
+      return scriptDir;
+    }
+  } else {
+    // macOS: Check Contents/MacOS directory
+    const macOSDir = resolve(scriptDir, '..', 'MacOS');
+    const bunPath = resolve(macOSDir, 'bun');
+    if (existsSync(bunPath)) {
+      return macOSDir;
+    }
+  }
+
+  return null;
 }
 
 /**

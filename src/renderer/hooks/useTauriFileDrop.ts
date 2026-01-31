@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { track } from '@/analytics';
 import { isTauriEnvironment } from '@/utils/browserMock';
 import { isDebugMode } from '@/utils/debug';
 
@@ -152,6 +153,9 @@ export function useTauriFileDrop(options: UseTauriFileDropOptions = {}): UseTaur
         if (isDebugMode()) {
           console.log('[useTauriFileDrop] Drop on zone:', zoneId, 'paths:', paths);
         }
+
+        // Track file_drop event
+        track('file_drop', { file_count: paths.length });
 
         // Call zone-specific handler
         if (zoneId) {

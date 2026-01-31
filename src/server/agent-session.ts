@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { createRequire } from 'module';
 import { query, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import { getScriptDir, getBundledRuntimePath, isBunRuntime } from './utils/runtime';
+import { getScriptDir, getBundledRuntimePath, getBundledBunDir, isBunRuntime } from './utils/runtime';
 import { getCrossPlatformEnv, buildCrossPlatformEnv } from './utils/platform';
 
 import type { ToolInput } from '../renderer/types/chat';
@@ -892,41 +892,40 @@ export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.Process
   const PATH_SEP = process.platform === 'win32' ? ';' : ':';
   const PATH_KEY = process.platform === 'win32' ? 'Path' : 'PATH';
 
-  // Detect bundled bun path from app resources
-  // When running in bundled app, this script is in Resources/server/
-  // Tauri externalBin places binaries in Contents/MacOS/ (not Resources)
-  // NOTE: Use getScriptDir() instead of __dirname because bun build hardcodes __dirname at compile time
-  const scriptDir = getScriptDir();
-  if (isDebug) console.log('[env] Script directory:', scriptDir);
+  // Detect bundled bun directory using shared utility from runtime.ts
+  // This ensures consistent path detection across the codebase (DRY principle)
+  const isWindows = process.platform === 'win32';
+  const bundledBunDir = getBundledBunDir();
 
-  const potentialBundledBinaries = [
-    // In bundled app: server-dist.js is in Resources/ (not Resources/server/)
-    // scriptDir = .../MyAgents.app/Contents/Resources
-    // MacOS dir = .../MyAgents.app/Contents/MacOS
-    scriptDir.replace('/Resources', '/MacOS'),
-    // Alternative: go up one level from Resources to Contents, then into MacOS
-    // Use resolve() to normalize the path (avoid /a/b/../c style paths)
-    resolve(scriptDir, '..', 'MacOS'),
-  ];
+  if (isDebug) {
+    console.log('[env] Script directory:', getScriptDir());
+    console.log(`[env] Checking bundled bun: ${bundledBunDir || 'NOT FOUND'} -> ${bundledBunDir ? 'EXISTS' : 'NOT FOUND'}`);
+  }
 
-  // Check which bundled paths actually exist
-  const validBundledPaths = potentialBundledBinaries.filter(p => {
-    const bunPath = `${p}/bun`;
-    const exists = existsSync(bunPath);
-    if (isDebug) console.log(`[env] Checking bundled bun: ${bunPath} -> ${exists ? 'EXISTS' : 'NOT FOUND'}`);
-    return exists;
-  });
+  // Build essential paths based on platform
+  const essentialPaths: string[] = [];
 
-  const essentialPaths = [
-    // Bundled bun paths (highest priority)
-    ...validBundledPaths,
-    // System bun installations (fallback)
-    `${home}/.bun/bin`,
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-  ];
+  // Bundled bun directory (highest priority)
+  if (bundledBunDir) {
+    essentialPaths.push(bundledBunDir);
+  }
+
+  // System bun/runtime installations (fallback)
+  if (isWindows) {
+    // Windows paths
+    if (home) {
+      essentialPaths.push(resolve(home, '.bun', 'bin'));
+    }
+  } else {
+    // macOS/Linux paths
+    if (home) {
+      essentialPaths.push(`${home}/.bun/bin`);
+    }
+    essentialPaths.push('/opt/homebrew/bin');
+    essentialPaths.push('/usr/local/bin');
+    essentialPaths.push('/usr/bin');
+    essentialPaths.push('/bin');
+  }
 
   const existingPath = process.env[PATH_KEY] || process.env.PATH || '';
   if (isDebug) console.log('[env] Original PATH:', existingPath.substring(0, 200) + (existingPath.length > 200 ? '...' : ''));
@@ -934,8 +933,17 @@ export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.Process
   const pathParts = existingPath ? existingPath.split(PATH_SEP) : [];
 
   // Add essential paths if not already present (in reverse order so first in list ends up first in PATH)
+  // Use case-insensitive comparison on Windows since paths are case-insensitive
+  const pathIncludes = (parts: string[], path: string): boolean => {
+    if (isWindows) {
+      const lowerPath = path.toLowerCase();
+      return parts.some(p => p.toLowerCase() === lowerPath);
+    }
+    return parts.includes(path);
+  };
+
   for (const p of [...essentialPaths].reverse()) {
-    if (p && !pathParts.includes(p)) {
+    if (p && !pathIncludes(pathParts, p)) {
       pathParts.unshift(p);
     }
   }
@@ -943,7 +951,7 @@ export function buildClaudeSessionEnv(providerEnv?: ProviderEnv): NodeJS.Process
   const finalPath = pathParts.join(PATH_SEP);
   if (isDebug) {
     console.log('[env] Final PATH (first 5 entries):', pathParts.slice(0, 5).join(PATH_SEP));
-    console.log('[env] Bundled bun will be used:', validBundledPaths.length > 0 ? 'YES' : 'NO (using system bun)');
+    console.log('[env] Bundled bun will be used:', bundledBunDir ? 'YES' : 'NO (using system bun)');
   }
 
   // Build base environment
@@ -2852,8 +2860,20 @@ async function startStreamingSession(): Promise<void> {
           console.warn('[agent] Result message has no usage data, token statistics may be incomplete');
         }
 
+        // Calculate duration for analytics
+        const durationMs = currentTurnStartTime ? Date.now() - currentTurnStartTime : 0;
+
         console.log('[agent][sdk] Broadcasting chat:message-complete');
-        broadcast('chat:message-complete', null);
+        // Include usage data for frontend analytics tracking
+        broadcast('chat:message-complete', {
+          model: currentTurnUsage.model,
+          input_tokens: currentTurnUsage.inputTokens,
+          output_tokens: currentTurnUsage.outputTokens,
+          cache_read_tokens: currentTurnUsage.cacheReadTokens,
+          cache_creation_tokens: currentTurnUsage.cacheCreationTokens,
+          tool_count: currentTurnToolCount,
+          duration_ms: durationMs,
+        });
         handleMessageComplete();
       }
     }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
+import { initAnalytics, track } from '@/analytics';
 import { startTabSidecar, stopTabSidecar, startGlobalSidecar, stopAllSidecars, initGlobalSidecarReadyPromise, markGlobalSidecarReady, getGlobalServerUrl, resetGlobalSidecarReadyPromise } from '@/api/tauriClient';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import CustomTitleBar from '@/components/CustomTitleBar';
@@ -99,6 +100,12 @@ export default function App() {
     mountedRef.current = true;
     retryCountRef.current = 0;
 
+    // Initialize analytics (async, non-blocking)
+    void initAnalytics().then(() => {
+      // Track app launch event
+      track('app_launch', { launch_type: 'cold' });
+    });
+
     // Initialize the ready promise BEFORE starting the sidecar
     // This allows other components to wait for it
     initGlobalSidecarReadyPromise();
@@ -136,13 +143,22 @@ export default function App() {
     const tab = currentTabs.find(t => t.id === tabId);
     if (!tab) return;
 
+    // Calculate actual tab_count after close:
+    // - If closing the last tab, a new launcher is created, so count = 1
+    // - Otherwise, count = currentTabs.length - 1
+    const isLastTab = currentTabs.length === 1;
+    const actualTabCount = isLastTab ? 1 : currentTabs.length - 1;
+
+    // Track tab_close event with correct count
+    track('tab_close', { view: tab.view, tab_count: actualTabCount });
+
     // Stop this Tab's Sidecar when closing (only if it has an agentDir)
     if (tab.agentDir) {
       void stopTabSidecar(tabId);
     }
 
     // Special case: If this is the last tab, replace with launcher (don't close the app)
-    if (currentTabs.length === 1) {
+    if (isLastTab) {
       const newTab = createNewTab();
       setTabs([newTab]);
       setActiveTabId(newTab.id);
@@ -224,6 +240,13 @@ export default function App() {
     sessionId?: string
   ) => {
     if (!activeTabId) return;
+
+    // Track workspace_open or history_open event
+    if (sessionId) {
+      track('history_open');
+    } else {
+      track('workspace_open');
+    }
 
     setTabErrors((prev) => ({ ...prev, [activeTabId]: null }));
     setLoadingTabs((prev) => ({ ...prev, [activeTabId]: true }));
@@ -313,6 +336,9 @@ export default function App() {
     const newTab = createNewTab();
     setTabs((prev) => [...prev, newTab]);
     setActiveTabId(newTab.id);
+
+    // Track tab_new event
+    track('tab_new', { tab_count: tabs.length + 1 });
   }, [tabs.length]);
 
   // Handle tab reordering via drag and drop
@@ -331,6 +357,9 @@ export default function App() {
   // Open Settings as a new tab (or switch to existing one)
   // Optional initialSection parameter to open a specific section (e.g., 'providers')
   const handleOpenSettings = useCallback(async (initialSection?: string) => {
+    // Track settings_open event
+    track('settings_open', { section: initialSection ?? null });
+
     // Set initial section for Settings component
     setSettingsInitialSection(initialSection);
 

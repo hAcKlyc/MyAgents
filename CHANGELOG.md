@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.8] - 2026-02-01
+
+### Added
+- **Analytics 系统**
+  - 匿名使用统计，帮助改进产品体验
+  - 默认关闭，需通过环境变量 `MYAGENTS_ANALYTICS_ENABLED=true` 启用
+  - 支持事件批量发送、防抖、节流（每分钟最多 200 事件）
+  - 数据加密传输，不收集任何敏感信息（代码、对话内容等）
+  - device_id 持久化存储到 `~/.myagents/device_id`（跨安装保持一致）
+
+
+---
+
 ## [0.1.7] - 2026-01-31
 
 ### Added

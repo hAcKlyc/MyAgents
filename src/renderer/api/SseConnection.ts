@@ -62,10 +62,13 @@ const STRING_EVENTS = new Set([
 ]);
 
 // Event types with null payload
-const NULL_EVENTS = new Set(['chat:message-complete', 'chat:message-stopped']);
+const NULL_EVENTS = new Set(['chat:message-stopped']);
+
+// Event types with JSON payload for analytics
+const JSON_ANALYTICS_EVENTS = new Set(['chat:message-complete']);
 
 // All event types
-const ALL_EVENTS = [...JSON_EVENTS, ...JSON_OR_STRING_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS];
+const ALL_EVENTS = [...JSON_EVENTS, ...JSON_OR_STRING_EVENTS, ...STRING_EVENTS, ...NULL_EVENTS, ...JSON_ANALYTICS_EVENTS];
 
 export type SseEventHandler = (eventName: string, data: unknown) => void;
 export type SseConnectionStatusHandler = (status: 'connected' | 'disconnected' | 'reconnecting' | 'failed') => void;
@@ -135,10 +138,23 @@ export class SseConnection {
             return;
         }
 
-        // Handle null-payload events (message-complete, message-stopped)
+        // Handle null-payload events (message-stopped)
         if (NULL_EVENTS.has(eventName)) {
             console.debug(`[SSE ${this.connectionId}] Received: ${eventName}`);
             this.eventHandler(eventName, null);
+            return;
+        }
+
+        // Handle JSON analytics events (message-complete with usage data)
+        if (JSON_ANALYTICS_EVENTS.has(eventName)) {
+            try {
+                const parsed = JSON.parse(data);
+                this.eventHandler(eventName, parsed);
+            } catch (e) {
+                console.warn(`[SSE ${this.connectionId}] Failed to parse analytics JSON for ${eventName}:`, e);
+                // Still emit event with null so tracking can proceed with defaults
+                this.eventHandler(eventName, null);
+            }
             return;
         }
 

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
 
+import { track } from '@/analytics';
 import { createSseConnection, type SseConnection } from '@/api/SseConnection';
 import type { ImageAttachment } from '@/components/SimpleChatInput';
 import type { PermissionRequest } from '@/components/PermissionPrompt';
@@ -249,6 +250,10 @@ export default function TabProvider({
                 return false;
             }
             console.log(`[TabProvider ${tabId}] resetSession complete`);
+
+            // Track session_new event
+            track('session_new');
+
             return true;
         } catch (error) {
             console.error(`[TabProvider ${tabId}] resetSession error:`, error);
@@ -533,6 +538,10 @@ export default function TabProvider({
                     break;
                 }
                 const tool = data as ToolUse;
+
+                // Track tool_use event
+                track('tool_use', { tool: tool.name });
+
                 // For Task tool, add taskStartTime and initial taskStats
                 const toolSimple: ToolUseSimple = tool.name === 'Task'
                     ? { ...tool, inputJson: '', isLoading: true, taskStartTime: Date.now(), taskStats: { toolCount: 0, inputTokens: 0, outputTokens: 0 } }
@@ -564,6 +573,10 @@ export default function TabProvider({
                     break;
                 }
                 const tool = data as ToolUse;
+
+                // Track tool_use event (server-side tools)
+                track('tool_use', { tool: tool.name });
+
                 // Server tools come with complete input, no streaming
                 const toolSimple: ToolUseSimple = {
                     ...tool,
@@ -728,6 +741,27 @@ export default function TabProvider({
                 // Normally content_block_stop handles this, but third-party providers may not
                 // send it, leaving blocks stuck in loading state.
                 markIncompleteBlocksAsFinished('completed');
+
+                // Track message_complete event with usage data
+                const completePayload = data as {
+                    model?: string;
+                    input_tokens?: number;
+                    output_tokens?: number;
+                    cache_read_tokens?: number;
+                    cache_creation_tokens?: number;
+                    tool_count?: number;
+                    duration_ms?: number;
+                } | null;
+                // Always track message_complete, use defaults if payload is missing
+                track('message_complete', {
+                    model: completePayload?.model,
+                    input_tokens: completePayload?.input_tokens ?? 0,
+                    output_tokens: completePayload?.output_tokens ?? 0,
+                    cache_read_tokens: completePayload?.cache_read_tokens ?? 0,
+                    cache_creation_tokens: completePayload?.cache_creation_tokens ?? 0,
+                    tool_count: completePayload?.tool_count ?? 0,
+                    duration_ms: completePayload?.duration_ms ?? 0,
+                });
                 break;
             }
 
@@ -747,6 +781,9 @@ export default function TabProvider({
                 }
                 // Mark all incomplete thinking blocks and tool_use blocks as stopped
                 markIncompleteBlocksAsFinished('stopped');
+
+                // Track message_stop event
+                track('message_stop');
                 break;
             }
 
@@ -766,6 +803,9 @@ export default function TabProvider({
                 }
                 // Mark all incomplete thinking blocks and tool_use blocks as failed
                 markIncompleteBlocksAsFinished('failed');
+
+                // Track message_error event (don't include actual error message for privacy)
+                track('message_error');
                 break;
             }
 
@@ -983,13 +1023,18 @@ export default function TabProvider({
         const trimmed = text.trim();
         if (!trimmed && (!images || images.length === 0)) return false;
 
+        // Detect skill/slash command: /command at start of message (for analytics)
+        const skillMatch = trimmed.match(/^\/([a-zA-Z][a-zA-Z0-9_-]*)/);
+        const skill = skillMatch ? skillMatch[1] : null;
+        const hasImages = !!(images && images.length > 0);
+
         try {
             // Reset new session flag BEFORE sending - allow message replay to show user's message
             // This must happen before API call because chat:message-replay arrives during the call
             isNewSessionRef.current = false;
 
             // Store attachments for merging with SSE replay
-            if (images && images.length > 0) {
+            if (hasImages) {
                 pendingAttachmentsRef.current = images.map((img) => ({
                     id: img.id,
                     name: img.file.name,
@@ -1015,6 +1060,17 @@ export default function TabProvider({
                 model,
                 providerEnv,
             });
+
+            // Track message_send event only after successful send
+            if (response.success) {
+                track('message_send', {
+                    mode: permissionMode ?? 'auto',
+                    model: model ?? 'default',
+                    skill,
+                    has_image: hasImages,
+                    has_file: false,
+                });
+            }
 
             return response.success;
         } catch (error) {
@@ -1160,7 +1216,15 @@ export default function TabProvider({
         if (!pendingPermission) return;
 
         const requestId = pendingPermission.requestId;
-        console.log(`[TabProvider] Permission response: ${decision} for ${pendingPermission.toolName}`);
+        const toolName = pendingPermission.toolName;
+        console.log(`[TabProvider] Permission response: ${decision} for ${toolName}`);
+
+        // Track permission decision
+        if (decision === 'deny') {
+            track('permission_deny', { tool: toolName });
+        } else {
+            track('permission_grant', { tool: toolName, type: decision });
+        }
 
         // Clear pending permission immediately for UI responsiveness
         setPendingPermission(null);
