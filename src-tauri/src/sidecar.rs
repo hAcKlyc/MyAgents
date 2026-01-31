@@ -750,7 +750,13 @@ pub fn start_tab_sidecar<R: Runtime>(
     } else {
         // Global sidecar: use temp directory
         let temp_dir = std::env::temp_dir().join(format!("myagents-global-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).ok();
+        log::info!("[sidecar] Creating temp agent directory: {:?}", temp_dir);
+
+        // Attempt to create directory with error logging
+        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
+            log::warn!("[sidecar] Failed to create temp directory {:?}: {}. Agent may fail to start.", temp_dir, e);
+        }
+
         cmd.arg("--agent-dir").arg(&temp_dir);
         Some(temp_dir)
     };

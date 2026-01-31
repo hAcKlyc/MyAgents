@@ -25,14 +25,19 @@ export function getCrossPlatformEnv(): {
 } {
     const isWin = isWindows();
 
+    // Safe fallback for temp directory:
+    // - Windows: TEMP > TMP > C:\Windows\Temp (always exists)
+    // - Unix: TMPDIR > /tmp (always exists)
+    const tempFallback = isWin ? 'C:\\Windows\\Temp' : '/tmp';
+
     return {
         home: isWin
             ? (process.env.USERPROFILE || '')
             : (process.env.HOME || ''),
         user: process.env.USER || process.env.USERNAME || '',
         temp: isWin
-            ? (process.env.TEMP || process.env.TMP || '')
-            : (process.env.TMPDIR || '/tmp'),
+            ? (process.env.TEMP || process.env.TMP || tempFallback)
+            : (process.env.TMPDIR || tempFallback),
     };
 }
 

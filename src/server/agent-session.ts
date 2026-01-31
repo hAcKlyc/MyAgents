@@ -33,9 +33,10 @@ const MYAGENTS_USER_DIR = '.myagents';
  * All user configs (MCP, providers, projects, etc.) are stored here
  */
 export function getMyAgentsUserDir(): string {
-  const { home } = getCrossPlatformEnv();
-  // Fallback to /tmp only if home is not available (should be rare)
-  const homeDir = home || '/tmp';
+  const { home, temp } = getCrossPlatformEnv();
+  // Fallback to temp directory if home is not available (extremely rare)
+  // temp is now guaranteed to have a valid platform-specific fallback
+  const homeDir = home || temp;
   return join(homeDir, MYAGENTS_USER_DIR);
 }
 
