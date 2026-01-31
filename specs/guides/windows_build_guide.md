@@ -358,6 +358,61 @@ Get-Process | Where-Object { $_.ProcessName -like "*bun*" }
 netstat -ano | findstr "31415"
 ```
 
+### 升级体验问题
+
+**安装新版本时提示必须先卸载旧版本**
+
+**问题描述**：
+从 v0.1.6 升级到 v0.1.7 时，双击安装包后提示"建议卸载现有版本"，用户必须手动卸载后才能安装新版本。
+
+**根本原因**：
+Tauri NSIS 安装程序的默认行为会在检测到旧版本时推荐卸载。
+
+**解决方案**：
+
+1. **配置 allowDowngrades**（已在 v0.1.7 实施）
+
+   在 `src-tauri/tauri.conf.json` 中显式设置：
+   ```json
+   {
+     "bundle": {
+       "windows": {
+         "allowDowngrades": true,
+         "nsis": {
+           "installMode": "currentUser",
+           "languages": ["SimpChinese", "English"]
+         }
+       }
+     }
+   }
+   ```
+
+   效果：安装提示中应该提供"不卸载，继续"选项。
+
+2. **使用自动更新（推荐）**
+
+   最佳体验是不要手动安装，使用内置的自动更新功能：
+   - 应用启动时自动检测更新
+   - 后台下载更新包
+   - 提示用户"重启以更新"
+   - 自动安装，无需手动操作
+
+   详见 [自动更新系统](../tech_docs/auto_update.md)
+
+3. **验证测试步骤**
+
+   ```powershell
+   # 1. 确保已安装旧版本
+   # 2. 双击新版本安装包
+   # 3. 查看安装提示是否有"不卸载，继续"或"继续安装"按钮
+   # 4. 选择继续安装（不卸载）
+   # 5. 验证安装后版本号和用户数据是否保留
+   ```
+
+**注意事项**：
+- 覆盖安装后，用户数据（Projects、Providers）应该保留在 `%APPDATA%\MyAgents`
+- 如遇到 WebView 缓存问题，可清理 `%LOCALAPPDATA%\MyAgents\EBWebView`
+
 ### 发布问题
 
 **rclone 上传失败**
