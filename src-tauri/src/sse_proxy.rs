@@ -164,11 +164,13 @@ async fn connect_sse(
     // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
     // Disable connection pooling to avoid stale connection issues on Windows
+    // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
         .tcp_nodelay(true)
         .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
         .pool_max_idle_per_host(0)  // Disable connection pooling
+        .no_proxy()  // Disable proxy for all requests (especially localhost)
         .build()?;
     
     let response = client
@@ -330,11 +332,13 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
     // Disable connection pooling to avoid stale connection issues on Windows
+    // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
         .tcp_nodelay(true)
         .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
         .pool_max_idle_per_host(0)  // Disable connection pooling - create fresh connection each time
+        .no_proxy()  // Disable proxy for all requests (especially localhost)
         .build()
         .map_err(|e| {
             let err = format!("[proxy] Failed to create client: {}", e);
