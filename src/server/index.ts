@@ -1678,17 +1678,8 @@ async function main() {
         try {
           const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
 
-          // Validate cache directory path (prevent path traversal)
-          const TMP_DIR = normalize(resolve(tmpdir()));
-          const CACHE_DIR = normalize(resolve(join(TMP_DIR, 'myagents-cache')));
-
-          // Security check: ensure cache dir is within tmpdir
-          // Use relative path check for cross-platform compatibility (Windows case-insensitive paths)
-          const relativePath = relative(TMP_DIR, CACHE_DIR);
-          if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-            throw new Error('Invalid cache directory path');
-          }
-
+          // Use tmpdir for cache (simple and safe approach)
+          const CACHE_DIR = join(tmpdir(), 'myagents-cache');
           const CACHE_FILE = join(CACHE_DIR, 'feedback_qr_code.png');
           const LOCK_FILE = `${CACHE_FILE}.lock`;
           const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour (faster updates)
