@@ -3,6 +3,7 @@
 
 mod commands;
 pub mod logger;
+mod proxy_config;
 mod sidecar;
 mod sse_proxy;
 mod updater;
