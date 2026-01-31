@@ -202,6 +202,25 @@ function scheduleRetry(delay: number): void {
 }
 
 /**
+ * 安全的 JSON 序列化，处理循环引用
+ */
+function safeStringify(obj: unknown): string {
+  const seen = new WeakSet();
+  return JSON.stringify(obj, (_key, value) => {
+    // 处理非对象类型
+    if (typeof value !== 'object' || value === null) {
+      return value;
+    }
+    // 检测循环引用
+    if (seen.has(value)) {
+      return '[Circular]';
+    }
+    seen.add(value);
+    return value;
+  });
+}
+
+/**
  * 发送事件到服务器
  */
 async function sendEvents(events: TrackEvent[]): Promise<TrackResponse> {
@@ -214,7 +233,7 @@ async function sendEvents(events: TrackEvent[]): Promise<TrackResponse> {
       'Content-Type': 'application/json',
       'X-API-Key': apiKey,
     },
-    body: JSON.stringify({ events }),
+    body: safeStringify({ events }),
   };
 
   let response: Response;

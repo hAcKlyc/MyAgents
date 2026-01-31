@@ -53,6 +53,28 @@ export async function initAnalytics(): Promise<void> {
 }
 
 /**
+ * 清理参数对象，只保留可序列化的简单值
+ */
+function sanitizeParams(params: EventParams): EventParams {
+  const result: EventParams = {};
+  for (const [key, value] of Object.entries(params)) {
+    // 只保留简单类型：string, number, boolean, null
+    if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = value;
+    } else if (typeof value === 'object') {
+      // 对象类型尝试转为字符串，忽略失败
+      try {
+        result[key] = JSON.stringify(value);
+      } catch {
+        result[key] = '[Object]';
+      }
+    }
+    // 其他类型（function, symbol, undefined）忽略
+  }
+  return result;
+}
+
+/**
  * 追踪事件
  * @param event - 事件名称
  * @param params - 事件参数（可选）
@@ -63,13 +85,16 @@ export function track(event: EventName | string, params: EventParams = {}): void
     return;
   }
 
+  // 清理参数，确保可序列化
+  const safeParams = sanitizeParams(params);
+
   // 构建事件对象
   const trackEvent: TrackEvent = {
     event,
     device_id: getDeviceId(),
     platform: getPlatform(),
     app_version: getAppVersionSync(),
-    params,
+    params: safeParams,
     client_timestamp: new Date().toISOString(),
   };
 
