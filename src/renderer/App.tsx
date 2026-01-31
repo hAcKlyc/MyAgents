@@ -296,8 +296,14 @@ export default function App() {
   }, []);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    // Special case: If only one launcher tab, do nothing
+    const tab = tabs.find(t => t.id === tabId);
+    if (tabs.length === 1 && tab?.view === 'launcher') {
+      return;
+    }
+
     closeTabWithConfirmation(tabId);
-  }, [closeTabWithConfirmation]);
+  }, [tabs, closeTabWithConfirmation]);
 
   const handleNewTab = useCallback(() => {
     if (tabs.length >= MAX_TABS) {
