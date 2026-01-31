@@ -271,9 +271,7 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
 
         return () => {
             cancelled = true;
-            if (!isTauriEnvironment()) {
-                setQrCodeDataUrl(null);
-            }
+            setQrCodeDataUrl(null); // 统一清理，避免内存泄漏
         };
     }, [activeSection]);
 

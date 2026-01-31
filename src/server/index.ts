@@ -1673,13 +1673,14 @@ async function main() {
 
       // GET /api/assets/qr-code - Fetch QR code image with local caching
       // Downloads from CDN on first launch and caches locally for subsequent requests
-      // Cache refreshes daily to get updated QR codes from cloud
+      // Cache refreshes every hour to get updated QR codes from cloud
       if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
         try {
           const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
           const CACHE_DIR = join(tmpdir(), 'myagents-cache');
           const CACHE_FILE = join(CACHE_DIR, 'feedback_qr_code.png');
-          const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+          const LOCK_FILE = `${CACHE_FILE}.lock`;
+          const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour (faster updates)
 
           let needsDownload = true;
 
@@ -1697,37 +1698,73 @@ async function main() {
             console.log('[api/assets/qr-code] No cache found, downloading');
           }
 
-          // Download if needed
+          // Download if needed (with file lock to prevent concurrent writes)
           if (needsDownload) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
-
-            const response = await fetch(QR_CODE_URL, { signal: controller.signal });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-              // If download fails but cache exists, use stale cache
-              if (existsSync(CACHE_FILE)) {
-                console.warn('[api/assets/qr-code] Download failed, using stale cache');
+            // Check if another process is already downloading
+            if (existsSync(LOCK_FILE)) {
+              const lockStats = statSync(LOCK_FILE);
+              const lockAge = Date.now() - lockStats.mtimeMs;
+              if (lockAge < 30000) { // Lock valid for 30s
+                console.log('[api/assets/qr-code] Download in progress, waiting...');
+                // Wait and use existing cache if available
+                if (existsSync(CACHE_FILE)) {
+                  const imageBuffer = readFileSync(CACHE_FILE);
+                  const base64 = imageBuffer.toString('base64');
+                  return jsonResponse({
+                    success: true,
+                    dataUrl: `data:image/png;base64,${base64}`
+                  });
+                }
               } else {
-                return jsonResponse({ success: false, error: 'Failed to fetch QR code' }, response.status);
+                // Stale lock, remove it
+                rmSync(LOCK_FILE, { force: true });
               }
-            } else {
-              // Save to cache
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
+            }
 
-              // Ensure cache directory exists
-              if (!existsSync(CACHE_DIR)) {
-                mkdirSync(CACHE_DIR, { recursive: true });
+            // Acquire lock
+            if (!existsSync(CACHE_DIR)) {
+              mkdirSync(CACHE_DIR, { recursive: true });
+            }
+            writeFileSync(LOCK_FILE, String(Date.now()));
+
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+              const response = await fetch(QR_CODE_URL, { signal: controller.signal });
+              clearTimeout(timeoutId);
+
+              if (!response.ok) {
+                // If download fails but cache exists, use stale cache
+                if (existsSync(CACHE_FILE)) {
+                  console.warn('[api/assets/qr-code] Download failed, using stale cache');
+                } else {
+                  throw new Error(`下载失败: HTTP ${response.status}`);
+                }
+              } else {
+                // Save to cache using atomic write pattern
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
+
+                // Write to temp file first
+                const tmpFile = `${CACHE_FILE}.${Date.now()}.tmp`;
+                writeFileSync(tmpFile, buffer);
+
+                // Atomic rename (POSIX guarantee)
+                renameSync(tmpFile, CACHE_FILE);
+                console.log('[api/assets/qr-code] QR code cached successfully');
               }
-
-              writeFileSync(CACHE_FILE, buffer);
-              console.log('[api/assets/qr-code] QR code cached successfully');
+            } finally {
+              // Release lock
+              rmSync(LOCK_FILE, { force: true });
             }
           }
 
           // Read from cache and return as base64
+          if (!existsSync(CACHE_FILE)) {
+            return jsonResponse({ success: false, error: 'QR code not available' }, 503);
+          }
+
           const imageBuffer = readFileSync(CACHE_FILE);
           const base64 = imageBuffer.toString('base64');
           const mimeType = 'image/png';
@@ -1740,8 +1777,8 @@ async function main() {
           console.error('[api/assets/qr-code] Error:', error);
           const isTimeout = error instanceof Error && error.name === 'AbortError';
           return jsonResponse(
-            { success: false, error: isTimeout ? 'Request timeout' : (error instanceof Error ? error.message : 'Fetch failed') },
-            isTimeout ? 504 : 500
+            { success: false, error: isTimeout ? '网络请求超时' : (error instanceof Error ? error.message : '加载失败') },
+            isTimeout ? 504 : 503
           );
         }
       }
