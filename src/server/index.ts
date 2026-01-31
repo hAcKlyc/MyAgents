@@ -1,6 +1,6 @@
 import { appendFileSync, copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, rmSync, renameSync } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
-import { basename, dirname, join, relative, resolve, extname, normalize } from 'path';
+import { basename, dirname, join, relative, resolve, extname, normalize, isAbsolute } from 'path';
 import { tmpdir } from 'os';
 import AdmZip from 'adm-zip';
 import {
@@ -1683,7 +1683,9 @@ async function main() {
           const CACHE_DIR = normalize(resolve(join(TMP_DIR, 'myagents-cache')));
 
           // Security check: ensure cache dir is within tmpdir
-          if (!CACHE_DIR.startsWith(TMP_DIR)) {
+          // Use relative path check for cross-platform compatibility (Windows case-insensitive paths)
+          const relativePath = relative(TMP_DIR, CACHE_DIR);
+          if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
             throw new Error('Invalid cache directory path');
           }
 
