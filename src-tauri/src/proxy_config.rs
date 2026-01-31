@@ -25,12 +25,40 @@ struct PartialAppConfig {
 
 /// Read proxy settings from ~/.myagents/config.json
 /// Returns Some(ProxySettings) if proxy is enabled, None otherwise
+/// Logs errors for invalid configuration to help users debug
 pub fn read_proxy_settings() -> Option<ProxySettings> {
     let home = dirs::home_dir()?;
     let config_path = home.join(".myagents").join("config.json");
 
-    let content = fs::read_to_string(&config_path).ok()?;
-    let config: PartialAppConfig = serde_json::from_str(&content).ok()?;
+    // Read config file
+    let content = match fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // File not existing is normal (first run or no proxy configured)
+            return None;
+        }
+        Err(e) => {
+            log::warn!(
+                "[proxy_config] Failed to read config file {:?}: {}. \
+                 Check file permissions.",
+                config_path, e
+            );
+            return None;
+        }
+    };
+
+    // Parse JSON
+    let config: PartialAppConfig = match serde_json::from_str(&content) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!(
+                "[proxy_config] Invalid JSON in {:?}: {}. \
+                 Please check the configuration file format.",
+                config_path, e
+            );
+            return None;
+        }
+    };
 
     config.proxy_settings.filter(|p| p.enabled)
 }
@@ -54,9 +82,15 @@ pub fn build_client_with_proxy(
         let proxy_url = get_proxy_url(&proxy_settings);
         log::info!("[proxy_config] Using proxy for external requests: {}", proxy_url);
 
-        // Configure proxy but exclude localhost
+        // Configure proxy but exclude localhost and all loopback addresses
+        // Comprehensive NO_PROXY list for maximum compatibility:
+        // - localhost, localhost.localdomain (common DNS names)
+        // - 127.0.0.1, 127.0.0.0/8 (IPv4 loopback range)
+        // - ::1, [::1] (IPv6 loopback with/without brackets)
         let proxy = reqwest::Proxy::all(&proxy_url)?
-            .no_proxy(reqwest::NoProxy::from_string("localhost,127.0.0.1,::1"));
+            .no_proxy(reqwest::NoProxy::from_string(
+                "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]"
+            ));
 
         builder.proxy(proxy)
     } else {
