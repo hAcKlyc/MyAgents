@@ -142,3 +142,7 @@ Write-Host ""
 Write-Host "使用 -Verbose 参数查看详细日志:" -ForegroundColor Yellow
 Write-Host "  .\diagnose_windows.ps1 -Verbose" -ForegroundColor Gray
 Write-Host ""
+
+# 等待用户按键，避免窗口闪退
+Write-Host "按任意键退出..." -ForegroundColor DarkGray
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
