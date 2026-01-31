@@ -1,4 +1,4 @@
-# 测试连接脚本
+﻿# 测试连接脚本
 # 用于验证 Bun Sidecar 是否可以正常响应
 
 Write-Host "===== 连接测试 =====" -ForegroundColor Cyan
