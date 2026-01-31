@@ -10,10 +10,19 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 // Timeout constants (in seconds)
-// SSE uses read_timeout (idle timeout) instead of total timeout
-// Backend sends heartbeat every 15s, so 60s gives plenty of margin
+//
+// SSE_READ_TIMEOUT: Idle timeout for SSE connections
+// - Backend sends heartbeat every 15s
+// - 60s gives 4x margin to handle network jitter
+// - If no data received for 60s, connection is considered dead
+//
+// HTTP_PROXY_TIMEOUT: Total timeout for HTTP proxy requests
+// - 120s (2 minutes) allows for slow API responses
+// - Covers model generation time for complex requests
+//
+// TODO v0.2.0: Make these configurable via Settings
 const SSE_READ_TIMEOUT_SECS: u64 = 60;
-const HTTP_PROXY_TIMEOUT_SECS: u64 = 120; // 2 minutes for HTTP proxy requests
+const HTTP_PROXY_TIMEOUT_SECS: u64 = 120;
 
 /// Single SSE connection for a Tab
 struct SseConnection {
@@ -70,7 +79,7 @@ pub async fn start_sse_proxy(
     // Check if already running for this tab
     if let Some(conn) = connections.get(&tab_id) {
         if conn.running.load(Ordering::SeqCst) {
-            log::info!("[sse-proxy] Tab {} already has an active connection", tab_id);
+            log::debug!("[sse-proxy] Tab {} already has an active connection", tab_id);
             return Ok(());
         }
     }
@@ -93,7 +102,7 @@ pub async fn start_sse_proxy(
     let handle = tokio::spawn(async move {
         match connect_sse(&app_handle, &url, &running, &tab_id_clone).await {
             Ok(_) => {
-                log::info!("[sse-proxy] Tab {} connection closed normally", tab_id_clone);
+                log::debug!("[sse-proxy] Tab {} connection closed normally", tab_id_clone);
             }
             Err(e) => {
                 log::error!("[sse-proxy] Tab {} connection error: {}", tab_id_clone, e);
@@ -172,7 +181,8 @@ async fn connect_sse(
         .pool_idle_timeout(std::time::Duration::from_secs(5))  // Recycle idle connections after 5s
         .pool_max_idle_per_host(2)  // Keep up to 2 connections for reuse
         .no_proxy()  // Disable proxy for all requests (especially localhost)
-        .build()?;
+        .build()
+        .map_err(|e| format!("[sse-proxy] Failed to create HTTP client: {}", e))?;
     
     let response = client
         .get(url)

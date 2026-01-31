@@ -756,7 +756,7 @@ pub fn start_tab_sidecar<R: Runtime>(
     if let Some(proxy_settings) = proxy_config::read_proxy_settings() {
         match proxy_config::get_proxy_url(&proxy_settings) {
             Ok(proxy_url) => {
-                log::info!("[sidecar] Injecting proxy: {}", proxy_url);
+                log::info!("[sidecar] Injecting proxy for Claude Agent SDK: {}", proxy_url);
                 cmd.env("HTTP_PROXY", &proxy_url);
                 cmd.env("HTTPS_PROXY", &proxy_url);
                 cmd.env("http_proxy", &proxy_url);
@@ -767,9 +767,18 @@ pub fn start_tab_sidecar<R: Runtime>(
                 cmd.env("no_proxy", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
             }
             Err(e) => {
-                log::warn!("[sidecar] {}. Proxy will not be used for this instance.", e);
+                // Invalid proxy configuration (bad protocol, port, etc.)
+                // Log as error since user explicitly enabled proxy but config is invalid
+                log::error!(
+                    "[sidecar] Invalid proxy configuration: {}. \
+                     Please check Settings > About > Developer Mode > Proxy Settings. \
+                     Sidecar will start without proxy.",
+                    e
+                );
             }
         }
+    } else {
+        log::debug!("[sidecar] No proxy configured, using direct connection");
     }
 
     cmd.stdout(Stdio::piped())

@@ -1,18 +1,47 @@
-// Shared proxy configuration reading from ~/.myagents/config.json
+//! Shared proxy configuration module
+//!
+//! This module provides unified proxy configuration for:
+//! 1. Tauri updater → CDN downloads
+//! 2. Bun Sidecar → Claude Agent SDK → Anthropic API
+//!
+//! Configuration is read from `~/.myagents/config.json` and can be enabled/disabled
+//! via Settings > About > Developer Mode > Proxy Settings.
+//!
+//! Note: Localhost connections always bypass proxy (NO_PROXY is automatically set).
+
 use serde::Deserialize;
 use std::fs;
 
+/// Default proxy protocol (when not specified in config)
 const DEFAULT_PROXY_PROTOCOL: &str = "http";
+/// Default proxy host (when not specified in config)
 const DEFAULT_PROXY_HOST: &str = "127.0.0.1";
+/// Default proxy port (when not specified in config)
 const DEFAULT_PROXY_PORT: u16 = 7890;
 
-/// Proxy settings from ~/.myagents/config.json
+/// Proxy settings from `~/.myagents/config.json`
+///
+/// # Example JSON
+/// ```json
+/// {
+///   "proxySettings": {
+///     "enabled": true,
+///     "protocol": "http",
+///     "host": "127.0.0.1",
+///     "port": 7890
+///   }
+/// }
+/// ```
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxySettings {
+    /// Whether proxy is enabled
     pub enabled: bool,
-    pub protocol: Option<String>,  // "http" or "socks5"
+    /// Proxy protocol: "http", "https", or "socks5"
+    pub protocol: Option<String>,
+    /// Proxy host (IP or domain)
     pub host: Option<String>,
+    /// Proxy port (1-65535)
     pub port: Option<u16>,
 }
 

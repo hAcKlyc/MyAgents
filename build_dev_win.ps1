@@ -64,17 +64,60 @@ if ($PKG_VERSION -ne $TAURI_VERSION -or $PKG_VERSION -ne $CARGO_VERSION) {
 
 # 杀死残留进程（避免"旧代码"问题）
 Write-ColorOutput "[准备] 杀死残留进程..." "Blue"
-Get-Process | Where-Object { $_.ProcessName -eq "bun" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" } | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 1  # 等待进程完全退出
+
+$bunProcesses = Get-Process | Where-Object { $_.ProcessName -eq "bun" }
+$appProcesses = Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" }
+
+if ($bunProcesses) {
+    $bunProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Host "  清理了 $($bunProcesses.Count) 个 Bun 进程" -ForegroundColor Gray
+}
+
+if ($appProcesses) {
+    $appProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Host "  清理了 $($appProcesses.Count) 个 MyAgents 进程" -ForegroundColor Gray
+}
+
+# 验证进程清理完成（最多等待 2 秒）
+$maxWait = 20  # 20 * 100ms = 2s
+$waited = 0
+while ($waited -lt $maxWait) {
+    $remainingBun = Get-Process -Name "bun" -ErrorAction SilentlyContinue
+    $remainingApp = Get-Process -Name "MyAgents" -ErrorAction SilentlyContinue
+    if (-not $remainingBun -and -not $remainingApp) {
+        break
+    }
+    Start-Sleep -Milliseconds 100
+    $waited++
+}
+
+if ($waited -gt 0) {
+    Write-Host "  进程清理验证完成 (耗时 $($waited * 100)ms)" -ForegroundColor Gray
+}
+
 Write-ColorOutput "✓ 进程已清理" "Green"
 Write-Host ""
 
 # 清理旧构建（包括 Rust 缓存的 resources）
 Write-ColorOutput "[准备] 清理旧构建..." "Blue"
-$distDir = Join-Path $PROJECT_DIR "dist"
-if (Test-Path $distDir) {
-    Remove-Item $distDir -Recurse -Force
+
+# 清理构建输出目录
+$dirsToClean = @(
+    @{ Path = (Join-Path $PROJECT_DIR "dist"); Name = "前端构建输出" },
+    @{ Path = (Join-Path $PROJECT_DIR "src-tauri/target/x86_64-pc-windows-msvc/debug/bundle"); Name = "Debug 打包输出" },
+    @{ Path = (Join-Path $PROJECT_DIR "src-tauri/target/x86_64-pc-windows-msvc/debug/resources"); Name = "Debug resources 缓存" }
+)
+
+foreach ($dir in $dirsToClean) {
+    if (Test-Path $dir.Path) {
+        try {
+            Remove-Item -Recurse -Force $dir.Path -ErrorAction Stop
+            Write-Host "  已清理: $($dir.Name)" -ForegroundColor Gray
+        } catch {
+            Write-Host "  警告: 清理 $($dir.Name) 失败: $_" -ForegroundColor Yellow
+            # 不抛出异常，继续构建
+        }
+    }
 }
 
 # 创建占位符资源 (关键: 满足 tauri build 需求，但 sidecar.rs 在 debug 模式下会忽略它们)
@@ -84,15 +127,6 @@ if (-not (Test-Path $resourcesDir)) {
 }
 "// dev placeholder" | Out-File -FilePath (Join-Path $PROJECT_DIR "src-tauri/resources/server-dist.js") -Encoding UTF8
 
-# 清理 debug 构建产物（确保 resources 被重新复制）
-$debugBundleDir = Join-Path $PROJECT_DIR "src-tauri/target/x86_64-pc-windows-msvc/debug/bundle"
-if (Test-Path $debugBundleDir) {
-    Remove-Item $debugBundleDir -Recurse -Force
-}
-$debugResourcesDir = Join-Path $PROJECT_DIR "src-tauri/target/x86_64-pc-windows-msvc/debug/resources"
-if (Test-Path $debugResourcesDir) {
-    Remove-Item $debugResourcesDir -Recurse -Force
-}
 Write-ColorOutput "✓ 已清理并创建占位符" "Green"
 Write-Host ""
 

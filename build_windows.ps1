@@ -193,23 +193,54 @@ try {
     Write-Host "[准备] 清理旧构建..." -ForegroundColor Blue
 
     # 杀死残留进程（避免文件锁定）
-    Get-Process | Where-Object { $_.ProcessName -eq "bun" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" } | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
+    $bunProcesses = Get-Process | Where-Object { $_.ProcessName -eq "bun" }
+    $appProcesses = Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" }
 
-    if (Test-Path "dist") {
-        Remove-Item -Recurse -Force "dist"
+    if ($bunProcesses) {
+        $bunProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Host "  清理了 $($bunProcesses.Count) 个 Bun 进程" -ForegroundColor Gray
     }
 
-    $bundleDir = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle"
-    if (Test-Path $bundleDir) {
-        Remove-Item -Recurse -Force $bundleDir
+    if ($appProcesses) {
+        $appProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Host "  清理了 $($appProcesses.Count) 个 MyAgents 进程" -ForegroundColor Gray
     }
 
-    # CRITICAL: 清理 resources 目录确保 tauri.conf.json 等配置被重新读取
-    $resourcesDir = "src-tauri\target\x86_64-pc-windows-msvc\release\resources"
-    if (Test-Path $resourcesDir) {
-        Remove-Item -Recurse -Force $resourcesDir
+    # 验证进程清理完成（最多等待 2 秒）
+    $maxWait = 20  # 20 * 100ms = 2s
+    $waited = 0
+    while ($waited -lt $maxWait) {
+        $remainingBun = Get-Process -Name "bun" -ErrorAction SilentlyContinue
+        $remainingApp = Get-Process -Name "MyAgents" -ErrorAction SilentlyContinue
+        if (-not $remainingBun -and -not $remainingApp) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+        $waited++
+    }
+
+    if ($waited -gt 0) {
+        Write-Host "  进程清理验证完成 (耗时 $($waited * 100)ms)" -ForegroundColor Gray
+    }
+
+    # 清理构建输出目录
+    $dirsToClean = @(
+        @{ Path = "dist"; Name = "前端构建输出" },
+        @{ Path = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle"; Name = "打包输出" },
+        @{ Path = "src-tauri\target\x86_64-pc-windows-msvc\release\resources"; Name = "resources 缓存 (CRITICAL)" }
+    )
+
+    foreach ($dir in $dirsToClean) {
+        if (Test-Path $dir.Path) {
+            try {
+                Remove-Item -Recurse -Force $dir.Path -ErrorAction Stop
+                Write-Host "  已清理: $($dir.Name)" -ForegroundColor Gray
+            } catch {
+                Write-Host "  警告: 清理 $($dir.Name) 失败: $_" -ForegroundColor Yellow
+                Write-Host "  路径: $($dir.Path)" -ForegroundColor Yellow
+                # 不抛出异常，继续构建
+            }
+        }
     }
 
     Write-Host "  OK - 清理完成（含 resources 缓存）" -ForegroundColor Green

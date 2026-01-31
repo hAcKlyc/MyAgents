@@ -65,9 +65,20 @@ if (-not $SkipUninstall) {
         $uninstall = Read-Host "  是否卸载? (Y/n)"
         if ($uninstall -ne "n" -and $uninstall -ne "N") {
             Write-Host "  正在卸载..." -ForegroundColor Yellow
-            $app.Uninstall() | Out-Null
-            Start-Sleep -Seconds 2
-            Write-Host "  ✓ 卸载完成" -ForegroundColor Green
+            try {
+                $result = $app.Uninstall()
+                if ($result.ReturnValue -eq 0) {
+                    Start-Sleep -Seconds 2
+                    Write-Host "  ✓ 卸载完成" -ForegroundColor Green
+                } else {
+                    Write-Host "  警告: 卸载返回非零状态码 $($result.ReturnValue)" -ForegroundColor Yellow
+                    Write-Host "  建议手动检查控制面板确认卸载状态" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "  警告: 卸载失败: $_" -ForegroundColor Yellow
+                Write-Host "  您可能需要手动从控制面板卸载" -ForegroundColor Yellow
+                # 不抛出异常，允许继续执行
+            }
         }
     } else {
         Write-Host "  未找到已安装版本" -ForegroundColor Gray
