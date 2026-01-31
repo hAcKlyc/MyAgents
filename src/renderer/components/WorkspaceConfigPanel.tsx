@@ -131,8 +131,8 @@ export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: ex
         setInternalRefreshKey(k => k + 1);
     }, []);
 
-    // Get workspace name from path
-    const workspaceName = agentDir.split('/').pop() || 'Workspace';
+    // Get workspace name from path (support both / and \ separators for cross-platform)
+    const workspaceName = agentDir.split(/[/\\]/).filter(Boolean).pop() || 'Workspace';
 
     return createPortal(
         <div

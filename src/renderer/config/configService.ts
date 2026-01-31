@@ -407,7 +407,20 @@ export async function addProject(path: string): Promise<Project> {
     }
 
     // Create new project - use Tauri's basename for cross-platform path handling
-    const name = await basename(path);
+    let name: string;
+    try {
+        name = await basename(path);
+        // Validate basename result
+        if (!name || name.trim().length === 0) {
+            throw new Error('Empty basename result');
+        }
+    } catch (err) {
+        console.warn('[configService] basename() failed, using fallback:', err);
+        // Fallback: robust manual path parsing
+        const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+        name = parts[parts.length - 1] || 'Unknown';
+    }
+
     const newProject: Project = {
         id: crypto.randomUUID(),
         name,
