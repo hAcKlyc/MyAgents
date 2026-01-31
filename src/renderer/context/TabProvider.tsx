@@ -538,6 +538,10 @@ export default function TabProvider({
                     break;
                 }
                 const tool = data as ToolUse;
+
+                // Track tool_use event
+                track('tool_use', { tool: tool.name });
+
                 // For Task tool, add taskStartTime and initial taskStats
                 const toolSimple: ToolUseSimple = tool.name === 'Task'
                     ? { ...tool, inputJson: '', isLoading: true, taskStartTime: Date.now(), taskStats: { toolCount: 0, inputTokens: 0, outputTokens: 0 } }
@@ -569,6 +573,10 @@ export default function TabProvider({
                     break;
                 }
                 const tool = data as ToolUse;
+
+                // Track tool_use event (server-side tools)
+                track('tool_use', { tool: tool.name });
+
                 // Server tools come with complete input, no streaming
                 const toolSimple: ToolUseSimple = {
                     ...tool,

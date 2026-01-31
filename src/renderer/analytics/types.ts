@@ -20,7 +20,6 @@ export interface BaseEventParams {
  * 已移除的事件（规划时定义但实际不需要）：
  * - app_ready: 与 app_launch 功能重叠
  * - session_end: 会话只有切换/新建，无明确结束点
- * - tool_use: message_complete 中的 tool_count 已覆盖
  */
 export type EventName =
   // 应用生命周期
@@ -33,6 +32,8 @@ export type EventName =
   | 'message_complete'
   | 'message_stop'
   | 'message_error'
+  // 工具使用
+  | 'tool_use'
   // 权限控制
   | 'permission_grant'
   | 'permission_deny'
