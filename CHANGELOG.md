@@ -10,107 +10,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.7] - 2026-01-31
 
 ### Added
-- **Windows Dev 构建脚本** (`build_dev_win.ps1`)
-  - Debug 模式 + DevTools 启用
-  - 进程清理和 resources 缓存清理
-  - UTF-8 BOM 编码支持中文
-- **Windows 诊断工具** (`diagnose_windows.ps1`)
-  - 检查 Bun 进程和端口监听
-  - 配置和日志目录验证
-  - localhost 连接测试
-  - 支持 `-Verbose` 详细模式
-- **连接测试脚本** (`test_connection.ps1`)
-  - 测试 Bun Sidecar API 可用性
-  - PowerShell 和 curl 双重验证
-- **统一代理配置模块** (`src-tauri/src/proxy_config.rs`)
-  - 共享代理配置读取逻辑（消除 40 行重复代码）
-  - 代理 URL 验证（协议、端口）
-  - 统一 HTTP 客户端构建
-  - 5 个单元测试，全部通过
-- **二维码缓存 API** (`GET /api/assets/qr-code`)
-  - 启动时从 CDN 下载并缓存（1 小时过期）
-  - 文件锁机制防止并发损坏
-  - 原子写入保证数据完整性
-  - 多层降级处理（缓存 → 下载 → 过期缓存 → 错误）
-  - 路径安全验证和性能监控
+- Windows 平台开发和诊断工具（`build_dev_win.ps1`, `diagnose_windows.ps1`, `test_connection.ps1`）
+- 设置页面「关于」新增用户交流群二维码（自动缓存，离线可用）
+- 代理配置支持（Settings > About > Developer Mode）
+  - 支持 HTTP/HTTPS/SOCKS5 协议
+  - 自动应用于 Claude Agent SDK 和应用更新下载
 
 ### Changed
-- **Windows 路径兼容性**
-  - 移除复杂的路径安全检查（修复跨驱动器问题）
-  - 简化为直接使用 Tauri API 和 Node.js path 模块
-- **代理配置重构**
-  - `sidecar.rs` 使用 `proxy_config` 共享模块
-  - `updater.rs` 使用 `build_client_with_proxy()`
-  - `sse_proxy.rs` 强制 `.no_proxy()` 禁用代理
-  - Bun Sidecar 环境变量注入完整 NO_PROXY 列表
-- **连接池优化**
-  - 5 秒空闲超时（之前无限制）
-  - 每主机最多 2 个空闲连接
-  - 强制 HTTP/1.1（TODO v0.1.8 测试 HTTP/2）
-- **错误处理改进**
-  - 详细错误日志（proxy_config, sidecar, sse_proxy）
-  - 临时目录创建失败时提供权限提示
-  - 代理配置验证（协议、端口）
-- **PowerShell 脚本改进**
-  - 端口常量提取（引用 Rust 源码位置）
-  - 管理员权限检查和提示
-  - `Get-NetTCPConnection` 回退到 `netstat`（兼容旧 Windows）
-  - UTF-8 BOM 编码避免中文乱码
+- 改进 Windows 安装器升级体验，支持直接覆盖安装（无需先卸载旧版本）
+- 优化网络连接池配置（降低资源占用）
 
 ### Fixed
-- **Windows 生产包无法启动**
-  - 移除跨驱动器路径检查失败的问题
-- **Windows Sidecar 连接失败**
-  - 禁用 localhost 请求的系统代理（reqwest 默认行为）
-  - 确保 localhost 请求直连（`.no_proxy()`）
-- **Windows Tauri IPC CSP 错误**
-  - CSP 添加 `fetch-src` 指令（Windows Tauri 必需）
-  - `fetch-src` 包含 `http://ipc.localhost`
-- **Windows 构建脚本导致 CSP 错误（Critical）**
-  - 修复缺少 resources 目录清理（导致使用旧配置缓存）
-  - 移除错误的 CSP 覆盖逻辑（改为验证）
-  - 添加进程清理避免文件锁定
-- **二维码加载问题**
-  - Windows 打包后 CSP 阻止 CDN 加载
-  - 改为后端下载 + 缓存 + base64 返回
-  - 添加 Loading 状态和内存泄漏修复
-  - 并发下载安全性（文件锁 + 原子写入）
-- **NO_PROXY 列表不完整**
-  - 扩展到 6 个 localhost 变体：`localhost`, `localhost.localdomain`, `127.0.0.1`, `127.0.0.0/8`, `::1`, `[::1]`
-- **Code Review 修复（Critical & High）**
-  - test_connection.ps1 变量未定义错误
-  - 端口验证逻辑（移除 u16 范围检查警告）
-  - Windows 进程清理竞态条件（验证循环替代硬编码 sleep）
-  - CSP 验证逻辑增强（检查 fetch-src 包含 http://ipc.localhost）
-- **Code Review 修复（Medium & Low）**
-  - SSE 客户端构建错误处理改进
-  - Sidecar 代理错误处理细化（error/debug 日志分级）
-  - build_windows.ps1 进程清理验证与目录清理容错
-  - rebuild_clean.ps1 卸载失败警告
-  - build_dev_win.ps1 同步应用改进逻辑
-- **Windows 安装器升级体验**
-  - tauri.conf.json 添加 `allowDowngrades: true`
-  - 支持直接覆盖安装，无需先卸载旧版本
+- **Windows 平台关键修复**：
+  - 修复 Windows 生产包无法启动的问题
+  - 修复 Sidecar 连接失败（代理配置冲突）
+  - 修复 Windows Tauri IPC 通信错误（CSP 配置不完整）
+  - 修复构建脚本导致的配置缓存问题
+- 修复二维码加载失败问题（Windows CSP 限制）
+- 修复代理环境下 localhost 连接失败
+- 修复多项代码质量问题（进程清理竞态、错误处理等）
 
 ### Technical
-- **代码质量提升**
-  - 消除 40 行重复代理配置代码
-  - 添加代理配置单元测试（5 个测试用例）
-  - 改进错误处理和日志记录（所有模块添加 `[module-name]` 前缀）
-  - 详细的代码注释和文档引用（proxy_config.rs 添加模块级文档）
-  - 日志级别优化（连接已存在、正常关闭等改为 debug 级别）
-  - 超时常量文档化（记录设计意图和未来改进方向）
-- **文档完善**
-  - `specs/tech_docs/proxy_config.md` - 代理配置技术文档
-  - `specs/tech_docs/build_troubleshooting.md` - 构建问题排查
-  - `specs/tech_docs/windows_platform_guide.md` - Windows 平台指南
-  - `specs/guides/windows_build_guide.md` 添加升级体验问题排查
-- **构建脚本健壮性**
-  - CSP 配置验证（而非覆盖）+ fetch-src 指令专项检查
-  - Resources 缓存清理 + 清理失败容错处理
-  - 进程清理验证循环（最多等待 1-2 秒）+ 记录耗时
-  - 目录清理失败改为警告而非中断构建
-  - 卸载失败时提示手动操作而非抛出异常
+- 统一代理配置模块，消除代码重复
+- 完善错误处理和日志记录
+- 增强构建脚本健壮性（清理验证、容错处理）
+- 新增技术文档：代理配置、构建问题排查、Windows 平台指南
 
 **详见**: [specs/prd/prd_0.1.7.md](./specs/prd/prd_0.1.7.md)
 
