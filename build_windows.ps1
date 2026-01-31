@@ -143,35 +143,107 @@ try {
     Write-Host ""
 
     # ========================================
-    # 配置生产 CSP
+    # 验证 CSP 配置（不再覆盖）
     # ========================================
-    Write-Host "[3/7] 配置生产环境 CSP..." -ForegroundColor Blue
-
-    Copy-Item $TauriConfPath "$TauriConfPath.bak" -Force
+    Write-Host "[3/7] 验证 CSP 配置..." -ForegroundColor Blue
 
     $conf = Get-Content $TauriConfPath -Raw | ConvertFrom-Json
-    $conf.app.security.csp = "default-src 'self' ipc: tauri:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; img-src 'self' data: blob:;"
-    $jsonContent = $conf | ConvertTo-Json -Depth 10
-    [System.IO.File]::WriteAllText($TauriConfPath, $jsonContent, [System.Text.UTF8Encoding]::new($false))
+    $currentCsp = $conf.app.security.csp
 
-    Write-Host "  OK - CSP 已配置" -ForegroundColor Green
+    # 验证关键 CSP 指令是否存在
+    $requiredCspParts = @(
+        "http://ipc.localhost",
+        "asset:",
+        "https://download.myagents.io"
+    )
+
+    $missingParts = @()
+    foreach ($part in $requiredCspParts) {
+        if ($currentCsp -notlike "*$part*") {
+            $missingParts += $part
+        }
+    }
+
+    # 特殊验证: fetch-src 指令必须包含 http://ipc.localhost (Windows Tauri IPC 关键)
+    if ($currentCsp -match "fetch-src\s+([^;]+)") {
+        $fetchSrcDirective = $matches[1]
+        if ($fetchSrcDirective -notlike "*http://ipc.localhost*") {
+            $missingParts += "fetch-src 缺少 http://ipc.localhost (Windows 必需)"
+        }
+    } else {
+        $missingParts += "fetch-src 指令"
+    }
+
+    if ($missingParts.Count -gt 0) {
+        Write-Host "  错误: CSP 配置不符合 Windows 要求:" -ForegroundColor Red
+        $missingParts | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "  Windows Tauri IPC 需要 fetch-src 包含 http://ipc.localhost" -ForegroundColor Yellow
+        Write-Host "  请检查 tauri.conf.json 中的 CSP 配置" -ForegroundColor Yellow
+        Write-Host ""
+        throw "CSP 配置不完整，无法在 Windows 上正常运行"
+    } else {
+        Write-Host "  OK - CSP 配置完整 (包含 Windows IPC 支持)" -ForegroundColor Green
+    }
     Write-Host ""
 
     # ========================================
-    # 清理旧构建
+    # 清理旧构建（包括缓存的 resources）
     # ========================================
     Write-Host "[准备] 清理旧构建..." -ForegroundColor Blue
 
-    if (Test-Path "dist") {
-        Remove-Item -Recurse -Force "dist"
+    # 杀死残留进程（避免文件锁定）
+    $bunProcesses = Get-Process | Where-Object { $_.ProcessName -eq "bun" }
+    $appProcesses = Get-Process | Where-Object { $_.ProcessName -eq "MyAgents" }
+
+    if ($bunProcesses) {
+        $bunProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Host "  清理了 $($bunProcesses.Count) 个 Bun 进程" -ForegroundColor Gray
     }
 
-    $bundleDir = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle"
-    if (Test-Path $bundleDir) {
-        Remove-Item -Recurse -Force $bundleDir
+    if ($appProcesses) {
+        $appProcesses | Stop-Process -Force -ErrorAction SilentlyContinue
+        Write-Host "  清理了 $($appProcesses.Count) 个 MyAgents 进程" -ForegroundColor Gray
     }
 
-    Write-Host "  OK - 清理完成" -ForegroundColor Green
+    # 验证进程清理完成（最多等待 2 秒）
+    $maxWait = 20  # 20 * 100ms = 2s
+    $waited = 0
+    while ($waited -lt $maxWait) {
+        $remainingBun = Get-Process -Name "bun" -ErrorAction SilentlyContinue
+        $remainingApp = Get-Process -Name "MyAgents" -ErrorAction SilentlyContinue
+        if (-not $remainingBun -and -not $remainingApp) {
+            break
+        }
+        Start-Sleep -Milliseconds 100
+        $waited++
+    }
+
+    if ($waited -gt 0) {
+        Write-Host "  进程清理验证完成 (耗时 $($waited * 100)ms)" -ForegroundColor Gray
+    }
+
+    # 清理构建输出目录
+    $dirsToClean = @(
+        @{ Path = "dist"; Name = "前端构建输出" },
+        @{ Path = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle"; Name = "打包输出" },
+        @{ Path = "src-tauri\target\x86_64-pc-windows-msvc\release\resources"; Name = "resources 缓存 (CRITICAL)" }
+    )
+
+    foreach ($dir in $dirsToClean) {
+        if (Test-Path $dir.Path) {
+            try {
+                Remove-Item -Recurse -Force $dir.Path -ErrorAction Stop
+                Write-Host "  已清理: $($dir.Name)" -ForegroundColor Gray
+            } catch {
+                Write-Host "  警告: 清理 $($dir.Name) 失败: $_" -ForegroundColor Yellow
+                Write-Host "  路径: $($dir.Path)" -ForegroundColor Yellow
+                # 不抛出异常，继续构建
+            }
+        }
+    }
+
+    Write-Host "  OK - 清理完成（含 resources 缓存）" -ForegroundColor Green
     Write-Host ""
 
     # ========================================

@@ -3,16 +3,26 @@
 // Supports multiple connections (one per Tab)
 
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 // Timeout constants (in seconds)
-// SSE uses read_timeout (idle timeout) instead of total timeout
-// Backend sends heartbeat every 15s, so 60s gives plenty of margin
+//
+// SSE_READ_TIMEOUT: Idle timeout for SSE connections
+// - Backend sends heartbeat every 15s
+// - 60s gives 4x margin to handle network jitter
+// - If no data received for 60s, connection is considered dead
+//
+// HTTP_PROXY_TIMEOUT: Total timeout for HTTP proxy requests
+// - 120s (2 minutes) allows for slow API responses
+// - Covers model generation time for complex requests
+//
+// TODO v0.2.0: Make these configurable via Settings
 const SSE_READ_TIMEOUT_SECS: u64 = 60;
-const HTTP_PROXY_TIMEOUT_SECS: u64 = 120; // 2 minutes for HTTP proxy requests
+const HTTP_PROXY_TIMEOUT_SECS: u64 = 120;
 
 /// Single SSE connection for a Tab
 struct SseConnection {
@@ -69,7 +79,7 @@ pub async fn start_sse_proxy(
     // Check if already running for this tab
     if let Some(conn) = connections.get(&tab_id) {
         if conn.running.load(Ordering::SeqCst) {
-            log::info!("[sse-proxy] Tab {} already has an active connection", tab_id);
+            log::debug!("[sse-proxy] Tab {} already has an active connection", tab_id);
             return Ok(());
         }
     }
@@ -92,7 +102,7 @@ pub async fn start_sse_proxy(
     let handle = tokio::spawn(async move {
         match connect_sse(&app_handle, &url, &running, &tab_id_clone).await {
             Ok(_) => {
-                log::info!("[sse-proxy] Tab {} connection closed normally", tab_id_clone);
+                log::debug!("[sse-proxy] Tab {} connection closed normally", tab_id_clone);
             }
             Err(e) => {
                 log::error!("[sse-proxy] Tab {} connection error: {}", tab_id_clone, e);
@@ -161,10 +171,18 @@ async fn connect_sse(
     // Backend sends heartbeat every 15s, so 60s read_timeout gives 4x margin
     // CRITICAL: Enable tcp_nodelay to disable Nagle's algorithm for immediate packet transmission
     // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
+    // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
+    // Use short-lived connection pool to balance performance and stability
+    // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
         .tcp_nodelay(true)
-        .build()?;
+        .http1_only()  // Force HTTP/1.1 for stability (TODO v0.1.8: test HTTP/2 negotiation)
+        .pool_idle_timeout(std::time::Duration::from_secs(5))  // Recycle idle connections after 5s
+        .pool_max_idle_per_host(2)  // Keep up to 2 connections for reuse
+        .no_proxy()  // Disable proxy for all requests (especially localhost)
+        .build()
+        .map_err(|e| format!("[sse-proxy] Failed to create HTTP client: {}", e))?;
     
     let response = client
         .get(url)
@@ -323,9 +341,16 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     
     // Build client with configurable timeout
     // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
+    // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
+    // Use short-lived connection pool to balance performance and stability
+    // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
         .tcp_nodelay(true)
+        .http1_only()  // Force HTTP/1.1 for stability (TODO v0.1.8: test HTTP/2 negotiation)
+        .pool_idle_timeout(std::time::Duration::from_secs(5))  // Recycle idle connections after 5s
+        .pool_max_idle_per_host(2)  // Keep up to 2 connections for reuse
+        .no_proxy()  // Disable proxy for all requests (especially localhost)
         .build()
         .map_err(|e| {
             let err = format!("[proxy] Failed to create client: {}", e);
@@ -361,9 +386,29 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
 
     logger::info(&app, format!("[proxy] {} {} - Sending request...", request.method, request.url));
     
-    // Send request
+    // Send request with detailed error logging
     let response = req_builder.send().await.map_err(|e| {
-        let err = format!("[proxy] Request failed: {}", e);
+        let mut err = format!("[proxy] Request failed: {}", e);
+
+        // Add detailed error information for debugging
+        if e.is_connect() {
+            err.push_str(" (Connection error - cannot establish connection)");
+        }
+        if e.is_timeout() {
+            err.push_str(" (Timeout error - request took too long)");
+        }
+        if e.is_request() {
+            err.push_str(" (Request error - invalid request)");
+        }
+        if e.is_body() {
+            err.push_str(" (Body error - failed to read response body)");
+        }
+
+        // Try to get the source error
+        if let Some(source) = e.source() {
+            err.push_str(&format!(" | Source: {}", source));
+        }
+
         logger::error(&app, &err);
         e.to_string()
     })?;

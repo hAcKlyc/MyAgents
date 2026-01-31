@@ -3,7 +3,6 @@
 // Supports per-Tab isolation with independent Sidecar processes
 
 use std::collections::HashMap;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -12,8 +11,9 @@ use std::sync::{Arc, Mutex, Once};
 use std::thread;
 use std::time::Duration;
 
-use serde::Deserialize;
 use tauri::{AppHandle, Manager, Runtime};
+
+use crate::proxy_config;
 
 // Ensure file descriptor limit is increased only once
 static RLIMIT_INIT: Once = Once::new();
@@ -89,46 +89,8 @@ const SIDECAR_MARKER: &str = "--myagents-sidecar";
 
 // ===== Proxy Configuration =====
 // Default values (must match TypeScript PROXY_DEFAULTS in types.ts)
-const DEFAULT_PROXY_PROTOCOL: &str = "http";
-const DEFAULT_PROXY_HOST: &str = "127.0.0.1";
-const DEFAULT_PROXY_PORT: u16 = 7897;
-
-/// Proxy settings from ~/.myagents/config.json
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ProxySettings {
-    enabled: bool,
-    protocol: Option<String>,  // "http" or "socks5"
-    host: Option<String>,
-    port: Option<u16>,
-}
-
-/// Partial app config for reading proxy settings
-#[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct PartialAppConfig {
-    proxy_settings: Option<ProxySettings>,
-}
-
-/// Read proxy settings from ~/.myagents/config.json
-fn read_proxy_settings() -> Option<ProxySettings> {
-    let home = dirs::home_dir()?;
-    let config_path = home.join(".myagents").join("config.json");
-
-    let content = fs::read_to_string(&config_path).ok()?;
-    let config: PartialAppConfig = serde_json::from_str(&content).ok()?;
-
-    config.proxy_settings.filter(|p| p.enabled)
-}
-
-/// Get proxy URL string from settings
-fn get_proxy_url(settings: &ProxySettings) -> String {
-    let protocol = settings.protocol.as_deref().unwrap_or(DEFAULT_PROXY_PROTOCOL);
-    let host = settings.host.as_deref().unwrap_or(DEFAULT_PROXY_HOST);
-    let port = settings.port.unwrap_or(DEFAULT_PROXY_PORT);
-
-    format!("{}://{}:{}", protocol, host, port)
-}
+// Proxy configuration is now managed by the shared proxy_config module
+// See src/proxy_config.rs for implementation details
 
 /// Cleanup stale sidecar processes from previous app instances
 /// This should be called on app startup before creating the SidecarManager
@@ -167,8 +129,23 @@ pub fn cleanup_stale_sidecars() {
         // 3. Clean up MCP child processes
         kill_windows_processes_by_pattern(".myagents\\mcp\\");
 
-        thread::sleep(Duration::from_millis(200));
-        log::info!("[sidecar] Windows cleanup complete");
+        // Verify cleanup completed (max 1 second wait)
+        let start = std::time::Instant::now();
+        let max_wait = Duration::from_secs(1);
+        loop {
+            if !has_windows_processes(SIDECAR_MARKER)
+                && !has_windows_processes("claude-agent-sdk")
+                && !has_windows_processes(".myagents\\mcp\\")
+            {
+                log::info!("[sidecar] Windows cleanup verified in {:?}", start.elapsed());
+                break;
+            }
+            if start.elapsed() > max_wait {
+                log::warn!("[sidecar] Windows cleanup timeout after 1s, some processes may remain");
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 }
 
@@ -750,7 +727,20 @@ pub fn start_tab_sidecar<R: Runtime>(
     } else {
         // Global sidecar: use temp directory
         let temp_dir = std::env::temp_dir().join(format!("myagents-global-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).ok();
+        log::info!("[sidecar] Creating temp agent directory: {:?}", temp_dir);
+
+        // Create directory and fail early if unable to create
+        std::fs::create_dir_all(&temp_dir).map_err(|e| {
+            let err = format!(
+                "[sidecar] Failed to create temp directory {:?}: {}. \
+                 Check permissions on TEMP directory ({}). \
+                 This directory is required for Global Sidecar to store runtime data.",
+                temp_dir, e, std::env::temp_dir().display()
+            );
+            log::error!("{}", err);
+            err
+        })?;
+
         cmd.arg("--agent-dir").arg(&temp_dir);
         Some(temp_dir)
     };
@@ -763,16 +753,32 @@ pub fn start_tab_sidecar<R: Runtime>(
     }
 
     // Inject proxy environment variables if configured
-    if let Some(proxy_settings) = read_proxy_settings() {
-        let proxy_url = get_proxy_url(&proxy_settings);
-        log::info!("[sidecar] Injecting proxy: {}", proxy_url);
-        cmd.env("HTTP_PROXY", &proxy_url);
-        cmd.env("HTTPS_PROXY", &proxy_url);
-        cmd.env("http_proxy", &proxy_url);
-        cmd.env("https_proxy", &proxy_url);
-        // Ensure localhost traffic doesn't go through proxy
-        cmd.env("NO_PROXY", "localhost,127.0.0.1,::1");
-        cmd.env("no_proxy", "localhost,127.0.0.1,::1");
+    if let Some(proxy_settings) = proxy_config::read_proxy_settings() {
+        match proxy_config::get_proxy_url(&proxy_settings) {
+            Ok(proxy_url) => {
+                log::info!("[sidecar] Injecting proxy for Claude Agent SDK: {}", proxy_url);
+                cmd.env("HTTP_PROXY", &proxy_url);
+                cmd.env("HTTPS_PROXY", &proxy_url);
+                cmd.env("http_proxy", &proxy_url);
+                cmd.env("https_proxy", &proxy_url);
+                // Ensure localhost traffic doesn't go through proxy
+                // Comprehensive NO_PROXY list for maximum compatibility
+                cmd.env("NO_PROXY", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
+                cmd.env("no_proxy", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
+            }
+            Err(e) => {
+                // Invalid proxy configuration (bad protocol, port, etc.)
+                // Log as error since user explicitly enabled proxy but config is invalid
+                log::error!(
+                    "[sidecar] Invalid proxy configuration: {}. \
+                     Please check Settings > About > Developer Mode > Proxy Settings. \
+                     Sidecar will start without proxy.",
+                    e
+                );
+            }
+        }
+    } else {
+        log::debug!("[sidecar] No proxy configured, using direct connection");
     }
 
     cmd.stdout(Stdio::piped())
@@ -1051,6 +1057,34 @@ fn kill_windows_processes_by_pattern(pattern: &str) {
 
     if killed > 0 {
         log::info!("[sidecar] Killed {} processes matching '{}'", killed, pattern);
+    }
+}
+
+/// Check if any Windows processes exist matching the pattern
+#[cfg(windows)]
+fn has_windows_processes(pattern: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let ps_command = format!(
+        "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' }} | Select-Object -ExpandProperty ProcessId",
+        pattern.replace("'", "''")
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_command])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            !String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|s| s.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>()
+                .is_empty()
+        }
+        _ => false,
     }
 }
 

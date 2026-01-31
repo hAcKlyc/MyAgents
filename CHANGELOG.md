@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.7] - 2026-01-31
+
+### Added
+- Windows 平台开发工具（`build_dev_win.ps1`）
+- 设置页面「关于」新增用户交流群二维码（自动缓存，离线可用）
+- 代理配置支持（Settings > About > Developer Mode）
+  - 支持 HTTP/HTTPS/SOCKS5 协议
+  - 自动应用于 Claude Agent SDK 和应用更新下载
+
+### Changed
+- 改进 Windows 安装器升级体验，支持直接覆盖安装（无需先卸载旧版本）
+- 优化网络连接池配置（降低资源占用）
+
+### Fixed
+- **Windows 平台关键修复**：
+  - 修复 Windows 生产包无法启动的问题
+  - 修复 Sidecar 连接失败（代理配置冲突）
+  - 修复 Windows Tauri IPC 通信错误（CSP 配置不完整）
+  - 修复构建脚本导致的配置缓存问题
+  - 修复启动页工作区名称显示完整路径（应显示文件夹名）
+  - 修复工具徽章 Windows 路径显示问题（3 处）
+- 修复二维码加载失败问题（Windows CSP 限制）
+- 修复代理环境下 localhost 连接失败
+- 修复 Tab 关闭确认对话框无效（正在生成时关闭未被阻止）
+- 修复 Windows 关闭最后一个 Tab 时程序退出
+- 修复 React ref 在渲染期间更新（ESLint 警告）
+- 修复多项代码质量问题（进程清理竞态、错误处理等）
+
+### Technical
+- 统一代理配置模块，消除代码重复
+- Tab 关闭确认重构：使用 ConfirmDialog 替代 window.confirm()（符合 React 声明式编程）
+- 路径处理标准化：优先使用 Tauri `basename()` API，同步场景使用 `/[/\\]/` 正则
+- 完善错误处理和日志记录
+- 增强构建脚本健壮性（清理验证、容错处理）
+- 新增技术文档：代理配置、构建问题排查、Windows 平台指南
+
+**详见**: [specs/prd/prd_0.1.7.md](./specs/prd/prd_0.1.7.md)
+
+---
+
 ## [0.1.6] - 2026-01-30
 
 ### Added

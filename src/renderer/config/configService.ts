@@ -8,7 +8,7 @@ import {
     readDir,
     remove,
 } from '@tauri-apps/plugin-fs';
-import { homeDir, join } from '@tauri-apps/api/path';
+import { homeDir, join, basename } from '@tauri-apps/api/path';
 
 import {
     type AppConfig,
@@ -406,9 +406,21 @@ export async function addProject(path: string): Promise<Project> {
         return existing;
     }
 
-    // Create new project (support both / and \ path separators)
-    const normalizedPath = path.replace(/\\/g, '/');
-    const name = normalizedPath.split('/').pop() || 'Unknown';
+    // Create new project - use Tauri's basename for cross-platform path handling
+    let name: string;
+    try {
+        name = await basename(path);
+        // Validate basename result
+        if (!name || name.trim().length === 0) {
+            throw new Error('Empty basename result');
+        }
+    } catch (err) {
+        console.warn('[configService] basename() failed, using fallback:', err);
+        // Fallback: robust manual path parsing
+        const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+        name = parts[parts.length - 1] || 'Unknown';
+    }
+
     const newProject: Project = {
         id: crypto.randomUUID(),
         name,

@@ -1,6 +1,6 @@
 [package]
 name = "myagents"
-version = "0.1.6"
+version = "0.1.7"
 description = "MyAgents - Desktop Claude Code for everyone"
 authors = ["MyAgents Team <myagents.io@gmail.com>"]
 license = "Apache-2.0"

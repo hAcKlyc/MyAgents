@@ -3,6 +3,7 @@ import { arrayMove } from '@dnd-kit/sortable';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 import { startTabSidecar, stopTabSidecar, startGlobalSidecar, stopAllSidecars, initGlobalSidecarReadyPromise, markGlobalSidecarReady, getGlobalServerUrl, resetGlobalSidecarReadyPromise } from '@/api/tauriClient';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import CustomTitleBar from '@/components/CustomTitleBar';
 import TabBar from '@/components/TabBar';
 import TabProvider from '@/context/TabProvider';
@@ -30,6 +31,12 @@ export default function App() {
   // Per-tab loading state (keyed by tabId)
   const [loadingTabs, setLoadingTabs] = useState<Record<string, boolean>>({});
   const [tabErrors, setTabErrors] = useState<Record<string, string | null>>({});
+
+  // Tab close confirmation state
+  const [closeConfirmState, setCloseConfirmState] = useState<{
+    tabId: string;
+    tabTitle: string;
+  } | null>(null);
 
   // Global Sidecar silent retry mechanism
   const mountedRef = useRef(true);
@@ -121,39 +128,54 @@ export default function App() {
     ));
   }, []);
 
-  // Close tab with confirmation if generating
-  const closeTabWithConfirmation = useCallback((tabId: string) => {
-    const tab = tabs.find(t => t.id === tabId);
-    if (tab?.isGenerating) {
-      const confirmed = window.confirm('内容生成中，确认要关闭么？');
-      if (!confirmed) return;
-    }
+  // Perform the actual tab close operation (pure function, no confirmation)
+  const performCloseTab = useCallback((tabId: string) => {
+    const currentTabs = tabs;
 
-    // Stop this Tab's Sidecar when closing (only if it has an agentDir, i.e., was running a project)
-    // Settings/Launcher tabs don't have sidecars, so skip for them
-    if (tab?.agentDir) {
+    // Double-check: tab might have been removed
+    const tab = currentTabs.find(t => t.id === tabId);
+    if (!tab) return;
+
+    // Stop this Tab's Sidecar when closing (only if it has an agentDir)
+    if (tab.agentDir) {
       void stopTabSidecar(tabId);
     }
 
-    // Perform close
-    setTabs((prev) => {
-      const newTabs = prev.filter((t) => t.id !== tabId);
+    // Special case: If this is the last tab, replace with launcher (don't close the app)
+    if (currentTabs.length === 1) {
+      const newTab = createNewTab();
+      setTabs([newTab]);
+      setActiveTabId(newTab.id);
+      return;
+    }
 
-      // If closing the active tab, switch to the last tab
-      if (tabId === activeTabId && newTabs.length > 0) {
-        setActiveTabId(newTabs[newTabs.length - 1].id);
-      }
+    // Normal case: close the tab
+    const newTabs = currentTabs.filter((t) => t.id !== tabId);
 
-      // If no tabs left, create a new one (launcher page)
-      if (newTabs.length === 0) {
-        const newTab = createNewTab();
-        setActiveTabId(newTab.id);
-        return [newTab];
-      }
+    // If closing the active tab, switch to the last remaining tab
+    if (tabId === activeTabId && newTabs.length > 0) {
+      setActiveTabId(newTabs[newTabs.length - 1].id);
+    }
 
-      return newTabs;
-    });
-  }, [activeTabId, tabs]);
+    setTabs(newTabs);
+  }, [tabs, activeTabId]);
+
+  // Close tab with confirmation if generating (shows custom dialog)
+  const closeTabWithConfirmation = useCallback((tabId: string) => {
+    const tab = tabs.find(t => t.id === tabId);
+
+    // If generating, show confirmation dialog
+    if (tab?.isGenerating) {
+      setCloseConfirmState({
+        tabId,
+        tabTitle: tab.title
+      });
+      return;
+    }
+
+    // Otherwise, close directly
+    performCloseTab(tabId);
+  }, [tabs, performCloseTab]);
 
   // Close current active tab (for Cmd+W)
   const closeCurrentTab = useCallback(() => {
@@ -161,14 +183,12 @@ export default function App() {
 
     const activeTab = tabs.find(t => t.id === activeTabId);
 
-    // If on launcher page and it's the only tab, close the window
-    if (activeTab?.view === 'launcher' && tabs.length === 1) {
-      if (isTauriEnvironment()) {
-        void getCurrentWindow().close();
-      }
+    // Special case: If only one launcher tab, do nothing
+    if (tabs.length === 1 && activeTab?.view === 'launcher') {
       return;
     }
 
+    // Multiple tabs OR last tab is chat/settings: use the unified confirmation logic
     closeTabWithConfirmation(activeTabId);
   }, [activeTabId, tabs, closeTabWithConfirmation]);
 
@@ -276,8 +296,14 @@ export default function App() {
   }, []);
 
   const handleCloseTab = useCallback((tabId: string) => {
+    // Special case: If only one launcher tab, do nothing
+    const tab = tabs.find(t => t.id === tabId);
+    if (tabs.length === 1 && tab?.view === 'launcher') {
+      return;
+    }
+
     closeTabWithConfirmation(tabId);
-  }, [closeTabWithConfirmation]);
+  }, [tabs, closeTabWithConfirmation]);
 
   const handleNewTab = useCallback(() => {
     if (tabs.length >= MAX_TABS) {
@@ -407,6 +433,22 @@ export default function App() {
           );
         })}
       </div>
+
+      {/* Close confirmation dialog */}
+      {closeConfirmState && (
+        <ConfirmDialog
+          title="关闭标签页"
+          message={`正在与 AI 对话中，确定要关闭「${closeConfirmState.tabTitle}」吗？`}
+          confirmText="关闭"
+          cancelText="取消"
+          confirmVariant="danger"
+          onConfirm={() => {
+            performCloseTab(closeConfirmState.tabId);
+            setCloseConfirmState(null);
+          }}
+          onCancel={() => setCloseConfirmState(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyAgents",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "identifier": "com.myagents.app",
   "build": {
     "frontendDist": "../dist",
@@ -32,7 +32,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: tauri: http://ipc.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: http://ipc.localhost http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://download.myagents.io; img-src 'self' data: blob: https://download.myagents.io;",
+      "csp": "default-src 'self' ipc: tauri: asset: http://ipc.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: tauri: asset: http://ipc.localhost http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://download.myagents.io; fetch-src 'self' ipc: tauri: asset: http://ipc.localhost https://download.myagents.io; img-src 'self' data: blob: asset: https://download.myagents.io;",
       "dangerousDisableAssetCspModification": true
     }
   },
@@ -84,6 +84,7 @@
     "windows": {
       "certificateThumbprint": null,
       "timestampUrl": null,
+      "allowDowngrades": true,
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       },

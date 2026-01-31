@@ -9,6 +9,7 @@
 // 5. Or next app launch → update is automatically applied
 
 use crate::logger;
+use crate::proxy_config;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
@@ -248,12 +249,13 @@ pub async fn test_update_connectivity(app: AppHandle) -> Result<String, String> 
     let url = format!("https://download.myagents.io/update/{}.json", target);
     logger::info(&app, format!("[Updater] Testing HTTP connectivity to: {}", url));
 
-    // Build a reqwest client with detailed configuration
+    // Build a reqwest client with user's proxy configuration
     let current_version = app.package_info().version.to_string();
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .user_agent(format!("MyAgents-Updater/{}", current_version))
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
+        .timeout(std::time::Duration::from_secs(30));
+
+    let client = proxy_config::build_client_with_proxy(builder)
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
     // Make the request

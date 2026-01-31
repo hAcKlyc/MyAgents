@@ -118,8 +118,10 @@ export function mockAddProject(path: string): Project {
         return existing;
     }
 
-    // Create new
-    const name = path.split('/').pop() || 'Mock Project';
+    // Create new - normalize path separators and extract folder name
+    const normalizedPath = path.replace(/\\/g, '/');
+    const parts = normalizedPath.split('/').filter(p => p.length > 0);
+    const name = parts[parts.length - 1] || 'Mock Project';
     const newProject: Project = {
         id: `mock-${Date.now()}`,
         name,

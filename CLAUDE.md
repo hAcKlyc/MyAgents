@@ -323,6 +323,9 @@ if (isDebugMode()) console.log('[module] debug message');
 | SSE 状态同步 | [session_state_sync.md](./specs/tech_docs/session_state_sync.md) |
 | Session 存储架构 | [session_storage.md](./specs/tech_docs/session_storage.md) |
 | 日志系统 | [unified_logging.md](./specs/tech_docs/unified_logging.md) |
+| **代理配置** | [proxy_config.md](./specs/tech_docs/proxy_config.md) |
+| **Windows 平台适配** | [windows_platform_guide.md](./specs/tech_docs/windows_platform_guide.md) |
+| **构建问题排查** | [build_troubleshooting.md](./specs/tech_docs/build_troubleshooting.md) |
 | UI/设计规范 | [design_guide.md](./specs/guides/design_guide.md) |
 | macOS 签名、公证 | [macos_distribution_guide.md](./specs/guides/macos_distribution_guide.md) |
 | macOS 构建、发布 | [build_and_release_guide.md](./specs/guides/build_and_release_guide.md) |
