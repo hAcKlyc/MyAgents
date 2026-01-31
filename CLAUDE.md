@@ -62,6 +62,10 @@ myagents/
 │   └── shared/            # 前后端共享代码
 ├── src-tauri/             # Tauri Rust 代码
 ├── specs/                 # 设计文档
+│   ├── prd/               # 产品需求文档 (功能规划、需求说明) **本地维护不提交 Git**
+│   ├── tech_docs/         # 技术文档 (架构、集成、存储等深度技术说明)
+│   ├── guides/            # 操作指南 (构建、发布、签名等实操流程)
+│   └── research/          # 技术调研文档
 └── .agent/                # Agent 配置
 ```
 
@@ -217,6 +221,9 @@ useEffect(() => {
 | 依赖 npm/npx/Node.js | 用户可能未安装 | 内置 bun |
 | 配置变更不 resume session | AI 失忆 | 先设 `resumeSessionId` |
 | 提交前不 typecheck | CI 失败 | `npm run typecheck` |
+| 提交前不检查分支 | 误提交到错误分支 | `git branch --show-current` |
+| 在 main 分支直接提交 | 破坏主分支稳定性 | 切换到 dev 分支 |
+| 未经确认合并到 main | 绕过测试流程 | 先询问用户确认 |
 
 ---
 
@@ -256,6 +263,26 @@ try {
 import { isDebugMode } from '@/utils/debug';
 if (isDebugMode()) console.log('[module] debug message');
 ```
+
+---
+
+## Git 分支管理规范
+
+> **核心原则**：提交前检查分支、dev 开发 main 禁提、合并需用户确认。
+
+### 强制检查流程
+
+**每次 `git commit` 前必须先执行查看当前分支，确保当前分支处于开发分支内**：
+- `dev/*` 开发分支：正常提交（按 feature/fix 粒度）
+- `main` 主分支：**禁止直接提交**，必须通过合并
+
+### 合并到 main
+
+**必须同时满足**：
+1. dev 分支已充分测试
+2. `npm run typecheck && npm run lint` 通过
+3. **用户明确要求 或 AI询问后明确确认** 
+
 
 ---
 
