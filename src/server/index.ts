@@ -1,6 +1,6 @@
 import { appendFileSync, copyFileSync, existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, rmSync, renameSync } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
-import { basename, dirname, join, relative, resolve, extname } from 'path';
+import { basename, dirname, join, relative, resolve, extname, normalize } from 'path';
 import { tmpdir } from 'os';
 import AdmZip from 'adm-zip';
 import {
@@ -1677,11 +1677,21 @@ async function main() {
       if (pathname === '/api/assets/qr-code' && request.method === 'GET') {
         try {
           const QR_CODE_URL = 'https://download.myagents.io/assets/feedback_qr_code.png';
-          const CACHE_DIR = join(tmpdir(), 'myagents-cache');
+
+          // Validate cache directory path (prevent path traversal)
+          const TMP_DIR = normalize(resolve(tmpdir()));
+          const CACHE_DIR = normalize(resolve(join(TMP_DIR, 'myagents-cache')));
+
+          // Security check: ensure cache dir is within tmpdir
+          if (!CACHE_DIR.startsWith(TMP_DIR)) {
+            throw new Error('Invalid cache directory path');
+          }
+
           const CACHE_FILE = join(CACHE_DIR, 'feedback_qr_code.png');
           const LOCK_FILE = `${CACHE_FILE}.lock`;
           const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour (faster updates)
 
+          const startTime = Date.now();
           let needsDownload = true;
 
           // Check if cached file exists and is fresh
@@ -1690,12 +1700,12 @@ async function main() {
             const age = Date.now() - stats.mtimeMs;
             if (age < CACHE_MAX_AGE_MS) {
               needsDownload = false;
-              console.log('[api/assets/qr-code] Using cached QR code');
+              console.log(`[api/assets/qr-code] Cache hit (age: ${Math.round(age / 1000 / 60)}min)`);
             } else {
-              console.log('[api/assets/qr-code] Cache expired, re-downloading');
+              console.log(`[api/assets/qr-code] Cache expired (age: ${Math.round(age / 1000 / 60)}min), re-downloading`);
             }
           } else {
-            console.log('[api/assets/qr-code] No cache found, downloading');
+            console.log('[api/assets/qr-code] Cache miss, downloading');
           }
 
           // Download if needed (with file lock to prevent concurrent writes)
@@ -1728,6 +1738,7 @@ async function main() {
             writeFileSync(LOCK_FILE, String(Date.now()));
 
             try {
+              const downloadStartTime = Date.now();
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
@@ -1737,7 +1748,7 @@ async function main() {
               if (!response.ok) {
                 // If download fails but cache exists, use stale cache
                 if (existsSync(CACHE_FILE)) {
-                  console.warn('[api/assets/qr-code] Download failed, using stale cache');
+                  console.warn(`[api/assets/qr-code] Download failed (HTTP ${response.status}), using stale cache`);
                 } else {
                   throw new Error(`下载失败: HTTP ${response.status}`);
                 }
@@ -1745,6 +1756,7 @@ async function main() {
                 // Save to cache using atomic write pattern
                 const arrayBuffer = await response.arrayBuffer();
                 const buffer = Buffer.from(arrayBuffer);
+                const downloadTime = Date.now() - downloadStartTime;
 
                 // Write to temp file first
                 const tmpFile = `${CACHE_FILE}.${Date.now()}.tmp`;
@@ -1752,7 +1764,7 @@ async function main() {
 
                 // Atomic rename (POSIX guarantee)
                 renameSync(tmpFile, CACHE_FILE);
-                console.log('[api/assets/qr-code] QR code cached successfully');
+                console.log(`[api/assets/qr-code] Downloaded and cached (${Math.round(buffer.length / 1024)}KB in ${downloadTime}ms)`);
               }
             } finally {
               // Release lock
@@ -1768,6 +1780,9 @@ async function main() {
           const imageBuffer = readFileSync(CACHE_FILE);
           const base64 = imageBuffer.toString('base64');
           const mimeType = 'image/png';
+          const totalTime = Date.now() - startTime;
+
+          console.log(`[api/assets/qr-code] Request completed in ${totalTime}ms`);
 
           return jsonResponse({
             success: true,

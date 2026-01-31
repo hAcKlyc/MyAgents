@@ -243,12 +243,14 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
     // QR code URL for user community section
     // Tauri: Downloads on first launch and caches locally, CDN in browser
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+    const [qrCodeLoading, setQrCodeLoading] = useState(false);
 
     // Load QR code when entering about section
     useEffect(() => {
         if (activeSection !== 'about') return;
 
         let cancelled = false;
+        setQrCodeLoading(true);
 
         if (isTauriEnvironment()) {
             // Tauri mode: Call backend API to download & cache QR code
@@ -261,17 +263,23 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                     }
                 })
                 .catch((error) => {
+                    if (cancelled) return;
                     console.error('[Settings] Failed to load QR code:', error);
                     // Silently fail - QR code section will remain hidden
+                })
+                .finally(() => {
+                    if (!cancelled) setQrCodeLoading(false);
                 });
         } else {
             // Browser mode: Direct CDN URL
             setQrCodeDataUrl('https://download.myagents.io/assets/feedback_qr_code.png');
+            setQrCodeLoading(false);
         }
 
         return () => {
             cancelled = true;
             setQrCodeDataUrl(null); // 统一清理，避免内存泄漏
+            setQrCodeLoading(false);
         };
     }, [activeSection]);
 
@@ -1252,17 +1260,23 @@ export default function Settings({ initialSection, onSectionChange }: SettingsPr
                                 </div>
                             </div>
 
-                            {/* User Community QR Code - Hidden until image loads successfully */}
-                            {qrCodeDataUrl && (
+                            {/* User Community QR Code - Show loading state, then image when ready */}
+                            {(qrCodeLoading || qrCodeDataUrl) && (
                                 <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-contrast)] p-5">
                                     <div className="flex flex-col items-center text-center">
                                         <p className="text-sm font-medium text-[var(--ink)]">加入用户交流群</p>
                                         <p className="mt-1 text-xs text-[var(--ink-muted)]">扫码加入，与其他用户交流使用心得</p>
-                                        <img
-                                            src={qrCodeDataUrl}
-                                            alt="用户交流群二维码"
-                                            className="mt-4 h-36 w-36 rounded-lg"
-                                        />
+                                        {qrCodeLoading ? (
+                                            <div className="mt-4 h-36 w-36 flex items-center justify-center">
+                                                <Loader2 className="h-8 w-8 animate-spin text-[var(--ink-muted)]" />
+                                            </div>
+                                        ) : (
+                                            <img
+                                                src={qrCodeDataUrl!}
+                                                alt="用户交流群二维码"
+                                                className="mt-4 h-36 w-36 rounded-lg"
+                                            />
+                                        )}
                                     </div>
                                 </div>
                             )}
