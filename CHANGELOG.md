@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.7] - 2026-01-31
 
 ### Added
-- Windows 平台开发和诊断工具（`build_dev_win.ps1`, `diagnose_windows.ps1`, `test_connection.ps1`）
+- Windows 平台开发工具（`build_dev_win.ps1`）
 - 设置页面「关于」新增用户交流群二维码（自动缓存，离线可用）
 - 代理配置支持（Settings > About > Developer Mode）
   - 支持 HTTP/HTTPS/SOCKS5 协议

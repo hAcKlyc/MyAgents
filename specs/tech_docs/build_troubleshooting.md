@@ -173,39 +173,6 @@ let client = reqwest::Client::builder()
 
 ---
 
-## 调试工具
-
-### Windows 诊断脚本
-
-```powershell
-# 运行完整诊断
-.\diagnose_windows.ps1
-
-# 详细模式（含日志）
-.\diagnose_windows.ps1 -Verbose
-```
-
-**检查内容**：
-- Bun 进程状态
-- 端口监听状态（31415-31418）
-- 配置和日志目录
-- localhost 连接测试
-- 临时目录和缓存
-
-### 连接测试脚本
-
-```powershell
-# 测试 Bun Sidecar 连接
-.\test_connection.ps1
-```
-
-**测试内容**：
-- GET /sessions
-- POST /api/unified-log
-- curl 测试（如果可用）
-
----
-
 ## 最佳实践
 
 ### 构建前检查清单

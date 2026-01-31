@@ -212,41 +212,6 @@ Remove-Item src-tauri\target\x86_64-pc-windows-msvc\release\resources -Recurse -
 
 ---
 
-## 🧪 测试工具
-
-### 诊断脚本
-
-**diagnose_windows.ps1**：
-```powershell
-# 基础诊断
-.\diagnose_windows.ps1
-
-# 详细模式（含日志）
-.\diagnose_windows.ps1 -Verbose
-```
-
-**检查内容**：
-- Bun 进程状态和 PID
-- 端口监听状态（31415-31418）
-- 配置目录（`%USERPROFILE%\.myagents`）
-- 日志文件（最新 20 行）
-- 临时目录和缓存
-- localhost 连接测试
-
-### 连接测试脚本
-
-**test_connection.ps1**：
-```powershell
-.\test_connection.ps1
-```
-
-**测试内容**：
-- GET /sessions - 检查 Sidecar API 可用性
-- POST /api/unified-log - 测试 API 写入
-- curl 测试（如果可用）
-
----
-
 ## 🚀 发布流程
 
 ### Windows 发布检查清单
