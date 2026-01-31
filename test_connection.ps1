@@ -2,7 +2,7 @@
 # 用于验证 Bun Sidecar 是否可以正常响应
 
 # Port constant (matches src-tauri/src/sidecar.rs:76 BASE_PORT)
-$GLOBAL_SIDECAR_PORT = $GLOBAL_SIDECAR_PORT
+$GLOBAL_SIDECAR_PORT = 31415
 
 Write-Host "===== 连接测试 =====" -ForegroundColor Cyan
 Write-Host ""

@@ -129,8 +129,23 @@ pub fn cleanup_stale_sidecars() {
         // 3. Clean up MCP child processes
         kill_windows_processes_by_pattern(".myagents\\mcp\\");
 
-        thread::sleep(Duration::from_millis(200));
-        log::info!("[sidecar] Windows cleanup complete");
+        // Verify cleanup completed (max 1 second wait)
+        let start = std::time::Instant::now();
+        let max_wait = Duration::from_secs(1);
+        loop {
+            if !has_windows_processes(SIDECAR_MARKER)
+                && !has_windows_processes("claude-agent-sdk")
+                && !has_windows_processes(".myagents\\mcp\\")
+            {
+                log::info!("[sidecar] Windows cleanup verified in {:?}", start.elapsed());
+                break;
+            }
+            if start.elapsed() > max_wait {
+                log::warn!("[sidecar] Windows cleanup timeout after 1s, some processes may remain");
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 }
 
@@ -1033,6 +1048,34 @@ fn kill_windows_processes_by_pattern(pattern: &str) {
 
     if killed > 0 {
         log::info!("[sidecar] Killed {} processes matching '{}'", killed, pattern);
+    }
+}
+
+/// Check if any Windows processes exist matching the pattern
+#[cfg(windows)]
+fn has_windows_processes(pattern: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let ps_command = format!(
+        "Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{}*' }} | Select-Object -ExpandProperty ProcessId",
+        pattern.replace("'", "''")
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_command])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            !String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter_map(|s| s.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>()
+                .is_empty()
+        }
+        _ => false,
     }
 }
 

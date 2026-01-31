@@ -154,7 +154,6 @@ try {
     $requiredCspParts = @(
         "http://ipc.localhost",
         "asset:",
-        "fetch-src",
         "https://download.myagents.io"
     )
 
@@ -165,17 +164,26 @@ try {
         }
     }
 
-    if ($missingParts.Count -gt 0) {
-        Write-Host "  警告: CSP 配置缺少以下部分:" -ForegroundColor Yellow
-        $missingParts | ForEach-Object { Write-Host "    - $_" -ForegroundColor Yellow }
-        Write-Host "  请检查 tauri.conf.json 中的 CSP 配置" -ForegroundColor Yellow
-        Write-Host ""
-        $continue = Read-Host "是否继续构建? (Y/n)"
-        if ($continue -eq "n" -or $continue -eq "N") {
-            throw "CSP 配置不完整"
+    # 特殊验证: fetch-src 指令必须包含 http://ipc.localhost (Windows Tauri IPC 关键)
+    if ($currentCsp -match "fetch-src\s+([^;]+)") {
+        $fetchSrcDirective = $matches[1]
+        if ($fetchSrcDirective -notlike "*http://ipc.localhost*") {
+            $missingParts += "fetch-src 缺少 http://ipc.localhost (Windows 必需)"
         }
     } else {
-        Write-Host "  OK - CSP 配置完整" -ForegroundColor Green
+        $missingParts += "fetch-src 指令"
+    }
+
+    if ($missingParts.Count -gt 0) {
+        Write-Host "  错误: CSP 配置不符合 Windows 要求:" -ForegroundColor Red
+        $missingParts | ForEach-Object { Write-Host "    - $_" -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "  Windows Tauri IPC 需要 fetch-src 包含 http://ipc.localhost" -ForegroundColor Yellow
+        Write-Host "  请检查 tauri.conf.json 中的 CSP 配置" -ForegroundColor Yellow
+        Write-Host ""
+        throw "CSP 配置不完整，无法在 Windows 上正常运行"
+    } else {
+        Write-Host "  OK - CSP 配置完整 (包含 Windows IPC 支持)" -ForegroundColor Green
     }
     Write-Host ""
 

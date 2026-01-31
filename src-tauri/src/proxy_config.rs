@@ -78,7 +78,10 @@ pub fn get_proxy_url(settings: &ProxySettings) -> Result<String, String> {
     // Validate port
     let port = settings.port.unwrap_or(DEFAULT_PROXY_PORT);
     if port == 0 {
-        return Err("Invalid proxy port: port cannot be 0".to_string());
+        return Err(format!(
+            "Invalid proxy port: {}. Port must be between 1 and 65535",
+            port
+        ));
     }
 
     let host = settings.host.as_deref().unwrap_or(DEFAULT_PROXY_HOST);
@@ -175,7 +178,7 @@ mod tests {
 
         let result = get_proxy_url(&settings);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("port cannot be 0"));
+        assert!(result.unwrap_err().contains("Invalid proxy port"));
     }
 
     #[test]
