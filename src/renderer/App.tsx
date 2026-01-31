@@ -136,18 +136,14 @@ export default function App() {
     const tab = currentTabs.find(t => t.id === tabId);
     if (!tab) return;
 
+    // Special case: If this is the last tab, do nothing (don't close the app)
+    if (currentTabs.length === 1) {
+      return;
+    }
+
     // Stop this Tab's Sidecar when closing (only if it has an agentDir)
     if (tab.agentDir) {
       void stopTabSidecar(tabId);
-    }
-
-    // Special case: If this is the last tab, replace with launcher instead of closing
-    // This prevents the app from closing on Windows
-    if (currentTabs.length === 1) {
-      const newTab = createNewTab();
-      setTabs([newTab]);
-      setActiveTabId(newTab.id);
-      return;
     }
 
     // Normal case: close the tab
@@ -182,17 +178,12 @@ export default function App() {
   const closeCurrentTab = useCallback(() => {
     if (!activeTabId) return;
 
-    const activeTab = tabs.find(t => t.id === activeTabId);
-
-    // Special case: If on launcher page and it's the only tab, close the window
-    if (activeTab?.view === 'launcher' && tabs.length === 1) {
-      if (isTauriEnvironment()) {
-        void getCurrentWindow().close();
-      }
+    // Special case: If this is the last tab, do nothing (don't close the app)
+    if (tabs.length === 1) {
       return;
     }
 
-    // All other cases: use the unified confirmation logic
+    // Multiple tabs: use the unified confirmation logic
     closeTabWithConfirmation(activeTabId);
   }, [activeTabId, tabs, closeTabWithConfirmation]);
 
