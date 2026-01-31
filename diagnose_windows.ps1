@@ -5,7 +5,20 @@ param(
     [switch]$Verbose
 )
 
+# Port constants (matches src-tauri/src/sidecar.rs:76 BASE_PORT)
+$GLOBAL_SIDECAR_PORT = 31415
+$TAB_SIDECAR_PORTS = @(31415, 31416, 31417, 31418)
+
 $ErrorActionPreference = "Continue"
+
+# Check for admin permissions (some diagnostics may require it)
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "! 未以管理员身份运行 - 部分诊断可能受限" -ForegroundColor Yellow
+    Write-Host "  提示: 右键点击脚本 -> '以管理员身份运行' 以获得完整诊断信息" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 Write-Host "===== MyAgents Windows 诊断工具 =====" -ForegroundColor Cyan
 Write-Host ""
 
@@ -24,13 +37,31 @@ Write-Host ""
 
 # 2. 检查端口监听
 Write-Host "[2] 检查端口监听..." -ForegroundColor Yellow
-$ports = @(31415, 31416, 31417, 31418)
-foreach ($port in $ports) {
-    $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($listener) {
-        Write-Host "  ✓ 端口 $port 正在监听 (PID: $($listener.OwningProcess))" -ForegroundColor Green
+# Try Get-NetTCPConnection first (Windows 8+), fallback to netstat for older versions
+$useNetstat = $false
+try {
+    $null = Get-NetTCPConnection -ErrorAction Stop 2>$null
+} catch {
+    Write-Host "  ! Get-NetTCPConnection 不可用，使用 netstat 代替" -ForegroundColor DarkGray
+    $useNetstat = $true
+}
+
+foreach ($port in $TAB_SIDECAR_PORTS) {
+    if ($useNetstat) {
+        $netstatOutput = netstat -ano | Select-String ":$port\s.*LISTENING"
+        if ($netstatOutput) {
+            $pid = ($netstatOutput -split '\s+')[-1]
+            Write-Host "  ✓ 端口 $port 正在监听 (PID: $pid)" -ForegroundColor Green
+        } else {
+            Write-Host "  × 端口 $port 未监听" -ForegroundColor Red
+        }
     } else {
-        Write-Host "  × 端口 $port 未监听" -ForegroundColor Red
+        $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        if ($listener) {
+            Write-Host "  ✓ 端口 $port 正在监听 (PID: $($listener.OwningProcess))" -ForegroundColor Green
+        } else {
+            Write-Host "  × 端口 $port 未监听" -ForegroundColor Red
+        }
     }
 }
 Write-Host ""
@@ -98,7 +129,7 @@ Write-Host ""
 
 # 6. 测试 localhost 连接
 Write-Host "[6] 测试 localhost 连接..." -ForegroundColor Yellow
-foreach ($port in @(31415)) {
+foreach ($port in @($GLOBAL_SIDECAR_PORT)) {
     try {
         $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2 -ErrorAction Stop
         Write-Host "  ✓ 端口 $port 响应正常 (HTTP $($response.StatusCode))" -ForegroundColor Green

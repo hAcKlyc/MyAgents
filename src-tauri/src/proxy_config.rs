@@ -63,13 +63,27 @@ pub fn read_proxy_settings() -> Option<ProxySettings> {
     config.proxy_settings.filter(|p| p.enabled)
 }
 
-/// Get proxy URL string from settings
-pub fn get_proxy_url(settings: &ProxySettings) -> String {
+/// Get proxy URL string from settings with validation
+/// Returns Result to ensure configuration is valid
+pub fn get_proxy_url(settings: &ProxySettings) -> Result<String, String> {
+    // Validate protocol
     let protocol = settings.protocol.as_deref().unwrap_or(DEFAULT_PROXY_PROTOCOL);
-    let host = settings.host.as_deref().unwrap_or(DEFAULT_PROXY_HOST);
-    let port = settings.port.unwrap_or(DEFAULT_PROXY_PORT);
+    if !["http", "https", "socks5"].contains(&protocol) {
+        return Err(format!(
+            "Invalid proxy protocol '{}'. Supported: http, https, socks5",
+            protocol
+        ));
+    }
 
-    format!("{}://{}:{}", protocol, host, port)
+    // Validate port
+    let port = settings.port.unwrap_or(DEFAULT_PROXY_PORT);
+    if port == 0 {
+        return Err("Invalid proxy port: port cannot be 0".to_string());
+    }
+
+    let host = settings.host.as_deref().unwrap_or(DEFAULT_PROXY_HOST);
+
+    Ok(format!("{}://{}:{}", protocol, host, port))
 }
 
 /// Build a reqwest client with user's proxy configuration
@@ -77,9 +91,9 @@ pub fn get_proxy_url(settings: &ProxySettings) -> String {
 /// - Always exclude localhost/127.0.0.1/::1 from proxy
 pub fn build_client_with_proxy(
     builder: reqwest::ClientBuilder
-) -> Result<reqwest::Client, reqwest::Error> {
+) -> Result<reqwest::Client, String> {
     let final_builder = if let Some(proxy_settings) = read_proxy_settings() {
-        let proxy_url = get_proxy_url(&proxy_settings);
+        let proxy_url = get_proxy_url(&proxy_settings)?;
         log::info!("[proxy_config] Using proxy for external requests: {}", proxy_url);
 
         // Configure proxy but exclude localhost and all loopback addresses
@@ -87,7 +101,8 @@ pub fn build_client_with_proxy(
         // - localhost, localhost.localdomain (common DNS names)
         // - 127.0.0.1, 127.0.0.0/8 (IPv4 loopback range)
         // - ::1, [::1] (IPv6 loopback with/without brackets)
-        let proxy = reqwest::Proxy::all(&proxy_url)?
+        let proxy = reqwest::Proxy::all(&proxy_url)
+            .map_err(|e| format!("[proxy_config] Failed to create proxy: {}", e))?
             .no_proxy(reqwest::NoProxy::from_string(
                 "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]"
             ));
@@ -100,4 +115,80 @@ pub fn build_client_with_proxy(
     };
 
     final_builder.build()
+        .map_err(|e| format!("[proxy_config] Failed to build HTTP client: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_proxy_url_with_defaults() {
+        let settings = ProxySettings {
+            enabled: true,
+            protocol: None,
+            host: None,
+            port: None,
+        };
+
+        let result = get_proxy_url(&settings);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "http://127.0.0.1:7890");
+    }
+
+    #[test]
+    fn test_get_proxy_url_with_custom_values() {
+        let settings = ProxySettings {
+            enabled: true,
+            protocol: Some("socks5".to_string()),
+            host: Some("192.168.1.1".to_string()),
+            port: Some(1080),
+        };
+
+        let result = get_proxy_url(&settings);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "socks5://192.168.1.1:1080");
+    }
+
+    #[test]
+    fn test_get_proxy_url_invalid_protocol() {
+        let settings = ProxySettings {
+            enabled: true,
+            protocol: Some("ftp".to_string()),
+            host: None,
+            port: None,
+        };
+
+        let result = get_proxy_url(&settings);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid proxy protocol"));
+    }
+
+    #[test]
+    fn test_get_proxy_url_zero_port() {
+        let settings = ProxySettings {
+            enabled: true,
+            protocol: None,
+            host: None,
+            port: Some(0),
+        };
+
+        let result = get_proxy_url(&settings);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("port cannot be 0"));
+    }
+
+    #[test]
+    fn test_get_proxy_url_https_protocol() {
+        let settings = ProxySettings {
+            enabled: true,
+            protocol: Some("https".to_string()),
+            host: Some("proxy.example.com".to_string()),
+            port: Some(443),
+        };
+
+        let result = get_proxy_url(&settings);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "https://proxy.example.com:443");
+    }
 }

@@ -163,13 +163,14 @@ async fn connect_sse(
     // CRITICAL: Enable tcp_nodelay to disable Nagle's algorithm for immediate packet transmission
     // Without this, small SSE events may be buffered and delayed, causing UI to feel unresponsive
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
-    // Disable connection pooling to avoid stale connection issues on Windows
+    // Use short-lived connection pool to balance performance and stability
     // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .read_timeout(std::time::Duration::from_secs(SSE_READ_TIMEOUT_SECS))
         .tcp_nodelay(true)
-        .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
-        .pool_max_idle_per_host(0)  // Disable connection pooling
+        .http1_only()  // Force HTTP/1.1 for stability (TODO v0.1.8: test HTTP/2 negotiation)
+        .pool_idle_timeout(std::time::Duration::from_secs(5))  // Recycle idle connections after 5s
+        .pool_max_idle_per_host(2)  // Keep up to 2 connections for reuse
         .no_proxy()  // Disable proxy for all requests (especially localhost)
         .build()?;
     
@@ -331,13 +332,14 @@ pub async fn proxy_http_request(app: AppHandle, request: HttpRequest) -> Result<
     // Build client with configurable timeout
     // Enable tcp_nodelay to disable Nagle's algorithm for faster response times
     // Force HTTP/1.1 for compatibility with Bun server (HTTP/2 may cause connection issues on Windows)
-    // Disable connection pooling to avoid stale connection issues on Windows
+    // Use short-lived connection pool to balance performance and stability
     // CRITICAL: Disable proxy for localhost - reqwest uses system proxy by default!
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_PROXY_TIMEOUT_SECS))
         .tcp_nodelay(true)
-        .http1_only()  // Force HTTP/1.1 to avoid protocol negotiation issues
-        .pool_max_idle_per_host(0)  // Disable connection pooling - create fresh connection each time
+        .http1_only()  // Force HTTP/1.1 for stability (TODO v0.1.8: test HTTP/2 negotiation)
+        .pool_idle_timeout(std::time::Duration::from_secs(5))  // Recycle idle connections after 5s
+        .pool_max_idle_per_host(2)  // Keep up to 2 connections for reuse
         .no_proxy()  // Disable proxy for all requests (especially localhost)
         .build()
         .map_err(|e| {

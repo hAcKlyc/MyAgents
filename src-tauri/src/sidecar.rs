@@ -739,16 +739,22 @@ pub fn start_tab_sidecar<R: Runtime>(
 
     // Inject proxy environment variables if configured
     if let Some(proxy_settings) = proxy_config::read_proxy_settings() {
-        let proxy_url = proxy_config::get_proxy_url(&proxy_settings);
-        log::info!("[sidecar] Injecting proxy: {}", proxy_url);
-        cmd.env("HTTP_PROXY", &proxy_url);
-        cmd.env("HTTPS_PROXY", &proxy_url);
-        cmd.env("http_proxy", &proxy_url);
-        cmd.env("https_proxy", &proxy_url);
-        // Ensure localhost traffic doesn't go through proxy
-        // Comprehensive NO_PROXY list for maximum compatibility
-        cmd.env("NO_PROXY", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
-        cmd.env("no_proxy", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
+        match proxy_config::get_proxy_url(&proxy_settings) {
+            Ok(proxy_url) => {
+                log::info!("[sidecar] Injecting proxy: {}", proxy_url);
+                cmd.env("HTTP_PROXY", &proxy_url);
+                cmd.env("HTTPS_PROXY", &proxy_url);
+                cmd.env("http_proxy", &proxy_url);
+                cmd.env("https_proxy", &proxy_url);
+                // Ensure localhost traffic doesn't go through proxy
+                // Comprehensive NO_PROXY list for maximum compatibility
+                cmd.env("NO_PROXY", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
+                cmd.env("no_proxy", "localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1,[::1]");
+            }
+            Err(e) => {
+                log::warn!("[sidecar] {}. Proxy will not be used for this instance.", e);
+            }
+        }
     }
 
     cmd.stdout(Stdio::piped())
