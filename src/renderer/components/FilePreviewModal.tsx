@@ -10,6 +10,7 @@
  */
 import { Edit2, FileText, FolderOpen, Loader2, Save, X } from 'lucide-react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
@@ -296,11 +297,13 @@ export default function FilePreviewModal({
         );
     };
 
-    return (
+    // Render via portal to document.body to avoid chat scrollbar penetrating through
+    // (parent stacking context from Chat/DirectoryPanel would otherwise overlay scrollbar on modal)
+    return createPortal(
         <>
             {/* Modal backdrop */}
             <div
-                className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
                 style={{ padding: '2vh 2vw' }}
                 onMouseDown={handleBackdropMouseDown}
                 onClick={handleBackdropClick}
@@ -412,6 +415,7 @@ export default function FilePreviewModal({
                     onCancel={() => setShowUnsavedConfirm(false)}
                 />
             )}
-        </>
+        </>,
+        document.body
     );
 }
