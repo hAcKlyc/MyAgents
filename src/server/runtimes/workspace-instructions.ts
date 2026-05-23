@@ -186,8 +186,11 @@ function collectRuleFiles(
 // ─── Core read functions ───
 
 /**
- * Read CLAUDE.md + .claude/CLAUDE.md + .claude/rules/*.md from a workspace.
- * Shares a single CollectBudget so the aggregate cap spans all three sources.
+ * Read 00-CORE.md (lightweight core memory) if present, otherwise fall back to
+ * CLAUDE.md + .claude/CLAUDE.md + .claude/rules/*.md.
+ *
+ * 00-CORE.md is a user-maintained ~200-token distillation of the full ruleset.
+ * When it exists we skip the heavy files to cut per-request fixed overhead.
  */
 function readClaudeWorkspaceInstructions(workspacePath: string): WorkspaceInstruction[] {
   const instructions: WorkspaceInstruction[] = [];
@@ -204,6 +207,14 @@ function readClaudeWorkspaceInstructions(workspacePath: string): WorkspaceInstru
     budget.totalBytes += size;
   };
 
+  // Phase-1 optimization: prefer 00-CORE.md (lightweight core memory)
+  const coreMemory = readIfExists(join(workspacePath, '.claude', 'rules', '00-CORE.md'));
+  if (coreMemory) {
+    consume(coreMemory);
+    return instructions; // skip heavy rules when core memory is present
+  }
+
+  // Fallback: load full rule set (legacy behaviour)
   // CLAUDE.md at project root
   consume(readIfExists(join(workspacePath, 'CLAUDE.md')));
 
