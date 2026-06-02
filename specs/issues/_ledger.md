@@ -17,10 +17,10 @@ Status vocabulary:
 
 | Issue | Type | First Seen | Last Touched | Status | One-liner |
 |------:|------|-----------|--------------|--------|-----------|
-| #294 | bug  | 2026-06-02 | 2026-06-02 16:19 | fixed | 真根因 = history switch 没有 per-tab generation/latest-wins guard，旧 async sidecar/switch/loadSession 完成后仍可覆盖新 target；`loadSession` 还会通过 mutable `currentSessionIdRef` 把旧 target POST 到新 sidecar。Fix = App switch token guard + TabProvider load generation/target guard，旧请求不再 commit UI / BG cancel / history replace；ee0273f0, dev/0.2.27 |
-| #293 | bug  | 2026-06-02 | 2026-06-02 16:19 | fixed | 真根因 = builtin SDK tool_result 仍按文本处理，MCP/SDK `type:image` content block 未转 `ToolAttachment[]`；Playwright stripping 又把唯一 raw image payload 隐掉。Fix = 新增 tool-result attachment parser，agent-session 走 saveToolAttachment + placeholder/update SSE + persist 前 await in-flight saves；ee0273f0, dev/0.2.27 |
-| #292 | feat | 2026-06-02 | 2026-06-02 16:19 | reviewed-notified | L · 自定义 `~/.myagents` 数据目录。有效需求但横跨 Rust/Node/CLI/Plugin Bridge/skills/logs/sessions/attachments/search/path-safety；推荐先统一 data-dir authority + `MYAGENTS_DATA_DIR` 注入，再做停机迁移工具，不能做成简单 UI toggle |
-| #291 | feat | 2026-06-02 | 2026-06-02 16:19 | answered | 当前 dev/main 已有完整对话导出 Markdown：对话右上角菜单“导出为 md 文件” + 历史列表 hover 导出按钮，核心实现在 `sessionExport.ts::exportSessionAsMarkdown`；回帖指明入口并关闭 |
+| #294 | bug  | 2026-06-02 | 2026-06-02 16:24 | fixed | 真根因 = history switch 没有 per-tab generation/latest-wins guard，旧 async sidecar/switch/loadSession 完成后仍可覆盖新 target；`loadSession` 还会通过 mutable `currentSessionIdRef` 把旧 target POST 到新 sidecar。Fix = App switch token guard + TabProvider load generation/target guard，旧请求不再 commit UI / BG cancel / history replace；ee0273f0, dev/0.2.27 |
+| #293 | bug  | 2026-06-02 | 2026-06-02 16:23 | fixed | 真根因 = builtin SDK tool_result 仍按文本处理，MCP/SDK `type:image` content block 未转 `ToolAttachment[]`；Playwright stripping 又把唯一 raw image payload 隐掉。Fix = 新增 tool-result attachment parser，agent-session 走 saveToolAttachment + placeholder/update SSE + persist 前 await in-flight saves；ee0273f0, dev/0.2.27 |
+| #292 | feat | 2026-06-02 | 2026-06-02 16:24 | reviewed-notified | L · 自定义 `~/.myagents` 数据目录。有效需求但横跨 Rust/Node/CLI/Plugin Bridge/skills/logs/sessions/attachments/search/path-safety；推荐先统一 data-dir authority + `MYAGENTS_DATA_DIR` 注入，再做停机迁移工具，不能做成简单 UI toggle |
+| #291 | feat | 2026-06-02 | 2026-06-02 16:20 | answered | 当前 dev/main 已有完整对话导出 Markdown：对话右上角菜单“导出为 md 文件” + 历史列表 hover 导出按钮，核心实现在 `sessionExport.ts::exportSessionAsMarkdown`；回帖指明入口并关闭 |
 | #288 | bug  | 2026-06-01 | 2026-06-01 03:43 | fixed | 真根因 = SDK 内置 Explore subagent 固定走 `haiku` alias，而 MiniMax 等三方 provider 的折叠 alias 表把 `haiku` 固定到 provider 默认模型；会话选择 M2.5 时 Explore 仍请求 M2.7 导致上游 `400 Param Incorrect`。Fix = 折叠 alias 表随 active session model rebasing，split routing 保持不变，并在模型切换时重启 env-baked alias；989ee5dd, dev/0.2.27 |
 | #281 | bug  | 2026-05-31 | 2026-05-31 21:18 | fixed | 真根因 = SDKAssistantMessage.error 被当终态 `chat:agent-error`；同一 turn 后续 SDKResultSuccess completed 时前端按约定不清 sticky error。Fix = assistant-frame `.error` 先作为 turn-local provisional diagnostic，成功 result 只记 recovered 日志，终态 error 仍由 result `is_error` / 非 assistant error 驱动；6d1eaf26, dev/0.2.27 |
 | #280 | bug  | 2026-05-31 | 2026-05-31 21:18 | fixed | 真根因 = provider/SDK 返回 `result:""` + `terminal_reason:"completed"` + `output_tokens:0`，MyAgents 缺少“成功必须有可见输出 / 工具 / output tokens”不变量而静默 `message-complete`。Fix = server result 边界拦截 empty completed success，按 `message-error` 失败处理并补 whitespace guard；6d1eaf26, dev/0.2.27 |
@@ -104,7 +104,7 @@ Status vocabulary:
 
 ## Run Log
 
-### Run 2026-06-02 16:19 — 处理 4 / 跳过 17 / 失败 0
+### Run 2026-06-02 16:24 — 处理 4 / 跳过 17 / 失败 0
 - answered: [#291]（已有功能，已回帖说明入口并关闭）
 - reviewed-notified: [#292]（`specs/issues/292-custom-data-dir.md`，已加 enhancement + needs-review）
 - fixed: [#293, #294]（ee0273f0 dev/0.2.27）
