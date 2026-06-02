@@ -25,6 +25,7 @@ import { InactivityWatchdog } from './utils/inactivity-watchdog';
 import { processImage, resizeToolImageContent, classifyImageError } from './utils/imageResize';
 import { writeBase64FilesToAgentDir } from './utils/workspace-files';
 import { ensureGitignorePattern } from './utils/gitignore';
+import { extractToolResultRenderParts, type ExtractedToolResultAttachment } from './utils/tool-result-attachments';
 // Context helpers only — tool server singletons are no longer exported from
 // these modules. The actual SDK server objects are created on-demand via
 // `getBuiltinMcpInstance()` in buildSdkMcpServers() below. See
@@ -49,6 +50,7 @@ import type { ToolInput } from '../renderer/types/chat';
 import { parsePartialJson } from '../shared/parsePartialJson';
 import { deriveSessionTitle } from '../shared/sessionTitle';
 import type { SystemInitInfo } from '../shared/types/system';
+import type { ToolAttachment } from '../shared/types/tool-attachment';
 import { saveSessionMetadata, updateSessionTitleFromMessage, saveSessionMessages, saveAttachment, updateSessionMetadata, getSessionMetadata, getSessionData } from './SessionStore';
 import { createSessionMetadata, type SessionMessage, type MessageAttachment, type MessageUsage, type SessionSource } from './types/session';
 import {
@@ -73,6 +75,14 @@ import { trackServer } from './analytics';
 import { getCurrentRuntimeType, isExternalRuntime } from './runtimes/factory';
 import { resolveLastRealUserMessagePreview } from './utils/session-message-preview';
 import type { ImagePayload } from './runtimes/types';
+import {
+  awaitInFlightSaves,
+  makeErrorAttachment,
+  makePlaceholderAttachment,
+  saveToolAttachment,
+  trackInFlightSave,
+  type SaveContext,
+} from './runtimes/tool-attachments';
 import { imEventBus, type ImEventType } from './utils/im-event-bus';
 import { imRequestRegistry } from './utils/im-request-registry';
 import { mirrorIfChannelBound, type MirrorImage } from './utils/im-mirror';
@@ -421,6 +431,7 @@ type ToolUseState = {
   result?: string;
   isLoading?: boolean;
   isError?: boolean;
+  attachments?: ToolAttachment[];
   subagentCalls?: SubagentToolCall[];
   /** Gemini thinking models: opaque signature that must be round-tripped on tool calls */
   thought_signature?: string;
@@ -4947,18 +4958,28 @@ function handleContentBlockStop(index: number, toolId?: string): void {
   }
 }
 
-function handleToolResultStart(toolUseId: string, content: string, isError: boolean): void {
+function handleToolResultStart(
+  toolUseId: string,
+  content: string,
+  isError: boolean,
+  attachments?: ToolAttachment[],
+): void {
   if (handleSubagentToolResultStart(toolUseId, content, isError)) {
     return;
   }
-  setToolResult(toolUseId, content, isError);
+  setToolResult(toolUseId, content, isError, attachments);
 }
 
-function handleToolResultComplete(toolUseId: string, content: string, isError?: boolean): void {
+function handleToolResultComplete(
+  toolUseId: string,
+  content: string,
+  isError?: boolean,
+  attachments?: ToolAttachment[],
+): void {
   if (handleSubagentToolResultComplete(toolUseId, content, isError)) {
     return;
   }
-  setToolResult(toolUseId, content, isError);
+  setToolResult(toolUseId, content, isError, attachments);
 }
 
 function handleMessageComplete(): void {
@@ -5128,14 +5149,14 @@ function handleMessageComplete(): void {
   // Fire-and-forget: persistMessagesToStorage is async (cooperative file lock),
   // but the enclosing handler is a sync stream-event callback. Errors are already
   // swallowed inside SessionStore writers; surfacing them here would be no-op.
-  void persistMessagesToStorage({
+  persistMessagesAfterInFlightAttachmentSaves({
     inputTokens: currentTurnUsage.inputTokens,
     outputTokens: currentTurnUsage.outputTokens,
     cacheReadTokens: currentTurnUsage.cacheReadTokens || undefined,
     cacheCreationTokens: currentTurnUsage.cacheCreationTokens || undefined,
     model: currentTurnUsage.model,
     modelUsage: currentTurnUsage.modelUsage,
-  }, currentTurnToolCount, durationMs).catch(err => console.error('[agent] persistMessagesToStorage failed:', err));
+  }, currentTurnToolCount, durationMs);
 
   // (v0.2.12 Codex review fix v3 #2 follow-up) Re-arm streaming flag for
   // the queued fallback case AFTER all teardown has run, so endTurnAbort
@@ -5194,7 +5215,7 @@ function handleMessageStopped(): void {
   const lastMessage = messages[messages.length - 1];
   if (!lastMessage || lastMessage.role !== 'assistant' || typeof lastMessage.content === 'string') {
     // Persist even if no assistant message (fire-and-forget — async lock).
-    void persistMessagesToStorage().catch(err => console.error('[agent] persistMessagesToStorage failed:', err));
+    persistMessagesAfterInFlightAttachmentSaves();
     return;
   }
   lastMessage.content = lastMessage.content.map((block) => {
@@ -5209,7 +5230,7 @@ function handleMessageStopped(): void {
     return block;
   });
   // Persist after processing message (fire-and-forget — async lock).
-  void persistMessagesToStorage().catch(err => console.error('[agent] persistMessagesToStorage failed:', err));
+  persistMessagesAfterInFlightAttachmentSaves();
 }
 
 function handleMessageError(error: string): void {
@@ -5288,8 +5309,126 @@ function findToolBlockById(toolUseId: string): { tool: ToolUseState } | null {
 /** Sentinel value for stripped Playwright tool results (truthy, so ProcessRow sees tool as complete) */
 const PLAYWRIGHT_RESULT_SENTINEL = '[playwright_result_stripped]';
 
+/** Sentinel value for attachment-only tool results (truthy, so ProcessRow sees tool as complete) */
+const TOOL_ATTACHMENT_RESULT_SENTINEL = '[tool_result_attachment]';
+
 /** Set of tool_use IDs whose results are stripped from frontend broadcast in the current turn */
 const strippedToolResultIds = new Set<string>();
+
+function mergeToolAttachments(
+  existing: ToolAttachment[] | undefined,
+  incoming: ToolAttachment[],
+): ToolAttachment[] {
+  if (incoming.length === 0) {
+    return existing ?? [];
+  }
+  const merged = [...(existing ?? [])];
+  for (const attachment of incoming) {
+    const idx = merged.findIndex((candidate) => {
+      if (attachment.pendingId && candidate.pendingId === attachment.pendingId) {
+        return true;
+      }
+      return !!attachment.refPath && candidate.refPath === attachment.refPath;
+    });
+    if (idx >= 0) {
+      merged[idx] = { ...merged[idx], ...attachment };
+    } else {
+      merged.push(attachment);
+    }
+  }
+  return merged;
+}
+
+function applyToolAttachmentUpdate(
+  toolUseId: string,
+  pendingId: string,
+  attachment: ToolAttachment,
+): void {
+  const toolBlock = findToolBlockById(toolUseId);
+  if (!toolBlock) {
+    return;
+  }
+  toolBlock.tool.attachments = mergeToolAttachments(
+    toolBlock.tool.attachments,
+    [{ ...attachment, pendingId }],
+  );
+}
+
+function createToolAttachmentSaveContext(
+  toolUseId: string,
+  input: ExtractedToolResultAttachment,
+  caption?: string,
+): SaveContext {
+  const toolName = findToolBlockById(toolUseId)?.tool.name;
+  return {
+    sessionId,
+    // Builtin SDK tool results do not expose a stable turn item id here.
+    // toolUseId is unique per turn and keeps the attachment endpoint stable.
+    turnId: toolUseId,
+    toolUseId,
+    mimeType: input.mimeType,
+    kind: input.kind,
+    caption,
+    producedBy: toolName ? `builtin.${toolName}` : 'builtin.tool_result',
+  };
+}
+
+function scheduleBuiltinToolAttachmentSave(
+  toolUseId: string,
+  input: ExtractedToolResultAttachment,
+  caption?: string,
+): ToolAttachment {
+  const ctx = createToolAttachmentSaveContext(toolUseId, input, caption);
+  const { attachment, pendingId } = makePlaceholderAttachment(ctx);
+  const tracked = (async (): Promise<void> => {
+    try {
+      const real = await saveToolAttachment(input.source, ctx);
+      applyToolAttachmentUpdate(toolUseId, pendingId, real);
+      broadcast('chat:tool-attachment-update', {
+        toolUseId,
+        pendingId,
+        attachment: real,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.warn(`[agent] saveToolAttachment failed (toolUseId=${toolUseId}): ${reason}`);
+      const failed = makeErrorAttachment(ctx, err, pendingId);
+      applyToolAttachmentUpdate(toolUseId, pendingId, failed);
+      broadcast('chat:tool-attachment-update', {
+        toolUseId,
+        pendingId,
+        attachment: failed,
+      });
+    }
+  })();
+  trackInFlightSave(tracked);
+  return attachment;
+}
+
+function prepareBuiltinToolResultPayload(
+  toolUseId: string,
+  rawContent: unknown,
+  fallbackText?: string,
+): { content: string; attachments: ToolAttachment[] } {
+  const parts = extractToolResultRenderParts(rawContent);
+  const content = parts.text || fallbackText || (parts.attachments.length > 0 ? TOOL_ATTACHMENT_RESULT_SENTINEL : '');
+  const caption = parts.text || undefined;
+  const attachments = parts.attachments.map((input) =>
+    scheduleBuiltinToolAttachmentSave(toolUseId, input, caption)
+  );
+  return { content, attachments };
+}
+
+function persistMessagesAfterInFlightAttachmentSaves(
+  usage?: MessageUsage,
+  toolCount?: number,
+  durationMs?: number,
+): void {
+  void (async () => {
+    await awaitInFlightSaves();
+    await persistMessagesToStorage(usage, toolCount, durationMs);
+  })().catch(err => console.error('[agent] persistMessagesToStorage failed:', err));
+}
 
 function isPlaywrightTool(toolUseId: string): boolean {
   const toolBlock = findToolBlockById(toolUseId);
@@ -5421,7 +5560,12 @@ function getSubagentToolResult(toolUseId: string): string | undefined {
   return parentTool.tool.subagentCalls.find((call) => call.id === toolUseId)?.result;
 }
 
-function setToolResult(toolUseId: string, content: string, isError?: boolean): void {
+function setToolResult(
+  toolUseId: string,
+  content: string,
+  isError?: boolean,
+  attachments?: ToolAttachment[],
+): void {
   const toolBlock = findToolBlockById(toolUseId);
   if (!toolBlock) {
     return;
@@ -5429,6 +5573,9 @@ function setToolResult(toolUseId: string, content: string, isError?: boolean): v
   toolBlock.tool.result = content;
   if (typeof isError === 'boolean') {
     toolBlock.tool.isError = isError;
+  }
+  if (attachments && attachments.length > 0) {
+    toolBlock.tool.attachments = mergeToolAttachments(toolBlock.tool.attachments, attachments);
   }
 }
 
@@ -9493,18 +9640,13 @@ async function startStreamingSession(preWarm = false): Promise<void> {
               is_error?: boolean;
             };
 
-            let contentStr = '';
-            if (typeof toolResultBlock.content === 'string') {
-              contentStr = toolResultBlock.content;
-            } else if (toolResultBlock.content !== null && toolResultBlock.content !== undefined) {
-              contentStr = JSON.stringify(toolResultBlock.content, null, 2);
-            }
-
             toolResultIndexToId.set(streamEvent.index, toolResultBlock.tool_use_id);
-            if (contentStr) {
-              const parentToolUseId =
-                childToolToParent.get(toolResultBlock.tool_use_id) ?? sdkMessage.parent_tool_use_id;
-              if (parentToolUseId) {
+            const parentToolUseId =
+              childToolToParent.get(toolResultBlock.tool_use_id) ?? sdkMessage.parent_tool_use_id;
+            if (parentToolUseId) {
+              const parts = extractToolResultRenderParts(toolResultBlock.content);
+              const contentStr = parts.text || (parts.attachments.length > 0 ? TOOL_ATTACHMENT_RESULT_SENTINEL : '');
+              if (contentStr) {
                 if (!childToolToParent.has(toolResultBlock.tool_use_id)) {
                   ensureSubagentToolPlaceholder(parentToolUseId, toolResultBlock.tool_use_id);
                 }
@@ -9514,23 +9656,37 @@ async function startStreamingSession(preWarm = false): Promise<void> {
                   content: contentStr,
                   isError: toolResultBlock.is_error || false
                 });
-              } else {
+                handleToolResultStart(
+                  toolResultBlock.tool_use_id,
+                  contentStr,
+                  toolResultBlock.is_error || false
+                );
+              }
+            } else {
+              const prepared = prepareBuiltinToolResultPayload(
+                toolResultBlock.tool_use_id,
+                toolResultBlock.content,
+              );
+              if (prepared.content || prepared.attachments.length > 0) {
                 // Strip Playwright tool results from frontend broadcast
                 const shouldStripResult = isPlaywrightTool(toolResultBlock.tool_use_id);
                 if (shouldStripResult) {
                   strippedToolResultIds.add(toolResultBlock.tool_use_id);
                 }
+                const content = shouldStripResult ? PLAYWRIGHT_RESULT_SENTINEL : prepared.content;
                 broadcast('chat:tool-result-start', {
                   toolUseId: toolResultBlock.tool_use_id,
-                  content: shouldStripResult ? PLAYWRIGHT_RESULT_SENTINEL : contentStr,
-                  isError: toolResultBlock.is_error || false
+                  content,
+                  isError: toolResultBlock.is_error || false,
+                  attachments: prepared.attachments.length > 0 ? prepared.attachments : undefined,
                 });
+                handleToolResultStart(
+                  toolResultBlock.tool_use_id,
+                  content,
+                  toolResultBlock.is_error || false,
+                  prepared.attachments,
+                );
               }
-              handleToolResultStart(
-                toolResultBlock.tool_use_id,
-                contentStr,
-                toolResultBlock.is_error || false
-              );
             }
           }
         } else if (streamEvent.type === 'content_block_stop') {
@@ -9722,18 +9878,17 @@ async function startStreamingSession(preWarm = false): Promise<void> {
 
               // For WebSearch/WebFetch, prefer structured tool_use_result data if available
               // This contains query, results array with titles/urls, etc.
-              let contentStr: string;
-              if (toolUseResultData && typeof toolUseResultData === 'object') {
-                contentStr = JSON.stringify(toolUseResultData);
-              } else if (typeof toolResultBlock.content === 'string') {
-                contentStr = toolResultBlock.content;
-              } else {
-                contentStr = JSON.stringify(toolResultBlock.content ?? '', null, 2);
-              }
+              const structuredText =
+                toolUseResultData && typeof toolUseResultData === 'object'
+                  ? JSON.stringify(toolUseResultData)
+                  : undefined;
 
               const parentToolUseId =
                 childToolToParent.get(toolResultBlock.tool_use_id) ?? sdkMessage.parent_tool_use_id;
               if (parentToolUseId) {
+                const parts = extractToolResultRenderParts(toolResultBlock.content);
+                const contentStr =
+                  structuredText ?? (parts.text || (parts.attachments.length > 0 ? TOOL_ATTACHMENT_RESULT_SENTINEL : ''));
                 if (!childToolToParent.has(toolResultBlock.tool_use_id)) {
                   ensureSubagentToolPlaceholder(parentToolUseId, toolResultBlock.tool_use_id);
                 }
@@ -9742,16 +9897,31 @@ async function startStreamingSession(preWarm = false): Promise<void> {
                   toolUseId: toolResultBlock.tool_use_id,
                   content: contentStr
                 });
+                handleToolResultComplete(toolResultBlock.tool_use_id, contentStr);
               } else {
+                const prepared = prepareBuiltinToolResultPayload(
+                  toolResultBlock.tool_use_id,
+                  toolResultBlock.content,
+                  structuredText,
+                );
                 // Top-level tool result (e.g., WebSearch without parent)
                 const stripped = strippedToolResultIds.has(toolResultBlock.tool_use_id) || isPlaywrightTool(toolResultBlock.tool_use_id);
+                const contentStr = structuredText ?? prepared.content;
+                const content = stripped ? PLAYWRIGHT_RESULT_SENTINEL : contentStr;
                 broadcast('chat:tool-result-complete', {
                   toolUseId: toolResultBlock.tool_use_id,
-                  content: stripped ? PLAYWRIGHT_RESULT_SENTINEL : contentStr
+                  content,
+                  attachments: prepared.attachments.length > 0 ? prepared.attachments : undefined,
                 });
                 inFlightToolCount = Math.max(0, inFlightToolCount - 1);
+                handleToolResultComplete(
+                  toolResultBlock.tool_use_id,
+                  content,
+                  undefined,
+                  prepared.attachments,
+                );
+                continue;
               }
-              handleToolResultComplete(toolResultBlock.tool_use_id, contentStr);
             }
           }
           }
@@ -9839,36 +10009,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
                 is_error?: boolean;
               };
 
-              let contentStr: string;
-              if (typeof toolResultBlock.content === 'string') {
-                contentStr = toolResultBlock.content;
-              } else if (Array.isArray(toolResultBlock.content)) {
-                contentStr = toolResultBlock.content
-                  .map((c) => {
-                    if (typeof c === 'string') {
-                      return c;
-                    }
-                    if (typeof c === 'object' && c !== null) {
-                      if ('text' in c && typeof c.text === 'string') {
-                        return c.text;
-                      }
-                      if ('type' in c && c.type === 'text' && 'text' in c) {
-                        return String(c.text);
-                      }
-                      return JSON.stringify(c, null, 2);
-                    }
-                    return String(c);
-                  })
-                  .join('\n');
-              } else if (typeof toolResultBlock.content === 'object' && toolResultBlock.content) {
-                contentStr = JSON.stringify(toolResultBlock.content, null, 2);
-              } else {
-                contentStr = String(toolResultBlock.content);
-              }
-
               const parentToolUseId =
                 childToolToParent.get(toolResultBlock.tool_use_id) ?? sdkMessage.parent_tool_use_id;
               if (parentToolUseId) {
+                const parts = extractToolResultRenderParts(toolResultBlock.content);
+                const contentStr = parts.text || (parts.attachments.length > 0 ? TOOL_ATTACHMENT_RESULT_SENTINEL : '');
                 if (!childToolToParent.has(toolResultBlock.tool_use_id)) {
                   ensureSubagentToolPlaceholder(parentToolUseId, toolResultBlock.tool_use_id);
                 }
@@ -9878,20 +10023,32 @@ async function startStreamingSession(preWarm = false): Promise<void> {
                   content: contentStr,
                   isError: toolResultBlock.is_error || false
                 });
+                handleToolResultComplete(
+                  toolResultBlock.tool_use_id,
+                  contentStr,
+                  toolResultBlock.is_error || false
+                );
               } else {
+                const prepared = prepareBuiltinToolResultPayload(
+                  toolResultBlock.tool_use_id,
+                  toolResultBlock.content,
+                );
                 const stripped = strippedToolResultIds.has(toolResultBlock.tool_use_id) || isPlaywrightTool(toolResultBlock.tool_use_id);
+                const content = stripped ? PLAYWRIGHT_RESULT_SENTINEL : prepared.content;
                 broadcast('chat:tool-result-complete', {
                   toolUseId: toolResultBlock.tool_use_id,
-                  content: stripped ? PLAYWRIGHT_RESULT_SENTINEL : contentStr,
-                  isError: toolResultBlock.is_error || false
+                  content,
+                  isError: toolResultBlock.is_error || false,
+                  attachments: prepared.attachments.length > 0 ? prepared.attachments : undefined,
                 });
                 inFlightToolCount = Math.max(0, inFlightToolCount - 1);
+                handleToolResultComplete(
+                  toolResultBlock.tool_use_id,
+                  content,
+                  toolResultBlock.is_error || false,
+                  prepared.attachments,
+                );
               }
-              handleToolResultComplete(
-                toolResultBlock.tool_use_id,
-                contentStr,
-                toolResultBlock.is_error || false
-              );
             }
           }
         }

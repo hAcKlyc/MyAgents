@@ -514,6 +514,7 @@ export default function TabProvider({
     // Without this, SSE replays race with loadSession and create intermediate
     // render states (3→46→249) causing visible scroll jumps on session entry.
     const isLoadingSessionRef = useRef(false);
+    const loadSessionGenerationRef = useRef(0);
     // Ref for cron task exit handler (set by useCronTask hook via context)
     const onCronTaskExitRequestedRef = useRef<((taskId: string, reason: string) => void) | null>(null);
     // Synchronous map: toolUseId → toolName. Updated outside React state updaters
@@ -3175,6 +3176,16 @@ export default function TabProvider({
         targetSessionId: string,
         options?: { skipLoadingReset?: boolean; previousSessionId?: string | null }
     ): Promise<boolean> => {
+        const loadGeneration = ++loadSessionGenerationRef.current;
+        const requireTargetSessionRef = options?.previousSessionId !== undefined;
+        const isStaleLoad = (phase: string): boolean => {
+            const stale = loadSessionGenerationRef.current !== loadGeneration
+                || (requireTargetSessionRef && currentSessionIdRef.current !== targetSessionId);
+            if (stale) {
+                console.log(`[TabProvider ${tabId}] Ignoring stale loadSession(${targetSessionId}) at ${phase}`);
+            }
+            return stale;
+        };
         // Rollback target for the prop-sync ref/state move (line 340-344). Prop
         // sync fires synchronously when tab.sessionId changes, moving
         // `currentSessionIdRef` to target before /sessions/switch is verified.
@@ -3202,6 +3213,9 @@ export default function TabProvider({
 
             // Check if session is already activated by another Tab or CronTask (Session singleton constraint)
             const activation = await getSessionActivation(targetSessionId);
+            if (isStaleLoad('after-activation')) {
+                return false;
+            }
             if (activation) {
                 // Case 1: Session is open in another Tab - jump to that Tab
                 if (activation.tab_id && activation.tab_id !== tabId) {
@@ -3228,6 +3242,9 @@ export default function TabProvider({
             // as the user scrolls up. Keeps first-paint JSON body tiny on 600+
             // message sessions.
             const response = await apiGetJson<{ success: boolean; session?: SessionMetadata & { liveSessionState?: SessionState; liveStreamingMessage?: { id: string; role: 'assistant'; content: string; timestamp: string; sdkUuid?: string }; messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: string; sdkUuid?: string; attachments?: Array<{ id: string; name: string; mimeType: string; path: string; previewUrl?: string }>; metadata?: Message['metadata'] }>; totalCount?: number; hasMoreBefore?: boolean } }>(`/sessions/${targetSessionId}?limit=${INITIAL_PAGE_SIZE}`);
+            if (isStaleLoad('after-session-fetch')) {
+                return false;
+            }
 
             if (!response.success || !response.session) {
                 // Session not found is not necessarily an error - it may have been deleted
@@ -3246,12 +3263,18 @@ export default function TabProvider({
             try {
                 switchResult = await postJson<{ success: boolean; error?: string }>('/sessions/switch', { sessionId: targetSessionId });
             } catch (error) {
+                if (isStaleLoad('after-switch-throw')) {
+                    return false;
+                }
                 const message = error instanceof Error ? error.message : String(error);
                 console.warn(`[TabProvider ${tabId}] Session switch failed for ${targetSessionId}: ${message}`);
                 setAgentError(message);
                 isLoadingSessionRef.current = false;
                 setIsSessionLoading(false);
                 rollbackOnSwitchFailure();
+                return false;
+            }
+            if (isStaleLoad('after-switch')) {
                 return false;
             }
             if (!switchResult.success) {
@@ -3385,6 +3408,9 @@ export default function TabProvider({
             } else {
                 titleRoundsRef.current = [];
             }
+            if (isStaleLoad('before-state-replace')) {
+                return false;
+            }
 
             // Clear current state and load new messages
             seenIdsRef.current.clear();
@@ -3463,8 +3489,10 @@ export default function TabProvider({
             console.log(`[TabProvider ${tabId}] Loaded ${loadedMessages.length} messages from session`);
             return true;
         } catch (error) {
-            isLoadingSessionRef.current = false;
-            setIsSessionLoading(false);
+            if (!isStaleLoad('catch')) {
+                isLoadingSessionRef.current = false;
+                setIsSessionLoading(false);
+            }
             const errorMessage = error instanceof Error ? error.message : String(error);
             const errorStack = error instanceof Error ? error.stack : undefined;
             console.error(`[TabProvider ${tabId}] Load session failed:`, errorMessage);

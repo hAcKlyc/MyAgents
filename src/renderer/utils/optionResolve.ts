@@ -162,3 +162,20 @@ export function isExistingSessionSwitch(args: {
     && !args.isPendingSession
     && !args.isResetSessionBirth;
 }
+
+/**
+ * #294 — rapid history clicks can leave several async handleSwitchSession
+ * flows in flight for the same tab. Only the latest requested target may
+ * commit tab state; older completions must be ignored.
+ */
+export function shouldCommitSessionSwitch(args: {
+  requestedToken: number;
+  latestToken: number | undefined;
+  requestedSessionId: string;
+  latestSessionId: string | undefined;
+  tabStillPresent: boolean;
+}): boolean {
+  return args.tabStillPresent
+    && args.latestToken === args.requestedToken
+    && args.latestSessionId === args.requestedSessionId;
+}

@@ -6,6 +6,7 @@ import {
   resolveBuiltinPermissionMode,
   resolveLauncherProvider,
   shouldDegradedLoad,
+  shouldCommitSessionSwitch,
 } from './optionResolve';
 
 describe('resolveBuiltinPermissionMode (#244)', () => {
@@ -208,6 +209,38 @@ describe('session-load transition classification (#255)', () => {
       wasPendingSession: false,
       isPendingSession: false,
       isResetSessionBirth: true,
+    })).toBe(false);
+  });
+});
+
+describe('shouldCommitSessionSwitch (#294)', () => {
+  it('allows only the latest requested session switch to commit', () => {
+    expect(shouldCommitSessionSwitch({
+      requestedToken: 2,
+      latestToken: 2,
+      requestedSessionId: 'session-b',
+      latestSessionId: 'session-b',
+      tabStillPresent: true,
+    })).toBe(true);
+  });
+
+  it('rejects an older switch completion after the user clicked another session', () => {
+    expect(shouldCommitSessionSwitch({
+      requestedToken: 1,
+      latestToken: 2,
+      requestedSessionId: 'session-a',
+      latestSessionId: 'session-b',
+      tabStillPresent: true,
+    })).toBe(false);
+  });
+
+  it('rejects commits after the tab disappeared', () => {
+    expect(shouldCommitSessionSwitch({
+      requestedToken: 2,
+      latestToken: 2,
+      requestedSessionId: 'session-b',
+      latestSessionId: 'session-b',
+      tabStillPresent: false,
     })).toBe(false);
   });
 });

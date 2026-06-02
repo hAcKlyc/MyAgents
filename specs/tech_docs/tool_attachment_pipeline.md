@@ -1,9 +1,10 @@
 # Tool Attachment 一等公民管道
 
-> AI 运行时（Codex / 未来 Gemini / CC / builtin）产出的富媒体（图片为主，预留音频/PDF）走同一条
+> AI 运行时（Codex / builtin / 未来 Gemini / CC）产出的富媒体（图片为主，预留音频/PDF）走同一条
 > `UnifiedEvent.tool_result.attachments[]` 通道，前端用单一 `ToolAttachmentGallery` 组件渲染。
 >
-> 引入版本：v0.2.15。本期接入 Codex Runtime；builtin SDK / Gemini / CC 接入留 v0.2.16+。
+> 引入版本：v0.2.15。Codex Runtime 先接入；v0.2.27 已接入 builtin SDK 的 MCP/SDK image
+> `tool_result.content[]`。Gemini / CC Runtime 接入留后续版本。
 >
 > 设计 PRD：`specs/prd/prd_0.2.15_codex_tool_outputs_normalization.md`（本地存档，未入 git）。
 
@@ -288,9 +289,10 @@ attachment。任何触发这种路径的入口视为 bug。
 
 ## 10. 后续 Phase（v0.2.16+）
 
-- **P5 — builtin SDK image content**：`agent-session.ts:8716-8754` 改 array-aware 处理 SDK 返回的
-  `content[]` 中 `type:'image'` ContentBlock，调 `saveToolAttachment` → attachments。完成后老的
-  `gemini-image-tool.ts` filePath 文本协议退役，`TOOLS_THAT_OWN_GALLERY_PREFIXES` 清空
+- **已完成 v0.2.27 — builtin SDK image content**：`agent-session.ts` 通过
+  `utils/tool-result-attachments.ts` array-aware 处理 SDK / MCP 返回的 `content[]` 中
+  `type:'image'` ContentBlock，调用 `saveToolAttachment` → attachments。
+  旧 `gemini-image-tool.ts` filePath 文本协议退役仍需单独跟进。
 - **Gemini / CC Runtime tool image**：协议层就位，对应 Runtime parseNotification 改造接入
 - **IM Bot 媒体下发**：tool_result 转发链路消费 attachments，把图片送达 Telegram / 飞书 / 微信
 - **GC / size limits**：session 软删除时清理 `~/.myagents/generated/tool-attachments/<sid>/`；

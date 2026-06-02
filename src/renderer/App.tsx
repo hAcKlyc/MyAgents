@@ -45,6 +45,7 @@ import { updateSession } from '@/api/sessionClient';
 import { dismissTopmost } from '@/utils/closeLayer';
 import { forceFlushLogs, setLogServerUrl, clearLogServerUrl } from '@/utils/frontendLogger';
 import { normalizeRuntime, planSessionOpen } from '@/utils/sessionOpenPlan';
+import { shouldCommitSessionSwitch } from '@/utils/optionResolve';
 import { applyTerminalSessionToTabs } from '@/utils/sessionTermination';
 import { listenWithCleanup } from '@/utils/tauriListen';
 import { CUSTOM_EVENTS, createPendingSessionId, isPendingSessionId } from '../shared/constants';
@@ -316,6 +317,9 @@ export default function App() {
 
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
+
+  const sessionSwitchSeqRef = useRef(0);
+  const latestSessionSwitchRef = useRef(new Map<string, { token: number; sessionId: string }>());
 
   // Persist open chat tabs after every structural change (Issue #232). This is
   // a POST-COMMIT effect — it flushes shortly after each tabs/activeTabId change
@@ -1434,6 +1438,23 @@ export default function App() {
    * Implements Session singleton with all 4 scenarios
    */
   const handleSwitchSession = useCallback(async (tabId: string, sessionId: string) => {
+    const switchToken = ++sessionSwitchSeqRef.current;
+    latestSessionSwitchRef.current.set(tabId, { token: switchToken, sessionId });
+    const isLatestSwitch = (phase: string): boolean => {
+      const latest = latestSessionSwitchRef.current.get(tabId);
+      const ok = shouldCommitSessionSwitch({
+        requestedToken: switchToken,
+        latestToken: latest?.token,
+        requestedSessionId: sessionId,
+        latestSessionId: latest?.sessionId,
+        tabStillPresent: tabsRef.current.some(t => t.id === tabId),
+      });
+      if (!ok) {
+        console.log(`[App] Ignoring stale session switch ${sessionId} for tab ${tabId} at ${phase}`);
+      }
+      return ok;
+    };
+
     const tabsSnapshot = tabsRef.current;
     const currentTab = tabsSnapshot.find(t => t.id === tabId);
 
@@ -1452,6 +1473,9 @@ export default function App() {
     });
     if (jumpPlan.type === 'jump-to-tab') {
       console.log(`[App] handleSwitchSession Scenario 1: Session ${sessionId} already in tab ${jumpPlan.tabId}, jumping to it`);
+      if (!isLatestSwitch('jump-fast-path')) {
+        return;
+      }
       setActiveTabId(jumpPlan.tabId);
       return;
     }
@@ -1472,6 +1496,9 @@ export default function App() {
       getSessionActivation(sessionId),
       getTabCronTask(tabId),
     ]);
+    if (!isLatestSwitch('resolved-open-plan-inputs')) {
+      return;
+    }
     // When the current Tab has no session yet (fresh chat), there's no "current
     // session runtime" to compare against — treat target's runtime as current,
     // so cross-runtime check doesn't false-positive on an empty Tab. Mirrors
@@ -1490,6 +1517,9 @@ export default function App() {
 
     if (plan.type === 'jump-to-tab') {
       console.log(`[App] handleSwitchSession Scenario 1: Session ${sessionId} already in tab ${plan.tabId}, jumping to it`);
+      if (!isLatestSwitch('jump-after-plan')) {
+        return;
+      }
       setActiveTabId(plan.tabId);
       return;
     }
@@ -1520,6 +1550,13 @@ export default function App() {
       try {
         const result = await ensureSessionSidecar(sessionId, currentTab.agentDir, 'tab', newTab.id);
         await activateSession(sessionId, newTab.id, null, result.port, currentTab.agentDir, false);
+        if (!isLatestSwitch('cross-runtime-new-tab-commit')) {
+          await releaseSessionSidecar(sessionId, 'tab', newTab.id).catch(err =>
+            console.warn('[App] Failed to release stale cross-runtime tab owner:', err)
+          );
+          setTabs(prev => prev.filter(t => t.id !== newTab.id));
+          return;
+        }
         setTabs(prev => prev.map(t =>
           t.id === newTab.id
             ? { ...t, joinedExistingSidecar: !result.isNew }
@@ -1560,6 +1597,9 @@ export default function App() {
           await stopSseProxy(tabId);
           const stopped = await releaseSessionSidecar(oldSessionId, 'tab', tabId);
           console.log(`[App] Released old session ${oldSessionId}, sidecar stopped: ${stopped}`);
+        }
+        if (!isLatestSwitch('attach-existing-sidecar-commit')) {
+          return;
         }
 
         // Step 3: Update UI state (TabProvider will reconnect SSE to new Sidecar)
@@ -1617,6 +1657,13 @@ export default function App() {
         // Ensure Sidecar for new Tab as owner of this Session
         const result = await ensureSessionSidecar(sessionId, currentTabForScenario3.agentDir, 'tab', newTab.id);
         console.log(`[App] New tab ${newTab.id} Sidecar ensured: port=${result.port}, isNew=${result.isNew}`);
+        if (!isLatestSwitch('current-cron-new-tab-commit')) {
+          await releaseSessionSidecar(sessionId, 'tab', newTab.id).catch(err =>
+            console.warn('[App] Failed to release stale cron-switch tab owner:', err)
+          );
+          setTabs((prev) => prev.filter(t => t.id !== newTab.id));
+          return;
+        }
 
         // Update new tab state
         setTabs((prev) =>
@@ -1749,7 +1796,13 @@ export default function App() {
       // ensureSessionSidecar branch above). Safe to cancel any BG completion
       // now — releasing the BG owner with Tab still attached keeps the sidecar
       // alive and the streaming turn intact.
+      if (!isLatestSwitch('scenario4-before-bg-cancel')) {
+        return;
+      }
       await cancelBackgroundCompletion(sessionId);
+      if (!isLatestSwitch('scenario4-commit')) {
+        return;
+      }
 
       // Update UI state - TabProvider will detect sessionId change and call loadSession()
       //
