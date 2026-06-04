@@ -69,6 +69,20 @@ fn get_sidecar_state() -> Option<&'static crate::sidecar::ManagedSidecarManager>
 
 /// Start the internal management API server on a random port
 /// Returns the port number for injection into Sidecar env vars
+
+/// Write the Management API port to ~/.myagents/management.port so external
+/// tools (session consoles, third-party frontends) can discover it.
+fn write_management_port_file(port: u16) {
+    if let Some(home) = dirs::home_dir() {
+        let port_file = home.join(".myagents").join("management.port");
+        if let Err(e) = std::fs::write(&port_file, port.to_string()) {
+            ulog_warn!("[mgmt-api] Failed to write management.port: {}", e);
+        } else {
+            ulog_info!("[mgmt-api] Wrote management.port = {}", port);
+        }
+    }
+}
+
 pub async fn start_management_api() -> Result<u16, String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -82,6 +96,8 @@ pub async fn start_management_api() -> Result<u16, String> {
     MANAGEMENT_PORT
         .set(port)
         .map_err(|_| "Management API already started".to_string())?;
+
+    write_management_port_file(port);
 
     let app = Router::new()
         .route("/api/cron/create", post(create_cron_handler))
