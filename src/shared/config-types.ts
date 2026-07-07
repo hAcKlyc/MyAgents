@@ -22,9 +22,11 @@ export type BackgroundAgentPermissionMode = 'inherit' | 'fullAgency';
 
 export const COLOR_THEMES = ['warm', 'sage'] as const;
 export type ColorTheme = typeof COLOR_THEMES[number];
+export const DEFAULT_COLOR_THEME: ColorTheme = 'sage';
 
 export function normalizeColorTheme(value: unknown): ColorTheme {
-  return value === 'sage' ? 'sage' : 'warm';
+  if (value === 'warm' || value === 'sage') return value;
+  return DEFAULT_COLOR_THEME;
 }
 
 /**
@@ -1791,7 +1793,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultPermissionMode: 'auto',
   backgroundAgentPermissionMode: 'inherit', // background agents inherit granted perms; nothing wider (#264)
   theme: 'system',
-  colorTheme: 'warm',
+  colorTheme: DEFAULT_COLOR_THEME,
   uiLanguage: 'system',
   minimizeToTray: true,   // 默认开启最小化到托盘
   forceWakeLock: false,   // 默认关闭常开阻睡（智能模式仍在跑，覆盖 AI 工作期间）

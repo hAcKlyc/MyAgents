@@ -190,10 +190,11 @@ describe('normalizeChatQueueResponseMode', () => {
 });
 
 describe('normalizeColorTheme', () => {
-  it('keeps sage and falls back to warm for missing or unknown values', () => {
+  it('keeps explicit color themes and falls back to sage for missing or unknown values', () => {
     expect(normalizeColorTheme('sage')).toBe('sage');
-    expect(normalizeColorTheme(undefined)).toBe('warm');
-    expect(normalizeColorTheme('forest')).toBe('warm');
+    expect(normalizeColorTheme('warm')).toBe('warm');
+    expect(normalizeColorTheme(undefined)).toBe('sage');
+    expect(normalizeColorTheme('forest')).toBe('sage');
   });
 });
 

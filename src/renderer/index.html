@@ -11,7 +11,7 @@
         var t = localStorage.getItem('theme') || 'system';
         if (t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme:dark)').matches))
           document.documentElement.classList.add('dark');
-        var c = localStorage.getItem('colorTheme') || 'warm';
+        var c = localStorage.getItem('colorTheme') || 'sage';
         if (c === 'sage')
           document.documentElement.setAttribute('data-color-theme', 'sage');
       } catch(e) {}
