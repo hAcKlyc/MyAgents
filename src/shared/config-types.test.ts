@@ -193,6 +193,8 @@ describe('normalizeColorTheme', () => {
   it('keeps explicit color themes and falls back to sage for missing or unknown values', () => {
     expect(normalizeColorTheme('sage')).toBe('sage');
     expect(normalizeColorTheme('warm')).toBe('warm');
+    expect(normalizeColorTheme('mauve')).toBe('mauve');
+    expect(normalizeColorTheme('wisteria')).toBe('wisteria');
     expect(normalizeColorTheme(undefined)).toBe('sage');
     expect(normalizeColorTheme('forest')).toBe('sage');
   });

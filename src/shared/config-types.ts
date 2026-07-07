@@ -20,12 +20,12 @@ export type PermissionMode = 'auto' | 'plan' | 'fullAgency';
  */
 export type BackgroundAgentPermissionMode = 'inherit' | 'fullAgency';
 
-export const COLOR_THEMES = ['warm', 'sage'] as const;
+export const COLOR_THEMES = ['warm', 'sage', 'mauve', 'wisteria'] as const;
 export type ColorTheme = typeof COLOR_THEMES[number];
 export const DEFAULT_COLOR_THEME: ColorTheme = 'sage';
 
 export function normalizeColorTheme(value: unknown): ColorTheme {
-  if (value === 'warm' || value === 'sage') return value;
+  if (COLOR_THEMES.includes(value as ColorTheme)) return value as ColorTheme;
   return DEFAULT_COLOR_THEME;
 }
 

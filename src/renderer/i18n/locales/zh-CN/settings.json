@@ -53,7 +53,9 @@
     "colorThemeDescription": "切换整个软件的界面配色",
     "colorTheme": {
       "warm": "暖纸",
-      "sage": "鼠尾草"
+      "sage": "鼠尾草",
+      "mauve": "灰紫",
+      "wisteria": "藤紫"
     },
     "queueTitle": "连续发送消息",
     "queueModeTitle": "队列响应模式",

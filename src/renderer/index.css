@@ -610,6 +610,348 @@
   --toggle-off-bg: rgb(220 232 215 / 0.18);
 }
 
+/* ============================================================
+   Color Theme — "Mauve" (灰紫)
+   Low-saturation purple with a mature, document-friendly feel.
+   ============================================================ */
+[data-color-theme="mauve"]:not(.dark) {
+  --ink: #201820;
+  --ink-secondary: #3a3039;
+  --ink-muted: #756875;
+  --ink-subtle: #aaa0a9;
+  --ink-faint: #c6bdc5;
+
+  --paper: #f8f4f7;
+  --paper-elevated: #fffafd;
+  --message-user-bg: #fffafd;
+  --paper-inset: #eadfe8;
+  --paper-a0: rgb(248 244 247 / 0);
+  --paper-elevated-a0: rgb(255 250 253 / 0);
+  --message-user-bg-a0: rgb(255 250 253 / 0);
+  --paper-inset-a0: rgb(234 223 232 / 0);
+  --hover-bg: rgb(154 95 143 / 0.08);
+
+  --accent: #9a5f8f;
+  --accent-warm: #9a5f8f;
+  --accent-warm-hover: #b173a6;
+  --accent-warm-subtle: rgb(154 95 143 / 0.10);
+  --accent-warm-muted: rgb(154 95 143 / 0.18);
+  --accent-warm-subtle-a0: rgb(154 95 143 / 0);
+  --accent-cool: #6f6aa8;
+  --accent-cool-hover: #837dcc;
+
+  --heartbeat: #bd5a70;
+  --heartbeat-bg: rgb(189 90 112 / 0.10);
+  --heartbeat-border: rgb(189 90 112 / 0.20);
+
+  --success: #4f8a69;
+  --success-bg: #e0ede5;
+  --error: #c84f5b;
+  --error-bg: #f5dfe3;
+  --error-hover: #ad414c;
+  --error-subtle: rgb(200 79 91 / 0.08);
+  --warning: #a76d18;
+  --warning-bg: #f2e8c9;
+  --info: #5f789f;
+  --info-bg: #e2e8f0;
+
+  --button-primary-bg: #9a5f8f;
+  --button-primary-bg-hover: #884f7e;
+  --button-primary-text: #ffffff;
+  --button-dark-bg: #201820;
+  --button-dark-bg-hover: #3a3039;
+  --button-secondary-bg: #eadfe8;
+  --button-secondary-bg-hover: #dfd1dc;
+  --button-secondary-text: #201820;
+
+  --fb-surface-peek: rgb(252 247 251 / 0.16);
+  --fb-surface-glass: rgb(252 247 251 / 0.58);
+  --fb-surface-pin: rgb(252 247 251 / 0.96);
+  --fb-surface-pin-a0: rgb(252 247 251 / 0);
+  --fb-surface-pin-72: rgb(252 247 251 / 0.72);
+  --fb-surface-pin-95: rgb(252 247 251 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.64);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.50);
+  --fb-shadow-strong: rgb(32 24 32 / 0.26);
+  --fb-shadow-soft: rgb(32 24 32 / 0.12);
+  --fb-shadow-preview: rgb(32 24 32 / 0.42);
+  --fb-core-shadow: rgb(32 24 32 / 0.22);
+  --fb-inset-shadow: rgb(32 24 32 / 0.08);
+  --fb-control-hover: rgb(32 24 32 / 0.06);
+  --fb-line-input: rgb(32 24 32 / 0.07);
+  --fb-line-thumb: rgb(32 24 32 / 0.12);
+  --fb-drag-handle: rgb(32 24 32 / 0.18);
+  --fb-scroll-thumb: rgb(170 160 169 / 0.52);
+
+  --line: rgb(32 24 32 / 0.10);
+  --line-strong: rgb(32 24 32 / 0.18);
+  --line-subtle: rgb(32 24 32 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(32 24 32 / 0.05);
+  --shadow-sm: 0 2px 8px rgb(32 24 32 / 0.08);
+  --shadow-md: 0 8px 24px rgb(32 24 32 / 0.12);
+  --shadow-lg: 0 16px 40px rgb(32 24 32 / 0.16);
+  --shadow-xl: 0 24px 48px rgb(32 24 32 / 0.20);
+
+  --focus-border: #201820;
+  --toggle-off-bg: rgb(32 24 32 / 0.18);
+}
+
+.dark[data-color-theme="mauve"] {
+  --ink: #eadce8;
+  --ink-secondary: #d5c5d2;
+  --ink-muted: #a0939e;
+  --ink-subtle: #706370;
+  --ink-faint: #504750;
+
+  --paper: #191219;
+  --paper-elevated: #241a23;
+  --message-user-bg: #2c202b;
+  --paper-inset: #120d12;
+  --paper-a0: rgb(25 18 25 / 0);
+  --paper-elevated-a0: rgb(36 26 35 / 0);
+  --message-user-bg-a0: rgb(44 32 43 / 0);
+  --paper-inset-a0: rgb(18 13 18 / 0);
+  --hover-bg: rgb(193 138 183 / 0.13);
+
+  --accent: #c18ab7;
+  --accent-warm: #c18ab7;
+  --accent-warm-hover: #d29cc7;
+  --accent-warm-subtle: rgb(193 138 183 / 0.13);
+  --accent-warm-muted: rgb(193 138 183 / 0.22);
+  --accent-warm-subtle-a0: rgb(193 138 183 / 0);
+  --accent-cool: #9b96d4;
+  --accent-cool-hover: #aea8e6;
+
+  --heartbeat: #d8798b;
+  --heartbeat-bg: rgb(216 121 139 / 0.13);
+  --heartbeat-border: rgb(216 121 139 / 0.23);
+
+  --success: #78b58d;
+  --success-bg: rgb(120 181 141 / 0.16);
+  --error: #ef737c;
+  --error-bg: rgb(239 115 124 / 0.16);
+  --error-hover: #db626d;
+  --error-subtle: rgb(239 115 124 / 0.13);
+  --warning: #d8ad58;
+  --warning-bg: rgb(216 173 88 / 0.16);
+  --info: #8aa2d1;
+  --info-bg: rgb(138 162 209 / 0.16);
+
+  --button-primary-bg: #c18ab7;
+  --button-primary-bg-hover: #b079a6;
+  --button-primary-text: #140f14;
+  --button-dark-bg: #473a46;
+  --button-dark-bg-hover: #5a4a58;
+  --button-secondary-bg: #30242f;
+  --button-secondary-bg-hover: #3a2d39;
+  --button-secondary-text: #eadce8;
+
+  --fb-surface-peek: rgb(25 18 25 / 0.24);
+  --fb-surface-glass: rgb(36 26 35 / 0.60);
+  --fb-surface-pin: rgb(36 26 35 / 0.96);
+  --fb-surface-pin-a0: rgb(36 26 35 / 0);
+  --fb-surface-pin-72: rgb(36 26 35 / 0.72);
+  --fb-surface-pin-95: rgb(36 26 35 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.16);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.12);
+  --fb-shadow-strong: rgb(0 0 0 / 0.38);
+  --fb-shadow-soft: rgb(0 0 0 / 0.22);
+  --fb-shadow-preview: rgb(0 0 0 / 0.55);
+  --fb-core-shadow: rgb(0 0 0 / 0.32);
+  --fb-inset-shadow: rgb(0 0 0 / 0.16);
+  --fb-control-hover: rgb(255 255 255 / 0.08);
+  --fb-line-input: rgb(234 220 232 / 0.08);
+  --fb-line-thumb: rgb(234 220 232 / 0.16);
+  --fb-drag-handle: rgb(234 220 232 / 0.20);
+  --fb-scroll-thumb: rgb(160 147 158 / 0.56);
+
+  --line: rgb(234 220 232 / 0.10);
+  --line-strong: rgb(234 220 232 / 0.18);
+  --line-subtle: rgb(234 220 232 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.12);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.18);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 0.28);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.35);
+  --shadow-xl: 0 24px 48px rgb(0 0 0 / 0.42);
+
+  --focus-border: var(--accent);
+  --toggle-thumb: #eadce8;
+  --toggle-off-bg: rgb(234 220 232 / 0.18);
+}
+
+/* ============================================================
+   Color Theme — "Wisteria" (藤紫)
+   Lighter blue-purple with a soft, airy reading surface.
+   ============================================================ */
+[data-color-theme="wisteria"]:not(.dark) {
+  --ink: #1e1a24;
+  --ink-secondary: #352f40;
+  --ink-muted: #70687c;
+  --ink-subtle: #a49ab2;
+  --ink-faint: #c0b7ca;
+
+  --paper: #f7f4fb;
+  --paper-elevated: #fffaff;
+  --message-user-bg: #fffaff;
+  --paper-inset: #e7dff2;
+  --paper-a0: rgb(247 244 251 / 0);
+  --paper-elevated-a0: rgb(255 250 255 / 0);
+  --message-user-bg-a0: rgb(255 250 255 / 0);
+  --paper-inset-a0: rgb(231 223 242 / 0);
+  --hover-bg: rgb(138 111 200 / 0.08);
+
+  --accent: #8a6fc8;
+  --accent-warm: #8a6fc8;
+  --accent-warm-hover: #9c82d8;
+  --accent-warm-subtle: rgb(138 111 200 / 0.10);
+  --accent-warm-muted: rgb(138 111 200 / 0.18);
+  --accent-warm-subtle-a0: rgb(138 111 200 / 0);
+  --accent-cool: #5f83b7;
+  --accent-cool-hover: #7096cc;
+
+  --heartbeat: #bd678c;
+  --heartbeat-bg: rgb(189 103 140 / 0.10);
+  --heartbeat-border: rgb(189 103 140 / 0.20);
+
+  --success: #548c72;
+  --success-bg: #e0ede8;
+  --error: #c85568;
+  --error-bg: #f5e0e5;
+  --error-hover: #ad4658;
+  --error-subtle: rgb(200 85 104 / 0.08);
+  --warning: #a7741c;
+  --warning-bg: #f2e9ce;
+  --info: #567da8;
+  --info-bg: #e0e8f2;
+
+  --button-primary-bg: #8a6fc8;
+  --button-primary-bg-hover: #785eb6;
+  --button-primary-text: #ffffff;
+  --button-dark-bg: #1e1a24;
+  --button-dark-bg-hover: #352f40;
+  --button-secondary-bg: #e7dff2;
+  --button-secondary-bg-hover: #dcd2eb;
+  --button-secondary-text: #1e1a24;
+
+  --fb-surface-peek: rgb(251 248 255 / 0.16);
+  --fb-surface-glass: rgb(251 248 255 / 0.58);
+  --fb-surface-pin: rgb(251 248 255 / 0.96);
+  --fb-surface-pin-a0: rgb(251 248 255 / 0);
+  --fb-surface-pin-72: rgb(251 248 255 / 0.72);
+  --fb-surface-pin-95: rgb(251 248 255 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.64);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.50);
+  --fb-shadow-strong: rgb(30 26 36 / 0.26);
+  --fb-shadow-soft: rgb(30 26 36 / 0.12);
+  --fb-shadow-preview: rgb(30 26 36 / 0.42);
+  --fb-core-shadow: rgb(30 26 36 / 0.22);
+  --fb-inset-shadow: rgb(30 26 36 / 0.08);
+  --fb-control-hover: rgb(30 26 36 / 0.06);
+  --fb-line-input: rgb(30 26 36 / 0.07);
+  --fb-line-thumb: rgb(30 26 36 / 0.12);
+  --fb-drag-handle: rgb(30 26 36 / 0.18);
+  --fb-scroll-thumb: rgb(164 154 178 / 0.52);
+
+  --line: rgb(30 26 36 / 0.10);
+  --line-strong: rgb(30 26 36 / 0.18);
+  --line-subtle: rgb(30 26 36 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(30 26 36 / 0.05);
+  --shadow-sm: 0 2px 8px rgb(30 26 36 / 0.08);
+  --shadow-md: 0 8px 24px rgb(30 26 36 / 0.12);
+  --shadow-lg: 0 16px 40px rgb(30 26 36 / 0.16);
+  --shadow-xl: 0 24px 48px rgb(30 26 36 / 0.20);
+
+  --focus-border: #1e1a24;
+  --toggle-off-bg: rgb(30 26 36 / 0.18);
+}
+
+.dark[data-color-theme="wisteria"] {
+  --ink: #e4dcf0;
+  --ink-secondary: #cec3df;
+  --ink-muted: #9b91ad;
+  --ink-subtle: #695f7a;
+  --ink-faint: #4b4358;
+
+  --paper: #15121c;
+  --paper-elevated: #201a2a;
+  --message-user-bg: #282134;
+  --paper-inset: #0f0c14;
+  --paper-a0: rgb(21 18 28 / 0);
+  --paper-elevated-a0: rgb(32 26 42 / 0);
+  --message-user-bg-a0: rgb(40 33 52 / 0);
+  --paper-inset-a0: rgb(15 12 20 / 0);
+  --hover-bg: rgb(168 145 226 / 0.13);
+
+  --accent: #a891e2;
+  --accent-warm: #a891e2;
+  --accent-warm-hover: #baa5ef;
+  --accent-warm-subtle: rgb(168 145 226 / 0.13);
+  --accent-warm-muted: rgb(168 145 226 / 0.22);
+  --accent-warm-subtle-a0: rgb(168 145 226 / 0);
+  --accent-cool: #86a7dc;
+  --accent-cool-hover: #98b9ed;
+
+  --heartbeat: #d77ca2;
+  --heartbeat-bg: rgb(215 124 162 / 0.13);
+  --heartbeat-border: rgb(215 124 162 / 0.23);
+
+  --success: #7db69a;
+  --success-bg: rgb(125 182 154 / 0.16);
+  --error: #ef7b8c;
+  --error-bg: rgb(239 123 140 / 0.16);
+  --error-hover: #db6a7d;
+  --error-subtle: rgb(239 123 140 / 0.13);
+  --warning: #d8b160;
+  --warning-bg: rgb(216 177 96 / 0.16);
+  --info: #8eb1e2;
+  --info-bg: rgb(142 177 226 / 0.16);
+
+  --button-primary-bg: #a891e2;
+  --button-primary-bg-hover: #9780d0;
+  --button-primary-text: #111019;
+  --button-dark-bg: #40384f;
+  --button-dark-bg-hover: #514663;
+  --button-secondary-bg: #2b2438;
+  --button-secondary-bg-hover: #352d44;
+  --button-secondary-text: #e4dcf0;
+
+  --fb-surface-peek: rgb(21 18 28 / 0.24);
+  --fb-surface-glass: rgb(32 26 42 / 0.60);
+  --fb-surface-pin: rgb(32 26 42 / 0.96);
+  --fb-surface-pin-a0: rgb(32 26 42 / 0);
+  --fb-surface-pin-72: rgb(32 26 42 / 0.72);
+  --fb-surface-pin-95: rgb(32 26 42 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.16);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.12);
+  --fb-shadow-strong: rgb(0 0 0 / 0.38);
+  --fb-shadow-soft: rgb(0 0 0 / 0.22);
+  --fb-shadow-preview: rgb(0 0 0 / 0.55);
+  --fb-core-shadow: rgb(0 0 0 / 0.32);
+  --fb-inset-shadow: rgb(0 0 0 / 0.16);
+  --fb-control-hover: rgb(255 255 255 / 0.08);
+  --fb-line-input: rgb(228 220 240 / 0.08);
+  --fb-line-thumb: rgb(228 220 240 / 0.16);
+  --fb-drag-handle: rgb(228 220 240 / 0.20);
+  --fb-scroll-thumb: rgb(155 145 173 / 0.56);
+
+  --line: rgb(228 220 240 / 0.10);
+  --line-strong: rgb(228 220 240 / 0.18);
+  --line-subtle: rgb(228 220 240 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.12);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.18);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 0.28);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.35);
+  --shadow-xl: 0 24px 48px rgb(0 0 0 / 0.42);
+
+  --focus-border: var(--accent);
+  --toggle-thumb: #e4dcf0;
+  --toggle-off-bg: rgb(228 220 240 / 0.18);
+}
+
 /* Viewport-locked app: prevent document-level scrolling entirely.
    All scrolling is handled by inner containers (MessageList, panels, etc.). */
 html,
@@ -659,6 +1001,36 @@ body {
   background:
     radial-gradient(1200px 700px at 82% -10%, #213321 0%, rgb(33 51 33 / 0) 55%),
     radial-gradient(900px 600px at -10% 110%, #17302d 0%, rgb(23 48 45 / 0) 55%),
+    var(--paper);
+}
+
+[data-color-theme="mauve"]:not(.dark) body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #ead8e8 0%, rgb(234 216 232 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #d9d6ec 0%, rgb(217 214 236 / 0) 55%),
+    linear-gradient(120deg, rgb(255 255 255 / 0.48), rgb(255 255 255 / 0)),
+    var(--paper);
+}
+
+.dark[data-color-theme="mauve"] body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #342034 0%, rgb(52 32 52 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #2a2540 0%, rgb(42 37 64 / 0) 55%),
+    var(--paper);
+}
+
+[data-color-theme="wisteria"]:not(.dark) body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #e3d9f5 0%, rgb(227 217 245 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #d8e0f2 0%, rgb(216 224 242 / 0) 55%),
+    linear-gradient(120deg, rgb(255 255 255 / 0.48), rgb(255 255 255 / 0)),
+    var(--paper);
+}
+
+.dark[data-color-theme="wisteria"] body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #2c2340 0%, rgb(44 35 64 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #202c42 0%, rgb(32 44 66 / 0) 55%),
     var(--paper);
 }
 

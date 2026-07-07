@@ -12,8 +12,8 @@
         if (t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme:dark)').matches))
           document.documentElement.classList.add('dark');
         var c = localStorage.getItem('colorTheme') || 'sage';
-        if (c === 'sage')
-          document.documentElement.setAttribute('data-color-theme', 'sage');
+        if (c === 'sage' || c === 'mauve' || c === 'wisteria')
+          document.documentElement.setAttribute('data-color-theme', c);
       } catch(e) {}
     </script>
   </head>

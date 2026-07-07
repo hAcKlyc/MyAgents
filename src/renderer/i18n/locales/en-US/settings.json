@@ -53,7 +53,9 @@
     "colorThemeDescription": "Switch the app-wide interface palette",
     "colorTheme": {
       "warm": "Warm paper",
-      "sage": "Sage"
+      "sage": "Sage",
+      "mauve": "Mauve",
+      "wisteria": "Wisteria"
     },
     "queueTitle": "Queued messages",
     "queueModeTitle": "Queue response mode",
