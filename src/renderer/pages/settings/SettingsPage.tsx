@@ -44,7 +44,10 @@ import {
     normalizeChatQueueResponseMode,
     getManagedCodexProviderReadiness,
     isManagedCodexProviderGateEnabled,
+    COLOR_THEMES,
+    normalizeColorTheme,
     type ChatQueueResponseMode,
+    type ColorTheme,
     type ProxyProtocol,
 } from '@/config/types';
 import {
@@ -266,6 +269,7 @@ export default function Settings({ initialSection, initialMcpId, initialOfficial
         { value: 'zh-CN', label: tCommon('language.zhCN') },
         { value: 'en-US', label: tCommon('language.enUS') },
     ], [tCommon]);
+    const selectedColorTheme = normalizeColorTheme(config.colorTheme);
     const [claudeTranscriptCleanupDaysDraft, setClaudeTranscriptCleanupDaysDraft] = useState(
         String(DEFAULT_CLAUDE_TRANSCRIPT_CLEANUP_PERIOD_DAYS),
     );
@@ -4082,6 +4086,29 @@ export default function Settings({ initialSection, initialMcpId, initialOfficial
                                                 }`}
                                             >
                                                 {tSettings(`general.theme.${mode}`)}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 flex items-center justify-between gap-4">
+                                    <div className="flex-1 pr-4">
+                                        <p className="text-sm font-medium text-[var(--ink)]">{tSettings('general.colorThemeTitle')}</p>
+                                        <p className="mt-0.5 text-xs text-[var(--ink-muted)]">{tSettings('general.colorThemeDescription')}</p>
+                                    </div>
+                                    <div className="flex shrink-0 gap-0.5 rounded-full bg-[var(--paper-inset)] p-0.5">
+                                        {COLOR_THEMES.map((colorTheme) => (
+                                            <button
+                                                key={colorTheme}
+                                                type="button"
+                                                onClick={() => updateConfig({ colorTheme: colorTheme as ColorTheme })}
+                                                className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${
+                                                    selectedColorTheme === colorTheme
+                                                        ? 'bg-[var(--paper-elevated)] text-[var(--ink)] shadow-sm'
+                                                        : 'text-[var(--ink-muted)] hover:text-[var(--ink-secondary)]'
+                                                }`}
+                                            >
+                                                {tSettings(`general.colorTheme.${colorTheme}`)}
                                             </button>
                                         ))}
                                     </div>

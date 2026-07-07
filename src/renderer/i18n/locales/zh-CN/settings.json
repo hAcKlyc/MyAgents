@@ -49,6 +49,12 @@
       "light": "日间模式",
       "dark": "夜间模式"
     },
+    "colorThemeTitle": "颜色皮肤",
+    "colorThemeDescription": "切换整个软件的界面配色",
+    "colorTheme": {
+      "warm": "暖纸",
+      "sage": "鼠尾草"
+    },
     "queueTitle": "连续发送消息",
     "queueModeTitle": "队列响应模式",
     "queueTurnDescription": "仅在 AI 完成一个执行轮次后，自动发送下一条消息",

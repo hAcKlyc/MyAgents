@@ -18,6 +18,7 @@ import {
   mergePresetModelWithCustomEntry,
   normalizeChatQueueResponseMode,
   normalizeClaudeTranscriptCleanupPeriodDays,
+  normalizeColorTheme,
   normalizeProviderOrder,
   splitProviderModelInput,
   withManagedCodexRuntimeModels,
@@ -185,6 +186,14 @@ describe('normalizeChatQueueResponseMode', () => {
     expect(normalizeChatQueueResponseMode('realtime')).toBe('realtime');
     expect(normalizeChatQueueResponseMode('turn')).toBe('turn');
     expect(normalizeChatQueueResponseMode('invalid')).toBe('realtime');
+  });
+});
+
+describe('normalizeColorTheme', () => {
+  it('keeps sage and falls back to warm for missing or unknown values', () => {
+    expect(normalizeColorTheme('sage')).toBe('sage');
+    expect(normalizeColorTheme(undefined)).toBe('warm');
+    expect(normalizeColorTheme('forest')).toBe('warm');
   });
 });
 

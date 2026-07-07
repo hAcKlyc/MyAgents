@@ -49,6 +49,12 @@
       "light": "Light",
       "dark": "Dark"
     },
+    "colorThemeTitle": "Color theme",
+    "colorThemeDescription": "Switch the app-wide interface palette",
+    "colorTheme": {
+      "warm": "Warm paper",
+      "sage": "Sage"
+    },
     "queueTitle": "Queued messages",
     "queueModeTitle": "Queue response mode",
     "queueTurnDescription": "Send the next queued message only after AI finishes the current turn",

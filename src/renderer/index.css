@@ -439,6 +439,177 @@
   color-scheme: dark;
 }
 
+/* ============================================================
+   Color Theme — "Sage" (鼠尾草)
+   Keeps light/dark brightness semantics while swapping the app palette.
+   ============================================================ */
+[data-color-theme="sage"]:not(.dark) {
+  --ink: #17221b;
+  --ink-secondary: #27352b;
+  --ink-muted: #657367;
+  --ink-subtle: #95a091;
+  --ink-faint: #b6beb0;
+
+  --paper: #f3f7ef;
+  --paper-elevated: #fbfff8;
+  --message-user-bg: #fdfff9;
+  --paper-inset: #dce8d6;
+  --paper-a0: rgb(243 247 239 / 0);
+  --paper-elevated-a0: rgb(251 255 248 / 0);
+  --message-user-bg-a0: rgb(253 255 249 / 0);
+  --paper-inset-a0: rgb(220 232 214 / 0);
+  --hover-bg: rgb(95 143 104 / 0.09);
+
+  --accent: #5f8f68;
+  --accent-warm: #5f8f68;
+  --accent-warm-hover: #6fa979;
+  --accent-warm-subtle: rgb(95 143 104 / 0.10);
+  --accent-warm-muted: rgb(95 143 104 / 0.18);
+  --accent-warm-subtle-a0: rgb(95 143 104 / 0);
+  --accent-cool: #4f8278;
+  --accent-cool-hover: #60998e;
+
+  --heartbeat: #bd5f58;
+  --heartbeat-bg: rgb(189 95 88 / 0.10);
+  --heartbeat-border: rgb(189 95 88 / 0.20);
+
+  --success: #3f8a5b;
+  --success-bg: #dcecdf;
+  --error: #c84545;
+  --error-bg: #f5dede;
+  --error-hover: #ad3737;
+  --error-subtle: rgb(200 69 69 / 0.08);
+  --warning: #a66a14;
+  --warning-bg: #f2e9c8;
+  --info: #487b86;
+  --info-bg: #dce9ea;
+
+  --button-primary-bg: #5f8f68;
+  --button-primary-bg-hover: #527e5a;
+  --button-primary-text: #ffffff;
+  --button-dark-bg: #17221b;
+  --button-dark-bg-hover: #2d3c32;
+  --button-secondary-bg: #dce8d6;
+  --button-secondary-bg-hover: #cfddc8;
+  --button-secondary-text: #17221b;
+
+  --fb-surface-peek: rgb(247 252 243 / 0.16);
+  --fb-surface-glass: rgb(247 252 243 / 0.58);
+  --fb-surface-pin: rgb(247 252 243 / 0.96);
+  --fb-surface-pin-a0: rgb(247 252 243 / 0);
+  --fb-surface-pin-72: rgb(247 252 243 / 0.72);
+  --fb-surface-pin-95: rgb(247 252 243 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.64);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.50);
+  --fb-shadow-strong: rgb(23 34 27 / 0.26);
+  --fb-shadow-soft: rgb(23 34 27 / 0.12);
+  --fb-shadow-preview: rgb(23 34 27 / 0.42);
+  --fb-core-shadow: rgb(23 34 27 / 0.22);
+  --fb-inset-shadow: rgb(23 34 27 / 0.08);
+  --fb-control-hover: rgb(23 34 27 / 0.06);
+  --fb-line-input: rgb(23 34 27 / 0.07);
+  --fb-line-thumb: rgb(23 34 27 / 0.12);
+  --fb-drag-handle: rgb(23 34 27 / 0.18);
+  --fb-scroll-thumb: rgb(149 160 145 / 0.52);
+
+  --line: rgb(23 34 27 / 0.10);
+  --line-strong: rgb(23 34 27 / 0.18);
+  --line-subtle: rgb(23 34 27 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(23 34 27 / 0.05);
+  --shadow-sm: 0 2px 8px rgb(23 34 27 / 0.08);
+  --shadow-md: 0 8px 24px rgb(23 34 27 / 0.12);
+  --shadow-lg: 0 16px 40px rgb(23 34 27 / 0.16);
+  --shadow-xl: 0 24px 48px rgb(23 34 27 / 0.20);
+
+  --focus-border: #17221b;
+  --toggle-off-bg: rgb(23 34 27 / 0.18);
+}
+
+.dark[data-color-theme="sage"] {
+  --ink: #dce8d7;
+  --ink-secondary: #c6d3c2;
+  --ink-muted: #94a28f;
+  --ink-subtle: #64715f;
+  --ink-faint: #475142;
+
+  --paper: #121912;
+  --paper-elevated: #1a241a;
+  --message-user-bg: #202c20;
+  --paper-inset: #0d120d;
+  --paper-a0: rgb(18 25 18 / 0);
+  --paper-elevated-a0: rgb(26 36 26 / 0);
+  --message-user-bg-a0: rgb(32 44 32 / 0);
+  --paper-inset-a0: rgb(13 18 13 / 0);
+  --hover-bg: rgb(127 177 132 / 0.13);
+
+  --accent: #7fb184;
+  --accent-warm: #7fb184;
+  --accent-warm-hover: #92c797;
+  --accent-warm-subtle: rgb(127 177 132 / 0.13);
+  --accent-warm-muted: rgb(127 177 132 / 0.22);
+  --accent-warm-subtle-a0: rgb(127 177 132 / 0);
+  --accent-cool: #6cb3a5;
+  --accent-cool-hover: #7fcabc;
+
+  --heartbeat: #d4706a;
+  --heartbeat-bg: rgb(212 112 106 / 0.13);
+  --heartbeat-border: rgb(212 112 106 / 0.23);
+
+  --success: #7fb184;
+  --success-bg: rgb(127 177 132 / 0.16);
+  --error: #ef6b66;
+  --error-bg: rgb(239 107 102 / 0.16);
+  --error-hover: #db5b55;
+  --error-subtle: rgb(239 107 102 / 0.13);
+  --warning: #d6a84c;
+  --warning-bg: rgb(214 168 76 / 0.16);
+  --info: #77aeb8;
+  --info-bg: rgb(119 174 184 / 0.16);
+
+  --button-primary-bg: #7fb184;
+  --button-primary-bg-hover: #6da073;
+  --button-primary-text: #0f150f;
+  --button-dark-bg: #3a4738;
+  --button-dark-bg-hover: #4a5a47;
+  --button-secondary-bg: #243024;
+  --button-secondary-bg-hover: #2d3a2d;
+  --button-secondary-text: #dce8d7;
+
+  --fb-surface-peek: rgb(18 25 18 / 0.24);
+  --fb-surface-glass: rgb(26 36 26 / 0.60);
+  --fb-surface-pin: rgb(26 36 26 / 0.96);
+  --fb-surface-pin-a0: rgb(26 36 26 / 0);
+  --fb-surface-pin-72: rgb(26 36 26 / 0.72);
+  --fb-surface-pin-95: rgb(26 36 26 / 0.95);
+  --fb-glass-border: rgb(255 255 255 / 0.16);
+  --fb-glass-border-soft: rgb(255 255 255 / 0.12);
+  --fb-shadow-strong: rgb(0 0 0 / 0.38);
+  --fb-shadow-soft: rgb(0 0 0 / 0.22);
+  --fb-shadow-preview: rgb(0 0 0 / 0.55);
+  --fb-core-shadow: rgb(0 0 0 / 0.32);
+  --fb-inset-shadow: rgb(0 0 0 / 0.16);
+  --fb-control-hover: rgb(255 255 255 / 0.08);
+  --fb-line-input: rgb(220 232 215 / 0.08);
+  --fb-line-thumb: rgb(220 232 215 / 0.16);
+  --fb-drag-handle: rgb(220 232 215 / 0.20);
+  --fb-scroll-thumb: rgb(148 162 143 / 0.56);
+
+  --line: rgb(220 232 215 / 0.10);
+  --line-strong: rgb(220 232 215 / 0.18);
+  --line-subtle: rgb(220 232 215 / 0.06);
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.12);
+  --shadow-sm: 0 2px 8px rgb(0 0 0 / 0.18);
+  --shadow-md: 0 8px 24px rgb(0 0 0 / 0.28);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.35);
+  --shadow-xl: 0 24px 48px rgb(0 0 0 / 0.42);
+
+  --focus-border: var(--accent);
+  --toggle-thumb: #dce8d7;
+  --toggle-off-bg: rgb(220 232 215 / 0.18);
+}
+
 /* Viewport-locked app: prevent document-level scrolling entirely.
    All scrolling is handled by inner containers (MessageList, panels, etc.). */
 html,
@@ -473,6 +644,21 @@ body {
     /* #333: 同色 0-alpha 端点，禁用 `transparent` 关键字（见 paper token 区注释） */
     radial-gradient(1200px 700px at 82% -10%, #2a2018 0%, rgb(42 32 24 / 0) 55%),
     radial-gradient(900px 600px at -10% 110%, #1a2420 0%, rgb(26 36 32 / 0) 55%),
+    var(--paper);
+}
+
+[data-color-theme="sage"]:not(.dark) body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #d5e8d0 0%, rgb(213 232 208 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #cfe4de 0%, rgb(207 228 222 / 0) 55%),
+    linear-gradient(120deg, rgb(255 255 255 / 0.48), rgb(255 255 255 / 0)),
+    var(--paper);
+}
+
+.dark[data-color-theme="sage"] body {
+  background:
+    radial-gradient(1200px 700px at 82% -10%, #213321 0%, rgb(33 51 33 / 0) 55%),
+    radial-gradient(900px 600px at -10% 110%, #17302d 0%, rgb(23 48 45 / 0) 55%),
     var(--paper);
 }
 

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useConfig } from './useConfig';
+import { normalizeColorTheme } from '@/config/types';
 
 /**
  * Applies the theme to the document based on config.theme ('light' | 'dark' | 'system').
@@ -10,6 +11,7 @@ import { useConfig } from './useConfig';
 export function useThemeEffect(): void {
   const { config } = useConfig();
   const theme = config.theme ?? 'system';
+  const colorTheme = normalizeColorTheme(config.colorTheme);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -37,4 +39,14 @@ export function useThemeEffect(): void {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, [theme]);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    if (colorTheme === 'warm') {
+      html.removeAttribute('data-color-theme');
+    } else {
+      html.setAttribute('data-color-theme', colorTheme);
+    }
+    try { localStorage.setItem('colorTheme', colorTheme); } catch { /* ignore */ }
+  }, [colorTheme]);
 }

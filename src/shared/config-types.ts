@@ -20,6 +20,13 @@ export type PermissionMode = 'auto' | 'plan' | 'fullAgency';
  */
 export type BackgroundAgentPermissionMode = 'inherit' | 'fullAgency';
 
+export const COLOR_THEMES = ['warm', 'sage'] as const;
+export type ColorTheme = typeof COLOR_THEMES[number];
+
+export function normalizeColorTheme(value: unknown): ColorTheme {
+  return value === 'sage' ? 'sage' : 'warm';
+}
+
 /**
  * Permission mode display configuration
  * Based on PRD 0.0.17 mode definitions
@@ -694,6 +701,7 @@ export interface AppConfig {
   backgroundAgentPermissionMode?: BackgroundAgentPermissionMode;
   // UI preferences
   theme: 'light' | 'dark' | 'system';
+  colorTheme?: ColorTheme;
   /** Product UI language. Existing pre-i18n configs missing this field migrate
    *  to `zh-CN`; new installs default to `system`. */
   uiLanguage?: UiLanguage;
@@ -1783,6 +1791,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultPermissionMode: 'auto',
   backgroundAgentPermissionMode: 'inherit', // background agents inherit granted perms; nothing wider (#264)
   theme: 'system',
+  colorTheme: 'warm',
   uiLanguage: 'system',
   minimizeToTray: true,   // 默认开启最小化到托盘
   forceWakeLock: false,   // 默认关闭常开阻睡（智能模式仍在跑，覆盖 AI 工作期间）

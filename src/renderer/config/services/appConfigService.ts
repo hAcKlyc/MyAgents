@@ -10,6 +10,7 @@ import {
     getSystemPresetProjectMetadataPatch,
     mergePresetModelWithCustomEntry,
     normalizeClaudeTranscriptCleanupPeriodDays,
+    normalizeColorTheme,
 } from '../types';
 import {
     isBrowserDevMode,
@@ -109,6 +110,7 @@ export function migrateImBotConfig(config: AppConfig): AppConfig {
 }
 
 function normalizeDeveloperSettings(config: AppConfig): AppConfig {
+    config.colorTheme = normalizeColorTheme(config.colorTheme);
     config.uiLanguage = normalizeUiLanguage(config.uiLanguage);
     config.claudeTranscriptCleanupPeriodDays = normalizeClaudeTranscriptCleanupPeriodDays(
         config.claudeTranscriptCleanupPeriodDays,
