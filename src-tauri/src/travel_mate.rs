@@ -192,6 +192,7 @@ struct RuntimeState {
     attention: TravelAttention,
     current_pet: PetIdentity,
     loaded: bool,
+    hidden_trip: Option<String>,
     presented_trip: Option<String>,
 }
 
@@ -202,6 +203,7 @@ impl Default for RuntimeState {
             attention: TravelAttention::default(),
             current_pet: PetIdentity::fallback(),
             loaded: false,
+            hidden_trip: None,
             presented_trip: None,
         }
     }
@@ -575,6 +577,13 @@ async fn commit_transition(
             return Err(error);
         }
     }
+    {
+        let mut state = runtime().lock().await;
+        state.hidden_trip = match &transition.snapshot.phase {
+            TravelPhase::Away { trip_id, .. } => Some(trip_id.clone()),
+            _ => None,
+        };
+    }
     if matches!(
         transition.snapshot.phase,
         TravelPhase::ReturnedPendingPostcard { .. }
@@ -604,8 +613,15 @@ async fn reconcile(app: &AppHandle) -> Result<TravelSnapshot, String> {
     }
 
     match &snapshot.phase {
-        TravelPhase::Away { .. } => {
-            apply_visibility_effect(app, TravelEffect::HidePet).await?;
+        TravelPhase::Away { trip_id, .. } => {
+            let should_hide = {
+                let state = runtime().lock().await;
+                state.hidden_trip.as_deref() != Some(trip_id)
+            };
+            if should_hide {
+                apply_visibility_effect(app, TravelEffect::HidePet).await?;
+                runtime().lock().await.hidden_trip = Some(trip_id.clone());
+            }
         }
         TravelPhase::ReturnedPendingPostcard { trip_id, .. } => {
             let should_present = {
@@ -634,7 +650,7 @@ pub async fn cmd_travel_mate_snapshot() -> Result<TravelSnapshot, String> {
 pub async fn cmd_travel_mate_set_enabled(
     app: AppHandle,
     enabled: bool,
-    pet: PetIdentity,
+    pet: Option<PetIdentity>,
 ) -> Result<TravelSnapshot, String> {
     ensure_loaded().await;
     let snapshot = runtime().lock().await.snapshot.clone();
@@ -643,7 +659,9 @@ pub async fn cmd_travel_mate_set_enabled(
         if !(config.dev_gate && config.enabled) {
             return Err("enable the desktop pet before turning on travel mode".into());
         }
-        let pet = pet.sanitized();
+        let pet = pet
+            .ok_or_else(|| "pet identity is required when enabling travel mode".to_string())?
+            .sanitized();
         let next = enable_travel(snapshot.clone(), now_ms(), random_seed());
         {
             runtime().lock().await.current_pet = pet;
