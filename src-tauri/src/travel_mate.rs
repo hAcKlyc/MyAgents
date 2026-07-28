@@ -120,6 +120,8 @@ pub enum TravelPhase {
 pub struct TravelSnapshot {
     pub version: u8,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub recall_pending: bool,
     pub phase: TravelPhase,
 }
 
@@ -128,6 +130,7 @@ impl TravelSnapshot {
         Self {
             version: SCHEMA_VERSION,
             enabled: false,
+            recall_pending: false,
             phase: TravelPhase::Disabled,
         }
     }
@@ -137,6 +140,7 @@ impl TravelSnapshot {
         Self {
             version: SCHEMA_VERSION,
             enabled: true,
+            recall_pending: false,
             phase: TravelPhase::HomeScheduled { departure_at_ms },
         }
     }
@@ -238,6 +242,10 @@ fn bounded_text(value: &str, max_chars: usize) -> String {
     value.trim().chars().take(max_chars).collect()
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn scale_seed(seed: u64, minimum: i64, maximum: i64) -> i64 {
     let span = (maximum - minimum) as u128;
     minimum + ((span * seed as u128) / u64::MAX as u128) as i64
@@ -250,6 +258,7 @@ fn enable_travel(snapshot: TravelSnapshot, now: i64, seed: u64) -> TravelSnapsho
     TravelSnapshot {
         version: SCHEMA_VERSION,
         enabled: true,
+        recall_pending: false,
         phase: TravelPhase::HomeScheduled {
             departure_at_ms: now + scale_seed(seed, DEPARTURE_MIN_MS, DEPARTURE_MAX_MS),
         },
@@ -257,19 +266,26 @@ fn enable_travel(snapshot: TravelSnapshot, now: i64, seed: u64) -> TravelSnapsho
 }
 
 fn disable_travel(snapshot: TravelSnapshot) -> TravelTransition {
-    if !snapshot.enabled && matches!(snapshot.phase, TravelPhase::Disabled) {
+    if !snapshot.enabled
+        && !snapshot.recall_pending
+        && matches!(snapshot.phase, TravelPhase::Disabled)
+    {
         return TravelTransition {
             snapshot,
             effects: Vec::new(),
         };
     }
-    let should_recall = matches!(snapshot.phase, TravelPhase::Away { .. });
+    let should_recall =
+        snapshot.recall_pending || matches!(snapshot.phase, TravelPhase::Away { .. });
     let mut effects = vec![TravelEffect::Persist];
     if should_recall {
         effects.push(TravelEffect::ShowPet);
     }
     TravelTransition {
-        snapshot: TravelSnapshot::disabled(),
+        snapshot: TravelSnapshot {
+            recall_pending: should_recall,
+            ..TravelSnapshot::disabled()
+        },
         effects,
     }
 }
@@ -402,6 +418,7 @@ fn tick(
                     snapshot: TravelSnapshot {
                         version: SCHEMA_VERSION,
                         enabled: true,
+                        recall_pending: false,
                         phase: TravelPhase::HomeScheduled {
                             departure_at_ms: now + scale_seed(seed, RETRY_MIN_MS, RETRY_MAX_MS),
                         },
@@ -414,6 +431,7 @@ fn tick(
                 snapshot: TravelSnapshot {
                     version: SCHEMA_VERSION,
                     enabled: true,
+                    recall_pending: false,
                     phase: TravelPhase::Away {
                         trip_id: format!("trip-{now}-{postcard_seed}"),
                         departed_at_ms: now,
@@ -437,6 +455,7 @@ fn tick(
                 snapshot: TravelSnapshot {
                     version: SCHEMA_VERSION,
                     enabled: true,
+                    recall_pending: false,
                     phase: TravelPhase::ReturnedPendingPostcard {
                         trip_id,
                         postcard,
@@ -528,7 +547,7 @@ async fn load_snapshot() -> TravelSnapshot {
         return TravelSnapshot::disabled();
     };
     match serde_json::from_str::<TravelSnapshot>(&contents) {
-        Ok(snapshot) if snapshot.version == SCHEMA_VERSION => snapshot,
+        Ok(snapshot) if valid_snapshot(&snapshot) => snapshot,
         Ok(_) | Err(_) => {
             let quarantine = path.with_extension(format!("json.corrupt.{}", now_ms()));
             if let Err(error) = tokio::fs::rename(&path, &quarantine).await {
@@ -554,10 +573,25 @@ fn should_suppress_snapshot(contents: &str) -> bool {
     serde_json::from_str::<TravelSnapshot>(contents)
         .ok()
         .is_some_and(|snapshot| {
-            snapshot.version == SCHEMA_VERSION
-                && snapshot.enabled
-                && matches!(snapshot.phase, TravelPhase::Away { .. })
+            valid_snapshot(&snapshot) && matches!(snapshot.phase, TravelPhase::Away { .. })
         })
+}
+
+fn valid_snapshot(snapshot: &TravelSnapshot) -> bool {
+    if snapshot.version != SCHEMA_VERSION {
+        return false;
+    }
+    match snapshot.phase {
+        TravelPhase::Disabled => !snapshot.enabled,
+        _ => snapshot.enabled && !snapshot.recall_pending,
+    }
+}
+
+fn hidden_trip_from_snapshot(snapshot: &TravelSnapshot) -> Option<String> {
+    match &snapshot.phase {
+        TravelPhase::Away { trip_id, .. } => Some(trip_id.clone()),
+        _ => None,
+    }
 }
 
 async fn ensure_loaded() {
@@ -570,6 +604,7 @@ async fn ensure_loaded() {
     let snapshot = load_snapshot().await;
     let mut state = runtime().lock().await;
     if !state.loaded {
+        state.hidden_trip = hidden_trip_from_snapshot(&snapshot);
         state.snapshot = snapshot;
         state.loaded = true;
     }
@@ -618,6 +653,7 @@ fn hide_failure_retry(now: i64, seed: u64) -> TravelSnapshot {
     TravelSnapshot {
         version: SCHEMA_VERSION,
         enabled: true,
+        recall_pending: false,
         phase: TravelPhase::HomeScheduled {
             departure_at_ms: now + scale_seed(seed, RETRY_MIN_MS, RETRY_MAX_MS),
         },
@@ -663,24 +699,33 @@ async fn commit_transition(
             return Err(error);
         }
     }
+    let mut committed_snapshot = transition.snapshot.clone();
+    if transition.snapshot.recall_pending {
+        committed_snapshot.recall_pending = false;
+        persist_snapshot(&committed_snapshot).await?;
+        {
+            let mut state = runtime().lock().await;
+            state.snapshot = committed_snapshot.clone();
+        }
+        emit_snapshot(app, &committed_snapshot).await;
+    }
     {
         let mut state = runtime().lock().await;
-        state.hidden_trip = match &transition.snapshot.phase {
+        state.hidden_trip = match &committed_snapshot.phase {
             TravelPhase::Away { trip_id, .. } => Some(trip_id.clone()),
             _ => None,
         };
     }
     if matches!(
-        transition.snapshot.phase,
+        committed_snapshot.phase,
         TravelPhase::ReturnedPendingPostcard { .. }
     ) {
         let mut state = runtime().lock().await;
-        if let TravelPhase::ReturnedPendingPostcard { ref trip_id, .. } = transition.snapshot.phase
-        {
+        if let TravelPhase::ReturnedPendingPostcard { ref trip_id, .. } = committed_snapshot.phase {
             state.presented_trip = Some(trip_id.clone());
         }
     }
-    Ok(transition.snapshot)
+    Ok(committed_snapshot)
 }
 
 async fn reconcile_inner(app: &AppHandle) -> Result<TravelSnapshot, String> {
@@ -712,6 +757,20 @@ async fn reconcile_inner(app: &AppHandle) -> Result<TravelSnapshot, String> {
     let transition = tick(snapshot.clone(), now_ms(), can_depart, random_seed(), pet);
     if !transition.effects.is_empty() {
         return commit_transition(app, transition).await;
+    }
+
+    if snapshot.recall_pending {
+        apply_visibility_effect(app, TravelEffect::ShowPet).await?;
+        let mut recalled = snapshot.clone();
+        recalled.recall_pending = false;
+        persist_snapshot(&recalled).await?;
+        {
+            let mut state = runtime().lock().await;
+            state.snapshot = recalled.clone();
+            state.hidden_trip = None;
+        }
+        emit_snapshot(app, &recalled).await;
+        return Ok(recalled);
     }
 
     match &snapshot.phase {
@@ -764,8 +823,11 @@ pub async fn cmd_travel_mate_set_enabled(
 ) -> Result<TravelSnapshot, String> {
     let _operation = operation_gate().lock().await;
     ensure_loaded().await;
-    let snapshot = runtime().lock().await.snapshot.clone();
+    let mut snapshot = runtime().lock().await.snapshot.clone();
     if enabled {
+        if snapshot.recall_pending {
+            snapshot = reconcile_inner(&app).await?;
+        }
         let config = crate::floating_ball::load_fb_config();
         if !(config.dev_gate && config.enabled) {
             return Err("enable the desktop pet before turning on travel mode".into());
@@ -821,6 +883,7 @@ pub async fn cmd_travel_mate_dismiss_postcard(app: AppHandle) -> Result<TravelSn
     let next = TravelSnapshot {
         version: SCHEMA_VERSION,
         enabled: true,
+        recall_pending: false,
         phase: TravelPhase::HomeScheduled {
             departure_at_ms: now_ms()
                 + scale_seed(random_seed(), DEPARTURE_MIN_MS, DEPARTURE_MAX_MS),
@@ -885,6 +948,7 @@ pub async fn cmd_travel_mate_demo_return(app: AppHandle) -> Result<TravelSnapsho
     let forced = TravelSnapshot {
         version: SCHEMA_VERSION,
         enabled: true,
+        recall_pending: false,
         phase: TravelPhase::Away {
             trip_id,
             departed_at_ms,
@@ -981,7 +1045,9 @@ mod tests {
             disabled.effects,
             vec![TravelEffect::Persist, TravelEffect::ShowPet]
         );
-        assert_eq!(disabled.snapshot, TravelSnapshot::disabled());
+        assert!(matches!(disabled.snapshot.phase, TravelPhase::Disabled));
+        assert!(!disabled.snapshot.enabled);
+        assert!(disabled.snapshot.recall_pending);
     }
 
     #[test]
@@ -1058,6 +1124,38 @@ mod tests {
     }
 
     #[test]
+    fn loaded_away_snapshot_is_already_marked_hidden() {
+        let away = tick(TravelSnapshot::scheduled(1_000), 1_000, true, 42, pet()).snapshot;
+        let expected_trip_id = match &away.phase {
+            TravelPhase::Away { trip_id, .. } => trip_id.clone(),
+            _ => panic!("expected away snapshot"),
+        };
+
+        assert_eq!(hidden_trip_from_snapshot(&away), Some(expected_trip_id));
+        assert_eq!(hidden_trip_from_snapshot(&TravelSnapshot::disabled()), None);
+    }
+
+    #[test]
+    fn recall_pending_is_durable_and_restricted_to_disabled_state() {
+        let pending = TravelSnapshot {
+            recall_pending: true,
+            ..TravelSnapshot::disabled()
+        };
+        let json = serde_json::to_string(&pending).unwrap();
+        let restored: TravelSnapshot = serde_json::from_str(&json).unwrap();
+        assert!(restored.recall_pending);
+        assert!(valid_snapshot(&restored));
+        assert_eq!(
+            disable_travel(restored.clone()).effects,
+            vec![TravelEffect::Persist, TravelEffect::ShowPet]
+        );
+
+        let mut invalid = tick(TravelSnapshot::scheduled(1_000), 1_000, true, 42, pet()).snapshot;
+        invalid.recall_pending = true;
+        assert!(!valid_snapshot(&invalid));
+    }
+
+    #[test]
     fn failed_hide_rolls_back_to_a_short_retry_schedule() {
         let now = 8_000;
         let earliest = hide_failure_retry(now, 0);
@@ -1108,7 +1206,7 @@ mod tests {
         let first = operation_gate().lock().await;
         let entered = Arc::new(AtomicBool::new(false));
         let entered_in_task = entered.clone();
-        let second = tokio::spawn(async move {
+        let second = tauri::async_runtime::spawn(async move {
             let _guard = operation_gate().lock().await;
             entered_in_task.store(true, Ordering::SeqCst);
         });

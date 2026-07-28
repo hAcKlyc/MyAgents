@@ -33,8 +33,12 @@ write travel state.
   synced so the visibility effect cannot outrun a crash-durable state commit.
 - State-changing commands and timer reconciliation share one operation gate.
   Hide failure durably rolls the pet back to a 5–20 minute home retry.
+- Disabling during a trip persists an internal recall-pending marker before
+  showing the pet, then clears it durably. A temporary show failure is retried
+  by reconciliation, including after restart.
 - Startup immediately reconciles overdue deadlines. An away snapshot suppresses
-  the normal floating-ball startup path, preventing a restart flash.
+  the normal floating-ball startup path, preventing a restart flash; loading
+  that snapshot records the already-hidden trip instead of hiding it twice.
 - The returned state remains persisted until the user dismisses its postcard,
   so restart and sleep/wake cannot duplicate or lose the delivery.
 

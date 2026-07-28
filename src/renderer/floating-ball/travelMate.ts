@@ -45,6 +45,7 @@ export type TravelMatePhase =
 export interface TravelMateSnapshot {
     version: 1;
     enabled: boolean;
+    recallPending?: boolean;
     phase: TravelMatePhase;
 }
 
