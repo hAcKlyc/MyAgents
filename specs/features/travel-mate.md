@@ -25,8 +25,14 @@ write travel state.
 - A trip lasts 20–120 minutes.
 - Pending approval/question/plan state, blocked work, or an error postpones a
   due departure by 5–20 minutes.
+- Attention starts unknown after launch. An overdue departure waits until the
+  renderer has reported attention and the native desktop-pet window is
+  confirmed enabled and visible.
 - `~/.myagents/travel_mate.json` is written under the shared file-lock helper
-  before the pet window is hidden or shown.
+  before the pet window is hidden or shown. The file and parent directory are
+  synced so the visibility effect cannot outrun a crash-durable state commit.
+- State-changing commands and timer reconciliation share one operation gate.
+  Hide failure durably rolls the pet back to a 5–20 minute home retry.
 - Startup immediately reconciles overdue deadlines. An away snapshot suppresses
   the normal floating-ball startup path, preventing a restart flash.
 - The returned state remains persisted until the user dismisses its postcard,
@@ -49,7 +55,8 @@ tool payloads are not accepted by the travel command surface.
 ## Renderer integration
 
 - Desktop Pet settings exposes Travel Mode only while the desktop pet is
-  enabled.
+  enabled. Home status is intentionally natural-language-only and does not
+  reveal an exact departure deadline.
 - `BallWindow` reports the current pending/blocked/error guard and selected pet
   identity.
 - `CompanionWindow` listens for `travel-mate://state-changed` and owns the
@@ -62,6 +69,8 @@ tool payloads are not accepted by the travel command surface.
 ## Verification
 
 The Rust tests cover timing bounds, attention postponement, persist-before-hide
-ordering, recall-on-disable, idempotent return, privacy fields, and the shared
+ordering, serialized operations, hide rollback, startup schema validation,
+recall-on-disable, idempotent return, strict privacy DTOs, and the shared
 `travel-mate-v1.json` protocol vector. Renderer tests cover species inference,
-allowlisted command payloads, attention mapping, and postcard interaction.
+allowlisted command payloads, attention mapping, postcard interaction, and
+modal keyboard focus.

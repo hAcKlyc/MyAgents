@@ -425,17 +425,28 @@ export default function CompanionWindow() {
     }, [applyMode]);
 
     useEffect(() => {
-        let cancelled = false;
-        void getTravelMateSnapshot()
-            .then((snapshot) => {
-                if (!cancelled) applyTravelSnapshot(snapshot);
-            })
-            .catch((err) => {
-                console.warn('[travel-mate] load snapshot failed:', err);
-            });
-        return () => {
-            cancelled = true;
-        };
+        const ac = new AbortController();
+        let eventSequence = 0;
+        void (async () => {
+            await listenWithCleanup<TravelMateSnapshot>(
+                'travel-mate://state-changed',
+                (event) => {
+                    eventSequence += 1;
+                    applyTravelSnapshot(event.payload);
+                },
+                ac.signal,
+            );
+            const sequenceAtRead = eventSequence;
+            const snapshot = await getTravelMateSnapshot();
+            if (!ac.signal.aborted && sequenceAtRead === eventSequence) {
+                applyTravelSnapshot(snapshot);
+            }
+        })().catch((err) => {
+            if (!ac.signal.aborted) {
+                console.warn('[travel-mate] bootstrap failed:', err);
+            }
+        });
+        return () => ac.abort();
     }, [applyTravelSnapshot]);
 
     const beginPinRequest = useCallback(() => ({
@@ -655,11 +666,6 @@ export default function CompanionWindow() {
             },
             ac.signal,
         );
-        void listenWithCleanup<TravelMateSnapshot>(
-            'travel-mate://state-changed',
-            (e) => applyTravelSnapshot(e.payload),
-            ac.signal,
-        );
         // 原生 hover 信号（修 hover 失灵）：app 非激活时 WKWebView 收不到
         // mouseMoved，DOM mouseenter/leave 不可靠——NSTrackingArea 的进出
         // 事件经 Rust 转发到这里，驱动 peek 的 grace 计时。
@@ -706,7 +712,7 @@ export default function CompanionWindow() {
             () => undefined,
         );
         return () => ac.abort();
-    }, [applyMode, applySummonCtx, applyTravelSnapshot, clearNativeFocusLostTimer, scheduleHideIfPeek, schedulePinnedInputFocus, summonPinned, hideSelf, suspend, resume]);
+    }, [applyMode, applySummonCtx, clearNativeFocusLostTimer, scheduleHideIfPeek, schedulePinnedInputFocus, summonPinned, hideSelf, suspend, resume]);
 
     // ── peek → pin 升格（窗内有效行为 = 激活 + 执行该行为，0612 用户裁决） ──
     // 点击带处境抓取（点击 = "我要说话"）；滚轮只升格不抓处境（滚轮 = "我要

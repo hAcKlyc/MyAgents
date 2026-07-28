@@ -34,7 +34,7 @@ pub enum PetSpecies {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PetIdentity {
     pub id: String,
     pub display_name: String,
@@ -173,7 +173,7 @@ struct TravelTransition {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TravelAttention {
     pub has_pending_interaction: bool,
     pub is_blocked: bool,
@@ -192,6 +192,7 @@ struct RuntimeState {
     attention: TravelAttention,
     current_pet: PetIdentity,
     loaded: bool,
+    attention_ready: bool,
     hidden_trip: Option<String>,
     presented_trip: Option<String>,
 }
@@ -203,6 +204,7 @@ impl Default for RuntimeState {
             attention: TravelAttention::default(),
             current_pet: PetIdentity::fallback(),
             loaded: false,
+            attention_ready: false,
             hidden_trip: None,
             presented_trip: None,
         }
@@ -210,9 +212,14 @@ impl Default for RuntimeState {
 }
 
 static RUNTIME: OnceLock<Mutex<RuntimeState>> = OnceLock::new();
+static OPERATION: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn runtime() -> &'static Mutex<RuntimeState> {
     RUNTIME.get_or_init(|| Mutex::new(RuntimeState::default()))
+}
+
+fn operation_gate() -> &'static Mutex<()> {
+    OPERATION.get_or_init(|| Mutex::new(()))
 }
 
 fn now_ms() -> i64 {
@@ -278,15 +285,15 @@ fn create_postcard(trip_id: &str, seed: u64, pet: &PetIdentity) -> TravelPostcar
     }
     const PLACES: [Place; 6] = [
         Place {
-            name: "京都小巷",
-            arrival: "清晨的石板路还带着一点雨光。",
+            name: "西安城墙",
+            arrival: "清晨的城砖还带着一点雨光。",
             encounter: [
-                "我追着屋檐下的风铃走了半条街。",
-                "我在河边认识了一只爱散步的小狗。",
-                "我在旧书店门口看了很久的云。",
+                "我追着檐角的风铃走了半条老街。",
+                "我在城墙根认识了一只爱散步的小狗。",
+                "我在书院门口看了很久的云。",
             ],
-            ending: "店主送了我一枚红叶书签。",
-            symbol: "maple",
+            ending: "店主送了我一枚银杏书签。",
+            symbol: "ginkgo",
             palette: ["#C8644B", "#F2D6B3", "#284B3F"],
         },
         Place {
@@ -464,13 +471,36 @@ fn write_snapshot_atomic(path: &Path, snapshot: &TravelSnapshot) -> Result<(), S
         .map_err(|error| format!("create travel state directory: {error}"))?;
     let bytes = serde_json::to_vec_pretty(snapshot)
         .map_err(|error| format!("serialize travel state: {error}"))?;
-    let temp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    let mut file =
-        fs::File::create(&temp).map_err(|error| format!("create travel state temp: {error}"))?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|error| format!("write travel state temp: {error}"))?;
-    fs::rename(&temp, path).map_err(|error| format!("commit travel state: {error}"))
+    let temp = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    let result = (|| {
+        let mut file = fs::File::create(&temp)
+            .map_err(|error| format!("create travel state temp: {error}"))?;
+        file.write_all(&bytes)
+            .and_then(|_| file.sync_all())
+            .map_err(|error| format!("write travel state temp: {error}"))?;
+        fs::rename(&temp, path).map_err(|error| format!("commit travel state: {error}"))?;
+        sync_parent_directory(parent)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> Result<(), String> {
+    fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("sync travel state directory: {error}"))
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 async fn persist_snapshot(snapshot: &TravelSnapshot) -> Result<(), String> {
@@ -517,9 +547,16 @@ pub fn should_suppress_pet_on_startup() -> bool {
     };
     fs::read_to_string(path)
         .ok()
-        .and_then(|contents| serde_json::from_str::<TravelSnapshot>(&contents).ok())
+        .is_some_and(|contents| should_suppress_snapshot(&contents))
+}
+
+fn should_suppress_snapshot(contents: &str) -> bool {
+    serde_json::from_str::<TravelSnapshot>(contents)
+        .ok()
         .is_some_and(|snapshot| {
-            snapshot.enabled && matches!(snapshot.phase, TravelPhase::Away { .. })
+            snapshot.version == SCHEMA_VERSION
+                && snapshot.enabled
+                && matches!(snapshot.phase, TravelPhase::Away { .. })
         })
 }
 
@@ -547,12 +584,58 @@ async fn emit_snapshot(app: &AppHandle, snapshot: &TravelSnapshot) {
 async fn apply_visibility_effect(app: &AppHandle, effect: TravelEffect) -> Result<(), String> {
     match effect {
         TravelEffect::Persist => Ok(()),
-        TravelEffect::HidePet => crate::floating_ball::cmd_fb_disable(app.clone()).await,
-        TravelEffect::ShowPet => crate::floating_ball::cmd_fb_enable(app.clone()).await,
+        TravelEffect::HidePet => {
+            let before = crate::floating_ball::cmd_fb_capabilities(app.clone()).await?;
+            if !before.supported || !before.active {
+                return Err("desktop pet window is unavailable for travel departure".into());
+            }
+            crate::floating_ball::cmd_fb_disable(app.clone()).await?;
+            let after = crate::floating_ball::cmd_fb_capabilities(app.clone()).await?;
+            if after.active {
+                return Err("desktop pet window remained visible after travel departure".into());
+            }
+            Ok(())
+        }
+        TravelEffect::ShowPet => {
+            let config = crate::floating_ball::load_fb_config();
+            if !(config.dev_gate && config.enabled) {
+                return Err("desktop pet is disabled; travel return will retry later".into());
+            }
+            crate::floating_ball::cmd_fb_enable(app.clone()).await?;
+            let after = crate::floating_ball::cmd_fb_capabilities(app.clone()).await?;
+            if !after.supported || !after.active {
+                return Err("desktop pet window did not become visible after travel return".into());
+            }
+            Ok(())
+        }
         TravelEffect::PresentPostcard => {
             crate::floating_ball::cmd_fb_show_companion(app.clone(), "pin".into()).await
         }
     }
+}
+
+fn hide_failure_retry(now: i64, seed: u64) -> TravelSnapshot {
+    TravelSnapshot {
+        version: SCHEMA_VERSION,
+        enabled: true,
+        phase: TravelPhase::HomeScheduled {
+            departure_at_ms: now + scale_seed(seed, RETRY_MIN_MS, RETRY_MAX_MS),
+        },
+    }
+}
+
+async fn compensate_hide_failure(app: &AppHandle, original_error: String) -> Result<(), String> {
+    let retry = hide_failure_retry(now_ms(), random_seed());
+    persist_snapshot(&retry).await.map_err(|rollback_error| {
+        format!("{original_error}; failed to persist departure rollback: {rollback_error}")
+    })?;
+    {
+        let mut state = runtime().lock().await;
+        state.snapshot = retry.clone();
+        state.hidden_trip = None;
+    }
+    emit_snapshot(app, &retry).await;
+    Err(original_error)
 }
 
 async fn commit_transition(
@@ -574,6 +657,9 @@ async fn commit_transition(
     for effect in transition.effects.iter().copied().skip(1) {
         if let Err(error) = apply_visibility_effect(app, effect).await {
             crate::ulog_warn!("[travel-mate] visibility effect {effect:?} failed: {error}");
+            if effect == TravelEffect::HidePet {
+                compensate_hide_failure(app, error.clone()).await?;
+            }
             return Err(error);
         }
     }
@@ -597,16 +683,32 @@ async fn commit_transition(
     Ok(transition.snapshot)
 }
 
-async fn reconcile(app: &AppHandle) -> Result<TravelSnapshot, String> {
+async fn reconcile_inner(app: &AppHandle) -> Result<TravelSnapshot, String> {
     ensure_loaded().await;
-    let (snapshot, can_depart, pet) = {
+    let (snapshot, attention_ready, can_depart, pet) = {
         let state = runtime().lock().await;
         (
             state.snapshot.clone(),
+            state.attention_ready,
             state.attention.can_depart(),
             state.current_pet.clone(),
         )
     };
+    let departure_due = matches!(
+        snapshot.phase,
+        TravelPhase::HomeScheduled { departure_at_ms } if now_ms() >= departure_at_ms
+    );
+    if departure_due {
+        let config = crate::floating_ball::load_fb_config();
+        let capabilities = crate::floating_ball::cmd_fb_capabilities(app.clone()).await?;
+        if !attention_ready
+            || !(config.dev_gate && config.enabled)
+            || !capabilities.supported
+            || !capabilities.active
+        {
+            return Ok(snapshot);
+        }
+    }
     let transition = tick(snapshot.clone(), now_ms(), can_depart, random_seed(), pet);
     if !transition.effects.is_empty() {
         return commit_transition(app, transition).await;
@@ -619,7 +721,9 @@ async fn reconcile(app: &AppHandle) -> Result<TravelSnapshot, String> {
                 state.hidden_trip.as_deref() != Some(trip_id)
             };
             if should_hide {
-                apply_visibility_effect(app, TravelEffect::HidePet).await?;
+                if let Err(error) = apply_visibility_effect(app, TravelEffect::HidePet).await {
+                    compensate_hide_failure(app, error).await?;
+                }
                 runtime().lock().await.hidden_trip = Some(trip_id.clone());
             }
         }
@@ -640,8 +744,14 @@ async fn reconcile(app: &AppHandle) -> Result<TravelSnapshot, String> {
     Ok(snapshot)
 }
 
+async fn reconcile(app: &AppHandle) -> Result<TravelSnapshot, String> {
+    let _operation = operation_gate().lock().await;
+    reconcile_inner(app).await
+}
+
 #[tauri::command]
 pub async fn cmd_travel_mate_snapshot() -> Result<TravelSnapshot, String> {
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     Ok(runtime().lock().await.snapshot.clone())
 }
@@ -652,6 +762,7 @@ pub async fn cmd_travel_mate_set_enabled(
     enabled: bool,
     pet: Option<PetIdentity>,
 ) -> Result<TravelSnapshot, String> {
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     let snapshot = runtime().lock().await.snapshot.clone();
     if enabled {
@@ -688,17 +799,20 @@ pub async fn cmd_travel_mate_update_attention(
     attention: TravelAttention,
     pet: PetIdentity,
 ) -> Result<TravelSnapshot, String> {
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     {
         let mut state = runtime().lock().await;
         state.attention = attention;
+        state.attention_ready = true;
         state.current_pet = pet.sanitized();
     }
-    reconcile(&app).await
+    reconcile_inner(&app).await
 }
 
 #[tauri::command]
 pub async fn cmd_travel_mate_dismiss_postcard(app: AppHandle) -> Result<TravelSnapshot, String> {
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     let snapshot = runtime().lock().await.snapshot.clone();
     if !matches!(snapshot.phase, TravelPhase::ReturnedPendingPostcard { .. }) {
@@ -734,6 +848,7 @@ fn require_debug_demo() -> Result<(), String> {
 #[tauri::command]
 pub async fn cmd_travel_mate_demo_depart(app: AppHandle) -> Result<TravelSnapshot, String> {
     require_debug_demo()?;
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     let (snapshot, pet) = {
         let state = runtime().lock().await;
@@ -754,6 +869,7 @@ pub async fn cmd_travel_mate_demo_depart(app: AppHandle) -> Result<TravelSnapsho
 #[tauri::command]
 pub async fn cmd_travel_mate_demo_return(app: AppHandle) -> Result<TravelSnapshot, String> {
     require_debug_demo()?;
+    let _operation = operation_gate().lock().await;
     ensure_loaded().await;
     let snapshot = runtime().lock().await.snapshot.clone();
     let TravelPhase::Away {
@@ -783,7 +899,6 @@ pub async fn cmd_travel_mate_demo_return(app: AppHandle) -> Result<TravelSnapsho
 pub fn setup_on_startup(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        ensure_loaded().await;
         loop {
             if let Err(error) = reconcile(&app).await {
                 crate::ulog_warn!("[travel-mate] reconcile failed: {error}");
@@ -919,5 +1034,89 @@ mod tests {
         assert_eq!(json["phase"]["pet"]["displayName"], "Mino");
         assert!(!json.to_string().contains("workspace"));
         assert!(!json.to_string().contains("prompt"));
+    }
+
+    #[test]
+    fn command_metadata_rejects_unknown_fields() {
+        let pet = r#"{"id":"mino","displayName":"Mino","species":"cat","workspace":"/tmp"}"#;
+        let attention = r#"{"hasPendingInteraction":false,"isBlocked":false,"hasError":false,"prompt":"secret"}"#;
+
+        assert!(serde_json::from_str::<PetIdentity>(pet).is_err());
+        assert!(serde_json::from_str::<TravelAttention>(attention).is_err());
+    }
+
+    #[test]
+    fn startup_suppression_accepts_only_the_current_away_schema() {
+        let away = tick(TravelSnapshot::scheduled(1_000), 1_000, true, 42, pet()).snapshot;
+        let current = serde_json::to_string(&away).unwrap();
+        assert!(should_suppress_snapshot(&current));
+
+        let mut future = serde_json::to_value(away).unwrap();
+        future["version"] = serde_json::json!(SCHEMA_VERSION + 1);
+        assert!(!should_suppress_snapshot(&future.to_string()));
+        assert!(!should_suppress_snapshot("{not json"));
+    }
+
+    #[test]
+    fn failed_hide_rolls_back_to_a_short_retry_schedule() {
+        let now = 8_000;
+        let earliest = hide_failure_retry(now, 0);
+        let latest = hide_failure_retry(now, u64::MAX);
+
+        assert_eq!(earliest.departure_at_ms(), Some(now + RETRY_MIN_MS));
+        assert_eq!(latest.departure_at_ms(), Some(now + RETRY_MAX_MS));
+    }
+
+    #[test]
+    fn atomic_store_replaces_and_syncs_a_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(STORE_FILE);
+        let expected = TravelSnapshot::scheduled(42);
+
+        write_snapshot_atomic(&path, &expected).unwrap();
+
+        let actual: TravelSnapshot =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn failed_atomic_rename_removes_its_temporary_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("occupied");
+        fs::create_dir(&target).unwrap();
+
+        assert!(write_snapshot_atomic(&target, &TravelSnapshot::scheduled(42)).is_err());
+        let leftovers = fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("occupied.json.tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[tokio::test]
+    async fn operation_gate_serializes_mutations() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let first = operation_gate().lock().await;
+        let entered = Arc::new(AtomicBool::new(false));
+        let entered_in_task = entered.clone();
+        let second = tokio::spawn(async move {
+            let _guard = operation_gate().lock().await;
+            entered_in_task.store(true, Ordering::SeqCst);
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!entered.load(Ordering::SeqCst));
+        drop(first);
+        second.await.unwrap();
+        assert!(entered.load(Ordering::SeqCst));
     }
 }

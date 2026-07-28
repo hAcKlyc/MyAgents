@@ -1797,7 +1797,7 @@
     "travelMate": {
       "title": "旅行模式",
       "description": "让桌宠偶尔独自出门。它会在空闲时离开 20–120 分钟，回来后带一张离线生成的旅行明信片；有待确认事项或错误时不会出发。",
-      "nextDeparture": "预计下次出发：{{time}}",
+      "home": "在家",
       "away": "正在旅行中",
       "postcardWaiting": "已归来，有一张明信片等你",
       "enabledToast": "已开启旅行模式",

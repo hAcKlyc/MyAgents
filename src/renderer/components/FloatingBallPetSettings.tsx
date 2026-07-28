@@ -651,9 +651,7 @@ export default function FloatingBallPetSettings() {
                                 </p>
                                 {travelSnapshot?.phase.kind === 'homeScheduled' && (
                                     <p className="mt-2 text-xs text-[var(--ink-subtle)]">
-                                        {t('floatingBallPet.travelMate.nextDeparture', {
-                                            time: new Date(travelSnapshot.phase.departureAtMs).toLocaleString(),
-                                        })}
+                                        {t('floatingBallPet.travelMate.home')}
                                     </p>
                                 )}
                                 {travelSnapshot?.phase.kind === 'away' && (

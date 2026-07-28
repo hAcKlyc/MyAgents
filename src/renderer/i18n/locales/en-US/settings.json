@@ -1797,7 +1797,7 @@
     "travelMate": {
       "title": "Travel Mode",
       "description": "Let your pet take an occasional solo trip. It leaves for 20–120 minutes only when nothing needs your attention, then returns with an offline-generated postcard.",
-      "nextDeparture": "Next departure: {{time}}",
+      "home": "Home",
       "away": "Currently travelling",
       "postcardWaiting": "Back home with a postcard for you",
       "enabledToast": "Travel Mode enabled",
