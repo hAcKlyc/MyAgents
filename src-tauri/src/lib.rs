@@ -49,6 +49,7 @@ pub mod task_execution;
 pub mod task_scheduler;
 pub mod terminal;
 pub mod thought;
+pub mod travel_mate;
 mod tray;
 mod updater;
 pub mod utils;
@@ -527,6 +528,12 @@ pub fn run() {
             floating_ball::cmd_fb_relay,
             floating_ball::cmd_fb_open_main_with_session,
             floating_ball::cmd_fb_open_desktop_pet_settings,
+            travel_mate::cmd_travel_mate_snapshot,
+            travel_mate::cmd_travel_mate_set_enabled,
+            travel_mate::cmd_travel_mate_update_attention,
+            travel_mate::cmd_travel_mate_dismiss_postcard,
+            travel_mate::cmd_travel_mate_demo_depart,
+            travel_mate::cmd_travel_mate_demo_return,
             // OS notification + click-to-foreground deep-link (v0.2.14)
             notification::cmd_show_notification,
             notification::cmd_consume_notification_click,
@@ -1217,6 +1224,7 @@ pub fn run() {
             // Floating ball (PRD 0.2.35): bring the ball up at launch when the
             // developer gate + ball toggle are both enabled in config.
             floating_ball::setup_on_startup(app.handle());
+            travel_mate::setup_on_startup(app.handle());
 
             // Start Global Sidecar health monitor
             // Periodically checks if the Global Sidecar is alive and auto-restarts it

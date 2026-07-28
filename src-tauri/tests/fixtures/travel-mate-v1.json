@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "departureCases": [
+    {
+      "name": "minimum schedule and seed",
+      "now": 1000,
+      "randomValues": [0, 0],
+      "expectedTripId": "trip-1000-0",
+      "expectedPostcardSeed": 0,
+      "expectedReturnAtMs": 1201000,
+      "expectedEffects": ["persist", "hidePet"]
+    },
+    {
+      "name": "maximum schedule and bounded seed",
+      "now": 2000,
+      "randomValues": [1, 1],
+      "expectedTripId": "trip-2000-999999",
+      "expectedPostcardSeed": 999999,
+      "expectedReturnAtMs": 7202000,
+      "expectedEffects": ["persist", "hidePet"]
+    }
+  ]
+}

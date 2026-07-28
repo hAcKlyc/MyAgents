@@ -40,6 +40,13 @@ import { createFocusConvergence } from './focusConvergence';
 import { useFloatingSession, type FbAttachment, type FbMsg } from './useFloatingSession';
 import { useFloatingComposerKeydown } from './useFloatingComposerKeydown';
 import { describeNativeFloatingBallError } from './nativeFloatingBall';
+import { TravelMatePostcard } from './TravelMatePostcard';
+import {
+    dismissTravelMatePostcard,
+    getTravelMateSnapshot,
+    type TravelMateSnapshot,
+    type TravelMatePostcard as TravelMatePostcardData,
+} from './travelMate';
 
 import './fb.css';
 
@@ -289,6 +296,7 @@ export default function CompanionWindow() {
     const [axNeeded, setAxNeeded] = useState(false);
     const [providerForCapability, setProviderForCapability] = useState<Provider | null>(null);
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [travelPostcard, setTravelPostcard] = useState<TravelMatePostcardData | null>(null);
 
     const convoRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -406,6 +414,29 @@ export default function CompanionWindow() {
         },
         [clearNativeFocusLostTimer, clearPinnedInputFocusRetries, inputFocusConvergence, markRead],
     );
+
+    const applyTravelSnapshot = useCallback((snapshot: TravelMateSnapshot) => {
+        if (snapshot.phase.kind === 'returnedPendingPostcard') {
+            setTravelPostcard(snapshot.phase.postcard);
+            applyMode('pin');
+        } else {
+            setTravelPostcard(null);
+        }
+    }, [applyMode]);
+
+    useEffect(() => {
+        let cancelled = false;
+        void getTravelMateSnapshot()
+            .then((snapshot) => {
+                if (!cancelled) applyTravelSnapshot(snapshot);
+            })
+            .catch((err) => {
+                console.warn('[travel-mate] load snapshot failed:', err);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [applyTravelSnapshot]);
 
     const beginPinRequest = useCallback(() => ({
         seq: ++pinRequestSeqRef.current,
@@ -624,6 +655,11 @@ export default function CompanionWindow() {
             },
             ac.signal,
         );
+        void listenWithCleanup<TravelMateSnapshot>(
+            'travel-mate://state-changed',
+            (e) => applyTravelSnapshot(e.payload),
+            ac.signal,
+        );
         // 原生 hover 信号（修 hover 失灵）：app 非激活时 WKWebView 收不到
         // mouseMoved，DOM mouseenter/leave 不可靠——NSTrackingArea 的进出
         // 事件经 Rust 转发到这里，驱动 peek 的 grace 计时。
@@ -670,7 +706,7 @@ export default function CompanionWindow() {
             () => undefined,
         );
         return () => ac.abort();
-    }, [applyMode, applySummonCtx, clearNativeFocusLostTimer, scheduleHideIfPeek, schedulePinnedInputFocus, summonPinned, hideSelf, suspend, resume]);
+    }, [applyMode, applySummonCtx, applyTravelSnapshot, clearNativeFocusLostTimer, scheduleHideIfPeek, schedulePinnedInputFocus, summonPinned, hideSelf, suspend, resume]);
 
     // ── peek → pin 升格（窗内有效行为 = 激活 + 执行该行为，0612 用户裁决） ──
     // 点击带处境抓取（点击 = "我要说话"）；滚轮只升格不抓处境（滚轮 = "我要
@@ -1330,6 +1366,21 @@ export default function CompanionWindow() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                 </button>
             </div>
+
+            {travelPostcard && (
+                <TravelMatePostcard
+                    postcard={travelPostcard}
+                    eyebrow={t('floatingBall.travelMate.eyebrow')}
+                    dismissLabel={t('floatingBall.travelMate.dismiss')}
+                    onDismiss={() => {
+                        void dismissTravelMatePostcard()
+                            .then(() => setTravelPostcard(null))
+                            .catch((err) => {
+                                console.warn('[travel-mate] dismiss postcard failed:', err);
+                            });
+                    }}
+                />
+            )}
 
             {/* 会话流 */}
             <FileActionProvider
