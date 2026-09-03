@@ -217,6 +217,10 @@
     "removeQuote": "去掉引用",
     "resizeHandle": "拖动调节高度",
     "moveHandle": "拖动移动窗口",
+    "travelMate": {
+      "eyebrow": "旅行归来",
+      "dismiss": "收好明信片"
+    },
     "toasts": {
       "maxImages": "最多只能上传 {{count}} 张图片",
       "cannotUploadDevMode": "无法上传文件：当前为浏览器开发模式，请使用桌面应用",

@@ -217,6 +217,10 @@
     "removeQuote": "Remove quote",
     "resizeHandle": "Drag to resize",
     "moveHandle": "Drag to move window",
+    "travelMate": {
+      "eyebrow": "Back from a trip",
+      "dismiss": "Keep postcard"
+    },
     "toasts": {
       "maxImages": "You can upload at most {{count}} images.",
       "cannotUploadDevMode": "Cannot upload files in browser dev mode. Use the desktop app.",

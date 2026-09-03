@@ -14,6 +14,7 @@ import { useCloseLayer } from '@/hooks/useCloseLayer';
 import { useTauriFileDrop } from '@/hooks/useTauriFileDrop';
 import { track } from '@/analytics';
 import { isTauriEnvironment } from '@/utils/browserMock';
+import { listenWithCleanup } from '@/utils/tauriListen';
 import { shortenPathForDisplay } from '@/utils/pathDetection';
 import { workspacePathsEqual } from '../../shared/workspacePath';
 import {
@@ -39,6 +40,13 @@ import {
 import { PetSprite } from '@/floating-ball/PetSprite';
 import { derivePetPreviewPlayback } from '@/floating-ball/petPlayback';
 import type { PetPack } from '@/floating-ball/petAtlas';
+import {
+    demoTravelMateDeparture,
+    demoTravelMateReturn,
+    getTravelMateSnapshot,
+    setTravelMateEnabled,
+    type TravelMateSnapshot,
+} from '@/floating-ball/travelMate';
 import '@/floating-ball/fb.css';
 
 function notifyBallConfigChanged() {
@@ -290,6 +298,8 @@ export default function FloatingBallPetSettings() {
     const [petdexUrl, setPetdexUrl] = useState('');
     const [deleteTarget, setDeleteTarget] = useState<PetPack | null>(null);
     const [deletingPetId, setDeletingPetId] = useState<string | null>(null);
+    const [travelSnapshot, setTravelSnapshot] = useState<TravelMateSnapshot | null>(null);
+    const [travelBusy, setTravelBusy] = useState(false);
     const dropZoneRef = useRef<HTMLDivElement | null>(null);
     const refreshSeqRef = useRef(0);
     const mountedRef = useRef(true);
@@ -307,6 +317,10 @@ export default function FloatingBallPetSettings() {
             ...installedPacks.filter((pack) => !builtinIds.has(pack.id)),
         ];
     }, [installedPacks]);
+    const selectedPetPack = useMemo(
+        () => stylePacks.find((pack) => pack.id === selectedPetId) ?? BUILTIN_PET_PACKS[0],
+        [selectedPetId, stylePacks],
+    );
     const workspaceOptions = useMemo(
         () => [
             { value: '', label: t('floatingBallPet.followDefaultWorkspace') },
@@ -345,10 +359,27 @@ export default function FloatingBallPetSettings() {
     useEffect(() => {
         mountedRef.current = true;
         void refreshInstalled();
+        void getTravelMateSnapshot()
+            .then((snapshot) => {
+                if (mountedRef.current) setTravelSnapshot(snapshot);
+            })
+            .catch((err) => {
+                console.warn('[FloatingBallPetSettings] load travel mode failed:', err);
+            });
         return () => {
             mountedRef.current = false;
         };
     }, [refreshInstalled]);
+
+    useEffect(() => {
+        const ac = new AbortController();
+        void listenWithCleanup<TravelMateSnapshot>(
+            'travel-mate://state-changed',
+            (event) => setTravelSnapshot(event.payload),
+            ac.signal,
+        );
+        return () => ac.abort();
+    }, []);
 
     const selectPetPack = useCallback(
         async (pack: PetPack) => {
@@ -357,9 +388,14 @@ export default function FloatingBallPetSettings() {
                 floatingBallPetId: pack.id,
             });
             notifyBallConfigChanged();
+            if (travelSnapshot?.enabled) {
+                void setTravelMateEnabled(true, pack).catch((err) => {
+                    console.warn('[FloatingBallPetSettings] refresh travel pet failed:', err);
+                });
+            }
             track('floating_ball_pet_select', { pet_id: pack.id, source: pack.source ?? 'builtin' });
         },
-        [updateConfig],
+        [travelSnapshot?.enabled, updateConfig],
     );
 
     const deletePetPack = useCallback(
@@ -392,6 +428,17 @@ export default function FloatingBallPetSettings() {
 
     const setEnabled = useCallback(
         async (enabled: boolean) => {
+            if (!enabled && travelSnapshot?.enabled) {
+                try {
+                    const snapshot = await setTravelMateEnabled(false, selectedPetPack);
+                    setTravelSnapshot(snapshot);
+                } catch (err) {
+                    toast.error(tRef.current('floatingBallPet.travelMate.toggleFailed', {
+                        message: err instanceof Error ? err.message : String(err),
+                    }));
+                    return;
+                }
+            }
             try {
                 await runFloatingBallToggleTransaction({
                     enabled,
@@ -414,8 +461,43 @@ export default function FloatingBallPetSettings() {
                 ? tRef.current('floatingBallPet.toasts.enabled')
                 : tRef.current('floatingBallPet.toasts.disabled'));
         },
-        [toast, updateConfig],
+        [selectedPetPack, toast, travelSnapshot?.enabled, updateConfig],
     );
+
+    const toggleTravelMate = useCallback(async () => {
+        if (travelBusy) return;
+        setTravelBusy(true);
+        try {
+            const snapshot = await setTravelMateEnabled(!travelSnapshot?.enabled, selectedPetPack);
+            setTravelSnapshot(snapshot);
+            toast.success(snapshot.enabled
+                ? tRef.current('floatingBallPet.travelMate.enabledToast')
+                : tRef.current('floatingBallPet.travelMate.disabledToast'));
+        } catch (err) {
+            toast.error(tRef.current('floatingBallPet.travelMate.toggleFailed', {
+                message: err instanceof Error ? err.message : String(err),
+            }));
+        } finally {
+            if (mountedRef.current) setTravelBusy(false);
+        }
+    }, [selectedPetPack, toast, travelBusy, travelSnapshot?.enabled]);
+
+    const runTravelDemo = useCallback(async (action: 'depart' | 'return') => {
+        if (travelBusy) return;
+        setTravelBusy(true);
+        try {
+            const snapshot = action === 'depart'
+                ? await demoTravelMateDeparture()
+                : await demoTravelMateReturn();
+            setTravelSnapshot(snapshot);
+        } catch (err) {
+            toast.error(tRef.current('floatingBallPet.travelMate.demoFailed', {
+                message: err instanceof Error ? err.message : String(err),
+            }));
+        } finally {
+            if (mountedRef.current) setTravelBusy(false);
+        }
+    }, [toast, travelBusy]);
 
     const importPaths = useCallback(
         async (paths: string[]) => {
@@ -572,6 +654,72 @@ export default function FloatingBallPetSettings() {
                         </button>
                     </div>
                 </section>
+
+                {config.floatingBallEnabled && (
+                    <section className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 sm:p-5">
+                        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                            <div className="min-w-0 flex-1">
+                                <h3 className="text-base font-medium text-[var(--ink)]">
+                                    {t('floatingBallPet.travelMate.title')}
+                                </h3>
+                                <p className="mt-1 text-sm leading-6 text-[var(--ink-muted)]">
+                                    {t('floatingBallPet.travelMate.description')}
+                                </p>
+                                {travelSnapshot?.phase.kind === 'homeScheduled' && (
+                                    <p className="mt-2 text-xs text-[var(--ink-subtle)]">
+                                        {t('floatingBallPet.travelMate.home')}
+                                    </p>
+                                )}
+                                {travelSnapshot?.phase.kind === 'away' && (
+                                    <p className="mt-2 text-xs font-medium text-[var(--accent)]">
+                                        {t('floatingBallPet.travelMate.away')}
+                                    </p>
+                                )}
+                                {travelSnapshot?.phase.kind === 'returnedPendingPostcard' && (
+                                    <p className="mt-2 text-xs font-medium text-[var(--accent)]">
+                                        {t('floatingBallPet.travelMate.postcardWaiting')}
+                                    </p>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                disabled={travelBusy || !travelSnapshot}
+                                onClick={() => void toggleTravelMate()}
+                                className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                                    travelSnapshot?.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
+                                }`}
+                                aria-label={t('floatingBallPet.travelMate.title')}
+                                aria-pressed={!!travelSnapshot?.enabled}
+                            >
+                                <span
+                                    className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-[var(--toggle-thumb)] shadow transition-transform ${
+                                        travelSnapshot?.enabled ? 'translate-x-5' : 'translate-x-0'
+                                    }`}
+                                />
+                            </button>
+                        </div>
+                        {import.meta.env.DEV && travelSnapshot?.enabled && (
+                            <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--line)] pt-4">
+                                <button
+                                    type="button"
+                                    disabled={travelBusy || travelSnapshot.phase.kind !== 'homeScheduled'}
+                                    onClick={() => void runTravelDemo('depart')}
+                                    className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] disabled:opacity-50"
+                                >
+                                    {t('floatingBallPet.travelMate.demoDepart')}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={travelBusy || travelSnapshot.phase.kind !== 'away'}
+                                    onClick={() => void runTravelDemo('return')}
+                                    className="rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-1.5 text-xs font-medium text-[var(--ink)] disabled:opacity-50"
+                                >
+                                    {t('floatingBallPet.travelMate.demoReturn')}
+                                </button>
+                            </div>
+                        )}
+                    </section>
+                )}
 
                 <section className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-4 sm:p-5">
                     <h3 className="text-base font-medium text-[var(--ink)]">{t('floatingBallPet.generalTitle')}</h3>

@@ -272,6 +272,9 @@ html.fb-transparent #root {
   .fbw-win *::after {
     animation: none !important;
   }
+  .fbw-travel-postcard {
+    animation: none;
+  }
 }
 
 /* ════════ Companion（透明窗，DOM = 一块暖纸） ════════ */
@@ -377,6 +380,116 @@ html.fb-transparent #root {
 }
 .fbw-chrome button:hover { background: var(--fb-control-hover); color: var(--ink); }
 .fbw-chrome svg { width: 14px; height: 14px; }
+
+/* Travel Mate return card: one offline story layer owned by this window. */
+.fbw-travel-postcard {
+  position: absolute;
+  inset: 12px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 52px 34px 30px;
+  border: 1px solid color-mix(in srgb, var(--travel-ink) 28%, var(--line));
+  border-radius: 19px;
+  background:
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--travel-accent) 18%, transparent), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--travel-paper) 34%, var(--paper-elevated)), var(--paper-elevated) 72%);
+  box-shadow: 0 18px 42px var(--fb-shadow-panel);
+  color: var(--ink);
+  -webkit-user-select: text;
+  user-select: text;
+  animation: fbw-travel-arrive 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fbw-travel-postcard::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border: 1px solid color-mix(in srgb, var(--travel-ink) 13%, transparent);
+  border-radius: 14px;
+  pointer-events: none;
+}
+.fbw-travel-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--paper-elevated) 72%, transparent);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.fbw-travel-close:hover { background: var(--fb-control-hover); color: var(--ink); }
+.fbw-travel-stamp {
+  position: absolute;
+  top: 25px;
+  left: 32px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--travel-ink);
+  font-size: var(--text-xs, 12px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.fbw-travel-eyebrow {
+  margin: 18px 0 8px;
+  color: var(--travel-ink);
+  font-size: var(--text-xs, 12px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+.fbw-travel-postcard h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl, 24px);
+  font-weight: 600;
+  line-height: 1.25;
+}
+.fbw-travel-destination {
+  margin: 8px 0 24px;
+  color: var(--ink-subtle);
+  font-size: var(--text-xs, 12px);
+}
+.fbw-travel-story {
+  margin: 0;
+  color: var(--ink-muted);
+  font-family: var(--font-serif);
+  font-size: var(--text-base, 16px);
+  line-height: 1.9;
+}
+.fbw-travel-signature {
+  margin: 18px 0 0;
+  color: var(--travel-ink);
+  font-family: var(--font-serif);
+  font-size: var(--text-sm, 14px);
+  text-align: right;
+}
+.fbw-travel-keep {
+  align-self: flex-end;
+  margin-top: auto;
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--travel-ink) 30%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--travel-ink) 8%, var(--paper));
+  color: var(--ink);
+  font-size: var(--text-sm, 14px);
+  font-weight: 600;
+  cursor: pointer;
+}
+.fbw-travel-keep:hover {
+  background: color-mix(in srgb, var(--travel-ink) 14%, var(--paper));
+}
+@keyframes fbw-travel-arrive {
+  from { opacity: 0; transform: translateY(10px) rotate(-0.6deg); }
+  to { opacity: 1; transform: translateY(0) rotate(0); }
+}
 
 /* 会话区 */
 .fbw-convo {

@@ -3562,7 +3562,7 @@ pub use commands::*;
 /// bring the ball up without waiting for the frontend.
 pub fn setup_on_startup(app: &tauri::AppHandle) {
     let cfg = load_fb_config();
-    if !(cfg.dev_gate && cfg.enabled) {
+    if !(cfg.dev_gate && cfg.enabled) || crate::travel_mate::should_suppress_pet_on_startup() {
         return;
     }
     #[cfg(any(target_os = "macos", target_os = "windows"))]

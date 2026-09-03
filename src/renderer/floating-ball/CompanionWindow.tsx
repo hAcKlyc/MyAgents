@@ -46,6 +46,13 @@ import { createFocusConvergence } from './focusConvergence';
 import { useFloatingSession, type FbAttachment, type FbMsg } from './useFloatingSession';
 import { useFloatingComposerKeydown } from './useFloatingComposerKeydown';
 import { describeNativeFloatingBallError } from './nativeFloatingBall';
+import { TravelMatePostcard } from './TravelMatePostcard';
+import {
+    dismissTravelMatePostcard,
+    getTravelMateSnapshot,
+    type TravelMateSnapshot,
+    type TravelMatePostcard as TravelMatePostcardData,
+} from './travelMate';
 
 import './fb.css';
 
@@ -305,6 +312,7 @@ export default function CompanionWindow() {
     const [axNeeded, setAxNeeded] = useState(false);
     const [providerForCapability, setProviderForCapability] = useState<Provider | null>(null);
     const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+    const [travelPostcard, setTravelPostcard] = useState<TravelMatePostcardData | null>(null);
 
     const convoRef = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -422,6 +430,40 @@ export default function CompanionWindow() {
         },
         [clearNativeFocusLostTimer, clearPinnedInputFocusRetries, inputFocusConvergence, markRead],
     );
+
+    const applyTravelSnapshot = useCallback((snapshot: TravelMateSnapshot) => {
+        if (snapshot.phase.kind === 'returnedPendingPostcard') {
+            setTravelPostcard(snapshot.phase.postcard);
+            applyMode('pin');
+        } else {
+            setTravelPostcard(null);
+        }
+    }, [applyMode]);
+
+    useEffect(() => {
+        const ac = new AbortController();
+        let eventSequence = 0;
+        void (async () => {
+            await listenWithCleanup<TravelMateSnapshot>(
+                'travel-mate://state-changed',
+                (event) => {
+                    eventSequence += 1;
+                    applyTravelSnapshot(event.payload);
+                },
+                ac.signal,
+            );
+            const sequenceAtRead = eventSequence;
+            const snapshot = await getTravelMateSnapshot();
+            if (!ac.signal.aborted && sequenceAtRead === eventSequence) {
+                applyTravelSnapshot(snapshot);
+            }
+        })().catch((err) => {
+            if (!ac.signal.aborted) {
+                console.warn('[travel-mate] bootstrap failed:', err);
+            }
+        });
+        return () => ac.abort();
+    }, [applyTravelSnapshot]);
 
     const beginPinRequest = useCallback(() => ({
         seq: ++pinRequestSeqRef.current,
@@ -1346,6 +1388,21 @@ export default function CompanionWindow() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                 </button>
             </div>
+
+            {travelPostcard && (
+                <TravelMatePostcard
+                    postcard={travelPostcard}
+                    eyebrow={t('floatingBall.travelMate.eyebrow')}
+                    dismissLabel={t('floatingBall.travelMate.dismiss')}
+                    onDismiss={() => {
+                        void dismissTravelMatePostcard()
+                            .then(() => setTravelPostcard(null))
+                            .catch((err) => {
+                                console.warn('[travel-mate] dismiss postcard failed:', err);
+                            });
+                    }}
+                />
+            )}
 
             {/* 会话流 */}
             <FileActionProvider

@@ -412,6 +412,16 @@ Phase4 后，几个历史大型 UI 入口保留原路径作为兼容 facade，�
 
 macOS 的 renderer 崩溃恢复由 Tauri `on_web_content_process_terminate` 回调拥有：只有 WebKit 明确报告 content process 已终止时才 reload 对应 WebView，并从持久 Session/REST/SSE 权威恢复页面。普通系统 wake/resume、窗口重新显示或应用激活不得 reload 健康 WebView，以免丢失未提交草稿和 renderer-local UI 状态；Sidecar/Session 生命周期独立于 WebView，content process 终止时继续存活并保持后端权威。
 
+#### Desktop Pet Travel authority
+
+桌宠旅行模式的 phase、wall-clock deadline、持久化和原生窗口显隐由
+`src-tauri/src/travel_mate.rs` 单一拥有；`BallWindow` 只投影当前
+pending/blocked/error attention guard 和宠物身份，`CompanionWindow` 只消费
+`travel-mate://state-changed` 并展示归来明信片。旅行 store 必须经
+`utils::file_lock` 且在 hide/show 前 durable commit；不得把 timer、第二份
+phase 或用户内容放进 renderer。完整状态机、隐私白名单和恢复规则见
+[`features/travel-mate.md`](./features/travel-mate.md)。
+
 ### 3. 系统提示词组装 (`src/server/system-prompt.ts`)
 
 对话 Session 的系统上下文由四类来源共同组成：Runtime 原生 base/preset、MyAgents

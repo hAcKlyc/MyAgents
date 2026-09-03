@@ -29,6 +29,7 @@ import { PetSprite } from './PetSprite';
 import { deriveFloatingPetPlayback } from './petPlayback';
 import { getPetAnimationDuration } from './petAtlas';
 import { derivePetAnimation, type FbBallState, type FbPendingKind, type PetDragDirection } from './petStateMapper';
+import { updateTravelMateAttention } from './travelMate';
 import './fb.css';
 
 interface FbCtx {
@@ -190,6 +191,17 @@ export default function BallWindow() {
             window.clearTimeout(timer);
         };
     }, [loadBallConfig]);
+
+    useEffect(() => {
+        void updateTravelMateAttention({
+            state,
+            pendingKind,
+            hasError,
+            pet: petPack,
+        }).catch((err) => {
+            console.warn('[travel-mate] attention update failed:', err);
+        });
+    }, [hasError, pendingKind, petPack, state]);
 
     useEffect(() => {
         const ac = new AbortController();
