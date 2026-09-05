@@ -176,7 +176,7 @@ function materializeVisionProviderEnv(
   model: string,
   config: AdminAppConfig,
 ): ProviderEnv | undefined {
-  const env = resolveProviderEnv(providerId, config);
+  const env = resolveProviderEnv(providerId, config, model);
   const provider = findEffectiveProvider(providerId, config);
   if (provider?.type === 'subscription') {
     return {};

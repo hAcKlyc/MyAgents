@@ -27,6 +27,7 @@ import {
   getProxyForUrl as resolveGlobalProxyForUrl,
 } from '../proxy-state';
 import { isProviderReasoningEffortSupported } from '../../shared/reasoningEffort';
+import { TOKENDANCE_APP_URL, TOKENDANCE_PROVIDER_ID } from '../../shared/tokendance';
 
 const DEFAULT_TIMEOUT = 300_000; // 5 minutes
 const THOUGHT_SIG_CACHE_MAX = 500; // Max cached thought_signatures to prevent unbounded growth
@@ -576,6 +577,11 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${bearer}`,
+            // Use the bridge entry's provider owner, never a caller-supplied
+            // header or a process-global "current provider".
+            ...(upstream.providerId === TOKENDANCE_PROVIDER_ID
+              ? { 'X-App-URL': TOKENDANCE_APP_URL }
+              : {}),
           },
           body: requestBody,
           signal: controller.signal,

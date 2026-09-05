@@ -3614,7 +3614,6 @@ async function main() {
           console.log(`[api/provider/verify] =========================`);
           console.log(`[api/provider/verify] providerId: ${providerId}`);
           console.log(`[api/provider/verify] baseUrl: ${baseUrl}`);
-          console.log(`[api/provider/verify] apiKey: ${apiKey.slice(0, 10)}...`);
           console.log(`[api/provider/verify] model: ${model ?? 'default'}`);
           console.log(`[api/provider/verify] authType: ${authType ?? 'both'}`);
           console.log(`[api/provider/verify] apiProtocol: ${apiProtocol ?? 'anthropic'}`);

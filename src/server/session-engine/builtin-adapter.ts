@@ -604,7 +604,7 @@ export function createBuiltinSessionEngine(): SessionEngine {
         const providerRoutingRecovery = taskProviderRoutingRecovery(routingOwner);
 
         if (operation.providerId) {
-          providerEnv = resolveTaskProviderRouting(operation.providerId, routingOwner);
+          providerEnv = resolveTaskProviderRouting(operation.providerId, routingOwner, operation.model);
           if (operation.model) {
             providerRoute = createConcreteProviderRoute(operation.providerId, operation.model);
           }
@@ -616,7 +616,7 @@ export function createBuiltinSessionEngine(): SessionEngine {
           if (isConcreteProviderRoute(resolved.providerRoute)) {
             providerRoute = resolved.providerRoute;
             model = resolved.providerRoute.model;
-            providerEnv = resolveTaskProviderRouting(resolved.providerRoute.providerId, routingOwner);
+            providerEnv = resolveTaskProviderRouting(resolved.providerRoute.providerId, routingOwner, model);
           } else if (resolved.providerEnvJson) {
             const decoded = decodeProviderEnvSnapshot(resolved.providerEnvJson, resolved.providerId);
             if (!decoded) {
@@ -629,7 +629,7 @@ export function createBuiltinSessionEngine(): SessionEngine {
             }
             providerEnv = decoded as ProviderEnv;
           } else if (resolved.providerId) {
-            providerEnv = resolveTaskProviderRouting(resolved.providerId, routingOwner);
+            providerEnv = resolveTaskProviderRouting(resolved.providerId, routingOwner, model);
             if (model) providerRoute = createConcreteProviderRoute(resolved.providerId, model);
           }
           if (resolved.runtime !== 'builtin') {

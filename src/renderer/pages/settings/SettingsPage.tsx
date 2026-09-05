@@ -32,6 +32,8 @@ import { useTranslation } from 'react-i18next';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listenWithCleanup } from '@/utils/tauriListen';
+import TokenDanceProvider from '@/components/tokendance/TokenDanceProvider';
+import { TOKENDANCE_PROVIDER_ID } from '../../../shared/tokendance';
 import { homeDir, join } from '@tauri-apps/api/path';
 
 import { track } from '@/analytics';
@@ -5167,6 +5169,8 @@ export default function Settings({
               {visibleProviders.map((provider) =>
                 provider.id === CODEX_SUBSCRIPTION_PROVIDER_ID ? (
                   renderManagedCodexProviderCard(provider)
+                ) : provider.id === TOKENDANCE_PROVIDER_ID ? (
+                  <TokenDanceProvider key={provider.id} provider={provider} isActive={isActive} />
                 ) : (
                   <div
                     key={provider.id}

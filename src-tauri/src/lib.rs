@@ -22,6 +22,7 @@ pub mod floating_ball;
 pub mod floating_ball_pets;
 mod global_shortcut;
 pub mod grok_auth;
+pub mod tokendance;
 pub mod i18n;
 pub mod im;
 pub mod inbox;
@@ -484,6 +485,14 @@ pub fn run() {
             grok_auth::cmd_grok_verify_account,
             grok_auth::cmd_grok_fetch_models,
             grok_auth::cmd_grok_logout,
+            tokendance::cmd_tokendance_auth_open,
+            tokendance::cmd_tokendance_auth_status,
+            tokendance::cmd_tokendance_auth_close,
+            tokendance::cmd_tokendance_auth_retry_save,
+            tokendance::cmd_tokendance_balance,
+            tokendance::cmd_tokendance_payment,
+            tokendance::cmd_tokendance_prepare_payment_request,
+            tokendance::cmd_tokendance_cancel_payment_request,
             // Workspace template commands
             commands::cmd_create_workspace_from_template,
             commands::cmd_create_workspace_from_bundled_template,

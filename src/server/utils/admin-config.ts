@@ -22,6 +22,7 @@ import {
 import { resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
 import { stripBom } from '../../shared/utils';
+import { resolveProviderForModel } from '../../shared/tokendance';
 import { workspacePathsEqual } from '../../shared/workspacePath';
 import { promoteAgentMcpJsonToGlobal } from '../../shared/mcpConfig';
 import type { AppConfig, ManagedProviderCredential, McpServerDefinition, PermissionMode, Provider, ProviderVerifyStatus, SubscriptionAuthPolicy } from '../../shared/config-types';
@@ -1084,12 +1085,19 @@ export function resolveSubscriptionAuthKind(
 export function resolveProviderEnv(
   providerId: string,
   config?: AdminAppConfig,
+  model?: string,
 ): ResolvedProviderEnv | undefined {
   if (!providerId) return undefined;
 
   const c = config ?? loadConfig();
-  const provider = findEffectiveProvider(providerId, c);
-  if (!provider) return undefined;
+  const registeredProvider = findEffectiveProvider(providerId, c);
+  if (!registeredProvider) return undefined;
+  // Some callers only check credentials/enablement. Execution callers must
+  // pass the concrete route model; availability must not depend on a preset
+  // primary model the user may have removed.
+  const provider = model
+    ? resolveProviderForModel(registeredProvider as unknown as Provider, model)
+    : registeredProvider;
   if (!isProviderEnabled(provider)) return undefined;
 
   // Anthropic subscription remains SDK-native. Grok subscription is builtin
@@ -1156,7 +1164,7 @@ export function materializeProviderRouteEnv(
   if (!isConcreteProviderRoute(route)) return undefined;
   if (route.kind === 'subscription'
       && resolveSubscriptionAuthKind(route.providerId, config) !== 'host-managed-oauth') return undefined;
-  return resolveProviderEnv(route.providerId, config);
+  return resolveProviderEnv(route.providerId, config, route.model);
 }
 
 /** Managed OAuth owns both the bearer and its destination. */
@@ -1659,7 +1667,7 @@ export function resolveWorkspaceConfig(
     providerId = isConcreteProviderRoute(providerRoute) ? providerRoute.providerId : sessionMeta?.providerId;
     providerEnv = isConcreteProviderRoute(providerRoute)
       ? materializeProviderRouteEnv(providerRoute, config)
-      : (providerId ? resolveProviderEnv(providerId, config) : undefined);
+      : (providerId ? resolveProviderEnv(providerId, config, sessionMeta?.model) : undefined);
   } else if (resolvedRuntime === 'builtin') {
     providerId = sessionMeta?.providerId
       || (agent?.providerId as string | undefined)
@@ -1671,7 +1679,7 @@ export function resolveWorkspaceConfig(
         providers: providersForRouteResolution(config),
       });
       providerRoute = isConcreteProviderRoute(route) ? route : undefined;
-      providerEnv = resolveProviderEnv(providerId, config);
+      providerEnv = resolveProviderEnv(providerId, config, providerRoute?.model);
     }
   }
   // Legacy env fallback: once a canonical providerRoute exists, live materialization

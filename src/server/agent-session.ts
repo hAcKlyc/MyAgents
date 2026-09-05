@@ -112,6 +112,7 @@ import {
 } from '../shared/toolDisplay/filePatch';
 import { parsePartialJson } from '../shared/parsePartialJson';
 import { deriveSessionTitle } from '../shared/sessionTitle';
+import { TOKENDANCE_APP_URL, TOKENDANCE_PROVIDER_ID } from '../shared/tokendance';
 import { createLiveUserMessageReplay } from '../shared/chatMessageReplay';
 import { isPendingSessionId } from '../shared/constants';
 import { MANAGED_BROWSER_MCP_ID } from '../shared/browserTools';
@@ -6040,6 +6041,16 @@ export function buildClaudeSessionEnv(
     ?? (providerEnv === undefined
       ? getSessionProviderId() ?? SUBSCRIPTION_PROVIDER_ID
       : (!effectiveProviderEnv?.baseUrl && !effectiveProviderEnv?.apiKey ? SUBSCRIPTION_PROVIDER_ID : ''));
+
+  // The host owns TokenDance attribution, including imported/shared keys.
+  // Replace case-insensitive duplicates without changing other custom headers
+  // or process.env; each SDK subprocess keeps its own provider identity.
+  if (effectiveProviderId === TOKENDANCE_PROVIDER_ID) {
+    const headers = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split(/\r?\n/)
+      .filter(line => line.trim() && line.split(':', 1)[0].trim().toLowerCase() !== 'x-app-url');
+    headers.push(`X-App-URL: ${TOKENDANCE_APP_URL}`);
+    env.ANTHROPIC_CUSTOM_HEADERS = headers.join('\n');
+  }
 
   // Declare MyAgents as the inference-routing host for non-subscription
   // providers. This tells CC's `managedEnv` layer (see claude-code

@@ -3017,8 +3017,8 @@ pub async fn cmd_probe_proxy(
 pub async fn cmd_fetch_provider_models(
     url: String,
     provider_id: String,
-    auth_header_name: String,
-    auth_header_value: String,
+    auth_header_name: Option<String>,
+    auth_header_value: Option<String>,
     extra_headers: Option<HashMap<String, String>>,
 ) -> Result<serde_json::Value, String> {
     ulog_info!(
@@ -3043,14 +3043,21 @@ pub async fn cmd_fetch_provider_models(
         crate::proxy_config::build_client_with_proxy_for_provider(builder, &provider_id)?
     };
 
-    let mut request = client
-        .get(&url)
-        .header(&auth_header_name, &auth_header_value);
+    let mut request = client.get(&url);
+    if let (Some(name), Some(value)) = (auth_header_name, auth_header_value) {
+        request = request.header(name, value);
+    }
 
     if let Some(headers) = extra_headers {
         for (key, value) in headers {
             request = request.header(key, value);
         }
+    }
+
+    if provider_id == "tokendance" {
+        // Attribution is fixed by the native provider boundary; extra headers
+        // cannot change it, and no credentials are needed for the public list.
+        request = request.headers(crate::tokendance::attribution_headers());
     }
 
     let response = request.send().await.map_err(|e| {

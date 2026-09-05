@@ -26,6 +26,7 @@ export function taskProviderRoutingRecovery(owner: TaskProviderRoutingOwner): st
 export function resolveTaskProviderRouting(
   providerId: string,
   owner: TaskProviderRoutingOwner,
+  model?: string,
 ): ProviderEnv | 'subscription' {
   const recovery = taskProviderRoutingRecovery(owner);
   const provider = findProvider(providerId);
@@ -45,9 +46,9 @@ export function resolveTaskProviderRouting(
     );
   }
   if (provider.type === 'subscription') {
-    return (resolveProviderEnv(providerId) as ProviderEnv | undefined) ?? 'subscription';
+    return (resolveProviderEnv(providerId, undefined, model) as ProviderEnv | undefined) ?? 'subscription';
   }
-  const env = resolveProviderEnv(providerId);
+  const env = resolveProviderEnv(providerId, undefined, model);
   if (!env) {
     throw new Error(
       `Provider '${providerId}' has no API Key. Configure it in 设置 → 模型供应商, or update the owning configuration. ${recovery}`,
