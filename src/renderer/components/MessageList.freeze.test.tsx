@@ -469,6 +469,7 @@ describe('MessageList — freeze data while inactive (Virtuoso cache-poisoning r
       ...followProps,
     });
     const focusedComponents = lastData().components;
+    const focusedContext = lastData().context;
     scrollToBottom.mockClear();
 
     rerender(
@@ -492,7 +493,9 @@ describe('MessageList — freeze data while inactive (Virtuoso cache-poisoning r
     expect(unfocused.data.at(-1)?.id).toBe('assistant-final');
     expect(unfocused.firstItemIndex).toBe(999_995);
     expect(unfocused.heightEstimates).toEqual([150, 270, 900]);
-    expect(unfocused.components).not.toBe(focusedComponents);
+    expect(unfocused.components).toBe(focusedComponents);
+    expect(unfocused.context).not.toBe(focusedContext);
+    expect((unfocused.context as { footer: { showStatus: boolean } }).footer.showStatus).toBe(false);
 
     unfocused.atBottomStateChange?.(false);
     expect(handleAtBottomChange).toHaveBeenCalledWith(false);
@@ -527,7 +530,8 @@ describe('MessageList — freeze data while inactive (Virtuoso cache-poisoning r
     expect(lastData().data.at(-1)?.id).toBe('assistant-final');
     expect(lastData().firstItemIndex).toBe(999_995);
     expect(lastData().heightEstimates).toEqual([150, 270, 900]);
-    expect(lastData().components).not.toBe(focusedComponents);
+    expect(lastData().components).toBe(focusedComponents);
+    expect(lastData().context).not.toBe(focusedContext);
     expect(scrollToBottom).toHaveBeenCalledTimes(1);
   });
 

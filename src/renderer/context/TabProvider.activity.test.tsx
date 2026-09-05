@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useEffect, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SseEventMetadata } from '@/api/SseConnection';
 import {
@@ -224,6 +224,75 @@ function readStreamingContent(): string | unknown[] | null {
 }
 
 const allowSessionOpening = () => () => undefined;
+
+describe('Tab-owned query clock integration', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps query time through tool updates and pauses only for unresolved human requests', async () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    let tab: ReturnType<typeof useTabState>;
+    function ClockProbe() {
+      const value = useTabState();
+      useEffect(() => { tab = value; }, [value]);
+      return null;
+    }
+    sseHarness.state.connected = false;
+    sseHarness.state.eventHandler = null;
+    sseHarness.state.statusHandler = null;
+    const sessionId = 'pending-query-clock';
+    render(<TabProvider tabId="query-clock" agentDir="/tmp/workspace" sessionId={sessionId} claimSessionOpeningTransition={allowSessionOpening}><ClockProbe /></TabProvider>);
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    // Same optimistic loading edge used by Chat before /chat/send.
+    act(() => tab.setIsLoading(true));
+    now = 2500;
+    expect(tab!.getQueryElapsedSeconds()).toBe(2);
+    emit('chat:status', { sessionState: 'running' });
+    emit('chat:system-status', { status: 'api_retry:1:3' });
+    now = 4000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(4);
+
+    emit('permission:request', { sessionId, requestId: 'p1', toolName: 'Bash', input: '{}' });
+    emit('permission:request', { sessionId, requestId: 'p2', toolName: 'Write', input: '{}' });
+    now = 14000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(4);
+    emit('permission:expired', { sessionId, requestId: 'p1' });
+    now = 24000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(4);
+    emit('permission:expired', { sessionId, requestId: 'p2' });
+    now = 26000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(6);
+
+    emit('ask-user-question:request', { sessionId, requestId: 'q1', questions: [{ question: 'Continue?', header: 'Choice', options: [{ label: 'Yes', description: 'Continue' }], multiSelect: false }] });
+    now = 56000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(6);
+    emit('ask-user-question:expired', { sessionId, requestId: 'q1' });
+    now = 58000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(8);
+
+    emit('enter-plan-mode:request', { sessionId, requestId: 'enter', autoApproved: true });
+    now = 60000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(10);
+    emit('exit-plan-mode:request', { sessionId, requestId: 'exit' });
+    now = 90000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(10);
+    // The resolved plan card remains visible; its presence must not keep time paused.
+    tauriHarness.proxyFetch.mockResolvedValue(new Response('{"success":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    await act(async () => { await tab.respondExitPlanMode(true); });
+    expect(tab!.pendingExitPlanMode?.resolved).toBe('approved');
+    now = 92000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(12);
+
+    emit('chat:message-complete', {});
+    expect(tab!.getQueryElapsedSeconds()).toBe(0);
+    now = 100000;
+    emit('chat:status', { sessionState: 'running' });
+    now = 103000;
+    expect(tab!.getQueryElapsedSeconds()).toBe(3);
+    emit('chat:message-error', { message: 'test terminal' });
+    expect(tab!.getQueryElapsedSeconds()).toBe(0);
+  });
+});
 
 function collabMessage(status: 'running' | 'completed' = 'running'): Message {
   return {

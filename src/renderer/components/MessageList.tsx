@@ -31,6 +31,7 @@ interface MessageListProps {
   messages: readonly MessageType[];
   streamingMessage: MessageType | null;
   isLoading: boolean;
+  getQueryElapsedSeconds?: () => number;
   sessionId?: string | null;
   /**
    * Whether this Tab is currently visible. When `false`, the host wraps this
@@ -104,6 +105,7 @@ const noopRowLayoutChanged = (_messageId: string, _reason: RowLayoutChangeReason
 const STATUS_ROW_HEIGHT_PX = 30;
 const EMPTY_MESSAGE_ID_SET: ReadonlySet<string> = new Set();
 const EMPTY_MESSAGES: readonly MessageType[] = [];
+const noQueryElapsedSeconds = () => 0;
 const DEFAULT_WINDOW_PRESENTATION: MainWindowPresentation = {
   surfaceAvailable: true,
   generation: 0,
@@ -141,15 +143,13 @@ function getRandomStreamingMessage(t: TFunction<'chat'>): string {
   return t(`shell.messageList.streaming.${index}`);
 }
 
-const StatusTimer = memo(function StatusTimer({ message }: { message: string }) {
+const StatusTimer = memo(function StatusTimer({ message, getElapsedSeconds }: { message: string; getElapsedSeconds: () => number }) {
   const { t } = useTranslation('chat');
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const startTimeRef = useRef(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(() => getElapsedSeconds());
   useEffect(() => {
-    startTimeRef.current = Date.now();
-    const id = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startTimeRef.current) / 1000)), 1000);
+    const id = setInterval(() => setElapsedSeconds(getElapsedSeconds()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [getElapsedSeconds]);
   const elapsedText = elapsedSeconds > 0 ? formatElapsedTime(elapsedSeconds, t) : null;
   const displayText = elapsedText ? `${message} (${elapsedText})` : message;
   return (
@@ -200,16 +200,10 @@ function hasExitPlanModeTool(message: MessageType): boolean {
   );
 }
 
-// ── Virtuoso Footer — memo'd component that reads dynamic values from refs ──
+// ── Virtuoso Footer — dynamic values arrive through the existing list context ──
 // Must NOT be recreated on every render (inline arrow in `components` causes Virtuoso
 // to remount the footer, resetting StatusTimer and forcing extra remeasurement).
-const VirtuosoFooter = memo(function VirtuosoFooter({
-  pendingPermission, onPermissionDecision,
-  pendingAskUserQuestion, onAskUserQuestionSubmit, onAskUserQuestionCancel,
-  showStatus, statusMessage,
-  systemNotice, onDismissSystemNotice,
-  bottomSpacerPx,
-}: {
+type FooterProps = {
   pendingPermission?: PermissionRequest | null;
   onPermissionDecision?: (requestId: string, decision: 'deny' | 'allow_once' | 'always_allow') => void | Promise<void>;
   pendingAskUserQuestion?: AskUserQuestionRequest | null;
@@ -217,10 +211,23 @@ const VirtuosoFooter = memo(function VirtuosoFooter({
   onAskUserQuestionCancel?: (requestId: string) => void;
   showStatus: boolean;
   statusMessage: string;
+  getQueryElapsedSeconds: () => number;
   systemNotice?: SystemNotice | null;
   onDismissSystemNotice?: () => void;
   bottomSpacerPx?: number;
-}) {
+};
+
+interface MessageListContext extends MessageActionContext {
+  footer: FooterProps;
+}
+
+const VirtuosoFooter = memo(function VirtuosoFooter({
+  pendingPermission, onPermissionDecision,
+  pendingAskUserQuestion, onAskUserQuestionSubmit, onAskUserQuestionCancel,
+  showStatus, statusMessage, getQueryElapsedSeconds,
+  systemNotice, onDismissSystemNotice,
+  bottomSpacerPx,
+}: FooterProps) {
   const spacerHeight = resolveChatBottomSpacerPx(bottomSpacerPx);
   return (
     <div className="mx-auto max-w-3xl px-3">
@@ -238,7 +245,7 @@ const VirtuosoFooter = memo(function VirtuosoFooter({
           <AskUserQuestionPrompt request={pendingAskUserQuestion} onSubmit={onAskUserQuestionSubmit} onCancel={onAskUserQuestionCancel} />
         </div>
       )}
-      {showStatus && <StatusTimer message={statusMessage} />}
+      {showStatus && <StatusTimer message={statusMessage} getElapsedSeconds={getQueryElapsedSeconds} />}
       {!showStatus && systemNotice && (
         <SystemNoticeRow notice={systemNotice} onDismiss={onDismissSystemNotice} />
       )}
@@ -251,6 +258,13 @@ const VirtuosoFooter = memo(function VirtuosoFooter({
   );
 });
 
+// Virtuoso renders this as a component type. Dynamic footer values belong in
+// context, not in a function factory that remounts prompts and the status row.
+function MessageListFooter({ context }: { context?: MessageListContext }) {
+  return context ? <VirtuosoFooter {...context.footer} /> : null;
+}
+const VIRTUOSO_COMPONENTS = { Footer: MessageListFooter };
+
 // ── No custom Scroller/List components ──
 // Tested: custom Scroller (py-3 padding) and List (mx-auto max-w-3xl) break Virtuoso's
 // internal height tracking — scrollHeight diverges from totalListHeight by 12,000+ px,
@@ -260,6 +274,7 @@ const MessageList = memo(function MessageList({
   messages,
   streamingMessage,
   isLoading,
+  getQueryElapsedSeconds = noQueryElapsedSeconds,
   sessionId,
   isActive = true,
   windowPresentation = DEFAULT_WINDOW_PRESENTATION,
@@ -609,28 +624,15 @@ const MessageList = memo(function MessageList({
   // ── Stable computeItemKey ──
   const computeItemKey = useMemo(() => (_i: number, m: MessageType) => m.id, []);
 
-  // ── Stable Footer wrapper — useMemo keeps component identity stable for Virtuoso ──
-  const FooterComponent = useMemo(() => {
-    return function Footer() {
-      return (
-        <VirtuosoFooter
-          pendingPermission={pendingPermission}
-          onPermissionDecision={onPermissionDecision}
-          pendingAskUserQuestion={pendingAskUserQuestion}
-          onAskUserQuestionSubmit={onAskUserQuestionSubmit}
-          onAskUserQuestionCancel={onAskUserQuestionCancel}
-          showStatus={showStatus}
-          statusMessage={statusMessage}
-          systemNotice={systemNotice}
-          onDismissSystemNotice={onDismissSystemNotice}
-          bottomSpacerPx={bottomSpacerPx}
-        />
-      );
-    };
-  }, [pendingPermission, onPermissionDecision, pendingAskUserQuestion, onAskUserQuestionSubmit, onAskUserQuestionCancel, showStatus, statusMessage, systemNotice, onDismissSystemNotice, bottomSpacerPx]);
-
-  // ── Stable components object ──
-  const components = useMemo(() => ({ Footer: FooterComponent }), [FooterComponent]);
+  const listContext = useMemo<MessageListContext>(() => ({
+    ...messageActionContext,
+    footer: {
+      pendingPermission, onPermissionDecision,
+      pendingAskUserQuestion, onAskUserQuestionSubmit, onAskUserQuestionCancel,
+      showStatus, statusMessage, getQueryElapsedSeconds,
+      systemNotice, onDismissSystemNotice, bottomSpacerPx,
+    },
+  }), [messageActionContext, pendingPermission, onPermissionDecision, pendingAskUserQuestion, onAskUserQuestionSubmit, onAskUserQuestionCancel, showStatus, statusMessage, getQueryElapsedSeconds, systemNotice, onDismissSystemNotice, bottomSpacerPx]);
 
   // ── Freeze the data fed to Virtuoso while the internal Tab is inactive ──────
   // An inactive internal Tab is wrapped in `content-visibility: hidden`, so any
@@ -658,14 +660,12 @@ const MessageList = memo(function MessageList({
     data: readonly MessageType[];
     firstItemIndex: number | undefined;
     heightEstimateSeed?: number[];
-    components: typeof components;
-    messageActionContext: MessageActionContext;
+    context: MessageListContext;
   }>({
     data: canLayoutVirtualList ? messages : EMPTY_MESSAGES,
     firstItemIndex: canLayoutVirtualList ? firstItemIndex : undefined,
     heightEstimateSeed: canLayoutVirtualList ? liveHeightEstimateSeed : undefined,
-    components,
-    messageActionContext,
+    context: listContext,
   });
   useLayoutEffect(() => {
     if (canLayoutVirtualList) {
@@ -673,18 +673,14 @@ const MessageList = memo(function MessageList({
         data: messages,
         firstItemIndex,
         heightEstimateSeed: liveHeightEstimateSeed,
-        components,
-        messageActionContext,
+        context: listContext,
       };
     }
-  }, [canLayoutVirtualList, messages, firstItemIndex, liveHeightEstimateSeed, components, messageActionContext]);
+  }, [canLayoutVirtualList, messages, firstItemIndex, liveHeightEstimateSeed, listContext]);
   const virtuosoData = canLayoutVirtualList ? messages : frozenDataRef.current.data;
   const virtuosoFirstItemIndex = canLayoutVirtualList ? firstItemIndex : frozenDataRef.current.firstItemIndex;
   const virtuosoHeightEstimateSeed = canLayoutVirtualList ? liveHeightEstimateSeed : frozenDataRef.current.heightEstimateSeed;
-  const virtuosoComponents = canLayoutVirtualList ? components : frozenDataRef.current.components;
-  const virtuosoMessageActionContext = canLayoutVirtualList
-    ? messageActionContext
-    : frozenDataRef.current.messageActionContext;
+  const virtuosoContext = canLayoutVirtualList ? listContext : frozenDataRef.current.context;
   const debugProbe = useChatScrollDebugProbe({
     sessionId,
     scroller: debugScroller,
@@ -738,7 +734,7 @@ const MessageList = memo(function MessageList({
         ref={virtuosoRef}
         scrollerRef={handleScrollerRef}
         data={virtuosoData}
-        context={virtuosoMessageActionContext}
+        context={virtuosoContext}
         computeItemKey={computeItemKey}
         firstItemIndex={virtuosoFirstItemIndex}
         heightEstimates={virtuosoHeightEstimateSeed}
@@ -755,7 +751,7 @@ const MessageList = memo(function MessageList({
         skipAnimationFrameInResizeObserver={!canLayoutVirtualList || !isLargeRowShrinking}
         className="h-full"
         style={{ overscrollBehavior: 'none', scrollbarGutter: 'stable', overflowAnchor: 'none' }}
-        components={virtuosoComponents}
+        components={VIRTUOSO_COMPONENTS}
         itemContent={renderItem}
       />
     </div>

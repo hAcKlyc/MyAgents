@@ -515,6 +515,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
     hasMoreBefore: _hasMoreBefore,
     loadOlderMessages,
     isLoading,
+    getQueryElapsedSeconds,
     isSessionLoading,
     sessionRestoreError,
     sessionState,
@@ -5452,6 +5453,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
               layoutByMessageId={chatScrollModel.layoutByMessageId}
               onLoadOlder={handleLoadOlderMessages}
               isLoading={isLoading}
+              getQueryElapsedSeconds={getQueryElapsedSeconds}
               sessionId={sessionId}
               isActive={isActive}
               windowPresentation={windowPresentation}

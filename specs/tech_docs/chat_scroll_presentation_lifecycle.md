@@ -66,6 +66,10 @@ App 的 Tab memo comparator 只让 active Chat 响应 presentation 对象变化�
 
 ## 5. 不变量与禁止项
 
+Chat 底部 query 耗时由 TabProvider 的 `useQueryElapsedClock` 持有，使用单调时钟累计当前 query 的运行片段；未决权限、AskUserQuestion 或 ExitPlanMode 等待期间暂停。已 resolved 的计划卡及自动批准的 EnterPlanMode 不暂停。Footer 仅每秒采样，工具/文案/布局变化、presentation suspension 和 Chat 展示子树重挂载都不能重置起点。结束、新 query 或真实 Session 切换重置，pending identity 实体化保留。首次中途加入或整个 Tab owner 重建时无法恢复过去的暂停片段，计时从当前观察开始；不改变历史消息 `durationMs` 的后端墙钟含义。
+
+Virtuoso 的 Footer 必须使用模块级稳定组件类型，动态内容通过现有 list context 传入，并与 data 一同遵守 frozen snapshot。`useMemo(() => function Footer(){...}, [动态值])` 仍会在依赖变化时创建新组件类型，重挂载整个 footer，不能作为“稳定 Footer”。
+
 - focus change 必须产生零个 Chat scroll command。
 - 可见失焦窗口的 `atBottomStateChange`、follow 与 pagination 正常工作。
 - suspension 期间消息/SSE 正常推进，但 data、firstItemIndex、height estimate 和行测量不进入 Virtuoso。
