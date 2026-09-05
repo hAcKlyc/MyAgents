@@ -115,7 +115,7 @@ describe('Windows SDK subprocess UTF-8 env', () => {
     expect(env.BASH_ENV).toBe(once);
   });
 
-  it('applies the UTF-8 env contract from buildClaudeSessionEnv when Windows Git Bash is resolved', () => {
+  it.each([undefined, '0'])('enables PowerShell alongside Git Bash and UTF-8 with inherited switch %s', (inheritedSwitch) => {
     const home = mkdtempSync(resolve(tmpdir(), 'myagents-env-home-'));
     tempHomes.push(home);
     const inheritedGitBashPath = resolve(process.cwd(), 'package.json');
@@ -123,10 +123,13 @@ describe('Windows SDK subprocess UTF-8 env', () => {
     vi.stubEnv('USERPROFILE', home);
     vi.stubEnv('CLAUDE_CODE_GIT_BASH_PATH', inheritedGitBashPath);
     vi.stubEnv('CLAUDE_CODE_SHELL_PREFIX', 'echo existing;');
+    vi.stubEnv('CLAUDE_CODE_USE_POWERSHELL_TOOL', inheritedSwitch);
 
     const env = buildClaudeSessionEnv();
 
     expect(env.CLAUDE_CODE_GIT_BASH_PATH).toBe(inheritedGitBashPath);
+    expect(env.CLAUDE_CODE_USE_POWERSHELL_TOOL).toBe('1');
+    expect(env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC).toBe('1');
     expect(env.LANG).toBe('C.UTF-8');
     expect(env.LC_ALL).toBe('C.UTF-8');
     expect(env.PYTHONUTF8).toBe('1');
@@ -147,8 +150,19 @@ describe('Windows SDK subprocess UTF-8 env', () => {
     const env = buildClaudeSessionEnv();
 
     expect(env.CLAUDE_CODE_GIT_BASH_PATH).toBe('');
+    expect(env.CLAUDE_CODE_USE_POWERSHELL_TOOL).toBe('1');
     expect(env.BASH_ENV).toContain('windows-utf8-bash-env.sh');
     expect(readFileSync(env.BASH_ENV!, 'utf-8')).toContain('chcp.com 65001');
+  });
+
+  it.each(['darwin', 'linux'] as const)('does not opt into PowerShell on %s', (platform) => {
+    const home = mkdtempSync(resolve(tmpdir(), 'myagents-env-home-'));
+    tempHomes.push(home);
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('CLAUDE_CODE_USE_POWERSHELL_TOOL', undefined);
+
+    expect(buildClaudeSessionEnv().CLAUDE_CODE_USE_POWERSHELL_TOOL).toBeUndefined();
   });
 });
 

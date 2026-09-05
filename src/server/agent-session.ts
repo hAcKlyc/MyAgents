@@ -6087,6 +6087,9 @@ export function buildClaudeSessionEnv(
   // Always write the resolved path OR empty string — empty is treated as
   // "not set" and lets the SDK fall back to PATH lookup.
   if (isWindows) {
+    // Own local tool availability instead of depending on the SDK's rollout,
+    // which our nonessential-traffic policy disables. Git Bash remains available.
+    env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
     const inheritedGitBash = process.env.CLAUDE_CODE_GIT_BASH_PATH;
     let resolvedGitBash = '';
     if (inheritedGitBash && existsSync(inheritedGitBash)) {
