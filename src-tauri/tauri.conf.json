@@ -67,9 +67,6 @@
       "infoplist/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
       "infoplist/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings"
     },
-    "externalBin": [
-      "binaries/cuse"
-    ],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "entitlements": "Entitlements.plist",

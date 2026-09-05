@@ -72,7 +72,7 @@ myagents-releases/
 此脚本会：
 1. 检查基础依赖，并按 `rust-toolchain.toml` 准备 Rust toolchain、`rustfmt` / `clippy`、`x86_64-pc-windows-msvc` target
 2. 根据 exact prepared cache 提前检查 CMake 3.28+/MSVC 等原生推理构建工具；缺失时在下载或安装项目依赖前给出修复命令，不自动安装原生构建工具
-3. 下载 bundled Node.js v24 运行时、cuse、Git 安装包和 VC++ Runtime DLL
+3. 下载 bundled Node.js v24 运行时、Git 安装包和 VC++ Runtime DLL
 4. 安装前端/后端依赖 (`npm install`)
 5. 下载 Rust crates（`cargo fetch`）
 6. 准备 x64 离线文档 Worker、OCR、ONNX Runtime 与 PDFium；资源缓存跨 `npm run clean` 复用

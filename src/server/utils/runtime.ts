@@ -208,56 +208,6 @@ export function getBundledRuntimePath(): string {
 }
 
 /**
- * Get the absolute path to the bundled cuse (computer-use MCP) binary.
- *
- * Layout mirrors bundled bun:
- * - macOS (prod):     <bundle>/Contents/MacOS/cuse
- * - Windows (prod):   <install-dir>/cuse.exe (flat, alongside bun.exe + server-dist.js)
- * - Dev:              <project>/src-tauri/binaries/cuse-<target-triple>[.exe]
- *
- * Returns null on unsupported platforms (Linux) or when the binary is
- * missing — callers (MCP resolver) are responsible for gracefully disabling
- * the cuse preset in that case.
- */
-export function getBundledCusePath(): string | null {
-  // Hard platform gate: cuse only ships macOS + Windows binaries.
-  if (process.platform !== 'darwin' && process.platform !== 'win32') {
-    return null;
-  }
-
-  const scriptDir = getScriptDir();
-
-  if (isWindows()) {
-    // Production: flat layout, cuse.exe next to bun.exe / server-dist.js
-    const prodBin = resolve(scriptDir, 'cuse.exe');
-    if (existsSync(prodBin)) return prodBin;
-  } else {
-    // macOS production: Contents/MacOS/cuse (sibling of bun, via externalBin)
-    const prodBin = resolve(scriptDir, '..', 'MacOS', 'cuse');
-    if (existsSync(prodBin)) return prodBin;
-  }
-
-  // Development: walk up from scriptDir to find src-tauri/binaries/cuse-<triple>.
-  // download_cuse.sh always writes both macOS target triples (same
-  // universal binary), so checking the arch-matching triple is enough —
-  // no alt-triple fallback needed.
-  const triple = isWindows()
-    ? 'cuse-x86_64-pc-windows-msvc.exe'
-    : (process.arch === 'arm64'
-        ? 'cuse-aarch64-apple-darwin'
-        : 'cuse-x86_64-apple-darwin');
-
-  let dir = scriptDir;
-  for (let i = 0; i < 6; i++) {
-    const devBin = resolve(dir, 'src-tauri', 'binaries', triple);
-    if (existsSync(devBin)) return devBin;
-    dir = dirname(dir);
-  }
-
-  return null;
-}
-
-/**
  * Get the absolute path to the bundled sharp module's CommonJS entry (`lib/index.js`).
  *
  * sharp ships per-platform native addons (`@img/sharp-<triple>/sharp.node`) that

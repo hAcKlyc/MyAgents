@@ -1990,3 +1990,15 @@ describe('Codex app-server protocol helpers', () => {
     });
   });
 });
+
+// Old Session definitions may bypass the current preset catalogue.
+it('omits retired bundled Cuse from Codex launch while retaining custom Cuse', () => {
+  const projection = projectManagedCodexMcpLaunchConfig([
+    { id: 'legacy-cuse', name: 'Legacy', isBuiltin: true, type: 'stdio', command: '__bundled_cuse__' },
+    { id: 'cuse', name: 'Custom', isBuiltin: false, type: 'stdio', command: 'cuse', args: ['mcp'] },
+  ], {});
+  expect(projection.acceptedServerIds).toEqual(['cuse']);
+  expect(projection.failures).toEqual([]);
+  expect(projection.args.join(' ')).not.toContain('__bundled_cuse__');
+  expect(projection.serverNames).toHaveLength(1);
+});

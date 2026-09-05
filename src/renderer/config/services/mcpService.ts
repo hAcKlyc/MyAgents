@@ -29,7 +29,7 @@ function getRendererPlatform(): NodeJS.Platform {
 
 /**
  * Filter out presets whose `platforms` field doesn't include the host.
- * Keeps platform-specific presets (e.g. cuse on darwin/win32) invisible
+ * Keeps platform-specific presets invisible
  * everywhere on unsupported hosts. Mirror of admin-config.ts filter —
  * the two sites share the same semantic so catalogue and effective server
  * list stay in sync.

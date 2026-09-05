@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { McpServerDefinition } from './config-types';
+import { PRESET_MCP_SERVERS, type McpServerDefinition } from './config-types';
 import {
   applyMcpServerConfigAdditions,
   promoteAgentMcpJsonToGlobal,
@@ -20,6 +20,20 @@ function remote(id: string): McpServerDefinition {
 }
 
 describe('MCP config helpers', () => {
+  it('retires bundled Cuse definitions without deleting custom servers or config', () => {
+    const retired: McpServerDefinition = {
+      id: 'legacy-cuse', name: 'Old preset', isBuiltin: true, type: 'stdio', command: '__bundled_cuse__',
+    };
+    const custom = { ...retired, id: 'cuse', isBuiltin: false, command: 'cuse', args: ['mcp'] };
+    const config = { mcpServerArgs: { cuse: ['--verbose'] } };
+    expect(PRESET_MCP_SERVERS.some(server => server.id === 'cuse')).toBe(false);
+    expect(applyMcpServerConfigAdditions([retired, custom], config)).toEqual([
+      { ...custom, args: ['mcp', '--verbose'] },
+    ]);
+    expect(retired.command).toBe('__bundled_cuse__');
+    expect(config.mcpServerArgs.cuse).toEqual(['--verbose']);
+  });
+
   it('defaults only absent standard Playwright args to isolated mode', () => {
     const playwright: McpServerDefinition = {
       id: 'playwright',

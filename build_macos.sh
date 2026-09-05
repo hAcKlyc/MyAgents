@@ -200,18 +200,6 @@ fi
 echo -e "${GREEN}✓ TypeScript 检查通过${NC}"
 echo ""
 
-# 下载最新 cuse 二进制 (computer-use MCP)
-# 每次构建都拉取最新 release —— cuse 私有仓库的 release.yml 自动构建并发到 GH Release，
-# 维护者再跑 MyAgents-Cuse/publish_r2.sh 把产物镜像到 R2（`download.myagents.io/cuse/...`），
-# 此脚本从 R2 公网拉取，无需 gh CLI / 无需访问私有仓库。
-echo -e "${BLUE}[4.5/7] 拉取最新 cuse 二进制...${NC}"
-if ! "${PROJECT_DIR}/scripts/download_cuse.sh"; then
-    echo -e "${RED}✗ cuse 下载失败，无法继续构建${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✓ cuse 已就绪${NC}"
-echo ""
-
 # npm optionalDependencies are platform-filtered. A previous cross-arch repair
 # (for example installing the x64 Claude SDK on an arm64 host) can leave the
 # root node_modules with @esbuild/darwin-x64 while the current Node process is
@@ -285,60 +273,9 @@ echo ""
 NODEJS_DIR="${PROJECT_DIR}/src-tauri/resources/nodejs"
 
 # ========================================
-# 签名 externalBin 可执行文件
-# ========================================
-echo -e "${BLUE}[6/7] 签名外部二进制文件...${NC}"
-
-# 重签名：官方/下载的二进制默认用各自官方签名；macOS TCC 会把它们视为独立应用，
-# 导致每次访问受保护目录需单独授权。重签后子进程与主应用共享同一 Team ID，TCC
-# 权限（含 Screen Recording / Accessibility / AppleEvents）统一继承。
-echo -e "  ${CYAN}签名 externalBin 可执行文件 (使用应用签名替换官方签名)...${NC}"
-# Pit-of-success: signs ANY file matching src-tauri/binaries/*-apple-darwin.
-# Dropping a new externalBin under src-tauri/binaries/ with the apple-darwin
-# triple is enough — the loop auto-picks it up, re-signs it with our
-# Developer ID + hardened runtime + entitlements, and TCC permissions
-# inherit through the shared code signature. No per-binary enumeration to
-# keep in sync with tauri.conf.json.
-EXTBIN_DIR="${PROJECT_DIR}/src-tauri/binaries"
-EXTBIN_SIGNED_COUNT=0
-EXTBIN_FAILED_COUNT=0
-
-for bin in "${EXTBIN_DIR}"/*-apple-darwin; do
-    if [ -f "$bin" ]; then
-        echo -e "    ${CYAN}处理: $(basename "$bin")${NC}"
-
-        # 1. 移除 quarantine 属性 (macOS 会标记下载的二进制文件)
-        # 参考：https://v2.tauri.app/develop/sidecar/
-        xattr -d com.apple.quarantine "$bin" 2>/dev/null || true
-
-        # 2. 重签名：使用 --force 强制重签名，--options runtime 启用 hardened runtime
-        # --entitlements 使用应用的 entitlements 确保 JIT 等权限
-        # 子进程与主应用共享相同的 Team ID，TCC 权限（含 Screen Recording /
-        # Accessibility / AppleEvents）可以正确继承。
-        if codesign --force --options runtime --timestamp \
-            --entitlements "${PROJECT_DIR}/src-tauri/Entitlements.plist" \
-            --sign "$APPLE_SIGNING_IDENTITY" "$bin"; then
-            echo -e "    ${GREEN}✓ $(basename "$bin") 签名成功${NC}"
-            ((EXTBIN_SIGNED_COUNT++))
-        else
-            echo -e "    ${RED}✗ $(basename "$bin") 签名失败${NC}"
-            ((EXTBIN_FAILED_COUNT++))
-        fi
-    fi
-done
-
-if [ $EXTBIN_FAILED_COUNT -gt 0 ]; then
-    echo -e "${RED}错误: externalBin 签名失败，构建终止${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✓ externalBin 签名完成 (${EXTBIN_SIGNED_COUNT} 个文件)${NC}"
-
-echo ""
-
-# ========================================
 # 签名 Vendor 二进制文件 (ripgrep)
 # ========================================
-echo -e "  ${CYAN}签名 Vendor 二进制文件 (ripgrep, .node)...${NC}"
+echo -e "${BLUE}[6/7] 签名 Vendor 二进制文件 (ripgrep, .node)...${NC}"
 
 # 签名所有 macOS 二进制文件
 VENDOR_DIR="${SDK_DEST}/vendor"

@@ -1,7 +1,7 @@
 import type { McpServerDefinition } from '../../../../shared/config-types';
+import { isRetiredBundledMcpServer } from '../../../../shared/mcpConfig';
 import { resolveMcpTemplateValue } from '../../../session-core/mcp-template-resolution';
 import { NpxMcpResolutionError, resolveNpxMcpInvocation } from '../../../utils/mcp-command';
-import { getBundledCusePath } from '../../../utils/runtime';
 
 const CODEX_MCP_NO_PROXY_VAL = 'localhost,localhost.localdomain,127.0.0.1,127.0.0.0/8,::1';
 /** Native attempt bound, deliberately independent from MyAgents' 10s dispatch grace. */
@@ -207,6 +207,7 @@ export function projectManagedCodexMcpLaunchConfig(
   }>();
 
   for (const server of servers) {
+    if (isRetiredBundledMcpServer(server)) continue;
     const serverArgs: string[] = [];
     const serverEnvPatch: Record<string, string | undefined> = {};
     const nextAssignedParentEnv = new Map(assignedParentEnv);
@@ -218,14 +219,10 @@ export function projectManagedCodexMcpLaunchConfig(
       }
 
       if (server.type === 'stdio') {
-        let command = server.command;
+        const command = server.command;
         if (command === '__builtin__') {
           acceptedServerIds.push(server.id);
           continue;
-        }
-        if (command === '__bundled_cuse__') {
-          command = getBundledCusePath() ?? undefined;
-          if (!command) reject('bundled cuse binary not found');
         }
         if (!command) reject('missing stdio command');
         let stdioArgs = Array.isArray(server.args) ? [...server.args] : [];

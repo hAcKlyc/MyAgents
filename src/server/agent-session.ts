@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { createRequire } from 'module';
 import { query, getSessionMessages as sdkGetSessionMessages, forkSession as sdkForkSession, deleteSession as sdkDeleteSession, type Query, type SDKUserMessage, type AgentDefinition, type HookInput, type HookJSONOutput, type PreToolUseHookInput, type PostToolUseHookInput, type PermissionRequestHookInput, type SlashCommand as SdkSlashCommand } from '@anthropic-ai/claude-agent-sdk';
+import { isRetiredBundledMcpServer } from '../shared/mcpConfig';
 import { SDK_BUILTIN_TOOLS } from './sdk-builtin-tools';
 import {
   decideBackgroundAgentPermission,
@@ -3948,6 +3949,7 @@ async function buildSdkMcpServers(
   // "Invalid MCP configuration: X is a reserved MCP name." → exit code 1
   const allServers: McpServerDefinition[] = configState.currentMcpServers ?? [];
   const servers = allServers.filter(s => {
+    if (isRetiredBundledMcpServer(s)) return false;
     const normalized = s.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     if (SDK_RESERVED_MCP_NAMES.includes(normalized)) {
       console.warn(`[agent] MCP "${s.id}" skipped: conflicts with SDK reserved name. Rename to avoid this.`);
@@ -4040,22 +4042,6 @@ async function buildSdkMcpServers(
       let command = server.command;
       // Defensive: args may be non-array (e.g. boolean `true`) due to CLI parsing bugs or manual config edits
       let args = [...(Array.isArray(server.args) ? server.args : [])];
-
-      // Sentinel: bundled cuse (computer-use) binary — resolve to the
-      // platform-specific path shipped in the app bundle. If the binary is
-      // missing (unsupported platform, or a dev build without the binary
-      // downloaded yet), skip the MCP with a warning rather than crashing
-      // the session.
-      if (command === '__bundled_cuse__') {
-        const { getBundledCusePath } = await import('./utils/runtime');
-        const cusePath = getBundledCusePath();
-        if (!cusePath) {
-          console.warn(`[agent] MCP ${server.id}: bundled cuse binary not found (platform=${process.platform}); skipping. Run scripts/download_cuse.sh to install.`);
-          continue;
-        }
-        command = cusePath;
-        console.log(`[agent] MCP ${server.id}: resolved to bundled cuse at ${cusePath}`);
-      }
 
       // For npx commands: prefer system npx → bundled Node.js npx → bun x
       // System Node.js is maintained by the user's package manager, more reliable than our bundled npm.
@@ -9860,7 +9846,7 @@ export async function interruptCurrentResponse(reason: CancelReason = 'user'): P
 
     // Step 3: If interrupt "succeeded" (SDK ACKed), verify the turn actually completed.
     // interrupt() resolving only means the SDK received the signal — it does NOT guarantee
-    // the subprocess stopped processing. If an MCP tool is hung (e.g., cuse Read on a large
+    // the subprocess stopped processing. If an MCP tool is hung (e.g., reading a large
     // screenshot), the SDK subprocess remains blocked on client.callTool() with a ~28-hour
     // timeout. The for-await loop gets no more events, stdin transcriptState.messages are swallowed, and
     // the user sees "no response" until the 10-minute watchdog fires.

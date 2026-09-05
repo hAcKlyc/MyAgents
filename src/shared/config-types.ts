@@ -2632,19 +2632,6 @@ export const PRESET_MCP_SERVERS: McpServerDefinition[] = [
     isBuiltin: true,
     isFree: true,
   },
-  {
-    id: 'cuse',
-    name: 'Cuse 电脑控制',
-    description: '让 AI 直接操作你的电脑：截图、点击、输入、滚动。',
-    type: 'stdio',
-    // Sentinel resolved at MCP launch to the bundled cuse binary path —
-    // see getBundledCusePath() in src/server/utils/runtime.ts.
-    command: '__bundled_cuse__',
-    args: ['mcp', '--caller-app', 'MyAgents'],
-    isBuiltin: true,
-    isFree: true,
-    platforms: ['darwin', 'win32'],
-  },
 ];
 
 // ===== MCP OAuth 2.0 Types =====

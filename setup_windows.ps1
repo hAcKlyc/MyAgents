@@ -195,7 +195,7 @@ try {
 
         Write-Host "提取 VC++ Runtime DLL (app-local deployment)..." -ForegroundColor Blue
 
-        # Native binaries (SDK Claude, cuse, etc.) on Windows may require VCRUNTIME140.dll.
+        # Native binaries (SDK Claude, etc.) on Windows may require VCRUNTIME140.dll.
         # App-local deployment: copy DLLs into resources/ so end users don't need to install
         # VC++ Redistributable separately.
         $dlls = @("vcruntime140.dll", "vcruntime140_1.dll")
@@ -223,9 +223,7 @@ try {
     }
 
     # Main
-    Write-Host "Step 1/8: 检查并安装依赖" -ForegroundColor Blue
-    # Eight numbered steps remain: the Mino template now ships with the repo,
-    # so setup no longer owns a separate clone/preparation step.
+    Write-Host "Step 1/7: 检查并安装依赖" -ForegroundColor Blue
 
     # Check winget availability for auto-install
     $HasWinget = $false
@@ -295,35 +293,16 @@ try {
     }
     Write-Host "OK - 原生推理构建依赖检查完成" -ForegroundColor Green
 
-    Write-Host "`nStep 2/8: 下载 Node.js 运行时 (Sidecar + MCP Server + 社区工具统一 runtime)" -ForegroundColor Blue
+    Write-Host "`nStep 2/7: 下载 Node.js 运行时 (Sidecar + MCP Server + 社区工具统一 runtime)" -ForegroundColor Blue
     Get-NodeJSBinary
 
-    # cuse (computer-use MCP) 二进制 — 与 build_windows.ps1 同一脚本，dev 模式
-    # 通过 src/server/utils/runtime.ts::getBundledCusePath() 在 src-tauri/binaries/
-    # 下找。download_cuse.ps1 自带版本短路（latest.json + .cuse-version + PE
-    # header 烟雾测试），重跑是 noop。网络失败按软失败处理：dev 下 cuse
-    # 缺失会被 getBundledCusePath() 返回 null，MCP 优雅 skip + warn，不应阻断
-    # 整个 setup。
-    Write-Host "`nStep 3/8: 下载 cuse computer-use 二进制" -ForegroundColor Blue
-    try {
-        & "$ProjectDir\scripts\download_cuse.ps1"
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
-            throw "download_cuse.ps1 exit $LASTEXITCODE"
-        }
-        Write-Host "OK - cuse ready" -ForegroundColor Green
-    } catch {
-        Write-Host "  cuse 下载失败: $_" -ForegroundColor Yellow
-        Write-Host "  ⚠ computer-use 功能在 dev 模式下将不可用，网络恢复后可重跑：" -ForegroundColor Yellow
-        Write-Host "    .\scripts\download_cuse.ps1" -ForegroundColor Yellow
-    }
-
-    Write-Host "`nStep 4/8: 下载 Git 安装包 (用于 NSIS 打包)" -ForegroundColor Blue
+    Write-Host "`nStep 3/7: 下载 Git 安装包 (用于 NSIS 打包)" -ForegroundColor Blue
     Get-GitInstaller
 
-    Write-Host "`nStep 5/8: 提取 VC++ Runtime DLL" -ForegroundColor Blue
+    Write-Host "`nStep 4/7: 提取 VC++ Runtime DLL" -ForegroundColor Blue
     Get-VCRuntime
 
-    Write-Host "`nStep 6/8: 安装前端/后端依赖" -ForegroundColor Blue
+    Write-Host "`nStep 5/7: 安装前端/后端依赖" -ForegroundColor Blue
     & npm install
     if ($LASTEXITCODE -ne 0) {
         Write-Host "依赖安装失败" -ForegroundColor Red
@@ -341,7 +320,7 @@ try {
         exit 1
     }
 
-    Write-Host "`nStep 7/8: 下载 Rust 依赖" -ForegroundColor Blue
+    Write-Host "`nStep 6/7: 下载 Rust 依赖" -ForegroundColor Blue
     Write-Host "  正在下载 Rust 依赖包，请稍候..." -ForegroundColor Cyan
     Push-Location (Join-Path $ProjectDir "src-tauri")
     & cargo fetch
@@ -365,7 +344,7 @@ try {
     }
     Write-Host "OK - 原生推理资源 ready" -ForegroundColor Green
 
-    Write-Host "`nStep 8/8: 初始化完成!" -ForegroundColor Blue
+    Write-Host "`nStep 7/7: 初始化完成!" -ForegroundColor Blue
     Write-Host "`n=========================================" -ForegroundColor Green
     Write-Host "  开发环境准备就绪!" -ForegroundColor Green
     Write-Host "=========================================`n" -ForegroundColor Green

@@ -477,7 +477,7 @@ export async function atomicModifyProjects(
 /** Preset MCP servers (statically imported — see top of file) */
 function getPresetMcpServers(): McpServerDefinition[] {
   // Filter out presets whose `platforms` field doesn't include the host —
-  // keeps platform-specific presets (e.g. cuse on darwin/win32) invisible
+  // keeps platform-specific presets invisible
   // everywhere on unsupported hosts (catalogue, validation, effective
   // MCP lists, `myagents mcp list`).
   return (PRESET_MCP_SERVERS as McpServerDefinition[]).filter(p =>

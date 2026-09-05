@@ -97,9 +97,6 @@ jobs:
           printf 'ci placeholder\n' > src-tauri/resources/playwright-control/@playwright/mcp/.ci-placeholder
           printf 'ci placeholder\n' > src-tauri/resources/playwright-control/playwright/.ci-placeholder
           printf 'ci placeholder\n' > src-tauri/resources/playwright-control/playwright-core/.ci-placeholder
-          mkdir -p src-tauri/binaries
-          printf '#!/usr/bin/env sh\nexit 0\n' > src-tauri/binaries/cuse-x86_64-unknown-linux-gnu
-          chmod +x src-tauri/binaries/cuse-x86_64-unknown-linux-gnu
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D clippy::disallowed_methods -D clippy::disallowed_macros
 
@@ -132,8 +129,7 @@ jobs:
             'src-tauri/resources/cli',
             'src-tauri/resources/playwright-control/@playwright/mcp',
             'src-tauri/resources/playwright-control/playwright',
-            'src-tauri/resources/playwright-control/playwright-core',
-            'src-tauri/binaries'
+            'src-tauri/resources/playwright-control/playwright-core'
           )
           foreach ($directory in $resourceDirs) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -150,5 +146,4 @@ jobs:
           Set-Content src-tauri/resources/playwright-control/playwright-core/.ci-placeholder 'ci placeholder'
           Set-Content src-tauri/resources/vcruntime140.dll 'ci placeholder'
           Set-Content src-tauri/resources/vcruntime140_1.dll 'ci placeholder'
-          Set-Content src-tauri/binaries/cuse-x86_64-pc-windows-msvc.exe 'ci placeholder'
       - run: cargo check --manifest-path src-tauri/Cargo.toml --locked

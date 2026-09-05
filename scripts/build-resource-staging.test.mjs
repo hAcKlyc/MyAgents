@@ -415,7 +415,7 @@ test('native prerequisite preflight runs before expensive or destructive entry-p
     toolchain:
       '& "$ProjectDir\\scripts\\ensure_rust_toolchain.ps1" -Targets',
     expensiveBoundary:
-      'Write-Host "`nStep 2/8: 下载 Node.js 运行时',
+      'Write-Host "`nStep 2/7: 下载 Node.js 运行时',
     label: 'Windows setup',
   });
   const windowsSetupMainAt = setupWindows.indexOf('# Main');
@@ -464,7 +464,7 @@ test('native prerequisite preflight runs before expensive or destructive entry-p
       'prepare-native-inference.mjs" "x86_64-pc-windows-msvc" --check-prerequisites',
     toolchain:
       '& "$ProjectDir\\scripts\\ensure_rust_toolchain.ps1" -Targets',
-    expensiveBoundary: 'Write-Host "  拉取最新 cuse 二进制',
+    expensiveBoundary: '& "$ProjectDir\\scripts\\download_nodejs.ps1"',
     label: 'Windows release build',
   });
 
@@ -703,4 +703,12 @@ test('speech inference builds a signed exact native inventory around the shared 
     tauriConfig.bundle.resources['../src-tauri/resources/speech-inference'],
     'speech-inference',
   );
+});
+
+test('retired Cuse is absent from package and setup inputs', () => {
+  const tauri = JSON.parse(readFileSync(resolve(repoRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
+  assert.ok(!(tauri.bundle.externalBin ?? []).some(binary => binary.includes('cuse')));
+  for (const source of [setupUnix, setupWindows, buildMacos, buildWindows, buildDev, buildDevWindows]) {
+    assert.doesNotMatch(source, /download_cuse|binaries[/\\]cuse|EXTBIN_DIR/);
+  }
 });
