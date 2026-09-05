@@ -1527,7 +1527,7 @@ export const PRESET_PROVIDERS: Provider[] = [
     name: '词元跳动 Token Dance',
     subtitle: '一键注册使用各类模型，最低折扣至50%',
     vendor: 'TokenDance',
-    cloudProvider: '官方合作',
+    cloudProvider: '官方',
     type: 'api',
     primaryModel: 'deepseek-v4-pro-0813',
     isBuiltin: true,

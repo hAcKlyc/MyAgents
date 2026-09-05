@@ -181,7 +181,7 @@
   },
   "providers": {
     "tokendance": {
-      "partner": "Official partner",
+      "partner": "Official",
       "intro": "Register once for a range of models, with discounts up to 50%",
       "account": "Token Dance account",
       "details": "Provider details",
