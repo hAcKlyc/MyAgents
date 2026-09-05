@@ -2,7 +2,7 @@
   "name": "myagents",
   "description": "MyAgents - Desktop Claude Code for everyone. AI-powered productivity, not just for developers.",
   "type": "module",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "license": "AGPL-3.0-only",
   "packageManager": "npm@11.13.0",
   "engines": {
