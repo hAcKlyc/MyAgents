@@ -1,6 +1,6 @@
 # Bundled Node.js 运行时架构
 
-MyAgents 随应用提供单一 Node.js v24，用于 Sidecar、Plugin Bridge、MCP Server 和 `myagents` CLI。用户不需要安装系统 Node 才能运行产品功能；具体 Node 版本以 `scripts/download_nodejs.sh` / `.ps1` 的 `NODE_VERSION` 为准。
+MyAgents 随应用提供单一 Node.js v24，用于 Sidecar、Plugin Bridge、MCP Server 和 `myagents` CLI。用户不需要安装系统 Node 才能运行产品功能；Node/npm 的精确组合以 `scripts/node-runtime.json` 为唯一构建权威，下载脚本和前端版本展示共同读取。开发用的 `package.json#packageManager` 不代表应用内置 npm。
 
 ## 获取、缓存与打包
 
@@ -9,7 +9,11 @@ Node 下载脚本从 nodejs.org 取得官方 target artifact，并维护两层�
 - `src-tauri/resources/nodejs-cache/<platform>-<arch>-v<version>/`：按平台、架构和版本隔离的本地 cache；
 - `src-tauri/resources/nodejs/`：当前 Tauri target 的 staging projection。
 
-构建脚本在每个 target build 前从正确 cache 重建 staging，并验证版本、平台与架构。`resources/nodejs/` 不是跨 target 的权威缓存；双架构或交叉构建不能复用上一个 target 遗留的 staging。
+macOS/Linux 构建脚本在每个 target build 前从正确 cache 重建 staging，并验证版本、平台与架构。`resources/nodejs/` 不是跨 target 的权威缓存；双架构或交叉构建不能复用上一个 target 遗留的 staging。
+
+Windows setup、dev build 和 release build 共用 `scripts/download_nodejs.ps1`，直接核验 staging 中 Node 的版本/平台/架构与 npm/npx 版本；不匹配则重新下载官方 ZIP 并用 robocopy 复制深层依赖。
+
+npm 随官方 Node 发行包整组获取，禁止通过 `npm/latest` 或独立升级覆盖它。缓存复用和 staging 校验必须读取 npm 自身的 `package.json` 并检查 npm/npx 入口，不能仅凭 Node 版本命中缓存。需要调整组合时修改 manifest，且所选官方发行包必须自带声明的 npm；不匹配即准备失败。
 
 打包后的主路径为：
 

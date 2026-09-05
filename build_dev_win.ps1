@@ -142,6 +142,9 @@ foreach ($dir in $dirsToClean) {
     }
 }
 
+# Prepare the same pinned Node/npm pair as setup and release builds.
+& "$PROJECT_DIR\scripts\download_nodejs.ps1"
+
 # 创建占位符资源目录（满足 Tauri bundle 阶段的资源校验）。
 # server-dist.js / plugin-bridge-dist.mjs / cli/myagents.cjs 在下面的
 # [2/3] 步骤显式生成；Tauri build 阶段会禁掉 beforeBuildCommand，避免重复打包。

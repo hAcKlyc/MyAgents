@@ -19,10 +19,17 @@ set -e
 # ========================================
 # Configuration
 # ========================================
-NODE_VERSION="24.14.0"  # Active LTS — moltbot 等包要求 >=24，不可降级
-NODE_BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
-
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Bootstrap must work without system Node or jq. This checked-in manifest has
+# one exact version per line; PowerShell and Vite read the same JSON authority.
+RUNTIME_MANIFEST="${PROJECT_DIR}/scripts/node-runtime.json"
+NODE_VERSION=$(sed -nE 's/^[[:space:]]*"node":[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)"[,]?[[:space:]]*$/\1/p' "$RUNTIME_MANIFEST")
+NPM_VERSION=$(sed -nE 's/^[[:space:]]*"npm":[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)"[,]?[[:space:]]*$/\1/p' "$RUNTIME_MANIFEST")
+if [[ ! "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$NPM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid pinned Node/npm versions in $RUNTIME_MANIFEST" >&2
+    exit 1
+fi
+NODE_BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
 RESOURCES_DIR="${PROJECT_DIR}/src-tauri/resources/nodejs"
 CACHE_ROOT="${PROJECT_DIR}/src-tauri/resources/nodejs-cache"
 
@@ -99,81 +106,27 @@ check_arch() {
     return 0
 }
 
-# Upgrade npm by downloading tarball directly (bypasses broken npm — no catch-22).
-# Node.js v24 bundles npm 11.9.0 whose minizlib crashes on Windows with
-# "Class extends value undefined". Self-upgrade via `npm install npm@latest`
-# CANNOT work when npm itself is broken. Instead we download the npm tarball
-# with curl and replace the node_modules/npm directory.
-#
-# Usage: upgrade_npm <npm_modules_dir> <node_bin_or_empty>
-#   npm_modules_dir: path containing npm/ (e.g., .../lib/node_modules or .../node_modules)
-#   node_bin:        path to node binary for version check (empty string to skip check)
-upgrade_npm() {
-    local npm_modules_dir="$1"
-    local node_bin="$2"
-    local npm_dir="${npm_modules_dir}/npm"
-
-    if [[ ! -d "$npm_dir" ]]; then
-        log_warn "npm directory not found at ${npm_dir}, skipping upgrade"
-        return 0
+# npm belongs to the official Node distribution. Inspect the package itself
+# even for cross-target caches, where the bundled executable cannot run here.
+check_npm() {
+    local dir="$1"
+    local platform="$2"
+    local npm_dir="${dir}/lib/node_modules/npm"
+    local bin_dir="${dir}/bin"
+    local suffix=""
+    if [[ "$platform" == "win" ]]; then
+        npm_dir="${dir}/node_modules/npm"
+        bin_dir="$dir"
+        suffix=".cmd"
     fi
-
-    local old_ver="unknown"
-    if [[ -n "$node_bin" && -x "$node_bin" ]]; then
-        old_ver=$("$node_bin" "${npm_dir}/bin/npm-cli.js" --version 2>/dev/null || echo "unknown")
-    fi
-    log_info "Upgrading npm (curl + tar, bypasses broken npm)... current: v${old_ver}"
-
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-
-    # Query npm registry for latest tarball URL
-    local tarball_url
-    tarball_url=$(curl -sL https://registry.npmjs.org/npm/latest | grep -o '"tarball":"[^"]*"' | head -1 | cut -d'"' -f4)
-    if [[ -z "$tarball_url" ]]; then
-        log_error "Failed to query npm registry (no tarball URL returned)"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-    log_info "Downloading: ${tarball_url}"
-
-    # Download and extract
-    if ! curl -sL "$tarball_url" -o "${tmp_dir}/npm.tgz"; then
-        log_error "Failed to download npm tarball"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    if ! tar -xzf "${tmp_dir}/npm.tgz" -C "$tmp_dir" 2>/dev/null; then
-        log_error "Failed to extract npm tarball"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    local extracted="${tmp_dir}/package"
-    if [[ ! -d "$extracted" ]]; then
-        log_error "Extracted npm tarball missing 'package' directory"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    # Replace old npm with new
-    rm -rf "$npm_dir"
-    mv "$extracted" "$npm_dir"
-
-    # Verify
-    local new_ver="unknown"
-    if [[ -n "$node_bin" && -x "$node_bin" ]]; then
-        new_ver=$("$node_bin" "${npm_dir}/bin/npm-cli.js" --version 2>/dev/null || echo "unknown")
-    else
-        new_ver=$(grep '"version"' "${npm_dir}/package.json" 2>/dev/null | head -1 | grep -o '"[0-9][^"]*"' | tr -d '"')
-    fi
-    log_ok "npm upgraded: v${old_ver} → v${new_ver}"
-
-    rm -rf "$tmp_dir"
+    [[ -f "${npm_dir}/package.json" && -f "${npm_dir}/bin/npm-cli.js" && -f "${npm_dir}/bin/npx-cli.js" ]] || return 1
+    [[ -f "${bin_dir}/npm${suffix}" && -f "${bin_dir}/npx${suffix}" ]] || return 1
+    local existing_npm
+    existing_npm=$(sed -nE 's/^  "version":[[:space:]]*"([^" ]+)"[,]?[[:space:]]*$/\1/p' "${npm_dir}/package.json")
+    [[ "$existing_npm" == "$NPM_VERSION" ]]
 }
 
-# Check if a staged/cache tree contains the expected Node.js version and arch.
+# Check the pinned Node/npm pair and target before reusing or staging a tree.
 # Usage: check_existing <dir> <platform> [expected_arch]
 #   platform: darwin | linux | win
 #   expected_arch: arm64 | x64 (optional for win)
@@ -224,7 +177,8 @@ check_existing() {
         if [[ -n "$expected_arch" && ( "$platform" == "darwin" || "$platform" == "linux" ) ]]; then
             check_arch "$node_bin" "$expected_arch" || return 1
         fi
-        return 0  # Version and arch match
+        check_npm "$dir" "$platform" || return 1
+        return 0  # Node/npm versions and target match
     fi
     return 1
 }
@@ -349,7 +303,7 @@ download_macos() {
     trap "rm -rf '$tmp_dir'" RETURN
 
     # Download
-    curl -sL "$url" -o "${tmp_dir}/${tarball}"
+    curl -fsSL "$url" -o "${tmp_dir}/${tarball}"
 
     # Extract — strip the top-level directory
     log_info "Extracting..."
@@ -359,11 +313,8 @@ download_macos() {
     local extracted_dir="${tmp_dir}/node-v${NODE_VERSION}-darwin-${node_arch}"
     install_unix_distribution "$extracted_dir" "$cache_dir"
 
-    # Upgrade npm — bundled npm 11.9.0 has minizlib bug on Windows.
-    # Even for macOS builds, upgrade ensures consistency across platforms. Do
-    # it once per cache entry so target switching does not force Node re-fetches.
-    upgrade_npm "${cache_dir}/lib/node_modules" "${cache_dir}/bin/node"
     write_metadata "$cache_dir" "darwin" "$node_arch"
+    check_existing "$cache_dir" "darwin" "$node_arch" || { log_error "Downloaded runtime does not match Node $NODE_VERSION / npm $NPM_VERSION"; return 1; }
 
     if [[ "$should_stage" == "true" ]]; then
         stage_nodejs "$cache_dir" "darwin" "$node_arch"
@@ -410,7 +361,7 @@ download_linux() {
     tmp_dir=$(mktemp -d)
     trap "rm -rf '$tmp_dir'" RETURN
 
-    curl -sL "$url" -o "${tmp_dir}/${tarball}"
+    curl -fsSL "$url" -o "${tmp_dir}/${tarball}"
 
     log_info "Extracting..."
     tar xf "${tmp_dir}/${tarball}" -C "$tmp_dir"
@@ -418,8 +369,8 @@ download_linux() {
     local extracted_dir="${tmp_dir}/node-v${NODE_VERSION}-linux-${node_arch}"
     install_unix_distribution "$extracted_dir" "$cache_dir"
 
-    upgrade_npm "${cache_dir}/lib/node_modules" "${cache_dir}/bin/node"
     write_metadata "$cache_dir" "linux" "$node_arch"
+    check_existing "$cache_dir" "linux" "$node_arch" || { log_error "Downloaded runtime does not match Node $NODE_VERSION / npm $NPM_VERSION"; return 1; }
 
     if [[ "$should_stage" == "true" ]]; then
         stage_nodejs "$cache_dir" "linux" "$node_arch"
@@ -452,7 +403,7 @@ download_windows() {
     tmp_dir=$(mktemp -d)
     trap "rm -rf '$tmp_dir'" RETURN
 
-    curl -sL "$url" -o "${tmp_dir}/${zipfile}"
+    curl -fsSL "$url" -o "${tmp_dir}/${zipfile}"
 
     log_info "Extracting..."
     unzip -q "${tmp_dir}/${zipfile}" -d "$tmp_dir"
@@ -473,10 +424,8 @@ download_windows() {
     rm -f "${cache_dir}/corepack.cmd" "${cache_dir}/corepack"
     rm -rf "${cache_dir}/node_modules/corepack"
 
-    # Upgrade npm — Windows layout uses node_modules/ (no lib/ prefix).
-    # Can't run node.exe on macOS for version check, pass empty string.
-    upgrade_npm "${cache_dir}/node_modules" ""
     write_metadata "$cache_dir" "win" "$arch"
+    check_existing "$cache_dir" "win" "$arch" || { log_error "Downloaded runtime does not match Node $NODE_VERSION / npm $NPM_VERSION"; return 1; }
 
     if [[ "$should_stage" == "true" ]]; then
         stage_nodejs "$cache_dir" "win" "$arch"
