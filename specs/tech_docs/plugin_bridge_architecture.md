@@ -71,8 +71,8 @@ install_sdk_shim()（最后写入，覆盖 npm 可能安装的真 openclaw 包�
 Rust spawn_plugin_bridge()
   ↓
 1. 定位内置 node 可执行文件 + `plugin-bridge-dist.mjs`
-2. SDK shim 完整性检查（package.json version 含 "-shim"?）
-   └─ 不通过 → 自动重新安装 shim
+2. SDK shim 完整性与版本检查（package.json version 含 "-shim" 且匹配当前兼容版本）
+   └─ 不通过 → 从 App 资源复制当前 shim，不运行 npm、不升级已安装插件
 3. 构造 node 启动命令，并通过 `process_cmd::spawn_tree()` 创建进程树
    └─ 敏感配置通过 BRIDGE_PLUGIN_CONFIG 环境变量传递（不暴露到 ps）
    └─ 注入 per-channel OpenClaw 状态目录（OPENCLAW_STATE_DIR / OPENCLAW_CONFIG_PATH / OPENCLAW_OAUTH_DIR；名字以上游 utils.ts/paths.ts 实际消费者为准）
@@ -264,7 +264,6 @@ sdk-shim/
 
 | 维度 | 手写模块 | 自动生成 stub |
 |------|---------|-------------|
-| 数量 | 37 | 340 |
 | 保护机制 | `_handwritten.json` 清单 | `AUTO-GENERATED STUB` header |
 | 函数行为 | 真实逻辑（简化版） | 首次调用打印警告，返回安全默认值 |
 | 维护方式 | 手动编写和更新 | `npm run generate:sdk-shims` 自动生成 |
@@ -304,6 +303,8 @@ sdk-shim/
 
 三处 identity 必须一致；当前字面值以源码和生成器校验为准，不在文档复制。
 
+修改 shim 内容或 exports 时也必须同步更新三处 identity，否则已安装插件会在启动时继续复用旧 shim。普通 Channel 启动只检查并刷新 shim；npm 安装或升级由显式插件安装 / 更新入口执行。
+
 Shim 用 ESM 格式（`"type": "module"`），生成器输出 `export function`，与上游 OpenClaw `plugin-sdk/*` 子路径导出对齐。
 
 ### 维护工作流
@@ -321,6 +322,8 @@ git diff src/server/plugin-bridge/sdk-shim/  # 审查变更
 3. 重跑生成器（它会跳过该文件）
 
 插件引入尚未手写适配的 SDK export 时，生成 stub 让单项功能按兼容合同降级并记录未实现警告；不能因一个缺失 module 使整个 Bridge 在 import 阶段崩溃。需要真实行为时再把对应模块升级为受保护的手写实现。
+
+插件使用的兼容子路径可能已不在当前上游源码的 exports 中，仍需登记到 `_handwritten.json` 才能在生成时保留。例如微信 2.4.8 的 `channel-message.createTypingCallbacks` 复用 `channel-runtime` 的既有实现，与 2.4.6 保持相同的 Bridge typing 行为。
 
 ## HTTP 端点一览
 

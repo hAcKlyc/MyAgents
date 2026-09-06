@@ -18,6 +18,8 @@
  * specific name from each closed issue regresses and this suite fails.
  */
 
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { setOpenClawConfigSnapshot } from '../plugin-bridge/openclaw-config';
@@ -25,6 +27,20 @@ import { setOpenClawConfigSnapshot } from '../plugin-bridge/openclaw-config';
 const SHIM_BASE = '../plugin-bridge/sdk-shim/plugin-sdk';
 
 describe('plugin-bridge SDK shim — drift-stub augmentation', () => {
+  it('resolves the Weixin 2.4.8 channel-message import to the existing typing contract', async () => {
+    // Resolve through Node's package exports, as the plugin's lazy monitor
+    // import does. A relative import alone would miss an absent exports entry.
+    const require = createRequire(new URL('../plugin-bridge/sdk-shim/package.json', import.meta.url));
+    const mod = await import(pathToFileURL(require.resolve('openclaw/plugin-sdk/channel-message')).href);
+    const legacy = await import(`${SHIM_BASE}/channel-runtime.js`);
+    expect(mod.createTypingCallbacks).toBe(legacy.createTypingCallbacks);
+
+    const callbacks = mod.createTypingCallbacks({ start: async () => {}, stop: async () => {} });
+    await expect(callbacks.onReplyStart()).resolves.toBeUndefined();
+    expect(callbacks.onIdle()).toBeUndefined();
+    expect(callbacks.onCleanup()).toBeUndefined();
+  });
+
   it('exports listChatCommandsForConfig as a function (issue #187)', async () => {
     const mod = await import(`${SHIM_BASE}/command-auth.js`);
     expect(typeof mod.listChatCommandsForConfig).toBe('function');

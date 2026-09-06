@@ -1,6 +1,6 @@
 {
   "name": "openclaw",
-  "version": "2026.6.29-shim",
+  "version": "2026.9.6-shim",
   "type": "module",
   "exports": {
     "./plugin-sdk": "./plugin-sdk/index.js",
@@ -54,6 +54,7 @@
     "./plugin-sdk/channel-location": "./plugin-sdk/channel-location.js",
     "./plugin-sdk/channel-logging": "./plugin-sdk/channel-logging.js",
     "./plugin-sdk/channel-mention-gating": "./plugin-sdk/channel-mention-gating.js",
+    "./plugin-sdk/channel-message": "./plugin-sdk/channel-message.js",
     "./plugin-sdk/channel-pairing": "./plugin-sdk/channel-pairing.js",
     "./plugin-sdk/channel-pairing-paths": "./plugin-sdk/channel-pairing-paths.js",
     "./plugin-sdk/channel-plugin-common": "./plugin-sdk/channel-plugin-common.js",

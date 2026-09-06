@@ -11,6 +11,7 @@
   "channel-entry-contract",
   "channel-feedback",
   "channel-inbound",
+  "channel-message",
   "channel-plugin-common",
   "channel-policy",
   "channel-reply-pipeline",
