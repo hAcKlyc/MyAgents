@@ -66,7 +66,7 @@ describe('normalizeProviderOrder', () => {
     expect(normalizeProviderOrder(['a', 'b', 'c'], ['c', 'a'])).toEqual(['c', 'a', 'b']);
   });
 
-  it('introduces Token Dance first while preserving an explicitly saved position', () => {
+  it('pins Token Dance first while preserving every other saved relative position', () => {
     const ids = withManagedCodexProviderCatalog(PRESET_PROVIDERS, DEFAULT_CONFIG)
       .map(provider => provider.id);
     const legacyOrder = ['deepseek', SUBSCRIPTION_PROVIDER_ID];
@@ -77,7 +77,9 @@ describe('normalizeProviderOrder', () => {
     ]);
     const explicitOrder = ['deepseek', TOKENDANCE_PROVIDER_ID, SUBSCRIPTION_PROVIDER_ID];
     const ordered = normalizeProviderOrder(ids, explicitOrder);
-    expect(ordered.slice(0, 3)).toEqual(explicitOrder);
+    expect(ordered.slice(0, 3)).toEqual([TOKENDANCE_PROVIDER_ID, 'deepseek', SUBSCRIPTION_PROVIDER_ID]);
+    expect(normalizeProviderOrder(ids, ['unknown', 'deepseek', TOKENDANCE_PROVIDER_ID, TOKENDANCE_PROVIDER_ID]).slice(0, 2))
+      .toEqual([TOKENDANCE_PROVIDER_ID, 'deepseek']);
     expect(new Set(ordered).size).toBe(ids.length);
     expect(normalizeProviderOrder(ids, ordered)).toEqual(ordered);
     expect(legacyOrder).toEqual(['deepseek', SUBSCRIPTION_PROVIDER_ID]);

@@ -247,8 +247,9 @@ export function normalizeProviderOrder(
   providerOrder?: string[],
 ): string[] {
   const known = new Set(providerIds);
-  const seen = new Set<string>();
-  const ordered: string[] = [];
+  // Token Dance has a fixed display position; user order starts after it.
+  const ordered: string[] = known.has(TOKENDANCE_PROVIDER_ID) ? [TOKENDANCE_PROVIDER_ID] : [];
+  const seen = new Set(ordered);
 
   for (const id of providerOrder ?? []) {
     if (!known.has(id) || seen.has(id)) continue;
@@ -259,11 +260,6 @@ export function normalizeProviderOrder(
   for (const id of providerIds) {
     if (seen.has(id)) continue;
     seen.add(id);
-    // Recommend Token Dance first when it has no user-chosen position yet.
-    if (id === TOKENDANCE_PROVIDER_ID) {
-      ordered.unshift(id);
-      continue;
-    }
     const insertAfter =
       id === XAI_SUBSCRIPTION_PROVIDER_ID
         ? ordered.includes(CODEX_SUBSCRIPTION_PROVIDER_ID)

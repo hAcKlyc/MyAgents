@@ -482,6 +482,7 @@
       "deleteMessage": "Delete \"{{name}}\"? This cannot be undone."
     },
     "order": {
+      "fixedFirst": "Pinned first",
       "drag": "Drag to reorder",
       "dragProvider": "Drag to reorder {{name}}",
       "moveUp": "Move up",

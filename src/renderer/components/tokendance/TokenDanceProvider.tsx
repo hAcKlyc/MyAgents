@@ -27,6 +27,7 @@ import {
   type DiscoveredModel,
 } from '../../config/services/modelDiscoveryService';
 import ModelManagementPanel from '../ModelManagementPanel';
+import WebsiteLink from '../ExternalLink';
 import {
   TokenDanceDialog,
   TokenDanceBadge,
@@ -325,14 +326,22 @@ export default function TokenDanceProvider({
                 t('models.empty')}
             </p>
           </div>
-          <button
-            type="button"
-            className={iconButton}
-            onClick={() => setDialog('detail')}
-            aria-label={t('details')}
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <WebsiteLink
+              href="https://tokendance.space/models"
+              className="whitespace-nowrap rounded-lg px-1.5 py-1.5 text-xs text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)]"
+            >
+              {i18n.t('providers.website', { ns: 'settings' })}
+            </WebsiteLink>
+            <button
+              type="button"
+              className={iconButton}
+              onClick={() => setDialog('detail')}
+              aria-label={t('details')}
+            >
+              <Settings2 className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         {balance.configured ? (
           balanceView()

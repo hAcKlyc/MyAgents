@@ -59,6 +59,15 @@ describe('Token Dance authorization panel', () => {
       return undefined;
     });
   });
+  it('opens the model website from the card without starting authorization', () => {
+    render(<TokenDanceProvider provider={provider} />);
+    const link = screen.getByRole('link', { name: 'Website' });
+    expect(link).toHaveAttribute('href', 'https://tokendance.space/models');
+    fireEvent.click(link);
+    expect(mocks.open).toHaveBeenCalledWith('https://tokendance.space/models');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalledWith('cmd_tokendance_auth_open', expect.anything());
+  });
   it('keeps a balance placeholder and login guidance in the logged-out provider details', async () => {
     render(<TokenDanceProvider provider={provider} />);
     fireEvent.click(screen.getByRole('button', { name: 'Provider details' }));

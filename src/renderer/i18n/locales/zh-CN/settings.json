@@ -482,6 +482,7 @@
       "deleteMessage": "确定要删除「{{name}}」吗？此操作无法撤销。"
     },
     "order": {
+      "fixedFirst": "固定首位",
       "drag": "拖拽排序",
       "dragProvider": "拖拽排序 {{name}}",
       "moveUp": "上移",

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { ArrowDown, ArrowUp, GripVertical, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, GripVertical, Pin, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
     closestCenter,
@@ -21,6 +21,7 @@ import { CSS } from '@dnd-kit/utilities';
 
 import OverlayBackdrop from '@/components/OverlayBackdrop';
 import { normalizeProviderOrder, type Provider } from '@/config/types';
+import { TOKENDANCE_PROVIDER_ID } from '../../shared/tokendance';
 
 interface ProviderEnableOrderDialogProps {
     providers: Provider[];
@@ -37,11 +38,12 @@ interface ProviderOrderRowProps {
     index: number;
     isLast: boolean;
     enabled: boolean;
+    fixed?: boolean;
     onMove: (providerId: string, direction: -1 | 1) => void;
     onToggle: (providerId: string, enabled: boolean) => void;
 }
 
-function ProviderOrderRow({ provider, index, isLast, enabled, onMove, onToggle }: ProviderOrderRowProps) {
+function ProviderOrderRow({ provider, index, isLast, enabled, fixed = false, onMove, onToggle }: ProviderOrderRowProps) {
     const { t } = useTranslation('settings');
     const {
         attributes,
@@ -50,7 +52,7 @@ function ProviderOrderRow({ provider, index, isLast, enabled, onMove, onToggle }
         transform,
         transition,
         isDragging,
-    } = useSortable({ id: provider.id });
+    } = useSortable({ id: provider.id, disabled: fixed });
 
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
@@ -59,40 +61,50 @@ function ProviderOrderRow({ provider, index, isLast, enabled, onMove, onToggle }
 
     return (
         <div
+            data-provider-order-row={provider.id}
             ref={setNodeRef}
             style={style}
             className={`flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--paper)] px-3 py-3 transition-shadow ${isDragging ? 'relative z-10 shadow-lg ring-1 ring-[var(--focus-border)]' : ''} ${enabled ? '' : 'opacity-60'}`}
         >
-            <button
-                type="button"
-                {...attributes}
-                {...listeners}
-                className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] active:cursor-grabbing"
-                title={t('providers.order.drag')}
-                aria-label={t('providers.order.dragProvider', { name: provider.name })}
-            >
-                <GripVertical className="h-4 w-4" />
-            </button>
-            <div className="flex w-16 shrink-0 items-center gap-1">
-                <button
-                    type="button"
-                    onClick={() => onMove(provider.id, -1)}
-                    disabled={index === 0}
-                    className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] disabled:opacity-35"
-                    title={t('providers.order.moveUp')}
-                >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                </button>
-                <button
-                    type="button"
-                    onClick={() => onMove(provider.id, 1)}
-                    disabled={isLast}
-                    className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] disabled:opacity-35"
-                    title={t('providers.order.moveDown')}
-                >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                </button>
-            </div>
+            {fixed ? (
+                <div className="flex w-[106px] shrink-0 items-center gap-2 px-1.5 text-xs text-[var(--ink-muted)]">
+                    <Pin className="h-4 w-4" />
+                    <span>{t('providers.order.fixedFirst')}</span>
+                </div>
+            ) : (
+                <>
+                    <button
+                        type="button"
+                        {...attributes}
+                        {...listeners}
+                        className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] active:cursor-grabbing"
+                        title={t('providers.order.drag')}
+                        aria-label={t('providers.order.dragProvider', { name: provider.name })}
+                    >
+                        <GripVertical className="h-4 w-4" />
+                    </button>
+                    <div className="flex w-16 shrink-0 items-center gap-1">
+                        <button
+                            type="button"
+                            onClick={() => onMove(provider.id, -1)}
+                            disabled={index === 0}
+                            className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] disabled:opacity-35"
+                            title={t('providers.order.moveUp')}
+                        >
+                            <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => onMove(provider.id, 1)}
+                            disabled={isLast}
+                            className="rounded-md p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] disabled:opacity-35"
+                            title={t('providers.order.moveDown')}
+                        >
+                            <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+                    </div>
+                </>
+            )}
             <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-2">
                     <p className="truncate text-sm font-medium text-[var(--ink)]">{provider.name}</p>
@@ -112,6 +124,7 @@ function ProviderOrderRow({ provider, index, isLast, enabled, onMove, onToggle }
             <button
                 type="button"
                 role="switch"
+                aria-label={provider.name}
                 aria-checked={enabled}
                 onClick={() => onToggle(provider.id, !enabled)}
                 className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors ${enabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'}`}
@@ -139,6 +152,9 @@ export default function ProviderEnableOrderDialog({
             .map(id => byId.get(id))
             .filter((provider): provider is Provider => Boolean(provider));
     }, [providers, providerOrderDraft]);
+    const fixedProvider = providerRows.find(provider => provider.id === TOKENDANCE_PROVIDER_ID);
+    const sortableProviders = providerRows.filter(provider => provider.id !== TOKENDANCE_PROVIDER_ID);
+    const sortableIds = sortableProviders.map(provider => provider.id);
 
     const disabledSet = useMemo(
         () => new Set(disabledProviderDraft),
@@ -158,13 +174,14 @@ export default function ProviderEnableOrderDialog({
 
     const moveProvider = useCallback((providerId: string, direction: -1 | 1) => {
         onProviderOrderDraftChange((current) => {
-            const normalized = normalizeProviderOrder(providers.map(provider => provider.id), current);
+            const normalized = normalizeProviderOrder(providers.map(provider => provider.id), current)
+                .filter(id => id !== TOKENDANCE_PROVIDER_ID);
             const index = normalized.indexOf(providerId);
             const nextIndex = index + direction;
             if (index < 0 || nextIndex < 0 || nextIndex >= normalized.length) return normalized;
             const next = [...normalized];
             [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-            return next;
+            return normalizeProviderOrder(providers.map(provider => provider.id), next);
         });
     }, [providers, onProviderOrderDraftChange]);
 
@@ -173,11 +190,12 @@ export default function ProviderEnableOrderDialog({
         if (!over || active.id === over.id) return;
 
         onProviderOrderDraftChange((current) => {
-            const normalized = normalizeProviderOrder(providers.map(provider => provider.id), current);
+            const normalized = normalizeProviderOrder(providers.map(provider => provider.id), current)
+                .filter(id => id !== TOKENDANCE_PROVIDER_ID);
             const oldIndex = normalized.indexOf(String(active.id));
             const newIndex = normalized.indexOf(String(over.id));
             if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return normalized;
-            return arrayMove(normalized, oldIndex, newIndex);
+            return normalizeProviderOrder(providers.map(provider => provider.id), arrayMove(normalized, oldIndex, newIndex));
         });
     }, [providers, onProviderOrderDraftChange]);
 
@@ -238,17 +256,30 @@ export default function ProviderEnableOrderDialog({
                         collisionDetection={closestCenter}
                         onDragEnd={handleDragEnd}
                     >
+                        {fixedProvider && (
+                            <div className="mb-2">
+                                <ProviderOrderRow
+                                    provider={fixedProvider}
+                                    index={0}
+                                    isLast
+                                    fixed
+                                    enabled={!disabledSet.has(fixedProvider.id)}
+                                    onMove={moveProvider}
+                                    onToggle={toggleProviderEnabled}
+                                />
+                            </div>
+                        )}
                         <SortableContext
-                            items={providerRows.map(provider => provider.id)}
+                            items={sortableIds}
                             strategy={verticalListSortingStrategy}
                         >
                             <div className="space-y-2">
-                                {providerRows.map((provider, index) => (
+                                {sortableProviders.map((provider, index) => (
                                     <ProviderOrderRow
                                         key={provider.id}
                                         provider={provider}
                                         index={index}
-                                        isLast={index === providerRows.length - 1}
+                                        isLast={index === sortableProviders.length - 1}
                                         enabled={!disabledSet.has(provider.id)}
                                         onMove={moveProvider}
                                         onToggle={toggleProviderEnabled}
