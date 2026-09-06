@@ -230,6 +230,20 @@ fn should_request_exit_confirmation(code: Option<i32>, confirmed: bool) -> bool 
     code != Some(tauri::RESTART_EXIT_CODE) && !confirmed
 }
 
+fn app_context() -> tauri::Context<tauri::Wry> {
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "windows")]
+    let context = {
+        let mut context = context;
+        // Tauri's ICO codegen decodes only entries()[0], which is 16x16 in our
+        // multi-resolution ICO. Supply the full-resolution runtime image before
+        // any windows or the tray are built; keep the ICO for EXE/installer use.
+        context.set_default_window_icon(Some(tauri::include_image!("icons/128x128@2x.png")));
+        context
+    };
+    context
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ── DIAGNOSTIC PANIC HOOK (April 2026 crash investigation) ─────────────
@@ -1720,7 +1734,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .build(tauri::generate_context!())
+        .build(app_context())
         .expect("error while building tauri application");
 
     // Run with event handler to catch Cmd+Q, Dock quit, and Dock click
@@ -1885,6 +1899,24 @@ mod nav_guard_tests {
         classify_navigation(&Url::parse(s).expect("parse url"))
     }
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_runtime_icon_has_high_dpi_source() {
+        let context = super::app_context();
+        let icon = context.default_window_icon().expect("runtime app icon");
+        assert!(
+            icon.width() >= 256 && icon.height() >= 256,
+            "Windows must receive a high-resolution icon, got {}x{}",
+            icon.width(),
+            icon.height(),
+        );
+        assert_eq!(icon.width(), icon.height());
+        assert_eq!(
+            icon.rgba().len(),
+            (icon.width() * icon.height() * 4) as usize
+        );
+    }
+
     #[test]
     fn native_exit_requires_the_shared_frontend_confirmation_except_for_restart() {
         assert!(should_request_exit_confirmation(None, false));
@@ -2009,7 +2041,7 @@ mod nav_guard_tests {
         let source = include_str!("lib.rs");
         let window_handler = source
             .split_once(".on_window_event")
-            .and_then(|(_, tail)| tail.split_once(".build(tauri::generate_context!())"))
+            .and_then(|(_, tail)| tail.split_once(".build(app_context())"))
             .map(|(handler, _)| handler)
             .expect("window event handler source");
 

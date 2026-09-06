@@ -83,6 +83,16 @@ Task Activation Detector同样拥有 Job Object。timeout、stdout超限、Task 
 
 Launcher使用 no-follow检查、临时文件和原子 replace；路径 quoting必须覆盖空格、Unicode和 `%`。CLI mode attach parent console，并只使用当前 bundle的 Node和CLI。资源缺失时fail closed，不执行HOME旧 payload或系统 Node。
 
+## Windows 应用图标
+
+`lib.rs::app_context()` 在构建 App、窗口和托盘之前，将 Windows 的 `default_window_icon` 显式设为现有的 256×256 PNG（`icons/128x128@2x.png`）。运行时窗口和托盘继续从这一个默认图标派生；录音提示点按源图尺寸缩放。
+
+原因：当前 `tauri-codegen` 的 ICO 解码只读取 `entries()[0]`。仓库的 `icon.ico` 虽包含 16/24/32/48/64/128/256 七档，第一帧却是 16×16，直接用生成的默认 Context 会把这张小图交给 Windows，在任务栏和高 DPI 下放大失真。仅调整 `bundle.icon` 中 PNG 的顺序不能解决 Windows 优先读取 ICO 的行为。参见 [Tauri 上游问题 #14596](https://github.com/tauri-apps/tauri/issues/14596)。
+
+EXE、快捷方式与 NSIS 安装器继续使用完整的多尺寸 `icon.ico`，由 Windows Shell 选择尺寸；macOS 保留现有 ICNS 与独立托盘 template。不要为了运行时窗口重排或删减 ICO 的尺寸，也不要把托盘 template 用作应用图标。
+
+回归测试检查实际启动 Context 的图标分辨率与 RGBA 完整性。Windows 真机应检查 100/150/200% 缩放下的运行中任务栏、Alt+Tab、标题栏和托盘（含录音提示点）；区分运行时窗口图标与已固定快捷方式的 Shell 缓存。
+
 ## WebView2 与 CSP
 
 Windows production document origin、IPC和custom resource URL与macOS不同：
