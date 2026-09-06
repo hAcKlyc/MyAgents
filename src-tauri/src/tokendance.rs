@@ -771,7 +771,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/models", listener.local_addr().unwrap());
         let (stop, stopped) = oneshot::channel::<()>();
-        let server = tokio::spawn(async move {
+        let server = tauri::async_runtime::spawn(async move {
             axum::serve(listener, router)
                 .with_graceful_shutdown(async {
                     let _ = stopped.await;

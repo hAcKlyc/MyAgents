@@ -583,22 +583,16 @@ async function createHarness(
       };
     });
   }
-  vi.doMock('../sse', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('../sse')>();
-    return {
-      ...actual,
-      broadcast: (event: string, data: unknown) => {
-        broadcastEvents.push({ event, data });
-      },
-      broadcastLive: (
-        event: string,
-        data: unknown,
-        scope: { nextRevision: () => number },
-      ) => {
-        scope.nextRevision();
-        broadcastEvents.push({ event, data });
-      },
-    };
+  // Observe one loaded SSE module before importing its consumers. An async
+  // partial mock using importOriginal can bind overlapping module imports to
+  // different broadcasters, hiding real queue events from this collector.
+  const sse = await import('../sse');
+  vi.spyOn(sse, 'broadcast').mockImplementation((event, data) => {
+    broadcastEvents.push({ event, data });
+  });
+  vi.spyOn(sse, 'broadcastLive').mockImplementation((event, data, scope) => {
+    scope.nextRevision();
+    broadcastEvents.push({ event, data });
   });
   const mirrorCalls: MirrorPayload[] = [];
   vi.doMock('../utils/im-mirror', async (importOriginal) => {
@@ -611,9 +605,7 @@ async function createHarness(
     };
   });
 
-  // Load the overlapping module graph in dependency order. Importing these in
-  // parallel can race Vitest's dynamic SSE mock and leave SessionEngine bound
-  // to the real broadcaster while this harness observes the mocked one.
+  // Load consumers in dependency order after installing the event observer.
   const externalSession = await import('./external-session');
   const { getSessionEngine } = await import('../session-engine');
   const sessionStore = await import('../SessionStore');
@@ -673,8 +665,8 @@ afterEach(async () => {
     rmSync(harness.home, { recursive: true, force: true });
   }
   restoreEnv();
+  vi.restoreAllMocks();
   vi.doUnmock('./factory');
-  vi.doUnmock('../sse');
   vi.doUnmock('../utils/im-mirror');
   vi.doUnmock('./utils/kill-with-escalation');
   vi.doUnmock('./external-session/transcript-persistence');
