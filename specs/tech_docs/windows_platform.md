@@ -83,6 +83,16 @@ Task Activation Detector同样拥有 Job Object。timeout、stdout超限、Task 
 
 Launcher使用 no-follow检查、临时文件和原子 replace；路径 quoting必须覆盖空格、Unicode和 `%`。CLI mode attach parent console，并只使用当前 bundle的 Node和CLI。资源缺失时fail closed，不执行HOME旧 payload或系统 Node。
 
+## Windows 应用图标
+
+`lib.rs::app_context()` 在构建 App、窗口和托盘之前，将 Windows 的 `default_window_icon` 显式设为现有的 256×256 PNG（`icons/128x128@2x.png`）。运行时窗口和托盘继续从这一个默认图标派生；录音提示点按源图尺寸缩放。
+
+原因：当前 `tauri-codegen` 的 ICO 解码只读取 `entries()[0]`。仓库的 `icon.ico` 虽包含 16/24/32/48/64/128/256 七档，第一帧却是 16×16，直接用生成的默认 Context 会把这张小图交给 Windows，在任务栏和高 DPI 下放大失真。仅调整 `bundle.icon` 中 PNG 的顺序不能解决 Windows 优先读取 ICO 的行为。参见 [Tauri 上游问题 #14596](https://github.com/tauri-apps/tauri/issues/14596)。
+
+EXE、快捷方式与 NSIS 安装器继续使用完整的多尺寸 `icon.ico`，由 Windows Shell 选择尺寸；macOS 保留现有 ICNS 与独立托盘 template。不要为了运行时窗口重排或删减 ICO 的尺寸，也不要把托盘 template 用作应用图标。
+
+回归测试检查实际启动 Context 的图标分辨率与 RGBA 完整性。Windows 真机应检查 100/150/200% 缩放下的运行中任务栏、Alt+Tab、标题栏和托盘（含录音提示点）；区分运行时窗口图标与已固定快捷方式的 Shell 缓存。
+
 ## WebView2 与 CSP
 
 Windows production document origin、IPC和custom resource URL与macOS不同：
@@ -94,6 +104,16 @@ Windows production document origin、IPC和custom resource URL与macOS不同：
 - `webview_policy.rs` 为所有共享 data directory的 WebView统一选择 Windows Fluent Overlay scrollbar。
 
 CSP authority是 `src-tauri/tauri.conf.json`。新增 network/subresource surface必须明确归入 control面或登记的数据面，不能为了通过WebView2直接扩大 `http:` / CDN通配。
+
+### 空闲 CPU / GPU / I/O 诊断
+
+持续负载必须追到仍在工作的生产者：JS timer/rAF、CSS 动画、媒体播放、native browser 页面或真实业务事件。页面复杂度会放大一次更新的成本，但不能单凭历史消息数量认定空闲持续渲染的原因；Chat 已有分页和虚拟列表。
+
+- 只采样 MyAgents 精确进程树，按 `--type` 区分 browser、renderer、GPU 和 utility；全机同名 `msedgewebview2.exe` 不都属于本应用。
+- `Win32_Perf*Data_PerfProc_Process` 的 I/O bytes 包含文件、网络和设备 I/O，不能换算成 SSD 写入量。目录净大小、缓存文件存在或单次修改时间也不能证明持续原地改写。需要用 ProcMon/ETW 的具体路径、操作和字节量确定磁盘写入；参见 [Microsoft 计数器定义](https://learn.microsoft.com/en-us/previous-versions/aa394323(v=vs.85))。
+- GPU 重启必须有进程退出/启动或失败事件；“存在 ShaderCache / GPUCache”不构成证据。性能定位优先采集 DevTools Performance 与 WebView2 ETW trace，见 [Microsoft WebView2 性能指南](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/performance)。
+- 对比前台会话、非会话 Tab、窗口隐藏/最小化、恢复和托盘彻底退出；记录桌宠、内嵌浏览器与媒体是否活跃。未经控制的低负载样本不能用作前台高占用问题的修复验收。
+- `--autoplay-policy=no-user-gesture-required` 只是播放权限，不会自行创建音频流。媒体 owner 仍须在结束/失败时卸载资源，并拒绝所属 UI 关闭后的异步播放，见 [音频资源生命周期](tool_attachment_pipeline.md#音频播放资源生命周期)。
 
 ## Native Browser child
 

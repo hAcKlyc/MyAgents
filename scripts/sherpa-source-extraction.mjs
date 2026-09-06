@@ -63,6 +63,28 @@ export function patchSherpaWindowsOnnxRuntimeImport(sourceRoot) {
   return true;
 }
 
+export function patchHclustWindowsFenvPragma(sourceRoot) {
+  const sourcePath = join(sourceRoot, 'fastcluster_dm.cpp');
+  requireEntry(sourcePath, 'file');
+  const source = readFileSync(sourcePath, 'utf8');
+  const original = '#pragma STDC FENV_ACCESS on';
+  // The locked upstream explicitly allows ignoring this pragma. MSVC already
+  // ignores it with C4068; omit only the unsupported directive, keeping fenv
+  // includes/checks and the directive for other compilers intact.
+  const patched = `#ifndef _MSC_VER\n${original}\n#endif`;
+  if (source.includes(patched)) {
+    return false;
+  }
+  const firstMatch = source.indexOf(original);
+  if (firstMatch < 0 || source.indexOf(original, firstMatch + 1) >= 0) {
+    throw new Error(
+      'Locked hclust source no longer matches the expected FENV_ACCESS pragma',
+    );
+  }
+  writeFileSync(sourcePath, source.replace(original, patched), 'utf8');
+  return true;
+}
+
 export function extractSherpaBuildSource({
   archive,
   destination,

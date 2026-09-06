@@ -30,6 +30,7 @@ import {
 } from './speech-inference-resource-cache.mjs';
 import {
   extractSherpaBuildSource,
+  patchHclustWindowsFenvPragma,
   patchSherpaWindowsOnnxRuntimeImport,
 } from './sherpa-source-extraction.mjs';
 
@@ -636,7 +637,9 @@ export async function prepareSpeechInference(options, documentResult) {
         '-B',
         sherpaBuild,
         '-DCMAKE_BUILD_TYPE=Release',
-        '-DCMAKE_CXX_FLAGS=-DSHERPA_ONNX_DISABLE_COREML=1',
+        // Initialize extra flags without replacing CMake's platform defaults
+        // (notably MSVC /EHsc, required by Sherpa and its C++ dependencies).
+        '-DCMAKE_CXX_FLAGS_INIT=-DSHERPA_ONNX_DISABLE_COREML=1',
         '-DBUILD_SHARED_LIBS=ON',
         '-DSHERPA_ONNX_BUILD_C_API_EXAMPLES=OFF',
         '-DSHERPA_ONNX_ENABLE_C_API=ON',
@@ -660,6 +663,12 @@ export async function prepareSpeechInference(options, documentResult) {
         stdio: 'inherit',
       },
     );
+    // FetchContent has materialized hclust during configuration. Patch before
+    // compiling Sherpa; the adapter later consumes this same dependency tree.
+    const hclustIncludeRoot = join(sherpaBuild, '_deps', 'hclust_cpp-src');
+    if (targetLock.platform === 'windows') {
+      patchHclustWindowsFenvPragma(hclustIncludeRoot);
+    }
     execFileSync(
       'cmake',
       [
@@ -697,7 +706,6 @@ export async function prepareSpeechInference(options, documentResult) {
         : sherpaLibrary;
 
     const adapterBuild = join(buildRoot, 'a');
-    const hclustIncludeRoot = join(sherpaBuild, '_deps', 'hclust_cpp-src');
     if (!existsSync(join(hclustIncludeRoot, 'fastcluster-all-in-one.h'))) {
       throw new Error(
         `Locked hclust-cpp headers are unavailable: ${hclustIncludeRoot}`,
