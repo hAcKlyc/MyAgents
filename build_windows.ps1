@@ -267,137 +267,8 @@ try {
     Write-Host "  OK - 原生推理构建依赖检查完成" -ForegroundColor Green
     Write-Host ""
 
-    # 每次构建都拉取最新 cuse release — 从 Cloudflare R2 拉取（公网公开），
-    # 不再依赖 gh CLI / 私有仓库访问权限。cuse 维护者负责在 GH Release 之后跑
-    # MyAgents-Cuse/publish_r2.sh 镜像产物到 R2（`download.myagents.io/cuse/...`）。
-    # 直接在当前 shell 里运行 .ps1，不走 `pwsh -File` ——
-    # 这样 Windows PowerShell 5.1（Windows 自带）和 PowerShell 7+ 都能工作，
-    # 避免用户没装 pwsh 时 preflight 直接失败。
-    Write-Host "  拉取最新 cuse 二进制..." -ForegroundColor Cyan
-    try {
-        & "$ProjectDir\scripts\download_cuse.ps1"
-        if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) { throw "download_cuse.ps1 exit $LASTEXITCODE" }
-        $cuseBinaryPath = "src-tauri\binaries\cuse-x86_64-pc-windows-msvc.exe"
-        if (-not (Test-Path $cuseBinaryPath)) { throw "cuse binary not written" }
-        Write-Host "  cuse OK" -ForegroundColor Green
-    } catch {
-        Write-Host "  cuse 下载失败: $_" -ForegroundColor Red
-        Write-Host "    检查网络连通性: curl https://download.myagents.io/cuse/latest.json" -ForegroundColor Yellow
-        $depOk = $false
-    }
-
-    $nodejsPath = "src-tauri\resources\nodejs\node.exe"
-    $NodeDir = "src-tauri\resources\nodejs"
-    Write-Host "  检查 bundled Node.js... " -NoNewline
-    if (Test-Path $nodejsPath) {
-        Write-Host "OK (exists)" -ForegroundColor Green
-        # Node.js 已存在，但仍需确保 npm 已升级（首次下载后未升级的遗留情况）
-        $npmDir = Join-Path $NodeDir "node_modules\npm"
-        $nodeExe = Join-Path $NodeDir "node.exe"
-        if (Test-Path $npmDir) {
-            $npmCli = Join-Path $npmDir "bin\npm-cli.js"
-            $curVer = & $nodeExe $npmCli --version 2>&1
-            # npm 11.9.0 has minizlib CJS bug — must upgrade
-            if ("$curVer" -match "^11\.[0-9]\.") {
-                Write-Host "    npm v$curVer 需要升级..." -ForegroundColor Yellow
-                try {
-                    $npmTmpDir = Join-Path $env:TEMP "npm_upgrade_$(Get-Random)"
-                    New-Item -ItemType Directory -Path $npmTmpDir -Force | Out-Null
-                    $registryJson = Invoke-RestMethod -Uri "https://registry.npmjs.org/npm/latest" -TimeoutSec 30
-                    $tarballUrl = $registryJson.dist.tarball
-                    $tgzPath = Join-Path $npmTmpDir "npm.tgz"
-                    Invoke-WebRequest -Uri $tarballUrl -OutFile $tgzPath -TimeoutSec 60
-                    tar -xzf $tgzPath -C $npmTmpDir 2>&1 | Out-Null
-                    $extractedPkg = Join-Path $npmTmpDir "package"
-                    if (Test-Path $extractedPkg) {
-                        Remove-Item -Recurse -Force $npmDir
-                        Move-Item -Path $extractedPkg -Destination $npmDir
-                        $newVer = & $nodeExe (Join-Path $npmDir "bin\npm-cli.js") --version 2>&1
-                        Write-Host "    npm 升级: v$curVer → v$newVer ✓" -ForegroundColor Green
-                    }
-                    Remove-Item -Recurse -Force $npmTmpDir -ErrorAction SilentlyContinue
-                } catch {
-                    Write-Host "    npm 升级失败: $_" -ForegroundColor Red
-                }
-            } else {
-                Write-Host "    npm v$curVer ✓" -ForegroundColor Green
-            }
-        }
-    } else {
-        Write-Host "MISSING - downloading..." -ForegroundColor Yellow
-        # Auto-download Node.js if setup_windows.ps1 was not run
-        try {
-            $NodeVersion = "24.14.0"
-            $NodeDir = "src-tauri\resources\nodejs"
-            $ZipName = "node-v$NodeVersion-win-x64.zip"
-            $TempZip = Join-Path $env:TEMP "node-windows.zip"
-            $TempDir = Join-Path $env:TEMP "node-windows-extract"
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest -Uri "https://nodejs.org/dist/v$NodeVersion/$ZipName" -OutFile $TempZip -UseBasicParsing -TimeoutSec 300
-            if (Test-Path $TempDir) { Remove-Item -Recurse -Force $TempDir }
-            Expand-Archive -Path $TempZip -DestinationPath $TempDir -Force
-            $ExtractedDir = Join-Path $TempDir "node-v$NodeVersion-win-x64"
-            if (Test-Path $NodeDir) { Remove-Item -Recurse -Force $NodeDir }
-            New-Item -ItemType Directory -Path $NodeDir -Force | Out-Null
-            # Copy top-level files
-            Copy-Item (Join-Path $ExtractedDir "node.exe") $NodeDir -Force
-            Copy-Item (Join-Path $ExtractedDir "npm.cmd") $NodeDir -Force
-            Copy-Item (Join-Path $ExtractedDir "npx.cmd") $NodeDir -Force
-            Copy-Item (Join-Path $ExtractedDir "npm") $NodeDir -Force
-            Copy-Item (Join-Path $ExtractedDir "npx") $NodeDir -Force
-            # Use robocopy for node_modules — Copy-Item -Recurse silently skips
-            # files beyond MAX_PATH (260 chars), corrupting npm's minizlib/minipass
-            $SrcMod = Join-Path $ExtractedDir "node_modules"
-            $DstMod = Join-Path $NodeDir "node_modules"
-            if (Test-Path $SrcMod) {
-                & robocopy $SrcMod $DstMod /E /NFL /NDL /NJH /NJS /NC /NS /NP | Out-Null
-                if ($LASTEXITCODE -ge 8) { throw "robocopy failed: exit $LASTEXITCODE" }
-            }
-            if (Test-Path $TempZip) { Remove-Item -Force $TempZip }
-            if (Test-Path $TempDir) { Remove-Item -Recurse -Force $TempDir }
-            # Upgrade npm — bundled npm 11.9.0 has minizlib CJS bug on Windows.
-            # CANNOT use `npm install npm@latest` (catch-22: broken npm can't upgrade itself).
-            # Download npm tarball directly with Invoke-WebRequest + tar (Win10+ built-in).
-            $npmDir = Join-Path $NodeDir "node_modules\npm"
-            if (Test-Path $npmDir) {
-                Write-Host "    升级 npm (curl + tar)..." -NoNewline
-                try {
-                    $nodeExe = Join-Path $NodeDir "node.exe"
-                    $oldNpmCli = Join-Path $npmDir "bin\npm-cli.js"
-                    $oldVer = if (Test-Path $oldNpmCli) { & $nodeExe $oldNpmCli --version 2>&1 } else { "unknown" }
-                    Write-Host " 当前 v$oldVer" -NoNewline
-
-                    $npmTmpDir = Join-Path $env:TEMP "npm_upgrade_$(Get-Random)"
-                    New-Item -ItemType Directory -Path $npmTmpDir -Force | Out-Null
-                    $registryJson = Invoke-RestMethod -Uri "https://registry.npmjs.org/npm/latest" -TimeoutSec 30
-                    $tarballUrl = $registryJson.dist.tarball
-                    Write-Host " → 下载 $($registryJson.version)..." -NoNewline
-                    $tgzPath = Join-Path $npmTmpDir "npm.tgz"
-                    Invoke-WebRequest -Uri $tarballUrl -OutFile $tgzPath -TimeoutSec 60
-                    tar -xzf $tgzPath -C $npmTmpDir 2>&1 | Out-Null
-                    $extractedPkg = Join-Path $npmTmpDir "package"
-                    if (Test-Path $extractedPkg) {
-                        Remove-Item -Recurse -Force $npmDir
-                        Move-Item -Path $extractedPkg -Destination $npmDir
-                        $newNpmCli = Join-Path $npmDir "bin\npm-cli.js"
-                        $newVer = & $nodeExe $newNpmCli --version 2>&1
-                        Write-Host " → v$newVer ✓" -ForegroundColor Green
-                    } else {
-                        Write-Host " 解压失败 (package/ 目录不存在)" -ForegroundColor Red
-                    }
-                    Remove-Item -Recurse -Force $npmTmpDir -ErrorAction SilentlyContinue
-                } catch {
-                    Write-Host " 下载失败: $_ " -ForegroundColor Red
-                    Write-Host "    ⚠ npm 未升级，插件安装可能失败" -ForegroundColor Yellow
-                    Remove-Item -Recurse -Force $npmTmpDir -ErrorAction SilentlyContinue
-                }
-            }
-            Write-Host "    OK - Node.js downloaded" -ForegroundColor Green
-        } catch {
-            Write-Host "    下载失败，请先运行 .\setup_windows.ps1" -ForegroundColor Red
-            $depOk = $false
-        }
-    }
+    # Setup and release builds share the same pinned runtime preparation.
+    & "$ProjectDir\scripts\download_nodejs.ps1"
 
     $gitInstallerPath = "src-tauri\nsis\Git-Installer.exe"
     Write-Host "  检查 Git installer... " -NoNewline
@@ -683,6 +554,8 @@ try {
     Write-Host "  这可能需要几分钟，请耐心等待..." -ForegroundColor Yellow
 
     Write-Host "  准备离线文档与语音推理资源..." -ForegroundColor Cyan
+    & node "$ProjectDir\scripts\prepare-cuse-bundle.mjs" "x86_64-pc-windows-msvc"
+    if ($LASTEXITCODE -ne 0) { throw "Cuse Skill+CLI preparation failed" }
     & node "$ProjectDir\scripts\prepare-native-inference.mjs" "x86_64-pc-windows-msvc"
     if ($LASTEXITCODE -ne 0) { throw "原生推理资源准备失败" }
 

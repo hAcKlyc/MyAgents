@@ -710,7 +710,7 @@ Sidecar HTTP workspace IO endpoint 已全部下线，Renderer 唯一入口是 `u
 **Problem.** 把内置 system skill同步到`~/.myagents/skills/`时，若**先清/替换目标再校验源**，打包不完整的bundle会把可用副本换成空目录；如果随后写入版本戳，坏状态会被永久视为已完成。
 
 **Surface / Invariants enforced.**
-- "完整 skill" = 含顶层 `SKILL.md`。源不完整 → **保留现有副本** + `ulog_warn`，**不**清目标。
+- 普通 "完整 skill" = 含顶层 `SKILL.md`；Cuse 携带 native CLI，还必须通过 metadata/完整文件清单与执行权限校验，并在版本 fast path 比较 App 源实际 payload（签名后的字节为准，见 [Cuse bundle](cuse_bundle.md)）。源不完整 → **保留现有副本** + `ulog_warn`，**不**清目标。
 - 版本戳 `complete = missing.is_empty() && incomplete.is_empty()` 时才写；任一缺/不完整 → 不写戳 → 下次启动重试。平台跳过的 skill 是有意的、不算缺陷、不阻塞。
 - Rust `cmd_sync_system_skills` 与 Node `seedBundledSkills` 两条 seed 路径**同款逻辑**。
 - `SYSTEM_SKILLS` 是版本化安装集合；`src/shared/systemSkills.ts::REQUIRED_SYSTEM_SKILLS` 是其中始终启用的 canonical 产品契约子集，Rust workspace/slash 路径在 `src-tauri/src/workspace_files/skills_config.rs` 维护必要镜像，并由 cross-language test 锁定。读取/写回 `skills-config.json` 都会移除 Required 的 stale disabled 项，list 投影固定为 `required:true, enabled:true`，disable API fail closed；普通系统/用户 Skill 仍保留可禁用语义。

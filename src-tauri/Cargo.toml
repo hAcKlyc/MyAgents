@@ -1,6 +1,6 @@
 [package]
 name = "myagents"
-version = "0.4.14"
+version = "0.4.15"
 description = "MyAgents - Desktop Claude Code for everyone"
 authors = ["MyAgents Team <myagents.io@gmail.com>"]
 license = "AGPL-3.0-only"

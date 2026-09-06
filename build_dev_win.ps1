@@ -142,6 +142,9 @@ foreach ($dir in $dirsToClean) {
     }
 }
 
+# Prepare the same pinned Node/npm pair as setup and release builds.
+& "$PROJECT_DIR\scripts\download_nodejs.ps1"
+
 # 创建占位符资源目录（满足 Tauri bundle 阶段的资源校验）。
 # server-dist.js / plugin-bridge-dist.mjs / cli/myagents.cjs 在下面的
 # [2/3] 步骤显式生成；Tauri build 阶段会禁掉 beforeBuildCommand，避免重复打包。
@@ -195,6 +198,8 @@ Write-Host ""
 # release builds. The prepare owner is fingerprinted, so a warm invocation is
 # an offline no-op instead of repeating downloads, extraction, or signing.
 Write-ColorOutput "[准备] 准备离线文档与语音推理资源 (x86_64-pc-windows-msvc)..." "Blue"
+& node "$PROJECT_DIR\scripts\prepare-cuse-bundle.mjs" "x86_64-pc-windows-msvc"
+if ($LASTEXITCODE -ne 0) { throw "Cuse Skill+CLI preparation failed" }
 & node "$PROJECT_DIR\scripts\prepare-native-inference.mjs" "x86_64-pc-windows-msvc"
 if ($LASTEXITCODE -ne 0) {
     Write-ColorOutput "✗ 原生推理资源准备失败" "Red"

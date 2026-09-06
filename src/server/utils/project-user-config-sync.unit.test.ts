@@ -64,6 +64,32 @@ describe('project-user-config-sync', () => {
     expect(getMyAgentsUserDir()).toBe(join(home, '.myagents'));
   });
 
+  it('keeps the Cuse CLI and references together and preserves disable across content updates', () => {
+    const { home, workspace } = makeEnv();
+    writeUserSkill(home, 'cuse');
+    const source = join(home, '.myagents', 'skills', 'cuse');
+    mkdirSync(join(source, 'scripts'));
+    mkdirSync(join(source, 'references'));
+    const binary = process.platform === 'win32' ? 'cuse.exe' : 'cuse';
+    writeFileSync(join(source, 'scripts', binary), 'native CLI');
+    writeFileSync(join(source, 'references', 'setup.md'), 'setup');
+    syncProjectUserConfigFiles(workspace, { cliToolRegistryEnabled: true });
+    const projected = join(workspace, '.claude', 'skills', 'cuse');
+    expect(readFileSync(join(projected, 'scripts', binary), 'utf8')).toBe('native CLI');
+    expect(readFileSync(join(projected, 'references', 'setup.md'), 'utf8')).toBe('setup');
+    const config = join(home, '.myagents', 'skills-config.json');
+    writeFileSync(config, JSON.stringify({ disabled: ['cuse'] }));
+    syncProjectUserConfigFiles(workspace, { cliToolRegistryEnabled: true });
+    expect(existsSync(projected)).toBe(false);
+    writeFileSync(join(source, 'scripts', binary), 'updated CLI');
+    syncProjectUserConfigFiles(workspace, { cliToolRegistryEnabled: true });
+    expect(existsSync(projected)).toBe(false);
+    expect(JSON.parse(readFileSync(config, 'utf8')).disabled).toEqual(['cuse']);
+    writeFileSync(config, JSON.stringify({ disabled: [] }));
+    syncProjectUserConfigFiles(workspace, { cliToolRegistryEnabled: true });
+    expect(readFileSync(join(projected, 'scripts', binary), 'utf8')).toBe('updated CLI');
+  });
+
   it('removes managed skill symlinks when the skill is disabled', () => {
     const { home, workspace } = makeEnv();
     writeUserSkill(home, 'review-helper');

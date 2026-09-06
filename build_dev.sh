@@ -144,6 +144,10 @@ echo ""
 
 echo -e "${BLUE}[准备] 准备离线文档与语音推理资源 (${DEV_NATIVE_TARGET})...${NC}"
 node "${PROJECT_DIR}/scripts/prepare-native-inference.mjs" "$DEV_NATIVE_TARGET"
+node "${PROJECT_DIR}/scripts/prepare-cuse-bundle.mjs" "$DEV_NATIVE_TARGET"
+if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "${PROJECT_DIR}/bundled-skills/cuse/scripts/cuse"
+fi
 echo -e "${GREEN}✓ 原生推理资源 ready${NC}"
 echo ""
 

@@ -25,6 +25,7 @@ import {
     withManagedCodexProviderCatalog,
 } from './types';
 import type { RuntimeModelInfo } from '../../shared/types/runtime';
+import type { TokenDanceAuthView } from '../../shared/tokendance';
 import type { AgentConfig } from '../../shared/types/agent';
 import { apiGetJson } from '@/api/apiFetch';
 import {
@@ -708,6 +709,16 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         void listenWithCleanup<{ botId: string }>('im:bot-config-changed', refreshOnConfigEvent, ac.signal);
         void listenWithCleanup('agent:config-changed', refreshOnConfigEvent, ac.signal);
         void listenWithCleanup('app:config-changed', refreshOnConfigEvent, ac.signal);
+        // Native OAuth owns durable credential saving even when Settings is
+        // unmounted. Rebuild the existing provider projection at app scope.
+        void listenWithCleanup<TokenDanceAuthView>('tokendance:auth-changed', event => {
+            if (event.payload.phase !== 'connected' || !isMountedRef.current) return;
+            void rebuildAndPersistAvailableProviders()
+                .then(() => refreshConfigFromDisk('provider authorization', { syncNativeUiLanguage: false }))
+                .catch(() => {
+                    if (isMountedRef.current) scheduleStartupMaintenanceRetry();
+                });
+        }, ac.signal);
         // PRD 0.2.35 — the Rust `cmd_set_force_wake_lock` command (called from
         // Settings.tsx OR triggered by the tray CheckMenuItem click) writes
         // disk and emits this event. We re-read disk so the React state
@@ -717,7 +728,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         void listenWithCleanup<{ uiLanguage: UiLanguage; locale: SupportedLocale }>('ui-language-changed', refreshOnUiLanguageEvent, ac.signal);
 
         return () => ac.abort();
-    }, [refreshConfigFromDisk]);
+    }, [refreshConfigFromDisk, scheduleStartupMaintenanceRetry]);
 
     // ============= Listen for Admin CLI config changes (via SSE → window event) =============
 

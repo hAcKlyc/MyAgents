@@ -5,9 +5,10 @@
  * Lower section: Discover more — single-click "添加" per row, no multi-select
  */
 import { X, Search, Loader2, RefreshCw, AlertCircle, Plus, Trash2, Settings2 } from 'lucide-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { TOKENDANCE_PROVIDER_ID } from '../../shared/tokendance';
 
 import { useCloseLayer } from '@/hooks/useCloseLayer';
 import {
@@ -27,6 +28,7 @@ import {
   formatTokenCount,
   supportsModelDiscovery,
   synthesizeModalitiesFromDiscovered,
+  isTokenDanceConversationModel,
   type DiscoveredModel,
 } from '@/config/services/modelDiscoveryService';
 import { atomicModifyConfig, rebuildAndPersistAvailableProviders } from '@/config/configService';
@@ -45,6 +47,23 @@ interface ModelManagementPanelProps {
   onRefresh: () => Promise<void>;
   discoveryAction?: () => Promise<DiscoveredModel[]>;
   discoveryUnavailableMessage?: string;
+}
+
+// Both the panel and its portaled editor own their keyboard focus. Popover
+// deliberately leaves focus to callers, since other consumers are autocompletes.
+function containModelDialogTab(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== 'Tab') return;
+  const root = event.currentTarget;
+  const controls = [...root.querySelectorAll<HTMLElement>(
+    'button, input, [href], [tabindex="0"]',
+  )].filter(element => !element.matches(':disabled'));
+  const target = event.shiftKey ? controls.at(-1) : controls[0];
+  const boundary = event.shiftKey ? controls[0] : controls.at(-1);
+  if (!root.contains(document.activeElement) || document.activeElement === boundary) {
+    event.preventDefault();
+    (target ?? root).focus();
+  }
+  event.stopPropagation();
 }
 
 export default function ModelManagementPanel({
@@ -73,6 +92,8 @@ export default function ModelManagementPanel({
   const fetchIdRef = useRef(0);
   const editingAnchorRef = useRef<HTMLDivElement | null>(null);
   const pendingAnchorRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const titleId = useId();
 
   const primaryModel = provider.primaryModel;
 
@@ -97,14 +118,19 @@ export default function ModelManagementPanel({
 
   useEffect(() => {
     const prev = document.body.style.overflow;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => {
+      document.body.style.overflow = prev;
+      if (trigger?.isConnected) trigger.focus();
+    };
   }, []);
 
   useCloseLayer(() => { onClose(); return true; }, 200);
 
   // ===== Discovery fetch =====
-  const canDiscover = discoveryAction !== undefined || (!!apiKey && supportsModelDiscovery(provider));
+  const canDiscover = discoveryAction !== undefined || ((!!apiKey || provider.id === TOKENDANCE_PROVIDER_ID) && supportsModelDiscovery(provider));
 
   const bundledModelsById = useMemo(
     () => new Map(
@@ -133,6 +159,37 @@ export default function ModelManagementPanel({
         ? await discoveryAction()
         : await fetchProviderModels(provider, apiKey);
       if (!isMountedRef.current || thisId !== fetchIdRef.current) return;
+      if (provider.id === TOKENDANCE_PROVIDER_ID) {
+        // Catalog capability is a merge intent, never a stale replacement of
+        // user-authored names, primary choice, or removals.
+        let changed = false;
+        await atomicModifyConfig(c => {
+          const entries = [...(c.presetCustomModels?.[provider.id] ?? [])];
+          // Derive the current enabled set from disk while holding the lock;
+          // an in-flight refresh must not resurrect a concurrently removed ID.
+          const bundled = PRESET_PROVIDERS.find(p => p.id === provider.id)?.models ?? [];
+          const removed = new Set(c.presetRemovedModels?.[provider.id] ?? []);
+          const currentModels = [...bundled.filter(m => !removed.has(m.model)), ...entries];
+          for (const model of currentModels) {
+            if (removed.has(model.model)) continue;
+            const found = result.find(m => m.id === model.model);
+            if (!found?.supportedProtocols) continue;
+            const index = entries.findIndex(m => m.model === model.model);
+            const existing = index < 0 ? model : entries[index];
+            if (JSON.stringify(existing.supportedProtocols) === JSON.stringify(found.supportedProtocols)) continue;
+            const updated = { ...existing, supportedProtocols: found.supportedProtocols };
+            if (index < 0) entries.push({ ...updated, source: 'discovered' });
+            else entries[index] = updated;
+            changed = true;
+          }
+          return changed ? { ...c, presetCustomModels: { ...c.presetCustomModels, [provider.id]: entries } } : c;
+        });
+        if (changed) {
+          await rebuildAndPersistAvailableProviders();
+          await onRefresh();
+        }
+        if (!isMountedRef.current || thisId !== fetchIdRef.current) return;
+      }
       if (!provider.isBuiltin && onUpdateCustomProvider) {
         const enrichedModels = enrichExistingModelsFromDiscovery(provider.models, result);
         if (enrichedModels !== provider.models) {
@@ -143,7 +200,8 @@ export default function ModelManagementPanel({
           if (!isMountedRef.current || thisId !== fetchIdRef.current) return;
         }
       }
-      setDiscoveredModels(result);
+      setDiscoveredModels(provider.id === TOKENDANCE_PROVIDER_ID
+        ? result.filter(isTokenDanceConversationModel) : result);
     } catch (e) {
       if (!isMountedRef.current || thisId !== fetchIdRef.current) return;
       const structuredMessage = e && typeof e === 'object' && 'message' in e
@@ -159,7 +217,7 @@ export default function ModelManagementPanel({
         setDiscoveryLoading(false);
       }
     }
-  }, [provider, apiKey, canDiscover, discoveryAction, onUpdateCustomProvider]);
+  }, [provider, apiKey, canDiscover, discoveryAction, onUpdateCustomProvider, onRefresh]);
 
   useEffect(() => { doFetch(); }, [doFetch]);
 
@@ -255,6 +313,15 @@ export default function ModelManagementPanel({
     for (const key of Object.keys(patch) as Array<keyof ModelEntity>) {
       if (patch[key] === undefined) delete entity[key];
     }
+    if (provider.id === TOKENDANCE_PROVIDER_ID) {
+      const catalog = discoveredModels.length ? discoveredModels : await fetchProviderModels(provider, apiKey);
+      const matched = catalog.find(m => m.id === modelId);
+      const supportedProtocols = matched?.supportedProtocols;
+      if (!matched || !isTokenDanceConversationModel(matched)) {
+        throw new Error(t('providers.tokendance.models.protocolUnavailable'));
+      }
+      entity.supportedProtocols = supportedProtocols;
+    }
     const remainingInputIds = customInputModelIds.filter((id) => (
       id !== modelId && !activeModelIds.has(id)
     ));
@@ -302,7 +369,7 @@ export default function ModelManagementPanel({
     await onRefresh();
     setPendingCustomModel(null);
     setCustomInput(remainingInputIds.join(', '));
-  }, [pendingCustomModel, createManualModelEntity, customInputModelIds, activeModelIds, provider, onUpdateCustomProvider, onRefresh]);
+  }, [pendingCustomModel, createManualModelEntity, customInputModelIds, activeModelIds, provider, onUpdateCustomProvider, onRefresh, discoveredModels, apiKey, t]);
 
   const editableModelIds = useMemo(() => {
     if (!provider.isBuiltin) return activeModelIds;
@@ -359,6 +426,27 @@ export default function ModelManagementPanel({
     if (activeModelIds.has(model.id)) return;
     const entity = toModelEntity(model, provider);
 
+    if (provider.id === TOKENDANCE_PROVIDER_ID) {
+      if (!isTokenDanceConversationModel(model)) return;
+      await atomicModifyConfig(c => {
+        const entries = c.presetCustomModels?.[provider.id] ?? [];
+        const existing = entries.find(m => m.model === model.id);
+        return {
+          ...c,
+          presetRemovedModels: { ...c.presetRemovedModels,
+            [provider.id]: (c.presetRemovedModels?.[provider.id] ?? []).filter(id => id !== model.id),
+          },
+          presetCustomModels: { ...c.presetCustomModels,
+            [provider.id]: [...entries.filter(m => m.model !== model.id),
+              { ...entity, ...existing, supportedProtocols: entity.supportedProtocols }],
+          },
+        };
+      });
+      await rebuildAndPersistAvailableProviders();
+      await onRefresh();
+      return;
+    }
+
     if (provider.isBuiltin) {
       // Also remove from presetRemovedModels if re-adding a previously removed preset
       await atomicModifyConfig(c => {
@@ -410,17 +498,31 @@ export default function ModelManagementPanel({
     <OverlayBackdrop onClose={onClose} className="z-[200]">
       <div
         data-model-management-panel
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (editingModelId || pendingCustomModel) return;
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            onClose();
+          }
+          containModelDialogTab(event);
+        }}
         className="relative flex h-[85vh] w-[620px] max-w-[90vw] flex-col overflow-hidden rounded-2xl bg-[var(--paper-elevated)] shadow-2xl"
       >
         {/* Header */}
         <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
-          <h2 className="text-lg font-semibold text-[var(--ink)]">
+          <h2 id={titleId} className="text-lg font-semibold text-[var(--ink)]">
             {t('providers.models.title')}
             <span className="ml-2 text-sm font-normal text-[var(--ink-muted)]">{provider.name}</span>
           </h2>
           <button
             type="button"
             onClick={onClose}
+            aria-label={t('common:actions.close')}
             className="rounded-lg p-1.5 text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)]"
           >
             <X className="h-4 w-4" />
@@ -667,11 +769,12 @@ const ActiveModelRow = React.memo(function ActiveModelRow({
           type="button"
           onClick={handleToggleEdit}
           title={t('providers.models.settingsTitle')}
+          aria-label={`${t('providers.models.settingsTitle')}: ${model.modelName ?? model.model}`}
           data-model-gear
           className={`flex-shrink-0 rounded p-1 transition-all hover:text-[var(--accent)] ${
             isEditing
               ? 'text-[var(--accent)] opacity-100'
-              : 'text-[var(--ink-subtle)] opacity-0 group-hover:opacity-100'
+              : 'text-[var(--ink-subtle)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
           }`}
         >
           <Settings2 className="h-3 w-3" />
@@ -687,7 +790,7 @@ const ActiveModelRow = React.memo(function ActiveModelRow({
         <button
           type="button"
           onClick={handleSetPrimary}
-          className="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium text-[var(--ink-subtle)] opacity-0 transition-all hover:bg-[var(--paper-inset)] hover:text-[var(--accent)] group-hover:opacity-100"
+          className="flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium text-[var(--ink-subtle)] opacity-0 transition-all hover:bg-[var(--paper-inset)] hover:text-[var(--accent)] group-hover:opacity-100 group-focus-within:opacity-100"
         >
           {t('providers.models.setPrimary')}
         </button>
@@ -697,7 +800,8 @@ const ActiveModelRow = React.memo(function ActiveModelRow({
       <button
         type="button"
         onClick={handleDelete}
-        className="flex-shrink-0 rounded p-1 text-[var(--ink-subtle)] opacity-0 transition-all hover:text-[var(--error)] group-hover:opacity-100"
+        aria-label={t('providers.models.removeModel', { model: model.modelName ?? model.model })}
+        className="flex-shrink-0 rounded p-1 text-[var(--ink-subtle)] opacity-0 transition-all hover:text-[var(--error)] group-hover:opacity-100 group-focus-within:opacity-100"
       >
         <Trash2 className="h-3 w-3" />
       </button>
@@ -740,6 +844,10 @@ const ModelSettingsEditor = function ModelSettingsEditor({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const focusBeforeOpen = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const focusEditor = useCallback((node: HTMLDivElement | null) => {
+    node?.querySelector<HTMLInputElement>('input')?.focus();
+  }, []);
 
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
@@ -748,7 +856,11 @@ const ModelSettingsEditor = function ModelSettingsEditor({
   }, []);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    const trigger = focusBeforeOpen.current;
+    return () => {
+      mountedRef.current = false;
+      if (trigger?.isConnected) trigger.focus();
+    };
   }, []);
   useCloseLayer(() => { onCancelRef.current(); return true; }, 210);
 
@@ -809,89 +921,106 @@ const ModelSettingsEditor = function ModelSettingsEditor({
       open
       anchorRef={anchorRef}
       onClose={handlePopoverClose}
+      closeOnEscape={false}
+      preserveTabOrder={false}
       placement="bottom-end"
       offset={8}
       zIndex={260}
       unstyled
       className="w-[360px] max-w-[calc(100vw-32px)] origin-top-right animate-[popoverIn_0.22s_cubic-bezier(0.3,1.2,0.4,1)] rounded-[14px] border border-[var(--line-subtle)] bg-[var(--paper-elevated)] p-4 shadow-[var(--shadow-lg)]"
     >
-      <div data-testid="model-settings-popover" className="mb-3 flex items-baseline gap-2">
-        <span className="flex-shrink-0 text-xs font-semibold text-[var(--ink)]">{t('providers.models.parameterTitle')}</span>
-        <code className="truncate font-mono text-xs text-[var(--ink-subtle)]">{model.model}</code>
-      </div>
-
-      {/* 显示名称 */}
-      <div className="mb-2.5">
-        <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.displayName')}</label>
-        <input
-          type="text"
-          value={nameDraft}
-          onChange={(e) => setNameDraft(e.target.value)}
-          placeholder={model.model}
-          aria-label={t('providers.models.displayName')}
-          className={`${inputBase} ${inputOk}`}
-        />
-      </div>
-
-      {/* 上下文窗口 */}
-      <div className="mb-2.5">
-        <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.contextWindow')}</label>
-        <input
-          type="text"
-          value={contextDraft}
-          onChange={(e) => setContextDraft(e.target.value)}
-          placeholder={t('providers.models.contextPlaceholder')}
-          aria-label={t('providers.models.contextWindow')}
-          className={`${inputBase} font-mono placeholder:font-sans ${contextInvalid ? inputErr : inputOk}`}
-        />
-      </div>
-
-      {/* 输入模态 */}
-      <div>
-        <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.inputModalities')}</label>
-        <div className="flex gap-1.5 pt-0.5">
-          {EDITABLE_MODALITIES.map(kind => {
-            const selected = modalities.includes(kind);
-            return (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => toggleModality(kind)}
-                className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                  selected
-                    ? 'border-transparent bg-[var(--accent-warm-muted)] font-medium text-[var(--accent)]'
-                    : 'border-[var(--line)] text-[var(--ink-muted)] hover:border-[var(--ink-subtle)]'
-                }`}
-              >
-                {selected && <span className="mr-1 text-xs">✓</span>}
-                {t(`providers.models.modality.${kind}`)}
-              </button>
-            );
-          })}
+      <div
+        ref={focusEditor}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('providers.models.parameterTitle')}
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.stopPropagation();
+            handlePopoverClose();
+          }
+          containModelDialogTab(event);
+        }}
+      >
+        <div data-testid="model-settings-popover" className="mb-3 flex items-baseline gap-2">
+          <span className="flex-shrink-0 text-xs font-semibold text-[var(--ink)]">{t('providers.models.parameterTitle')}</span>
+          <code className="truncate font-mono text-xs text-[var(--ink-subtle)]">{model.model}</code>
         </div>
-      </div>
 
-      <p className={`mt-2 text-xs leading-relaxed ${saveError || contextInvalid || modalitiesInvalid ? 'text-[var(--error)]' : 'text-[var(--ink-subtle)]'}`}>
-        {hint}
-      </p>
+        {/* 显示名称 */}
+        <div className="mb-2.5">
+          <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.displayName')}</label>
+          <input
+            type="text"
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            placeholder={model.model}
+            aria-label={t('providers.models.displayName')}
+            className={`${inputBase} ${inputOk}`}
+          />
+        </div>
 
-      {/* Actions */}
-      <div className="mt-3 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg px-3 py-1.5 text-xs text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)]"
-        >
-          {t('providers.models.cancel')}
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!canSave}
-          className="rounded-lg bg-[var(--button-primary-bg)] px-4 py-1.5 text-xs font-medium text-[var(--button-primary-text)] transition-colors hover:bg-[var(--button-primary-bg-hover)] disabled:opacity-40"
-        >
-          {saving ? t('providers.models.saving') : t('providers.models.save')}
-        </button>
+        {/* 上下文窗口 */}
+        <div className="mb-2.5">
+          <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.contextWindow')}</label>
+          <input
+            type="text"
+            value={contextDraft}
+            onChange={(e) => setContextDraft(e.target.value)}
+            placeholder={t('providers.models.contextPlaceholder')}
+            aria-label={t('providers.models.contextWindow')}
+            className={`${inputBase} font-mono placeholder:font-sans ${contextInvalid ? inputErr : inputOk}`}
+          />
+        </div>
+
+        {/* 输入模态 */}
+        <div>
+          <label className="mb-1 block text-xs font-medium tracking-wide text-[var(--ink-muted)]">{t('providers.models.inputModalities')}</label>
+          <div className="flex gap-1.5 pt-0.5">
+            {EDITABLE_MODALITIES.map(kind => {
+              const selected = modalities.includes(kind);
+              return (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => toggleModality(kind)}
+                  className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                    selected
+                      ? 'border-transparent bg-[var(--accent-warm-muted)] font-medium text-[var(--accent)]'
+                      : 'border-[var(--line)] text-[var(--ink-muted)] hover:border-[var(--ink-subtle)]'
+                  }`}
+                >
+                  {selected && <span className="mr-1 text-xs">✓</span>}
+                  {t(`providers.models.modality.${kind}`)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <p className={`mt-2 text-xs leading-relaxed ${saveError || contextInvalid || modalitiesInvalid ? 'text-[var(--error)]' : 'text-[var(--ink-subtle)]'}`}>
+          {hint}
+        </p>
+
+        {/* Actions */}
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg px-3 py-1.5 text-xs text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)]"
+          >
+            {t('providers.models.cancel')}
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!canSave}
+            className="rounded-lg bg-[var(--button-primary-bg)] px-4 py-1.5 text-xs font-medium text-[var(--button-primary-text)] transition-colors hover:bg-[var(--button-primary-bg-hover)] disabled:opacity-40"
+          >
+            {saving ? t('providers.models.saving') : t('providers.models.save')}
+          </button>
+        </div>
       </div>
     </Popover>
   );
@@ -942,7 +1071,7 @@ const DiscoveredModelRow = React.memo(function DiscoveredModelRow({
       <button
         type="button"
         onClick={handleAdd}
-        className="flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium text-[var(--accent)] opacity-0 transition-all hover:bg-[var(--accent-warm-subtle)] group-hover:opacity-100"
+        className="flex-shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium text-[var(--accent)] opacity-0 transition-all hover:bg-[var(--accent-warm-subtle)] group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {t('providers.models.add')}
       </button>

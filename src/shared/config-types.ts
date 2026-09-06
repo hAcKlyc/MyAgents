@@ -1,5 +1,7 @@
 // Provider and permission configuration types
 
+import { TOKENDANCE_MODELS, TOKENDANCE_MODEL_LIST_URL, TOKENDANCE_PROVIDER_ID, type ModelProtocol } from './tokendance';
+
 import type {
   HeartbeatConfig,
   MemoryAutoUpdateConfig,
@@ -88,6 +90,8 @@ export interface ModelEntity {
   maxOutputTokens?: number; // 最大输出 token 数
   inputModalities?: string[]; // 输入模态 ["text", "image", "video"]
   outputModalities?: string[]; // 输出模态 ["text"]
+  /** Catalog-owned transport capabilities for managed aggregate providers. */
+  supportedProtocols?: ModelProtocol[];
 
   // === 来源标记 ===
   source?: 'preset' | 'discovered' | 'manual';
@@ -118,6 +122,7 @@ export function mergePresetModelWithCustomEntry(
       maxOutputTokens: preset.maxOutputTokens ?? custom.maxOutputTokens,
       inputModalities: preset.inputModalities ?? custom.inputModalities,
       outputModalities: preset.outputModalities ?? custom.outputModalities,
+      supportedProtocols: custom.supportedProtocols ?? preset.supportedProtocols,
     };
   }
 
@@ -129,6 +134,7 @@ export function mergePresetModelWithCustomEntry(
     maxOutputTokens: custom.maxOutputTokens ?? preset.maxOutputTokens,
     inputModalities: custom.inputModalities ?? preset.inputModalities,
     outputModalities: custom.outputModalities ?? preset.outputModalities,
+    supportedProtocols: custom.supportedProtocols ?? preset.supportedProtocols,
   };
 }
 
@@ -241,8 +247,9 @@ export function normalizeProviderOrder(
   providerOrder?: string[],
 ): string[] {
   const known = new Set(providerIds);
-  const seen = new Set<string>();
-  const ordered: string[] = [];
+  // Token Dance has a fixed display position; user order starts after it.
+  const ordered: string[] = known.has(TOKENDANCE_PROVIDER_ID) ? [TOKENDANCE_PROVIDER_ID] : [];
+  const seen = new Set(ordered);
 
   for (const id of providerOrder ?? []) {
     if (!known.has(id) || seen.has(id)) continue;
@@ -1504,6 +1511,21 @@ export function applyManagedCodexProviderReadiness(
 
 export const PRESET_PROVIDERS: Provider[] = [
   {
+    id: TOKENDANCE_PROVIDER_ID,
+    name: '词元跳动 Token Dance',
+    subtitle: '一键注册使用各类模型，最低折扣至50%',
+    vendor: 'TokenDance',
+    cloudProvider: '官方',
+    type: 'api',
+    primaryModel: 'deepseek-v4-pro-0813',
+    isBuiltin: true,
+    config: { baseUrl: 'https://tokendance.space/gateway' },
+    authType: 'api_key',
+    websiteUrl: 'https://tokendance.space',
+    modelListUrl: TOKENDANCE_MODEL_LIST_URL,
+    models: TOKENDANCE_MODELS,
+  },
+  {
     id: 'anthropic-sub',
     name: 'Anthropic (订阅)',
     vendor: 'Anthropic',
@@ -2610,19 +2632,6 @@ export const PRESET_MCP_SERVERS: McpServerDefinition[] = [
     args: [],
     isBuiltin: true,
     isFree: true,
-  },
-  {
-    id: 'cuse',
-    name: 'Cuse 电脑控制',
-    description: '让 AI 直接操作你的电脑：截图、点击、输入、滚动。',
-    type: 'stdio',
-    // Sentinel resolved at MCP launch to the bundled cuse binary path —
-    // see getBundledCusePath() in src/server/utils/runtime.ts.
-    command: '__bundled_cuse__',
-    args: ['mcp', '--caller-app', 'MyAgents'],
-    isBuiltin: true,
-    isFree: true,
-    platforms: ['darwin', 'win32'],
   },
 ];
 

@@ -1070,7 +1070,7 @@ fn sync_admin_agent_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<boo
 // matching exclusion list in src/server/index.ts::seedBundledSkills
 // MUST be kept in sync (comment there points back here).
 
-const SYSTEM_SKILLS_VERSION: &str = "56";
+const SYSTEM_SKILLS_VERSION: &str = "57";
 
 /// One process-wide transaction owner for the versioned system-skill
 /// snapshot. Startup automation and ConfigProvider may request convergence at
@@ -1082,6 +1082,8 @@ static SYSTEM_SKILLS_SYNC_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new
 /// the app's flows depend on them, users are not meant to customise.
 /// Keep in sync with the exclusion list in Bun's `seedBundledSkills()`.
 const SYSTEM_SKILLS: &[&str] = &[
+    // Complete Skill+CLI; content updates with the app, user may disable discovery.
+    "cuse",
     // v51: one product-owned Task discussion workflow replaces the former
     // alignment/executor pair. Ordinary dispatch now hands task.md directly
     // to the Runtime, so execution no longer depends on a Skill name.
@@ -1228,6 +1230,19 @@ fn sync_system_skills_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<b
     let myagents_dir = home.join(".myagents");
     let skills_dir = myagents_dir.join("skills");
 
+    let res = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Resource dir: {}", e))?;
+    let bundled_skills_dir = res.join("bundled-skills");
+    // The independent Cuse release can change without a hand-edited Skill stamp.
+    // Compare actual app bytes, including Developer ID signatures, before skipping.
+    let cuse_current = !crate::cuse_skill::supported()
+        || crate::cuse_skill::matches_bundle(
+            &bundled_skills_dir.join("cuse"),
+            &skills_dir.join("cuse"),
+        );
+
     // Version gate — skip the whole sweep if we've already landed
     // SYSTEM_SKILLS_VERSION AND every system skill is actually present on disk.
     //
@@ -1242,6 +1257,7 @@ fn sync_system_skills_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<b
     if ver_file.exists() {
         let ver = fs::read_to_string(&ver_file).unwrap_or_default();
         if ver.trim() == SYSTEM_SKILLS_VERSION
+            && cuse_current
             && all_installed_system_skills_complete(&skills_dir)
             && retired_system_skills_absent(&skills_dir)
         {
@@ -1249,12 +1265,6 @@ fn sync_system_skills_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<b
         }
     }
 
-    // Source: app bundle resources/bundled-skills/
-    let res = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Resource dir: {}", e))?;
-    let bundled_skills_dir = res.join("bundled-skills");
     if !bundled_skills_dir.exists() {
         return Err(format!(
             "bundled-skills not found: {:?}",
@@ -1268,6 +1278,9 @@ fn sync_system_skills_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<b
     let mut missing = Vec::new();
     let mut incomplete = Vec::new();
     for skill_name in SYSTEM_SKILLS {
+        if *skill_name == "cuse" && !crate::cuse_skill::supported() {
+            continue;
+        }
         let src = bundled_skills_dir.join(skill_name);
         let dst = skills_dir.join(skill_name);
         match sync_one_system_skill(&src, &dst)
@@ -1349,6 +1362,9 @@ enum SystemSkillSync {
 /// is a packaging defect, not a skill. Applies equally to a bundled source dir
 /// and an installed `~/.myagents/skills/<name>` dir.
 fn skill_dir_is_complete(dir: &Path) -> bool {
+    if dir.file_name().is_some_and(|name| name == "cuse") {
+        return crate::cuse_skill::complete(dir);
+    }
     dir.join("SKILL.md").is_file()
 }
 
@@ -1356,9 +1372,10 @@ fn skill_dir_is_complete(dir: &Path) -> bool {
 /// Used to bypass the version fast-path so a frozen/incomplete install (issue
 /// #321) self-heals instead of trusting the version stamp.
 fn all_installed_system_skills_complete(skills_dir: &Path) -> bool {
-    SYSTEM_SKILLS
-        .iter()
-        .all(|name| skill_dir_is_complete(&skills_dir.join(name)))
+    SYSTEM_SKILLS.iter().all(|name| {
+        (*name == "cuse" && !crate::cuse_skill::supported())
+            || skill_dir_is_complete(&skills_dir.join(name))
+    })
 }
 
 fn retired_system_skills_absent(skills_dir: &Path) -> bool {
@@ -1584,8 +1601,10 @@ mod system_skills_tests {
     }
 
     #[test]
-    fn v56_keeps_task_cli_speech_automation_and_creator_skills_aligned() {
-        assert_eq!(SYSTEM_SKILLS_VERSION, "56");
+    fn v57_keeps_cuse_and_product_skills_aligned() {
+        assert_eq!(SYSTEM_SKILLS_VERSION, "57");
+        assert!(SYSTEM_SKILLS.contains(&"cuse"));
+        assert!(!REQUIRED_SYSTEM_SKILLS.contains(&"cuse"));
         assert!(SYSTEM_SKILLS.contains(&"myagents-task-alignment"));
         assert!(RETIRED_SYSTEM_SKILLS.contains(&"task-alignment"));
         assert!(RETIRED_SYSTEM_SKILLS.contains(&"task-implement"));
@@ -1928,6 +1947,9 @@ mod system_skills_tests {
             let dir = skills_dir.join(name);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("SKILL.md"), "x").unwrap();
+            if *name == "cuse" {
+                crate::cuse_skill::tests::fixture(&dir);
+            }
         }
 
         fs::write(
@@ -1961,6 +1983,9 @@ mod system_skills_tests {
             let d = skills_dir.join(name);
             fs::create_dir_all(&d).unwrap();
             fs::write(d.join("SKILL.md"), "x").unwrap();
+            if *name == "cuse" {
+                crate::cuse_skill::tests::fixture(&d);
+            }
         }
         assert!(
             all_installed_system_skills_complete(&skills_dir),
@@ -1968,11 +1993,82 @@ mod system_skills_tests {
         );
 
         // Freeze one into the empty-dir state seen in #321.
-        let victim = SYSTEM_SKILLS.first().expect("at least one system skill");
+        let victim = SYSTEM_SKILLS
+            .iter()
+            .find(|name| **name != "cuse")
+            .expect("at least one common system skill");
         fs::remove_file(skills_dir.join(victim).join("SKILL.md")).unwrap();
         assert!(
             !all_installed_system_skills_complete(&skills_dir),
             "a SKILL.md-less system skill must fail the gate so sync re-runs"
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit native acceptance against a prepared Cuse bundle; no user directories"]
+    fn cuse_prepared_bundle_native_smoke() {
+        let source = std::env::var_os("MYAGENTS_CUSE_SMOKE_SOURCE")
+            .map(std::path::PathBuf::from)
+            .expect("set MYAGENTS_CUSE_SMOKE_SOURCE to the prepared cuse directory");
+        let tmp = tempfile::tempdir().unwrap();
+        let installed = tmp.path().join("cuse");
+        assert!(matches!(
+            sync_one_system_skill(&source, &installed).unwrap(),
+            SystemSkillSync::Synced
+        ));
+        assert!(crate::cuse_skill::matches_bundle(&source, &installed));
+        let binary = installed.join(if cfg!(target_os = "windows") {
+            "scripts/cuse.exe"
+        } else {
+            "scripts/cuse"
+        });
+        let output = crate::process_cmd::new(&binary)
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&fs::read(installed.join("package.json")).unwrap()).unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            format!("cuse {}", metadata["version"].as_str().unwrap())
+        );
+        for args in [vec!["--help"], vec!["readme"], vec!["readme", "setup"]] {
+            let result = crate::process_cmd::new(&binary)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(result.status.success());
+            assert!(!result.stdout.is_empty());
+        }
+    }
+
+    #[test]
+    fn cuse_sync_replaces_complete_payload_preserves_disable_and_rejects_incomplete_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("bundle/cuse");
+        let installed = tmp.path().join("skills/cuse");
+        crate::cuse_skill::tests::fixture(&source);
+        crate::cuse_skill::tests::fixture(&installed);
+        let config = tmp.path().join("skills-config.json");
+        let disabled = r#"{"disabled":["cuse"],"seeded":["user-skill"]}"#;
+        fs::write(&config, disabled).unwrap();
+        fs::write(source.join("SKILL.md"), "new bundled instructions").unwrap();
+        assert!(!crate::cuse_skill::matches_bundle(&source, &installed));
+        assert!(matches!(
+            sync_one_system_skill(&source, &installed).unwrap(),
+            SystemSkillSync::Synced
+        ));
+        assert!(crate::cuse_skill::matches_bundle(&source, &installed));
+        assert_eq!(fs::read_to_string(&config).unwrap(), disabled);
+        fs::remove_file(source.join("package.json")).unwrap();
+        assert!(matches!(
+            sync_one_system_skill(&source, &installed).unwrap(),
+            SystemSkillSync::SkippedIncompleteSource
+        ));
+        assert_eq!(
+            fs::read_to_string(installed.join("SKILL.md")).unwrap(),
+            "new bundled instructions"
         );
     }
 
@@ -3017,8 +3113,8 @@ pub async fn cmd_probe_proxy(
 pub async fn cmd_fetch_provider_models(
     url: String,
     provider_id: String,
-    auth_header_name: String,
-    auth_header_value: String,
+    auth_header_name: Option<String>,
+    auth_header_value: Option<String>,
     extra_headers: Option<HashMap<String, String>>,
 ) -> Result<serde_json::Value, String> {
     ulog_info!(
@@ -3043,14 +3139,21 @@ pub async fn cmd_fetch_provider_models(
         crate::proxy_config::build_client_with_proxy_for_provider(builder, &provider_id)?
     };
 
-    let mut request = client
-        .get(&url)
-        .header(&auth_header_name, &auth_header_value);
+    let mut request = client.get(&url);
+    if let (Some(name), Some(value)) = (auth_header_name, auth_header_value) {
+        request = request.header(name, value);
+    }
 
     if let Some(headers) = extra_headers {
         for (key, value) in headers {
             request = request.header(key, value);
         }
+    }
+
+    if provider_id == "tokendance" {
+        // Attribution is fixed by the native provider boundary; extra headers
+        // cannot change it, and no credentials are needed for the public list.
+        request = request.headers(crate::tokendance::attribution_headers());
     }
 
     let response = request.send().await.map_err(|e| {

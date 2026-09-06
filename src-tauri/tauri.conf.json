@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MyAgents",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "identifier": "com.myagents.app",
   "build": {
     "frontendDist": "../dist",
@@ -67,9 +67,6 @@
       "infoplist/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
       "infoplist/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings"
     },
-    "externalBin": [
-      "binaries/cuse"
-    ],
     "macOS": {
       "minimumSystemVersion": "13.0",
       "entitlements": "Entitlements.plist",

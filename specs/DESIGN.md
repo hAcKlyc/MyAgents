@@ -89,6 +89,7 @@ MyAgents 是以长时间阅读、持续协作和多任务切换为核心的桌�
 - 紧凑 Task/Record 流可使用 14px 正文，但不能反向降低 Launcher 和 Chat 的正文档位。
 - 按钮和菜单正文统一为 14px，时间、状态、hint 统一为 12px。
 - Markdown H1/H2/H3 为 22/20/18px，H4–H6 为 16px；标题用层级和间距表达，不依赖过重字重。
+- 模型供应商卡片标题统一 `text-lg font-semibold`（18px / 27px、600），包括订阅、API、自定义供应商；保留单行省略。
 - Theme-owned Launcher Hero 可拥有经注册校验的展示字号；这是品牌层例外，不构成业务组件新增孤立字阶的先例。
 - 中英文混排使用 Theme 的 CJK fallback；代码块不得继承纯西文字体后落入宋体。
 

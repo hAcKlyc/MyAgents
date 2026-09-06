@@ -221,6 +221,7 @@ echo -e "  ${GREEN}✓ Claude native binary (${SDK_TRIPLE}) 就绪${NC}"
 
 echo -e "  ${CYAN}准备离线文档与语音推理资源 (${TARGET})...${NC}"
 node "${PROJECT_DIR}/scripts/prepare-native-inference.mjs" "$TARGET"
+node "${PROJECT_DIR}/scripts/prepare-cuse-bundle.mjs" "$TARGET"
 
 npm run tauri:build -- --target "$TARGET" --bundles appimage,deb
 

@@ -553,3 +553,9 @@ PATH 优先级（agent-session.ts::buildClaudeSessionEnv）：
 | `SPEECH_SESSION_REQUIRED` | 必须从拥有 authoritative Session + Workspace 的 MyAgents 会话调用；不要补传 scope 参数 |
 | `SPEECH_JOB_NOT_FOUND` | 该 job 不属于当前 Session 或已不存在；先在同一 Session 运行 `myagents speech list` |
 | `MyAgents <new-group>` 进了 GUI | app-binary 直调只兼容已发布 group；canonical `myagents <new-group>` 不受 Rust group 名单约束 |
+
+### 已移除内置 MCP 的旧定义
+
+旧 Cuse MCP 已退出内置 MCP 目录，其专用可执行文件不再打包；旧配置或 Session snapshot 中的 `__bundled_cuse__` 启动标记由共享 `isRetiredBundledMcpServer` 在目录及 SDK/Codex 启动投影排除，不跨 owner 改写持久化数据。自定义真实命令（即使 ID 为 `cuse`）仍按普通 MCP 处理。历史工具结果沿用公共媒体展示。
+
+Cuse 是可关闭的版本化 Skill，携带独立 CLI，由构建从 Cuse 发布源下载，运行时不联网更新。它复用上述内容归属/启停分离与完整目录投影，详见 [Cuse bundle](cuse_bundle.md)。

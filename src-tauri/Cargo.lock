@@ -3966,7 +3966,7 @@ checksum = "2195bf6aa996a481483b29d62a7663eed3fe39600c460e323f8ff41e90bdd89b"
 
 [[package]]
 name = "myagents"
-version = "0.4.14"
+version = "0.4.15"
 dependencies = [
  "active-win-pos-rs 0.11.0",
  "axum",

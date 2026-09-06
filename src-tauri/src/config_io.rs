@@ -75,7 +75,7 @@ fn normalize_theme_fields(config: &mut serde_json::Value) {
     object.remove("theme");
 }
 
-fn read_config_json(config_path: &Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_config_json(config_path: &Path) -> Result<serde_json::Value, String> {
     if !config_path.exists() {
         return Ok(serde_json::json!({}));
     }

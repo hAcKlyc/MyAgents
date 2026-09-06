@@ -77,6 +77,7 @@ import {
 } from '../../shared/chatMessageReplay';
 import { imagePayloadForSend, mergeAttachmentPreviews } from './userImageAttachmentProjection';
 import { parsePartialJson } from '@/utils/parsePartialJson';
+import { useQueryElapsedClock } from '@/hooks/useQueryElapsedClock';
 import { enqueuePermissionRequest, peekPermissionRequest, removePermissionRequest } from '@/utils/permissionQueue';
 import { i18n } from '@/i18n';
 import { subscribeFrontendLogs, setCurrentTabId } from '@/utils/frontendLogger';
@@ -896,6 +897,11 @@ export default function TabProvider({
     const [pendingAskUserQuestion, setPendingAskUserQuestion] = useState<AskUserQuestionRequest | null>(null);
     const [pendingExitPlanMode, setPendingExitPlanMode] = useState<ExitPlanModeRequest | null>(null);
     const [pendingEnterPlanMode, setPendingEnterPlanMode] = useState<EnterPlanModeRequest | null>(null);
+    const getQueryElapsedSeconds = useQueryElapsedClock(
+        isLoading || classifySessionActivity(sessionState) === 'active',
+        Boolean(pendingPermission || pendingAskUserQuestion || (pendingExitPlanMode && !pendingExitPlanMode.resolved)),
+        currentSessionId,
+    );
     const [toolCompleteCount, setToolCompleteCount] = useState(0);
     const [queuedMessages, setQueuedMessages] = useState<QueuedMessageInfo[]>([]);
     const queuedMessagesRef = useRef<QueuedMessageInfo[]>([]);
@@ -5328,6 +5334,7 @@ export default function TabProvider({
         firstItemIndex,
         hasMoreBefore,
         isLoading,
+        getQueryElapsedSeconds,
         isSessionLoading,
         sessionRestoreError,
         sessionRestoreMode,
@@ -5384,7 +5391,7 @@ export default function TabProvider({
     }), [
         tabId, agentDir, currentSessionId, messages, historyMessages, streamingMessage, firstItemIndex, hasMoreBefore, isLoading, isSessionLoading, sessionRestoreError, sessionRestoreMode, sessionState, sessionRuntime, sessionRuntimeSource, sessionMeta,
         logs, unifiedLogs, systemInitInfo, mcpEffectiveSnapshot, sdkSlashCommands, runtimeDiagnostics, agentError, systemStatus, systemNotice, contextUsage, agentPlanTodos, lastTerminalReason, pendingPermission, pendingAskUserQuestion, pendingExitPlanMode, pendingEnterPlanMode, toolCompleteCount, queuedMessages, isConnected,
-        setMessages, appendLog, appendUnifiedLog, clearUnifiedLogs, sendMessage, stopResponse, retryCurrentSessionRestore, loadOlderMessages, resetSession, adoptMigratedSession,
+        getQueryElapsedSeconds, setMessages, appendLog, appendUnifiedLog, clearUnifiedLogs, sendMessage, stopResponse, retryCurrentSessionRestore, loadOlderMessages, resetSession, adoptMigratedSession,
         apiGetJson, postJson, apiPutJson, apiDeleteJson, respondPermission, respondAskUserQuestion, respondExitPlanMode, cancelQueuedMessage, forceExecuteQueuedMessage
     ]);
 

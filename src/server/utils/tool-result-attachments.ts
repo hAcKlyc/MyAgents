@@ -60,6 +60,7 @@ const DATA_URL_RE = /^data:([^;,]+);base64,(.*)$/is;
  * while the inverse — a 30-screenshot browse run flooding the conversation —
  * is the failure mode this distinction exists to prevent.
  */
+// Keep legacy Cuse tool results and user-configured MCP screenshots folded.
 const PROCESS_TOOL_PREFIXES = ['mcp__playwright__', 'mcp__computer-use__', 'mcp__cuse__'];
 
 export function classifyToolAttachmentPresentation(

@@ -387,8 +387,7 @@ export function ToolboxSection({
                   </div>
                 )}
               {!isManagedBrowser &&
-                server.command !== '__builtin__' &&
-                server.command !== '__bundled_cuse__' && (
+                server.command !== '__builtin__' && (
                   <p
                     className="mt-2 truncate font-mono text-xs text-[var(--ink-muted)]"
                     title={`${server.command} ${server.args?.join(' ') ?? ''}`}

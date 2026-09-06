@@ -9,15 +9,6 @@
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
-	<!--
-	  TCC usage description for cuse (computer-use MCP child process).
-
-	  AppleEvents is required for window focus/activation and AppleScript
-	  helpers (e.g. WeChat scroll fallback). Screen Recording requires the
-	  NSScreenCaptureUsageDescription below. Accessibility has no Info.plist
-	  usage key. Child processes that share the parent app's code signature
-	  inherit the corresponding TCC grants from MyAgents.app.
-	-->
 	<key>NSAppleEventsUsageDescription</key>
 	<string>MyAgents 需要控制其他应用，以便 AI 为你激活窗口、运行 AppleScript 并完成桌面自动化任务。</string>
 	<key>NSMicrophoneUsageDescription</key>

@@ -46,6 +46,22 @@ Subscription 是产品/计费类型，不决定 auth owner。新增 subscription
 
 ## API Provider env
 
+### Token Dance 模型协议与账户接入
+
+`tokendance` 仍是一个普通 API Provider。公开模型目录的 `supported_protocols` 经发现服务映射到 `ModelEntity.supportedProtocols`，随 `presetCustomModels` 合并保存；新增与手动输入的模型 ID 都要先取得可用的协议能力。自动刷新只更新能力，不替换用户的名称、启用列表或首选。目录返回不认识的协议集合时保留空集合，不能借 Provider 默认协议冒充兼容。
+
+`src/shared/tokendance.ts::resolveProviderForModel` 是唯一优先级策略：Anthropic Messages → OpenAI Responses → OpenAI Chat Completions。它依据具体模型生成不可变的 Provider execution projection，配套选择 `apiProtocol` / `upstreamFormat` / `baseUrl` / 认证与输出参数。`materializeProviderRouteEnv`、Task、IM、vision 和 provider probe 在既有入口接入；Renderer 使用同一纯函数显示模型对应的推理选项。普通 Provider 保持原行为，Runtime / Bridge 不读取供应商能力数组。切换协议由既有 `providerEnvEqual` 与 Query 重建路径处理，不修改全局 Provider。
+
+`src-tauri/src/tokendance.rs` 在应用生命周期内拥有一次临时 PKCE loopback 授权。随机 `127.0.0.1` 回调路径接收一次 code；Key 通过 `with_config_lock` 保存到原有 `config.json`，并校验开始授权时的凭据版本，避免旧授权覆盖新账户。磁盘保存失败可重试同一 Key；凭据版本冲突则终止旧授权、释放待保存 Key，并由既有失败面板引导重新授权。面板打开期间持续等待，最后一个面板关闭后保留 15 分钟；不跨重启恢复。原生事件不携带 Key，ConfigProvider 在应用层刷新配置和既有可用供应商投影，隐藏设置页不影响授权保存。
+
+OAuth `app_url` 与请求头 `X-App-URL` 同时固定为 `https://myagents.io`（无尾斜杠）。Anthropic 请求通过既有 SDK child `ANTHROPIC_CUSTOM_HEADERS` 注入，独立验证诊断请求在 `provider-probe.ts` 的出站入口注入，OpenAI Bridge 根据该请求所属 Provider 注入，Rust 账户 / 充值 client 和模型目录请求也携带同值。大小写不同的旧归因头不能覆盖固定值，不修改进程全局环境或其他 Provider 的请求头。
+
+余额与充值 API 经 Rust 的 Provider-aware HTTP client。余额是账户原始微元，UI 两位小数只用于展示；请求和 UI 结果绑定凭据版本。只有供应商明确返回的 `TokenDance-Recovery-Action` 控制重新授权、充值或管理 Key 额度，不从普通网络错误 / HTTP 状态推断。
+
+充值 attempt 只属于当前面板；提交才创建，打开时轮询供应商会话，关闭后停止本地请求并忽略迟到结果。没有持久订单表、后台付款轮询或本地余额加减。关闭不代表远端订单已取消，旧二维码直到供应商过期前仍可能被支付。
+
+### SDK child 环境
+
 `buildClaudeSessionEnv()` 每次从 clean baseline 构造 SDK child env。切换 Provider 时必须显式设置或清除 `ANTHROPIC_BASE_URL`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN` 及 model aliases，不能让上一个 Provider 的值泄漏。
 
 Auth header 由 Provider 的 `authType` 决定：

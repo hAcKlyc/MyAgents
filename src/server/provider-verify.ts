@@ -18,6 +18,9 @@ import { sdkSubprocessUserMessage } from './utils/sdk-subprocess-diagnostics';
 import { getLastBridgeError } from './openai-bridge';
 import { getProxyForProviderUrl } from './proxy-state';
 import { SUBSCRIPTION_PROVIDER_ID } from '../shared/config-types';
+import type { Provider } from '../shared/config-types';
+import { resolveProviderForModel, TOKENDANCE_PROVIDER_ID } from '../shared/tokendance';
+import { findEffectiveProvider, loadConfig as loadProviderConfig } from './utils/admin-config';
 import {
   classifySubscriptionVerifyFailureKind,
   type SubscriptionStatus,
@@ -420,6 +423,23 @@ export async function verifyProviderViaSdk(
   credentialSource?: import('../shared/config-types').ManagedProviderCredential,
   managedVerification?: { expectedLineage: string },
 ): Promise<{ success: boolean; error?: string; detail?: string; retryable?: boolean }> {
+  if (providerId === TOKENDANCE_PROVIDER_ID) {
+    try {
+      const config = loadProviderConfig();
+      const registered = findEffectiveProvider(providerId, config) as unknown as Provider | null;
+      if (!registered) return { success: false, error: 'TokenDance provider is unavailable.' };
+      model ??= (config.providerPrimaryModels as Record<string, string> | undefined)?.[providerId] ?? registered.primaryModel;
+      const effective = resolveProviderForModel(registered, model);
+      baseUrl = effective.config.baseUrl!;
+      authType = effective.authType!;
+      apiProtocol = effective.apiProtocol;
+      upstreamFormat = effective.upstreamFormat;
+      maxOutputTokens = effective.maxOutputTokens;
+      maxOutputTokensParamName = effective.maxOutputTokensParamName;
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   console.log(`[provider/verify] Starting SDK verification for ${baseUrl}, model=${model ?? 'default'}, authType=${authType}, apiProtocol=${apiProtocol ?? 'anthropic'}, maxOutputTokens=${maxOutputTokens ?? 'none'}`);
   // PRD #124: register a per-call bridge token so the verify subprocess
   // routes to ITS upstream via /bridge/<token>/v1/messages, completely

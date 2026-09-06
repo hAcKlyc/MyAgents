@@ -180,6 +180,147 @@
     }
   },
   "providers": {
+    "tokendance": {
+      "partner": "Official",
+      "intro": "Register once for a range of models, with discounts up to 50%",
+      "account": "Token Dance account",
+      "details": "Provider details",
+      "manageAccount": "Manage account",
+      "manageOnWebsite": "Manage web authorization",
+      "website": "Visit Token Dance to learn more",
+      "quota": "Key quota reached · Manage authorization",
+      "done": "Done",
+      "retry": "Retry",
+      "balance": {
+        "loginRequired": "Log in to view your balance and top up.",
+        "label": "Account balance",
+        "previous": "Last balance",
+        "empty": "Top up to use models",
+        "refreshing": "Refreshing",
+        "loading": "Loading",
+        "refreshFailed": "Refresh failed",
+        "unavailable": "Temporarily unavailable",
+        "refresh": "Refresh balance",
+        "updatedAt": "Last updated: {{time}}"
+      },
+      "models": {
+        "protocolUnavailable": "Cannot confirm this model’s supported protocols. Refresh the model catalog and try again.",
+        "title": "Supported models",
+        "summary": "{{count}} enabled · Default {{model}}",
+        "manage": "Manage models",
+        "empty": "No models enabled",
+        "catalogFailed": "Catalog unavailable. Showing configured models."
+      },
+      "auth": {
+        "title": "Connect Token Dance",
+        "connect": "Connect",
+        "reconnect": "Reconnect",
+        "progress": "View progress",
+        "retrySave": "Retry saving",
+        "guide": "Log in and authorize on the webpage that opened",
+        "fallback": "If the page did not open, try “Open page” or copy the link below into your browser.",
+        "preparingLink": "Preparing authorization link…",
+        "copy": "Copy link",
+        "copied": "Copied",
+        "copyFailed": "Could not copy. Try again or open the page.",
+        "open": "Open page",
+        "openFailed": "Could not open the page. Try again or copy the link into your browser.",
+        "status": {
+          "idle": "Not logged in",
+          "preparing": "Preparing login",
+          "waiting": "Awaiting authorization",
+          "exchanging": "Connecting",
+          "saving": "Connecting",
+          "save-failed": "Save failed",
+          "failed": "Login incomplete",
+          "expired": "Authorization expired",
+          "connected": "Logged in",
+          "invalid": "Login expired"
+        },
+        "result": {
+          "idle": "Ready to connect",
+          "preparing": "Preparing login",
+          "waiting": "Waiting for authorization",
+          "exchanging": "Authorization received. Connecting…",
+          "saving": "Saving account",
+          "save-failed": "Account not saved yet",
+          "failed": "Login did not complete",
+          "expired": "This authorization expired",
+          "connected": "Logged in"
+        },
+        "hint": {
+          "idle": "Open the page to log in and authorize.",
+          "preparing": "The login page will open shortly.",
+          "waiting": "This continues automatically after you log in and authorize.",
+          "exchanging": "This panel closes automatically when connected.",
+          "saving": "This panel closes automatically after saving.",
+          "save-failed": "Retry saving without logging in again.",
+          "failed": "Reconnect to log in and authorize again.",
+          "expired": "Reconnect to open a new authorization page.",
+          "connected": "Your account has been saved."
+        },
+        "step": {
+          "open": "Open page",
+          "authorize": "Log in and authorize",
+          "complete": "Connect"
+        }
+      },
+      "error": {
+        "network_error": "Cannot reach Token Dance. Check your network and retry.",
+        "request_failed": "The request did not complete. Please retry.",
+        "exchange_failed": "Could not finish authorization. Please reconnect.",
+        "invalid_response": "Could not read the response. Please retry.",
+        "config_unavailable": "Cannot read local configuration. Please retry.",
+        "listener_failed": "Could not start web login. Please retry.",
+        "save_failed": "Could not save your account. Please retry saving.",
+        "account_changed": "The linked account changed. Please reconnect.",
+        "rate_limited": "Too many requests. Please try again shortly.",
+        "authorization_inactive": "This authorization has ended. Please reconnect."
+      },
+      "payment": {
+        "recovery": {"reauthorize_api_key":"Login expired. Close this panel and reconnect your account.","api_key_quota":"The current key quota is exhausted. Manage authorization on the website.","top_up_balance":"Insufficient balance. Check your account on the website and retry."},
+        "action": "Top up",
+        "title": "Top up account",
+        "subtitle": "Top up the currently linked Token Dance account.",
+        "scan": "Scan with WeChat or Alipay to pay",
+        "choose": "Choose an amount",
+        "custom": "Custom amount (CNY)",
+        "range": "Enter a whole amount from ¥1 to ¥100,000.",
+        "generate": "Generate payment QR code",
+        "creating": "Generating…",
+        "again": "Top up again",
+        "recipient": "Top up Token Dance account",
+        "qrAlt": "Payment QR code",
+        "qrFailed": "Could not generate the QR code. Close and try again.",
+        "countdown": "QR code expires in {{time}}",
+        "queryFailed": "Payment status unavailable. Retrying.",
+        "createUnknown": "Could not obtain a payment QR code. If you already paid, refresh your balance before trying another top-up.",
+        "status": {
+          "pending": "Awaiting payment",
+          "paid": "Paid",
+          "expired": "QR code expired",
+          "failed": "Failed",
+          "closed": "Closed",
+          "refunded": "Refunded"
+        },
+        "result": {
+          "pending": "Waiting for payment",
+          "paid": "Payment received",
+          "expired": "QR code expired",
+          "failed": "Payment did not complete",
+          "closed": "This payment is closed",
+          "refunded": "This payment was refunded"
+        },
+        "hint": {
+          "pending": "Updates automatically after payment. No manual confirmation needed.",
+          "paid": "Your account balance refreshes automatically.",
+          "expired": "You can top up again. If you already paid, refresh your balance first.",
+          "failed": "Choose an amount and try again.",
+          "closed": "Choose an amount and try again.",
+          "refunded": "Refund status is provided by Token Dance. Your balance will be checked again."
+        }
+      }
+    },
     "title": "Model Providers",
     "cardTitles": {
       "claudeSubscription": "Claude (Subscription)",
@@ -341,6 +482,7 @@
       "deleteMessage": "Delete \"{{name}}\"? This cannot be undone."
     },
     "order": {
+      "fixedFirst": "Pinned first",
       "drag": "Drag to reorder",
       "dragProvider": "Drag to reorder {{name}}",
       "moveUp": "Move up",
@@ -360,6 +502,7 @@
       "save": "Save"
     },
     "models": {
+      "removeModel": "Remove model {{model}}",
       "title": "Manage Models",
       "activeTitle": "Available Models",
       "emptyActive": "No models yet. Discover models below or add one manually.",

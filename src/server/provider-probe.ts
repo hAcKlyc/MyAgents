@@ -26,6 +26,7 @@
 import { fetch as undiciFetch, ProxyAgent, type Dispatcher } from 'undici';
 import { withAbortSignal } from './utils/cancellation';
 import type { ProviderEnv } from './provider-types';
+import { TOKENDANCE_APP_URL, TOKENDANCE_PROVIDER_ID } from '../shared/tokendance';
 
 const PROBE_TIMEOUT_MS = 15000;
 const PROBE_BODY_MAX = 500;
@@ -344,7 +345,12 @@ export async function probeAnthropicProviderDirect(args: {
         const proxyUrl = getProxyForProviderUrl(providerEnv.providerId!, url);
         const init: Parameters<typeof undiciFetch>[1] & { dispatcher?: Dispatcher } = {
           method: 'POST',
-          headers: anthropicAuthHeaders(providerEnv.authType, providerEnv.apiKey ?? ''),
+          headers: {
+            ...anthropicAuthHeaders(providerEnv.authType, providerEnv.apiKey ?? ''),
+            ...(providerEnv.providerId === TOKENDANCE_PROVIDER_ID
+              ? { 'X-App-URL': TOKENDANCE_APP_URL }
+              : {}),
+          },
           body: JSON.stringify({
             model: model ?? 'probe',
             max_tokens: 1,

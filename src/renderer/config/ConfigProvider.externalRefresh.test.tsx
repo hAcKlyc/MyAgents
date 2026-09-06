@@ -6,6 +6,7 @@ import { ConfigProvider } from './ConfigProvider';
 import { DEFAULT_CONFIG, type AppConfig, type Project, type Provider } from './types';
 import { useConfigData } from './useConfigData';
 import { useConfigActions } from './useConfigActions';
+import { rebuildAndPersistAvailableProviders } from './services/providerService';
 
 const mocks = vi.hoisted(() => ({
   config: {} as AppConfig,
@@ -177,6 +178,17 @@ describe('ConfigProvider external config invalidation', () => {
 
     await waitFor(() => expect(screen.getByTestId('snapshot')).toHaveTextContent('old-project'));
     expect(screen.getByTestId('snapshot')).toHaveTextContent('old-provider');
+  });
+
+  it('projects a native Token Dance login with no Settings or auth panel mounted', async () => {
+    render(<ConfigProvider><Probe /></ConfigProvider>);
+    await waitFor(() => expect(screen.getByTestId('snapshot')).toHaveTextContent('old-provider'));
+    vi.mocked(rebuildAndPersistAvailableProviders).mockClear();
+    mocks.config = { ...mocks.config, providerApiKeys: { ...mocks.config.providerApiKeys, tokendance: 'test-key' } };
+    const callback = mocks.listeners.get('tokendance:auth-changed') as unknown as (event: { payload: { phase: string } }) => void;
+    act(() => callback({ payload: { phase: 'connected' } }));
+    await waitFor(() => expect(screen.getByTestId('snapshot')).toHaveTextContent('tokendance'));
+    expect(rebuildAndPersistAvailableProviders).toHaveBeenCalledTimes(1);
   });
 
   it('merges late discovery into the lock-current Provider without replacing a newer explicit value', async () => {

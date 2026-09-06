@@ -23,6 +23,13 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/** Old app-owned definitions can survive in config and Session snapshots.
+ * Match the retired launch marker, never the user-editable server id/name.
+ */
+export function isRetiredBundledMcpServer(server: Pick<McpServerDefinition, 'type' | 'command'>): boolean {
+  return server.type === 'stdio' && server.command === '__bundled_cuse__';
+}
+
 /**
  * Apply user-editable MCP env and argument additions to a resolved catalogue.
  * `mcpServerArgs[id]` is an EXTRA-args store: replacing `server.args` would
@@ -36,7 +43,7 @@ export function applyMcpServerConfigAdditions(
   const argsByServer = asRecord(config.mcpServerArgs);
   const envByServer = asRecord(config.mcpServerEnv);
 
-  return servers.map((server) => {
+  return servers.filter(server => !isRetiredBundledMcpServer(server)).map((server) => {
     const configuredArgs = argsByServer[server.id];
     const extraArgs = configuredArgs === undefined && server.id === STANDARD_PLAYWRIGHT_MCP_ID
       ? [...DEFAULT_STANDARD_PLAYWRIGHT_ARGS]

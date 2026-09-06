@@ -72,7 +72,7 @@ myagents-releases/
 此脚本会：
 1. 检查基础依赖，并按 `rust-toolchain.toml` 准备 Rust toolchain、`rustfmt` / `clippy`、`x86_64-pc-windows-msvc` target
 2. 根据 exact prepared cache 提前检查 CMake 3.28+/MSVC 等原生推理构建工具；缺失时在下载或安装项目依赖前给出修复命令，不自动安装原生构建工具
-3. 下载 bundled Node.js v24 运行时、cuse、Git 安装包和 VC++ Runtime DLL
+3. 下载 bundled Node.js v24 运行时、Git 安装包和 VC++ Runtime DLL
 4. 安装前端/后端依赖 (`npm install`)
 5. 下载 Rust crates（`cargo fetch`）
 6. 准备 x64 离线文档 Worker、OCR、ONNX Runtime 与 PDFium；资源缓存跨 `npm run clean` 复用
@@ -500,3 +500,7 @@ ERROR : Failed to copy: AccessDenied
 - [macOS 构建与发布指南](./build_and_release_guide.md) - macOS 版本构建流程
 - [自动更新系统](../tech_docs/auto_update.md) - 更新机制详解
 - [Node.js Sidecar 打包](../tech_docs/bundled_node.md) - 运行时打包机制
+
+## Cuse 内置桌面操作 Skill
+
+`build_windows.ps1` 与 `build_dev_win.ps1` 在打包前调用 `prepare-cuse-bundle.mjs x86_64-pc-windows-msvc`，获取最新完整 Skill+CLI 到 `bundled-skills/cuse/`；不恢复旧 MCP sidecar。下载/校验失败终止构建，客户端更新覆盖内容并保留用户全局关闭状态。详见 [Cuse bundle](../tech_docs/cuse_bundle.md)。

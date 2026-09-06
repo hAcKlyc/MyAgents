@@ -133,9 +133,11 @@ Document/Media Worker及native inference artifact由resource lock和target manif
 
 Localhost Rust HTTP统一走 `crate::local_http` 并显式no-proxy。外部request/subprocess按general或Provider owner走 `proxy_config`；未选择应用代理时继承系统/TUN baseline，不强制direct。完整规则见 [`proxy_config.md`](proxy_config.md)。
 
-## Git Bash dependency
+## Builtin shell tools
 
-Builtin Claude shell在Windows需要Git Bash。NSIS installer检测并可安装随包Git installer；开发或自定义环境也可通过 `CLAUDE_CODE_GIT_BASH_PATH` 指定。缺失应返回明确dependency error，不能通过 `cmd.exe` 模拟或把问题归因于Node。
+`buildClaudeSessionEnv()` 在 Windows 显式设置 `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`。SDK 的 PowerShell 工具启用不再依赖上游 rollout（MyAgents 的非必要联网策略会关闭该机制）；产品工具目录同时保留 Bash 与 PowerShell，由模型选择，权限仍由既有 policy 裁决。macOS / Linux 不设置此开关。
+
+Bash 工具在 Windows 使用 Git Bash；PowerShell 工具由 SDK 直接执行 PowerShell。NSIS installer 检测并可安装随包 Git installer；开发或自定义环境也可通过 `CLAUDE_CODE_GIT_BASH_PATH` 指定。不能通过 `cmd.exe` 模拟 Git Bash 或把 shell 缺失归因于 Node。
 
 具体Git artifact/version、构建前置和签名以 `build_windows.ps1`、NSIS模板及Windows构建指南为准。
 

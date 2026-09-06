@@ -1,6 +1,6 @@
 # Bundled Node.js 运行时架构
 
-MyAgents 随应用提供单一 Node.js v24，用于 Sidecar、Plugin Bridge、MCP Server 和 `myagents` CLI。用户不需要安装系统 Node 才能运行产品功能；具体 Node 版本以 `scripts/download_nodejs.sh` / `.ps1` 的 `NODE_VERSION` 为准。
+MyAgents 随应用提供单一 Node.js v24，用于 Sidecar、Plugin Bridge、MCP Server 和 `myagents` CLI。用户不需要安装系统 Node 才能运行产品功能；Node/npm 的精确组合以 `scripts/node-runtime.json` 为唯一构建权威，下载脚本和前端版本展示共同读取。开发用的 `package.json#packageManager` 不代表应用内置 npm。
 
 ## 获取、缓存与打包
 
@@ -9,7 +9,11 @@ Node 下载脚本从 nodejs.org 取得官方 target artifact，并维护两层�
 - `src-tauri/resources/nodejs-cache/<platform>-<arch>-v<version>/`：按平台、架构和版本隔离的本地 cache；
 - `src-tauri/resources/nodejs/`：当前 Tauri target 的 staging projection。
 
-构建脚本在每个 target build 前从正确 cache 重建 staging，并验证版本、平台与架构。`resources/nodejs/` 不是跨 target 的权威缓存；双架构或交叉构建不能复用上一个 target 遗留的 staging。
+macOS/Linux 构建脚本在每个 target build 前从正确 cache 重建 staging，并验证版本、平台与架构。`resources/nodejs/` 不是跨 target 的权威缓存；双架构或交叉构建不能复用上一个 target 遗留的 staging。
+
+Windows setup、dev build 和 release build 共用 `scripts/download_nodejs.ps1`，直接核验 staging 中 Node 的版本/平台/架构与 npm/npx 版本；不匹配则重新下载官方 ZIP 并用 robocopy 复制深层依赖。
+
+npm 随官方 Node 发行包整组获取，禁止通过 `npm/latest` 或独立升级覆盖它。缓存复用和 staging 校验必须读取 npm 自身的 `package.json` 并检查 npm/npx 入口，不能仅凭 Node 版本命中缓存。需要调整组合时修改 manifest，且所选官方发行包必须自带声明的 npm；不匹配即准备失败。
 
 打包后的主路径为：
 
@@ -42,7 +46,7 @@ Builtin `anthropic-sub` 的 OAuth credential 仍由 Claude Code native credentia
 
 ### MyAgents-owned 入口
 
-- Rust 启动 Sidecar、Plugin Bridge 和 CLI 时使用安装目录中 bundled Node 的绝对路径。
+- Rust 启动 Sidecar、Plugin Bridge 时优先使用安装目录中 bundled Node 的绝对路径：先查 resource root，再查 executable-relative layout，最后调用 `system_binary::find()` 查找 Node。最后一步虽注释为开发回退，代码没有仅 debug 生效的限制；不能宣称生产环境绝不回退系统 Node。
 - `~/.myagents/bin/{myagents,myagents.cmd}` 是 Rust 原子生成的薄启动器，只回到当前 MyAgents executable 并透明转发 argv。
 - `src-tauri/src/cli.rs` 从当前 executable 的受信 resource root 定位 Node 与 `myagents.cjs`；资源缺失或路径逃逸时 fail closed，不回退系统 Node 或 HOME 里的旧业务脚本。
 
@@ -58,9 +62,17 @@ AI 的 Bash 工具需要尊重用户开发环境，因此 `buildClaudeSessionEnv
 
 SDK shell 不设置全局 `npm_config_prefix` 等会干扰 nvm 的变量。需要固定 npm 安装目录时，在单条命令上显式设置。
 
+这里的“系统 Node 目录”是 `getSystemNodeDirs()` 枚举的常见位置，并不等于原终端 PATH 的完整优先级。macOS/Linux 按 Homebrew、`/usr/local/bin`、`/usr/bin`、Volta、nvm/current、fnm/current 排序；只存在于 inherited PATH 的自定义版本目录在 bundled 之后。Shell 初始化、版本管理器或命令显式修改 PATH/指定绝对路径后，实际选择可以改变。此处没有版本兼容性探测，也不会因系统 Node 较旧或命令失败就自动再试 bundled Node。
+
+### 外部 Runtime 与应用内终端
+
+- Claude Code / Codex 等外部 Runtime 的进程环境走 `runtimes/env-utils.ts → getShellEnv()`，不是 `buildClaudeSessionEnv()`。它以 `shell.ts` 的平台目录表开头，再追加 inherited PATH 和异步检测到的用户 Shell PATH；常见系统目录在 bundled 前，但部分版本管理器目录在 bundled 后。外部 Runtime 内部 Shell 的最终环境仍由相应 Runtime 决定。
+- 应用内 PTY 终端由 `src-tauri/src/terminal.rs::inject_terminal_env()` 注入：`~/.myagents/bin`、应用可执行资源目录、bundled Node、inherited PATH。因此它的初始优先级与内置 AI 的 Shell 不同；终端 Shell 加载用户配置后还可能重排。
+- `myagents tool add` 注册的用户工具也不等同于官方 CLI：POSIX 启动器使用 `#!/usr/bin/env node`，随后沿用该 Node；Windows shim 优先使用写入时的 bundled Node 绝对路径，失效后才回退 PATH 上的 Node。
+
 ### Task command Detector
 
-Activation Trigger 的 command Detector 不是交互 shell。bare `node` / `node.exe` 固定解析到 bundled Node；其它 bare executable 走 `system_binary::find()`。它使用结构化 executable、args 与 cwd，不经 shell 字符串重拼。
+Activation Trigger 的 command Detector 不是交互 shell。bare `node` / `node.exe` 使用 Sidecar 的 Node locator，优先 bundled，缺失时也有上述系统查找回退；其它 bare executable 走 `system_binary::find()`。它使用结构化 executable、args 与 cwd，不经 shell 字符串重拼。
 
 Detector 在 `env_clear()` 后只恢复 OS、证书、general proxy、PATH 和 UTF-8 基线，不继承 Provider credential、Session 控制端口或启动 shell 的任意变量。
 
@@ -73,6 +85,14 @@ Detector 在 `env_clear()` 后只恢复 OS、证书、general proxy、PATH 和 U
 - product preset 使用 `src/shared/mcpPackages.ts` 的精确 package spec；
 - 用户附加参数只追加，不覆盖 preset 的 package / 基础参数；
 - localhost 保护和 proxy env 由对应进程 owner 注入。
+
+“系统 npx 优先”特指常见目录中的 npx 入口选择。Windows 显式配对同一 distribution 的 Node 与 npx；POSIX 直接执行 npx 文件，若入口使用 `#!/usr/bin/env node`，最终 Node 还取决于子进程 PATH，不保证与该 npx 来自同一发行包。自定义 MCP 的绝对命令路径和显式 env 另行生效；不能将 npx 特判扩展为所有 MCP 都固定使用 bundled Node。
+
+### OpenClaw 插件安装
+
+`src-tauri/src/im/bridge.rs` 将运行 Bridge 与安装插件分开处理。安装先通过 `system_binary::find("npm")` 查找 npm，失败或不可用时显式使用 bundled Node + `npm-cli.js`，并将其 Node 目录前置供安装脚本使用；后续依赖修复也显式使用 bundled 组合。
+
+这里第一步的 locator 搜索顺序是 inherited PATH → 应用目录 → 平台补充目录和检测出的 Shell PATH。即使变量和日志称为 “system npm”，实际也可能命中 bundled npm，不能按名称推断来源。`runtime.ts::getPackageManagerPath()` 虽定义 bundled 优先策略，目前没有生产调用方，不能用它代表插件安装的实际路径。
 
 标准 `playwright` preset 仍是上游 stdio MCP。应用自有「浏览器」由 Global Sidecar Browser Host 和 Rust resource owner 管理，不通过 npx，也不从 bundled Node、系统 Chrome 或用户 Playwright cache 猜浏览器。Chromium artifact 不是 Node bundle 的一部分。
 

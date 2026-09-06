@@ -48,6 +48,8 @@ export interface PopoverProps {
   closeOnOutsideClick?: boolean;
   /** Dismiss on Escape. Default true. */
   closeOnEscape?: boolean;
+  /** Disable when the caller owns a modal focus trap inside this portal. */
+  preserveTabOrder?: boolean;
   /**
    * Stacking layer. Default 260 — above every `<OverlayBackdrop>` in the app
    * (z-200/210/250) yet below the ConfirmDialog tier (z-300).
@@ -85,6 +87,7 @@ export function Popover({
   matchAnchorWidth = false,
   closeOnOutsideClick = true,
   closeOnEscape = true,
+  preserveTabOrder = true,
   zIndex = 260,
   className = '',
   style,
@@ -164,7 +167,7 @@ export function Popover({
   if (!open) return null;
 
   return (
-    <FloatingPortal>
+    <FloatingPortal preserveTabOrder={preserveTabOrder}>
       <div
         ref={(node) => {
           refs.setFloating(node);

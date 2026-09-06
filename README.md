@@ -567,3 +567,5 @@ See [LICENSING.md](LICENSING.md) for details,
 overview, and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for independently licensed
 components.
+
+Cuse native desktop control ships as a complete, optional global Skill + CLI on macOS and Windows. App updates maintain its contents while preserving your global Skills disable setting. See the [integration and build contract](specs/tech_docs/cuse_bundle.md).

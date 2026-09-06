@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import type { Provider, ModelEntity } from '../types';
+import { parseSupportedProtocols, TOKENDANCE_PROVIDER_ID, type ModelProtocol } from '../../../shared/tokendance';
 
 // ============= Types =============
 
@@ -21,6 +22,7 @@ export interface DiscoveredModel {
   supportsVideo?: boolean;
   supportsReasoning?: boolean;
   status?: string;
+  supportedProtocols?: ModelProtocol[];
 }
 
 // ============= Fetching =============
@@ -35,7 +37,8 @@ export async function fetchProviderModels(
   provider: Provider,
   apiKey: string | undefined,
 ): Promise<DiscoveredModel[]> {
-  if (!apiKey) throw new Error('API Key is required');
+  const publicCatalog = provider.id === TOKENDANCE_PROVIDER_ID;
+  if (!apiKey && !publicCatalog) throw new Error('API Key is required');
   const url = resolveModelListUrl(provider);
   if (!url) throw new Error('No model list URL available for this provider');
 
@@ -45,12 +48,17 @@ export async function fetchProviderModels(
   const body = await invoke<unknown>('cmd_fetch_provider_models', {
     url: isAnthropicApi ? `${url}?limit=100` : url,
     providerId: provider.id,
-    authHeaderName: isAnthropicApi ? 'x-api-key' : 'Authorization',
-    authHeaderValue: isAnthropicApi ? apiKey : `Bearer ${apiKey}`,
+    authHeaderName: publicCatalog ? null : isAnthropicApi ? 'x-api-key' : 'Authorization',
+    authHeaderValue: publicCatalog ? null : isAnthropicApi ? apiKey : `Bearer ${apiKey}`,
     extraHeaders: isAnthropicApi ? { 'anthropic-version': '2023-06-01' } : null,
   });
 
   return parseModelsResponse(body);
+}
+
+export function isTokenDanceConversationModel(model: DiscoveredModel): boolean {
+  return Boolean(model.supportedProtocols?.length)
+    && !/tts|ocr|embedding|rerank|^unifuncs-/i.test(model.id);
 }
 
 /** Resolve the URL to fetch models from.
@@ -150,6 +158,7 @@ function mapRawToDiscovered(m: Record<string, unknown>): DiscoveredModel {
     supportsVideo,
     supportsReasoning,
     status: m.status as string | undefined,
+    supportedProtocols: parseSupportedProtocols(m.supported_protocols),
   };
 }
 
@@ -206,6 +215,7 @@ export function toModelEntity(d: DiscoveredModel, provider: Provider): ModelEnti
     maxOutputTokens: d.maxOutputTokens,
     inputModalities: synthesizeModalitiesFromDiscovered(d),
     source: 'discovered',
+    supportedProtocols: d.supportedProtocols,
   };
 }
 

@@ -89,7 +89,6 @@ import {
   ADMIN_LOOPBACK_TIMEOUT_MS,
   managementApi,
 } from './utils/management-api-client';
-import { getCuseDiagnostics } from './utils/cuse-diagnostics';
 import { buildSessionExecutablePath } from './utils/session-executable-path';
 import { getSessionEngine } from './session-engine';
 import { getSessionsByAgentDir, isHistoryVisibleSession } from './SessionStore';
@@ -387,11 +386,6 @@ export async function handleMcpShow(payload: {
       )
     : undefined;
 
-  const cuseDiagnostics =
-    server.command === '__bundled_cuse__'
-      ? await getCuseDiagnostics({ workspacePath, includeR2Latest: false })
-      : undefined;
-
   return {
     success: true,
     data: {
@@ -403,7 +397,6 @@ export async function handleMcpShow(payload: {
       requiresConfig: !!server.requiresConfig,
       websiteUrl: server.websiteUrl,
       command: server.command,
-      resolvedCommand: cuseDiagnostics?.bundled.path,
       args: server.args,
       url: server.url,
       // Headers (for http/sse) and env (for stdio) — redacted values only.
@@ -422,7 +415,6 @@ export async function handleMcpShow(payload: {
         project: projectEnabled,
       },
       workspacePath: workspacePath ?? null,
-      diagnostics: cuseDiagnostics ? { cuse: cuseDiagnostics } : undefined,
     },
   };
 }
@@ -815,41 +807,6 @@ export async function handleMcpTest(payload: {
       success: true,
       data: { id, type: 'builtin' },
       hint: 'Built-in MCP validated.',
-    };
-  }
-
-  // Bundled cuse (computer-use) binary: resolve via runtime helper and skip
-  // the generic `which` preflight because __bundled_cuse__ is a sentinel, not
-  // a real PATH lookup. The diagnostic response intentionally exposes the
-  // resolved bundled path/version so `myagents mcp show/test cuse` can
-  // distinguish the app-owned binary from any stale skill-local cache.
-  if (server.command === '__bundled_cuse__') {
-    const cuse = await getCuseDiagnostics({
-      workspacePath: getCurrentWorkspacePath(),
-      includeR2Latest: true,
-    });
-    if (!cuse.bundled.path) {
-      return {
-        success: false,
-        error: `cuse 二进制未安装 (platform=${process.platform})。macOS/Windows 构建会自动包含；开发环境请运行 scripts/download_cuse.sh。`,
-        data: { id, type: 'stdio', cuse },
-      };
-    }
-    if (!cuse.bundled.exists || cuse.bundled.error) {
-      return {
-        success: false,
-        error: `Bundled cuse validation failed: ${cuse.bundled.error ?? 'resolved path does not exist'}`,
-        data: { id, type: 'stdio', cuse },
-      };
-    }
-    const warningHint =
-      cuse.warnings.length > 0
-        ? `\nWarnings:\n${cuse.warnings.map((w) => `- ${w}`).join('\n')}`
-        : '';
-    return {
-      success: true,
-      data: { id, type: 'stdio', cuse },
-      hint: `Bundled cuse validated: ${cuse.bundled.rawVersion ?? cuse.bundled.version ?? 'version unknown'}.${warningHint}`,
     };
   }
 
@@ -3010,12 +2967,12 @@ ERROR RECOVERY
 
 Commands:
   list                     List all MCP servers
-  show <id>                Show one MCP server's config + enable state (env/headers redacted; cuse includes resolved binary diagnostics)
+  show <id>                Show one MCP server's config + enable state (env/headers redacted)
   add                      Add a new MCP server
   remove <id>              Remove a custom MCP server
   enable <id>              Enable an MCP server
   disable <id>             Disable an MCP server
-  test <id>                Validate MCP server connectivity (cuse also checks resolved binary version)
+  test <id>                Validate MCP server connectivity
   env <id> <action>        Manage environment variables
   oauth <action> <id>      Manage OAuth for HTTP/SSE servers
 

@@ -90,6 +90,7 @@ import { launchSupportDiagnostics } from '@/utils/supportDiagnostics';
 import { createDefaultSessionGoalDraftConfig } from '@/utils/sessionGoalDraft';
 import { MANAGED_CODEX_COMPACT_SLASH_COMMAND } from '@/utils/slashActions';
 import { CODEX_SUBSCRIPTION_PROVIDER_ID, type PermissionMode, type McpServerDefinition, type Project, type Provider, getEffectiveModelAliases } from '@/config/types';
+import { resolveProviderForModel } from '../../shared/tokendance';
 import { syncMcpServerNames } from '@/components/tools/toolBadgeConfig';
 import {
   getAllMcpServers,
@@ -515,6 +516,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
     hasMoreBefore: _hasMoreBefore,
     loadOlderMessages,
     isLoading,
+    getQueryElapsedSeconds,
     isSessionLoading,
     sessionRestoreError,
     sessionState,
@@ -1152,6 +1154,14 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
   const [selectedModel, setSelectedModel] = useState<string | undefined>(
     currentAgent?.model ?? currentProject?.model ?? currentProvider?.primaryModel
   );
+  // The UI shows effort options for the same model transport that the
+  // ProviderRoute will materialize on the server. Missing catalog metadata
+  // hides protocol-specific options; execution reports the actionable error.
+  const effectiveModelProvider = useMemo(() => {
+    if (!currentProvider) return undefined;
+    try { return resolveProviderForModel(currentProvider, selectedModel ?? currentProvider.primaryModel); }
+    catch { return undefined; }
+  }, [currentProvider, selectedModel]);
   const currentProviderExecutionIntent = useMemo(
     () => sessionMeta?.providerExecutionIdentity
       ?? buildProviderExecutionIntent(currentProviderForHistory, selectedModel),
@@ -3689,20 +3699,20 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
   // the SDK default 'high' (the query-time isSdkEffortLevel gate). Reset to
   // 'default' (persisted + pushed via the handler) so UI and wire agree.
   useEffect(() => {
-    if (isExternalRuntime || !currentProvider) return;
+    if (isExternalRuntime || !effectiveModelProvider) return;
     if (configDispositionRef.current !== 'push') return;
     if (reasoningEffort === 'default') return;
     const choices = reasoningEffortChoices(
       'builtin',
-      currentProvider.apiProtocol,
-      currentProvider.id,
+      effectiveModelProvider.apiProtocol,
+      effectiveModelProvider.id,
       selectedModel,
     );
     if (choices && !choices.includes(reasoningEffort)) {
       void handleReasoningEffortChange('default');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- narrowed to protocol-relevant provider fields
-  }, [isExternalRuntime, currentProvider?.id, currentProvider?.apiProtocol, selectedModel, reasoningEffort, handleReasoningEffortChange]);
+  }, [isExternalRuntime, effectiveModelProvider?.id, effectiveModelProvider?.apiProtocol, selectedModel, reasoningEffort, handleReasoningEffortChange]);
 
   // Handle permission mode change — same dual-write policy as handleModelChange.
   const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
@@ -5452,6 +5462,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
               layoutByMessageId={chatScrollModel.layoutByMessageId}
               onLoadOlder={handleLoadOlderMessages}
               isLoading={isLoading}
+              getQueryElapsedSeconds={getQueryElapsedSeconds}
               sessionId={sessionId}
               isActive={isActive}
               windowPresentation={windowPresentation}
@@ -5556,7 +5567,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
             clientActionSlashCommands={runtimeClientActionSlashCommands}
             workspaceSlashCommands={workspaceCapabilitySlashCommands}
             sdkSlashCommands={visibleSdkSlashCommands}
-            provider={currentProvider}
+            provider={effectiveModelProvider}
             providers={providers}
             providerAvailable={currentProviderAvailableForInput}
             availableProviderIds={availableProviderIdsForInput}
@@ -5670,7 +5681,7 @@ export default function Chat({ windowPresentation, onNewSession, onOpenSession, 
               agentDir={agentDir}
               projectIcon={currentProject?.icon}
               projectDisplayName={currentProject?.displayName}
-              provider={currentProvider}
+              provider={effectiveModelProvider}
               providers={providers}
               onProviderChange={handleProviderChange}
               onCollapse={handleCollapseWorkspace}
