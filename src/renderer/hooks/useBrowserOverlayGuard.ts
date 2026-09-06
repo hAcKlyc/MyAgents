@@ -29,10 +29,12 @@ function checkOverlays(): boolean {
   for (const child of document.body.children) {
     if (!(child instanceof HTMLElement)) continue;
     const style = getComputedStyle(child);
+    // Older WebKit only exposes the prefixed property. CSSOM returns an
+    // empty string for unsupported properties; the JS accessor may be absent.
     if (
       style.position === 'fixed' &&
-      style.backdropFilter !== 'none' &&
-      style.backdropFilter.includes('blur')
+      (style.getPropertyValue('backdrop-filter').includes('blur') ||
+        style.getPropertyValue('-webkit-backdrop-filter').includes('blur'))
     ) {
       return true;
     }
