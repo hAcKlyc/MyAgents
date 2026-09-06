@@ -133,4 +133,31 @@ describe('Token Dance authorization panel', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(mocks.refresh).toHaveBeenCalled();
   });
+  it('lets an account conflict start fresh authorization while logged out', async () => {
+    render(<TokenDanceProvider provider={provider} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1));
+    emit({
+      ...view,
+      phase: 'failed',
+      error: { code: 'account_changed', message: 'account_changed' },
+    });
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText('The linked account changed. Please reconnect.')).toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: 'Retry saving' })).toBeNull();
+    mocks.invoke.mockImplementation(async (command) => {
+      if (command === 'cmd_tokendance_auth_open') {
+        return { view: { ...view, id: 'flow-2' }, isNew: true };
+      }
+    });
+    fireEvent.click(dialog.getByRole('button', { name: 'Reconnect' }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith(
+      'cmd_tokendance_auth_open',
+      expect.objectContaining({ fresh: true }),
+    ));
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2));
+    emit({ ...view, id: 'flow-2', phase: 'connected' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(mocks.refresh).toHaveBeenCalled();
+  });
 });

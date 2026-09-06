@@ -196,6 +196,26 @@ impl AuthFlow {
         self.stop_listener();
         Some(verifier)
     }
+    fn finish_save(&mut self, result: Result<(), TokenDanceError>) {
+        match result {
+            Ok(()) => {
+                self.view.phase = AuthPhase::Connected;
+                self.view.error = None;
+                self.pending_key = None;
+            }
+            Err(e) => {
+                if e.code == "account_changed" {
+                    // The flow's original credential can never win this CAS
+                    // again. Discard its key and offer fresh authorization.
+                    self.view.phase = AuthPhase::Failed;
+                    self.pending_key = None;
+                } else {
+                    self.view.phase = AuthPhase::SaveFailed;
+                }
+                self.view.error = Some(e);
+            }
+        }
+    }
 }
 impl Drop for AuthFlow {
     fn drop(&mut self) {
@@ -349,17 +369,9 @@ async fn save_key(app: AppHandle, id: String) {
     let Some(flow) = state.as_mut().filter(|f| f.view.id == id) else {
         return;
     };
-    match result {
-        Ok(()) => {
-            flow.view.phase = AuthPhase::Connected;
-            flow.view.error = None;
-            flow.pending_key = None;
-            let _ = app.emit("app:config-changed", ());
-        }
-        Err(e) => {
-            flow.view.phase = AuthPhase::SaveFailed;
-            flow.view.error = Some(e);
-        }
+    flow.finish_save(result);
+    if flow.view.phase == AuthPhase::Connected {
+        let _ = app.emit("app:config-changed", ());
     }
     publish(&app, &flow.view);
 }
@@ -913,6 +925,47 @@ mod tests {
             config_key(&crate::config_io::read_config_json(&path).unwrap()),
             "first"
         );
+    }
+
+    #[test]
+    fn account_conflict_ends_old_authorization_instead_of_retrying_its_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut f = flow();
+        f.view.phase = AuthPhase::Saving;
+        f.pending_key = Some(Zeroizing::new("old-flow-key".into()));
+        std::fs::write(
+            &path,
+            json!({"providerApiKeys":{"tokendance":"replacement"}}).to_string(),
+        )
+        .unwrap();
+
+        f.finish_save(persist_key(&path, "old-flow-key", &f.original_version));
+
+        assert!(f.view.phase == AuthPhase::Failed);
+        assert_eq!(f.view.error.as_ref().unwrap().code, "account_changed");
+        assert!(f.pending_key.is_none());
+        assert_eq!(
+            config_key(&crate::config_io::read_config_json(&path).unwrap()),
+            "replacement"
+        );
+    }
+
+    #[test]
+    fn disk_save_failure_preserves_key_for_retry_and_success_clears_it() {
+        let mut f = flow();
+        f.view.phase = AuthPhase::Saving;
+        f.pending_key = Some(Zeroizing::new("retry-key".into()));
+        f.finish_save(Err(error("save_failed")));
+        assert!(f.view.phase == AuthPhase::SaveFailed);
+        assert_eq!(
+            f.pending_key.as_deref().map(String::as_str),
+            Some("retry-key")
+        );
+        f.finish_save(Ok(()));
+        assert!(f.view.phase == AuthPhase::Connected);
+        assert!(f.view.error.is_none());
+        assert!(f.pending_key.is_none());
     }
 
     fn payment() -> Value {
