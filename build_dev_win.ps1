@@ -198,6 +198,8 @@ Write-Host ""
 # release builds. The prepare owner is fingerprinted, so a warm invocation is
 # an offline no-op instead of repeating downloads, extraction, or signing.
 Write-ColorOutput "[准备] 准备离线文档与语音推理资源 (x86_64-pc-windows-msvc)..." "Blue"
+& node "$PROJECT_DIR\scripts\prepare-cuse-bundle.mjs" "x86_64-pc-windows-msvc"
+if ($LASTEXITCODE -ne 0) { throw "Cuse Skill+CLI preparation failed" }
 & node "$PROJECT_DIR\scripts\prepare-native-inference.mjs" "x86_64-pc-windows-msvc"
 if ($LASTEXITCODE -ne 0) {
     Write-ColorOutput "✗ 原生推理资源准备失败" "Red"

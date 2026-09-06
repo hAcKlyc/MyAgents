@@ -162,3 +162,5 @@ sudo apt-get install -y fuse libfuse2
 ---
 
 **为什么 Linux 到 v0.2.0 才一等支持**：v0.1.x 的 Bun-based Sidecar 理论能跑 Linux，但双 runtime 策略（Bun + Node.js）导致 Linux 构建 pipeline 需要分别处理两套 binary 分发；v0.2.0 统一到 Node.js 后，Linux 只需维护单一 runtime 链路，刚好是收敛这块的最佳时机。详见 [prd_0.2.0_node_runtime_migration.md](../prd/prd_0.2.0_node_runtime_migration.md)。
+
+Cuse 目前只发布 macOS/Windows Skill+CLI；Linux 构建会清除共享构建树里的 Cuse staging，启动同步跳过该 Skill。详见 [Cuse bundle](../tech_docs/cuse_bundle.md)。

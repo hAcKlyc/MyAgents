@@ -705,10 +705,28 @@ test('speech inference builds a signed exact native inventory around the shared 
   );
 });
 
-test('retired Cuse is absent from package and setup inputs', () => {
+test('Cuse uses the complete Skill bundle while retired MCP sidecar stays absent', () => {
   const tauri = JSON.parse(readFileSync(resolve(repoRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
   assert.ok(!(tauri.bundle.externalBin ?? []).some(binary => binary.includes('cuse')));
   for (const source of [setupUnix, setupWindows, buildMacos, buildWindows, buildDev, buildDevWindows]) {
     assert.doesNotMatch(source, /download_cuse|binaries[/\\]cuse|EXTBIN_DIR/);
   }
+});
+
+
+test('all native build entrypoints prepare Cuse for the explicit target', () => {
+  for (const source of [buildDev, buildMacos, buildLinux, buildWindows, buildDevWindows]) {
+    assert.match(source, /prepare-cuse-bundle\.mjs/);
+    assert.ok(source.indexOf('prepare-cuse-bundle.mjs') < source.lastIndexOf('npm run tauri:build'));
+  }
+  assert.match(buildMacos, /prepare-cuse-bundle\.mjs" "\$TARGET"/);
+  assert.match(buildDev, /prepare-cuse-bundle\.mjs" "\$DEV_NATIVE_TARGET"/);
+  for (const source of [buildWindows, buildDevWindows]) {
+    assert.match(source, /prepare-cuse-bundle\.mjs" "x86_64-pc-windows-msvc"/);
+    assert.match(source, /if \(\$LASTEXITCODE -ne 0\) \{ throw "Cuse Skill\+CLI preparation failed" \}/);
+  }
+  for (const source of [buildMacos, buildDev]) {
+    assert.match(source, /codesign --force --options runtime --timestamp --sign "\$APPLE_SIGNING_IDENTITY" "\$\{PROJECT_DIR\}\/bundled-skills\/cuse\/scripts\/cuse"/);
+  }
+  assert.equal(tauriConfig.bundle.resources['../bundled-skills'], 'bundled-skills');
 });

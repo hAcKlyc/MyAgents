@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -113,6 +113,31 @@ describe('Codex app-server protocol helpers', () => {
     } finally {
       materialized.cleanup();
     }
+  });
+
+  it('projects the complete Cuse bundle so relative executable and reference paths resolve', () => {
+    const workspace = tempWorkspace();
+    const source = join(workspace, 'cuse');
+    mkdirSync(join(source, 'scripts'), { recursive: true });
+    mkdirSync(join(source, 'references'));
+    const binary = process.platform === 'win32' ? 'cuse.exe' : 'cuse';
+    writeFileSync(join(source, 'scripts', binary), 'bundled native CLI');
+    writeFileSync(join(source, 'references', 'setup.md'), 'setup reference');
+    writeFileSync(join(source, 'package.json'), JSON.stringify({ entrypoint: `scripts/${binary}` }));
+    writeFileSync(join(source, 'SKILL.md'), 'Cuse');
+    const result = materializeManagedCodexExtensions({
+      revision: 'cuse', workspacePath: workspace, scenario: { type: 'desktop' },
+      enabledPluginIds: [], commands: [], agents: [], mcpServers: [], dynamicTools: [], components: [],
+      skills: [{ name: 'cuse', description: 'desktop control', contentSha256: 'sha',
+        path: join(source, 'SKILL.md'), scope: 'user', sourceId: 'global', sourceLocalId: 'cuse' }],
+    });
+    try {
+      const projected = join(result.skillRoots[0], '000');
+      const metadata = JSON.parse(readFileSync(join(projected, 'package.json'), 'utf8'));
+      expect(readFileSync(join(projected, metadata.entrypoint), 'utf8')).toBe('bundled native CLI');
+      expect(readFileSync(join(projected, 'references', 'setup.md'), 'utf8')).toBe('setup reference');
+    } finally { result.cleanup(); }
+    expect(readFileSync(join(source, 'scripts', binary), 'utf8')).toBe('bundled native CLI');
   });
 
   it('holds Managed Codex Host tools behind the existing permission owner', async () => {

@@ -104,7 +104,7 @@ describe('required system skill API contract', () => {
     mkdirSync(projectSkills, { recursive: true });
     mkdirSync(join(scratch, 'tmp'), { recursive: true });
 
-    for (const name of [...REQUIRED_SYSTEM_SKILLS, OPTIONAL_SYSTEM_SKILL, 'user-skill']) {
+    for (const name of [...REQUIRED_SYSTEM_SKILLS, OPTIONAL_SYSTEM_SKILL, 'cuse', 'user-skill']) {
       writeSkill(userSkills, name);
     }
     writeSkill(userSkills, OPTIONAL_SYSTEM_SKILL, 'author: Legacy Author');
@@ -357,6 +357,22 @@ describe('required system skill API contract', () => {
       });
       expect(projectSystemNameSave.ok).toBe(true);
       expect(readFileSync(join(projectSkills, 'myagents-cli', 'SKILL.md'), 'utf8')).toContain('Project-local edit.');
+
+      // Cuse is maintained by the app but its discovery remains user-controlled.
+      expect(byFolder(userBody.skills, 'cuse')).toMatchObject({
+        systemOwned: true, required: false, enabled: true,
+      });
+      for (const enabled of [false, true]) {
+        const response = await fetch(`${baseUrl}/api/skill/toggle-enable`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderName: 'cuse', enabled }),
+        });
+        expect(response.ok).toBe(true);
+        const listed = await (await fetch(`${baseUrl}/api/skills?scope=user`)).json() as SkillsListResponse;
+        expect(byFolder(listed.skills, 'cuse')).toMatchObject({ systemOwned: true, required: false, enabled });
+        const persisted = JSON.parse(readFileSync(configPath, 'utf8')) as { disabled: string[] };
+        expect(persisted.disabled.includes('cuse')).toBe(!enabled);
+      }
 
       const baselineConfig = readFileSync(configPath, 'utf8');
       for (const folderName of REQUIRED_SYSTEM_SKILLS) {

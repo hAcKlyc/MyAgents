@@ -10,6 +10,7 @@ pub mod browser_resource;
 pub mod browser_runtime_authority;
 pub mod cli;
 mod commands;
+mod cuse_skill;
 pub mod config_io;
 mod crash_artifact_retention;
 pub mod cron_task;

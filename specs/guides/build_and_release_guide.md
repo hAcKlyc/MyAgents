@@ -463,3 +463,7 @@ npx tauri signer generate -w ~/.tauri/myagents.key
 - [自动更新系统](../tech_docs/auto_update.md) - 运行时 owner、平台安装流程与安全不变量
 - [macOS 分发指南](./macos_distribution_guide.md) - 代码签名、公证详解
 - [Node.js Sidecar 打包](../tech_docs/bundled_node.md) - 运行时打包机制
+
+### Cuse 桌面操作 Skill
+
+Mac 正式/开发构建会按目标拉取并校验 Cuse 完整 Skill+CLI，再对 CLI 使用客户端身份签名。Windows 构建使用独立 Windows 包。资源随 App 更新，全局关闭状态保留；协议、低层构建准备命令和校验规则见 [Cuse bundle](../tech_docs/cuse_bundle.md)。

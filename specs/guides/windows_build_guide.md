@@ -500,3 +500,7 @@ ERROR : Failed to copy: AccessDenied
 - [macOS 构建与发布指南](./build_and_release_guide.md) - macOS 版本构建流程
 - [自动更新系统](../tech_docs/auto_update.md) - 更新机制详解
 - [Node.js Sidecar 打包](../tech_docs/bundled_node.md) - 运行时打包机制
+
+## Cuse 内置桌面操作 Skill
+
+`build_windows.ps1` 与 `build_dev_win.ps1` 在打包前调用 `prepare-cuse-bundle.mjs x86_64-pc-windows-msvc`，获取最新完整 Skill+CLI 到 `bundled-skills/cuse/`；不恢复旧 MCP sidecar。下载/校验失败终止构建，客户端更新覆盖内容并保留用户全局关闭状态。详见 [Cuse bundle](../tech_docs/cuse_bundle.md)。

@@ -980,6 +980,8 @@ function resolveBundledSkillsDir(): string | null {
  * genuine user skill named identically.
  */
 const SYSTEM_SKILLS: readonly string[] = [
+  // Optional native desktop Skill; Rust owns complete bundle updates.
+  'cuse',
   'myagents-task-alignment',
   // v10: ultra-research removed — not generic enough.
   'download-anything',

@@ -112,3 +112,7 @@ myagents_files/
 
 # Agent long-term memory (raw daily notes & topic files, per .claude/rules/04-MEMORY.md)
 /memory/
+
+# Complete Cuse Skill+CLI fetched for the current build target
+/bundled-skills/cuse/
+/bundled-skills/.cuse-prepare-*/

@@ -634,6 +634,8 @@ for TARGET in "${BUILD_TARGETS[@]}"; do
 
     echo -e "  ${CYAN}准备离线文档与语音推理资源 (${TARGET})...${NC}"
     node "${PROJECT_DIR}/scripts/prepare-native-inference.mjs" "$TARGET"
+    node "${PROJECT_DIR}/scripts/prepare-cuse-bundle.mjs" "$TARGET"
+    codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "${PROJECT_DIR}/bundled-skills/cuse/scripts/cuse"
 
     npm run tauri:build -- --target "$TARGET"
 

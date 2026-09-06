@@ -554,6 +554,8 @@ try {
     Write-Host "  这可能需要几分钟，请耐心等待..." -ForegroundColor Yellow
 
     Write-Host "  准备离线文档与语音推理资源..." -ForegroundColor Cyan
+    & node "$ProjectDir\scripts\prepare-cuse-bundle.mjs" "x86_64-pc-windows-msvc"
+    if ($LASTEXITCODE -ne 0) { throw "Cuse Skill+CLI preparation failed" }
     & node "$ProjectDir\scripts\prepare-native-inference.mjs" "x86_64-pc-windows-msvc"
     if ($LASTEXITCODE -ne 0) { throw "原生推理资源准备失败" }
 

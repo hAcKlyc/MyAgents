@@ -557,3 +557,5 @@ PATH 优先级（agent-session.ts::buildClaudeSessionEnv）：
 ### 已移除内置 MCP 的旧定义
 
 Cuse 已退出内置 MCP 目录与安装包；旧配置或 Session snapshot 中的 `__bundled_cuse__` 启动标记由共享 `isRetiredBundledMcpServer` 在目录及 SDK/Codex 启动投影排除，不跨 owner 改写持久化数据。自定义真实命令（即使 ID 为 `cuse`）仍按普通 MCP 处理。历史工具结果沿用公共媒体展示。
+
+Cuse 是可关闭的版本化 Skill，携带独立 CLI，由构建从 Cuse 发布源下载，运行时不联网更新。它复用上述内容归属/启停分离与完整目录投影，详见 [Cuse bundle](cuse_bundle.md)。
