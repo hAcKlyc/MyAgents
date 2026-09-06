@@ -26,11 +26,6 @@ import {
 } from "./treeFlatten";
 import type { StickyAncestor, TreeListItem } from "./treeTypes";
 
-// Reveal waits this many frames for react-virtuoso's scroller to finish layout
-// before giving up. scrollToIndex no-ops on an unmeasured scroller, which is
-// exactly the state right after the conditional (search→tree) mount.
-const REVEAL_READINESS_MAX_FRAMES = 20;
-
 interface ViewportContext {
   footerHeight: number;
 }
@@ -119,7 +114,10 @@ interface WorkspaceTreeViewportProps {
   onJumpToAncestorPath: (path: string) => void;
   /** Right-click on a sticky breadcrumb / empty-hint row → the folder's menu. */
   onAncestorContextMenu: (path: string, event: React.MouseEvent) => void;
-  onRowClick: (item: Extract<TreeListItem, { kind: "node" }>["row"], event: React.MouseEvent) => void;
+  onRowClick: (
+    item: Extract<TreeListItem, { kind: "node" }>["row"],
+    event: React.MouseEvent,
+  ) => void;
   onRowContextMenu: (
     item: Extract<TreeListItem, { kind: "node" }>["row"],
     event: React.MouseEvent,
@@ -166,9 +164,9 @@ export const WorkspaceTreeViewport = memo(
       const [topUnits, setTopUnits] = useState(() =>
         Math.max(0, Math.floor(initialScrollTop / rowHeight)),
       );
-      const [scrollerElement, setScrollerElement] = useState<HTMLElement | null>(
-        null,
-      );
+      const [scrollerElement, setScrollerElement] =
+        useState<HTMLElement | null>(null);
+      const [totalListHeight, setTotalListHeight] = useState(0);
       const virtuosoRef = useRef<VirtuosoHandle>(null);
       const lastRevealRequestIdRef = useRef<number | null>(null);
       // Live element ref (read inside async rAF callbacks without a stale closure).
@@ -176,8 +174,8 @@ export const WorkspaceTreeViewport = memo(
       // Wrapper element — carries the `--tree-sticky-push` CSS variable so the
       // push animation never enters React state.
       const wrapperElRef = useRef<HTMLDivElement | null>(null);
-      // Latest items, so a deferred reveal recomputes its index after a
-      // non-idempotent refresh may have reordered the list mid-flight.
+      // The imperative keyboard scroll handle always resolves the path
+      // against the latest flattened list.
       const itemsRef = useRef(items);
       useEffect(() => {
         itemsRef.current = items;
@@ -186,8 +184,6 @@ export const WorkspaceTreeViewport = memo(
       useEffect(() => {
         getStickyAncestorsRef.current = getStickyAncestors;
       }, [getStickyAncestors]);
-      // Cancel handle for an in-flight (deferred) reveal scroll.
-      const revealCancelRef = useRef<(() => void) | null>(null);
       // initialScrollTop is a restore-on-mount, applied at most once (when the
       // scroller first attaches). Re-applying on later prop churn could clobber
       // a reveal scroll that just landed.
@@ -203,9 +199,6 @@ export const WorkspaceTreeViewport = memo(
           scrollerElement.scrollTo({ top: initialScrollTop });
         }
       }, [initialScrollTop, revealRequest, scrollerElement]);
-
-      // Cancel any in-flight reveal rAF on unmount.
-      useEffect(() => () => revealCancelRef.current?.(), []);
 
       useEffect(() => {
         if (!scrollerElement) {
@@ -228,7 +221,11 @@ export const WorkspaceTreeViewport = memo(
           // Quantized setState: same value → React bails out, no re-render.
           setTopUnits(Math.max(0, Math.floor(nextScrollTop / rowHeight)));
           // VS Code-style push transition — pure DOM write per scroll event.
-          const push = computeStickyPushPx(nextScrollTop, rowHeight, countAtUnit);
+          const push = computeStickyPushPx(
+            nextScrollTop,
+            rowHeight,
+            countAtUnit,
+          );
           wrapperElRef.current?.style.setProperty(
             "--tree-sticky-push",
             `${push}px`,
@@ -309,71 +306,65 @@ export const WorkspaceTreeViewport = memo(
         [],
       );
 
-      // Scroll a requested path into view. The tree is conditionally rendered
-      // (search ↔ tree), so a reveal coincides with a FRESH MOUNT of this
-      // Virtuoso, whose scroller isn't measured yet during this mount-time
-      // effect — `scrollToIndex` silently no-ops there. The old fire-once code
-      // also consumed the request immediately (+ dedup ref), so it never
-      // retried once the scroller was ready → the viewport stayed at the top.
-      // Fix: claim the request, then scroll only AFTER paint and once the
-      // scroller has a real height, recomputing the index against the latest
-      // items.
+      // A mounted scroller can have a height before Virtuoso commits its
+      // scrollable content. Wait for the list's measurement AND DOM geometry;
+      // otherwise scrollToIndex is clamped to zero on search → tree mounts.
       useEffect(() => {
         if (
           !revealRequest ||
+          !scrollerElement ||
           lastRevealRequestIdRef.current === revealRequest.id
         ) {
           return;
         }
-        // Ancestors may still be (lazily) expanding — bail until the row
-        // exists; the next `items` change re-runs this effect.
-        if (
-          items.findIndex(
-            (item) => item.kind === "node" && item.row.path === revealRequest.path,
-          ) < 0
-        ) {
-          return;
-        }
         const { id, path } = revealRequest;
-        lastRevealRequestIdRef.current = id;
-        revealCancelRef.current?.(); // supersede any prior pending reveal
+        const index = items.findIndex(
+          (item) => item.kind === "node" && item.row.path === path,
+        );
+        if (index < 0 || totalListHeight < items.length * rowHeight) return;
 
-        let framesLeft = REVEAL_READINESS_MAX_FRAMES;
-        let rafHandle = 0;
         const attempt = () => {
-          const el = scrollerElRef.current;
-          const index = itemsRef.current.findIndex(
-            (item) => item.kind === "node" && item.row.path === path,
-          );
-          if (index >= 0 && el && el.clientHeight > 0) {
-            // Instant (not 'smooth'): robust to a list refresh interrupting
-            // the animation, and the right UX for a "jump to file" reveal.
-            virtuosoRef.current?.scrollToIndex({
-              index,
-              align: "center",
-              behavior: "auto",
-            });
-            onRevealHandled?.(id);
-            revealCancelRef.current = null;
+          const el = scrollerElement;
+          if (
+            lastRevealRequestIdRef.current === id ||
+            el.clientHeight === 0 ||
+            el.scrollHeight < items.length * rowHeight
+          )
             return;
-          }
-          if (framesLeft-- <= 0) {
+
+          virtuosoRef.current?.scrollToIndex({
+            index,
+            align: "center",
+            behavior: "auto",
+          });
+          // Only acknowledge a visible destination. Merely issuing the
+          // command is not evidence that the browser accepted its scroll.
+          const rowTop = index * rowHeight - el.scrollTop;
+          if (rowTop >= 0 && rowTop + rowHeight <= el.clientHeight) {
+            lastRevealRequestIdRef.current = id;
             onRevealHandled?.(id);
-            revealCancelRef.current = null;
-            return;
           }
-          rafHandle = requestAnimationFrame(attempt);
         };
-        const cancelFirst = runAfterNextPaint(attempt);
-        revealCancelRef.current = () => {
-          cancelFirst();
-          if (rafHandle) cancelAnimationFrame(rafHandle);
+        let cancelPaint = runAfterNextPaint(attempt);
+        // A hidden panel keeps its intent until it has usable geometry.
+        // Resize events resume it without polling or an arbitrary expiry.
+        const observer = new ResizeObserver(() => {
+          cancelPaint();
+          cancelPaint = runAfterNextPaint(attempt);
+        });
+        observer.observe(scrollerElement);
+        return () => {
+          cancelPaint();
+          observer.disconnect();
         };
-        // No cleanup-cancel: this effect re-runs on every `items` change (lazy
-        // expand / refresh) and cancelling would abort an in-flight reveal.
-        // Same-id re-runs bail at the top; unmount cancellation is the
-        // dedicated effect above.
-      }, [onRevealHandled, revealRequest, items]);
+      }, [
+        onRevealHandled,
+        revealRequest,
+        items,
+        rowHeight,
+        scrollerElement,
+        totalListHeight,
+      ]);
 
       const dropTargetDir = internalDropTarget ?? dropTargetPath;
 
@@ -399,6 +390,7 @@ export const WorkspaceTreeViewport = memo(
             fixedItemHeight={rowHeight}
             increaseViewportBy={{ bottom: rowHeight * 8, top: rowHeight * 4 }}
             scrollerRef={handleScrollerRef}
+            totalListHeightChanged={setTotalListHeight}
             itemContent={(_index, item) => {
               switch (item.kind) {
                 case "edit":

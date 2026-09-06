@@ -172,7 +172,7 @@ export default memo(function FileSearchResults({
                                     <div
                                         role="group"
                                         title={hit.path}
-                                        className={`group flex h-7 items-center px-4 text-sm select-none ${
+                                        className={`group relative flex h-7 items-center px-4 text-sm select-none ${
                                             isActiveFile
                                                 ? 'bg-[var(--accent-warm-subtle)]'
                                                 : 'hover:bg-[var(--hover-bg)]'
@@ -185,7 +185,7 @@ export default memo(function FileSearchResults({
                                     >
                                         <button
                                             type="button"
-                                            className="flex h-full min-w-0 flex-1 items-center gap-1.5 pr-2 text-left"
+                                            className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left"
                                             onClick={() => onFileClick(hit)}
                                         >
                                             <FileIcon name={hit.name} />
@@ -201,28 +201,20 @@ export default memo(function FileSearchResults({
                                                 </span>
                                             )}
                                         </button>
-                                        <button
-                                            type="button"
-                                            title={t('workspaceFiles.common.revealInTree')}
-                                            aria-label={t('workspaceFiles.common.revealInTree')}
-                                            className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--ink-muted)]/60 opacity-0 transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--accent-warm)] group-hover:opacity-100 focus-visible:opacity-100"
-                                            onClick={(event) => {
-                                                event.stopPropagation();
-                                                onRevealInTree(hit);
-                                            }}
-                                        >
-                                            <LocateFixed className="h-3.5 w-3.5" />
-                                        </button>
-                                        {hit.matchCount > 0 && (
-                                            <div
-                                                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--paper-inset)] text-xs font-medium text-[var(--ink-muted)]"
-                                                aria-label={t('workspaceFiles.search.contentMatchCount', {
-                                                    count: hit.matchCount,
-                                                })}
+                                        <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center bg-gradient-to-l from-[var(--paper-elevated)] from-70% pl-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+                                            <button
+                                                type="button"
+                                                title={t('workspaceFiles.common.revealInTree')}
+                                                aria-label={t('workspaceFiles.common.revealInTree')}
+                                                className="flex h-6 w-6 items-center justify-center rounded-md text-[var(--ink-muted)]/60 transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--accent-warm)] group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    onRevealInTree(hit);
+                                                }}
                                             >
-                                                {hit.matchCount}
-                                            </div>
-                                        )}
+                                                <LocateFixed className="h-3.5 w-3.5" />
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {visibleMatches.length > 0 && (
@@ -252,7 +244,7 @@ export default memo(function FileSearchResults({
                                                         <span className="w-8 shrink-0 select-none pr-3 pt-[1px] text-right font-mono text-xs text-[var(--ink-muted)]/60">
                                                             {match.lineNumber}
                                                         </span>
-                                                        <span className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono leading-relaxed group-hover:text-[var(--ink)]">
+                                                        <span className="line-clamp-2 min-w-0 flex-1 whitespace-pre-wrap break-words font-mono leading-relaxed group-hover:text-[var(--ink)]">
                                                             <SearchHighlight
                                                                 text={match.lineContent.trimStart()}
                                                                 highlights={adjustHighlightsForTrim(
@@ -267,7 +259,7 @@ export default memo(function FileSearchResults({
                                             {hasMore && (
                                                 <button
                                                     type="button"
-                                                    className="ml-[30px] self-start rounded-md px-2 py-1 text-xs text-[var(--accent-warm)] hover:bg-[var(--paper-inset)]"
+                                                    className="self-center rounded-md px-2 py-1 text-xs text-[var(--accent-warm)] hover:bg-[var(--paper-inset)]"
                                                     onClick={() => onToggleFile(hit.path)}
                                                 >
                                                     {isExpanded

@@ -294,7 +294,8 @@ snippet 构建常见 "取匹配位置前后各 N 字符" 的近似切片。裸 `
 - **路径归一化**：`useDirectorySearch` 在一次 state commit 前调用 `normalizeFolderSearchHits` / `normalizeFileSearchHits`，把 Windows `\` 转为 `/`。后续 active target、ancestor 计算、文件树 reveal 都只处理 workspace-relative slash path。
 - **结果菜单 path-based**：搜索结果右键菜单维护独立的 `SearchResultContextMenuState`，菜单固定为 `预览`、`在文件目录中展示`、`打开所在文件夹`，不依赖 `findInTree(...)` 反查已加载 node，也不复用普通文件树的删除 / 重命名等高风险菜单项。
 - **Reveal-in-tree**：`handleRevealSearchResultInTree(path)` 用 `ancestorDirectoryPaths(path)` 逐层 `openPath`，必要时通过现有 `expandDir` 加载目录。目标 node 找到后才退出搜索模式、选中节点，并发送 `treeRevealRequest`；folder hit 额外传入 `expandTargetDirectory`，使目标目录本身也打开并完成 lazy load。退出搜索不清空 query。
-- **Reveal 请求消费**：`WorkspaceTreeViewport` 在 `rows` 中找到目标 path 后调用 Virtuoso `scrollToIndex({ align: 'center', behavior: 'smooth' })`，随后触发 `onRevealHandled(id)` 清掉请求，避免树重渲染后旧 reveal 回放。
+- **Reveal 请求消费**：`WorkspaceTreeViewport` 在 `items` 中找到目标 path，等待 Virtuoso `totalListHeightChanged` 与 DOM 滚动区域都容纳当前固定行高列表后，调用 `scrollToIndex({ align: 'center', behavior: 'auto' })`。只有目标行落入实际 viewport 才触发 `onRevealHandled(id)`；容器已有高度或已过两帧不代表虚拟内容已提交。隐藏面板保留请求，ResizeObserver 在恢复可见时继续定位；请求替换、清空或组件卸载会取消待执行回调。
+- **内容预览密度**：每文件默认显示两条命中，每条最多两行文本；展开后每条仍遵守两行限制。文件行不展示命中数量 badge；定位按钮在 hover / keyboard focus 时绝对覆盖于最右侧，不占正文宽度，展开 / 收起按钮在行内居中。
 - **取消语义**：新的 reveal 请求会让旧请求返回 `cancelled`，不弹错误 toast；只有目标确实 missing 才提示 `文件不存在或已删除`。
 - **Preview focus event**：点击搜索命中行会生成 `FilePreviewFocusTarget`。该事件通过 `DirectoryPanel -> Chat/FileActionContext -> FilePreviewModal -> MonacoEditor` 传递。Monaco 侧以 focus target 对象身份去重，而不是只看 `requestId`，所以不同来源不会碰撞，同一行重复点击也能重新定位。
 - **Markdown 源码定位**：Markdown rendered preview 没有稳定源码行号映射。带 search focus target 打开 Markdown 时切到 edit/source Monaco 视图定位，不做 rendered DOM 反推。

@@ -93,7 +93,13 @@ describe('FileSearchResults', () => {
         expect(props.onToggleFile).toHaveBeenCalledWith(hit.path);
     });
 
-    it('does not fabricate a content badge for filename-only matches', () => {
+    it('omits the per-file count even when file content has matches', () => {
+        renderResults();
+        expect(screen.queryByLabelText(/正文命中/)).not.toBeInTheDocument();
+        expect(screen.queryByText(String(hit.matchCount))).not.toBeInTheDocument();
+    });
+
+    it('does not offer expand for filename-only matches', () => {
         renderResults({
             folders: [],
             query: 'note',
