@@ -70,19 +70,19 @@ const anthropic = ['anthropic:messages', ...chat] as const;
 const presetRows: Array<
   [string, string, string, number, readonly ModelProtocol[]]
 > = [
-  ['deepseek-v4-pro-0813', 'DeepSeek V4 Pro 0813', 'deepseek', 1000000, all],
-  ['qwen3.8-max-0902', 'Qwen3.8-Max-0902', 'qwen', 1000000, responses],
-  ['kimi-k3', 'Kimi K3', 'kimi', 1048576, chat],
-  ['glm-5.3', 'GLM 5.3', 'zhipu', 1000000, all],
-  ['minimax-m3', 'MiniMax M3', 'minimax', 1000000, all],
-  ['seed-2.1-pro', 'Seed-2.1-Pro', 'doubao', 256000, responses],
-  ['step-3.7-flash', 'Step 3.7 Flash', 'stepfun', 256000, all],
-  ['mimo-v2.5-pro', 'MiMo-V2.5-Pro', 'xiaomi', 1048576, all],
-  ['hy4-preview', 'Hy4 Preview', 'hunyuan', 1024000, responses],
-  ['longcat-2.0', 'LongCat-2.0', 'longcat', 1000000, chat],
-  ['dots-3-note-preview', 'Dots3-Note Preview', 'dots', 512000, anthropic],
-  ['ling-3.0-flash', 'Ling-3.0-Flash', 'ling', 256000, anthropic],
-  ['spark-x2.5-4b', 'Spark-X2.5-4B', 'spark', 1000000, anthropic],
+  ['deepseek-v4-pro-0813', 'DeepSeek: DeepSeek V4 Pro 0813', 'deepseek', 1000000, all],
+  ['qwen3.8-max-0902', 'Qwen: Qwen3.8-Max-0902', 'qwen', 1000000, responses],
+  ['kimi-k3', 'MoonshotAI: Kimi K3', 'kimi', 1048576, chat],
+  ['glm-5.3', 'Z.ai: GLM 5.3', 'zhipu', 1000000, all],
+  ['minimax-m3', 'MiniMax: MiniMax M3', 'minimax', 1000000, all],
+  ['seed-2.1-pro', 'ByteDance Seed: Seed-2.1-Pro', 'doubao', 256000, responses],
+  ['step-3.7-flash', 'StepFun: Step 3.7 Flash', 'stepfun', 256000, all],
+  ['mimo-v2.5-pro', 'Xiaomi: MiMo-V2.5-Pro', 'xiaomi', 1048576, all],
+  ['hy4-preview', 'Tencent: Hy4 Preview', 'hunyuan', 1024000, responses],
+  ['longcat-2.0', 'Meituan: LongCat-2.0', 'longcat', 1000000, chat],
+  ['dots-3-note-preview', 'Dots Studio: Dots3-Note Preview', 'dots', 512000, anthropic],
+  ['ling-3.0-flash', 'Ling: Ling-3.0-Flash', 'ling', 256000, anthropic],
+  ['spark-x2.5-4b', 'Xunfei: Spark-X2.5-4B', 'spark', 1000000, anthropic],
 ];
 export const TOKENDANCE_MODELS: ModelEntity[] = presetRows.map(
   ([model, modelName, modelSeries, contextLength, supportedProtocols]) => ({
