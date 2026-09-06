@@ -107,8 +107,11 @@ function detachListeners(el: HTMLAudioElement) {
   el.removeEventListener('error', onError);
 }
 
-function onEnded() { currentPath = null; revokeBlobUrl(); notify(); }
-function onError() { currentPath = null; revokeBlobUrl(); notify(); }
+// Revoking a blob URL only prevents future URL resolution; it does not unload
+// an element that already holds the media resource. Every terminal path must
+// retire the element and its listeners through the same owner as explicit stop.
+function onEnded() { stopAudio(); }
+function onError() { stopAudio(); }
 
 function revokeBlobUrl() {
   if (currentBlobUrl) {
@@ -149,9 +152,7 @@ export async function playAudio(filePath: string): Promise<void> {
     // Only reset if this is still the active generation
     if (gen === playGeneration) {
       console.error('[audioPlayer] playback failed:', err);
-      currentPath = null;
-      revokeBlobUrl();
-      notify();
+      stopAudio();
     }
   }
 }

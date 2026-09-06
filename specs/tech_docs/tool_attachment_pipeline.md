@@ -123,6 +123,14 @@ Renderer 通过 `resolveTauriToolAttachmentUrl()` 把相对 `refPath` 映射为�
 
 特殊工具组件可以显示自己的文字 metadata，但不得再次渲染同一媒体或从结果文本正则恢复第二份附件。
 
+### 音频播放资源生命周期
+
+附件音频的播放 owner 是 Renderer `audioPlayer.ts` 单例；消息行只订阅状态，因此虚拟列表回收行不停止用户主动播放的音频。暂停保留 element、URL 和 position，结束、错误、`play()` 拒绝、显式停止则统一经过 `stopAudio()`：先摘除 listener，再 pause、移除 `src`、`load()` 重置媒体资源，最后撤销 blob URL 并清空状态。只清除 UI 的 path 或撤销 blob URL 不会卸载已加载的媒体元素。
+
+Settings TTS 试听由设置弹窗自身持有，`useTtsPreview` 只是其局部 lifecycle 实现，不复用附件单例。一次试听的 synthesis request、blob URL、media element 和 `play()` Promise 属于同一 operation。关闭、卸载或修改试听配置时立即使 operation 失效并释放媒体；旧请求完成、旧媒体事件、旧 `play()` Promise 均不得创建播放器、修改新试听状态或显示过期错误。现有 `apiPostJson` transport 不支持取消请求，因此在异步边界撤销后续播放资格；不增加通信模式，也不把后端合成完成等同于仍有播放许可。
+
+回归测试见 `audioPlayer.test.tsx` 与 `useTtsPreview.test.tsx`；覆盖终态资源释放、暂停/恢复保留位置、关闭期间异步返回、重新打开后的旧回调，以及 StrictMode setup/cleanup。
+
 ## 安全不变量
 
 ### 本地路径

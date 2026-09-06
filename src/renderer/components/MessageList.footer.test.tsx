@@ -71,6 +71,45 @@ function ClockOwner({
 describe('MessageList footer status positioning', () => {
   afterEach(() => vi.useRealTimers());
 
+  it.each(['tab', 'window'])('stops footer polling while the %s is hidden, even when the query ends there', (surface) => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const elapsed = vi.fn(() => Math.floor((Date.now() - startedAt) / 1000));
+    const props = createBaseProps({ isLoading: true, getQueryElapsedSeconds: elapsed });
+    const { rerender } = render(<MessageList {...props} />);
+    act(() => vi.advanceTimersByTime(1000));
+    const hidden = surface === 'tab'
+      ? { isActive: false }
+      : { windowPresentation: { surfaceAvailable: false, generation: 1 } };
+    rerender(<MessageList {...props} {...hidden} />);
+    expect(document.querySelector('[data-chat-status-row] svg')).toBeNull();
+    elapsed.mockClear();
+    act(() => vi.advanceTimersByTime(5000));
+    expect(elapsed).not.toHaveBeenCalled();
+
+    rerender(<MessageList {...props} {...hidden} isLoading={false} />);
+    act(() => vi.advanceTimersByTime(5000));
+    expect(elapsed).not.toHaveBeenCalled();
+  });
+
+  it('resamples the Tab clock immediately when a running query becomes visible again', () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const props = createBaseProps({
+      isLoading: true,
+      getQueryElapsedSeconds: () => Math.floor((Date.now() - startedAt) / 1000),
+    });
+    const { rerender } = render(<MessageList {...props} />);
+    act(() => vi.advanceTimersByTime(1000));
+    const row = document.querySelector('[data-chat-status-row]');
+    rerender(<MessageList {...props} isActive={false} />);
+    act(() => vi.advanceTimersByTime(30000));
+    rerender(<MessageList {...props} />);
+    expect(document.querySelector('[data-chat-status-row]')).toBe(row);
+    expect(row).toHaveTextContent('31秒');
+    expect(row?.querySelector('svg')).toHaveClass('animate-spin');
+  });
+
   it('keeps query elapsed time and the status row across footer content/layout changes', () => {
     vi.useFakeTimers();
     const startedAt = Date.now();

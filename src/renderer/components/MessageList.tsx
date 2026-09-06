@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
-import React, { memo, useCallback, useMemo, useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { createContext, memo, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, useLayoutEffect, useRef } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ListItem, SizeFunction, VirtuosoHandle } from 'react-virtuoso';
 import type { TFunction } from 'i18next';
@@ -113,6 +113,10 @@ const DEFAULT_WINDOW_PRESENTATION: MainWindowPresentation = {
 const noopViewportAdmissionChanged = (_admitted: boolean, _presentationGeneration: number) => {};
 const noopItemsRendered = () => {};
 
+// Presentation admission remains owned by MessageList. Its projection must
+// reach the sampler even while Virtuoso's data/context are deliberately frozen.
+const MessageListPresentationContext = createContext(true);
+
 function isLargeRowShrink(reason: RowLayoutChangeReason): boolean {
   return reason === 'process-row-collapse' || reason === 'user-message-collapse-measured';
 }
@@ -145,11 +149,15 @@ function getRandomStreamingMessage(t: TFunction<'chat'>): string {
 
 const StatusTimer = memo(function StatusTimer({ message, getElapsedSeconds }: { message: string; getElapsedSeconds: () => number }) {
   const { t } = useTranslation('chat');
-  const [elapsedSeconds, setElapsedSeconds] = useState(() => getElapsedSeconds());
-  useEffect(() => {
-    const id = setInterval(() => setElapsedSeconds(getElapsedSeconds()), 1000);
+  const canPresent = useContext(MessageListPresentationContext);
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    if (!canPresent) return () => {};
+    const id = setInterval(onStoreChange, 1000);
     return () => clearInterval(id);
-  }, [getElapsedSeconds]);
+  }, [canPresent]);
+  // The Tab clock keeps advancing without a timer. Re-subscription samples its
+  // current value on restore; hidden snapshots never keep a polling loop alive.
+  const elapsedSeconds = useSyncExternalStore(subscribe, getElapsedSeconds);
   const elapsedText = elapsedSeconds > 0 ? formatElapsedTime(elapsedSeconds, t) : null;
   const displayText = elapsedText ? `${message} (${elapsedText})` : message;
   return (
@@ -159,7 +167,12 @@ const StatusTimer = memo(function StatusTimer({ message, getElapsedSeconds }: { 
       style={{ height: STATUS_ROW_HEIGHT_PX }}
       title={displayText}
     >
-      <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+      {/* Retire the animated node, preserving its slot. Chromium can defer a
+          class/style removal inside content-visibility:hidden, retaining the
+          old CSS animation until the subtree becomes renderable again. */}
+      <span className="h-3 w-3 shrink-0" aria-hidden="true">
+        {canPresent && <Loader2 className="h-full w-full animate-spin" />}
+      </span>
       <span className="min-w-0 truncate">{displayText}</span>
     </div>
   );
@@ -693,6 +706,7 @@ const MessageList = memo(function MessageList({
   }, [debugProbe, onItemsRendered]);
 
   return (
+    <MessageListPresentationContext.Provider value={canLayoutVirtualList}>
     <div
       ref={viewportRootRef}
       className="relative flex-1"
@@ -755,6 +769,7 @@ const MessageList = memo(function MessageList({
         itemContent={renderItem}
       />
     </div>
+    </MessageListPresentationContext.Provider>
   );
 });
 

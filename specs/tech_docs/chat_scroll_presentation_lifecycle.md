@@ -70,6 +70,8 @@ Chat 底部 query 耗时由 TabProvider 的 `useQueryElapsedClock` 持有，使�
 
 Virtuoso 的 Footer 必须使用模块级稳定组件类型，动态内容通过现有 list context 传入，并与 data 一同遵守 frozen snapshot。`useMemo(() => function Footer(){...}, [动态值])` 仍会在依赖变化时创建新组件类型，重挂载整个 footer，不能作为“稳定 Footer”。
 
+冻结展示 snapshot 不等于暂停组件内部的副作用。`MessageListPresentationContext` 只向 Footer 投影现有 `canLayoutVirtualList` 准入结果，不持有第二份状态；该值不能随 Virtuoso context 一起冻结。Footer 的 `useSyncExternalStore` 仅在准入时每秒订阅 Tab clock，并在不可呈现时撤销轮询、卸载 spinner 的动画节点（保留固定占位）；恢复时立即读取当前 clock。Chromium 可以延迟处理 `content-visibility:hidden` 后代的 class/style 变化，单纯移除动画 class 不保证立即清除已有 CSS animation。否则隐藏前的 loading snapshot 会使计时器在后台任务结束后仍永久运行。Tab clock 本身通过时间差累计，不依赖此轮询，也不因窗口隐藏、暂停采样或恢复而重置。
+
 - focus change 必须产生零个 Chat scroll command。
 - 可见失焦窗口的 `atBottomStateChange`、follow 与 pagination 正常工作。
 - suspension 期间消息/SSE 正常推进，但 data、firstItemIndex、height estimate 和行测量不进入 Virtuoso。

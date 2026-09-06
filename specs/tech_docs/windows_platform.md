@@ -95,6 +95,16 @@ Windows production document origin、IPC和custom resource URL与macOS不同：
 
 CSP authority是 `src-tauri/tauri.conf.json`。新增 network/subresource surface必须明确归入 control面或登记的数据面，不能为了通过WebView2直接扩大 `http:` / CDN通配。
 
+### 空闲 CPU / GPU / I/O 诊断
+
+持续负载必须追到仍在工作的生产者：JS timer/rAF、CSS 动画、媒体播放、native browser 页面或真实业务事件。页面复杂度会放大一次更新的成本，但不能单凭历史消息数量认定空闲持续渲染的原因；Chat 已有分页和虚拟列表。
+
+- 只采样 MyAgents 精确进程树，按 `--type` 区分 browser、renderer、GPU 和 utility；全机同名 `msedgewebview2.exe` 不都属于本应用。
+- `Win32_Perf*Data_PerfProc_Process` 的 I/O bytes 包含文件、网络和设备 I/O，不能换算成 SSD 写入量。目录净大小、缓存文件存在或单次修改时间也不能证明持续原地改写。需要用 ProcMon/ETW 的具体路径、操作和字节量确定磁盘写入；参见 [Microsoft 计数器定义](https://learn.microsoft.com/en-us/previous-versions/aa394323(v=vs.85))。
+- GPU 重启必须有进程退出/启动或失败事件；“存在 ShaderCache / GPUCache”不构成证据。性能定位优先采集 DevTools Performance 与 WebView2 ETW trace，见 [Microsoft WebView2 性能指南](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/performance)。
+- 对比前台会话、非会话 Tab、窗口隐藏/最小化、恢复和托盘彻底退出；记录桌宠、内嵌浏览器与媒体是否活跃。未经控制的低负载样本不能用作前台高占用问题的修复验收。
+- `--autoplay-policy=no-user-gesture-required` 只是播放权限，不会自行创建音频流。媒体 owner 仍须在结束/失败时卸载资源，并拒绝所属 UI 关闭后的异步播放，见 [音频资源生命周期](tool_attachment_pipeline.md#音频播放资源生命周期)。
+
 ## Native Browser child
 
 应用自有「浏览器」为每个 Product Session建立独立 BrowserContext和原生窗口/child WebView。Browser Host由Global Sidecar拥有，Chromium后代进入同一 process tree。
