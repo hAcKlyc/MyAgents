@@ -129,6 +129,8 @@ Token 组：
 
 `index.css` 只保留 Type Scale、布局/交互结构、使用语义 Token 的通用 selector，以及一个不携带视觉值的 Tailwind v4 `@theme inline` 编译桥。该桥把 `font-sans/mono`、`rounded*`、`shadow*`和 `duration-*` utility 映射到当前 Theme 的 runtime Token；Theme package **禁止**声明 raw `@theme`，因为 runtime 注入的 CSS 不再经 Tailwind 编译，会让 utility 静默退回 framework default。新增会随完整 Theme 改变的颜色、字体、材质、阴影或圆角，必须先进入 Theme contract/default package，再按需要扩展无值桥接，不能落回组件常量。
 
+推荐卡片材质由 `--featured-card-background` / `--featured-card-border` / `--featured-card-shadow` 拥有；目前词元跳动卡片消费这三个 Token。各主题按自己的强调色预计算 sRGB / alpha 色值，并叠加 `--paper-elevated`，深色降低高光强度；required Token 不依赖旧版 WebView 尚未支持的 `color-mix()`，避免 canonical 注册失败阻断启动。组件不读取 Theme ID 或 scheme，不另建配色表。
+
 Code Token 必须在每套 Theme 的 light/dark scheme 内分别设计：light 代码面位于 `paper → paper-inset`
 之间，dark 代码面位于或略高于 `paper-inset`，Header 再向对应方向推进一级。Prism 由同一组
 Theme 语义色生成并在各自代码背景上满足正文对比度；CodeBlock、Mermaid、Bash、FilePatch

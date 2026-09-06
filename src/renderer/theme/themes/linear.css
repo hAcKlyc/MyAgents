@@ -96,6 +96,12 @@ html[data-theme-id='linear'][data-color-scheme='light'] {
   --line: rgb(27 27 27 / 0.10);
   --line-strong: rgb(27 27 27 / 0.18);
   --line-subtle: rgb(27 27 27 / 0.06);
+  /* Accent-derived sRGB literals keep required material valid on macOS 13.0 WebKit. */
+  --featured-card-background:
+    radial-gradient(ellipse at 100% 0%, rgb(94 106 210 / 0.14), transparent 66%),
+    linear-gradient(126deg, transparent 45%, rgb(94 106 210 / 0.0588)), var(--paper-elevated);
+  --featured-card-border: rgb(73.031 81.275 152.725 / 0.262);
+  --featured-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32);
   --theme-shadow-base: 0 1px 3px 0 rgb(38 40 57 / 0.10), 0 1px 2px -1px rgb(38 40 57 / 0.10);
   --theme-shadow-xs: 0 1px 2px rgb(38 40 57 / 0.05);
   --theme-shadow-sm: 0 2px 8px rgb(38 40 57 / 0.08);
@@ -207,6 +213,12 @@ html[data-theme-id='linear'][data-color-scheme='dark'] {
   --line: rgb(227 228 230 / 0.10);
   --line-strong: rgb(227 228 230 / 0.18);
   --line-subtle: rgb(227 228 230 / 0.06);
+  /* Accent-derived sRGB literals keep required material valid on macOS 13.0 WebKit. */
+  --featured-card-background:
+    radial-gradient(ellipse at 100% 0%, rgb(96 106 204 / 0.12), transparent 66%),
+    linear-gradient(126deg, transparent 45%, rgb(96 106 204 / 0.0504)), var(--paper-elevated);
+  --featured-card-border: rgb(137.000 144.183 212.137 / 0.262);
+  --featured-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
   --theme-shadow-base: 0 1px 3px 0 rgb(0 0 0 / 0.10), 0 1px 2px -1px rgb(0 0 0 / 0.10);
   --theme-shadow-xs: 0 1px 2px rgb(0 0 0 / 0.12);
   --theme-shadow-sm: 0 2px 8px rgb(0 0 0 / 0.18);

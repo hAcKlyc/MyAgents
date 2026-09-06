@@ -71,6 +71,23 @@ describe('ThemeRegistry', () => {
     expect(themeRegistry.resolve(undefined, 'light', false).themeId).toBe('myagents-light');
   });
 
+  it('registers every production Theme on WebViews without color-mix support', () => {
+    // macOS 13.0 ships WebKit 16.1. An unsupported required material must
+    // never make canonical Theme registration throw before the app mounts.
+    const setProperty = CSSStyleDeclaration.prototype.setProperty;
+    const parser = vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty')
+      .mockImplementation(function (this: CSSStyleDeclaration, property, value, priority) {
+        if (value?.includes('color-mix(')) return;
+        setProperty.call(this, property, value, priority);
+      });
+    try {
+      const registry = new ThemeRegistry(themeRegistry.getAcceptedDefinitions());
+      expect(registry.getAcceptedDefinitions().map(({ id }) => id)).toEqual(productionThemeIds);
+    } finally {
+      parser.mockRestore();
+    }
+  });
+
   it('derives selector swatches from each Theme package primary action tokens', () => {
     for (const themeId of productionThemeIds) {
       const swatches = themeRegistry.getPreviewSwatches(themeId);

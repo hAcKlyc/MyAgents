@@ -269,7 +269,7 @@ function themeTokenProperty(token: string): string {
   if (token.startsWith('--font-')) return 'font-family';
   if (token.startsWith('--radius-') || token.startsWith('--theme-radius-')) return 'border-radius';
   if (token.startsWith('--duration-')) return 'transition-duration';
-  if (token === '--theme-body-background') return 'background';
+  if (token === '--theme-body-background' || token === '--featured-card-background') return 'background';
   if (token === '--theme-body-texture') return 'background-image';
   if (token === '--theme-body-texture-opacity') return 'opacity';
   if (token === '--theme-body-texture-blend') return 'mix-blend-mode';
@@ -279,6 +279,7 @@ function themeTokenProperty(token: string): string {
     || token.startsWith('--action-shadow')
     || token.startsWith('--tool-shadow')
     || token === '--fb-window-shadow'
+    || token === '--featured-card-shadow'
   ) return 'box-shadow';
   return 'color';
 }

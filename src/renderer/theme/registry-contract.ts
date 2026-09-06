@@ -20,6 +20,7 @@ export const REQUIRED_THEME_CSS_TOKENS = [
   '--fb-inset-shadow', '--fb-window-shadow', '--fb-control-hover', '--fb-line-input', '--fb-line-thumb',
   '--fb-drag-handle',
   '--line', '--line-strong', '--line-subtle',
+  '--featured-card-background', '--featured-card-border', '--featured-card-shadow',
   '--theme-radius-base', '--theme-radius-sm', '--theme-radius-md', '--theme-radius-lg',
   '--theme-radius-xl', '--theme-radius-2xl', '--theme-radius-full',
   '--theme-shadow-base', '--theme-shadow-xs', '--theme-shadow-sm', '--theme-shadow-md',

@@ -310,13 +310,18 @@ export default function TokenDanceProvider({
   return (
     <>
       <div
-        className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5"
+        className="min-w-0 rounded-xl border p-5"
+        style={{
+          background: 'var(--featured-card-background)',
+          borderColor: 'var(--featured-card-border)',
+          boxShadow: 'var(--featured-card-shadow)',
+        }}
         data-tokendance-card
       >
         <div className="mb-4 flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h3 className="truncate font-semibold text-[var(--ink)]">
+              <h3 className="truncate text-lg font-semibold text-[var(--ink)]">
                 {provider.name}
               </h3>
               <TokenDanceBadge>{t('partner')}</TokenDanceBadge>
