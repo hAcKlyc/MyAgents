@@ -17,7 +17,7 @@ MyAgents 是基于 Tauri v2 的桌面 AI Agent 客户端。React Renderer 提供
 | 内置 Node.js v24 | Global/Session Sidecar、Plugin Bridge、MCP Server、CLI 与随 App 运行的 Node 工具 |
 | Claude Agent SDK / 外部 CLI Runtime | 具体模型会话和工具执行；只能经 SessionEngine 进入产品 Session |
 
-MyAgents 自有的 Node 代码统一运行在随 App 发布的 Node.js v24，不依赖用户系统 Node。SDK native binary、Codex、Claude Code、Gemini、Document Worker 和 Media Worker 都是独立进程，不共享 Node 进程内状态。
+正常安装中的 MyAgents 自有 Node 服务使用随 App 发布的 Node.js v24，无需用户安装系统 Node。核心服务的资源缺失回退、CLI 的严格资源定位，以及用户工具的 PATH 优先级分别由对应启动入口决定，见 [Bundled Node](./tech_docs/bundled_node.md)。SDK native binary、Codex、Claude Code、Gemini、Document Worker 和 Media Worker 都是独立进程，不共享 Node 进程内状态。
 
 ## 全景架构
 

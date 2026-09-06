@@ -52,7 +52,7 @@ Subscription 是产品/计费类型，不决定 auth owner。新增 subscription
 
 `src/shared/tokendance.ts::resolveProviderForModel` 是唯一优先级策略：Anthropic Messages → OpenAI Responses → OpenAI Chat Completions。它依据具体模型生成不可变的 Provider execution projection，配套选择 `apiProtocol` / `upstreamFormat` / `baseUrl` / 认证与输出参数。`materializeProviderRouteEnv`、Task、IM、vision 和 provider probe 在既有入口接入；Renderer 使用同一纯函数显示模型对应的推理选项。普通 Provider 保持原行为，Runtime / Bridge 不读取供应商能力数组。切换协议由既有 `providerEnvEqual` 与 Query 重建路径处理，不修改全局 Provider。
 
-`src-tauri/src/tokendance.rs` 在应用生命周期内拥有一次临时 PKCE loopback 授权。随机 `127.0.0.1` 回调路径接收一次 code；Key 通过 `with_config_lock` 保存到原有 `config.json`，并校验开始授权时的凭据版本，避免旧授权覆盖新账户。保存失败可重试同一 Key。面板打开期间持续等待，最后一个面板关闭后保留 15 分钟；不跨重启恢复。原生事件不携带 Key，ConfigProvider 在应用层刷新配置和既有可用供应商投影，隐藏设置页不影响授权保存。
+`src-tauri/src/tokendance.rs` 在应用生命周期内拥有一次临时 PKCE loopback 授权。随机 `127.0.0.1` 回调路径接收一次 code；Key 通过 `with_config_lock` 保存到原有 `config.json`，并校验开始授权时的凭据版本，避免旧授权覆盖新账户。磁盘保存失败可重试同一 Key；凭据版本冲突则终止旧授权、释放待保存 Key，并由既有失败面板引导重新授权。面板打开期间持续等待，最后一个面板关闭后保留 15 分钟；不跨重启恢复。原生事件不携带 Key，ConfigProvider 在应用层刷新配置和既有可用供应商投影，隐藏设置页不影响授权保存。
 
 OAuth `app_url` 与请求头 `X-App-URL` 同时固定为 `https://myagents.io`（无尾斜杠）。Anthropic 请求通过既有 SDK child `ANTHROPIC_CUSTOM_HEADERS` 注入，独立验证诊断请求在 `provider-probe.ts` 的出站入口注入，OpenAI Bridge 根据该请求所属 Provider 注入，Rust 账户 / 充值 client 和模型目录请求也携带同值。大小写不同的旧归因头不能覆盖固定值，不修改进程全局环境或其他 Provider 的请求头。
 
