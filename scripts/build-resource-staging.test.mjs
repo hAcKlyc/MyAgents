@@ -691,7 +691,16 @@ test('speech inference builds a signed exact native inventory around the shared 
   assert.match(speechResourceScript, /SHERPA_ONNX_BUILD_C_API_EXAMPLES=OFF/);
   assert.match(
     speechResourceScript,
-    /CMAKE_CXX_FLAGS=-DSHERPA_ONNX_DISABLE_COREML=1/,
+    /CMAKE_CXX_FLAGS_INIT=-DSHERPA_ONNX_DISABLE_COREML=1/,
+  );
+  assert.doesNotMatch(speechResourceScript, /-DCMAKE_CXX_FLAGS=/);
+  assert.match(
+    speechResourceScript,
+    /if \(targetLock\.platform === 'windows'\) \{\s+patchHclustWindowsFenvPragma\(hclustIncludeRoot\);/,
+  );
+  assert.ok(
+    speechResourceScript.indexOf('patchHclustWindowsFenvPragma(hclustIncludeRoot)') <
+      speechResourceScript.indexOf("'--build'"),
   );
   assert.match(speechResourceScript, /--target[\s\S]*sherpa-onnx-c-api/);
   assert.match(speechResourceScript, /signNativeFiles/);
