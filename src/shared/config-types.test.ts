@@ -27,6 +27,7 @@ import {
   withManagedCodexProviderCatalog,
 } from './config-types';
 import managedCodexRuntimeLock from './managed-codex-runtime.json';
+import { TOKENDANCE_PROVIDER_ID } from './tokendance';
 
 describe('MCP presets', () => {
   it('keeps standard Playwright generic and exposes the managed Browser separately', () => {
@@ -58,10 +59,28 @@ describe('MCP presets', () => {
 // normalizeProviderOrder reconciles a persisted provider order against the set
 // of providers that actually exist now: honor the saved order, drop stale/
 // unknown ids, dedupe, then append any known providers the order didn't mention
-// (newly added). Drift here scrambles or drops providers from the picker.
+// (newly added), with explicit placement policies for recommended/subscription
+// providers. Drift here scrambles or drops providers from the picker.
 describe('normalizeProviderOrder', () => {
   it('honors the saved order, then appends known providers missing from it', () => {
     expect(normalizeProviderOrder(['a', 'b', 'c'], ['c', 'a'])).toEqual(['c', 'a', 'b']);
+  });
+
+  it('introduces Token Dance first while preserving an explicitly saved position', () => {
+    const ids = withManagedCodexProviderCatalog(PRESET_PROVIDERS, DEFAULT_CONFIG)
+      .map(provider => provider.id);
+    const legacyOrder = ['deepseek', SUBSCRIPTION_PROVIDER_ID];
+    const introduced = normalizeProviderOrder(ids, legacyOrder);
+    expect(introduced.slice(0, 5)).toEqual([
+      TOKENDANCE_PROVIDER_ID, 'deepseek', SUBSCRIPTION_PROVIDER_ID,
+      CODEX_SUBSCRIPTION_PROVIDER_ID, XAI_SUBSCRIPTION_PROVIDER_ID,
+    ]);
+    const explicitOrder = ['deepseek', TOKENDANCE_PROVIDER_ID, SUBSCRIPTION_PROVIDER_ID];
+    const ordered = normalizeProviderOrder(ids, explicitOrder);
+    expect(ordered.slice(0, 3)).toEqual(explicitOrder);
+    expect(new Set(ordered).size).toBe(ids.length);
+    expect(normalizeProviderOrder(ids, ordered)).toEqual(ordered);
+    expect(legacyOrder).toEqual(['deepseek', SUBSCRIPTION_PROVIDER_ID]);
   });
 
   it('places newly introduced Codex subscription after Anthropic subscription when the saved order is missing it', () => {
@@ -519,7 +538,8 @@ describe('Managed Codex provider readiness', () => {
   it('inserts the provider after Anthropic subscription in the default catalogue', () => {
     const catalog = withManagedCodexProviderCatalog(PRESET_PROVIDERS, DEFAULT_CONFIG);
 
-    expect(catalog.slice(0, 4).map(provider => provider.id)).toEqual([
+    expect(catalog.slice(0, 5).map(provider => provider.id)).toEqual([
+      TOKENDANCE_PROVIDER_ID,
       SUBSCRIPTION_PROVIDER_ID,
       CODEX_SUBSCRIPTION_PROVIDER_ID,
       XAI_SUBSCRIPTION_PROVIDER_ID,

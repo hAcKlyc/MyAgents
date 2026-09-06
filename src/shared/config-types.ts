@@ -259,6 +259,11 @@ export function normalizeProviderOrder(
   for (const id of providerIds) {
     if (seen.has(id)) continue;
     seen.add(id);
+    // Recommend Token Dance first when it has no user-chosen position yet.
+    if (id === TOKENDANCE_PROVIDER_ID) {
+      ordered.unshift(id);
+      continue;
+    }
     const insertAfter =
       id === XAI_SUBSCRIPTION_PROVIDER_ID
         ? ordered.includes(CODEX_SUBSCRIPTION_PROVIDER_ID)
@@ -1510,19 +1515,6 @@ export function applyManagedCodexProviderReadiness(
 
 export const PRESET_PROVIDERS: Provider[] = [
   {
-    id: 'anthropic-sub',
-    name: 'Anthropic (订阅)',
-    vendor: 'Anthropic',
-    cloudProvider: '官方',
-    type: 'subscription',
-    subscriptionAuth: { kind: 'sdk-native' },
-    primaryModel: 'claude-sonnet-5',
-    isBuiltin: true,
-    config: {},
-    modelAliases: { ...ANTHROPIC_ALIASES },
-    models: ANTHROPIC_MODELS,
-  },
-  {
     id: TOKENDANCE_PROVIDER_ID,
     name: '词元跳动 Token Dance',
     subtitle: '一键注册使用各类模型，最低折扣至50%',
@@ -1536,6 +1528,19 @@ export const PRESET_PROVIDERS: Provider[] = [
     websiteUrl: 'https://tokendance.space',
     modelListUrl: TOKENDANCE_MODEL_LIST_URL,
     models: TOKENDANCE_MODELS,
+  },
+  {
+    id: 'anthropic-sub',
+    name: 'Anthropic (订阅)',
+    vendor: 'Anthropic',
+    cloudProvider: '官方',
+    type: 'subscription',
+    subscriptionAuth: { kind: 'sdk-native' },
+    primaryModel: 'claude-sonnet-5',
+    isBuiltin: true,
+    config: {},
+    modelAliases: { ...ANTHROPIC_ALIASES },
+    models: ANTHROPIC_MODELS,
   },
   {
     id: XAI_SUBSCRIPTION_PROVIDER_ID,
