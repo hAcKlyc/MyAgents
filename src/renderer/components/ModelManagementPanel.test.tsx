@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { StrictMode } from 'react';
 
 import { i18n } from '@/i18n';
 import { DEFAULT_CONFIG, type AppConfig, type Provider } from '@/config/types';
@@ -206,5 +208,75 @@ describe('ModelManagementPanel managed discovery', () => {
 
     await waitFor(() => expect(screen.queryByText('Loading models...')).not.toBeInTheDocument());
     expect(onUpdateCustomProvider).not.toHaveBeenCalled();
+  });
+});
+
+describe('ModelManagementPanel discovery scheduling (#582)', () => {
+  beforeEach(async () => {
+    document.body.innerHTML = '';
+    await i18n.changeLanguage('en-US');
+  });
+
+  function panelElement(props: {
+    provider?: Provider;
+    discoveryAction: () => Promise<DiscoveredModel[]>;
+  }) {
+    // Inline callbacks on purpose: this is how SettingsPage renders the panel,
+    // so every host render hands the panel new function identities.
+    return (
+      <ModelManagementPanel
+        provider={props.provider ?? customProvider()}
+        apiKey={undefined}
+        config={baseConfig}
+        onClose={() => undefined}
+        onSaveCustomModels={async () => undefined}
+        onUpdateCustomProvider={async () => undefined}
+        onSetPrimaryModel={async () => undefined}
+        onRefresh={async () => undefined}
+        discoveryAction={props.discoveryAction}
+      />
+    );
+  }
+
+  it('discovers once per endpoint, not once per host render', async () => {
+    const discoveryAction = vi.fn(async () => [{ id: 'm1', displayName: 'Model One' }]);
+    const { rerender } = render(panelElement({ discoveryAction }));
+    expect(await screen.findByText('Model One')).toBeInTheDocument();
+    expect(discoveryAction).toHaveBeenCalledTimes(1);
+
+    // New callback identities and a freshly built (but equal) provider object
+    // are what a host re-render produces; none of it is a reason to refetch.
+    for (let i = 0; i < 3; i += 1) {
+      rerender(panelElement({ provider: customProvider(), discoveryAction }));
+    }
+    await act(async () => { await Promise.resolve(); });
+    expect(discoveryAction).toHaveBeenCalledTimes(1);
+
+    // A different endpoint is a reason to refetch.
+    rerender(panelElement({
+      provider: { ...customProvider(), config: { baseUrl: 'https://other.example.test' } },
+      discoveryAction,
+    }));
+    await waitFor(() => expect(discoveryAction).toHaveBeenCalledTimes(2));
+  });
+
+  it('coalesces overlapping requests for the same endpoint into one', async () => {
+    let resolveFirst: (models: DiscoveredModel[]) => void = () => undefined;
+    const discoveryAction = vi.fn<() => Promise<DiscoveredModel[]>>()
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValue([{ id: 'm2', displayName: 'Model Two' }]);
+
+    // StrictMode mounts effects twice; without the in-flight guard the second
+    // run opened a second connection to the provider while the first was pending.
+    render(<StrictMode>{panelElement({ discoveryAction })}</StrictMode>);
+    expect(discoveryAction).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveFirst([{ id: 'm1', displayName: 'Model One' }]); });
+    expect(await screen.findByText('Model One')).toBeInTheDocument();
+
+    // Once the request has settled, a manual refresh is allowed again.
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByText('Model Two')).toBeInTheDocument();
+    expect(discoveryAction).toHaveBeenCalledTimes(2);
   });
 });

@@ -91,6 +91,7 @@ export default function ModelManagementPanel({
   const [pendingCustomModel, setPendingCustomModel] = useState<ModelEntity | null>(null);
   const isMountedRef = useRef(true);
   const fetchIdRef = useRef(0);
+  const inFlightDiscoveryKeyRef = useRef<string | null>(null);
   const editingAnchorRef = useRef<HTMLDivElement | null>(null);
   const pendingAnchorRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +134,20 @@ export default function ModelManagementPanel({
   // ===== Discovery fetch =====
   const canDiscover = discoveryAction !== undefined || ((!!apiKey || provider.id === TOKENDANCE_PROVIDER_ID) && supportsModelDiscovery(provider));
 
+  // Everything the discovery request depends on, as a stable string. Auto
+  // discovery is keyed on this rather than on prop identities: hosts render
+  // the panel with inline callbacks and freshly built provider objects, and
+  // keying on those re-fired the request on every host render (#582).
+  const discoveryKey = canDiscover
+    ? JSON.stringify([
+      provider.id,
+      provider.modelListUrl ?? null,
+      provider.config.baseUrl ?? null,
+      apiKey ?? null,
+      discoveryAction !== undefined,
+    ])
+    : null;
+
   const bundledModelsById = useMemo(
     () => new Map(
       provider.isBuiltin
@@ -151,7 +166,11 @@ export default function ModelManagementPanel({
   );
 
   const doFetch = useCallback(async () => {
-    if (!canDiscover) return;
+    if (discoveryKey === null) return;
+    // Singleflight: a request for the same endpoint and credentials is still
+    // running and its result will land, so do not open a second connection.
+    if (inFlightDiscoveryKeyRef.current === discoveryKey) return;
+    inFlightDiscoveryKeyRef.current = discoveryKey;
     setDiscoveryLoading(true);
     setDiscoveryError(null);
     const thisId = ++fetchIdRef.current;
@@ -214,13 +233,21 @@ export default function ModelManagementPanel({
           : e instanceof Error ? e.message : String(e),
       );
     } finally {
-      if (isMountedRef.current && thisId === fetchIdRef.current) {
-        setDiscoveryLoading(false);
+      if (thisId === fetchIdRef.current) {
+        inFlightDiscoveryKeyRef.current = null;
+        if (isMountedRef.current) setDiscoveryLoading(false);
       }
     }
-  }, [provider, apiKey, canDiscover, discoveryAction, onUpdateCustomProvider, onRefresh]);
+  }, [provider, apiKey, discoveryKey, discoveryAction, onUpdateCustomProvider, onRefresh]);
 
-  useEffect(() => { doFetch(); }, [doFetch]);
+  const doFetchRef = useRef(doFetch);
+  useEffect(() => { doFetchRef.current = doFetch; });
+
+  // Discover once per endpoint/credential change, not once per render.
+  useEffect(() => {
+    if (discoveryKey === null) return;
+    void doFetchRef.current();
+  }, [discoveryKey]);
 
   // ===== Actions =====
   const handleSetPrimary = useCallback(async (modelId: string) => {
