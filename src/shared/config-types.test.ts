@@ -54,6 +54,19 @@ describe('MCP presets', () => {
     });
     expect(tavily?.url).not.toContain('TAVILY_API_KEY');
   });
+
+  it('ships the keyless You.com search preset on the free MCP profile', () => {
+    const youcom = PRESET_MCP_SERVERS.find(server => server.id === 'you-search');
+
+    expect(youcom).toMatchObject({
+      type: 'http',
+      url: 'https://api.you.com/mcp?profile=free',
+      isBuiltin: true,
+      isFree: true,
+    });
+    expect(youcom?.requiresConfig).toBeUndefined();
+    expect(youcom?.headers).toBeUndefined();
+  });
 });
 
 // normalizeProviderOrder reconciles a persisted provider order against the set

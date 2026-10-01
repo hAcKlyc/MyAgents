@@ -2717,6 +2717,17 @@ export const PRESET_MCP_SERVERS: McpServerDefinition[] = [
     configHint: '免费注册即可获取 API Key（1000 次/月，无需信用卡）',
   },
   {
+    id: 'you-search',
+    name: 'You.com 搜索引擎',
+    description:
+      '无需 API Key 的 You.com 全网搜索（free profile 端点）。获取 API Key 后可改用认证端点解锁更多工具',
+    type: 'http',
+    url: 'https://api.you.com/mcp?profile=free',
+    isBuiltin: true,
+    isFree: true,
+    websiteUrl: 'https://you.com/platform/api-keys',
+  },
+  {
     id: 'gemini-image',
     name: 'Nano Banana 图片生成',
     description: '支持图片生成与多轮编辑（基于 Gemini Nano Banana）',

@@ -545,8 +545,12 @@ export function getToolBadgeConfig(toolName: string): ToolBadgeConfig {
         };
       }
 
-      // Search tools (DuckDuckGo, Tavily, etc.) - Emerald
-      if (toolName.startsWith('mcp__ddg-search__') || toolName.startsWith('mcp__tavily-search__')) {
+      // Search tools (DuckDuckGo, Tavily, You.com, etc.) - Emerald
+      if (
+        toolName.startsWith('mcp__ddg-search__') ||
+        toolName.startsWith('mcp__tavily-search__') ||
+        toolName.startsWith('mcp__you-search__')
+      ) {
         return {
           icon: <Search className="size-4" />,
           colors: {
