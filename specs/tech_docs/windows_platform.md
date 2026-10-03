@@ -58,7 +58,7 @@ Windows `spawn_tree()` 先 suspended创建根进程、绑定 `JOB_OBJECT_LIMIT_K
 
 创建入口在 App shutdown关闭后必须拒绝新 spawn；owner等待已登记 children，不能边退出边产生新进程。
 
-需要继承用户 console 的 CLI mode 是明确例外，使用 raw `Command`；Terminal 的进程创建由 `portable-pty` / ConPTY owner 管理。不要把后台进程的 `CREATE_NO_WINDOW` 规则套到这两条交互路径。
+需要继承用户 console 的 CLI mode 是明确例外：Rust CLI 入口用 Windows `CreateProcessW` 启动内置 Node，继承标准输入输出，并以 `STARTF_USESHOWWINDOW + SW_HIDE` 隐藏仅在没有可继承 console 时新建的窗口。不能使用 `CREATE_NO_WINDOW`，因为 DSH 受限令牌下该标志可能导致子进程初始化失败。Terminal 的进程创建由 `portable-pty` / ConPTY owner 管理。
 
 ### Recovery
 

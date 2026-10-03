@@ -342,6 +342,8 @@ canonical HOME launcher 总是传私有 marker，Rust 在调用 Node 前剥掉�
 }
 ```
 
+Rust CLI 入口启动内置 Node 时继续继承标准输入输出。Windows 专用进程创建路径通过 `STARTF_USESHOWWINDOW + SW_HIDE` 让新分配的 console 在创建时即隐藏；已有终端 console 不受影响。不能改用后台进程通用的 `CREATE_NO_WINDOW`：DSH 受限令牌下该标志可能导致子进程以 `STATUS_DLL_INIT_FAILED` 退出。
+
 ### Rust 端口回退
 
 ```rust

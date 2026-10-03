@@ -10,6 +10,7 @@ use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(test))]
@@ -139,33 +140,25 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
-    // Intentionally use raw Command: CLI mode must inherit the user's console;
-    // process_cmd would apply CREATE_NO_WINDOW on Windows.
     let node_path = crate::sidecar::normalize_external_path(runtime.node);
     let script_path = crate::sidecar::normalize_external_path(runtime.script);
-    #[allow(clippy::disallowed_methods)]
-    let mut command = Command::new(&node_path);
-    command.arg(script_path);
-    command.args(forwarded_cli_args(args));
-    command.stdin(Stdio::inherit());
-    command.stdout(Stdio::inherit());
-    command.stderr(Stdio::inherit());
 
     // Preserve an explicit Session port. Only terminal-style invocations with
     // no inherited port may fall back to the Global Sidecar port file.
     let inherited_port = std::env::var("MYAGENTS_PORT").ok();
     let inherited_session = std::env::var("MYAGENTS_SESSION_ID").ok();
-    if should_inject_global_port(inherited_port.as_deref(), inherited_session.as_deref()) {
-        if let Some(port) = discover_sidecar_port() {
-            command.env("MYAGENTS_PORT", port);
-        }
-    }
+    let global_port =
+        should_inject_global_port(inherited_port.as_deref(), inherited_session.as_deref())
+            .then(discover_sidecar_port)
+            .flatten();
 
-    command.env("NO_PROXY", crate::proxy_config::LOCALHOST_NO_PROXY);
-    command.env("no_proxy", crate::proxy_config::LOCALHOST_NO_PROXY);
-
-    match command.status() {
-        Ok(status) => status.code().unwrap_or(1),
+    match run_node(
+        &node_path,
+        &script_path,
+        forwarded_cli_args(args),
+        global_port.as_deref(),
+    ) {
+        Ok(code) => code,
         Err(error) => {
             eprintln!(
                 "Error: {}",
@@ -180,6 +173,41 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
 }
+
+#[cfg(not(windows))]
+fn run_node(
+    node: &Path,
+    script: &Path,
+    args: &[String],
+    global_port: Option<&str>,
+) -> std::io::Result<i32> {
+    #[allow(clippy::disallowed_methods)]
+    let mut command = Command::new(node);
+    command.arg(script).args(args);
+    command.stdin(Stdio::inherit());
+    command.stdout(Stdio::inherit());
+    command.stderr(Stdio::inherit());
+    if let Some(port) = global_port {
+        command.env("MYAGENTS_PORT", port);
+    }
+    command.env("NO_PROXY", crate::proxy_config::LOCALHOST_NO_PROXY);
+    command.env("no_proxy", crate::proxy_config::LOCALHOST_NO_PROXY);
+    command.status().map(|status| status.code().unwrap_or(1))
+}
+
+#[cfg(windows)]
+fn run_node(
+    node: &Path,
+    script: &Path,
+    args: &[String],
+    global_port: Option<&str>,
+) -> std::io::Result<i32> {
+    windows_process::run(node, script, args, global_port)
+}
+
+#[cfg(windows)]
+#[path = "cli/windows_process.rs"]
+mod windows_process;
 
 fn should_inject_global_port(
     inherited_port: Option<&str>,
