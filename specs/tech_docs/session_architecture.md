@@ -152,6 +152,8 @@ MCP pre-warm 是 soft readiness observation，不是 AI turn 的 admission autho
 
 ### 4.4 Rewind、Fork、Retry 与 reload anchor
 
+SDK 输入的 queue UUID 只用于关联准入和消费。Replay、assistant-start 与 result handoff 不证明该 UUID 是持久 native chain entry，因此这些路径不能写入 `sdkUuid` 或 native UUID 集；恢复点只取原生 user/assistant 内容事件提供的 UUID。缺少精确边界时沿既有 mutation 校验明确拒绝，不猜测更早历史。旧数据中的同值 UUID 也可能是真实 native entry，不能按“等于 queueId”批量删除；已失效的显式边界仍通过用户选定的更早 Rewind/Retry 恢复。
+
 三种操作统一进入 SessionEngine，adapter 拥有 native history 操作与执行顺序，SessionStore 拥有产品 transcript、metadata 和提交裁决。Renderer 不自行选择 Runtime 路径或补做重发。
 
 | 操作 | Product Session | 执行语义 |

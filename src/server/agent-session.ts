@@ -2182,9 +2182,7 @@ function schedulePostTerminalQueueDrain(reason: 'complete' | 'stopped' | 'error'
  *   3. Clear queueState.inFlightToCliId and promote the next pending item, which
  *      yields it to CLI for the next mid-turn drain
  */
-async function handleQueuedCommandReplay(
-  sdkMessage: { uuid?: string }
-): Promise<void> {
+async function handleQueuedCommandReplay(): Promise<void> {
   const queueId = getInFlightQueueId();
   if (!queueId) return; // defensive — caller already matched
   const meta = getInFlightMetadata();
@@ -2193,7 +2191,6 @@ async function handleQueuedCommandReplay(
   }
   console.log(`[agent] queued_command replay consumed by AI: queueId=${queueId}`);
   await surfaceInFlightQueueItem(queueId, meta, {
-    sdkUuid: sdkMessage.uuid,
     midTurnBreak: true,
     reason: 'SDKUserMessageReplay consumed by AI',
     joinsCurrentTurn: true,
@@ -2208,7 +2205,6 @@ function maybeSurfaceInFlightAtAssistantTurnStart(reason: string): void {
   if (queueState.awaitingAssistantStartAckQueueId !== queueId) return;
   const meta = getInFlightMetadata();
   void surfaceInFlightQueueItem(queueId, meta, {
-    sdkUuid: queueId,
     reason,
     awaitPersist: false,
     schedulePersist: true,
@@ -13141,27 +13137,13 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         // and promote the next pending item.
         const isReplay = (sdkMessage as { isReplay?: boolean }).isReplay === true;
         if (isReplay && sdkMessage.uuid && sdkMessage.uuid === queueState.inFlightToCliId) {
-          await handleQueuedCommandReplay(sdkMessage);
+          await handleQueuedCommandReplay();
           continue;
         }
         if (isReplay) {
-          // (v0.2.12 Codex review fix #4) Other replay flavours
-          // (initial-message ack, batched-message ack, local-command echo).
-          // These don't represent new conversation turns, but the replay's
-          // uuid is the canonical SDK uuid for our previously-pushed user
-          // message. We MUST run the same sdkUuid-assignment loop the
-          // non-replay branch uses, otherwise rewindFiles / fork / forkSession
-          // checkpoint anchors break for those transcriptState.messages — `transcriptState.currentSessionUuids`
-          // alone is insufficient because rewindSession matches by
-          // `transcriptState.messages[i].sdkUuid`.
-          if (sdkMessage.uuid) {
-            addCurrentSessionUuid(sdkMessage.uuid);
-            addLiveSessionUuid(sdkMessage.uuid);
-            const boundMessageId = bindSdkUuidToLatestUnboundUserMessage(sdkMessage.uuid);
-            if (boundMessageId) {
-              broadcast('chat:message-sdk-uuid', { messageId: boundMessageId, sdkUuid: sdkMessage.uuid });
-            }
-          }
+          // A replay acknowledges dispatch/consumption. Its UUID may echo the
+          // input correlation ID without being a native history entry. Only
+          // ordinary native user/assistant events can supply rewind anchors.
           continue;
         }
         // (#228) Suppress SDK-synthetic transcript material from the user-visible

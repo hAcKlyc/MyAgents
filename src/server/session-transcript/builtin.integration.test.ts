@@ -640,7 +640,7 @@ describe('builtin V2 execution independent of product storage', () => {
     expect(rows[1].sdkUuid).toBe('tail-frame-1');
     expect(rows[3].sdkUuid).toBe('tail-frame-2');
     expect(JSON.stringify(rows[1].content)).not.toContain('response-2');
-    expect(rows[2]).toMatchObject({ content: 'queued question', sdkUuid: 'queued-followup' });
+    expect(rows[2]).toMatchObject({ content: 'queued question', sdkUuid: undefined });
     const active = store.getActiveSessionTranscript(metadata.id)!;
     expect(await active.writer.flush()).toBe(true);
     expect((await active.file.read()).projection.messages.get(rows[1].id)?.sdkUuid).toBe('tail-frame-1');
@@ -1245,6 +1245,20 @@ it.each([false, true])('retries past an independent product diagnostic with cold
   expect(replay).toHaveBeenCalledTimes(1);
   expect(state.query.mock.calls.at(-1)?.[0].options.resumeSessionAt).toBe('native-u1');
   expect(agent.getMessages()[1]).toMatchObject({ id: 'd1', messageKind: 'diagnostic' });
+});
+
+it('does not promote a queued consumption id into a native rewind anchor', async () => {
+  const workspace = join(state.home, 'queue-anchor');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.queuedFollowup = true;
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('original', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 2 full-only tail'));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(agent.getMessages().find(message => message.content === 'queued question')).toMatchObject({ role: 'user', sdkUuid: undefined });
+  expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBeUndefined();
 });
 
 it.each(['unconfirmed-user', 'partial-assistant', 'legacy-error', 'conflicting-diagnostic', 'runtime-anchor'] as const)(
