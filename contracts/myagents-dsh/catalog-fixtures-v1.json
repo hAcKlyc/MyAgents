@@ -1,6 +1,6 @@
 {
   "artifactFormatVersion": 1,
-  "contractSha256": "7d7d7d67b5cf2e9e06c6886a8490896de6e6488dffb11f322e055e61a49d8d22",
+  "contractSha256": "cc4ff4710d2a1f7b2569e17c834a5e3377269ca45cfe31e086d8d9b6bbb93efa",
   "tools": [
     {
       "behaviorFixtureIds": [
@@ -459,11 +459,9 @@
     },
     {
       "behaviorFixtureIds": [
-        "foreground_child_terminal",
-        "default_background_child_handle",
-        "exact_model_alias",
-        "background_permission_fail_closed",
-        "stop_and_generation_cleanup"
+        "native_spawn_and_fork",
+        "native_continuation",
+        "host_child_policy"
       ],
       "invalidInput": {
         "description": "Review fixture changes",
@@ -476,69 +474,44 @@
         "prompt": "Review the fixture"
       },
       "validOutput": {
-        "agentId": "agent-1",
-        "model": "fixture-model",
-        "result": "done",
-        "resultTruncated": false,
-        "state": "succeeded",
-        "taskId": "work-1",
-        "usage": {
-          "cacheReadTokens": 0,
-          "cacheWriteTokens": 0,
-          "inputTokens": 1,
-          "outputTokens": 1,
-          "totalTokens": 2
-        }
+        "kind": "continuable",
+        "subagentId": "agent-1"
       }
     },
     {
       "behaviorFixtureIds": [
-        "stop_process_tree",
-        "stop_child",
-        "already_terminal_idempotent",
-        "cross_session_id_rejected",
-        "waits_for_resource_finalizer"
+        "native_turn_interrupt",
+        "native_continuation_after_interrupt"
       ],
       "invalidInput": {
-        "task_id": "work-1",
+        "agent_id": "agent-1",
         "unexpected": true
       },
       "name": "TaskStop",
       "validInput": {
-        "task_id": "work-1"
+        "agent_id": "agent-1"
       },
       "validOutput": {
-        "alreadyTerminal": false,
-        "kind": "agent",
-        "taskId": "work-1",
-        "terminal": "aborted"
+        "accepted": true
       }
     },
     {
       "behaviorFixtureIds": [
-        "parent_child_sibling_delivery",
-        "ordered_sequence",
-        "stopped_child_resume",
-        "terminal_recipient_notification",
-        "broadcast_and_cross_session_rejected"
+        "native_parent_child_delivery",
+        "native_catalog"
       ],
       "invalidInput": {
+        "agent_id": "agent-1",
         "message": "done",
-        "summary": "Fixture update",
-        "to": "agent-1",
         "unexpected": true
       },
       "name": "SendMessage",
       "validInput": {
-        "message": "done",
-        "summary": "Fixture update",
-        "to": "agent-1"
+        "agent_id": "agent-1",
+        "message": "done"
       },
       "validOutput": {
-        "messageId": "message-1",
-        "recipient": "agent-1",
-        "sequence": 1,
-        "state": "delivered"
+        "messageId": "message-1"
       }
     },
     {
@@ -560,6 +533,7 @@
         "subject": "Fixture task"
       },
       "validOutput": {
+        "list": "personal",
         "revision": "task-graph-1",
         "task": {
           "blockedBy": [],
@@ -589,6 +563,7 @@
         "taskId": "task-1"
       },
       "validOutput": {
+        "list": "personal",
         "revision": "task-graph-1",
         "task": {
           "blockedBy": [],
@@ -615,6 +590,7 @@
       "name": "TaskList",
       "validInput": {},
       "validOutput": {
+        "list": "personal",
         "revision": "task-graph-1",
         "tasks": [
           {
@@ -635,7 +611,7 @@
         "status_and_text_update",
         "owner_and_metadata_update",
         "dependency_cycle_rejected",
-        "terminal_transition_rejected",
+        "delete_and_reopen_task",
         "append_snapshot_crash_recovery"
       ],
       "invalidInput": {
@@ -652,6 +628,7 @@
         "changedFields": [
           "status"
         ],
+        "list": "personal",
         "revision": "task-graph-2",
         "task": {
           "blockedBy": [],

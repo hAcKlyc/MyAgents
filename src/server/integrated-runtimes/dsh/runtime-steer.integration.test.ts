@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PRESET_PROVIDERS } from '../../../shared/config-types';
 import { RuntimeSteerUnavailableError, type UnifiedEvent } from '../../runtimes/types';
 import { DshRuntime } from './runtime';
+import { DshAttachmentRegistry } from './attachments';
+import { dshSessionOwnedPaths } from './owned-paths';
 import type { DshRpcObject } from './protocol-types';
 
 const fixture = vi.hoisted(() => ({ home: '', extensionRevision: '', request: vi.fn(), notify: (_params: DshRpcObject): unknown => undefined }));
@@ -50,9 +52,13 @@ describe('DSH native collaboration boundaries', () => {
     vi.stubEnv('MYAGENTS_INTERNAL_CLI_TOKEN', 'synthetic');
     fixture.request.mockImplementation(async (method: string, params: DshRpcObject) => {
       switch (method) {
-        case 'extension/replace':
-          fixture.extensionRevision = String(params.revision);
-          return { state: 'applied', desiredRevision: params.revision, effectiveRevision: params.revision };
+        case 'extension/replace': {
+          const registry = new DshAttachmentRegistry(dshSessionOwnedPaths(join(fixture.home, '.myagents'), 'session-steer-reject').attachmentRoot);
+          await registry.initialize();
+          const snapshot = await registry.readJson(params.snapshotAttachment as { attachmentId: string; mimeType: string; sizeBytes: number; sha256: string }) as { revision: string };
+          fixture.extensionRevision = snapshot.revision;
+          return { state: 'applied', desiredRevision: snapshot.revision, effectiveRevision: snapshot.revision };
+        }
         case 'extension/catalog': return { digest: 'a'.repeat(64), revision: fixture.extensionRevision, skills: [], tools: [] };
         case 'session/create': return { runtimeSessionId: 'runtime-1', state: 'ready', toolCatalog: { effectiveTools: [] }, extensionCatalog: { digest: 'a'.repeat(64) } };
         case 'config/apply': return { state: 'applied', effectiveRevision: params.revision };
@@ -69,6 +75,20 @@ describe('DSH native collaboration boundaries', () => {
     const process = await runtime.startSession({ sessionId: 'session-steer-reject', workspacePath,
       permissionMode: 'full-autonomous', scenario: { type: 'desktop' } }, event => events.push(event));
     try {
+      const liveSource = { revision: 'live-extensions', workspacePath,
+        skills: [], commands: [], agents: [], mcpServers: [], dynamicTools: [] };
+      expect(await runtime.replaceDshExtensions(process, liveSource)).toMatchObject({
+        state: 'applied', desiredRevision: 'myagents-dsh-v3:live-extensions',
+        effectiveRevision: 'myagents-dsh-v3:live-extensions',
+      });
+      expect(fixture.request.mock.calls.filter(call => call[0] === 'extension/replace')).toHaveLength(2);
+      const publication = vi.spyOn(DshAttachmentRegistry.prototype, 'publishJson');
+      publication.mockRejectedValueOnce(new Error('synthetic disk failure'));
+      await expect(runtime.replaceDshExtensions(process, { ...liveSource, revision: 'unpublished' }))
+        .rejects.toThrow('synthetic disk failure');
+      expect(fixture.request.mock.calls.filter(call => call[0] === 'extension/replace')).toHaveLength(2);
+      expect(await runtime.reconcileDshExtensions(process)).toBeNull();
+      expect(fixture.extensionRevision).toBe('myagents-dsh-v3:live-extensions');
       events.length = 0;
       await fixture.notify({
         runtimeGeneration: 'generation-1', productSessionId: 'session-steer-reject',
@@ -85,6 +105,26 @@ describe('DSH native collaboration boundaries', () => {
       expect(beforeDispatch).toHaveBeenCalledWith({ clientOperationId: 'root-A', inputFingerprint: expect.any(String) });
       expect(fixture.request.mock.calls.filter(call => call[0] === 'turn/followUp')).toHaveLength(1);
       expect(fixture.request.mock.calls.some(call => call[0] === 'session/history')).toBe(false);
+      let releasePublication!: (value: Awaited<ReturnType<DshAttachmentRegistry['publishJson']>>) => void;
+      let publicationStarted!: () => void;
+      const started = new Promise<void>(resolve => { publicationStarted = resolve; });
+      publication.mockImplementationOnce(() => {
+        publicationStarted();
+        return new Promise(resolve => { releasePublication = resolve; });
+      });
+      const dispatcher = { descriptors: [], dispatch: vi.fn(), dispose: vi.fn() };
+      const replacement = runtime.replaceDshExtensions(process, {
+        ...liveSource, revision: 'closing-generation', hostToolDispatcher: dispatcher,
+      });
+      const rejection = expect(replacement).rejects.toThrow('DSH extension owner is closed');
+      await started;
+      await runtime.stopSession(process);
+      expect(dispatcher.dispose).not.toHaveBeenCalled();
+      releasePublication({ attachmentId: `sha256:${'b'.repeat(64)}`, mimeType: 'application/json',
+        sizeBytes: 1, sha256: 'b'.repeat(64) });
+      await rejection;
+      expect(dispatcher.dispose).toHaveBeenCalledTimes(1);
+      expect(fixture.request.mock.calls.filter(call => call[0] === 'extension/replace')).toHaveLength(2);
     } finally { await runtime.stopSession(process); }
   });
 });

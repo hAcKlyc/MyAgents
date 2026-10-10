@@ -1184,7 +1184,7 @@ export class DshRuntime implements AgentRuntime {
       });
       const extensionResult = await host.request(
         'extension/replace',
-        extension,
+        { snapshotAttachment: await attachments.publishJson(extension) },
       );
       const componentReceipts = extensionComponentReceipts(extensionResult);
       const componentIssues = componentReceipts.filter(component => (
@@ -1710,7 +1710,7 @@ export class DshRuntime implements AgentRuntime {
         throw error;
       }
       const existing = process.planeForGeneration(dshExtensionGenerationId(plane));
-      if (existing === process.desiredExtensionPlane) {
+      if (existing && existing === process.desiredExtensionPlane) {
         plane.hostToolDispatcher?.dispose('dsh_extension_generation_unchanged');
         return process.extensionDiagnostics;
       }
@@ -1729,8 +1729,16 @@ export class DshRuntime implements AgentRuntime {
       if (existing) {
         plane.hostToolDispatcher?.dispose('dsh_extension_generation_reused');
         plane = existing;
-      } else {
-        process.registerExtensionPlane(plane);
+      }
+      // Publication is local and definite: until it succeeds the Runtime
+      // cannot own this candidate, so preserve the current desired generation.
+      let snapshotAttachment;
+      try {
+        snapshotAttachment = await process.attachments.publishJson(plane.snapshot);
+        if (!existing) process.registerExtensionPlane(plane);
+      } catch (error) {
+        if (!existing) plane.hostToolDispatcher?.dispose('dsh_extension_snapshot_publish_failed');
+        throw error;
       }
       const previousDesired = process.desiredExtensionPlane;
       process.desiredExtensionPlane = plane;
@@ -1740,7 +1748,7 @@ export class DshRuntime implements AgentRuntime {
       // process teardown.
       const result = await process.host.request(
         'extension/replace',
-        plane.snapshot,
+        { snapshotAttachment },
       );
       if (previousDesired && previousDesired !== plane && previousDesired !== process.extensionPlane) {
         process.releaseExtensionPlane(previousDesired, 'dsh_extension_candidate_replaced');

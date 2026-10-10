@@ -81,8 +81,8 @@
         },
         "productSessionId": "product-session-1",
         "protocol": {
-          "maxVersion": "6.0.0",
-          "minVersion": "6.0.0"
+          "maxVersion": "6.1.0",
+          "minVersion": "6.1.0"
         },
         "runtimeHome": "/fixture/runtime-home",
         "unexpected": true,
@@ -172,8 +172,8 @@
         },
         "productSessionId": "product-session-1",
         "protocol": {
-          "maxVersion": "6.0.0",
-          "minVersion": "6.0.0"
+          "maxVersion": "6.1.0",
+          "minVersion": "6.1.0"
         },
         "runtimeHome": "relative/runtime-home",
         "workspace": {
@@ -198,7 +198,7 @@
         },
         "piVersion": "0.50.3",
         "profileDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "protocolVersion": "6.0.0",
+        "protocolVersion": "6.1.0",
         "runtimeCapabilities": {
           "configuration": {
             "agents": "next-turn",
@@ -291,13 +291,13 @@
         },
         "runtimeEngine": {
           "distribution": "myagents-dsh",
-          "distributionVersion": "0.1.9",
+          "distributionVersion": "0.1.15",
           "name": "deepseek-harness",
-          "version": "0.1.7-rc.2.myagents.477b4f420553.8d5f1cfa482e"
+          "version": "0.2.0-rc.2.myagents.639ed0153972.56bce4eb7e07"
         },
         "runtimeGeneration": "generation-1",
-        "runtimeVersion": "0.1.9",
-        "schemaSha256": "c52558486ded4d6e2f34ef0b00eb4937bcb5f5d33526f3a1d265c7e74b41e4fa",
+        "runtimeVersion": "0.1.15",
+        "schemaSha256": "c847b6d5b232f28f121486aaa4d5324e1c16f2d8dfb688e0549f91ba69e9480b",
         "sessionFormat": "dsh-session-events-v2"
       }
     },
@@ -326,27 +326,31 @@
         "runtimeSessionId": "runtime-session-1",
         "state": "ready",
         "toolCatalog": {
-          "contractSha256": "7d7d7d67b5cf2e9e06c6886a8490896de6e6488dffb11f322e055e61a49d8d22",
+          "contractSha256": "cc4ff4710d2a1f7b2569e17c834a5e3377269ca45cfe31e086d8d9b6bbb93efa",
           "diagnostics": [
             {
               "available": true,
-              "tool": "Read"
+              "tool": "read"
             },
             {
               "available": true,
-              "tool": "Write"
+              "tool": "read_image"
             },
             {
               "available": true,
-              "tool": "Edit"
+              "tool": "write"
             },
             {
               "available": true,
-              "tool": "Glob"
+              "tool": "edit"
             },
             {
               "available": true,
-              "tool": "Grep"
+              "tool": "glob"
+            },
+            {
+              "available": true,
+              "tool": "grep"
             },
             {
               "available": true,
@@ -374,11 +378,11 @@
             },
             {
               "available": true,
-              "tool": "WebFetch"
+              "tool": "web_fetch"
             },
             {
               "available": true,
-              "tool": "WebSearch"
+              "tool": "web_search"
             },
             {
               "available": true,
@@ -398,15 +402,23 @@
             },
             {
               "available": true,
-              "tool": "Agent"
+              "tool": "subagent"
             },
             {
               "available": true,
-              "tool": "TaskStop"
+              "tool": "fork_agent"
             },
             {
               "available": true,
-              "tool": "SendMessage"
+              "tool": "interrupt_agent"
+            },
+            {
+              "available": true,
+              "tool": "send_message"
+            },
+            {
+              "available": true,
+              "tool": "list_agents"
             },
             {
               "available": true,
@@ -425,28 +437,31 @@
               "tool": "TaskUpdate"
             }
           ],
-          "digest": "e57a18f3b04984bae3af70af55b8525a5fac0bca80464321ab6e7725a5b04dfd",
+          "digest": "30e16c58dc7190090517bfd9c4317f8a64a715148eb004490e7c1d51918df95a",
           "effectiveTools": [
-            "Read",
-            "Write",
-            "Edit",
-            "Glob",
-            "Grep",
+            "read",
+            "read_image",
+            "write",
+            "edit",
+            "glob",
+            "grep",
             "bash",
             "pwsh",
             "job_output",
             "job_list",
             "job_kill",
             "ls",
-            "WebFetch",
-            "WebSearch",
+            "web_fetch",
+            "web_search",
             "AskUserQuestion",
             "EnterPlanMode",
             "ExitPlanMode",
             "Skill",
-            "Agent",
-            "TaskStop",
-            "SendMessage",
+            "subagent",
+            "fork_agent",
+            "interrupt_agent",
+            "send_message",
+            "list_agents",
             "TaskCreate",
             "TaskGet",
             "TaskList",
@@ -454,26 +469,29 @@
           ],
           "formatVersion": 1,
           "implementationCatalog": [
-            "Read",
-            "Write",
-            "Edit",
-            "Glob",
-            "Grep",
+            "read",
+            "read_image",
+            "write",
+            "edit",
+            "glob",
+            "grep",
             "bash",
             "pwsh",
             "job_output",
             "job_list",
             "job_kill",
             "ls",
-            "WebFetch",
-            "WebSearch",
+            "web_fetch",
+            "web_search",
             "AskUserQuestion",
             "EnterPlanMode",
             "ExitPlanMode",
             "Skill",
-            "Agent",
-            "TaskStop",
-            "SendMessage",
+            "subagent",
+            "fork_agent",
+            "interrupt_agent",
+            "send_message",
+            "list_agents",
             "TaskCreate",
             "TaskGet",
             "TaskList",
@@ -494,6 +512,7 @@
           "sequence": 1
         },
         "historyFormat": "dsh-session-events-v2",
+        "inheritedEventCount": 0,
         "records": [
           {
             "chunkCount": 1,
@@ -520,6 +539,7 @@
           "sequence": 1
         },
         "historyFormat": "dsh-session-events-v2",
+        "inheritedEventCount": 0,
         "records": [
           {
             "chunkCount": 1,
@@ -1208,8 +1228,8 @@
       }
     }
   ],
-  "protocolVersion": "6.0.0",
-  "schemaSha256": "c52558486ded4d6e2f34ef0b00eb4937bcb5f5d33526f3a1d265c7e74b41e4fa",
+  "protocolVersion": "6.1.0",
+  "schemaSha256": "c847b6d5b232f28f121486aaa4d5324e1c16f2d8dfb688e0549f91ba69e9480b",
   "valid": [
     {
       "frame": {
@@ -1290,8 +1310,8 @@
           },
           "productSessionId": "product-session-1",
           "protocol": {
-            "maxVersion": "6.0.0",
-            "minVersion": "6.0.0"
+            "maxVersion": "6.1.0",
+            "minVersion": "6.1.0"
           },
           "runtimeHome": "/fixture/runtime-home",
           "workspace": {
@@ -1319,7 +1339,7 @@
             "maxPendingRequests": 128
           },
           "profileDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "protocolVersion": "6.0.0",
+          "protocolVersion": "6.1.0",
           "runtimeCapabilities": {
             "configuration": {
               "agents": "next-turn",
@@ -1412,13 +1432,13 @@
           },
           "runtimeEngine": {
             "distribution": "myagents-dsh",
-            "distributionVersion": "0.1.9",
+            "distributionVersion": "0.1.15",
             "name": "deepseek-harness",
-            "version": "0.1.7-rc.2.myagents.477b4f420553.8d5f1cfa482e"
+            "version": "0.2.0-rc.2.myagents.639ed0153972.56bce4eb7e07"
           },
           "runtimeGeneration": "generation-1",
-          "runtimeVersion": "0.1.9",
-          "schemaSha256": "c52558486ded4d6e2f34ef0b00eb4937bcb5f5d33526f3a1d265c7e74b41e4fa",
+          "runtimeVersion": "0.1.15",
+          "schemaSha256": "c847b6d5b232f28f121486aaa4d5324e1c16f2d8dfb688e0549f91ba69e9480b",
           "sessionFormat": "dsh-session-events-v2"
         }
       },
@@ -1541,6 +1561,7 @@
             "stableBoundaryId": "boundary-1"
           },
           "historyFormat": "dsh-session-events-v2",
+          "inheritedEventCount": 0,
           "records": [
             {
               "data": {

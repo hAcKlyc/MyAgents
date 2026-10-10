@@ -1211,7 +1211,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "parallel",
-      "description": "Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell; pass `workdir` instead of using `cd`. Managed `$DSH_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.",
+      "description": "Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell; pass `workdir` instead of using `cd`. Managed `$DSH_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. An unset variable expands to an empty string, so guard variables in such paths with `${VAR:?}`. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.",
       "errorCodes": [
         {
           "code": "permission_denied",
@@ -1468,7 +1468,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "parallel",
-      "description": "Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`. Managed `$env:DSH_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.",
+      "description": "Execute a PowerShell command (`pwsh -Command`) and return its stdout/stderr. Each call runs in a fresh pwsh process; pass `workdir` instead of using `cd`. Paths use native Windows form (`C:\\...`); read environment variables with `$env:NAME`. Managed `$env:DSH_*` variables expose current harness environment facts. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. On Windows a force-killed command settles as `[exit code: 1]` without a signal marker — treat it as an interruption, not a command failure. Before any delete or move, verify that the resolved absolute target path is the intended one; never run it against a computed path you have not checked. Do not assign to automatic variables such as `$HOME`; variable names are case-insensitive, so `$home` is the same read-only variable. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]`, a policy denial: do not retry another way.",
       "errorCodes": [
         {
           "code": "permission_denied",
@@ -2651,7 +2651,8 @@
               "additionalProperties": false,
               "properties": {
                 "header": {
-                  "maxLength": 12,
+                  "description": "Short display heading; prefer twelve characters or fewer.",
+                  "maxLength": 256,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -2670,7 +2671,6 @@
                       "label": {
                         "maxLength": 80,
                         "minLength": 1,
-                        "pattern": "^(?:\\S+)(?:\\s+\\S+){0,4}$",
                         "type": "string"
                       },
                       "preview": {
@@ -2697,8 +2697,7 @@
               "required": [
                 "question",
                 "header",
-                "options",
-                "multiSelect"
+                "options"
               ],
               "type": "object"
             },
@@ -2720,7 +2719,8 @@
               "additionalProperties": false,
               "properties": {
                 "header": {
-                  "maxLength": 12,
+                  "description": "Short display heading; prefer twelve characters or fewer.",
+                  "maxLength": 256,
                   "minLength": 1,
                   "type": "string"
                 },
@@ -2739,7 +2739,6 @@
                       "label": {
                         "maxLength": 80,
                         "minLength": 1,
-                        "pattern": "^(?:\\S+)(?:\\s+\\S+){0,4}$",
                         "type": "string"
                       },
                       "preview": {
@@ -2766,8 +2765,7 @@
               "required": [
                 "question",
                 "header",
-                "options",
-                "multiSelect"
+                "options"
               ],
               "type": "object"
             },
@@ -3100,7 +3098,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "session_serial",
-      "description": "Loads one model-invocable SKILL.md from the operation-visible approved DSH Skill catalog, strips frontmatter, expands deterministic arguments, and returns its bounded instructions inline.",
+      "description": "Loads one model-invocable SKILL.md from the operation-visible approved DSH Skill catalog, strips frontmatter, expands deterministic arguments, and returns its bounded instructions inline. Pass args as one string: $ARGUMENTS expands the full string, indexed/numbered placeholders expand parsed arguments; without placeholders the arguments are appended in an ARGUMENTS section.",
       "errorCodes": [
         {
           "code": "skill_not_found",
@@ -3218,63 +3216,39 @@
     },
     {
       "behaviorFixtureIds": [
-        "foreground_child_terminal",
-        "default_background_child_handle",
-        "exact_model_alias",
-        "background_permission_fail_closed",
-        "stop_and_generation_cleanup"
+        "native_spawn_and_fork",
+        "native_continuation",
+        "host_child_policy"
       ],
       "checkpoint": "none",
       "concurrency": "parallel",
-      "description": "Starts a supervised local child Agent with a fresh DSH context and the current bounded workspace/component snapshot. Omit subagent_type for the general descriptor; Explore and Plan provide read-only research/planning roles. Custom descriptors may narrow inherited tools. run_in_background defaults to true: omitted/true returns a background handle; false waits for this activation's result. All roles and both modes retain context for SendMessage follow-ups after completion. taskId addresses TaskStop, agentId addresses SendMessage. The first successful foreground result is returned only through this tool; background and follow-up completion reports arrive automatically. An idle retained handle is not still executing. TaskStop closes the handle and model messages cannot restart it.",
+      "description": "Policy for native subagent and fork_agent delegation. DSH owns fresh/forked Sessions, continuable conversations, result delivery and lifecycle. MyAgents applies the admitted Host model, workspace, permission and Plan policy.",
       "errorCodes": [
         {
-          "code": "agent_unavailable",
+          "code": "permission_denied",
           "retryable": false,
-          "when": "No compatible child descriptor or model alias is visible."
-        },
-        {
-          "code": "child_nesting_forbidden",
-          "retryable": false,
-          "when": "A child attempts to spawn another child."
-        },
-        {
-          "code": "interaction_unavailable",
-          "retryable": false,
-          "when": "A background child requires unavailable interaction."
-        },
-        {
-          "code": "child_failed",
-          "retryable": true,
-          "when": "The supervised child reaches a failed terminal."
+          "when": "Host policy denies delegation."
         }
       ],
       "executionInputSchema": {
         "additionalProperties": false,
         "properties": {
+          "background": {
+            "type": "boolean"
+          },
           "description": {
-            "maxLength": 80,
-            "minLength": 1,
             "type": "string"
           },
           "model": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
             "type": "string"
           },
           "prompt": {
-            "maxLength": 1000000,
-            "minLength": 1,
             "type": "string"
           },
-          "run_in_background": {
-            "type": "boolean"
+          "provider": {
+            "type": "string"
           },
-          "subagent_type": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "reasoning_effort": {
             "type": "string"
           }
         },
@@ -3287,29 +3261,22 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "background": {
+            "type": "boolean"
+          },
           "description": {
-            "maxLength": 80,
-            "minLength": 1,
             "type": "string"
           },
           "model": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
             "type": "string"
           },
           "prompt": {
-            "maxLength": 1000000,
-            "minLength": 1,
             "type": "string"
           },
-          "run_in_background": {
-            "type": "boolean"
+          "provider": {
+            "type": "string"
           },
-          "subagent_type": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "reasoning_effort": {
             "type": "string"
           }
         },
@@ -3323,7 +3290,7 @@
         "cancellation": "abort_signal_exactly_one_terminal",
         "durableResult": "dsh_tool_result_before_runtime_visibility",
         "headless": "policy_required",
-        "timeout": "work_registry"
+        "timeout": "host_policy"
       },
       "name": "Agent",
       "originPolicy": {
@@ -3332,7 +3299,6 @@
       },
       "outputLimits": {
         "maxInlineBytes": 262144,
-        "maxRetainedOutputBytes": 8388608,
         "maxStructuredItems": 64
       },
       "outputSchema": {
@@ -3340,134 +3306,39 @@
           {
             "additionalProperties": false,
             "properties": {
-              "agentId": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "kind": {
+                "const": "continuable",
                 "type": "string"
               },
-              "model": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                "type": "string"
-              },
-              "outputPath": {
-                "maxLength": 8192,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                "type": "string"
-              },
-              "state": {
-                "const": "background",
-                "type": "string"
-              },
-              "taskId": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "subagentId": {
                 "type": "string"
               }
             },
             "required": [
-              "taskId",
-              "agentId",
-              "state",
-              "outputPath",
-              "model"
+              "kind",
+              "subagentId"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "agentId": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "kind": {
+                "const": "foreground",
                 "type": "string"
               },
-              "model": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "output": {
+                "items": {},
+                "type": "array"
+              },
+              "runId": {
                 "type": "string"
-              },
-              "result": {
-                "maxLength": 262144,
-                "type": "string"
-              },
-              "resultTruncated": {
-                "type": "boolean"
-              },
-              "state": {
-                "anyOf": [
-                  {
-                    "const": "succeeded",
-                    "type": "string"
-                  },
-                  {
-                    "const": "failed",
-                    "type": "string"
-                  },
-                  {
-                    "const": "aborted",
-                    "type": "string"
-                  }
-                ]
-              },
-              "taskId": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                "type": "string"
-              },
-              "usage": {
-                "additionalProperties": false,
-                "properties": {
-                  "cacheReadTokens": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "cacheWriteTokens": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "inputTokens": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "outputTokens": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "totalTokens": {
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "inputTokens",
-                  "outputTokens",
-                  "cacheReadTokens",
-                  "cacheWriteTokens",
-                  "totalTokens"
-                ],
-                "type": "object"
               }
             },
             "required": [
-              "taskId",
-              "agentId",
-              "state",
-              "result",
-              "resultTruncated",
-              "model"
+              "kind",
+              "runId",
+              "output"
             ],
             "type": "object"
           }
@@ -3479,60 +3350,51 @@
         "mode": "plan-safe-child-only",
         "revision": "operation-birth-and-durable-session"
       },
-      "resultSemantics": "Foreground returns this activation's result, usage, and continuable identity; background returns one supervised handle and output path. Execution completion and handle closure are separate.",
+      "resultSemantics": "Use the installed native delegation result; no ProductWork handles or role registry.",
       "sideEffect": "delegation",
       "timeoutMs": 600000
     },
     {
       "behaviorFixtureIds": [
-        "stop_process_tree",
-        "stop_child",
-        "already_terminal_idempotent",
-        "cross_session_id_rejected",
-        "waits_for_resource_finalizer"
+        "native_turn_interrupt",
+        "native_continuation_after_interrupt"
       ],
       "checkpoint": "none",
-      "concurrency": "session_serial",
-      "description": "Stops an owned child Agent by task ID and waits for terminal state and resource finalization.",
+      "concurrency": "parallel",
+      "description": "Policy for native interrupt_agent. Interrupt the addressed child turn without closing its conversation or descendants; DSH returns acceptance immediately.",
       "errorCodes": [
         {
-          "code": "task_not_found",
+          "code": "permission_denied",
           "retryable": false,
-          "when": "The task is unknown or belongs to another Runtime Session."
+          "when": "Host policy denies interruption."
         },
         {
-          "code": "task_stop_failed",
-          "retryable": true,
-          "when": "The WorkRegistry cannot establish terminal cleanup."
+          "code": "agent_not_found",
+          "retryable": false,
+          "when": "The target is absent from the native Agent registry and child catalog."
         }
       ],
       "executionInputSchema": {
         "additionalProperties": false,
         "properties": {
-          "task_id": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "agent_id": {
             "type": "string"
           }
         },
         "required": [
-          "task_id"
+          "agent_id"
         ],
         "type": "object"
       },
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "task_id": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+          "agent_id": {
             "type": "string"
           }
         },
         "required": [
-          "task_id"
+          "agent_id"
         ],
         "type": "object"
       },
@@ -3540,7 +3402,7 @@
         "cancellation": "abort_signal_exactly_one_terminal",
         "durableResult": "dsh_tool_result_before_runtime_visibility",
         "headless": "allowed",
-        "timeout": "work_registry"
+        "timeout": "host_policy"
       },
       "name": "TaskStop",
       "originPolicy": {
@@ -3554,41 +3416,12 @@
       "outputSchema": {
         "additionalProperties": false,
         "properties": {
-          "alreadyTerminal": {
+          "accepted": {
             "type": "boolean"
-          },
-          "kind": {
-            "const": "agent",
-            "type": "string"
-          },
-          "taskId": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-            "type": "string"
-          },
-          "terminal": {
-            "anyOf": [
-              {
-                "const": "succeeded",
-                "type": "string"
-              },
-              {
-                "const": "failed",
-                "type": "string"
-              },
-              {
-                "const": "aborted",
-                "type": "string"
-              }
-            ]
           }
         },
         "required": [
-          "taskId",
-          "kind",
-          "terminal",
-          "alreadyTerminal"
+          "accepted"
         ],
         "type": "object"
       },
@@ -3598,60 +3431,37 @@
         "mode": "denied",
         "revision": "operation-birth-and-durable-session"
       },
-      "resultSemantics": "Wait for the addressed work item to reach its existing or newly stopped terminal and finalize owned resources.",
+      "resultSemantics": "Native interrupt acceptance; no subtree stop or resource-finalization receipt.",
       "sideEffect": "session_state",
       "timeoutMs": 120000
     },
     {
       "behaviorFixtureIds": [
-        "parent_child_sibling_delivery",
-        "ordered_sequence",
-        "stopped_child_resume",
-        "terminal_recipient_notification",
-        "broadcast_and_cross_session_rejected"
+        "native_parent_child_delivery",
+        "native_catalog"
       ],
       "checkpoint": "none",
-      "concurrency": "session_serial",
-      "description": "Delivers an ordered plain-text message within the caller's root lineage. Use the agentId returned by Agent for one live child or sibling; a child may use the literal parent for the root. taskId, caller-defined names, broadcasts, team aliases, cross-Session recipients, and stopping or terminal Agents are unsupported. A queued receipt means admission for the recipient's next child-turn boundary, not interruption or completed work; delivered and queued are receipts, not terminal results.",
+      "concurrency": "parallel",
+      "description": "Policy for native send_message and list_agents. Native messaging addresses a direct continuable child or the resident child's direct parent by agent_id. Delivery confirmation is not the recipient's answer. DSH owns the catalog and Inbox.",
       "errorCodes": [
         {
-          "code": "recipient_not_found",
+          "code": "permission_denied",
           "retryable": false,
-          "when": "The local recipient cannot be resolved."
-        },
-        {
-          "code": "recipient_out_of_scope",
-          "retryable": false,
-          "when": "The target is cross-Session, broadcast, team, or cloud-owned."
-        },
-        {
-          "code": "delivery_failed",
-          "retryable": true,
-          "when": "The ordered mailbox or resume path cannot accept the message."
+          "when": "Host policy denies messaging."
         }
       ],
       "executionInputSchema": {
         "additionalProperties": false,
         "properties": {
+          "agent_id": {
+            "type": "string"
+          },
           "message": {
-            "maxLength": 1000000,
-            "type": "string"
-          },
-          "summary": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "to": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
             "type": "string"
           }
         },
         "required": [
-          "to",
-          "summary",
+          "agent_id",
           "message"
         ],
         "type": "object"
@@ -3659,25 +3469,15 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "agent_id": {
+            "type": "string"
+          },
           "message": {
-            "maxLength": 1000000,
-            "type": "string"
-          },
-          "summary": {
-            "maxLength": 200,
-            "minLength": 1,
-            "type": "string"
-          },
-          "to": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
             "type": "string"
           }
         },
         "required": [
-          "to",
-          "summary",
+          "agent_id",
           "message"
         ],
         "type": "object"
@@ -3686,7 +3486,7 @@
         "cancellation": "abort_signal_exactly_one_terminal",
         "durableResult": "dsh_tool_result_before_runtime_visibility",
         "headless": "allowed",
-        "timeout": "work_registry"
+        "timeout": "host_policy"
       },
       "name": "SendMessage",
       "originPolicy": {
@@ -3701,40 +3501,11 @@
         "additionalProperties": false,
         "properties": {
           "messageId": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
             "type": "string"
-          },
-          "recipient": {
-            "maxLength": 256,
-            "minLength": 1,
-            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-            "type": "string"
-          },
-          "sequence": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "state": {
-            "anyOf": [
-              {
-                "const": "delivered",
-                "type": "string"
-              },
-              {
-                "const": "queued",
-                "type": "string"
-              }
-            ]
           }
         },
         "required": [
-          "messageId",
-          "recipient",
-          "state",
-          "sequence"
+          "messageId"
         ],
         "type": "object"
       },
@@ -3744,7 +3515,7 @@
         "mode": "denied",
         "revision": "operation-birth-and-durable-session"
       },
-      "resultSemantics": "Return an ordered delivery receipt after resolving one exact live in-scope collaborator by agentId or the child-only parent alias.",
+      "resultSemantics": "Native delivery confirmation and catalog; no ProductWork mailbox or sibling messaging.",
       "sideEffect": "delegation",
       "timeoutMs": 120000
     },
@@ -3758,7 +3529,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "session_serial",
-      "description": "Creates a task in the current Runtime Session-local TaskGraph. It does not create a product task or scheduled automation.",
+      "description": "Create a task for your own work. Without list, it belongs to this agent's personal list and other agents cannot access it through Task tools. Use meaningful steps for multi-step work, not trivial one-step answers. Only the root agent may use list: shared for collaborative work; shared tasks start unassigned and must be assigned or offered with TaskUpdate. This does not create a MyAgents product task, reminder, or scheduled automation.",
       "errorCodes": [
         {
           "code": "task_graph_limit",
@@ -3782,6 +3553,18 @@
             "maxLength": 65536,
             "minLength": 1,
             "type": "string"
+          },
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
           },
           "metadata": {
             "maxProperties": 128,
@@ -3834,6 +3617,18 @@
             "maxLength": 65536,
             "minLength": 1,
             "type": "string"
+          },
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
           },
           "metadata": {
             "maxProperties": 128,
@@ -3893,6 +3688,18 @@
       "outputSchema": {
         "additionalProperties": false,
         "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "revision": {
             "maxLength": 256,
             "minLength": 1,
@@ -3925,6 +3732,9 @@
               "description": {
                 "maxLength": 65536,
                 "type": "string"
+              },
+              "hasHiddenBlockers": {
+                "type": "boolean"
               },
               "id": {
                 "maxLength": 256,
@@ -3959,6 +3769,17 @@
                   "type": "string"
                 },
                 "type": "object"
+              },
+              "offerTo": {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array",
+                "uniqueItems": true
               },
               "owner": {
                 "maxLength": 256,
@@ -4009,6 +3830,7 @@
           }
         },
         "required": [
+          "list",
           "task",
           "revision"
         ],
@@ -4033,7 +3855,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "parallel",
-      "description": "Gets one task and its current dependency, owner, flat scalar metadata, and revision snapshot from the Session-local TaskGraph.",
+      "description": "Read one task by ID in your personal list by default, or pass list: shared for collaborative work. Read its requirements and blockers before changing it. You can read only your own personal tasks and shared tasks assigned or offered to you. Use TaskList in the same list to discover IDs. Missing and inaccessible tasks have the same not-found result.",
       "errorCodes": [
         {
           "code": "task_not_found",
@@ -4049,6 +3871,18 @@
       "executionInputSchema": {
         "additionalProperties": false,
         "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "taskId": {
             "maxLength": 256,
             "minLength": 1,
@@ -4064,6 +3898,18 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "taskId": {
             "maxLength": 256,
             "minLength": 1,
@@ -4094,6 +3940,18 @@
       "outputSchema": {
         "additionalProperties": false,
         "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "revision": {
             "maxLength": 256,
             "minLength": 1,
@@ -4126,6 +3984,9 @@
               "description": {
                 "maxLength": 65536,
                 "type": "string"
+              },
+              "hasHiddenBlockers": {
+                "type": "boolean"
               },
               "id": {
                 "maxLength": 256,
@@ -4160,6 +4021,17 @@
                   "type": "string"
                 },
                 "type": "object"
+              },
+              "offerTo": {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array",
+                "uniqueItems": true
               },
               "owner": {
                 "maxLength": 256,
@@ -4210,6 +4082,7 @@
           }
         },
         "required": [
+          "list",
           "task",
           "revision"
         ],
@@ -4234,7 +4107,7 @@
       ],
       "checkpoint": "none",
       "concurrency": "parallel",
-      "description": "Lists a bounded, stable snapshot of non-deleted tasks in the current Runtime collaboration domain.",
+      "description": "List this agent's personal tasks by default. Use list: shared to inspect collaborative tasks assigned or offered to you. The root agent sees all shared tasks; a child sees only its own shared work. An empty shared result reveals nothing about other agents' tasks. After finishing shared work, list again to find newly unblocked work.",
       "errorCodes": [
         {
           "code": "task_graph_unavailable",
@@ -4249,12 +4122,38 @@
       ],
       "executionInputSchema": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "inputSchema": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "lifecycle": {
@@ -4275,6 +4174,18 @@
       "outputSchema": {
         "additionalProperties": false,
         "properties": {
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "revision": {
             "maxLength": 256,
             "minLength": 1,
@@ -4309,6 +4220,9 @@
                   "maxLength": 65536,
                   "type": "string"
                 },
+                "hasHiddenBlockers": {
+                  "type": "boolean"
+                },
                 "id": {
                   "maxLength": 256,
                   "minLength": 1,
@@ -4342,6 +4256,17 @@
                     "type": "string"
                   },
                   "type": "object"
+                },
+                "offerTo": {
+                  "items": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                    "type": "string"
+                  },
+                  "maxItems": 32,
+                  "type": "array",
+                  "uniqueItems": true
                 },
                 "owner": {
                   "maxLength": 256,
@@ -4398,6 +4323,7 @@
           }
         },
         "required": [
+          "list",
           "tasks",
           "revision",
           "truncated"
@@ -4418,12 +4344,12 @@
         "status_and_text_update",
         "owner_and_metadata_update",
         "dependency_cycle_rejected",
-        "terminal_transition_rejected",
+        "delete_and_reopen_task",
         "append_snapshot_crash_recovery"
       ],
       "checkpoint": "none",
       "concurrency": "session_serial",
-      "description": "Atomically updates one Session-local task, including status, ownership, dependencies, text, and bounded flat scalar metadata. When starting an unassigned task, owner may be omitted: the Runtime assigns the actual calling Agent. An existing owner is preserved; the root or current owner may explicitly transfer to root or a registered child agentId in this Session. Dependencies must remain acyclic.",
+      "description": "Update a task by ID in your personal list by default, or pass list: shared for collaborative work. Read its latest state with TaskGet first. Only the root agent may assign shared work to a continuable child or offer it to specific child IDs with offerTo. An offered child may claim an unassigned, unblocked task atomically. Do not claim someone else's task, change another agent's personal list, or mark unfinished work complete. Use the exact child runtime ID returned by subagent, fork_agent, or list_agents for owner/offerTo; owner: root names the root agent. Claim offered work with status: in_progress (owner is inferred). Normal statuses are pending, in_progress, completed; completed tasks may be corrected or reopened. Use status: deleted to remove obsolete work and clean all dependency references; deleted returns task: null. The legacy cancelled status is retained for compatibility and does not resolve blockers. An empty or unchanged update succeeds without changing the list revision. addBlocks/addBlockedBy add dependencies within the same list; cycles are rejected. metadata values of null remove keys. Results carry the list revision at the top level.",
       "errorCodes": [
         {
           "code": "task_not_found",
@@ -4434,11 +4360,6 @@
           "code": "task_dependency_invalid",
           "retryable": false,
           "when": "A dependency is absent, cross-Session, self-referential, or cyclic."
-        },
-        {
-          "code": "task_terminal_conflict",
-          "retryable": false,
-          "when": "The update attempts an invalid terminal transition."
         },
         {
           "code": "task_graph_conflict",
@@ -4480,6 +4401,18 @@
             "minLength": 1,
             "type": "string"
           },
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "metadata": {
             "maxProperties": 128,
             "patternProperties": {
@@ -4508,6 +4441,17 @@
             },
             "type": "object"
           },
+          "offerTo": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array",
+            "uniqueItems": true
+          },
           "owner": {
             "maxLength": 256,
             "minLength": 1,
@@ -4530,6 +4474,10 @@
               },
               {
                 "const": "cancelled",
+                "type": "string"
+              },
+              {
+                "const": "deleted",
                 "type": "string"
               }
             ]
@@ -4585,6 +4533,18 @@
             "minLength": 1,
             "type": "string"
           },
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
           "metadata": {
             "maxProperties": 128,
             "patternProperties": {
@@ -4613,6 +4573,17 @@
             },
             "type": "object"
           },
+          "offerTo": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array",
+            "uniqueItems": true
+          },
           "owner": {
             "maxLength": 256,
             "minLength": 1,
@@ -4635,6 +4606,10 @@
               },
               {
                 "const": "cancelled",
+                "type": "string"
+              },
+              {
+                "const": "deleted",
                 "type": "string"
               }
             ]
@@ -4698,6 +4673,10 @@
                   "type": "string"
                 },
                 {
+                  "const": "offerTo",
+                  "type": "string"
+                },
+                {
                   "const": "addBlocks",
                   "type": "string"
                 },
@@ -4711,10 +4690,54 @@
                 }
               ]
             },
-            "maxItems": 8,
-            "minItems": 1,
+            "maxItems": 9,
+            "minItems": 0,
             "type": "array",
             "uniqueItems": true
+          },
+          "list": {
+            "anyOf": [
+              {
+                "const": "personal",
+                "type": "string"
+              },
+              {
+                "const": "shared",
+                "type": "string"
+              }
+            ]
+          },
+          "notification": {
+            "additionalProperties": false,
+            "properties": {
+              "deliveredTo": {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "failedTo": {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "deliveredTo",
+              "failedTo"
+            ],
+            "type": "object"
           },
           "revision": {
             "maxLength": 256,
@@ -4723,115 +4746,137 @@
             "type": "string"
           },
           "task": {
-            "additionalProperties": false,
-            "properties": {
-              "activeForm": {
-                "maxLength": 512,
-                "type": "string"
-              },
-              "blockedBy": {
-                "items": {
-                  "maxLength": 256,
-                  "minLength": 1,
-                  "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                  "type": "string"
-                },
-                "maxItems": 256,
-                "type": "array",
-                "uniqueItems": true
-              },
-              "createdSequence": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer"
-              },
-              "description": {
-                "maxLength": 65536,
-                "type": "string"
-              },
-              "id": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                "type": "string"
-              },
-              "metadata": {
-                "maxProperties": 128,
-                "patternProperties": {
-                  "^.*$": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "activeForm": {
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "blockedBy": {
+                    "items": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                      "type": "string"
+                    },
+                    "maxItems": 256,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "createdSequence": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "description": {
+                    "maxLength": 65536,
+                    "type": "string"
+                  },
+                  "hasHiddenBlockers": {
+                    "type": "boolean"
+                  },
+                  "id": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                    "type": "string"
+                  },
+                  "metadata": {
+                    "maxProperties": 128,
+                    "patternProperties": {
+                      "^.*$": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "maxLength": 65536,
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "propertyNames": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "offerTo": {
+                    "items": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "owner": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+                    "type": "string"
+                  },
+                  "status": {
                     "anyOf": [
                       {
-                        "type": "null"
+                        "const": "pending",
+                        "type": "string"
                       },
                       {
-                        "type": "boolean"
+                        "const": "in_progress",
+                        "type": "string"
                       },
                       {
-                        "type": "number"
+                        "const": "completed",
+                        "type": "string"
                       },
                       {
-                        "maxLength": 65536,
+                        "const": "cancelled",
                         "type": "string"
                       }
                     ]
+                  },
+                  "subject": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "updatedSequence": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
                   }
                 },
-                "propertyNames": {
-                  "maxLength": 128,
-                  "minLength": 1,
-                  "type": "string"
-                },
+                "required": [
+                  "id",
+                  "subject",
+                  "status",
+                  "blockedBy",
+                  "createdSequence",
+                  "updatedSequence"
+                ],
                 "type": "object"
               },
-              "owner": {
-                "maxLength": 256,
-                "minLength": 1,
-                "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
-                "type": "string"
-              },
-              "status": {
-                "anyOf": [
-                  {
-                    "const": "pending",
-                    "type": "string"
-                  },
-                  {
-                    "const": "in_progress",
-                    "type": "string"
-                  },
-                  {
-                    "const": "completed",
-                    "type": "string"
-                  },
-                  {
-                    "const": "cancelled",
-                    "type": "string"
-                  }
-                ]
-              },
-              "subject": {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              "updatedSequence": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer"
+              {
+                "type": "null"
               }
-            },
-            "required": [
-              "id",
-              "subject",
-              "status",
-              "blockedBy",
-              "createdSequence",
-              "updatedSequence"
-            ],
-            "type": "object"
+            ]
           }
         },
         "required": [
+          "list",
           "task",
           "revision",
           "changedFields"
