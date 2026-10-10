@@ -94,6 +94,15 @@ describe('handleSessionEngineQueueRoute', () => {
     });
   });
 
+  it('reports an unavailable force handoff without telling the renderer to remove its target', async () => {
+    mocks.engine.forceQueuedMessage.mockRejectedValueOnce(new Error('Input owner is not ready; target retained'));
+    const response = await handleSessionEngineQueueRoute('/chat/queue/force', new Request('http://local/chat/queue/force', {
+      method: 'POST', body: JSON.stringify({ queueId: 'q1' }),
+    }));
+    expect(response?.status).toBe(500);
+    expect(await readJson(response!)).toEqual({ success: false, error: 'Input owner is not ready; target retained' });
+  });
+
   it('returns active engine queue status', async () => {
     mocks.engine.getQueueStatus.mockReturnValueOnce([{ id: 'q1', messagePreview: 'hello' }]);
 

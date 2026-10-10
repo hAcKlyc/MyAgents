@@ -84,6 +84,7 @@ function replaceQuerySession(session: Query | null): void {
   }
   querySession = session;
   queryGeneration += 1;
+  console.log(`[builtin-input] phase=query-replaced generation=${queryGeneration} previousQuery=${previousQuery !== null} query=${session !== null}`);
   queryMcpPrewarmOwner = null;
   if (previousQuery) {
     for (const waiter of queryExitWaiters) {
@@ -165,6 +166,10 @@ export const lifecycleState = {
 
 export function getQuerySession(): Query | null {
   return querySession;
+}
+
+export function getQueryGeneration(): number {
+  return queryGeneration;
 }
 
 export function hasQuerySession(): boolean {
@@ -588,6 +593,7 @@ export function hasMessageResolver(): boolean {
 }
 
 export function wakeGenerator(item: MessageQueueItem | null): void {
+  console.log(`[builtin-input] phase=resolver-wake generation=${queryGeneration} parked=${messageResolver !== null} input=${item !== null}`);
   if (!messageResolver) return;
   const resolve = messageResolver;
   messageResolver = null;
@@ -595,10 +601,23 @@ export function wakeGenerator(item: MessageQueueItem | null): void {
 }
 
 export function waitForMessage(dequeue: () => MessageQueueItem | undefined): Promise<MessageQueueItem | null> {
-  if (abortRequested) return Promise.resolve(null);
+  if (abortRequested) {
+    console.log(`[builtin-input] phase=message-wait-aborted generation=${queryGeneration}`);
+    return Promise.resolve(null);
+  }
   const queued = dequeue();
-  if (queued) return Promise.resolve(queued);
-  return new Promise(resolve => { messageResolver = resolve; });
+  if (queued) {
+    console.log(`[builtin-input] phase=message-dequeued generation=${queryGeneration}`);
+    return Promise.resolve(queued);
+  }
+  return new Promise(resolve => {
+    const resolverGeneration = queryGeneration;
+    console.log(`[builtin-input] phase=resolver-parked generation=${resolverGeneration}`);
+    messageResolver = item => {
+      console.log(`[builtin-input] phase=resolver-received installedGeneration=${resolverGeneration} currentGeneration=${queryGeneration} input=${item !== null}`);
+      resolve(item);
+    };
+  });
 }
 
 export function resetControlPlaneState(): void {
@@ -627,6 +646,7 @@ export function resetPreWarmState(): void {
 }
 
 export function clearGeneratorResolver(): void {
+  console.log(`[builtin-input] phase=resolver-cleared generation=${queryGeneration} parked=${messageResolver !== null}`);
   messageResolver = null;
 }
 

@@ -193,6 +193,10 @@ console.log('connected');
 console.log('Chat - sent');
 ```
 
+Builtin 输入生命周期使用 `[builtin-input]` 前缀，记录 Query replacement、resolver park/wake/clear、consumer 请求下一项、terminal/provider/MCP/admission 等待、提交、SDK yield、输入退休以及 Stop/force 的快照。字段限于 generation、Product Session 关联、布尔状态与各输入队列数量，不记录消息正文、工作区路径、Provider 配置或回调对象。`inputGeneration` 属于该 generator，`currentGeneration` 属于当前 Query；Query factory 尚未登记 authority 时前者可为 null。resolver 的 installed/current generation 可识别旧消费者的迟到唤醒。
+
+排查“上一轮已完成，下一条输入不消费”时保留同一 Sidecar 的原始日志顺序，对照最后一次 `consumer-next`、`terminal-ready`、`resolver-parked/received` 与 `sdk-yield`；这些日志定位产品侧交接边界，不能单凭 HTTP 健康、Query 存在或没有后续日志证明 SDK 内部消费健康。
+
 ### 3. 避免日志循环
 
 ```typescript

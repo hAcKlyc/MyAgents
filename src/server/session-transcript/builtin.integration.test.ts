@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +7,7 @@ import { NO_CHANNEL_DELIVERY } from '../session-core/channel-delivery';
 import type { TurnTerminalOutcome } from '../session-core/turn-queue';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 
-const state = vi.hoisted(() => ({ home: '', failProductIo: false, publicationGate: null as Promise<void> | null, publicationBlocked: false, queryExitGate: null as Promise<void> | null, queryInputEnded: 0, backgroundTask: false, backgroundTaskGate: null as Promise<void> | null, independentInputPump: false, sdkInputs: [] as unknown[], resultMode: 'success' as 'success' | 'error', rejectedResumeAt: null as string | null, sdkCumulativeBase: null as { input: number; output: number } | null, compactAtTurn: null as number | null, resetAtTurn: null as number | null, sdkCommands: [] as unknown[], interruptCloses: false, throwAfterInputEnd: false, query: vi.fn(), sdkRead: vi.fn(), sdkFork: vi.fn(), sdkDelete: vi.fn(), rewindFiles: vi.fn(), beforeResult: vi.fn(), events: [] as [string, unknown][], queuedFollowup: false, exitWithoutResult: false, toolFrames: false, childFrames: false, media: vi.fn() }));
+const state = vi.hoisted(() => ({ home: '', failProductIo: false, publicationGate: null as Promise<void> | null, publicationBlocked: false, queryExitGate: null as Promise<void> | null, queryInputEnded: 0, backgroundTask: false, backgroundTaskGate: null as Promise<void> | null, independentInputPump: false, sdkInputs: [] as unknown[], resultMode: 'success' as 'success' | 'error', rejectedResumeAt: null as string | null, sdkCumulativeBase: null as { input: number; output: number } | null, compactAtTurn: null as number | null, resetAtTurn: null as number | null, sdkCommands: [] as unknown[], interruptCloses: false, throwAfterInputEnd: false, beforeTurn: vi.fn(), query: vi.fn(), sdkRead: vi.fn(), sdkFork: vi.fn(), sdkDelete: vi.fn(), rewindFiles: vi.fn(), beforeResult: vi.fn(), events: [] as [string, unknown][], queuedFollowup: false, exitWithoutResult: false, toolFrames: false, childFrames: false, media: vi.fn() }));
 vi.mock('os', async original => ({ ...await original<typeof import('os')>(), homedir: () => state.home }));
 vi.mock('../utils/fs-utils', async original => {
   const actual = await original<typeof import('../utils/fs-utils')>();
@@ -29,6 +29,13 @@ vi.mock('node:fs/promises', async original => {
       return Promise.reject(Object.assign(new Error('product directory denied'), { code: 'EACCES' }));
     }
     return actual.mkdir(...args);
+  } };
+});
+vi.mock('../utils/managed-proxy-binding', async original => {
+  const actual = await original<typeof import('../utils/managed-proxy-binding')>();
+  return { ...actual, prepareProviderBinding: async (...args: Parameters<typeof actual.prepareProviderBinding>) => {
+    const prepared = await actual.prepareProviderBinding(...args);
+    return { ...prepared, beforeTurn: async () => { await state.beforeTurn(); await prepared.beforeTurn(); } };
   } };
 });
 vi.mock('@anthropic-ai/claude-agent-sdk', async original => ({
@@ -260,6 +267,7 @@ beforeEach(async () => {
   state.toolFrames = false;
   state.childFrames = false;
   state.beforeResult.mockReset();
+  state.beforeTurn.mockReset().mockResolvedValue(undefined);
   state.media.mockReset().mockResolvedValue([]);
   state.query.mockReset().mockImplementation(fakeQuery);
   state.sdkRead.mockReset().mockResolvedValue([]);
@@ -1776,4 +1784,114 @@ it.each(['stop', 'success', 'error'] as const)('keeps successor %s independent o
   releaseReceipt({ still_queued: [] });
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(close).not.toHaveBeenCalled();
+});
+
+
+it('consumes recovered queued input and the next direct input after a capabilities restart (#648)', async () => {
+  const platform = await import('../utils/platform');
+  vi.spyOn(platform, 'getCrossPlatformEnv').mockReturnValue({ home: state.home, user: 'synthetic', temp: tmpdir() });
+  vi.spyOn(platform, 'getHomeDir').mockReturnValue(state.home);
+  vi.spyOn(platform, 'getHomeDirOrNull').mockReturnValue(state.home);
+  const diagnostic = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const workspace = join(state.home, 'restart-workspace');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.independentInputPump = true;
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+  const send = (text: string) => agent.enqueueUserMessage(text, [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY, queueResponseModeOverride: 'turn' });
+  state.beforeResult.mockImplementationOnce(async () => {
+    const skill = join(workspace, '.claude', 'skills', 'synthetic-restart');
+    await mkdir(skill, { recursive: true });
+    await writeFile(join(skill, 'SKILL.md'), '---\nname: synthetic-restart\ndescription: Isolated restart fixture\n---\nSynthetic instructions.\n');
+    agent.syncProjectUserConfig(workspace);
+    expect(await send('recovered synthetic input')).toMatchObject({ queued: true });
+  });
+  await send('initial synthetic input');
+  await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(state.query).toHaveBeenCalledTimes(2);
+  await send('direct synthetic input');
+  await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(state.query).toHaveBeenCalledTimes(2);
+  expect(agent.getMessages().filter(row => row.role === 'user').map(row => row.content))
+    .toEqual(['initial synthetic input', 'recovered synthetic input', 'direct synthetic input']);
+  const traces = diagnostic.mock.calls.filter(([prefix]) => prefix === '[builtin-input]')
+    .map(([, payload]) => JSON.parse(payload as string) as Record<string, unknown>);
+  expect(traces.filter(row => row.phase === 'sdk-yield')).toHaveLength(3);
+  expect(traces.some(row => row.phase === 'terminal-ready')).toBe(true);
+  expect(new Set(traces.filter(row => row.phase === 'sdk-yield').map(row => row.inputGeneration)).size).toBe(2);
+  const traceText = JSON.stringify(traces);
+  expect(traceText).not.toContain('synthetic input');
+  expect(traceText).not.toContain(workspace);
+  expect(traces.every(row => Object.values(row).every(value => value === null || ['string', 'number', 'boolean'].includes(typeof value)))).toBe(true);
+});
+
+
+it('acknowledges Stop of promoted local input without yielding it to the SDK (#648)', async () => {
+  const platform = await import('../utils/platform');
+  vi.spyOn(platform, 'getCrossPlatformEnv').mockReturnValue({ home: state.home, user: 'synthetic', temp: tmpdir() });
+  vi.spyOn(platform, 'getHomeDir').mockReturnValue(state.home);
+  vi.spyOn(platform, 'getHomeDirOrNull').mockReturnValue(state.home);
+  const workspace = join(state.home, 'promotion-workspace');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.independentInputPump = true;
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+  let release!: (result: { accepted: true }) => void;
+  const gate = new Promise<{ accepted: true }>(resolve => { release = resolve; });
+  releaseWrite = () => release({ accepted: true });
+  const beforeDispatch = Object.assign(vi.fn(() => gate), { cancel: vi.fn(async () => { release({ accepted: true }); }) });
+  const terminal = vi.fn();
+  const send = agent.enqueueUserMessage('cancelled synthetic input', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY, beforeDispatch, onTerminal: terminal });
+  await vi.waitFor(() => expect(beforeDispatch).toHaveBeenCalledOnce());
+  await expect(agent.interruptCurrentResponse()).resolves.toBe(true);
+  await send;
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(state.sdkInputs).toHaveLength(0);
+  expect(state.beforeResult).not.toHaveBeenCalled();
+  expect(state.query).toHaveBeenCalledOnce();
+  expect(terminal).toHaveBeenCalledOnce();
+  expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'stopped' }));
+});
+
+
+it.each(['capabilities', 'provider-draining'] as const)('does not resurrect cancelled promoted input after %s requeue (#648 review)', async reason => {
+  const platform = await import('../utils/platform');
+  vi.spyOn(platform, 'getCrossPlatformEnv').mockReturnValue({ home: state.home, user: 'synthetic', temp: tmpdir() });
+  vi.spyOn(platform, 'getHomeDir').mockReturnValue(state.home);
+  vi.spyOn(platform, 'getHomeDirOrNull').mockReturnValue(state.home);
+  const workspace = join(state.home, 'cancel-requeue-workspace'); await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.independentInputPump = true;
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  releaseWrite = release;
+  const { ManagedProxyError } = await import('../utils/managed-proxy-binding');
+  state.beforeTurn.mockImplementationOnce(async () => {
+    await gate;
+    if (reason === 'provider-draining') throw new ManagedProxyError('draining', 'Synthetic provider draining');
+  });
+  const terminal = vi.fn();
+  await agent.enqueueUserMessage('cancelled synthetic input', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY, onTerminal: terminal });
+  await vi.waitFor(() => expect(state.beforeTurn).toHaveBeenCalledOnce());
+  if (reason === 'capabilities') {
+    const skill = join(workspace, '.claude', 'skills', 'synthetic-change');
+    await mkdir(skill, { recursive: true });
+    await writeFile(join(skill, 'SKILL.md'), '---\nname: synthetic-change\ndescription: Isolated cancel fixture\n---\nSynthetic.\n');
+    agent.syncProjectUserConfig(workspace);
+  }
+  await expect(agent.interruptCurrentResponse()).resolves.toBe(true);
+  release();
+  const lifecycle = await import('../builtin-session/lifecycle');
+  await vi.waitFor(() => expect(lifecycle.hasMessageResolver()).toBe(true));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(state.sdkInputs).toHaveLength(0);
+  expect(state.beforeResult).not.toHaveBeenCalled();
+  expect(terminal).toHaveBeenCalledOnce();
+  expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'stopped' }));
 });
