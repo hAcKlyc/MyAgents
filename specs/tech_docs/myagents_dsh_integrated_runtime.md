@@ -89,6 +89,8 @@ Provider credential 由 Host 的既有配置或认证 owner 管理，每个模�
 
 ## 6. Prompt 与扩展
 
+扩展完整快照经既有 `DshAttachmentRegistry` 发布为不可变 JSON；`extension/replace` 只传摘要引用。Runtime 在进入原有组件事务前通过 generation-scoped lease 校验大小、字节 SHA-256 与 canonical snapshot digest，并释放 lease。启动和 live replacement 共用这条路径，不能把全部技能正文重新塞进有界协议帧。协议精确版本仍由所选 handoff 决定；新的资源表示需要匹配的 Runtime。stdio 与带凭据的 remote MCP 使用 native credential owner 接受的环境变量名格式引用；启动环境与 secret 仍留在 Host reverse plane。
+
 Host 以结构化 `systemContext` 提供 global/root contributions；DSH 的 literal-context seam 保留文本语义，不将产品提示词改写成组件摘要。主项目指令由 DSH 原生 instruction plugin 加载，每层目录按 `CLAUDE.md`、`AGENTS.override.md`、`AGENTS.md` 的优先级选择。Host 只补充其拥有的 companion/rules 内容，不重复读取原生主指令。
 
 Skills、Commands、MCP 与 Host tools 等组件由同一次 Product capability inventory 编译。DSH 与 Managed Codex 共用 runtime-neutral `product-extensions` discovery/dispatcher；执行仍属于各自 Runtime。Host 也会生成 Agent descriptor，但当前 DSH 没有对应的角色编译器，这类组件返回 `unsupported/implementation_batch_pending`，不会据此创建子 Agent。子 Agent 由 DSH 原生工具创建并管理，Host 不运行第二套 Agent loop。

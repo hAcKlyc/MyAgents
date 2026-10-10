@@ -136,6 +136,10 @@ Builtin 的 `messageGenerator()` 是常驻 generator。配置需要重建 Query 
 
 desktop 连续发送支持 realtime 与 turn-boundary 两种策略，但两者仍共享同一个 Runtime queue owner。Stop 中止当前 turn，不凭空取消 SDK 已接纳但尚未消费的项；queue receipt、replay 或 assistant-start 才能确认后续项的真实状态。
 
+没有活跃 turn 时，常驻 Query 不代表消息正在执行。Stop 通过精确 queue owner 取消本地 message、pending、turn-boundary、admission 与尚未提交的 promoted input，等待取消结算后才返回结果；promoted token 留给 generator 确认清理。只有没有 turn、提交、输入或重试 owner 时才归置 idle，迟到取消不能覆盖新的输入。已提交给 SDK 的后续项不进入本地 Stop 的取消快照；启动中的 Stop 仍使用既有 canonical abort。
+
+强制发送在有活跃 turn 时沿既有中断与 terminal 晋级路径处理；没有活跃 turn 时，只向准备好的 generator/启动入口交接目标。找到了目标却无法交接，应保留消息并返回显式错误；只有目标不存在才返回 stale，不能调用 Stop 清掉目标后宣称发送成功。
+
 Builtin 中断请求由 `builtin-session/interrupt.ts` 在既有 Session 内按请求和 Query 归属管理。同一目标尚未 terminal 时复用其停止操作；目标 terminal 一旦被 turn owner 接管，就同步释放中断状态，不等待控制回执。迟到回执只可核对原请求、原 Query 的精确排队项，不能关闭后续 Query、清掉新请求或把后续 turn 当作取消。真实 SDK 错误仍按错误结算；只有尚未 terminal 的目标才适用 5 秒回执超时与 ACK 后 3 秒强制关闭。
 
 SDK background Agent/Bash 与父 turn 共用同一个 Query 和 Sidecar。自动 deferred restart 必须等待该 Query 的 background-task registry 清空；显式 Stop、Reset、Session switch、应用退出和真实 Query crash 仍可终止。
@@ -151,6 +155,8 @@ MCP pre-warm 是 soft readiness observation，不是 AI turn 的 admission autho
 外部 Runtime 的“进程 idle”不等于 turn 成功。Task、Goal、通知和 UI terminal 都必须读取 adapter 提供的真实 result classification。
 
 ### 4.4 Rewind、Fork、Retry 与 reload anchor
+
+SDK 输入的 queue UUID 只用于关联准入和消费。Replay、assistant-start 与 result handoff 不证明该 UUID 是持久 native chain entry，因此这些路径不能写入 `sdkUuid` 或 native UUID 集；恢复点只取原生 user/assistant 内容事件提供的 UUID。缺少精确边界时沿既有 mutation 校验明确拒绝，不猜测更早历史。旧数据中的同值 UUID 也可能是真实 native entry，不能按“等于 queueId”批量删除；已失效的显式边界仍通过用户选定的更早 Rewind/Retry 恢复。
 
 三种操作统一进入 SessionEngine，adapter 拥有 native history 操作与执行顺序，SessionStore 拥有产品 transcript、metadata 和提交裁决。Renderer 不自行选择 Runtime 路径或补做重发。
 

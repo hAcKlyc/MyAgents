@@ -320,6 +320,11 @@ export function requeuePromotedItemBeforeSdkDispatch(item: MessageQueueItem): vo
   messageQueue.unshift(item);
 }
 
+/** Exact local input owner, including ordinary realtime input without a domain owner. */
+export function getPromotedSourceItem(): MessageQueueItem | null {
+  return promotedItem?.sourceItem ?? null;
+}
+
 export function getPromotedTurnIdentity(): TurnIdentity | null {
   return promotedItem?.sourceItem.turnOwner
     ? { queueId: promotedItem.sourceItem.id, owner: promotedItem.sourceItem.turnOwner }

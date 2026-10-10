@@ -26,6 +26,7 @@ import { describe, expect, it } from "vitest";
 
 import { PRESET_PROVIDERS, type Provider } from "../../../shared/config-types";
 import { compileDshProductExtensionPlane } from "./extension-compiler";
+import { resolveDshMcpCredential } from './extension-host';
 import { createDshInitializeParams } from "./initialize";
 import { resolveDshRuntimeInstallation } from "./installation";
 import { compileDshModelExecutionProfile } from "./profile-compiler";
@@ -204,6 +205,79 @@ async function createNativeHostFixture(
 describe.runIf(nativeSmokeEnabled)(
   "DSH RuntimeProcessHost native smoke",
   () => {
+    it('applies a complete oversized Skill snapshot through an attachment before Session binding', async () => {
+      const fixture = await createNativeHostFixture('large-extensions');
+      const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
+      await registry.initialize();
+      const skills = [];
+      for (let index = 0; index < 8; index++) {
+        const content = `---\nname: large-${index}\ndescription: Synthetic large Skill\n---\n${'中文\\\n'.repeat(20_000)}`;
+        const path = join(fixture.workspace, `large-${index}.md`);
+        await writeFile(path, content);
+        skills.push({ name: `large-${index}`, description: 'Synthetic large Skill', path,
+          contentSha256: createHash('sha256').update(content).digest('hex'), scope: 'user' as const, sourceId: 'fixture' });
+      }
+      const plane = compileDshProductExtensionPlane({ revision: 'large-extensions', workspacePath: fixture.workspace,
+        skills, commands: [], agents: [], mcpServers: [], dynamicTools: [] });
+      const reference = await registry.publishJson(plane.snapshot);
+      expect(reference.sizeBytes).toBeGreaterThan(1_048_576);
+      let releases = 0;
+      const host = fixture.createHost({ ...fixture.hostHandlers,
+        'host/attachment/acquire': params => registry.acquire(params),
+        'host/attachment/release': params => { releases++; registry.release(params); return { ok: true }; },
+      });
+      try {
+        await host.start();
+        expect(await host.request('extension/replace', { snapshotAttachment: reference })).toMatchObject({
+          state: 'applied', effectiveRevision: plane.snapshot.revision,
+          components: skills.map(skill => ({ key: `skill:${skill.name}`, state: 'ready' })),
+        });
+        expect((await host.request('extension/catalog', {})).skills.map(skill => skill.name)).toEqual(skills.map(skill => skill.name));
+        expect(releases).toBe(1);
+      } finally {
+        await host.stop();
+        await rm(fixture.temporaryRoot, { recursive: true, force: true });
+      }
+    }, 60_000);
+
+    it('preflights credential-free stdio MCP through the real credential reverse port', async () => {
+      const fixture = await createNativeHostFixture('mcp-preflight');
+      const script = join(fixture.workspace, 'mcp.cjs');
+      await writeFile(script, `const readline = require('node:readline');
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  if (!Object.hasOwn(request, 'id')) return;
+  const result = request.method === 'initialize'
+    ? { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+    : request.method === 'tools/list' ? { tools: [{ name: 'ping', description: 'Synthetic ping', inputSchema: { type: 'object', properties: {} } }] } : {};
+  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
+});`);
+      const plane = compileDshProductExtensionPlane({
+        revision: 'mcp-regression', workspacePath: fixture.workspace,
+        skills: [], commands: [], agents: [], dynamicTools: [],
+        mcpServers: [{ id: 'fixture', name: 'Fixture', type: 'stdio', command: process.execPath, args: [script], isBuiltin: false }],
+      });
+      const requests: unknown[] = [];
+      const host = fixture.createHost({ ...fixture.hostHandlers,
+        'host/credential/resolve': params => {
+          requests.push(params);
+          return resolveDshMcpCredential({ plane, extensionDigest: plane.snapshot.digest, params });
+        },
+      });
+      try {
+        await host.start();
+        const result = await host.request('extension/replace', plane.snapshot);
+        expect({ result, requests, stderr: fixture.stderr }).toMatchObject({
+          result: { state: 'applied', components: [{ key: 'mcp:fixture', state: 'ready' }] },
+          requests: [expect.objectContaining({ subject: 'mcp', purpose: 'availability' }), expect.objectContaining({ subject: 'mcp', purpose: 'connection' })],
+        });
+        expect((await host.request('extension/catalog', {})).tools).toContain('mcp__fixture__ping');
+      } finally {
+        await host.stop();
+        await rm(fixture.temporaryRoot, { recursive: true, force: true });
+      }
+    }, 60_000);
+
     it('consumes realtime followUp at the next model boundary inside the native root turn', async () => {
       const fixture = await createNativeHostFixture('realtime-inbox');
       const events: Record<string, unknown>[] = [];

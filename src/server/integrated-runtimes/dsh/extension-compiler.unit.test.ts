@@ -136,6 +136,9 @@ describe('DSH declarative extension compiler', () => {
       hostToolDispatcher: dispatcher,
     }));
 
+    for (const binding of plane.credentialBindings) {
+      expect(binding.credentialRef).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/u);
+    }
     expect(plane.snapshot.components.map(component => component.kind)).toEqual([
       'skill',
       'command',

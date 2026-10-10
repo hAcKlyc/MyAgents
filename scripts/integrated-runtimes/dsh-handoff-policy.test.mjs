@@ -202,7 +202,7 @@ test("generated contracts are accepted mechanically and then drift-gated", () =>
     writeFixtureFile(oldEvidence, "previous protocol evidence");
     compareOrAcceptContracts(handoffRoot, contractsRoot, true);
     assert.equal(existsSync(oldEvidence), false);
-    assert.equal(existsSync(resolve(contractsRoot, "myagents-dsh/protocol-6.0.0-evidence.json")), true);
+    assert.equal(existsSync(resolve(contractsRoot, "myagents-dsh/protocol-6.1.0-evidence.json")), true);
     compareOrAcceptContracts(handoffRoot, contractsRoot, false);
 
     writeFileSync(resolve(handoffRoot, "contracts/myagents-dsh-compatibility-v1.json"), "target-specific identity\n");

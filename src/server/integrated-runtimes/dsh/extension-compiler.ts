@@ -31,7 +31,7 @@ const PROPERTY_NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/u;
 const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']);
 const MCP_ENV_REVISION_KEY = randomBytes(32);
 
-export type DshExtensionSnapshot = MethodParams<'extension/replace'>;
+export type DshExtensionSnapshot = Extract<MethodParams<'extension/replace'>, { formatVersion: 1 }>;
 type DshComponent = DshExtensionSnapshot['components'][number];
 type DshResource = DshExtensionSnapshot['resources'][number];
 type DshSkillRoot = DshExtensionSnapshot['skillSourcePolicy']['roots'][number];
@@ -315,7 +315,8 @@ function stdioMcpComponent(
     );
     const material = Object.freeze(buildMcpSubprocessEnv(process.env, server.env));
     const credentialRevision = opaqueMcpEnvironmentRevision(material, server.runtimeConfigRevision);
-    const credentialRef = safeReference('mcp-env', server.id);
+    // The native credential owner requires a POSIX environment-variable name.
+    const credentialRef = `mcp_env_${digest(server.id)}`;
     credentialBindings.push(Object.freeze({
       componentId: server.id,
       credentialRef,
@@ -418,7 +419,7 @@ function remoteMcpComponent(
       diagnostics.push(componentStatus('mcp', server.id, 'failed', 'dsh_mcp_headers_invalid'));
       return null;
     }
-    const credentialRef = safeReference('mcp-credential', server.id);
+    const credentialRef = `mcp_credential_${digest(server.id)}`;
     descriptor = { ...descriptor, credential: {
       credentialRef,
       credentialRevision: server.runtimeConfigRevision,

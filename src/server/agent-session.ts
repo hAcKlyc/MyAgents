@@ -301,6 +301,7 @@ import {
   claimQueryMcpMutation,
   forceWakeGeneratorWithNull,
   getQueryMcpMutation,
+  getQueryGeneration,
   incrementPreWarmFailCount,
   getBuiltinLiveRevision,
   getCurrentQueryAuthority,
@@ -358,6 +359,7 @@ import {
   getMessageQueue,
   getPendingMidTurnQueue,
   getPromotedItemCancellation,
+  getPromotedSourceItem,
   getPromotedTurnIdentity,
   getQueueStatus as queueGetQueueStatus,
   getTurnAdmissionTicket,
@@ -375,7 +377,6 @@ import {
   requeuePromotedItemBeforeSdkDispatch,
   releaseTurnAdmissionTicket as queueReleaseTurnAdmissionTicket,
   removeQueuedItemByQueueId,
-  removeQueuedItemByRequestId,
   rescuePendingMidTurnToMessageFront,
   setAwaitingAssistantStartAckQueueId,
   setCommittingTurnAdmissionQueueId,
@@ -1895,6 +1896,7 @@ let sessionRegistered = false;
 
 /** 唤醒 generator — 投递消息或 null（退出信号） */
 function wakeGenerator(item: MessageQueueItem | null): void {
+  traceBuiltinInputProgress('enqueue-handoff');
   if (lifecycleState.messageResolver) {
     lifecycleWakeGenerator(item);
   } else if (item) {
@@ -2182,9 +2184,7 @@ function schedulePostTerminalQueueDrain(reason: 'complete' | 'stopped' | 'error'
  *   3. Clear queueState.inFlightToCliId and promote the next pending item, which
  *      yields it to CLI for the next mid-turn drain
  */
-async function handleQueuedCommandReplay(
-  sdkMessage: { uuid?: string }
-): Promise<void> {
+async function handleQueuedCommandReplay(): Promise<void> {
   const queueId = getInFlightQueueId();
   if (!queueId) return; // defensive — caller already matched
   const meta = getInFlightMetadata();
@@ -2193,7 +2193,6 @@ async function handleQueuedCommandReplay(
   }
   console.log(`[agent] queued_command replay consumed by AI: queueId=${queueId}`);
   await surfaceInFlightQueueItem(queueId, meta, {
-    sdkUuid: sdkMessage.uuid,
     midTurnBreak: true,
     reason: 'SDKUserMessageReplay consumed by AI',
     joinsCurrentTurn: true,
@@ -2208,7 +2207,6 @@ function maybeSurfaceInFlightAtAssistantTurnStart(reason: string): void {
   if (queueState.awaitingAssistantStartAckQueueId !== queueId) return;
   const meta = getInFlightMetadata();
   void surfaceInFlightQueueItem(queueId, meta, {
-    sdkUuid: queueId,
     reason,
     awaitPersist: false,
     schedulePersist: true,
@@ -7893,11 +7891,11 @@ function clearMessageState(): void {
 }
 
 /**
- * 排空消息队列，逐条广播 queue:cancelled。**清 queueState.messageQueue 的唯一正路**。
+ * 整个 Session 清队列时逐条广播 queue:cancelled；精确取消走 cancelQueueItem。
  *
  * 设计契约（architectural invariant）：
- *   - 任何想清空 queueState.messageQueue 的地方都 MUST 走这个函数，禁止裸 `queueState.messageQueue.length = 0`
- *     或逐项 splice。裸清是前端 pills 残留的来源。
+ *   - 整个 Session 清队列必须走这里，禁止裸清 owner 中的数组；单项或 Stop 快照
+ *     通过 cancelQueueItem 同时结算输入和前端 pill。裸清会留下 pills。
  *   - 频繁调用是幂等的（空队列 early-return），不必担心"多调一次"。
  *
  * 调用者：
@@ -10027,7 +10025,32 @@ export async function waitForSessionIdle(
   return false;
 }
 
+type BuiltinInputTrace = { generation?: number; productSessionId: string };
+
+/** Bounded lifecycle metadata; never serialize Query, messages, callbacks or provider configuration. */
+function traceBuiltinInputProgress(phase: string, input?: BuiltinInputTrace): void {
+  console.log('[builtin-input]', JSON.stringify({
+    phase, inputGeneration: input?.generation ?? null, currentGeneration: getQueryGeneration(),
+    inputSessionId: input?.productSessionId ?? null,
+    query: lifecycleState.query !== null, processing: lifecycleState.processing,
+    abort: lifecycleState.abortRequested, resolver: lifecycleState.messageResolver !== null,
+    sessionState, turn: isTurnInFlight(), messages: getMessageQueue().length,
+    pending: getPendingMidTurnQueue().length, boundary: getTurnBoundaryQueue().length,
+    sdkInFlight: getInFlightQueueId() !== null, promoted: queueState.promotedItemInFlight,
+    admission: getTurnAdmissionTicket() !== null, committing: getCommittingTurnAdmissionQueueId() !== null,
+  }));
+}
+
+/** Cancellation settles product activity only after every remaining input owner is quiescent. */
+function settleCancelledInputActivity(): boolean {
+  if (isTurnInFlight() || hasQueuedOrInFlightWork() || queueState.promotedItemInFlight
+    || getCommittingTurnAdmissionQueueId() !== null || transientProviderRetryTimer) return false;
+  if (sessionState === 'running' || sessionState === 'starting') setSessionState('idle');
+  return true;
+}
+
 export async function interruptCurrentResponse(reason: CancelReason = 'user'): Promise<boolean> {
+  traceBuiltinInputProgress('stop-requested');
   if (transientProviderRetryTimer) {
     clearTransientProviderRetryTimer(`interrupt:${reason}`);
     const completionTerminal = handleMessageStopped();
@@ -10039,13 +10062,13 @@ export async function interruptCurrentResponse(reason: CancelReason = 'user'): P
     // A desktop turn-mode send has an admission ticket before the SDK turn
     // exists. Stop must cancel that exact ticket while enqueueUserMessage is
     // still awaiting startup/config work; otherwise it reports "already
-    // stopped" and the later generator starts the turn anyway (#601).
+    // stopped" and the later generator starts the turn anyway (#601). Established
+    // Queries cancel this ticket together with their entire local snapshot below.
     const desktopAdmission = getTurnAdmissionTicket();
-    if (desktopAdmission && !desktopAdmission.turnOwner) {
+    if (desktopAdmission && !desktopAdmission.turnOwner && sessionState === 'starting') {
       const cancellation = await cancelQueueItem(desktopAdmission.queueId);
       if (cancellation.status === 'cancelled') {
-        broadcast('chat:message-stopped', null);
-        if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) setSessionState('idle');
+        if (settleCancelledInputActivity()) broadcast('chat:message-stopped', null);
         return true;
       }
       // Admission crossed the commit seam while cancellation was attempted.
@@ -10096,13 +10119,26 @@ export async function interruptCurrentResponse(reason: CancelReason = 'user'): P
       }
       return true;
     }
-    // No active turn, but there might be orphaned queued transcriptState.messages.
-    // Drain them and notify the frontend so the UI can recover.
-    if (getMessageQueue().length > 0 || getTurnBoundaryQueue().length > 0) {
-      console.warn(`[agent] No active turn but ${getMessageQueue().length + getTurnBoundaryQueue().length} orphaned message(s) in queue, draining`);
-      drainQueueWithCancellation();
-    }
-    return false;
+    // A persistent Query is not an active turn. Cancel only locally owned
+    // input through the same exact-item owner used by queue/IM cancellation.
+    // Start every cancellation before awaiting observers, so a callback cannot
+    // dispatch another item from this Stop's snapshot. SDK-accepted future
+    // items are deliberately excluded.
+    const queueIds = new Set([
+      ...getMessageQueue().map(item => item.id),
+      ...getPendingMidTurnQueue().map(item => item.queueId),
+      ...getTurnBoundaryQueue().map(item => item.queueId),
+      ...(getPromotedSourceItem() ? [getPromotedSourceItem()!.id] : []),
+      ...(getTurnAdmissionTicket() ? [getTurnAdmissionTicket()!.queueId] : []),
+    ]);
+    const wasRunning = sessionState === 'running';
+    const results = await Promise.all([...queueIds].map(queueId => cancelQueueItem(queueId)));
+    const cancelled = results.some(result => result.status === 'cancelled');
+    const quiescent = settleCancelledInputActivity();
+    traceBuiltinInputProgress('stop-settled');
+    const stopped = cancelled || (wasRunning && quiescent);
+    if (stopped && quiescent) broadcast('chat:message-stopped', null);
+    return stopped;
   }
 
   if (builtinInterrupt.isInterrupting()) {
@@ -10141,33 +10177,19 @@ export async function cancelImRequest(
   requestId: string,
   reason: CancelReason = 'user',
 ): Promise<{ aborted: boolean; mode: 'running' | 'queued' | 'unknown' }> {
-  const removed = removeQueuedItemByRequestId(requestId);
-  if (removed.location === 'message' && removed.item) {
-    removed.item.settleDispatchAcceptance?.({ accepted: false, error: 'Queue item was cancelled' });
-    await notifyQueuedTurnStopped(removed.item);
-    removed.item.resolve();
-    broadcast('queue:cancelled', { queueId: removed.item.id });
-    console.log(`[agent] cancelImRequest requestId=${requestId} mode=queued`);
-    return { aborted: true, mode: 'queued' };
-  }
-  if (removed.location === 'pending-mid-turn' && removed.pending) {
-    removed.pending.sourceItem.settleDispatchAcceptance?.({ accepted: false, error: 'Queue item was cancelled' });
-    await notifyQueuedTurnStopped(removed.pending.sourceItem);
-    removed.pending.sourceItem.resolve();
-    broadcast('queue:cancelled', { queueId: removed.pending.queueId });
-    console.log(`[agent] cancelImRequest requestId=${requestId} mode=pending-mid-turn (never yielded to CLI)`);
-    return { aborted: true, mode: 'queued' };
-  }
-  if (removed.location === 'turn-boundary' && removed.turnBoundary) {
-    removed.turnBoundary.sourceItem?.settleDispatchAcceptance?.({ accepted: false, error: 'Queue item was cancelled' });
-    if (removed.turnBoundary.sourceItem) await notifyQueuedTurnStopped(removed.turnBoundary.sourceItem);
-    removed.turnBoundary.sourceItem?.resolve();
-    if (removed.turnBoundary.queueId === getForceTurnBoundaryQueueId()) {
-      setForceTurnBoundaryQueueId(null);
+  const localQueueId = getMessageQueue().find(item => item.requestId === requestId)?.id
+    ?? getPendingMidTurnQueue().find(item => item.sourceItem.requestId === requestId)?.queueId
+    ?? getTurnBoundaryQueue().find(item => item.requestId === requestId
+      || item.sourceItem?.requestId === requestId)?.queueId
+    ?? (getPromotedSourceItem()?.requestId === requestId ? getPromotedSourceItem()?.id : undefined)
+    ?? (getTurnAdmissionTicket()?.requestId === requestId ? getTurnAdmissionTicket()?.queueId : undefined);
+  if (localQueueId) {
+    const result = await cancelQueueItem(localQueueId);
+    if (result.status === 'cancelled') return { aborted: true, mode: 'queued' };
+    if (result.status === 'not_cancelled') {
+      await interruptCurrentResponse(reason);
+      return { aborted: true, mode: 'running' };
     }
-    broadcast('queue:cancelled', { queueId: removed.turnBoundary.queueId });
-    console.log(`[agent] cancelImRequest requestId=${requestId} mode=turn-boundary (never yielded to CLI)`);
-    return { aborted: true, mode: 'queued' };
   }
   // Admission has already transferred to the active turn before its user row
   // is durably persisted, but the output-owner FIFO is created only at the SDK
@@ -10201,26 +10223,8 @@ export async function cancelImRequest(
   // (v0.2.34) In-flight to CLI is conditionally cancellable through SDK
   // cancel_async_message while it is still pending in commandQueue.
   if (getInFlightMetadata()?.requestId === requestId && getInFlightQueueId() !== null) {
-    const queueId = getInFlightQueueId()!;
-    const cancelResult = await cancelSdkAsyncMessage(queueId);
-    const settlement = decideInFlightCancelSettlement(cancelResult);
-    if (settlement.cancelled) {
-      const sourceItem = getCurrentTurnSourceItem();
-      if (sourceItem?.id === queueId) await notifyQueuedTurnStopped(sourceItem);
-      if (settlement.removePendingRequest) removePendingOutputOwnerByQueueId(queueId);
-      if (settlement.clearSlot) {
-        clearInFlightSlot();
-        applyDeferredRestartIfNeeded();
-      }
-      if (settlement.broadcastCancelled) broadcast('queue:cancelled', { queueId });
-      console.log(`[agent] cancelImRequest requestId=${requestId} mode=in-flight-sdk-queue`);
-      if (settlement.promoteNext) schedulePostTerminalQueueDrain('stopped');
-      if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) {
-        setSessionState('idle');
-      }
-      return { aborted: true, mode: 'queued' };
-    }
-    console.log(`[agent] cancelImRequest requestId=${requestId} in-flight SDK cancel rejected result=${cancelResult}`);
+    const result = await cancelQueueItem(getInFlightQueueId()!);
+    if (result.status === 'cancelled') return { aborted: true, mode: 'queued' };
   }
   // Either the requestId was already consumed by SDK or it doesn't exist on
   // this side. Surface as 'unknown' so the IM client can show "cancel failed"
@@ -10254,7 +10258,11 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
   }
   const admissionCancellation = cancelTurnAdmissionTicket(queueId);
   const admission = admissionCancellation?.ticket ?? null;
-  const removed = removeQueuedItemByQueueId(queueId);
+  // Promotion is still local, even when realtime enqueue reserved a
+  // provisional SDK slot. The durable CAS above is its cancellation boundary.
+  const promotedCancellation = getPromotedSourceItem()?.id === queueId
+    ? cancelPromotedItemWithSettlement(queueId) : null;
+  const removed = promotedCancellation ? { location: null } : removeQueuedItemByQueueId(queueId);
 
   switch (removed.location) {
     case 'message': {
@@ -10265,6 +10273,7 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
       item.resolve();
       if (!item.deferVisibleAdmission) broadcast('queue:cancelled', { queueId });
       console.log(`[agent] Queue item ${queueId} cancelled from queueState.messageQueue (wasQueued=${item.wasQueued})`);
+      settleCancelledInputActivity();
       return { status: 'cancelled', cancelledText: item.messageText };
     }
     case 'pending-mid-turn': {
@@ -10275,9 +10284,7 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
       pending.sourceItem.resolve();
       broadcast('queue:cancelled', { queueId });
       console.log(`[agent] Queue item ${queueId} cancelled from queueState.pendingMidTurnQueue (never yielded to CLI)`);
-      if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) {
-        setSessionState('idle');
-      }
+      settleCancelledInputActivity();
       return {
         status: 'cancelled',
         cancelledText: typeof pending.userMessage.content === 'string' ? pending.userMessage.content : '',
@@ -10311,9 +10318,7 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
       }
       if (!invisibleAdmission) broadcast('queue:cancelled', { queueId });
       console.log(`[agent] Queue item ${queueId} cancelled from queueState.turnBoundaryQueue`);
-      if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) {
-        setSessionState('idle');
-      }
+      settleCancelledInputActivity();
       return { status: 'cancelled', cancelledText: turnBoundary.messageText };
     }
     case 'in-flight': {
@@ -10332,9 +10337,7 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
         if (settlement.broadcastCancelled) broadcast('queue:cancelled', { queueId });
         console.log(`[agent] Queue item ${queueId} cancelled from SDK commandQueue via cancel_async_message`);
         if (settlement.promoteNext) schedulePostTerminalQueueDrain('stopped');
-        if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) {
-          setSessionState('idle');
-        }
+        settleCancelledInputActivity();
         return { status: 'cancelled', cancelledText };
       }
       console.log(`[agent] Queue item ${queueId} cancel rejected — SDK async cancel result=${cancelResult}`);
@@ -10343,39 +10346,22 @@ export async function cancelQueueItem(queueId: string): Promise<QueueCancelResul
     }
   }
 
-  if (admission) {
-    // Direct turn admission and generator promotion overlap until the commit
-    // seam. Cancel both owners: otherwise the admission branch returns while
-    // a generator waiting on the MCP-mutation fence never observes cancel.
-    const promotedCancellation = cancelPromotedItemWithSettlement(queueId);
-    await Promise.all([
-      admissionCancellation?.settlement,
-      promotedCancellation?.settlement,
-    ]);
-    admission.settleDispatchAcceptance?.({
-      accepted: false,
-      error: 'Queue item was cancelled',
-    });
-    promotedCancellation?.item.settleDispatchAcceptance?.({
-      accepted: false,
-      error: 'Queue item was cancelled',
-    });
-    await notifyQueuedTurnStopped(promotedCancellation?.item ?? admission);
-    if (!admission.beforeUserPersistence) broadcast('queue:cancelled', { queueId });
-    console.log(`[agent] Queue item ${queueId} cancelled during builtin turn admission`);
-    return { status: 'cancelled', cancelledText: admission.messageText };
-  }
-
-  const promotedCancellation = cancelPromotedItemWithSettlement(queueId);
-  if (promotedCancellation !== null) {
-    await promotedCancellation.settlement;
-    promotedCancellation.item.settleDispatchAcceptance?.({
-      accepted: false,
-      error: 'Queue item was cancelled',
-    });
-    await notifyQueuedTurnStopped(promotedCancellation.item);
-    console.log(`[agent] Queue item ${queueId} cancellation requested during runtime promotion`);
-    return { status: 'cancelled', cancelledText: promotedCancellation.item.messageText };
+  if (admission || promotedCancellation) {
+    await Promise.all([admissionCancellation?.settlement, promotedCancellation?.settlement]);
+    admission?.settleDispatchAcceptance?.({ accepted: false, error: 'Queue item was cancelled' });
+    promotedCancellation?.item.settleDispatchAcceptance?.({ accepted: false, error: 'Queue item was cancelled' });
+    const source = promotedCancellation?.item ?? admission!;
+    await notifyQueuedTurnStopped(source);
+    if (promotedCancellation) {
+      // No SDK yield occurred: release only this provisional slot. Keep the
+      // cancellation token until the generator acknowledges and clears promotion.
+      if (getInFlightQueueId() === queueId) clearInFlightSlot();
+    }
+    if (!promotedCancellation?.item.deferVisibleAdmission && !admission?.beforeUserPersistence) {
+      broadcast('queue:cancelled', { queueId });
+    }
+    settleCancelledInputActivity();
+    return { status: 'cancelled', cancelledText: source.messageText };
   }
 
   console.log(`[agent] Queue item ${queueId} not found — already consumed or never existed`);
@@ -10421,12 +10407,12 @@ export async function cancelQueuedTurnsByOwner(owner: TurnOwner): Promise<number
  *   - queueState.turnBoundaryQueue: desktop turn-mode buffer. Move to
  *     queueState.turnBoundaryQueue[0] so the next clean turn boundary starts it.
  *
- * Either way, interruptCurrentResponse fires the prior turn's wind-down →
- * handleMessageComplete/Stopped → promotePendingMidTurnItem (or
- * generator's next waitForMessage drain of queueState.messageQueue) wakes the
- * generator with our target as the next message.
+ * An active turn is interrupted through its existing terminal path. With no
+ * active turn, dispatch only to a ready input owner; otherwise retain the target
+ * and report unavailable handoff. Query presence alone is not readiness.
  */
 export async function forceExecuteQueueItem(queueId: string): Promise<boolean> {
+  traceBuiltinInputProgress('force-requested');
   const location = findQueueLocation({
     messageIndex: getMessageQueue().findIndex(item => item.id === queueId),
     pendingMidTurnIndex: getPendingMidTurnQueue().findIndex(p => p.queueId === queueId),
@@ -10447,11 +10433,37 @@ export async function forceExecuteQueueItem(queueId: string): Promise<boolean> {
   // Move target to front of its queue so it's first when the turn ends.
   moveQueuedItemToFront(queueId);
 
-  if (location.location === 'turn-boundary' && !isTurnInFlight()) {
-    return startNextTurnQueuedItem('recovery', {
-      forceQueueId: queueId,
-      allowRealtimePending: true,
-    });
+  if (!isTurnInFlight()) {
+    // Discovery is not dispatch. A missing parked consumer or another input
+    // owner means this request cannot hand off now; retain every queue item and
+    // return an explicit error (not false/stale, which would erase the UI pill).
+    if (getSessionMutationBarrier() || queueState.promotedItemInFlight
+      || getCommittingTurnAdmissionQueueId() !== null
+      || (getTurnAdmissionTicket() !== null && getTurnAdmissionTicket()?.queueId !== queueId)
+      || getInFlightQueueId() !== null
+      || (isSessionActive() && (!lifecycleState.query || !lifecycleState.messageResolver || lifecycleState.abortRequested))) {
+      throw new Error('当前无法强制发送，消息仍保留在待处理队列中；请等待当前操作结束');
+    }
+    if (location.location === 'turn-boundary') {
+      if (!startNextTurnQueuedItem('recovery', { forceQueueId: queueId, allowRealtimePending: true })) {
+        throw new Error('该排队消息尚未准备好，已保留，请稍后重试');
+      }
+      return true;
+    }
+    if (lifecycleState.query) {
+      if (location.location === 'pending-mid-turn') {
+        promoteNextFromPending();
+      } else {
+        const target = removeQueuedItemByQueueId(queueId).item;
+        if (!target) return false;
+        wakeGenerator(target);
+      }
+      return true;
+    }
+    // A genuine inactive Session may use the existing serialized launch path.
+    // Pending input has never crossed SDK stdin; rescue through its existing owner.
+    if (location.location === 'pending-mid-turn') rescuePendingToQueue();
+    resetAbortFlag();
   }
 
   if (isSessionActive()) {
@@ -10959,6 +10971,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   let activeQuery: Query | null = null;
   let activeQueryAuthority: BuiltinQueryAuthority | null = null;
   const queryProductSessionId = sessionId;
+  const inputTrace: BuiltinInputTrace = { productSessionId: queryProductSessionId };
   const bindingController = new AbortController();
   // A Query launched from an explicit rewind boundary creates a sibling
   // native branch. The CLI does not publish that sibling as its durable
@@ -11236,10 +11249,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     );
     console.log(`[agent] starting query with model: ${configState.currentModel ?? 'default'}, permissionMode: ${configState.currentPermissionMode} -> SDK: ${sdkPermissionMode}, MCP: ${mcpStatus}, cleanupPeriodDays: ${claudeTranscriptCleanupPeriodDays}, ${resumeFrom ? `resume: ${resumeFrom}` : `sessionId: ${effectiveSdkSessionId}`}${effectiveResumeAt ? `, resumeSessionAt: ${effectiveResumeAt}` : ''}${forkMode ? `, FORK mode (forkPoint: ${forkResumeAt}${rewindResumeAt && rewindResumeAt !== forkResumeAt ? `, rewind→${rewindResumeAt}` : ''})` : ''}`);
 
-    const promptGen = messageGenerator(
-      preparedProvider,
-      rewindInputGate,
-    );
+    const promptGen = messageGenerator(preparedProvider, rewindInputGate, inputTrace);
 
     // Set session cron context so the im-cron tool can create tasks for non-IM sessions
     // IM sessions set imCronContext separately (in the IM message handler in index.ts)
@@ -11983,6 +11993,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         productSessionId: queryProductSessionId,
         expectedSdkSessionId: effectiveSdkSessionId,
       });
+      inputTrace.generation = getQueryGeneration();
       configState.currentCapabilitySnapshot = launchCapabilitySnapshot;
     } catch (queryError: unknown) {
       // Defensive fallback: metadata lost but SDK disk data exists → switch to resume
@@ -12005,6 +12016,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           productSessionId: queryProductSessionId,
           expectedSdkSessionId: effectiveSdkSessionId,
         });
+        inputTrace.generation = getQueryGeneration();
         configState.currentCapabilitySnapshot = launchCapabilitySnapshot;
       } else {
         throw queryError;
@@ -13141,27 +13153,13 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         // and promote the next pending item.
         const isReplay = (sdkMessage as { isReplay?: boolean }).isReplay === true;
         if (isReplay && sdkMessage.uuid && sdkMessage.uuid === queueState.inFlightToCliId) {
-          await handleQueuedCommandReplay(sdkMessage);
+          await handleQueuedCommandReplay();
           continue;
         }
         if (isReplay) {
-          // (v0.2.12 Codex review fix #4) Other replay flavours
-          // (initial-message ack, batched-message ack, local-command echo).
-          // These don't represent new conversation turns, but the replay's
-          // uuid is the canonical SDK uuid for our previously-pushed user
-          // message. We MUST run the same sdkUuid-assignment loop the
-          // non-replay branch uses, otherwise rewindFiles / fork / forkSession
-          // checkpoint anchors break for those transcriptState.messages — `transcriptState.currentSessionUuids`
-          // alone is insufficient because rewindSession matches by
-          // `transcriptState.messages[i].sdkUuid`.
-          if (sdkMessage.uuid) {
-            addCurrentSessionUuid(sdkMessage.uuid);
-            addLiveSessionUuid(sdkMessage.uuid);
-            const boundMessageId = bindSdkUuidToLatestUnboundUserMessage(sdkMessage.uuid);
-            if (boundMessageId) {
-              broadcast('chat:message-sdk-uuid', { messageId: boundMessageId, sdkUuid: sdkMessage.uuid });
-            }
-          }
+          // A replay acknowledges dispatch/consumption. Its UUID may echo the
+          // input correlation ID without being a native history entry. Only
+          // ordinary native user/assistant events can supply rewind anchors.
           continue;
         }
         // (#228) Suppress SDK-synthetic transcript material from the user-visible
@@ -13708,6 +13706,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       console.log(`[agent] Suppressing SDK error surfaced during abort (expected): ${errorMessage}`);
     }
   } finally {
+    traceBuiltinInputProgress('query-exit', inputTrace);
     clearTimeout(startupTimeoutId);
     clearInterval(apiWatchdogId);
     const wasPreWarming = lifecycleState.preWarming;
@@ -13998,9 +13997,7 @@ async function rejectPromotedMessageBeforeDispatch(
     broadcast('queue:cancelled', { queueId: item.id });
   }
   console.warn(`[goal] pre-dispatch gate rejected builtin queue item ${item.id}: ${result.error ?? result.code ?? 'stale admission'}`);
-  if (!hasQueuedOrInFlightWork() && !isTurnInFlight()) {
-    setSessionState('idle');
-  }
+  settleCancelledInputActivity();
   // A mutation may have latched a restart while this item owned promotion.
   // Rejection made the Query quiescent; successful items drain at terminal.
   applyDeferredRestartIfNeeded();
@@ -14038,6 +14035,7 @@ async function waitForTurnTerminalOrInputRetirement(
 async function* messageGenerator(
   preparedProvider: PreparedProvider,
   rewindInputGate?: RewoundQueryInputGate,
+  inputTrace?: BuiltinInputTrace,
 ): AsyncGenerator<SDKUserMessage> {
   // (v0.2.12) Mid-turn injection restored.
   //
@@ -14061,6 +14059,7 @@ async function* messageGenerator(
   // Exit signal: waitForMessage() returns null (via abortPersistentSession).
   console.log('[messageGenerator] Started (persistent mode, mid-turn injection enabled)');
   let rewoundTurnYielded = false;
+  traceBuiltinInputProgress('consumer-next', inputTrace);
 
   while (true) {
     let item: MessageQueueItem | null;
@@ -14074,33 +14073,49 @@ async function* messageGenerator(
       item = await waitForRewoundQueryRetryOrRetirement(rewindInputGate);
       if (!item) {
         console.log('[messageGenerator] Retiring rewound Query input to materialize native branch');
+        traceBuiltinInputProgress('input-retired', inputTrace);
         return;
       }
     } else {
       // A domain-owned turn is not finished until its durable terminal observer
       // has settled. Before a rewound Query's first replacement turn, explicit
       // abort may retire the exact input owner without admitting a message.
+      traceBuiltinInputProgress('terminal-wait', inputTrace);
       if (await waitForTurnTerminalOrInputRetirement(rewindInputGate?.retirement.signal) === 'retire') {
         console.log('[messageGenerator] Retiring rewound Query input before replacement admission');
+        traceBuiltinInputProgress('input-retired', inputTrace);
         return;
       }
+      traceBuiltinInputProgress('terminal-ready', inputTrace);
       // 等待队列中的消息（事件驱动，无轮询）
       item = await waitForMessage();
     }
     if (!item) {
       console.log('[messageGenerator] Received null — exiting (abort or session end)');
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return; // generator return → SDK endInput() → stdin EOF → subprocess 退出
     }
     beginPromotedItem(item);
+    traceBuiltinInputProgress('provider-wait', inputTrace);
     try {
       await preparedProvider.beforeTurn();
     } catch (error) {
+      if (isPromotedItemCanceled(item.id)) {
+        await rejectPromotedMessageBeforeDispatch(item, {
+          accepted: false,
+          code: 'dispatch_canceled',
+          error: 'Queue item was cancelled',
+          rollbackBeforeReject: Promise.resolve(item.beforeDispatch?.cancel?.()),
+        });
+        continue;
+      }
       if (error instanceof ManagedProxyError && error.code === 'draining') {
         // Admission has not reached the SDK. Keep the existing queue item for
         // the replacement Query; its cancellation and delivery IDs stay intact.
         requeuePromotedItemBeforeSdkDispatch(item);
         scheduleDeferredRestart('provider');
         applyDeferredRestartIfNeeded();
+        traceBuiltinInputProgress('input-retired', inputTrace);
         return;
       }
       await rejectPromotedMessageBeforeDispatch(item, {
@@ -14110,8 +14125,20 @@ async function* messageGenerator(
       });
       scheduleDeferredRestart('provider');
       applyDeferredRestartIfNeeded();
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return;
     }
+    // Cancellation wins before any replacement path can requeue and erase its token.
+    if (isPromotedItemCanceled(item.id)) {
+      await rejectPromotedMessageBeforeDispatch(item, {
+        accepted: false,
+        code: 'dispatch_canceled',
+        error: 'Queue item was cancelled',
+        rollbackBeforeReject: Promise.resolve(item.beforeDispatch?.cancel?.()),
+      });
+      continue;
+    }
+    traceBuiltinInputProgress('provider-ready', inputTrace);
     const promotedQuery = lifecycleState.query;
     let desiredCapabilities: EffectiveProjectCapabilitySnapshot;
     try {
@@ -14137,6 +14164,7 @@ async function* messageGenerator(
         scheduleDeferredRestart('capabilities');
         applyDeferredRestartIfNeeded();
         if (promotedQuery) await waitForQueryExit(promotedQuery);
+        traceBuiltinInputProgress('input-retired', inputTrace);
         return;
       }
     } catch (error) {
@@ -14164,8 +14192,10 @@ async function* messageGenerator(
       scheduleDeferredRestart('capabilities');
       applyDeferredRestartIfNeeded();
       if (promotedQuery) await waitForQueryExit(promotedQuery);
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return;
     }
+    traceBuiltinInputProgress('mcp-wait', inputTrace);
     const activeMcpMutation = getQueryMcpMutation();
     if (activeMcpMutation) {
       const cancellation = getPromotedItemCancellation(item.id);
@@ -14210,6 +14240,7 @@ async function* messageGenerator(
         }
         // This generator belongs to the indeterminate/replaced Query. It must
         // never dequeue again; the replacement generator owns the retry.
+        traceBuiltinInputProgress('input-retired', inputTrace);
         return;
       }
     }
@@ -14264,9 +14295,11 @@ async function* messageGenerator(
     if (prewarmObservation.outcome?.state === 'owner_replaced') {
       requeuePromotedItemBeforeSdkDispatch(item);
       console.log(`[agent] Requeued ${item.id}: MCP pre-warm owner was replaced before SDK dispatch`);
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return;
     }
 
+    traceBuiltinInputProgress('admission-wait', inputTrace);
     let guardResult: DispatchGuardResult | undefined;
     if (item.beforeDispatch) {
       try {
@@ -14450,6 +14483,7 @@ async function* messageGenerator(
     // rather than claiming the turn was never enqueued.
     clearPromotedItem(item.id);
     isStreamingMessage = true;
+    traceBuiltinInputProgress('admission-commit', inputTrace);
     if (lifecycleState.preWarming) {
       setPreWarmInProgress(false);
       if (lifecycleState.preWarmTimer) {
@@ -14476,6 +14510,7 @@ async function* messageGenerator(
       || (!pendingInboxConsumption && getCurrentTurnSourceItem() !== item)
     ) {
       item.resolve();
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return;
     }
 
@@ -14507,6 +14542,7 @@ async function* messageGenerator(
           || (!pendingInboxConsumption && getCurrentTurnSourceItem() !== item)
         ) {
           item.resolve();
+          traceBuiltinInputProgress('input-retired', inputTrace);
           return;
         }
         const admissionError = reportBuiltinAdmissionPersistenceFailure(
@@ -14557,6 +14593,7 @@ async function* messageGenerator(
       || (!pendingInboxConsumption && getCurrentTurnSourceItem() !== item)
     ) {
       item.resolve();
+      traceBuiltinInputProgress('input-retired', inputTrace);
       return;
     }
 
@@ -14574,6 +14611,7 @@ async function* messageGenerator(
 
     console.log(`[messageGenerator] Yielding message, wasQueued=${item.wasQueued}, queueId=${item.id}, requestId=${item.requestId ?? '-'} summary=${JSON.stringify(summarizeSensitiveSdkMessage({ type: 'user', message: yieldedMessage }))}`);
     if (rewindInputGate) rewoundTurnYielded = true;
+    traceBuiltinInputProgress('sdk-yield', inputTrace);
     yield {
       type: 'user' as const,
       message: yieldedMessage,
@@ -14587,5 +14625,6 @@ async function* messageGenerator(
     };
     item.resolve();
     clearPromotedItem(item.id);
+    traceBuiltinInputProgress('consumer-next', inputTrace);
   }
 }

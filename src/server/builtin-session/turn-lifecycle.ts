@@ -284,7 +284,6 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
           deps.setStreamingMessage(true);
           surfaceNextInput = () => {
             void deps.surfaceInFlightQueueItem(stale, meta, {
-              sdkUuid: stale,
               midTurnBreak: true,
               reason: forced ? 'force-send #289' : 'confirmed result handoff',
               awaitPersist: false,

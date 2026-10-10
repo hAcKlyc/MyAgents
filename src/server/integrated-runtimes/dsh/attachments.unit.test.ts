@@ -28,6 +28,16 @@ async function fixture() {
   return { root, registry };
 }
 
+it('publishes a complete extension snapshot larger than a protocol frame as immutable JSON', async () => {
+  const { registry } = await fixture();
+  const snapshot = { resources: [{ content: '中文\\\n'.repeat(200_000) }] };
+  const reference = await registry.publishJson(snapshot);
+  expect(reference.sizeBytes).toBeGreaterThan(1_048_576);
+  expect(reference.mimeType).toBe('application/json');
+  expect(Object.keys(reference).sort()).toEqual(['attachmentId', 'mimeType', 'sha256', 'sizeBytes']);
+  expect(await registry.readJson(reference)).toEqual(snapshot);
+});
+
 describe('DSH attachment read-only leases', () => {
   it.each(['Runtime tool', 'Host tool', 'user image'] as const)('seals %s bytes before Runtime consumption', async source => {
     const { root, registry } = await fixture();

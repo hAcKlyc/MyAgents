@@ -107,6 +107,18 @@ export class DshAttachmentRegistry {
     };
   }
 
+  async publishJson(value: unknown): Promise<{
+    attachmentId: string; mimeType: 'application/json'; sizeBytes: number; sha256: string;
+  }> {
+    const bytes = Buffer.from(JSON.stringify(value), 'utf8');
+    if (bytes.byteLength > 20 * 1_024 * 1_024) {
+      throw new Error('DSH extension snapshot exceeds the 20 MB resource limit');
+    }
+    const stored = await this.storeBytes(bytes, 'application/json');
+    return { attachmentId: stored.attachmentId, mimeType: 'application/json',
+      sizeBytes: stored.sizeBytes, sha256: stored.sha256 };
+  }
+
   async put(params: DshRpcObject): Promise<DshRpcObject> {
     const stagingPath = await realpath(text(params.stagingPath, 'DSH attachment staging path'));
     if (!inside(this.root, stagingPath)) throw new Error('DSH attachment staging path escaped its root');
