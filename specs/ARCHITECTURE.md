@@ -277,3 +277,7 @@ Renderer、Node 和 Rust 日志汇入本地统一日志；高频 transport delta
 - 精确版本、命令清单、字段枚举和平台产物以代码、类型、测试、`package.json` 与构建脚本为准。
 - PRD、issue、commit 和 CHANGELOG 解释历史动机，不能覆盖现行实现。
 - 文档与代码冲突时先核对实现、测试和 git 历史，再同时修正文档图中受影响的节点。
+
+### Headless AgentNet identity storage
+
+`src-tauri/agent-network-crypto` owns the shared KeyScope, private-key and TLS primitives. Its default build has no Tauri, GTK, keyring or Secret Service dependency. Desktop explicitly enables `os-store` and preserves its existing OS-backed storage. The separate encrypted headless backend receives a KEK through a private systemd projection and owns dynamic encrypted generation records; it is not an automatic fallback. The independent checker uses isolated invalid-issuer scopes and does not enroll a device. Headless account, actor and remote management integration remain pending; see [storage acceptance](./tech_docs/headless_identity_store.md).

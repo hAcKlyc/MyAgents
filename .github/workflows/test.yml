@@ -15,6 +15,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The headless identity store must build without Tauri/GTK or a desktop
+  # credential service. Actual systemd projection is a separate server gate.
+  headless-identity:
+    name: headless identity store · no desktop
+    # Match the first authorized Linux acceptance server's glibc baseline.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/agent-network-crypto
+      - name: Validate independent headless store
+        run: |
+          cargo test --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked
+          cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --all-targets -- -D clippy::disallowed_methods -D clippy::disallowed_macros
+          cargo build --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --release --bin identity-store-check
+          cargo tree --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked > /tmp/headless-store-dependencies.txt
+          if rg -i 'tauri|webkit|gtk|keyring|secret-service' /tmp/headless-store-dependencies.txt; then
+            echo 'Headless identity store unexpectedly depends on a desktop backend' >&2
+            exit 1
+          fi
+      - name: Record native test artifact provenance
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p output/headless-identity
+          cp src-tauri/agent-network-crypto/target/release/identity-store-check output/headless-identity/
+          cd output/headless-identity
+          sha256sum identity-store-check > identity-store-check.sha256
+          printf '%s\n' "$SOURCE_COMMIT" > source-commit.txt
+          ldd identity-store-check > native-dependencies.txt
+          if rg -i 'gtk|webkit|dbus|gobject' native-dependencies.txt; then
+            echo 'Headless identity artifact unexpectedly links desktop libraries' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headless-identity-store-linux
+          path: output/headless-identity/
+          if-no-files-found: error
+
   # JS/TS gate: typecheck + lint + deterministic test projects + bundle smoke.
   #
   # `integration` is the CI-safe stateful pool: serial, scratch filesystem and

@@ -19,7 +19,7 @@
 | 桌面 Host UI 已有 seam | `src/renderer/api/hostManagement.ts` 的 HostLocator/HostAddress/HostSnapshot/HostMutation/HostReceipt/HostManagementAdapter；`DeviceDetails.tsx:195` 接入 | 地址包含 principal/network/connection/authGeneration/service/targetIdentityGeneration，已有权限与效果 scope 展示 |
 | production adapter 明确 unsupported | `src/renderer/api/hostManagement.ts:121–145` | inspect 返回 clientProtocolUnavailable，其他方法拒绝；UI 测试注入不证明远程服务存在 |
 | UI 已防止不确定写自动重放 | `HostManagement.tsx:291–402` 检查完整 address、mutationId、resource，未知仅查原 receipt；`hostManagementState.ts:8–21` 不存 credential | 可接新 adapter，保留这些行为，不把 TS UI seam 当 wire authority |
-| 本地配置 owner 已有 CAS | `src/host/main.ts:174–187` 重读 config，expectedRevision 比较并 atomicJson 写原 config.json；不写原始 Key | 当前仅 Kimi/本地配置且不支持活跃 Session 时变更；未实现 durable mutation receipt/effectiveRevision/grant |
+| 本地配置 owner 已有 CAS | `src/host/management.ts` 在 supervisor 原锁内重读 config，CAS 与本地 receipt 原子保存；不写原始 Key | 当前仅 Kimi/本地配置；本地 durable receipt 已真机通过，远端 grant 与有效配置投影尚未实现 |
 
 包内路径指 `node_modules/@myagents/agent-network-protocol/` 的已安装只读内容，其 authority 是固定 tgz，不是该目录可编辑源码。Rust 同一包的校验/投影入口为 `src-tauri/agent-network-protocol/build.rs:9–59`。
 
@@ -82,3 +82,7 @@ status 区分 enrollment/connection ready/initialization/desiredRevision/effecti
 `src/host/management.ts` 新增本地配置回执，调用仍由原Node supervisor串行准入。可选本地UUID mutationId和canonical安全意图摘要绑定，原config.json一次提交默认值/receipt；status只区分persisted/conflict，effect为new-session/none，未知提交查原ID，不自动重放。ledger绑定本机Host UUID、固定容量256且无自动淘汰，损坏关闭；已有receipt可在busy或workspace变化后读取。旧无ID local configure保持原结果；不会把executionAuthorized或凭据能力扩展给远端。
 
 这些类型没有进入vendor或AgentNet transport。它们不是远端management grant、caller身份或target generation验证的替代品；未来adapter必须先完成authority定义的完整scope/授权，并把操作scope绑定到本地调用。共享Rust core、enrollment和远端协议仍未实现。主Goal不因本地回执测试通过而完成。
+
+## 无桌面存储环境的实测补充
+
+测试 Host 的实际服务进程与服务 UID 缺少 session D-Bus/XDG runtime，未安装gnome-keyring；现有Secret Service backend不能直接用于该环境。只读systemd credential不等价于动态save_pending。新的隔离Rust encrypted IdentityStore准备见[headless_identity_store.md](./headless_identity_store.md)，Desktop保持原OSstore。Root只初始化该隔离owner自己的新加密key，不向Node/远端增加凭据权限，不新增root运行时helper或公网接口。独立存储验收尚在实施；enrollment与Agenthub访问依赖不因此解除。
