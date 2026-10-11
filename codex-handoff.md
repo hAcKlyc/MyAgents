@@ -2,7 +2,7 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T02:36:15+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-12T02:55:00+08:00 -->
 <!-- codex-handoff:latest-anchor=mah-linux-20261012 -->
 
 ## Current Snapshot
@@ -14,7 +14,7 @@
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
-- Next steps: 修复GitHub Release网页下载在Ubuntu的curl(56)失败；raw源码/API可达，公开asset API已验证bootstrap字节摘要。复验API bootstrap真实下载/安装及同包重装后交付修复。取得凭据后运行Kimi受控任务、权限与resume；之后从Agenthub authority更新契约并联调桌面adapter。
+- Next steps: 下载修复PR #2仍开放；API实际归档下载通过后raw安装器curl(28)超时，旧服务已恢复。改为嵌入完整提交的installer，并修复bb995c23 CI发现的Host UI刷新锁住问题；跑最新完整门禁后合入、发布并复验实际在线安装与同包重装。取得凭据后运行Kimi受控任务、权限与resume；之后从Agenthub authority更新契约并联调桌面adapter。
 
 ## Resume Instructions
 
@@ -40,3 +40,9 @@
 - PR #1已交付fork main e5603d06，源90667797，CI38163417406四作业成功，Windows168/168。remote main/祖先/代码树已实际核查。
 - unsigned test prerelease已公开，来源/两个摘要固定；Ubuntu Release网页下载curl(56)失败，安装器未运行，旧Host active。没有宣布在线安装成功。API/raw路线核实后修复下载，保留严格元数据与字节校验。
 - 仍未发真实Kimi请求，未接AgentNet；缺安全凭据路径和可读authority，主Goal active。
+
+### 2026-10-12 02:55 +08:00 — 下载依赖与 UI 生命周期修复
+
+- bb995c23 的 API 原型已在 Ubuntu 下载并验证旧公开制品归档；raw installer 超时，installer未运行，test Host恢复active、仍为000e9632。原型不是已发布的修复制品。
+- scripts/host将installer通过git show固定提交后嵌入bootstrap；HostManagement修复点击准入signal与busy顺序，StrictMode回归通过。主智能体集成，两个既有native worker独立打包/审查，无模型执行。
+- 新提交、完整CI、PR #2合入、实际新版在线安装仍待下一步；Kimi凭据和Agenthub authority依赖未解除，主Goal active。

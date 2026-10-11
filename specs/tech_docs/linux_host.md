@@ -48,8 +48,14 @@ AgentNet 下一阶段详见 [linux_host_agentnet.md](linux_host_agentnet.md)。�
 
 ## 一键下载安装入口
 
-干净源码构建现在生成固定 `host-test-<releaseId>` 的 bootstrap，自动下载归档和完整源码提交下的安装器；两者 SHA-256 均通过才执行。构建末尾复核 HEAD 与工作区，发现变化则清理待发布制品；dirty 开发包不生成 bootstrap。测试版本不进入桌面 updater，不代表签名发行。离线测试验证正确摘要允许 fixture、任一文件篡改均不运行 fixture，以及 commit/tag/archive 不匹配拒绝；实际 GitHub prerelease 和服务器在线下载安装另行记录。
+干净源码构建现在生成固定 `host-test-<releaseId>` 的 bootstrap，通过固定仓库的 GitHub API 下载精确 release asset；安装器字节通过 git show 取自完整源码提交并嵌入 bootstrap。归档与嵌入安装器的 SHA-256 均通过才执行。构建末尾复核 HEAD 与工作区，发现变化则清理待发布制品；dirty 开发包不生成 bootstrap。测试版本不进入桌面 updater，不代表签名发行。离线测试验证正确摘要允许 fixture、任一文件篡改均不运行 fixture，以及 commit/tag/archive 不匹配拒绝；实际 GitHub prerelease 和服务器在线下载安装另行记录。
 
 ## 在线分发验收与下载修复
 
 未签名测试 prerelease `host-test-20261011181412-90667797200a` 已发布，归档及bootstrap上传摘要与本地产物一致。Ubuntu在线下载 `github.com` Release入口出现curl(56)连接中断，安装器没有执行；服务器继续运行000e9632旧包。固定commit的raw源码及GitHub API元数据均可达；公开asset API已完整下载bootstrap及160275993-byte归档，两者SHA256均与发布制品一致。正在修复bootstrap为固定仓库/精确tag/来源提交/指定asset的API下载，仍校验原两摘要，不采纳metadata中的任意URL或第三方镜像。真实下载与安装验收保持开放。
+
+### 在线下载与 UI 后续修复
+
+API 归档下载与摘要校验在 Ubuntu 通过，但随后固定源码安装器的 raw 下载出现 curl(28) 超时，安装器仍未执行；旧 Host 服务已恢复 active，未宣称完成在线安装。后续改为嵌入固定提交的安装器，生成和执行时均校验规范 Base64 与 SHA-256，消除 raw 下载依赖。
+
+下载修复提交 bb995c23 的 CI38164703808 暴露 Host 表单早于 passive effect 的刷新点击会锁住 busy：signal 尚未初始化时已进入 busy。修复为先创建生命周期 controller，再准入操作，并在 StrictMode 重建中止的 controller 时释放旧锁。独立审查无阻断，聚焦 DOM14/14（含 StrictMode）及 Host专项22项、typecheck通过；完整后续门禁和新制品真机验收继续进行，失败 CI 不作为合入依据。
