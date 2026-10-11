@@ -408,11 +408,14 @@ mod tests {
     fn concurrent_unique_writes_publish_complete_distinct_files() {
         let ws = Workspace::new();
         let mut workers = Vec::new();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
         for index in 0..8 {
             let root = ws.0.clone();
+            let barrier = barrier.clone();
             workers.push(std::thread::spawn(move || {
                 let content = vec![index; 1024];
                 let target = root.join("images");
+                barrier.wait();
                 let path = write_unique_file(&target, &root, "same.png", &content).unwrap();
                 assert_eq!(fs::read(root.join(&path)).unwrap(), content);
                 path

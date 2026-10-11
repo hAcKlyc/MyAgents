@@ -21,6 +21,7 @@ import {
 } from 'fs';
 import { resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
+import { resolveHostProviderCredential } from './host-credentials';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
 import { workspacePathsEqual } from '../../shared/workspacePath';
@@ -1282,7 +1283,7 @@ export function resolveProviderEnv(
   // 401 instead of an actionable "no API key" error.
   const apiKey = isManagedOauth
     ? undefined
-    : (c.providerApiKeys ?? {})[providerId];
+    : resolveHostProviderCredential((c.providerApiKeys ?? {})[providerId]);
   if (!isManagedOauth && (!apiKey || !apiKey.trim())) return undefined;
 
   // Extract provider config fields (same shape as frontend Chat.tsx builds)

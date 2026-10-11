@@ -1,0 +1,95 @@
+import { fork, type ChildProcess } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { HostSessionMessage, HostSessionRequest } from './host-session-protocol';
+
+const roots: string[] = [];
+const children: ChildProcess[] = [];
+afterEach(async () => {
+  for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL');
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+async function start(home: string, workspace: string, sessionId?: string) {
+  const generation = `generation-${Math.random()}`;
+  const child = fork(fileURLToPath(new URL('./host-session-worker.ts', import.meta.url)), [], {
+    execArgv: ['--import', 'tsx', '--import', join(home, 'no-egress.mjs')],
+    env: { ...process.env, HOME: home, USERPROFILE: home,
+      MYAGENTS_HOST_GENERATION: generation, MYAGENTS_HOST_WORKSPACE: workspace,
+      MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: 'claude-sonnet-4-6',
+      MYAGENTS_HOST_PROVIDER_ID: 'anthropic-sub', MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
+      ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', CLAUDE_CODE_OAUTH_TOKEN: '',
+      MYAGENTS_MANAGEMENT_PORT: '' },
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+  });
+  children.push(child);
+  let diagnostics = '';
+  child.stderr?.on('data', chunk => { diagnostics += String(chunk); });
+  const inbox: HostSessionMessage[] = [];
+  const waiters = new Set<() => void>();
+  child.on('message', message => { inbox.push(message as HostSessionMessage); for (const notify of waiters) notify(); });
+  function waitFor(predicate: (message: HostSessionMessage) => boolean): Promise<HostSessionMessage> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error(`Worker timeout: ${diagnostics}`)); }, 30_000);
+      const onExit = () => { cleanup(); reject(new Error(`Worker exited: ${diagnostics}`)); };
+      const poll = () => {
+        const index = inbox.findIndex(predicate);
+        if (index >= 0) { const [message] = inbox.splice(index, 1); cleanup(); resolve(message); }
+      };
+      const cleanup = () => { clearTimeout(timer); waiters.delete(poll); child.off('exit', onExit); };
+      waiters.add(poll); child.on('exit', onExit); poll();
+    });
+  }
+  const ready = await waitFor(message => message.type === 'ready') as Extract<HostSessionMessage, { type: 'ready' }>;
+  let sequence = 0;
+  async function request(operation: HostSessionRequest['operation'], args?: Record<string, unknown>, selectedGeneration = generation) {
+    const id = String(++sequence);
+    child.send({ id, generation: selectedGeneration, operation, args });
+    const reply = await waitFor(message => message.type === 'reply' && message.id === id) as Extract<HostSessionMessage, { type: 'reply' }>;
+    if (operation === 'shutdown' && reply.ok && child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()));
+    return reply;
+  }
+  return { ready, request };
+}
+
+describe('headless Host Session worker bootstrap', () => {
+  it('uses the real facade/store to persist birth, reject unauthorized execution and resume the same product identity', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'myagents-host-session-'));
+    roots.push(home);
+    const workspace = join(home, 'workspace');
+    await mkdir(workspace);
+    // The child is outside Vitest's no-egress hook. Enforce the same boundary
+    // at process bootstrap; this test never calls a model or mocks its success.
+    await writeFile(join(home, 'no-egress.mjs'), `
+      import net from 'node:net'; import http from 'node:http'; import https from 'node:https';
+      import { syncBuiltinESMExports } from 'node:module';
+      const deny = () => { throw new Error('Integration worker network access is forbidden'); };
+      globalThis.fetch = deny; net.connect = deny; net.createConnection = deny;
+      http.request = deny; http.get = deny; https.request = deny; https.get = deny;
+      syncBuiltinESMExports();
+    `);
+    const first = await start(home, workspace);
+    expect(first.ready.sessionId).toMatch(/^[a-f0-9-]{36}$/);
+    const persisted = JSON.parse(await readFile(join(home, '.myagents', 'sessions.json'), 'utf8'));
+    const metadata = persisted.find((row: { id: string }) => row.id === first.ready.sessionId);
+    expect(metadata).toMatchObject({ id: first.ready.sessionId, transcriptFormat: 2,
+      permissionMode: 'custom', providerId: 'anthropic-sub',
+      providerRoute: { kind: 'subscription', providerId: 'anthropic-sub', model: 'claude-sonnet-4-6' } });
+    expect(metadata.providerEnvJson).toBeUndefined();
+    expect(await first.request('send', { text: 'This must never execute' })).toMatchObject({ ok: false, error: expect.stringContaining('authorization') });
+    expect(await first.request('stop', undefined, 'old-generation')).toMatchObject({ ok: false, error: 'Stale Host generation' });
+    expect(await first.request('state')).toMatchObject({ ok: true, data: { sessionId: first.ready.sessionId, isBusy: false, terminal: null } });
+    expect(await first.request('permission', { requestId: 'not-pending', decision: 'allow_once' })).toMatchObject({ ok: false });
+    expect(await first.request('shutdown')).toMatchObject({ ok: true });
+    const resumed = await start(home, workspace, first.ready.sessionId);
+    expect(resumed.ready.sessionId).toBe(first.ready.sessionId);
+    expect(await resumed.request('describe')).toMatchObject({ ok: true, data: { executionAuthorized: false, runtime: 'builtin' } });
+    expect(await resumed.request('shutdown')).toMatchObject({ ok: true });
+    const after = JSON.parse(await readFile(join(home, '.myagents', 'sessions.json'), 'utf8'));
+    expect(after).toHaveLength(1);
+    expect(after[0].sdkSessionId).toBeUndefined();
+  });
+});

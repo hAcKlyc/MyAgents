@@ -1683,9 +1683,14 @@ fn write_relative_file_no_follow_windows_mode<F: FnOnce()>(
         }
     }
 
-    for nonce in 0..100u32 {
+    // A same-process writer may hold the previous temp with write/delete sharing
+    // disabled. FILE_CREATE may report access denial rather than a name
+    // collision, so every concurrent writer needs its own candidate.
+    static ATTACHMENT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+    for _ in 0..100u32 {
+        let nonce = ATTACHMENT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let temp_name = format!(
-            ".{}.myagents-{}-{}.tmp",
+            ".{}.myagents-attachment-{}-{}.tmp",
             leaf.to_string_lossy(),
             std::process::id(),
             nonce

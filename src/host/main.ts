@@ -1,0 +1,293 @@
+import { fork, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { createServer, request } from 'node:http';
+import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
+
+const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
+const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
+const home = join(stateDir, 'home');
+const configPath = join(home, '.myagents', 'config.json');
+const workspaceRoot = join(stateDir, 'workspaces');
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_BODY = 1024 * 1024;
+type Settings = { revision: number; providerId: string; model: string; workspace: string; executionAuthorized: boolean };
+type Config = { hostSettings?: Settings; providerApiKeys?: Record<string, string>; [key: string]: unknown };
+type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean };
+
+async function jsonFile<T>(path: string, fallback: T): Promise<T> {
+  try { return JSON.parse(await readFile(path, 'utf8')) as T; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return fallback; throw error; }
+}
+
+async function atomicJson(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const file = await open(temporary, 'wx', 0o600);
+  try { await file.writeFile(JSON.stringify(value, null, 2)); await file.sync(); }
+  finally { await file.close(); }
+  try { await rename(temporary, path); } catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+  const directory = await open(dirname(path), 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
+}
+
+async function workspacePath(value: string): Promise<string> {
+  if (!isAbsolute(value)) throw new Error('Workspace must be absolute');
+  const root = await realpath(workspaceRoot);
+  const target = await realpath(value);
+  const subpath = relative(root, target);
+  if (subpath === '..' || subpath.startsWith(`..${sep}`) || isAbsolute(subpath)
+    || !(await lstat(target)).isDirectory()) throw new Error('Workspace is outside the Host workspace root');
+  return target;
+}
+
+async function serve(): Promise<void> {
+  if (process.getuid?.() === 0) throw new Error('Run Host as the dedicated non-root service user');
+  if (process.env.HOME !== home) throw new Error('Host HOME must match its isolated state directory');
+  // --no-fork makes flock exec this Node process, preserving the locked fd.
+  // Verify the kernel fact rather than trusting an environment flag. macOS is
+  // used only for local controller tests; the installer only supports Linux.
+  if (process.platform === 'linux') {
+    const stat = await lstat(join(stateDir, 'host.lock'), { bigint: true });
+    const major = ((stat.dev >> 8n) & 0xfffn) | ((stat.dev >> 32n) & 0xfffff000n);
+    const minor = (stat.dev & 0xffn) | ((stat.dev >> 12n) & 0xffffff00n);
+    const locks = (await readFile('/proc/locks', 'utf8')).split('\n');
+    const held = locks.some(line => {
+      const fields = line.trim().split(/\s+/);
+      if (fields[1] !== 'FLOCK' || fields[3] !== 'WRITE' || fields[4] !== String(process.pid)) return false;
+      const device = fields[5]?.split(':');
+      return device?.length === 3 && BigInt(`0x${device[0]}`) === major && BigInt(`0x${device[1]}`) === minor && BigInt(device[2]) === stat.ino;
+    });
+    if (!held) throw new Error('Start Host with flock --no-fork holding its state/host.lock');
+  }
+  process.umask(0o077);
+  await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
+  await mkdir(join(workspaceRoot, 'default'), { recursive: true, mode: 0o700 });
+  const identityPath = join(stateDir, 'host-identity.json');
+  let identity = await jsonFile<{ hostId: string; schemaVersion: number } | null>(identityPath, null);
+  if (!identity) { identity = { hostId: randomUUID(), schemaVersion: 1 }; await atomicJson(identityPath, identity); }
+  if (identity.schemaVersion !== 1 || !uuidPattern.test(identity.hostId)) throw new Error('Unsupported Host identity');
+  let active: Active | null = null;
+  let shuttingDown = false;
+  let mutationTail: Promise<unknown> = Promise.resolve();
+  const pending = new Map<string, { active: Active; resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+  const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'host-session-worker.mjs');
+
+  function exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const result = mutationTail.then(operation);
+    mutationTail = result.catch(() => {});
+    return result;
+  }
+
+  function workerCall(target: Active, operation: HostSessionOperation, args: Record<string, unknown> = {}): Promise<unknown> {
+    if (target.closing && operation !== 'shutdown') return Promise.reject(new Error('Session is closing'));
+    return new Promise((resolveCall, reject) => {
+      const id = randomUUID();
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error('Session request outcome is unconfirmed; inspect state, do not resend automatically')); }, 60000);
+      pending.set(id, { active: target, resolve: resolveCall, reject, timer });
+      target.child.send({ id, generation: target.generation, operation, args } as HostSessionRequest, (error) => {
+        if (!error) return;
+        const entry = pending.get(id);
+        if (entry) { clearTimeout(entry.timer); pending.delete(id); entry.reject(new Error('Session transport failed; outcome is unconfirmed')); }
+      });
+    });
+  }
+
+  async function ensureSession(sessionId?: string): Promise<Active> {
+    if (shuttingDown) throw new Error('Host is stopping');
+    if (active) {
+      if (sessionId && active.sessionId === sessionId && !active.closing) return active;
+      throw new Error('First version allows one active Session; release it before opening another');
+    }
+    const config = await jsonFile<Config>(configPath, {});
+    const settings = config.hostSettings;
+    if (!settings) throw new Error('Configure the Host before creating a Session');
+    let workspace = await workspacePath(settings.workspace);
+    if (sessionId) {
+      if (!uuidPattern.test(sessionId)) throw new Error('Invalid Session ID');
+      const rows = await jsonFile<Array<{ id: string; agentDir: string; runtime?: string }>>(join(home, '.myagents', 'sessions.json'), []);
+      const row = rows.find(value => value.id === sessionId);
+      if (!row || (row.runtime && row.runtime !== 'builtin')) throw new Error('Unknown or unsupported Session');
+      workspace = await workspacePath(row.agentDir);
+    }
+    const generation = randomUUID();
+    const child = fork(workerPath, [], {
+      cwd: dirname(workerPath),
+      env: { ...process.env, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: settings.providerId,
+        MYAGENTS_HOST_MODEL: settings.model, MYAGENTS_HOST_GENERATION: generation,
+        MYAGENTS_HOST_EXECUTION_AUTHORIZED: settings.executionAuthorized ? '1' : '0' },
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    });
+    const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false };
+    active = target;
+    child.on('exit', () => {
+      if (active === target) active = null;
+      for (const [id, entry] of pending) if (entry.active === target) {
+        clearTimeout(entry.timer); pending.delete(id); entry.reject(new Error('Session process exited; inspect persisted state before retrying'));
+      }
+    });
+    child.on('message', raw => {
+      const reply = raw as HostSessionMessage;
+      if (!reply || reply.generation !== generation || reply.type !== 'reply') return;
+      const entry = pending.get(reply.id);
+      if (!entry || entry.active !== target) return;
+      clearTimeout(entry.timer); pending.delete(reply.id);
+      if (reply.ok) entry.resolve(reply.data); else entry.reject(new Error(reply.error ?? 'Session request failed'));
+    });
+    await new Promise<void>((resolveReady, reject) => {
+      const timer = setTimeout(() => { target.closing = true; child.kill('SIGTERM'); reject(new Error('Session startup timed out')); }, 60000);
+      const onMessage = (raw: unknown) => {
+        const value = raw as { type?: string; generation?: string; sessionId?: string };
+        if (value?.type !== 'ready' || value.generation !== generation || !value.sessionId || !uuidPattern.test(value.sessionId)) return;
+        target.sessionId = value.sessionId; finish(); resolveReady();
+      };
+      const onExit = () => { finish(); reject(new Error('Session initialization failed')); };
+      function finish() { clearTimeout(timer); child.off('message', onMessage); child.off('exit', onExit); child.off('error', onError); }
+      const onError = () => { finish(); reject(new Error('Session process could not start')); };
+      child.on('message', onMessage); child.once('exit', onExit); child.once('error', onError);
+    });
+    return target;
+  }
+
+  async function release(target: Active): Promise<void> {
+    target.closing = true;
+    const exited = new Promise<void>(resolveExit => target.child.once('exit', () => resolveExit()));
+    await workerCall(target, 'shutdown');
+    await Promise.race([exited, new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => reject(new Error('Session exit unconfirmed; owner remains held')), 15000); timer.unref();
+    })]);
+  }
+
+  async function dispatch(path: string, body: Record<string, unknown>): Promise<unknown> {
+    if (path === '/host/status') {
+      const config = await jsonFile<Config>(configPath, {});
+      return { hostId: identity!.hostId, version: 1, configured: Boolean(config.hostSettings),
+        settings: config.hostSettings ?? null, activeSession: active ? { sessionId: active.sessionId, generation: active.generation, closing: active.closing } : null,
+        stopping: shuttingDown, capabilities: ['local-session', 'permission', 'stop', 'persistent-history'],
+        agentNet: { available: false, reason: 'not-integrated' },
+        runtime: { node: process.versions.node, sdkBinaryPresent: existsSync(join(dirname(workerPath), 'claude-agent-sdk', 'claude')) } };
+    }
+    if (path === '/host/configure') return exclusive(async () => {
+      if (active) throw new Error('Release the active Session before configuring the Host');
+      const allowed = new Set(['expectedRevision', 'providerId', 'model', 'workspace', 'executionAuthorized']);
+      if (Object.keys(body).some(key => !allowed.has(key))) throw new Error('Unsupported configuration field');
+      const config = await jsonFile<Config>(configPath, {});
+      const revision = config.hostSettings?.revision ?? 0;
+      if (body.expectedRevision !== revision) throw new Error('Configuration conflict: inspect the latest revision');
+      if (body.providerId !== 'moonshot-coding' || typeof body.model !== 'string'
+        || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.model)
+        || typeof body.executionAuthorized !== 'boolean') throw new Error('First version requires a Kimi Code model and explicit execution authorization');
+      const workspace = await workspacePath(typeof body.workspace === 'string' ? body.workspace : join(workspaceRoot, 'default'));
+      const settings: Settings = { revision: revision + 1, providerId: body.providerId, model: body.model, workspace, executionAuthorized: body.executionAuthorized };
+      await atomicJson(configPath, { ...config, providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': 'systemd-credential:kimi' }, hostSettings: settings });
+      return { persisted: true, revision: settings.revision, effect: 'new-session', settings };
+    });
+    if (path === '/session/create') return exclusive(async () => {
+      if (Object.keys(body).length) throw new Error('Session creation accepts no overrides');
+      const target = await ensureSession();
+      return { sessionId: target.sessionId, generation: target.generation };
+    });
+    if (path === '/session/list') {
+      const rows = await jsonFile<Array<Record<string, unknown>>>(join(home, '.myagents', 'sessions.json'), []);
+      return rows.map(row => ({ id: row.id, title: row.title, agentDir: row.agentDir, createdAt: row.createdAt, updatedAt: row.updatedAt }));
+    }
+    const match = /^\/session\/([0-9a-f-]+)\/(describe|send|state|result|permission|stop|release)$/.exec(path);
+    if (!match || !uuidPattern.test(match[1])) throw new Error('Unknown Host operation');
+    if (match[2] === 'release') return exclusive(async () => {
+      const target = await ensureSession(match[1]);
+      await release(target); return { released: true };
+    });
+    // Only lifecycle resolution holds the owner lock. Interactive responses
+    // and Stop must not wait behind a send's dispatch acknowledgement.
+    const target = await exclusive(() => ensureSession(match[1]));
+    return workerCall(target, match[2] as HostSessionOperation, body);
+  }
+
+  const server = createServer(async (incoming, outgoing) => {
+    try {
+      if (incoming.method !== 'POST' || incoming.url?.includes('?')) throw new Error('Only typed POST control operations are supported');
+      const chunks: Buffer[] = []; let size = 0;
+      for await (const chunk of incoming) {
+        size += chunk.length;
+        if (size > MAX_BODY) throw new Error('Control request is too large');
+        chunks.push(Buffer.from(chunk));
+      }
+      const body = JSON.parse(Buffer.concat(chunks).toString() || '{}') as unknown;
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Invalid control request');
+      const data = await dispatch(incoming.url ?? '', body as Record<string, unknown>);
+      outgoing.writeHead(200, { 'Content-Type': 'application/json' }); outgoing.end(JSON.stringify({ ok: true, data }));
+    } catch (error) {
+      outgoing.writeHead(409, { 'Content-Type': 'application/json' });
+      outgoing.end(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'Host request failed' }));
+    }
+  });
+  server.requestTimeout = 65000; server.headersTimeout = 10000;
+  await mkdir(dirname(socket), { recursive: true, mode: 0o700 });
+  // The installer holds flock across the entire process lifetime. Never unlink
+  // a socket without that lock, which would admit two configuration owners.
+  if (existsSync(socket)) {
+    if (process.env.MYAGENTS_HOST_LOCK_HELD !== '1') throw new Error('Existing socket requires the service lock');
+    const stat = await lstat(socket);
+    if (!stat.isSocket() || stat.uid !== process.getuid?.()) throw new Error('Unsafe existing socket');
+    await unlink(socket);
+  }
+  await new Promise<void>((resolveListen, reject) => { server.once('error', reject); server.listen(socket, () => resolveListen()); });
+  await chmod(socket, 0o600);
+  console.log('MyAgents Host ready (local Unix socket, AgentNet not integrated)');
+  const stop = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close();
+    try { await exclusive(async () => { if (active) await release(active); }); }
+    catch { process.exitCode = 1; }
+    await unlink(socket).catch(() => {});
+    process.exit(process.exitCode ?? 0);
+  };
+  process.once('SIGTERM', () => { void stop(); });
+  process.once('SIGINT', () => { void stop(); });
+}
+
+async function control(path: string, body: Record<string, unknown>): Promise<void> {
+  await new Promise<void>((resolveCall, reject) => {
+    const call = request({ socketPath: socket, path, method: 'POST', headers: { 'Content-Type': 'application/json' } }, response => {
+      const chunks: Buffer[] = []; let size = 0;
+      response.on('data', (chunk: Buffer) => { size += chunk.length; if (size > 8 * MAX_BODY) { response.destroy(); reject(new Error('Host reply too large')); } else chunks.push(chunk); });
+      response.on('end', () => {
+        try {
+          const value = JSON.parse(Buffer.concat(chunks).toString());
+          if (!value.ok) throw new Error(value.error);
+          console.log(JSON.stringify(value.data, null, 2)); resolveCall();
+        } catch (error) { reject(error); }
+      });
+      response.on('error', reject);
+    });
+    call.setTimeout(65000, () => call.destroy(new Error('Host request outcome unconfirmed; inspect state before retrying')));
+    call.on('error', reject); call.end(JSON.stringify(body));
+  });
+}
+
+async function stdinText(): Promise<string> {
+  let text = '';
+  for await (const chunk of process.stdin) { text += chunk; if (Buffer.byteLength(text) > MAX_BODY) throw new Error('Input too large'); }
+  return text;
+}
+
+async function main(): Promise<void> {
+  const [command, sessionId, arg, decision] = process.argv.slice(2);
+  if (command === '--serve') return serve();
+  if (command === 'status' || command === 'doctor') return control('/host/status', {});
+  if (command === 'configure') return control('/host/configure', JSON.parse(await stdinText()));
+  if (command === 'create') return control('/session/create', {});
+  if (command === 'list') return control('/session/list', {});
+  if (command && ['describe', 'state', 'result', 'stop', 'release'].includes(command) && sessionId) return control(`/session/${sessionId}/${command}`, {});
+  if (command === 'send' && sessionId) return control(`/session/${sessionId}/send`, { text: await stdinText() });
+  if (command === 'respond' && sessionId) return control(`/session/${sessionId}/permission`, JSON.parse(await stdinText()));
+  if (command === 'permission' && sessionId && arg && ['allow_once', 'deny'].includes(decision)) return control(`/session/${sessionId}/permission`, { requestId: arg, decision });
+  throw new Error('Usage: myagents-host status|doctor|configure < config.json|create|list|send SESSION < prompt.txt|state/result/stop/release SESSION|permission SESSION REQUEST allow_once/deny');
+}
+
+main().catch(error => { console.error(error instanceof Error ? error.message : 'Host operation failed'); process.exitCode = 1; });
