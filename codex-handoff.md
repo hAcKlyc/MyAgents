@@ -2,25 +2,25 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T01:30:00+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-12T01:46:00+08:00 -->
 <!-- codex-handoff:latest-anchor=mah-linux-20261012 -->
 
 ## Current Snapshot
 
-- Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装验收进行中，尚未完成真实 Kimi 执行与 AgentNet 联调。
+- Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
 - Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
 - Latest anchor: mah-linux-20261012。
-- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；当前基线 4267bdb9。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
+- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；本阶段代码 000e9632；fork main 仍为4267bdb9，待CI合入。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
-- Next steps: 见 specs/tech_docs/linux_host.md 的勾选清单；已完成最终 bundle 真启动；接着完成真机 systemd 安装/重启/回滚，再运行 Kimi 受控任务、权限与 resume；之后从 Agenthub authority 更新契约并联调桌面 adapter。
+- Next steps: 见 specs/tech_docs/linux_host.md 的勾选清单；已完成最终 bundle 真启动及真机 systemd 安装/重启/回滚；取得凭据后运行 Kimi 受控任务、权限与 resume；之后从 Agenthub authority 更新契约并联调桌面 adapter。
 
 ## Resume Instructions
 
 - 先读此文件、源码 AGENTS.md / CLAUDE.md，以及主聊天的最新 INTERFACE.md。INTERFACE.md 是项目协作约定和未实现的 v0 草案，不是线协议 authority；实际线协议以 Agenthub authority 发布的固定产物为准，桌面端不能自定另一套。
 - 核对路径、remote、branch、HEAD、工作区与 worktree，保留用户和并发修改。
-- 对照最新 anchor 与 Handoff Log；当前仅有本地与 fixture 证据，不能称作真实业务验收或发布。
+- 对照最新 anchor 与 Handoff Log；区分本地自动测试、Linux 无模型真机验证与尚未完成的真实 Kimi/AgentNet 验收，不称作整体业务发布。
 - 重跑受后续改动影响的检查即可，不因为此文档重复全部测试。UI fixture 与真实 Host 验收分开记录。
 
 ## Handoff Log
