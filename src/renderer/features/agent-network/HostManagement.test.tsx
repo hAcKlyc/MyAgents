@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   HostAccess,
@@ -92,10 +93,9 @@ function fixture(snapshot = host()) {
     testProvider: vi.fn(async () => ({ ok: false })),
   } satisfies HostManagementAdapter;
 }
-async function mount(adapter = fixture(), online = true) {
-  const rendered = render(
-    <HostManagement locator={locator} online={online} adapter={adapter} />,
-  );
+async function mount(adapter = fixture(), online = true, strict = false) {
+  const content = <HostManagement locator={locator} online={online} adapter={adapter} />;
+  const rendered = render(strict ? <StrictMode>{content}</StrictMode> : content);
   fireEvent.click(screen.getByRole("button", { name: /Host 管理/ }));
   await screen.findByLabelText("默认模型");
   return { ...rendered, adapter };
@@ -366,12 +366,14 @@ describe("Host management UI v0 seam (isolated fixtures only)", () => {
       screen.getByRole("button", { name: "测试已生效配置" }),
     ).toBeDisabled();
   });
-  it("latest owner status updates the entry and revoked read permission hides the form", async () => {
+  it("latest owner status updates after StrictMode remount and revoked read permission hides the form", async () => {
     const adapter = fixture();
-    await mount(adapter);
+    await mount(adapter, true, true);
     adapter.read.mockResolvedValue(host({ initialization: "error" }));
     fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
+    expect(adapter.read).toHaveBeenCalledOnce();
     await screen.findByRole("button", { name: /Host 管理\s*异常/ });
+    expect(screen.getByRole("button", { name: "读取最新状态" })).toBeEnabled();
     adapter.read.mockResolvedValue(host({ permissions: [] }));
     fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
     expect(

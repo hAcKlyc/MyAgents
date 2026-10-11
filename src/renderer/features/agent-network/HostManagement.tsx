@@ -218,9 +218,19 @@ function HostConfiguration({
   );
   const busyRef = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
+  // A newly committed form can receive a click before its passive effect runs.
+  // Establish the signal before any operation can acquire the busy latch.
+  if (lifetime.current === null) lifetime.current = new AbortController();
   useEffect(() => {
-    const abort = new AbortController();
+    const previous = lifetime.current;
+    const abort = previous && !previous.signal.aborted
+      ? previous
+      : new AbortController();
     lifetime.current = abort;
+    if (previous?.signal.aborted) {
+      busyRef.current = false;
+      setBusy(false);
+    }
     return () => abort.abort();
   }, []);
 
@@ -263,10 +273,11 @@ function HostConfiguration({
     updatePending(value);
   }
   function begin(): AbortSignal | null {
-    if (busyRef.current || lifetime.current?.signal.aborted) return null;
+    const signal = lifetime.current?.signal;
+    if (!signal || signal.aborted || busyRef.current) return null;
     busyRef.current = true;
     setBusy(true);
-    return lifetime.current?.signal ?? null;
+    return signal;
   }
   function end(signal: AbortSignal) {
     if (signal.aborted) return;

@@ -175,7 +175,7 @@ try {
       bootstrap = bootstrapPath;
       writeFileSync(bootstrap, renderBootstrap({
         sourceCommit: commit, releaseTag, archiveName: archive.split('/').at(-1),
-        archiveSha256: archiveHash, installerSha256: installerHash,
+        archiveSha256: archiveHash, installerSha256: installerHash, installerBase64: committedInstaller.toString('base64'),
       }), { mode: 0o755 });
       assertCleanBuildSnapshot('after bootstrap');
     } catch (error) {

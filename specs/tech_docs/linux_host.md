@@ -22,7 +22,7 @@ Provider 配置保留 `systemd-credential:<name>` 引用。只有开启 Host mod
 - [x] 本地自动测试、桌面相关回归；非实现者审查。
 - [x] Linux 真机安装、进程/权限/端口/身份重启验收。
 - [ ] Kimi 小规模真实任务、受控文件结果、权限往返、重启续接与失败停止验收。
-- [ ] 本阶段提交、fork main 合入推送、核实远端主干与服务器制品来源。
+- [x] 本阶段提交与 fork main 合入推送，远端主干包含 CI 验证来源提交；服务器仍为先前验收的测试制品，见后文。
 - [ ] Agenthub 协议源码与测试实例依赖可用；设备 enrollment、远程配置权限/回执、桌面联调。
 - [ ] 正式签名 release、upgrade/schema rollback 与完整平台支持（不属于首个测试包验收）。
 
@@ -44,8 +44,18 @@ systemd 255 将凭据投影为 root-owned 0440 文件与 ACL；修复仅接受�
 
 AgentNet 下一阶段详见 [linux_host_agentnet.md](linux_host_agentnet.md)。凭据路径与 Agenthub authority 访问仍是外部依赖；主 Goal 保持进行中。
 
-主干门禁复验：Linux JS/TS、完整构建脚本/自动测试/构建、Rust test/Clippy 与 macOS CLIProxy 均通过；Windows 167 项通过、1 项既有并发附件写测试失败（Access denied）。定位同进程临时文件名重复，最小修复为 Windows attachment 独立前缀与 AtomicU64 取号；原并发测试加入8线程 Barrier，权限/路径/发布语义不放宽。独立静态审阅通过，修复后的 Windows CI 待实际复验，不合入失败门禁。
+主干门禁复验：初次 Windows gate 暴露既有并发附件临时文件名碰撞，修复保持路径/权限/exclusive publication 语义，原8线程测试加入 Barrier。修复提交71489ebd及最终提交90667797的完整四作业 CI 均通过；Windows168项全部成功。PR #1已合入 fork main e5603d06671192ba9e8fa5e1c12eec91f2733139；远端核实包含90667797且两者代码树相同。未将源码交付当作 Kimi 或 AgentNet 真实验收。
 
 ## 一键下载安装入口
 
-干净源码构建现在生成固定 `host-test-<releaseId>` 的 bootstrap，自动下载归档和完整源码提交下的安装器；两者 SHA-256 均通过才执行。构建末尾复核 HEAD 与工作区，发现变化则清理待发布制品；dirty 开发包不生成 bootstrap。测试版本不进入桌面 updater，不代表签名发行。离线测试验证正确摘要允许 fixture、任一文件篡改均不运行 fixture，以及 commit/tag/archive 不匹配拒绝；实际 GitHub prerelease 和服务器在线下载安装另行记录。
+干净源码构建现在生成固定 `host-test-<releaseId>` 的 bootstrap，通过固定仓库的 GitHub API 下载精确 release asset；安装器字节通过 git show 取自完整源码提交并嵌入 bootstrap。归档与嵌入安装器的 SHA-256 均通过才执行。构建末尾复核 HEAD 与工作区，发现变化则清理待发布制品；dirty 开发包不生成 bootstrap。测试版本不进入桌面 updater，不代表签名发行。离线测试验证正确摘要允许 fixture、任一文件篡改均不运行 fixture，以及 commit/tag/archive 不匹配拒绝；实际 GitHub prerelease 和服务器在线下载安装另行记录。
+
+## 在线分发验收与下载修复
+
+未签名测试 prerelease `host-test-20261011181412-90667797200a` 已发布，归档及bootstrap上传摘要与本地产物一致。Ubuntu在线下载 `github.com` Release入口出现curl(56)连接中断，安装器没有执行；服务器继续运行000e9632旧包。固定commit的raw源码及GitHub API元数据均可达；公开asset API已完整下载bootstrap及160275993-byte归档，两者SHA256均与发布制品一致。正在修复bootstrap为固定仓库/精确tag/来源提交/指定asset的API下载，仍校验原两摘要，不采纳metadata中的任意URL或第三方镜像。真实下载与安装验收保持开放。
+
+### 在线下载与 UI 后续修复
+
+API 归档下载与摘要校验在 Ubuntu 通过，但随后固定源码安装器的 raw 下载出现 curl(28) 超时，安装器仍未执行；旧 Host 服务已恢复 active，未宣称完成在线安装。后续改为嵌入固定提交的安装器，生成和执行时均校验规范 Base64 与 SHA-256，消除 raw 下载依赖。
+
+下载修复提交 bb995c23 的 CI38164703808 暴露 Host 表单早于 passive effect 的刷新点击会锁住 busy：signal 尚未初始化时已进入 busy。修复为先创建生命周期 controller，再准入操作，并在 StrictMode 重建中止的 controller 时释放旧锁。独立审查无阻断，聚焦 DOM14/14（含 StrictMode）及 Host专项22项、typecheck通过；完整后续门禁和新制品真机验收继续进行，失败 CI 不作为合入依据。

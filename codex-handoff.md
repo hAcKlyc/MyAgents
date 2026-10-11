@@ -2,7 +2,7 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T01:46:00+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-12T02:55:00+08:00 -->
 <!-- codex-handoff:latest-anchor=mah-linux-20261012 -->
 
 ## Current Snapshot
@@ -10,11 +10,11 @@
 - Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
 - Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
 - Latest anchor: mah-linux-20261012。
-- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；本阶段代码 000e9632；fork main 仍为4267bdb9，待Windows并发临时文件修复CI复验合入。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
+- Branch / commit: PR #1已合入用户 fork main e5603d06671192ba9e8fa5e1c12eec91f2733139，包含最终源码90667797且代码树一致，完整四作业CI通过。当前下载修复分支 `feat/mah-host-api-download` 从该main建立；upstream保留hAcKlyc/MyAgents。服务器仍运行000e9632包。用 git status/log/ls-remote 核对最新交付。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
-- Next steps: 见 specs/tech_docs/linux_host.md 的勾选清单；已完成最终 bundle 真启动及真机 systemd 安装/重启/回滚；取得凭据后运行 Kimi 受控任务、权限与 resume；之后从 Agenthub authority 更新契约并联调桌面 adapter。
+- Next steps: 下载修复PR #2仍开放；API实际归档下载通过后raw安装器curl(28)超时，旧服务已恢复。改为嵌入完整提交的installer，并修复bb995c23 CI发现的Host UI刷新锁住问题；跑最新完整门禁后合入、发布并复验实际在线安装与同包重装。取得凭据后运行Kimi受控任务、权限与resume；之后从Agenthub authority更新契约并联调桌面adapter。
 
 ## Resume Instructions
 
@@ -34,3 +34,15 @@
 - Evidence location: 本任务检出的同级 `outputs/MAH-UI-INDEPENDENT-REVIEW.md` 与 `outputs/ui-evidence/`；隔离运行 harness 在同级 `work/host-ui/`，不进入生产。复现：Node >=24.14、npm >=11.15，安装按 lockfile；运行 `node node_modules/vite/bin/vite.js --config ../work/host-ui/vite.config.mjs --configLoader native`，仅 loopback 5188。产物不包含真实凭据。
 - Collaboration: 主智能体实现和总验收（GPT-6 家族，具体变体/effort 未确认）；独立 UI worker 请求 `gpt-6-luna` / medium，实际型号/effort 未确认。纯 Codex 内置，未调用外部模型；用量/费用未知。
 - Next steps: 保持真实联调开放；不得将 fixture 保存/审批用作业务完成证据。完整远端审批必须绑定 SessionEngine 的 session/request/turn/Runtime generation，重连先回读。
+
+### 2026-10-12 — Linux Host 主干与在线下载验收
+
+- PR #1已交付fork main e5603d06，源90667797，CI38163417406四作业成功，Windows168/168。remote main/祖先/代码树已实际核查。
+- unsigned test prerelease已公开，来源/两个摘要固定；Ubuntu Release网页下载curl(56)失败，安装器未运行，旧Host active。没有宣布在线安装成功。API/raw路线核实后修复下载，保留严格元数据与字节校验。
+- 仍未发真实Kimi请求，未接AgentNet；缺安全凭据路径和可读authority，主Goal active。
+
+### 2026-10-12 02:55 +08:00 — 下载依赖与 UI 生命周期修复
+
+- bb995c23 的 API 原型已在 Ubuntu 下载并验证旧公开制品归档；raw installer 超时，installer未运行，test Host恢复active、仍为000e9632。原型不是已发布的修复制品。
+- scripts/host将installer通过git show固定提交后嵌入bootstrap；HostManagement修复点击准入signal与busy顺序，StrictMode回归通过。主智能体集成，两个既有native worker独立打包/审查，无模型执行。
+- 新提交、完整CI、PR #2合入、实际新版在线安装仍待下一步；Kimi凭据和Agenthub authority依赖未解除，主Goal active。
