@@ -31,6 +31,7 @@ import {
 import { isConcreteProviderRoute } from '../../../shared/providerRoute';
 import { INTERNAL_CLI_TOKEN_ENV } from '../../../shared/externalCliCapabilities';
 import { getSessionMetadata } from '../../SessionStore';
+import { withLogContext } from '../../logger-context';
 import { fingerprintDshNativeInput } from './input-identity';
 import {
   findEffectiveProvider,
@@ -1124,10 +1125,20 @@ export class DshRuntime implements AgentRuntime {
       hostHandlers,
       notificationHandlers,
       childEnvironment,
-      onStderrLine: line => emitProductEvent({ kind: 'log', level: 'warn', message: line }),
+      // Process diagnostics belong to this captured Session even when admission
+      // fails or the shared product event receiver has retired its generation.
+      // console uses the existing UnifiedLogger persistence and UI log sink.
+      onStderrLine: line => withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
+        console.warn(`[dsh] ${line}`);
+      }),
       redactStderrLine: redactDshDiagnosticLine,
+      onExit: exit => withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
+        console.warn(`[dsh] Process exited ${JSON.stringify({ ...exit, pid: host.pid, runtimeGeneration: host.identity?.runtimeGeneration })}`);
+      }),
       onFailure: error => {
-        emitProductEvent({ kind: 'log', level: 'error', message: redactDshDiagnosticLine(error.message) });
+        withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
+          console.error(`[dsh] ${redactDshDiagnosticLine(error.message)}`);
+        });
         // Transport failure ends this process generation. The shared lifecycle
         // owner must release running state so queued input can resume it.
         emitProductEvent({ kind: 'session_complete', subtype: 'error', result: redactDshDiagnosticLine(error.message) });

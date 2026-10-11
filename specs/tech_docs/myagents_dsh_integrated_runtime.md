@@ -56,6 +56,8 @@ DSH 使用应用内置的单一 Node，不回退系统 Node。Node/npm 组合由
 
 进程状态与 turn activity 分开。pre-warm 可建立真实 idle Runtime，但不能制造 running turn。transport/process failure 必须通过 `session_complete` 交给共享 lifecycle owner 释放该 generation；仅发 error status 会留下无法恢复的 running/process 状态。
 
+进程诊断不受 Product history/reconciliation 准入控制。DSH adapter 使用捕获的 Product Session 日志 scope，将脱敏 stderr、transport failure 和每次子进程退出事实直接交给现有 UnifiedLogger；旧 generation 的业务接收器退休后，仍可记录其尾部诊断。stderr 在流结束/关闭时排出无换行尾段；单行超过 16,384 字符时只记录省略提示，避免截断凭据表示后脱敏失效。退出记录分别保留原始 code/signal 与 Host 最近尝试的终止 signal/reason；优雅 shutdown 的 signal 为 null，Host 终止尝试不是原生自退出原因的证明，EOF 也不能证明原生恢复已损坏。业务事件仍必须等待原生绑定与历史对账成功。
+
 ## 4. 数据与持久化
 
 `dshSessionOwnedPaths()` 用 canonical Product Session id 的稳定摘要派生：
@@ -176,3 +178,5 @@ DSH recovery admission 当前按未结算 mutation 的种类限制 prepare；具
 | `src/server/runtimes/external-session/` | 共享 queue/config/interaction/transcript owners |
 
 默认 unit/integration 使用 fake model、隔离目录和 loopback fixture；覆盖握手与失配、generation retirement、admission uncertainty、恢复、权限、steer、附件与联合 mutation。真实 Provider/native smoke 必须显式执行，结果只证明对应 artifact、平台与模型。构建验证不代替真实桌面交互验收，也不在状态文档固化某次测试数量、源码 hash 或机器记录。
+
+准备好本机 artifact 后，设置 `MYAGENTS_DSH_NATIVE_SMOKE=1`，可选 `MYAGENTS_DSH_NATIVE_SMOKE_RESOURCE_ROOT` 指向含 build selection 的 resources 根，再用内置 Node 运行 `node_modules/vitest/vitest.mjs run --config vitest.dsh-native.config.ts -t "restores interrupted history"`。该定向 smoke 使用 loopback fake Provider，验证已有流式历史经 Stop、进程重启、原生恢复与 prewarm 后仍能进入下一次模型输入；不读取用户会话或真实 Provider 凭据，也不能证明未提供的故障状态已被修复。专用配置同时加载该 artifact 的 effective lock 与 public contract，避免把源码快照与准备好的二进制混用。

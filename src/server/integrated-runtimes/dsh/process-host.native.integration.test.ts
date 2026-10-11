@@ -97,11 +97,13 @@ async function createNativeHostFixture(
   );
   const installation = await resolveDshRuntimeInstallation({
     resourceRoot,
-    nodeExecutablePath: join(resourceRoot, "nodejs/bin/node"),
+    nodeExecutablePath: join(resourceRoot, process.platform === 'win32' ? 'nodejs/node.exe' : 'nodejs/bin/node'),
   });
   const launchEnvironment = buildDshChildEnvironment({
-    nodeExecutablePath: installation.nodeExecutablePath, commandDirectories: ["/bin", "/usr/bin"],
-    inheritedEnvironment: { HOME: temporaryRoot, USERPROFILE: temporaryRoot, LANG: 'en_US.UTF-8' },
+    nodeExecutablePath: installation.nodeExecutablePath,
+    commandDirectories: process.platform === 'win32' ? [] : ["/bin", "/usr/bin"],
+    inheritedEnvironment: { HOME: temporaryRoot, USERPROFILE: temporaryRoot, LANG: 'en_US.UTF-8',
+      SystemRoot: process.env.SystemRoot, TEMP: temporaryRoot, TMP: temporaryRoot },
     proxyEnvironment,
     sessionCli: route === undefined ? null : { ...route, internalCliToken: 'fixture-capability' },
   });
@@ -121,7 +123,7 @@ async function createNativeHostFixture(
       bundledNodeRef: "bundled-node",
       shellRef: "runtime-shell",
       ripgrepRef: "bundled-ripgrep",
-      shellDialect: "bash",
+      shellDialect: process.platform === 'win32' ? 'pwsh' : 'bash',
       allowedCommandRefs: ["runtime-shell", "bundled-node", "bundled-ripgrep"],
       pathPolicy: "sealed",
     },
@@ -206,6 +208,90 @@ async function createNativeHostFixture(
 describe.runIf(nativeSmokeEnabled)(
   "DSH RuntimeProcessHost native smoke",
   () => {
+    it.each(['resend', 'prewarm'] as const)('restores interrupted history before %s after a cold process restart', async mode => {
+      const inputs: string[] = [];
+      const server = createServer(async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        inputs.push(Buffer.concat(chunks).toString('utf8'));
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        const emit = (event: string, data: unknown) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        emit('message_start', { type: 'message_start', message: { id: `stop-${inputs.length}`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0 } } });
+        emit('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+        emit('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: inputs.length === 1 ? 'INTERRUPTED_PARTIAL' : 'RESUMED_REPLY' } });
+        if (inputs.length === 1) return; // Hold the first turn until the Host stops it.
+        emit('content_block_stop', { type: 'content_block_stop', index: 0 });
+        emit('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 10 } });
+        emit('message_stop', { type: 'message_stop' });
+        response.end();
+      });
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Fixture did not bind');
+      const fixture = await createNativeHostFixture(`stop-${mode}`);
+      const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
+      await registry.initialize();
+      const events: DshRpcObject[] = [];
+      const handlers: DshHostRequestHandlers = { ...fixture.hostHandlers,
+        'host/credential/resolve': params => params.purpose === 'availability'
+          ? { kind: 'availability', available: true, authoritativeCredentialRevision: params.profileRevision }
+          : { kind: 'material', authoritativeCredentialRevision: params.profileRevision, material: { apiKey: 'synthetic-stop-key' } },
+        'host/hook/execute': () => ({ state: 'continue' }),
+        'host/attachment/acquire': params => registry.acquire(params),
+        'host/attachment/release': params => { registry.release(params); return { ok: true }; },
+      };
+      const notifications: DshRuntimeNotificationHandlers = { 'runtime/event': params => { events.push(params); }, 'host/interaction/cancel': () => undefined };
+      let host = fixture.createHost(handlers, notifications);
+      try {
+        const provider = structuredClone(PRESET_PROVIDERS.find(({ id }) => id === 'anthropic-api'))!;
+        provider.id = 'native-stop-fixture'; provider.config.baseUrl = `http://127.0.0.1:${address.port}`;
+        const profile = compileDshModelExecutionProfile({ provider, modelId: 'claude-sonnet-4-6' });
+        const plane = compileDshProductExtensionPlane({ revision: 'stop-extensions', skills: [], commands: [], agents: [], mcpServers: [], dynamicTools: [] });
+        const extension = { snapshotAttachment: await registry.publishJson(plane.snapshot) };
+        await host.start();
+        await host.request('extension/replace', extension);
+        const catalog = await host.request('extension/catalog', {});
+        const binding = { persistenceRef: 'stop-persistence', provider: profile, configRevision: 'stop-config', extensionDigest: catalog.digest,
+          systemPrompt: '', permissionMode: 'full-autonomous' as const, interactionScenario: 'host-interaction-v1' as const };
+        const created = await host.request('session/create', { ...binding, clientOperationId: 'stop-create' });
+        const runtimeSessionId = String(created.runtimeSessionId);
+        const digest = createDshInitializeParams({ productSessionId: `native-stop-${mode}-product-session`, productVersion: '0.5.2',
+          runtimeHome: fixture.runtimeHome, workspace: { path: fixture.workspace, identity: fixture.executionEnvironment.workspace.identity },
+          executionEnvironment: fixture.executionEnvironment, interaction: 'deterministic-headless' }).executionEnvironment.digest;
+        const startTurn = (id: string, text: string) => host.request('turn/start', { clientOperationId: id, clientUserMessageId: `${id}-input`,
+          input: { parts: [{ kind: 'text', text }] }, configRevision: binding.configRevision, extensionDigest: catalog.digest,
+          executionEnvironmentRevision: fixture.executionEnvironment.revision, executionEnvironmentDigest: digest,
+          limits: { maxTurns: 2 }, origin: { kind: 'headless', scenario: 'stop-resume' } });
+        await startTurn('interrupted-turn', 'ORIGINAL_HISTORY_MARKER');
+        await expect.poll(() => JSON.stringify(events), { timeout: 20_000 }).toContain('INTERRUPTED_PARTIAL');
+        await host.request('turn/interrupt', { clientOperationId: 'interrupted-turn', cancelQueued: true });
+        await host.request('session/close', { clientOperationId: 'stop-close' });
+        await host.stop();
+        host = fixture.createHost(handlers, notifications);
+        await host.start();
+        await host.request('extension/replace', extension);
+        expect(await host.request('session/resume', { ...binding, clientOperationId: 'resume-bind', runtimeSessionId })).toMatchObject({ state: 'ready', runtimeSessionId });
+        const recovered = new DshMutationController(host, runtimeSessionId);
+        expect(JSON.stringify(await recovered.readHistory())).toContain('ORIGINAL_HISTORY_MARKER');
+        expect((await recovered.getTurn('interrupted-turn')).terminal).toBeDefined();
+        if (mode === 'prewarm') {
+          expect(inputs).toHaveLength(1); // Cold binding/reconciliation did not send a prompt.
+          expect((await host.request('runtime/status', {})).initialized).toBe(true);
+        }
+        await startTurn('resumed-turn', 'RESEND_MARKER');
+        await expect.poll(async () => (await host.request('turn/get', { clientOperationId: 'resumed-turn' })).terminal?.kind, { timeout: 20_000 }).toBe('succeeded');
+        expect(inputs).toHaveLength(2);
+        expect(inputs[1]).toContain('ORIGINAL_HISTORY_MARKER');
+        expect(inputs[1]).toContain('RESEND_MARKER');
+      } catch (error) {
+        throw new Error(`Stop/resume (${mode}) failed; stderr=${fixture.stderr.join(' | ')}`, { cause: error });
+      } finally {
+        await host.stop(); registry.close(); server.closeAllConnections();
+        await new Promise<void>(resolve => server.close(() => resolve()));
+        await rm(fixture.temporaryRoot, { recursive: true, force: true });
+      }
+    }, 120_000);
+
     it('applies a complete oversized Skill snapshot through an attachment before Session binding', async () => {
       const fixture = await createNativeHostFixture('large-extensions');
       const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
