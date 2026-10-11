@@ -528,6 +528,8 @@ function AgentNetworkContent({
       {selectedDevice && (
         <DeviceDetails
           connectionId={connectionId}
+          authGeneration={snapshot.authGeneration}
+          connectionReady={snapshot.state === "ready"}
           device={selectedDevice}
           catalog={catalogs[selectedDevice.deviceId]}
           isLocal={selectedDevice.deviceId === localId}

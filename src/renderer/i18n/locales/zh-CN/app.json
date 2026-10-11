@@ -1396,6 +1396,88 @@
     "removalPending": "等待撤销确认",
     "retryRemove": "重试移除",
     "retryRemoveMessage": "将重新确认服务端撤销并清理本地连接。",
-    "removeConnectionMessage": "移除「{{name}}」会撤销本机在该网络的身份。重新加入需要新 key。本地 Agent 与会话保留。"
+    "removeConnectionMessage": "移除「{{name}}」会撤销本机在该网络的身份。重新加入需要新 key。本地 Agent 与会话保留。",
+    "host": {
+      "title": "Host 管理",
+      "loading": "正在读取设备级管理能力…",
+      "clientProtocolUnavailable": "当前客户端协议尚未提供 Host 管理能力。接入设备级管理服务后，可在此配置执行环境与 Provider。",
+      "deviceUnsupported": "该设备未协商提供 Host 管理能力。原有 AgentNet 功能仍可使用。",
+      "unavailable": "暂时无法读取 Host 管理服务，请重试。",
+      "denied": "当前身份没有设备管理读取权限。能够调用 Agent 不代表拥有管理权。",
+      "states": {
+        "loading": "读取中",
+        "unsupported": "尚不支持",
+        "unavailable": "暂不可用",
+        "denied": "无管理权",
+        "unconfigured": "待配置",
+        "configured": "已配置",
+        "ready": "就绪",
+        "error": "异常",
+        "offline": "离线"
+      },
+      "environment": "执行环境",
+      "refresh": "读取最新状态",
+      "system": "系统",
+      "runtime": "Runtime",
+      "resources": "工作区与 Agent",
+      "resourceCount": "{{workspaces}} 个工作区 · {{agents}} 个 Agent",
+      "emptyHost": "此 Host 尚无 Agent，可先配置 Provider。Host 管理权限与 Agent 开放权限分别授予。",
+      "grants": "管理权限：{{grants}}",
+      "permissions": {
+        "read": "读取",
+        "configure": "配置",
+        "approve": "审批",
+        "operate": "操作"
+      },
+      "offline": "Host 或当前网络已离线。禁止发送修改，未提交草稿已保留。",
+      "readOnly": "当前服务或权限不允许修改 Provider，可查看执行环境与已脱敏配置。",
+      "provider": "Provider 配置",
+      "sessionScope": "修改由 Host 保存；已有 Session 保留出生时的配置快照。",
+      "revisions": "期望修订 {{desired}} / 生效修订 {{effective}}",
+      "apply": {
+        "pending": "已保存待生效",
+        "applied": "已生效",
+        "error": "生效失败"
+      },
+      "effects": {
+        "immediate": "生效范围：立即",
+        "nextTurn": "生效范围：下一轮",
+        "newSession": "生效范围：新建 Session",
+        "restartRequired": "生效范围：需要重启 Runtime"
+      },
+      "baseUrl": "API 地址（HTTPS）",
+      "model": "默认模型",
+      "invalidProvider": "请输入有效的 HTTPS 地址和模型名称，地址不含口令、查询参数或片段。",
+      "conflictDraft": "Host 配置已改变。输入仍保留，请核对最新修订后显式继续。",
+      "reconcile": "保留草稿，采用最新修订",
+      "processing": "处理中…",
+      "saveProvider": "保存 Provider",
+      "draftRetained": "未提交草稿已保留",
+      "noChanges": "没有待提交修改",
+      "credential": "API Key（只写）",
+      "credentialExists": "Host 已设置凭据。",
+      "credentialMissing": "Host 尚未设置凭据。",
+      "credentialHint": "凭据不回显，不保存到本机；关闭详情后需重新输入。先保存配置，再单独写入凭据。",
+      "saveCredential": "写入凭据",
+      "notices": {
+        "rejected": "Host 已拒绝此修改，输入已保留。",
+        "accepted": "Host 已接纳此修改，尚未确认持久化。",
+        "persisted": "Host 已保存。请以生效修订和生效范围判断何时可用。",
+        "applied": "Host 确认该修改已生效。",
+        "conflict": "Host 配置发生冲突，草稿已保留。",
+        "unconfirmed": "保存结果尚未确认。请查询原操作回执，不要重复提交。",
+        "conflictReadFailed": "发生配置冲突，但尚未读到最新状态。请读取最新状态后再继续。",
+        "persistedReadFailed": "Host 确认已保存，但尚未读回配置。请查询原回执，完成状态核对。",
+        "readFailed": "无法读取最新 Host 状态，草稿已保留。"
+      },
+      "receiptHint": "确认前暂停新的修改。关闭后重新打开，仍查询同一操作。",
+      "queryReceipt": "查询原操作回执",
+      "testProvider": "测试已生效配置",
+      "test": {
+        "passed": "Host 测试通过",
+        "failed": "Host 测试失败，请检查已生效的配置与凭据。"
+      },
+      "testHint": "测试使用 Host 已生效配置，需要操作权限；有未提交输入或待生效配置时不可测试。"
+    }
   }
 }

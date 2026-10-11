@@ -1397,6 +1397,88 @@
     "removalPending": "Removal pending",
     "retryRemove": "Retry removal",
     "retryRemoveMessage": "Confirm server revocation and finish local cleanup.",
-    "removeConnectionMessage": "Removing “{{name}}” revokes this device from the network. Rejoining requires a new key. Local Agents and sessions remain."
+    "removeConnectionMessage": "Removing “{{name}}” revokes this device from the network. Rejoining requires a new key. Local Agents and sessions remain.",
+    "host": {
+      "title": "Host management",
+      "loading": "Reading device management capabilities…",
+      "clientProtocolUnavailable": "The current client protocol does not provide Host management yet. Once a device management service is connected, configure its runtime and Provider here.",
+      "deviceUnsupported": "This device has not negotiated Host management capabilities. Existing AgentNet features remain available.",
+      "unavailable": "Host management is temporarily unavailable. Try again.",
+      "denied": "This identity has no device management read permission. Calling an Agent does not grant management access.",
+      "states": {
+        "loading": "Loading",
+        "unsupported": "Unsupported",
+        "unavailable": "Unavailable",
+        "denied": "No access",
+        "unconfigured": "Needs configuration",
+        "configured": "Configured",
+        "ready": "Ready",
+        "error": "Error",
+        "offline": "Offline"
+      },
+      "environment": "Execution environment",
+      "refresh": "Read latest state",
+      "system": "System",
+      "runtime": "Runtime",
+      "resources": "Workspaces and Agents",
+      "resourceCount": "{{workspaces}} workspaces · {{agents}} Agents",
+      "emptyHost": "This Host has no Agents yet. Configure its Provider first. Host management and Agent exposure have separate permissions.",
+      "grants": "Management permissions: {{grants}}",
+      "permissions": {
+        "read": "Read",
+        "configure": "Configure",
+        "approve": "Approve",
+        "operate": "Operate"
+      },
+      "offline": "The Host or current network is offline. Changes are disabled; your draft is retained.",
+      "readOnly": "The service or your permissions do not allow Provider changes. You can view the environment and redacted configuration.",
+      "provider": "Provider configuration",
+      "sessionScope": "The Host owns saved configuration. Existing Sessions keep their configuration birth snapshot.",
+      "revisions": "Desired revision {{desired}} / effective revision {{effective}}",
+      "apply": {
+        "pending": "Saved, awaiting application",
+        "applied": "Applied",
+        "error": "Application failed"
+      },
+      "effects": {
+        "immediate": "Applies immediately",
+        "nextTurn": "Applies on the next turn",
+        "newSession": "Applies to new Sessions",
+        "restartRequired": "Requires a Runtime restart"
+      },
+      "baseUrl": "API endpoint (HTTPS)",
+      "model": "Default model",
+      "invalidProvider": "Enter a valid HTTPS endpoint and model name. Do not include credentials, query parameters or fragments in the URL.",
+      "conflictDraft": "Host configuration changed. Your input is retained. Review the latest revision before explicitly continuing.",
+      "reconcile": "Keep draft and adopt latest revision",
+      "processing": "Processing…",
+      "saveProvider": "Save Provider",
+      "draftRetained": "Unsubmitted draft retained",
+      "noChanges": "No pending changes",
+      "credential": "API key (write only)",
+      "credentialExists": "The Host has a credential.",
+      "credentialMissing": "The Host has no credential.",
+      "credentialHint": "Credentials are never returned or stored locally. Re-enter after closing details. Save configuration first, then write the credential separately.",
+      "saveCredential": "Write credential",
+      "notices": {
+        "rejected": "The Host rejected this change. Your input is retained.",
+        "accepted": "The Host accepted this change; persistence is not yet confirmed.",
+        "persisted": "Saved by the Host. Check the effective revision and application scope for availability.",
+        "applied": "The Host confirmed this change is applied.",
+        "conflict": "Host configuration conflict. Your draft is retained.",
+        "unconfirmed": "The save result is unconfirmed. Query the original receipt instead of submitting again.",
+        "conflictReadFailed": "Configuration conflicted, but the latest state could not be read. Read the latest state before continuing.",
+        "persistedReadFailed": "The Host confirmed persistence, but configuration has not been read back. Query the original receipt to verify state.",
+        "readFailed": "Could not read the latest Host state. Your draft is retained."
+      },
+      "receiptHint": "Further changes are paused until confirmed. Reopening queries the same operation.",
+      "queryReceipt": "Query original receipt",
+      "testProvider": "Test effective configuration",
+      "test": {
+        "passed": "Host test passed",
+        "failed": "Host test failed. Check the effective configuration and credential."
+      },
+      "testHint": "Testing uses the effective configuration on the Host and requires Operate permission. Save drafts and wait for application first."
+    }
   }
 }

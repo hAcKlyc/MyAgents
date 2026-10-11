@@ -1,4 +1,8 @@
 import { useSyncExternalStore } from "react";
+import {
+  clearAllHostManagementState,
+  clearHostManagementScope,
+} from "./hostManagementState";
 import { listenWithCleanup } from "@/utils/tauriListen";
 import {
   networkConnections,
@@ -37,6 +41,7 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 function clearScope(snapshot: NetworkSnapshot) {
+  clearHostManagementScope(snapshot.principalId, snapshot.networkId);
   for (const key of drafts.keys()) {
     const [principal, network] = JSON.parse(key) as string[];
     if (principal === snapshot.principalId && network === snapshot.networkId)
@@ -124,6 +129,7 @@ export function startAgentNetworkStore(): () => void {
   return () => {
     abort.abort();
     drafts.clear();
+    clearAllHostManagementState();
     pending.clear();
     registry = initial;
     setNetworkReadScope(null);

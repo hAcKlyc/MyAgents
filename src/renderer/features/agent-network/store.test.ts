@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NetworkSnapshot, NetworkRegistry } from "@/api/agentNetwork";
+import {
+  getHostDraft,
+  setHostDraft,
+  getHostPending,
+  setHostPending,
+} from "./hostManagementState";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), listen: vi.fn() }));
 vi.mock("@/api/agentNetwork", () => ({
   networkConnections: mocks.read,
@@ -94,18 +100,51 @@ describe("App network projection", () => {
       );
     setDescriptionDraft(firstDraft, "official text");
     setDescriptionDraft(secondDraft, "self text");
+    const hostAddress = {
+      connectionId: "official",
+      principalId: "account",
+      networkId: "network",
+      authGeneration: 1,
+      deviceId: "host",
+      serviceId: "service",
+      targetIdentityGeneration: 1,
+    };
+    const otherHost = {
+      ...hostAddress,
+      connectionId: "self",
+      principalId: "self-account",
+      networkId: "self-network",
+    };
+    setHostDraft(hostAddress, {
+      config: { baseUrl: "https://fixture.invalid", model: "draft" },
+      expectedRevision: 1,
+    });
+    setHostPending(hostAddress, {
+      mutationId: "pending",
+      resource: "provider",
+      receipt: null,
+    });
+    setHostDraft(otherHost, {
+      config: { baseUrl: "https://fixture.invalid", model: "other" },
+      expectedRevision: 1,
+    });
     acceptNetworkRegistry(registry([base, second], "self"));
     expect(currentNetworkGeneration("official")).toBe(1);
     expect(currentNetworkGeneration("self")).toBe(1);
+    expect(getHostPending(hostAddress)?.mutationId).toBe("pending");
     event({
       payload: { ...base, state: "signedOut", authGeneration: 2, revision: 3 },
     });
     expect(getDescriptionDraft(firstDraft)).toBeUndefined();
     expect(getDescriptionDraft(secondDraft)).toBe("self text");
+    expect(getHostDraft(hostAddress)).toBeUndefined();
+    expect(getHostPending(hostAddress)).toBeUndefined();
+    expect(getHostDraft(otherHost)?.config.model).toBe("other");
     event({ payload: { ...second, revision: 2 } });
     expect(getDescriptionDraft(secondDraft)).toBe("self text");
     acceptNetworkRegistry(registry([{ ...base, authGeneration: 2 }]));
     expect(getDescriptionDraft(secondDraft)).toBeUndefined();
+    expect(getHostDraft(otherHost)).toBeUndefined();
   });
   it("does not read when teardown wins registration", async () => {
     let resolve!: (v: { isRegistered: () => boolean }) => void;
