@@ -18,7 +18,7 @@
 
 ## Resume Instructions
 
-- 先读此文件、源码 AGENTS.md / CLAUDE.md，以及主聊天的最新 INTERFACE.md；后者与协议产物是线协议 authority，不能由桌面端自定另一套。
+- 先读此文件、源码 AGENTS.md / CLAUDE.md，以及主聊天的最新 INTERFACE.md。INTERFACE.md 是项目协作约定和未实现的 v0 草案，不是线协议 authority；实际线协议以 Agenthub authority 发布的固定产物为准，桌面端不能自定另一套。
 - 核对路径、remote、branch、HEAD、工作区与 worktree，保留用户和并发修改。
 - 对照最新 anchor 与 Handoff Log；当前仅有本地与 fixture 证据，不能称作真实业务验收或发布。
 - 重跑受后续改动影响的检查即可，不因为此文档重复全部测试。UI fixture 与真实 Host 验收分开记录。
