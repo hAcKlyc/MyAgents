@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { downloadBuildResource } from '../build-resource-download.mjs';
 import { dshBuildDefines } from '../integrated-runtimes/dsh-build-selection.mjs';
+import { renderBootstrap, sha256File } from './bootstrap.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = resolve(root, process.env.MYAGENTS_HOST_OUTPUT ?? 'output/host');
@@ -20,6 +21,7 @@ const sha256 = async path => {
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 };
+const sha256Bytes = bytes => createHash('sha256').update(bytes).digest('hex');
 function verifyLinuxX64Elf(path) {
   const fd = openSync(path, 'r');
   const header = Buffer.alloc(20);
@@ -39,12 +41,26 @@ if (nodeVersion !== '24.20.0') throw new Error(`Expected scripts/node-runtime.js
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 const commit = git('rev-parse', 'HEAD');
 const dirty = git('status', '--porcelain').length > 0;
+function assertCleanBuildSnapshot(stage) {
+  if (!dirty) {
+    const currentCommit = git('rev-parse', 'HEAD');
+    const currentDirty = git('status', '--porcelain').length > 0;
+    if (currentCommit !== commit || currentDirty) throw new Error(`Clean source changed during build (${stage}); refusing to publish archive/bootstrap`);
+  }
+}
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const buildIdentity = { version: packageJson.version, mode: 'bundle', capturedAt: new Date().toISOString(), commit, dirty };
 const esbuildBanner = 'import { createRequire as __myAgentsCreateRequire } from "module"; const require = __myAgentsCreateRequire(import.meta.url);';
 mkdirSync(output, { recursive: true });
 const temp = mkdtempSync(join(output, '.build-'));
 const releaseId = `${new Date().toISOString().replaceAll(/[-:.TZ]/g, '').slice(0, 14)}-${commit.slice(0, 12)}`;
+const archive = join(output, `myagents-host-test-${releaseId}.tar.gz`);
+const archiveSidecar = `${archive}.sha256`;
+const bootstrapPath = join(output, `install-${releaseId}.sh`);
+// A repeated build in the same timestamp second shares its releaseId; clear stale outputs first.
+rmSync(archive, { force: true });
+rmSync(archiveSidecar, { force: true });
+rmSync(bootstrapPath, { force: true });
 const releaseRoot = join(temp, 'myagents-host-test', 'releases', releaseId);
 const resources = join(releaseRoot, 'resources');
 mkdirSync(resources, { recursive: true });
@@ -135,11 +151,41 @@ try {
     signing: { status: 'unsigned-test-package', note: 'SHA-256 checksums provide integrity only; this package has no publisher signature.' },
   };
   writeFileSync(join(releaseRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o644 });
-  const archive = join(output, `myagents-host-test-${releaseId}.tar.gz`);
-  execFileSync('tar', ['-czf', archive, '-C', temp, 'myagents-host-test']);
+  let bootstrap;
+  try {
+    assertCleanBuildSnapshot('before archive');
+    execFileSync('tar', ['-czf', archive, '-C', temp, 'myagents-host-test']);
+    assertCleanBuildSnapshot('after archive');
+  } catch (error) {
+    rmSync(archive, { force: true });
+    rmSync(archiveSidecar, { force: true });
+    throw error;
+  }
   const archiveHash = await sha256(archive);
-  writeFileSync(`${archive}.sha256`, `${archiveHash}  ${archive.split('/').at(-1)}\n`);
-  console.log(JSON.stringify({ archive, sha256: archiveHash, releaseId, manifest: manifest.signing.status }, null, 2));
+  writeFileSync(archiveSidecar, `${archiveHash}  ${archive.split('/').at(-1)}\n`);
+  const releaseTag = `host-test-${releaseId}`;
+  if (!dirty) {
+    try {
+      assertCleanBuildSnapshot('before bootstrap');
+      const committedInstaller = execFileSync('git', ['show', `${commit}:scripts/host/install.sh`], { cwd: root });
+      const workingInstallerHash = await sha256File(join(root, 'scripts/host/install.sh'));
+      const installerHash = sha256Bytes(committedInstaller);
+      if (workingInstallerHash !== installerHash) throw new Error('Working scripts/host/install.sh differs from the pinned source commit');
+      assertCleanBuildSnapshot('after bootstrap inputs');
+      bootstrap = bootstrapPath;
+      writeFileSync(bootstrap, renderBootstrap({
+        sourceCommit: commit, releaseTag, archiveName: archive.split('/').at(-1),
+        archiveSha256: archiveHash, installerSha256: installerHash,
+      }), { mode: 0o755 });
+      assertCleanBuildSnapshot('after bootstrap');
+    } catch (error) {
+      rmSync(archive, { force: true });
+      rmSync(archiveSidecar, { force: true });
+      if (bootstrap) rmSync(bootstrap, { force: true });
+      throw error;
+    }
+  }
+  console.log(JSON.stringify({ archive, sha256: archiveHash, releaseId, releaseTag, ...(bootstrap ? { bootstrap } : { bootstrap: 'omitted: source tree is dirty' }), manifest: manifest.signing.status }, null, 2));
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

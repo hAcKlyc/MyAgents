@@ -17,6 +17,8 @@ Provider 配置保留 `systemd-credential:<name>` 引用。只有开启 Host mod
 - [x] Host supervisor、Unix socket CLI、配置 CAS 和无秘密身份持久化。
 - [x] 原 SessionEngine worker、权限/停止/terminal、持久化与恢复。
 - [x] 无 GUI 的 Linux 自包含包、幂等 systemd 安装、校验与回滚。
+- [x] 固定测试版本的下载 bootstrap：双摘要校验、源码提交绑定与篡改拒绝测试。
+- [ ] 发布未签名测试制品并在 Ubuntu 验证实际在线下载安装。
 - [x] 本地自动测试、桌面相关回归；非实现者审查。
 - [x] Linux 真机安装、进程/权限/端口/身份重启验收。
 - [ ] Kimi 小规模真实任务、受控文件结果、权限往返、重启续接与失败停止验收。
@@ -43,3 +45,7 @@ systemd 255 将凭据投影为 root-owned 0440 文件与 ACL；修复仅接受�
 AgentNet 下一阶段详见 [linux_host_agentnet.md](linux_host_agentnet.md)。凭据路径与 Agenthub authority 访问仍是外部依赖；主 Goal 保持进行中。
 
 主干门禁复验：Linux JS/TS、完整构建脚本/自动测试/构建、Rust test/Clippy 与 macOS CLIProxy 均通过；Windows 167 项通过、1 项既有并发附件写测试失败（Access denied）。定位同进程临时文件名重复，最小修复为 Windows attachment 独立前缀与 AtomicU64 取号；原并发测试加入8线程 Barrier，权限/路径/发布语义不放宽。独立静态审阅通过，修复后的 Windows CI 待实际复验，不合入失败门禁。
+
+## 一键下载安装入口
+
+干净源码构建现在生成固定 `host-test-<releaseId>` 的 bootstrap，自动下载归档和完整源码提交下的安装器；两者 SHA-256 均通过才执行。构建末尾复核 HEAD 与工作区，发现变化则清理待发布制品；dirty 开发包不生成 bootstrap。测试版本不进入桌面 updater，不代表签名发行。离线测试验证正确摘要允许 fixture、任一文件篡改均不运行 fixture，以及 commit/tag/archive 不匹配拒绝；实际 GitHub prerelease 和服务器在线下载安装另行记录。
