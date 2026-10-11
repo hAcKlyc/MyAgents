@@ -10,7 +10,7 @@
 - Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
 - Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
 - Latest anchor: mah-linux-20261012。
-- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；本阶段代码 000e9632；fork main 仍为4267bdb9，待CI合入。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
+- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；本阶段代码 000e9632；fork main 仍为4267bdb9，待Windows并发临时文件修复CI复验合入。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。

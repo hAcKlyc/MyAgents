@@ -41,3 +41,5 @@ systemd 255 将凭据投影为 root-owned 0440 文件与 ACL；修复仅接受�
 首包约153 MiB，安装约377 MiB，空闲服务约17 MiB内存（单次测量，不包含执行峰值）；主要体积来自固定 Node/SDK，未包含桌面组件。完整本地 unit 5429、DOM 2135、integration 866 项通过（另有跳过项）；相关桌面构建冒烟通过。macOS完整构建脚本的一项未修改 DSH 测试预期 xattr 权限失败，但本机返回成功；Host专项通过，Linux CI另行门禁。服务器地址、凭据位置和原始验收日志只留主聊天私有记录。
 
 AgentNet 下一阶段详见 [linux_host_agentnet.md](linux_host_agentnet.md)。凭据路径与 Agenthub authority 访问仍是外部依赖；主 Goal 保持进行中。
+
+主干门禁复验：Linux JS/TS、完整构建脚本/自动测试/构建、Rust test/Clippy 与 macOS CLIProxy 均通过；Windows 167 项通过、1 项既有并发附件写测试失败（Access denied）。定位同进程临时文件名重复，最小修复为 Windows attachment 独立前缀与 AtomicU64 取号；原并发测试加入8线程 Barrier，权限/路径/发布语义不放宽。独立静态审阅通过，修复后的 Windows CI 待实际复验，不合入失败门禁。
