@@ -76,3 +76,9 @@ status 区分 enrollment/connection ready/initialization/desiredRevision/effecti
 - [ ] 独立审阅、桌面回归、主干/固定产物/部署版本对应核实。仅这些门禁通过后宣布远程管理可用。
 
 当前可继续做离线 owner/interface 工作；authority 协议扩展和真实 enrollment 均未开始，访问与 Linux key-store 可用性是明确依赖，不把现有 UI 或静态测试当成已接入。
+
+## 本地 owner 准备（独立于线协议）
+
+`src/host/management.ts` 新增本地配置回执，调用仍由原Node supervisor串行准入。可选本地UUID mutationId和canonical安全意图摘要绑定，原config.json一次提交默认值/receipt；status只区分persisted/conflict，effect为new-session/none，未知提交查原ID，不自动重放。ledger绑定本机Host UUID、固定容量256且无自动淘汰，损坏关闭；已有receipt可在busy或workspace变化后读取。旧无ID local configure保持原结果；不会把executionAuthorized或凭据能力扩展给远端。
+
+这些类型没有进入vendor或AgentNet transport。它们不是远端management grant、caller身份或target generation验证的替代品；未来adapter必须先完成authority定义的完整scope/授权，并把操作scope绑定到本地调用。共享Rust core、enrollment和远端协议仍未实现。主Goal不因本地回执测试通过而完成。

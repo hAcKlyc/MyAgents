@@ -18,7 +18,7 @@ Provider 配置保留 `systemd-credential:<name>` 引用。只有开启 Host mod
 - [x] 原 SessionEngine worker、权限/停止/terminal、持久化与恢复。
 - [x] 无 GUI 的 Linux 自包含包、幂等 systemd 安装、校验与回滚。
 - [x] 固定测试版本的下载 bootstrap：双摘要校验、源码提交绑定与篡改拒绝测试。
-- [ ] 发布未签名测试制品并在 Ubuntu 验证实际在线下载安装。
+- [x] 发布未签名测试制品并在 Ubuntu 验证实际在线下载安装。
 - [x] 本地自动测试、桌面相关回归；非实现者审查。
 - [x] Linux 真机安装、进程/权限/端口/身份重启验收。
 - [ ] Kimi 小规模真实任务、受控文件结果、权限往返、重启续接与失败停止验收。
@@ -59,3 +59,9 @@ AgentNet 下一阶段详见 [linux_host_agentnet.md](linux_host_agentnet.md)。�
 API 归档下载与摘要校验在 Ubuntu 通过，但随后固定源码安装器的 raw 下载出现 curl(28) 超时，安装器仍未执行；旧 Host 服务已恢复 active，未宣称完成在线安装。后续改为嵌入固定提交的安装器，生成和执行时均校验规范 Base64 与 SHA-256，消除 raw 下载依赖。
 
 下载修复提交 bb995c23 的 CI38164703808 暴露 Host 表单早于 passive effect 的刷新点击会锁住 busy：signal 尚未初始化时已进入 busy。修复为先创建生命周期 controller，再准入操作，并在 StrictMode 重建中止的 controller 时释放旧锁。独立审查无阻断，聚焦 DOM14/14（含 StrictMode）及 Host专项22项、typecheck通过；完整后续门禁和新制品真机验收继续进行，失败 CI 不作为合入依据。
+
+## 最新交付与本地回执准备
+
+PR #2已交付 fork main `02cf89a315f17564ade2ce3c7c546f6e5a1425af`，包含源码 `0ea52f00071bd756697953d877fd9567e00bcbdc` 且代码树相同。完整 Test CI38166019754 四作业通过，DOM2135、integration866、Windows168项通过。公开 unsigned test prerelease `host-test-20261011185647-0ea52f00071b` 已在 Ubuntu 实际在线安装并第二次同包校验，进程 PID不变；身份/config、enabled/active、socket0600与无HostTCP监听均确认，原服务正常。没有 Kimi Query 或 AgentNet 联调。
+
+Agenthub访问仍返回404，真实Kimi凭据安全位置仍待提供。可独立推进的本地配置owner回执已开始：`src/host/management.ts` 在既有supervisor exclusive下工作，原config.json同时提交Host默认值和非秘密receipt；原ID只读恢复、不另建状态owner。Host专项23项、typecheck/lint/classification通过；独立审查无阻断。聚焦测试覆盖并发重复、修改意图拒绝、conflict、重启、容量和损坏关闭，原Session facade创建/恢复也验证Host默认值与receipt未被改写；真实临时文件的故障注入覆盖提交前/rename后未知结果，不宣称生产fsync故障或断电恢复已验收。完整门禁与本轮新制品服务器复验待完成。

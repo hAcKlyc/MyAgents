@@ -1,10 +1,12 @@
 import { fork, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HostSessionMessage, HostSessionRequest } from './host-session-protocol';
+import { configureHost } from '../host/management';
 
 const roots: string[] = [];
 const children: ChildProcess[] = [];
@@ -71,6 +73,15 @@ describe('headless Host Session worker bootstrap', () => {
       http.request = deny; http.get = deny; https.request = deny; https.get = deny;
       syncBuiltinESMExports();
     `);
+    const configPath = join(home, '.myagents', 'config.json');
+    await mkdir(join(home, '.myagents'));
+    await configureHost({
+      hostId: randomUUID(), defaultWorkspace: workspace,
+      readConfig: async () => ({}),
+      writeConfig: async value => { await writeFile(configPath, JSON.stringify(value), { mode: 0o600 }); },
+      workspacePath: async value => value, busy: () => false,
+    }, { mutationId: randomUUID(), expectedRevision: 0, providerId: 'moonshot-coding', model: 'k3', executionAuthorized: false });
+    const hostConfig = JSON.parse(await readFile(configPath, 'utf8'));
     const first = await start(home, workspace);
     expect(first.ready.sessionId).toMatch(/^[a-f0-9-]{36}$/);
     const persisted = JSON.parse(await readFile(join(home, '.myagents', 'sessions.json'), 'utf8'));
@@ -91,5 +102,8 @@ describe('headless Host Session worker bootstrap', () => {
     const after = JSON.parse(await readFile(join(home, '.myagents', 'sessions.json'), 'utf8'));
     expect(after).toHaveLength(1);
     expect(after[0].sdkSessionId).toBeUndefined();
+    const afterConfig = JSON.parse(await readFile(configPath, 'utf8'));
+    expect(afterConfig.hostSettings).toEqual(hostConfig.hostSettings);
+    expect(afterConfig.hostConfigReceipts).toEqual(hostConfig.hostConfigReceipts);
   });
 });

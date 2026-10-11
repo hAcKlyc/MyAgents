@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
+import { configureHost, readConfigReceipt, type HostConfig } from './management';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -14,8 +15,6 @@ const configPath = join(home, '.myagents', 'config.json');
 const workspaceRoot = join(stateDir, 'workspaces');
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY = 1024 * 1024;
-type Settings = { revision: number; providerId: string; model: string; workspace: string; executionAuthorized: boolean };
-type Config = { hostSettings?: Settings; providerApiKeys?: Record<string, string>; [key: string]: unknown };
 type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean };
 
 async function jsonFile<T>(path: string, fallback: T): Promise<T> {
@@ -102,7 +101,7 @@ async function serve(): Promise<void> {
       if (sessionId && active.sessionId === sessionId && !active.closing) return active;
       throw new Error('First version allows one active Session; release it before opening another');
     }
-    const config = await jsonFile<Config>(configPath, {});
+    const config = await jsonFile<HostConfig>(configPath, {});
     const settings = config.hostSettings;
     if (!settings) throw new Error('Configure the Host before creating a Session');
     let workspace = await workspacePath(settings.workspace);
@@ -164,28 +163,19 @@ async function serve(): Promise<void> {
 
   async function dispatch(path: string, body: Record<string, unknown>): Promise<unknown> {
     if (path === '/host/status') {
-      const config = await jsonFile<Config>(configPath, {});
+      const config = await jsonFile<HostConfig>(configPath, {});
       return { hostId: identity!.hostId, version: 1, configured: Boolean(config.hostSettings),
         settings: config.hostSettings ?? null, activeSession: active ? { sessionId: active.sessionId, generation: active.generation, closing: active.closing } : null,
-        stopping: shuttingDown, capabilities: ['local-session', 'permission', 'stop', 'persistent-history'],
+        stopping: shuttingDown, capabilities: ['local-session', 'permission', 'stop', 'persistent-history', 'local-config-receipt'],
         agentNet: { available: false, reason: 'not-integrated' },
         runtime: { node: process.versions.node, sdkBinaryPresent: existsSync(join(dirname(workerPath), 'claude-agent-sdk', 'claude')) } };
     }
-    if (path === '/host/configure') return exclusive(async () => {
-      if (active) throw new Error('Release the active Session before configuring the Host');
-      const allowed = new Set(['expectedRevision', 'providerId', 'model', 'workspace', 'executionAuthorized']);
-      if (Object.keys(body).some(key => !allowed.has(key))) throw new Error('Unsupported configuration field');
-      const config = await jsonFile<Config>(configPath, {});
-      const revision = config.hostSettings?.revision ?? 0;
-      if (body.expectedRevision !== revision) throw new Error('Configuration conflict: inspect the latest revision');
-      if (body.providerId !== 'moonshot-coding' || typeof body.model !== 'string'
-        || !/^[a-zA-Z0-9._-]{1,128}$/.test(body.model)
-        || typeof body.executionAuthorized !== 'boolean') throw new Error('First version requires a Kimi Code model and explicit execution authorization');
-      const workspace = await workspacePath(typeof body.workspace === 'string' ? body.workspace : join(workspaceRoot, 'default'));
-      const settings: Settings = { revision: revision + 1, providerId: body.providerId, model: body.model, workspace, executionAuthorized: body.executionAuthorized };
-      await atomicJson(configPath, { ...config, providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': 'systemd-credential:kimi' }, hostSettings: settings });
-      return { persisted: true, revision: settings.revision, effect: 'new-session', settings };
-    });
+    if (path === '/host/configure') return exclusive(() => configureHost({
+      hostId: identity!.hostId, defaultWorkspace: join(workspaceRoot, 'default'),
+      readConfig: () => jsonFile<HostConfig>(configPath, {}), writeConfig: config => atomicJson(configPath, config),
+      workspacePath, busy: () => Boolean(active) || shuttingDown,
+    }, body));
+    if (path === '/host/receipt') return exclusive(async () => readConfigReceipt(await jsonFile<HostConfig>(configPath, {}), identity!.hostId, body));
     if (path === '/session/create') return exclusive(async () => {
       if (Object.keys(body).length) throw new Error('Session creation accepts no overrides');
       const target = await ensureSession();
@@ -281,13 +271,14 @@ async function main(): Promise<void> {
   if (command === '--serve') return serve();
   if (command === 'status' || command === 'doctor') return control('/host/status', {});
   if (command === 'configure') return control('/host/configure', JSON.parse(await stdinText()));
+  if (command === 'receipt' && sessionId) return control('/host/receipt', { mutationId: sessionId });
   if (command === 'create') return control('/session/create', {});
   if (command === 'list') return control('/session/list', {});
   if (command && ['describe', 'state', 'result', 'stop', 'release'].includes(command) && sessionId) return control(`/session/${sessionId}/${command}`, {});
   if (command === 'send' && sessionId) return control(`/session/${sessionId}/send`, { text: await stdinText() });
   if (command === 'respond' && sessionId) return control(`/session/${sessionId}/permission`, JSON.parse(await stdinText()));
   if (command === 'permission' && sessionId && arg && ['allow_once', 'deny'].includes(decision)) return control(`/session/${sessionId}/permission`, { requestId: arg, decision });
-  throw new Error('Usage: myagents-host status|doctor|configure < config.json|create|list|send SESSION < prompt.txt|state/result/stop/release SESSION|permission SESSION REQUEST allow_once/deny');
+  throw new Error('Usage: myagents-host status|doctor|configure < config.json|receipt MUTATION_UUID|create|list|send SESSION < prompt.txt|state/result/stop/release SESSION|permission SESSION REQUEST allow_once/deny');
 }
 
 main().catch(error => { console.error(error instanceof Error ? error.message : 'Host operation failed'); process.exitCode = 1; });
