@@ -4488,6 +4488,7 @@ dependencies = [
  "log",
  "macos-accessibility-client",
  "minisign-verify",
+ "myagents-agent-network-crypto",
  "myagents-agent-network-protocol",
  "myagents-media-worker-protocol",
  "nix 0.29.0",
@@ -4553,6 +4554,29 @@ dependencies = [
  "zbus 5.14.0",
  "zeroize",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "myagents-agent-network-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "keyring",
+ "libc",
+ "myagents-agent-network-protocol",
+ "p256",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

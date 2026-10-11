@@ -64,7 +64,7 @@ Session label 继续表示会话标题/原摘要。来源回执和异步事件�
 
 ### 设备身份与凭据
 
-Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持有私钥；私钥只持久化到系统凭据库（macOS Keychain、Windows Credential Manager、Linux Secret Service），使用时加载到 Rust 进程，不上传云端或交给 Renderer/Node，没有文件或明文降级。当前网络的身份签发方（官方 Space / 自部署实例）验证包含公钥及签名的 CSR，签发设备 leaf 与 signed binding，将账号、设备、密钥代次绑定到证书指纹、SAN 和有效期。
+Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持有私钥；桌面端私钥只持久化到系统凭据库（macOS Keychain、Windows Credential Manager、Linux Secret Service），使用时加载到 Rust 进程，不上传云端或交给 Renderer/Node。独立共享 crypto 包另提供显式选择的 headless 加密存储：仅从私有 systemd 凭据投影接收 KEK，动态私钥记录使用 AEAD 加密并受 scope 绑定、权限和持久化校验保护；没有桌面错误后的自动回退或明文降级。该后端尚未接入实际 headless 登记 owner，详见 [Headless 身份存储](./headless_identity_store.md)。当前网络的身份签发方（官方 Space / 自部署实例）验证包含公钥及签名的 CSR，签发设备 leaf 与 signed binding，将账号、设备、密钥代次绑定到证书指纹、SAN 和有效期。
 
 外层是设备到云端的 HTTPS/WSS，接入以稳定设备公钥绑定的 DPoP 证明持有凭据对应的私钥。官方接入凭据不超过原 Space 登录剩余有效期与 30 天；自部署凭据由固定实例签发，客户端按协议最大有效期验证，不依赖 Space 登录。设备 leaf 有效 7 天，在到期前 48 小时窗口按需续签。活跃回程使用一项带 jitter 的约 6 小时检查，空闲不轮询凭据或证书。暂时签发不可用且现有 leaf 尚有效时保留当前关联，真实撤销与过期不能忽略。
 

@@ -10,17 +10,18 @@
 - Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
 - Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
 - Latest anchor: mah-linux-20261012。
-- Previous branch / commit: PR #1已合入用户 fork main e5603d06671192ba9e8fa5e1c12eec91f2733139，包含最终源码90667797且代码树一致，完整四作业CI通过。当前下载修复分支 `feat/mah-host-api-download` 从该main建立；upstream保留hAcKlyc/MyAgents。服务器仍运行000e9632包。用 git status/log/ls-remote 核对最新交付。
+- Branch / commit: `feat/mah-headless-identity-store`，基线 fork main `d190f8fde103e3f261cf21406a05be5c0355489e`；已验收运行包源码 `8b5b7820263fd9a96361e58d50072c5a05436946`。实际状态以 git 和主聊天私有 QA 为准。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
-- Previous download-repair checkpoint: 下载修复PR #2仍开放；API实际归档下载通过后raw安装器curl(28)超时，旧服务已恢复。改为嵌入完整提交的installer，并修复bb995c23 CI发现的Host UI刷新锁住问题；跑最新完整门禁后合入、发布并复验实际在线安装与同包重装。取得凭据后运行Kimi受控任务、权限与resume；之后从Agenthub authority更新契约并联调桌面adapter。
+- Next step: 完成独立 crypto/store 整合和完整门禁，使用指定可信 CI artifact 在隔离 Rust UID 下验收 systemd 加密存储；取得安全凭据后验证 Kimi，取得 authority 后接入实际 AgentNet。
 
 ## Latest owner checkpoint
 
-- 下载修复PR #2已合入fork main02cf89a3，源码0ea52f00，完整CI38166019754四作业success。unsigned测试制品公开且Ubuntu两次实际在线安装验收通过：身份/config保留、第二次PID不变、无HostTCP、原服务active。
-- 当前工作分支 `feat/mah-host-config-receipts` 从上述main建立，实现本地config+receipt同一次atomic commit、同ID恢复与冲突回执。已有Node owner/exclusive/Unixsocket复用；无新增进程或AgentNet线协议，provider凭据不进入receipt。
-- 聚焦/typecheck/独立审查通过；完整CI、主干及新制品真机回执重启复验仍待执行。Kimi Query、SDK原生resume和AgentNet仍未验收，凭据位置与authority访问仍缺。
+- PR #3 已合入 fork main `d190f8fde103e3f261cf21406a05be5c0355489e`，源码 `8b5b7820263fd9a96361e58d50072c5a05436946`；完整 CI 38168368033 四作业成功。对应 unsigned 测试 prerelease 已通过真实在线安装、同 ID 并发/冲突回执、重启恢复、配置和既有 Session 保留验收。仍未发 Kimi Query、未接 AgentNet。
+- MAH-IDENTITY-20261012：当前 `feat/mah-headless-identity-store` 从上述 main 建立。实际 headless 服务无 session bus，现有 Linux Secret Service 不可直接用；抽取共享 Rust crypto，Desktop 保持显式 OS store，新增显式 systemd KEK + 动态 AEAD 身份存储。
+- 独立存储用例首轮通过；真机验收脚本经独立复核，artifact 校验后复制窗口已修复。完整 CI、可信 Linux artifact、隔离 UID/systemd 原生验收及新源码主干交付待完成。不把隔离存储测试称作 AgentNet 登记成功。
+- Kimi 安全凭据位置和 Agenthub authority/test account 访问仍待补充，问题已提出；不要重复提问、扫描无关凭据或手改 vendor。
 
 ## Resume Instructions
 

@@ -3,8 +3,8 @@
 //! lost activation ACK without replaying activation or storing a second pointer.
 use super::account::NetworkAccountSession;
 use super::crypto::{
-    certificate_chain, certificate_fingerprint, CryptoError, DevicePrivateKey, KeyScope,
-    OsIdentityStore, TlsIdentity,
+    certificate_chain, certificate_fingerprint, CryptoError, DevicePrivateKey, IdentityStore,
+    KeyScope, OsIdentityStore, TlsIdentity,
 };
 use super::jwt::{AccessClaims, AccountVerifier, VerifiedPeer};
 use super::NetworkError;
@@ -163,6 +163,15 @@ impl NetworkIdentity {
         account: NetworkAccountSession,
         retired_generation: Option<u64>,
     ) -> Result<Self, NetworkError> {
+        Self::initialize_with_store(account, retired_generation, Arc::new(OsIdentityStore)).await
+    }
+
+    /// Backend selection belongs to the Rust owner; Desktop never auto-falls back.
+    pub(crate) async fn initialize_with_store(
+        account: NetworkAccountSession,
+        retired_generation: Option<u64>,
+        store: Arc<dyn IdentityStore>,
+    ) -> Result<Self, NetworkError> {
         account.validate_instance().await?;
         let device = crate::device_identity::current_device_identity()
             .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
@@ -213,7 +222,7 @@ impl NetworkIdentity {
         } else {
             false
         };
-        let current_key = load_key(&scope).await?;
+        let current_key = load_key_with_store(&scope, store.clone()).await?;
         if let (Some(key), Some(expected)) = (&current_key, &state.key_fingerprint) {
             if !replacement && key.public_fingerprint()? != *expected {
                 return Err(NetworkError::new("NETWORK_CREDENTIAL_GENERATION_CONFLICT"));
@@ -229,7 +238,7 @@ impl NetworkIdentity {
         )?;
         scope.key_generation = generation;
         let key = match if recovery || replacement {
-            load_key(&scope).await?
+            load_key_with_store(&scope, store.clone()).await?
         } else {
             current_key
         } {
@@ -238,7 +247,7 @@ impl NetworkIdentity {
                 let persisted_scope = scope.clone();
                 tokio::task::spawn_blocking(move || {
                     let key = Arc::new(DevicePrivateKey::generate()?);
-                    OsIdentityStore::save_pending(&persisted_scope, &key)?;
+                    store.save_pending(&persisted_scope, &key)?;
                     Ok::<_, CryptoError>(key)
                 })
                 .await
@@ -425,8 +434,15 @@ async fn validate_peer(
 pub(crate) async fn load_key(
     scope: &KeyScope,
 ) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {
+    load_key_with_store(scope, Arc::new(OsIdentityStore)).await
+}
+
+async fn load_key_with_store(
+    scope: &KeyScope,
+    store: Arc<dyn IdentityStore>,
+) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {
     let scope = scope.clone();
-    match tokio::task::spawn_blocking(move || OsIdentityStore::load(&scope))
+    match tokio::task::spawn_blocking(move || store.load(&scope))
         .await
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?
     {
