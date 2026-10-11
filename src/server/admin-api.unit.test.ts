@@ -4554,6 +4554,8 @@ describe('admin-api Agent workspace archive', () => {
         enabled: false,
         workspacePath: '/tmp/workspace',
         channels: [],
+        mcpEnabledServers: '[playwright,tavily-search]',
+        mcpServersJson: '[]',
       }],
     });
     writeJson(join(scratch, '.myagents', 'projects.json'), [{
@@ -4568,6 +4570,9 @@ describe('admin-api Agent workspace archive', () => {
     const result = await handleAgentUnarchive({ id: 'agent-1' });
 
     expect(result.success).toBe(true);
+    const agents = readConfig().agents as Array<Record<string, unknown>>;
+    expect(agents[0].mcpEnabledServers).toEqual(['playwright', 'tavily-search']);
+    expect(agents[0].mcpServersJson).toBe('[]');
     const config = readConfig();
     expect((config.agents as Array<Record<string, unknown>>)[0].enabled).toBe(true);
     const projects = readJson(join(scratch, '.myagents', 'projects.json'));

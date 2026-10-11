@@ -25,6 +25,7 @@ import {
 import { isAbsolute, resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
 import { resolveHostProviderCredential, resolveHostCloudModelProvider } from './host-credentials';
+import { normalizeConfigMcpSelections, normalizeProjectMcpSelections } from '../../shared/mcpSelection';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
 import { HOST_PROVIDER_LIMIT, isHostModelId, isHostProviderProfile, portableProfileToProvider } from '../../shared/hostProviderConfig';
@@ -314,6 +315,7 @@ export function loadConfig(options: PersistenceReadOptions = {}): AdminAppConfig
     // Keep Admin API/CLI reads aligned with renderer and Rust IM config
     // readers: legacy Agent-only HTTP/SSE definitions are part of the MCP
     // catalogue until the user explicitly removes or disables them.
+    normalizeConfigMcpSelections(config);
     promoteAgentMcpJsonToGlobal(config);
     return config;
   } catch {
@@ -329,6 +331,7 @@ export function loadConfig(options: PersistenceReadOptions = {}): AdminAppConfig
             stripBom(readFileSync(bakPath, 'utf-8')),
           ) as AdminAppConfig,
         ) as AdminAppConfig;
+        normalizeConfigMcpSelections(config);
         promoteAgentMcpJsonToGlobal(config);
         return config;
       } catch {
@@ -383,6 +386,7 @@ export async function withConfigLock(
           await modifier(config),
         ) as AdminAppConfig;
 
+        normalizeConfigMcpSelections(modified);
         if (JSON.stringify(modified) === before) {
           return modified;
         }
@@ -486,13 +490,16 @@ export function loadProjects(options: PersistenceReadOptions = {}): ProjectSlim[
   if (!existsSync(path)) return [];
   try {
     const raw = readFileSync(path, 'utf-8');
-    return JSON.parse(raw) as ProjectSlim[];
+    const projects = JSON.parse(raw) as ProjectSlim[];
+    normalizeProjectMcpSelections(projects);
+    return projects;
   } catch {
     return [];
   }
 }
 
 export function saveProjects(projects: ProjectSlim[]): void {
+  normalizeProjectMcpSelections(projects);
   const path = getProjectsPath();
   const tmpPath = path + '.tmp';
   writeFileSync(tmpPath, JSON.stringify(projects, null, 2), 'utf-8');
@@ -539,6 +546,7 @@ export async function atomicModifyProjects(
         const projects = loadProjects(options);
         const before = JSON.stringify(projects);
         const modified = await modifier(projects);
+        normalizeProjectMcpSelections(modified);
 
         if (JSON.stringify(modified) === before) {
           return modified;
