@@ -2,19 +2,19 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T00:48:00+08:00 -->
-<!-- codex-handoff:latest-anchor=20261012-0048-mah-ui-provider -->
+<!-- codex-handoff:last-updated=2026-10-12T01:30:00+08:00 -->
+<!-- codex-handoff:latest-anchor=mah-linux-20261012 -->
 
 ## Current Snapshot
 
-- Status: 桌面端首批本地实现与隔离 UI 验收通过，尚无真实 Host 联调；未合入主干、未推送、未发布。
-- Current task: MAH-20261012，MAH-UI 首批：AgentNet 设备详情中的 Host 管理入口、执行环境及 Provider 配置。
-- Latest anchor: 20261012-0048-mah-ui-provider。
-- Branch / commit: `feat/mah-ui-host-management`；来源 `origin/main` 为 `37cf5282f28e1c91cb47f02a34c1dd53a31faaad`（0.5.2）。本文件所在任务提交是首批交付锚点；用 `git log -1` 核对。
+- Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装验收进行中，尚未完成真实 Kimi 执行与 AgentNet 联调。
+- Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
+- Latest anchor: mah-linux-20261012。
+- Branch / commit: Linux 开发分支 `feat/mah-linux-host`；origin 为用户 fork heavenzhang/MyAgents，upstream 保留 hAcKlyc/MyAgents；当前基线 4267bdb9。用 git status/log/ls-remote 核对最新交付，不将本文件旧锚点当当前 HEAD。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
-- Blockers: Agenthub authority 协议、Linux Host 实现及两设备真实测试环境尚未接入；当前已配置 GitHub 账号对上游只有 pull 权限，未找到明确可写 fork。主干集成/发布由 MAH 主聊天统一安排，桌面端聊天不操作 Host/云端生产。
-- Next steps: 主聊天确定有效接口版本和可写交付仓库；从 authority 导入固定契约，再由 Rust 接入受信任人类设备级入口；替换 adapter 并复验真实权限/CAS/回执/生效；随后扩展工作区/Agent、MCP/Skills、真实 pending interaction 审批与日志。
+- Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
+- Next steps: 见 specs/tech_docs/linux_host.md 的勾选清单；已完成最终 bundle 真启动；接着完成真机 systemd 安装/重启/回滚，再运行 Kimi 受控任务、权限与 resume；之后从 Agenthub authority 更新契约并联调桌面 adapter。
 
 ## Resume Instructions
 

@@ -13,6 +13,10 @@ const ALLOWED_SUFFIXES = [
   '.credentialed.test.ts',
 ];
 const CHILD_PROCESS_ALLOWLIST = new Set([
+  // Headless Host tests run only isolated Node control/store children with
+  // model execution disabled and pre-warm off. They never launch the SDK.
+  'src/server/host-controller.integration.test.ts',
+  'src/server/host-session-worker.integration.test.ts',
   // On Windows, runs process.execPath only to enumerate the sealed child's env
   // names. This catches OS-level case folding without secrets or network I/O.
   'src/server/integrated-runtimes/dsh/child-environment.unit.test.ts',

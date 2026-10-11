@@ -58,6 +58,7 @@ import { planRetraction } from './utils/message-retraction';
 import type { TransientProviderTextRetryDecision } from './session-core/turn-result-policy';
 import { diagnoseSdkSubprocessFailure } from './utils/sdk-subprocess-diagnostics';
 import { createGuardedSdkQuery } from './utils/sdk-child-launch-guard';
+import { hostExecutionLimits } from './utils/host-execution-limits';
 import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyError, prepareProviderBinding, type PreparedProvider } from './utils/managed-proxy-binding';
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
 import {
@@ -5630,7 +5631,7 @@ type OwnedFreezeSnapshotPatch = Partial<Pick<
   'runtime' | 'runtimeSource' | 'providerExecutionIdentity' | 'origin' | keyof ProductSessionSnapshotPatch
 >>;
 
-async function restoreBuiltinConfigFromOwnedMetadata(meta: SessionMetadata): Promise<void> {
+export async function restoreBuiltinConfigFromOwnedMetadata(meta: SessionMetadata): Promise<void> {
   if (!agentDir || isExternalRuntime(getCurrentRuntimeType())) return;
   const { resolveWorkspaceConfig } = await import('./utils/admin-config');
   const resolved = resolveWorkspaceConfig(agentDir, meta, { includeMcp: false });
@@ -11351,6 +11352,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     }
 
     const commonQueryOptions = {
+      ...hostExecutionLimits(),
       ...(configState.currentProviderEnv?.endpointSource ? { abortController: bindingController } : {}),
       enableFileCheckpointing: true,
       thinking: thinkingConfig,
