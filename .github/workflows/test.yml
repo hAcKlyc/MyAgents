@@ -4,6 +4,7 @@ name: Test
 # during fast iteration — so it MUST run automatically on every PR and push,
 # not just locally. Required check: a PR that fails this cannot merge.
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main, "dev/**"]
