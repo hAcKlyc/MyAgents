@@ -21,6 +21,8 @@ it('resolves private credential references only in Host mode and rejects unsafe 
   expect(() => resolveHostProviderCredential('systemd-credential:linked')).toThrow('private');
   chmodSync(join(directory, 'kimi'), 0o644);
   expect(() => resolveHostProviderCredential('systemd-credential:kimi')).toThrow('private');
+  chmodSync(join(directory, 'kimi'), 0o440);
+  expect(() => resolveHostProviderCredential('systemd-credential:kimi')).toThrow('private');
   chmodSync(join(directory, 'kimi'), 0o600); writeFileSync(join(directory, 'kimi'), '');
   expect(() => resolveHostProviderCredential('systemd-credential:kimi')).toThrow('invalid');
 });
