@@ -2885,7 +2885,6 @@ export async function beginDshDeleteMutation(input: {
     ensureStorageDir();
     try {
         return await withSessionFileLock(input.sessionId, async () => {
-            const messages = await readDshMessagesForMutation(input.sessionId);
             return withSessionsLock(async () => {
                 const all = readDshSessionsIndexForWrite(input.sessionId);
                 const index = all.findIndex(session => session.id === input.sessionId);
@@ -2897,18 +2896,18 @@ export async function beginDshDeleteMutation(input: {
                     !sessionUsesDsh(current)
                     || !current.runtimeSessionId
                     || current.pendingDshMutation
-                    || current.pendingDshRootOperation
-                    || (current.pendingDshInputs?.length ?? 0) > 0
                     || isSystemMaintenanceSession(current)
                 ) {
                     return dshMutationFailure('precondition_failed', 'The DSH delete authority changed');
                 }
+                // Rust has retired execution owners. Pending inputs/operations
+                // remain intact until native purge succeeds and Product removal
+                // completes; deletion never needs to decode the transcript.
                 const intent: PendingDshDelete = {
                     schemaVersion: 1,
                     kind: 'dsh-delete',
                     clientMutationId: input.clientMutationId,
                     sourceRuntimeSessionId: current.runtimeSessionId,
-                    sourceMessageCount: messages.length,
                 };
                 all[index] = { ...current, pendingDshMutation: intent };
                 writeDshSessionsIndex(all, input.sessionId);

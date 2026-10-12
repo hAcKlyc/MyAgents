@@ -155,6 +155,10 @@ Provider `server_tool_use` 是独立、有界的内容投影，不进入 canonic
 | Retry | 同一 mutation scope 完成精确 rewind，再走普通 desktop admission 重发原输入 |
 | Delete | Rust lifecycle fence → native tombstone → Product 隐藏 → native purge → Product 删除 |
 
+Delete 使用协议 6.2 的存储管理入口：在未绑定的原生进程中，用显式 runtimeSessionId 重放 delete prepare，保留原 token，不启动 Agent、Provider 或扩展，不读取 Product／native transcript。Rust 先退休执行 owner；待处理 operation/input 保留到原生清理成功后随 Product 删除。即使 receipt 已为 purged，Host 仍重试 purge，确保原生物理回收完成。未结算 fork/rewind 事务必须先由原 owner 结算，不能借删除丢弃工作区回退计划或另一个 Session 的发布状态；协调数据库损坏也不属于此入口的修复范围。
+
+启动日志记录 handshake、extensions、native-create/resume/rebind、mutation-reconciliation、turn-reconciliation、configuration、ready 阶段；阶段名称只说明失败所在步骤，EOF 不作为根因判断。私聊 IM 的 DSH 恢复失败在返回错误／producer finalPayloads 中提供 `/new` 提示，沿用已有的显式 peer 换绑事务，不自动换绑、不删除旧历史。
+
 root 文件恢复只覆盖 checkpoint 所治理的原生 Write/Edit，不回滚任意 Shell 或子 Agent 文件副作用。连续 rewind 复用不可变 checkpoint 与已提交 retained cuts，不复制第二份恢复记录。Fork 不继承源 Goal、置顶、Tag 或 registered-Agent origin。
 
 Retry 使用原生 operation anchor 区分未接纳与已接纳：前者只移除产品未执行尾部；后者必须建立精确 native rewind（包含 genesis 边界），再截断产品历史。失败响应区分会话是否已提交、文件是否已恢复与重发是否已接纳。丢响应后读取权威 receipt，不用旧前端快照覆盖，不自动重复 mutation。
@@ -179,4 +183,4 @@ DSH recovery admission 当前按未结算 mutation 的种类限制 prepare；具
 
 默认 unit/integration 使用 fake model、隔离目录和 loopback fixture；覆盖握手与失配、generation retirement、admission uncertainty、恢复、权限、steer、附件与联合 mutation。真实 Provider/native smoke 必须显式执行，结果只证明对应 artifact、平台与模型。构建验证不代替真实桌面交互验收，也不在状态文档固化某次测试数量、源码 hash 或机器记录。
 
-准备好本机 artifact 后，设置 `MYAGENTS_DSH_NATIVE_SMOKE=1`，可选 `MYAGENTS_DSH_NATIVE_SMOKE_RESOURCE_ROOT` 指向含 build selection 的 resources 根，再用内置 Node 运行 `node_modules/vitest/vitest.mjs run --config vitest.dsh-native.config.ts -t "restores interrupted history"`。该定向 smoke 使用 loopback fake Provider，验证已有流式历史经 Stop、进程重启、原生恢复与 prewarm 后仍能进入下一次模型输入；不读取用户会话或真实 Provider 凭据，也不能证明未提供的故障状态已被修复。专用配置同时加载该 artifact 的 effective lock 与 public contract，避免把源码快照与准备好的二进制混用。
+准备好本机 artifact 后，设置 `MYAGENTS_DSH_NATIVE_SMOKE=1`，可选 `MYAGENTS_DSH_NATIVE_SMOKE_RESOURCE_ROOT` 指向含 build selection 的 resources 根，再用内置 Node 运行 `node_modules/vitest/vitest.mjs run --config vitest.dsh-native.config.ts -t "history after"`。该定向 smoke 使用 loopback fake Provider，验证已有流式历史分别经正常 Stop／强制终止、进程重启、原生恢复与 prewarm 后仍能进入下一次模型输入，并验证损坏 native history 后的存储删除；不读取用户会话或真实 Provider 凭据，也不能证明未提供的故障状态已被修复。DeepSeek 保留正式端点与原生 adapter，通过仅转发到 loopback 的测试代理接入 fake Provider；测试机需提供支持 `req -addext` 的 `openssl`，临时证书仅由该测试子进程信任。专用配置同时加载该 artifact 的 effective lock 与 public contract，避免把源码快照与准备好的二进制混用。

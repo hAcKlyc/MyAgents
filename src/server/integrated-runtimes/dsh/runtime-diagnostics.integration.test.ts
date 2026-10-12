@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PRESET_PROVIDERS } from '../../../shared/config-types';
 import type { UnifiedEvent } from '../../runtimes/types';
 import { getLogContext } from '../../logger-context';
-import { DshRuntime } from './runtime';
+import { DshRuntime, startDshStorageManagement } from './runtime';
 import type { DshRuntimeProcessHostOptions } from './process-host';
 import { DshAttachmentRegistry } from './attachments';
 import { dshSessionOwnedPaths } from './owned-paths';
@@ -63,6 +63,19 @@ afterEach(async () => {
 });
 
 describe('DSH failed admission diagnostics', () => {
+  it('initializes storage management without credentials or a Session CLI capability', async () => {
+    fixture.phase = 'storage';
+    fixture.home = await mkdtemp(join(tmpdir(), 'dsh-storage-bootstrap-'));
+    await writeFile(join(fixture.home, 'node'), 'synthetic');
+    await mkdir(join(fixture.home, 'integrated-runtimes/dsh/runtime-artifact'), { recursive: true });
+    const workspacePath = join(fixture.home, 'workspace'); await mkdir(workspacePath);
+    vi.stubEnv('MYAGENTS_INTERNAL_CLI_TOKEN', 'must-not-be-forwarded');
+    const host = await startDshStorageManagement({ sessionId: 'storage-only', workspacePath });
+    expect(fixture.host?.childEnvironment.env.MYAGENTS_INTERNAL_CLI_TOKEN).toBeUndefined();
+    expect(() => fixture.host?.hostHandlers['host/credential/resolve']({} as never, {} as never)).toThrow('cannot execute');
+    await host.stop();
+  });
+
   it.each(['handshake', 'create', 'resume', 'reconciliation'])('retains %s diagnostics without admitting product events', async phase => {
     fixture.phase = phase;
     fixture.home = await mkdtemp(join(tmpdir(), 'dsh-diagnostics-'));
@@ -72,6 +85,7 @@ describe('DSH failed admission diagnostics', () => {
     vi.stubEnv('MYAGENTS_INTERNAL_CLI_TOKEN', 'synthetic');
     const logs: Array<{ message: string; sessionId?: string; runtime?: string }> = [];
     const capture = (...args: unknown[]) => logs.push({ message: args.join(' '), ...getLogContext() });
+    vi.spyOn(console, 'log').mockImplementation(capture);
     vi.spyOn(console, 'warn').mockImplementation(capture);
     vi.spyOn(console, 'error').mockImplementation(capture);
     const events: UnifiedEvent[] = [];
@@ -82,11 +96,12 @@ describe('DSH failed admission diagnostics', () => {
     }, event => events.push(event))).rejects.toThrow(/failed/);
     // This callback can also fire after a replacement retires the product receiver.
     fixture.host!.onStderrLine?.('late stream tail');
-    expect(logs.map(log => log.message)).toEqual(expect.arrayContaining([
-      '[dsh] before admission', '[dsh] cleanup tail', '[dsh] late stream tail',
-      '[dsh] Process exited {"code":23,"signal":null,"hostTermination":null}',
-    ]));
-    expect(logs.every(log => log.sessionId === 'product-diagnostics' && log.runtime === 'dsh')).toBe(true);
+    const expectedPhase = phase === 'create' ? 'native-create' : phase === 'resume' ? 'native-resume' : phase === 'reconciliation' ? 'turn-reconciliation' : 'handshake';
+    expect(logs.some(log => log.message.includes(`phase=${expectedPhase} admission failed:`))).toBe(true);
+    for (const tail of ['before admission', 'cleanup tail', 'late stream tail', 'Process exited']) {
+      expect(logs.some(log => log.message.includes(tail))).toBe(true);
+    }
+    expect(logs.filter(log => log.message.startsWith('[dsh]')).every(log => log.sessionId === 'product-diagnostics' && log.runtime === 'dsh')).toBe(true);
     expect(JSON.stringify(logs)).not.toContain('synthetic-secret');
     if (phase !== 'handshake') expect(logs.some(log => log.message.includes('Protocol input reached EOF'))).toBe(true);
     expect(events).toEqual([]); // No session_complete/history/turn escapes admission.

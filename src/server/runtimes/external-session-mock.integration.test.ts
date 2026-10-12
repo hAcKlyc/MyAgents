@@ -6160,6 +6160,27 @@ describe('external SessionEngine with fake runtime', () => {
   });
 
 
+  it.each(['private', 'group'] as const)('offers /new only to private peers when DSH resume fails (%s)', async sourceType => {
+    const harness = await createHarness([{ kind: 'success', text: 'old reply' }], { runtimeType: 'dsh' });
+    const sessionId = 'dsh-im-resume-failed';
+    const workspacePath = join(harness.home, 'workspace');
+    const request = (requestId: string) => ({ message: 'follow up', requestId, sessionId, workspacePath,
+      scenario: { type: 'agent-channel' as const, platform: 'feishu', sourceType },
+      permissionMode: 'full-auto', model: 'deepseek-flash', metadataBirthPending: true });
+    const first = await harness.engine.enqueueImMessage(request('first'));
+    await first.dispatchAcceptance;
+    await harness.engine.waitIdle(2_000, 10);
+    await harness.externalSession.stopExternalSession();
+    vi.spyOn(harness.runtime, 'startSession').mockRejectedValueOnce(new Error('synthetic native resume failure'));
+    const result = await harness.engine.enqueueImMessage(request('failed-resume'));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error?.includes('/new')).toBe(sourceType === 'private');
+      expect(result.error).toContain('synthetic native resume failure');
+    }
+    expect(harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId).toBe('fake-thread-1');
+  });
+
   it('admits consecutive IM follow-ups immediately and drains them FIFO at turn boundaries', async () => {
     const harness = await createHarness([
       { kind: 'success', text: 'first IM answer', completeDelayMs: 300 },

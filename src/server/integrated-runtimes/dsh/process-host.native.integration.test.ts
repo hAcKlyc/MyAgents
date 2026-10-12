@@ -1,5 +1,5 @@
 import { GENERATED_PROTOCOL_VERSION } from '../../../../contracts/myagents-dsh/public-contract.generated';
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { execFileSync } from "node:child_process";
 import { connect, type Socket } from "node:net";
@@ -11,6 +11,7 @@ import { buildDshChildEnvironment } from "./child-environment";
 import type { MethodParams, DshRpcObject } from "./protocol-types";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  glob,
   mkdir,
   mkdtemp,
   readFile,
@@ -208,9 +209,9 @@ async function createNativeHostFixture(
 describe.runIf(nativeSmokeEnabled)(
   "DSH RuntimeProcessHost native smoke",
   () => {
-    it.each(['resend', 'prewarm'] as const)('restores interrupted history before %s after a cold process restart', async mode => {
+    it.each(['anthropic', 'deepseek'].flatMap(providerKind => ['interrupt', 'kill'].flatMap(stopKind => ['resend', 'prewarm'].map(mode => ({ providerKind, stopKind, mode })))))('restores $providerKind history after $stopKind before $mode and deletes unreadable state', async ({ providerKind, stopKind, mode }) => {
       const inputs: string[] = [];
-      const server = createServer(async (request, response) => {
+      const respond: RequestListener = async (request, response) => {
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
         inputs.push(Buffer.concat(chunks).toString('utf8'));
@@ -224,18 +225,57 @@ describe.runIf(nativeSmokeEnabled)(
         emit('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 10 } });
         emit('message_stop', { type: 'message_stop' });
         response.end();
-      });
+      };
+      const certificateRoot = providerKind === 'deepseek' ? await mkdtemp(join(tmpdir(), 'myagents-dsh-recovery-tls-')) : undefined;
+      const certificate = certificateRoot ? join(certificateRoot, 'certificate.pem') : undefined;
+      const key = certificateRoot ? join(certificateRoot, 'key.pem') : undefined;
+      if (certificate && key) {
+        execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+          '-subj', '/CN=api.deepseek.com', '-addext', 'subjectAltName=DNS:api.deepseek.com',
+          '-keyout', key, '-out', certificate], { stdio: 'ignore' });
+      }
+      const server = certificate && key
+        ? createHttpsServer({ key: await readFile(key), cert: await readFile(certificate) }, respond)
+        : createServer(respond);
       await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Fixture did not bind');
-      const fixture = await createNativeHostFixture(`stop-${mode}`);
+      const sockets = new Set<Socket | Duplex>();
+      const proxy = certificate ? createServer((_request, response) => { response.writeHead(502); response.end(); }) : undefined;
+      let httpsProxy: string | undefined;
+      if (proxy) {
+        proxy.on('connect', (request, downstream, head) => {
+          // Keep the approved DeepSeek URL and native adapter. Only this child
+          // trusts this fixture's certificate, and the proxy cannot forward
+          // traffic anywhere except the loopback server.
+          if (request.url !== 'api.deepseek.com:443') { downstream.destroy(); return; }
+          const upstream = connect({ host: '127.0.0.1', port: address.port });
+          for (const socket of [downstream, upstream]) {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+            socket.on('error', () => { downstream.destroy(); upstream.destroy(); });
+          }
+          upstream.once('connect', () => {
+            downstream.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            if (head.length) upstream.write(head);
+            downstream.pipe(upstream); upstream.pipe(downstream);
+          });
+        });
+        await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+        const proxyAddress = proxy.address();
+        if (!proxyAddress || typeof proxyAddress === 'string') throw new Error('Proxy did not bind');
+        httpsProxy = `http://127.0.0.1:${proxyAddress.port}`;
+      }
+      const fixture = await createNativeHostFixture(`stop-${providerKind}-${stopKind}-${mode}`, undefined,
+        httpsProxy ? { HTTPS_PROXY: httpsProxy, HTTP_PROXY: httpsProxy, NO_PROXY: '' } : undefined, certificate);
       const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
       await registry.initialize();
       const events: DshRpcObject[] = [];
       const handlers: DshHostRequestHandlers = { ...fixture.hostHandlers,
         'host/credential/resolve': params => params.purpose === 'availability'
           ? { kind: 'availability', available: true, authoritativeCredentialRevision: params.profileRevision }
-          : { kind: 'material', authoritativeCredentialRevision: params.profileRevision, material: { apiKey: 'synthetic-stop-key' } },
+          : { kind: 'material', authoritativeCredentialRevision: params.profileRevision, material: { apiKey: 'synthetic-stop-key' },
+            ...(httpsProxy ? { providerNetwork: { httpsProxy, noProxy: '' } } : {}) },
         'host/hook/execute': () => ({ state: 'continue' }),
         'host/attachment/acquire': params => registry.acquire(params),
         'host/attachment/release': params => { registry.release(params); return { ok: true }; },
@@ -243,9 +283,11 @@ describe.runIf(nativeSmokeEnabled)(
       const notifications: DshRuntimeNotificationHandlers = { 'runtime/event': params => { events.push(params); }, 'host/interaction/cancel': () => undefined };
       let host = fixture.createHost(handlers, notifications);
       try {
-        const provider = structuredClone(PRESET_PROVIDERS.find(({ id }) => id === 'anthropic-api'))!;
-        provider.id = 'native-stop-fixture'; provider.config.baseUrl = `http://127.0.0.1:${address.port}`;
-        const profile = compileDshModelExecutionProfile({ provider, modelId: 'claude-sonnet-4-6' });
+        const provider = structuredClone(PRESET_PROVIDERS.find(({ id }) => id === (providerKind === 'deepseek' ? 'deepseek' : 'anthropic-api')))!;
+        if (providerKind === 'anthropic') {
+          provider.id = 'native-stop-fixture'; provider.config.baseUrl = `http://127.0.0.1:${address.port}`;
+        }
+        const profile = compileDshModelExecutionProfile({ provider, modelId: providerKind === 'deepseek' ? 'deepseek-flash' : 'claude-sonnet-4-6' });
         const plane = compileDshProductExtensionPlane({ revision: 'stop-extensions', skills: [], commands: [], agents: [], mcpServers: [], dynamicTools: [] });
         const extension = { snapshotAttachment: await registry.publishJson(plane.snapshot) };
         await host.start();
@@ -264,8 +306,14 @@ describe.runIf(nativeSmokeEnabled)(
           limits: { maxTurns: 2 }, origin: { kind: 'headless', scenario: 'stop-resume' } });
         await startTurn('interrupted-turn', 'ORIGINAL_HISTORY_MARKER');
         await expect.poll(() => JSON.stringify(events), { timeout: 20_000 }).toContain('INTERRUPTED_PARTIAL');
-        await host.request('turn/interrupt', { clientOperationId: 'interrupted-turn', cancelQueued: true });
-        await host.request('session/close', { clientOperationId: 'stop-close' });
+        if (stopKind === 'interrupt') {
+          await host.request('turn/interrupt', { clientOperationId: 'interrupted-turn', cancelQueued: true });
+          await host.request('session/close', { clientOperationId: 'stop-close' });
+        } else {
+          if (!host.pid) throw new Error('Native child has no PID');
+          process.kill(host.pid, 'SIGKILL');
+          await host.waitForExit();
+        }
         await host.stop();
         host = fixture.createHost(handlers, notifications);
         await host.start();
@@ -283,12 +331,32 @@ describe.runIf(nativeSmokeEnabled)(
         expect(inputs).toHaveLength(2);
         expect(inputs[1]).toContain('ORIGINAL_HISTORY_MARKER');
         expect(inputs[1]).toContain('RESEND_MARKER');
+        await host.request('session/close', { clientOperationId: 'before-storage-delete' });
+        await host.stop();
+        const nativeLogs: string[] = [];
+        for await (const path of glob(join(fixture.runtimeHome, 'sessions', '**', '*.jsonl.zstd'))) nativeLogs.push(path);
+        expect(nativeLogs.length).toBeGreaterThan(0);
+        for (const path of nativeLogs) await writeFile(path, 'invalid compressed history');
+        host = fixture.createHost(Object.fromEntries(DSH_REVERSE_METHOD_NAMES.map(method => [method, () => { throw new Error('Storage delete requested execution'); }])) as unknown as DshHostRequestHandlers, {
+          'runtime/event': () => { throw new Error('Storage delete emitted a business event'); },
+          'host/interaction/cancel': () => { throw new Error('Storage delete emitted an interaction'); },
+        });
+        await host.start();
+        const deletion = new DshMutationController(host, runtimeSessionId);
+        const prepared = await deletion.prepareStoredDelete('delete-unreadable');
+        expect((await deletion.commitDelete('delete-unreadable', prepared.token)).state).toBe('committed');
+        expect((await deletion.purgeDelete('delete-unreadable', prepared.token)).state).toBe('purged');
+        expect(inputs).toHaveLength(2);
+        for (const path of nativeLogs) await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
       } catch (error) {
         throw new Error(`Stop/resume (${mode}) failed; stderr=${fixture.stderr.join(' | ')}`, { cause: error });
       } finally {
         await host.stop(); registry.close(); server.closeAllConnections();
+        for (const socket of sockets) socket.destroy();
+        if (proxy) { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy.close(() => resolve())); }
         await new Promise<void>(resolve => server.close(() => resolve()));
         await rm(fixture.temporaryRoot, { recursive: true, force: true });
+        if (certificateRoot) await rm(certificateRoot, { recursive: true, force: true });
       }
     }, 120_000);
 

@@ -585,6 +585,54 @@ function executionEnvironment(
   };
 }
 
+/** Process bootstrap is shared by execution and offline storage management. */
+async function prepareDshProcess(sessionId: string, requestedWorkspace: string, allowSessionTools: boolean) {
+  const installation = await installedRuntime();
+  const workspacePath = await realpath(requestedWorkspace);
+  if (normalize(workspacePath) !== workspacePath) throw new Error('DSH workspace path is not canonical');
+  const roots = await createOwnedRoots(sessionId);
+  const workspaceIdentity = `myagents-workspace-v1:${hash(workspacePath)}`;
+  const commandDirectories = (await ensureShellPath()).split(delimiter)
+    .filter(entry => entry.length > 0 && isAbsolute(entry));
+  const childEnvironment = buildDshChildEnvironment({
+    nodeExecutablePath: installation.nodeExecutablePath,
+    commandDirectories,
+    inheritedEnvironment: process.env,
+    proxyEnvironment: getGeneralProxyEnvironment(),
+    sessionCli: allowSessionTools ? {
+      productSessionId: sessionId, sidecarPort: getSidecarPort(),
+      internalCliToken: process.env[INTERNAL_CLI_TOKEN_ENV] ?? '',
+    } : null,
+  });
+  return { installation, workspacePath, roots, workspaceIdentity, childEnvironment,
+    environmentWithoutDigest: executionEnvironment(workspacePath, workspaceIdentity, roots.attachmentRoot, childEnvironment.allowedKeys) };
+}
+
+/** No Provider, extension inventory, Agent or Product history is admitted here. */
+export async function startDshStorageManagement(options: { sessionId: string; workspacePath: string }): Promise<DshRuntimeProcessHost> {
+  const setup = await prepareDshProcess(options.sessionId, options.workspacePath, false);
+  const rejectExecution = (): never => { throw new Error('DSH storage management cannot execute Host capabilities'); };
+  const log = (message: string) => withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => console.warn(`[dsh] phase=storage-management ${message}`));
+  const host = new DshRuntimeProcessHost({
+    installation: setup.installation,
+    childEnvironment: setup.childEnvironment,
+    initialize: createDshInitializeParams({ productSessionId: options.sessionId, productVersion: packageJson.version,
+      runtimeHome: setup.roots.runtimeHome, workspace: { path: setup.workspacePath, identity: setup.workspaceIdentity },
+      executionEnvironment: setup.environmentWithoutDigest, interaction: 'unavailable' }),
+    hostHandlers: {
+      'host/credential/resolve': rejectExecution, 'host/interaction/request': rejectExecution,
+      'host/tool/execute': rejectExecution, 'host/hook/execute': rejectExecution,
+      'host/attachment/put': rejectExecution, 'host/attachment/acquire': rejectExecution, 'host/attachment/release': rejectExecution,
+    },
+    notificationHandlers: { 'runtime/event': rejectExecution, 'host/interaction/cancel': rejectExecution },
+    onStderrLine: log, redactStderrLine: redactDshDiagnosticLine,
+    onFailure: error => log(redactDshDiagnosticLine(error.message)),
+    onExit: exit => log(`Process exited ${JSON.stringify({ ...exit, pid: host.pid, runtimeGeneration: host.identity?.runtimeGeneration })}`),
+  });
+  try { await host.start(); return host; }
+  catch (error) { await host.stop('storage_management_failed').catch(() => undefined); throw error; }
+}
+
 function answerValue(
   kind: PendingInteraction['kind'],
   schema: DshRpcObject,
@@ -899,35 +947,10 @@ export class DshRuntime implements AgentRuntime {
     if (options.runtimeSource && options.runtimeSource !== 'integrated') {
       throw new Error('DSH Runtime source must be integrated');
     }
-    const installation = await installedRuntime();
-    const workspacePath = await realpath(options.workspacePath);
-    if (normalize(workspacePath) !== workspacePath) {
-      throw new Error('DSH workspace path is not canonical');
-    }
-    const roots = await createOwnedRoots(options.sessionId);
+    const { installation, workspacePath, roots, workspaceIdentity, childEnvironment, environmentWithoutDigest } =
+      await prepareDshProcess(options.sessionId, options.workspacePath, true);
     const attachments = new DshAttachmentRegistry(roots.attachmentRoot);
     await attachments.initialize();
-    const workspaceIdentity = `myagents-workspace-v1:${hash(workspacePath)}`;
-    const commandDirectories = (await ensureShellPath())
-      .split(delimiter)
-      .filter(entry => entry.length > 0 && isAbsolute(entry));
-    const childEnvironment = buildDshChildEnvironment({
-      nodeExecutablePath: installation.nodeExecutablePath,
-      commandDirectories,
-      inheritedEnvironment: process.env,
-      proxyEnvironment: getGeneralProxyEnvironment(),
-      sessionCli: {
-        productSessionId: options.sessionId,
-        sidecarPort: getSidecarPort(),
-        internalCliToken: process.env[INTERNAL_CLI_TOKEN_ENV] ?? '',
-      },
-    });
-    const environmentWithoutDigest = executionEnvironment(
-      workspacePath,
-      workspaceIdentity,
-      roots.attachmentRoot,
-      childEnvironment.allowedKeys,
-    );
     let processValue: DshProcess | undefined;
     let drainRequested = false;
     const onManagedDrain = () => {
@@ -1119,6 +1142,13 @@ export class DshRuntime implements AgentRuntime {
         emitProductEvent({ kind: 'interactive_request_resolved', requestId: interactionId, status: 'cancelled' });
       },
     });
+    let admissionPhase = 'handshake';
+    const phase = (next: string): void => {
+      admissionPhase = next;
+      withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
+        console.log(`[dsh] phase=${admissionPhase}`);
+      });
+    };
     const host = new DshRuntimeProcessHost({
       installation,
       initialize,
@@ -1129,15 +1159,15 @@ export class DshRuntime implements AgentRuntime {
       // fails or the shared product event receiver has retired its generation.
       // console uses the existing UnifiedLogger persistence and UI log sink.
       onStderrLine: line => withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
-        console.warn(`[dsh] ${line}`);
+        console.warn(`[dsh] phase=${admissionPhase} ${line}`);
       }),
       redactStderrLine: redactDshDiagnosticLine,
       onExit: exit => withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
-        console.warn(`[dsh] Process exited ${JSON.stringify({ ...exit, pid: host.pid, runtimeGeneration: host.identity?.runtimeGeneration })}`);
+        console.warn(`[dsh] phase=${admissionPhase} Process exited ${JSON.stringify({ ...exit, pid: host.pid, runtimeGeneration: host.identity?.runtimeGeneration })}`);
       }),
       onFailure: error => {
         withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
-          console.error(`[dsh] ${redactDshDiagnosticLine(error.message)}`);
+          console.error(`[dsh] phase=${admissionPhase} ${redactDshDiagnosticLine(error.message)}`);
         });
         // Transport failure ends this process generation. The shared lifecycle
         // owner must release running state so queued input can resume it.
@@ -1146,6 +1176,7 @@ export class DshRuntime implements AgentRuntime {
     });
 
     try {
+      phase('handshake');
       const identity = await host.start();
       projector = new DshRuntimeEventProjector({
         productSessionId: options.sessionId,
@@ -1210,6 +1241,7 @@ export class DshRuntime implements AgentRuntime {
           }
         },
       });
+      phase('extensions');
       const extensionResult = await host.request(
         'extension/replace',
         { snapshotAttachment: await attachments.publishJson(extension) },
@@ -1271,12 +1303,14 @@ export class DshRuntime implements AgentRuntime {
         interactionScenario: OFFICIAL_INTERACTION_REVISION,
         ...(options.resumeSessionId ? { runtimeSessionId: options.resumeSessionId } : {}),
       };
+      phase(options.resumeSessionId ? 'native-resume' : 'native-create');
       let binding = await host.request(
         options.resumeSessionId ? 'session/resume' : 'session/create',
         bindingParams,
       );
       const runtimeSessionId = string(binding.runtimeSessionId, 'DSH Runtime Session id');
       const mutationController = new DshMutationController(host, runtimeSessionId);
+      phase('mutation-reconciliation');
       const recovery = await recoverPendingDshMutation({
         productSessionId: options.sessionId,
         runtimeSessionId,
@@ -1287,6 +1321,7 @@ export class DshRuntime implements AgentRuntime {
         throw new Error('The DSH Product Session was deleted during recovery');
       }
       if (binding.state === 'recovery_required' || recovery.recovered) {
+        phase('native-rebind');
         binding = await host.request('session/resume', {
           ...bindingParams,
           clientOperationId: `session-rebind-${randomUUID()}`,
@@ -1299,6 +1334,7 @@ export class DshRuntime implements AgentRuntime {
       if (binding.runtimeSessionId !== runtimeSessionId) {
         throw new Error('DSH recovery changed the Runtime Session identity');
       }
+      phase('turn-reconciliation');
       const turnReconciliation = options.resumeSessionId
         ? await reconcileDshTurnsAtStartup({
             productSessionId: options.sessionId,
@@ -1356,7 +1392,9 @@ export class DshRuntime implements AgentRuntime {
         // admitted after its snapshot, including background reports waking an idle Root.
         if (turnId === undefined || !settledTurnIds.has(turnId)) action();
       }
+      phase('configuration');
       await this.applyConfiguration(processValue, configuration);
+      phase('ready');
       onEvent({
         kind: 'session_init',
         sessionId: runtimeSessionId,
@@ -1393,6 +1431,9 @@ export class DshRuntime implements AgentRuntime {
       }
       return processValue;
     } catch (error) {
+      withLogContext({ sessionId: options.sessionId, runtime: 'dsh' }, () => {
+        console.error(`[dsh] phase=${admissionPhase} admission failed: ${redactDshDiagnosticLine(error instanceof Error ? error.message : String(error))}`);
+      });
       if (processValue) processValue.closeOwnedResources('session_admission_failed');
       else await configuration.preparedProvider?.release().catch(() => undefined);
       attachments.close();
