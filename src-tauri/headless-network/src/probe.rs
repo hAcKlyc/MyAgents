@@ -184,6 +184,37 @@ async fn pages(
         cursor = Some(next.into());
     }
 }
+fn message_type(message: &ServerMessage) -> &'static str {
+    match message {
+        ServerMessage::Hello { .. } => "hello.result",
+        ServerMessage::AuthRefreshed { .. } => "auth.refreshed",
+        ServerMessage::Ready { .. } => "ready.result",
+        ServerMessage::ChannelOffer { .. } => "channel.offer",
+        ServerMessage::ChannelAccepted { .. } => "channel.accepted",
+        ServerMessage::Credit { .. } => "credit.available",
+        ServerMessage::ChannelReady { .. } => "channel.ready",
+        ServerMessage::ChannelClosed { .. } => "channel.closed",
+        ServerMessage::OpPrepared { .. } => "op.prepared",
+        ServerMessage::Permit { .. } => "permit.result",
+        ServerMessage::RouteClosed { .. } => "route.closed",
+        ServerMessage::RouteOpened { .. } => "route.opened",
+        ServerMessage::RouteRebound { .. } => "route.rebound",
+        ServerMessage::Changed { .. } => "change.available",
+        ServerMessage::Error { .. } => "error",
+    }
+}
+fn trace_control(stage: &'static str, message: &ServerMessage) {
+    eprintln!(
+        "{}",
+        serde_json::json!({"stage":stage,"type":message_type(message)})
+    );
+}
+fn require_joined(joined: bool) -> Result<(), NetworkError> {
+    if !joined {
+        return Err(NetworkError::new("SOURCE_DEVICE_NOT_JOINED"));
+    }
+    Ok(())
+}
 fn require_empty_source(page: &Value) -> Result<(), NetworkError> {
     let items = page["items"]
         .as_array()
@@ -199,6 +230,7 @@ fn require_empty_source(page: &Value) -> Result<(), NetworkError> {
 pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkError> {
     // Reserve one second for an explicit Close after a bounded handshake failure.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(29);
+    let mut setup_phase = "identity";
     let setup = async {
         let account =
             NetworkAccountSession::Official(crate::auth::OfficialAccountSession::capture()?);
@@ -207,11 +239,13 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
         let memory = MemoryBudget::default();
         let transport =
             NetworkTransport::new(&identity.network_url, identity.device_key(), memory.clone())?;
+        setup_phase = "initialHello";
         let mut socket = transport.websocket(&identity.token).await?;
         send(&mut socket, connector::hello()).await?;
         let (scope, local, _) = initial_hello(&mut socket, &identity).await?;
         // Inspect existing authority before any catalog PUT: this probe must never
         // replace an existing Agent source with its explicit zero-Agent catalog.
+        setup_phase = "catalog";
         let existing = transport
             .json(
                 NetworkRoute::Agents {
@@ -234,10 +268,10 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
         if uploaded["catalogSeq"] != 1 {
             return Err(NetworkError::new("CATALOG_INVALID"));
         }
+        setup_phase = "policy";
         let policy = policy::hydrate(&transport, &identity.token, &local).await?;
-        if !policy.joined {
-            return Err(NetworkError::new("SOURCE_DEVICE_NOT_JOINED"));
-        }
+        require_joined(policy.joined)?;
+        setup_phase = "ready";
         send(
             &mut socket,
             ClientMessage::Ready {
@@ -285,12 +319,22 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
                         ServerMessage::Error { code, .. } => {
                             return Err(NetworkError::cloud(&code, 400))
                         }
-                        _ => return Err(NetworkError::new("CONTROL_UNEXPECTED")),
+                        message @ ServerMessage::Changed { .. } => {
+                            trace_control("ready", &message);
+                            let fresh =
+                                policy::hydrate(&transport, &identity.token, &local).await?;
+                            require_joined(fresh.joined)?;
+                        }
+                        unexpected => {
+                            trace_control("ready", &unexpected);
+                            return Err(NetworkError::new("CONTROL_UNEXPECTED"));
+                        }
                     }
                 }
                 _ => return Err(NetworkError::new("NETWORK_CONNECTION_CLOSED")),
             }
         }
+        setup_phase = "targetlookup";
         let devices = pages(&transport, &identity.token, None).await?;
         let device = select_device(&devices, id, &local)?;
         let callable = pages(&transport, &identity.token, Some(&local.network_id)).await?;
@@ -305,10 +349,21 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
             foreign_offers,
         ))
     };
+    let setup_result = tokio::time::timeout_at(deadline, setup)
+        .await
+        .map_err(|_| NetworkError::new("PROBE_DEADLINE_EXCEEDED"))
+        .and_then(|result| result);
     let (mut identity, mut socket, scope, local, target, memory, foreign_offers) =
-        tokio::time::timeout_at(deadline, setup)
-            .await
-            .map_err(|_| NetworkError::new("PROBE_DEADLINE_EXCEEDED"))??;
+        match setup_result {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"status":"failed","phase":setup_phase,"errorCode":NetworkError::cloud(&error.code,400).code})
+                );
+                return Err(error);
+            }
+        };
     let channel_id = uuid::Uuid::new_v4().to_string();
     let mut report = Report {
         status: "channel-ready",
@@ -477,7 +532,14 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
                         ServerMessage::Error { code, .. } => {
                             return Err(NetworkError::cloud(&code, 400))
                         }
-                        _ => return Err(NetworkError::new("CONTROL_UNEXPECTED")),
+                        message @ ServerMessage::Changed { .. } => {
+                            trace_control("handshake", &message);
+                            return Err(NetworkError::new("PROBE_POLICY_CHANGED"));
+                        }
+                        unexpected => {
+                            trace_control("handshake", &unexpected);
+                            return Err(NetworkError::new("CONTROL_UNEXPECTED"));
+                        }
                     }
                 }
                 Some(Ok(Message::Binary(bytes))) => {
@@ -552,6 +614,34 @@ mod tests {
     }
     fn routing() -> Value {
         json!({"deviceId":device()["deviceId"],"source":{"serviceId":local().service_id,"networkId":local().network_id},"isLocal":false,"membershipRevision":2,"connectionEpoch":device()["catalogEpoch"],"keyGeneration":3,"signedBinding":"nonsecret-selection-fixture"})
+    }
+    #[test]
+    fn changed_diagnostics_use_only_static_type_and_rehydrated_join_gate() {
+        let scope = ConnectionScope {
+            service_id: local().service_id,
+            network_id: local().network_id,
+            boot_epoch: "boot".into(),
+            connection_epoch: "epoch".into(),
+        };
+        let changed = ServerMessage::Changed {
+            scope,
+            change: myagents_agent_network_protocol::ChangeScope::Catalog,
+            revision: 999,
+        };
+        assert_eq!(message_type(&changed), "change.available");
+        let projection = serde_json::json!({"stage":"ready","type":message_type(&changed)});
+        assert_eq!(projection.as_object().unwrap().len(), 2);
+        assert!(!projection.to_string().contains("999"));
+        require_joined(true).unwrap();
+        assert_eq!(
+            require_joined(false).unwrap_err().code,
+            "SOURCE_DEVICE_NOT_JOINED"
+        );
+        let error = ServerMessage::Error {
+            code: "not-to-be-printed".into(),
+            retryable: false,
+        };
+        assert_eq!(message_type(&error), "error");
     }
     #[test]
     fn source_catalog_getter_requires_explicit_complete_empty_page_before_put() {
