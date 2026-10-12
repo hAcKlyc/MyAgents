@@ -1,5 +1,5 @@
 #[path = "../../src/agent_network/catalog_ack.rs"]
-mod catalog_ack;
+pub(crate) mod catalog_ack;
 
 use crate::{
     agent_network::{

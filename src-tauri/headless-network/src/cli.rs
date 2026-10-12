@@ -25,6 +25,7 @@ async fn execute() -> Result<(), NetworkError> {
             "--device-name",
             "--status-file",
             "--target-device-id",
+            "--request-file",
             "--owned-instance",
             "--public-tls-ca-file",
             "--management-socket",
@@ -80,6 +81,7 @@ async fn execute() -> Result<(), NetworkError> {
             "owned-auth-wait",
             "owned-auth-cancel",
             "owned-auth-logout",
+            "owned-manage",
             "run",
         ]
         .contains(&command.as_str())
@@ -123,6 +125,14 @@ async fn execute() -> Result<(), NetworkError> {
                 management_gid: parse_id("--management-gid")?,
             })
         };
+        if options.contains_key("--request-file") != (command == "owned-manage") {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
+        let _management_lock = if command == "owned-manage" {
+            Some(status::run_lock(&root)?)
+        } else {
+            None
+        };
         let ca = options.get("--public-tls-ca-file").map(PathBuf::from);
         let connection = if matches!(command.as_str(), "owned-auth-cancel" | "owned-auth-logout") {
             owned::Connection::from_pinned(origin, ca.as_deref(), store.clone(), &device)?
@@ -139,6 +149,18 @@ async fn execute() -> Result<(), NetworkError> {
             "owned-auth-cancel" | "owned-auth-logout" => {
                 connection.cancel().await?;
                 println!("{}", serde_json::json!({"status":"signedOut"}));
+            }
+            "owned-manage" => {
+                let response = crate::native_management::run(
+                    &connection,
+                    &PathBuf::from(required("--request-file")?),
+                )
+                .await?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&response)
+                        .map_err(|_| NetworkError::new("HOST_MANAGEMENT_RESPONSE_INVALID"))?
+                );
             }
             "run" => {
                 let _lock = status::run_lock(&root)?;
@@ -158,7 +180,8 @@ async fn execute() -> Result<(), NetworkError> {
         }
         return Ok(());
     }
-    if options.contains_key("--public-tls-ca-file")
+    if options.contains_key("--request-file")
+        || options.contains_key("--public-tls-ca-file")
         || options.contains_key("--management-socket")
         || options.contains_key("--management-host-uid")
         || options.contains_key("--management-gid")

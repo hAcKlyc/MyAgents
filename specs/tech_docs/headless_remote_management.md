@@ -30,6 +30,8 @@
 - [ ] 上述表单的真实桌面→Linux Host 联调、实际渲染与键盘验收；本地 DOM 检查不能代替该门禁。
 - [ ] 一键安装包统一 Node Host 与网络 owner 的服务配置，以及真实桌面远程模型配置/Agent 创建验收。本轮 CI 会输出可信源码来源的 Linux Node Host 包，但不代表安装器已经完成统一。
 
+补充原生验收入口：`myagents-host-network owned-manage` 复用生产 Controller、实际 owned account binding、签名设备寻址与 Pairs；必须使用已经入网且当前空 catalog 的独立源设备，不隐式 join。请求从调用者所有的 0600、单链接、有界私有文件读取，所有写操作绑定前次真实 targetScope；它只输出固定响应，调用方在 finally 清除含凭据请求文件。本地新增 4 项及 Controller 11 项通过，独立只读审阅未发现可复现 P1/P2；Linux/TLS/Node IPC 联合验收仍未通过。
+
 接线约束：owned TLS profile 只发布空 catalog，不上传本地 Agent 目录或发送 Agent RPC/permit；管理应用使用独立 codec 和固定 Controller/Host 角色。Relay 的 ChannelReady 分支必须立即 drain 排队的管理 Ready 事件，不能等待下一帧。身份/网络/账户代次变化后关闭通道及待办；发送或写后记账失败关闭受影响 pair、报告原始 failure，不自动重复写入。模型凭据继续经产品能力配置，本阶段不获取密钥或调用收费模型。
 
 本阶段追加验证：111 项 headless Rust、协议 11 项单测与 6 项既有 codec 集成、Node 21 项 owner/IPC/真实 Session bootstrap 检查通过；没有收费模型调用。原 CI 捕获 IPC `/tmp` 父目录权限与 subprocess 测试分类缺口，已保留生产校验修复。随后 Linux CI 捕获本地 Host 测试缺少发布 bundle 的 CJS bridge，以及嵌套工作区缺失父目录；前者已对齐真实构建，后者沿原 root directory-fd authority 逐层创建、fsync 并保留独占叶目录与原意图恢复。主审另发现 Linux 凭据目录的 `/proc/self/fd` 最终链接不能以 `O_NOFOLLOW` 重开；现直接校验并 fsync 原 pinned fd，保留写后未知结果和原回执恢复的故障回归。本地 21 项相关集成、类型检查和定向 lint 再次通过。`8fad3268` 的独立服务 Linux CI 已成功，JavaScript CI 两项故障由本轮修复；新源码完整 Linux CI 与原生联合验收仍是开放门禁。
