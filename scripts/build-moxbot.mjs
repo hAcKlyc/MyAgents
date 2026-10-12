@@ -1,9 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { prepareMoxbotBundles } from './prepare-moxbot-bundles.mjs';
 
 // Fix all three product profiles (Vite, esbuild, Cargo) in the same invocation.
 // The override also owns the bundle ID, OS deep link and filesystem permission.
 const root = fileURLToPath(new URL('../', import.meta.url));
+await prepareMoxbotBundles({ repositoryRoot: root });
 const result = spawnSync(process.execPath, [
   fileURLToPath(new URL('../node_modules/@tauri-apps/cli/tauri.js', import.meta.url)),
   'build', '--config', 'src-tauri/tauri.moxbot.conf.json',

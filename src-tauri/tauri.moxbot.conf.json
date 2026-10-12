@@ -81,7 +81,13 @@
       "infoplist/en.lproj/InfoPlist.strings": null,
       "infoplist/moxbot/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
       "infoplist/zh-Hans.lproj/InfoPlist.strings": null,
-      "infoplist/moxbot/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings"
+      "infoplist/moxbot/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
+      "../bundled-skills": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-skills": "bundled-skills",
+      "../bundled-agents": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-agents": "bundled-agents",
+      "../bundled-workspaces": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-workspaces": "bundled-workspaces"
     },
     "macOS": {
       "infoPlist": "Info.moxbot.plist",
