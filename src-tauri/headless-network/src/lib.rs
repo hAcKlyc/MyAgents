@@ -4,6 +4,7 @@
 // Shared Desktop modules include operations deliberately absent from a zero-Agent host.
 pub(crate) mod agent_network;
 mod auth;
+mod probe;
 mod state;
 pub(crate) use agent_network::connector;
 pub mod cli;

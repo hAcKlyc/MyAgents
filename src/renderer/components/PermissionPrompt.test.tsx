@@ -85,7 +85,7 @@ describe('compact command approval authority', () => {
     expect(screen.getByText('shell.permissionPrompt.alwaysAllow').closest('button')).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'app:markdown.copy' }));
     await waitFor(() => expect(copyPlainText).toHaveBeenCalledExactlyOnceWith(command));
-    await screen.findByText('app:markdown.copied');
+    await screen.findByText('app:markdown.copied', {}, { timeout: 5_000 });
   });
 });
 

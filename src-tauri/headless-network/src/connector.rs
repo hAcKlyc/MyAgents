@@ -1,3 +1,6 @@
+#[path = "../../src/agent_network/catalog_ack.rs"]
+mod catalog_ack;
+
 use crate::{
     agent_network::{
         account::NetworkAccountSession,
@@ -41,7 +44,7 @@ fn publish(
         },
     )
 }
-fn hello() -> ClientMessage {
+pub(crate) fn hello() -> ClientMessage {
     ClientMessage::Hello {
         client_version: env!("CARGO_PKG_VERSION").into(),
         capabilities: ["tls13-mtls", "typed-rpc", "permit-v1", "return-v1"]
@@ -50,7 +53,7 @@ fn hello() -> ClientMessage {
         previous_connection: None,
     }
 }
-fn empty_catalog(epoch: String) -> Result<serde_json::Value, NetworkError> {
+pub(crate) fn empty_catalog(epoch: String) -> Result<serde_json::Value, NetworkError> {
     // This dedicated owner exposes no Agent registry or business invoke adapter.
     // Empty is its explicit product configuration, never a fallback after read failure.
     let value = serde_json::to_value(CatalogSnapshot {
@@ -64,7 +67,7 @@ fn empty_catalog(epoch: String) -> Result<serde_json::Value, NetworkError> {
         .map_err(|_| NetworkError::new("CATALOG_INVALID"))?;
     Ok(value)
 }
-fn control_gate(
+pub(crate) fn control_gate(
     message: &ServerMessage,
     scope: &myagents_agent_network_protocol::ConnectionScope,
     catalog_confirmed: bool,
@@ -107,9 +110,12 @@ async fn connect(
             Some(empty_catalog(scope.connection_epoch.clone())?),
         )
         .await?;
-    if uploaded["catalogSeq"] != 1 {
-        return Err(NetworkError::new("CATALOG_INVALID"));
-    }
+    catalog_ack::validate_catalog_ack(&uploaded, &scope.connection_epoch, 1).map_err(|error| {
+        NetworkError::new(match error {
+            catalog_ack::CatalogAckError::Invalid => "CATALOG_INVALID",
+            catalog_ack::CatalogAckError::NotCurrent => "CATALOG_NOT_CURRENT",
+        })
+    })?;
     let mut policy = policy::hydrate(&transport, &identity.token, &local).await?;
     send(
         &mut socket,

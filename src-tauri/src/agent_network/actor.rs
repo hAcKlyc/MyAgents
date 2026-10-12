@@ -1,11 +1,14 @@
 //! One App-owned device connector. Every async job belongs to this connection
 //! future: dropping it at an auth/exit boundary cancels HTTP, keys, channels and
 //! private bodies together. Neither a Tab nor a Session owns its lifetime.
-use super::connection::{initial_hello, send, send_control};
+#[path = "catalog_ack.rs"]
+mod catalog_ack;
+
 use super::account::NetworkAccountSession;
 use super::calls::{CallableAgent, Calls};
 use super::catalog::read_local_catalog;
 use super::commands::MetadataRequest;
+use super::connection::{initial_hello, send, send_control};
 use super::identity::NetworkIdentity;
 use super::incoming::{error_outcome, Admission, Incoming};
 use super::local_owner;
@@ -19,9 +22,8 @@ use crate::sidecar::ManagedSidecarManager;
 use crate::ulog_warn;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, FutureExt, SinkExt, StreamExt};
 use myagents_agent_network_protocol::{
-    budget, BusinessObject, CatalogSnapshot, ClientMessage, ConnectionScope,
-    Outcome, PreviousConnection, ServerEnvelope, ServerMessage, SourceRequest,
-    VerifiedCaller,
+    budget, BusinessObject, CatalogSnapshot, ClientMessage, ConnectionScope, Outcome,
+    PreviousConnection, ServerEnvelope, ServerMessage, SourceRequest, VerifiedCaller,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1222,7 +1224,7 @@ fn catalog_work(
             let items = read_local_catalog(&manager).await?;
             let snapshot = CatalogSnapshot {
                 version: 1,
-                connection_epoch: scope.connection_epoch,
+                connection_epoch: scope.connection_epoch.clone(),
                 catalog_seq,
                 items,
             };
@@ -1233,9 +1235,14 @@ fn catalog_work(
             let uploaded = transport
                 .json(NetworkRoute::Catalog, &token, Some(value))
                 .await?;
-            uploaded["catalogSeq"]
-                .as_u64()
-                .ok_or_else(|| NetworkError::new("CATALOG_INVALID"))
+            catalog_ack::validate_catalog_ack(&uploaded, &scope.connection_epoch, catalog_seq)
+                .map_err(|error| {
+                    NetworkError::new(match error {
+                        catalog_ack::CatalogAckError::Invalid => "CATALOG_INVALID",
+                        catalog_ack::CatalogAckError::NotCurrent => "CATALOG_NOT_CURRENT",
+                    })
+                })?;
+            Ok(catalog_seq)
         }
         .await;
         Work::Catalog(result)

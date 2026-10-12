@@ -3,8 +3,13 @@ import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
+import {
+  clearTimeout as nativeClearTimeout,
+  setTimeout as nativeSetTimeout,
+} from "node:timers";
 import { promisify } from "node:util";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   INTERNAL_CLI_TOKEN_ENV,
@@ -20,6 +25,49 @@ const hosts: Record<string, { port: number; home: string }> = {};
 let management: Server;
 let scratch: string;
 let cliBundle: string;
+
+class HealthDeadlineError extends Error {}
+
+async function readHealth(
+  probe: (signal: AbortSignal) => Promise<Response>,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  const controller = new AbortController();
+  let stage = "health-request";
+  let timer: ReturnType<typeof nativeSetTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = nativeSetTimeout(() => {
+      reject(new HealthDeadlineError(`Fixture deadline: stage=${stage}`));
+      controller.abort();
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      (async () => {
+        const response = await probe(controller.signal);
+        stage = "health-body";
+        await response.arrayBuffer();
+        return response.ok;
+      })(),
+      deadline,
+    ]);
+  } finally {
+    if (timer !== undefined) nativeClearTimeout(timer);
+    controller.abort();
+  }
+}
+
+async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolveExit) => {
+    const timer = nativeSetTimeout(() => child.kill("SIGKILL"), 2_000);
+    child.once("exit", () => {
+      nativeClearTimeout(timer);
+      resolveExit();
+    });
+    child.kill("SIGTERM");
+  });
+}
 
 // Launch only with explicit fixture inputs; never inherit user credentials or
 // connect these production processes to the user's App/data directories.
@@ -110,21 +158,38 @@ async function startHost(
   child.stderr?.on("data", (chunk) => {
     output = (output + String(chunk)).slice(-16_000);
   });
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error(`Fixture Sidecar exited: ${output}`);
-    try {
-      if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) {
-        hosts[role] = { port, home };
-        return;
+  console.info("[external-cli-fixture] stage=health-start", {
+    fetchMock: vi.isMockFunction(globalThis.fetch),
+    fakeClock: vi.isFakeTimers(),
+  });
+  const deadline = performance.now() + 15_000;
+  let healthy = false;
+  try {
+    while (performance.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`Fixture Sidecar exited: ${output}`);
+      try {
+        if (
+          await readHealth((signal) =>
+            fetch(`http://127.0.0.1:${port}/health`, { signal }),
+          )
+        ) {
+          hosts[role] = { port, home };
+          healthy = true;
+          return;
+        }
+      } catch (error) {
+        if (error instanceof HealthDeadlineError) throw error;
+        /* Retry a settled connection failure while the listener starts. */
       }
-    } catch {
-      /* Wait for the production listener. */
+      await new Promise<void>((resolveWait) =>
+        nativeSetTimeout(resolveWait, 50),
+      );
     }
-    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    throw new Error(`Fixture Sidecar did not become healthy: ${output}`);
+  } finally {
+    if (!healthy) await stopChild(child);
   }
-  throw new Error(`Fixture Sidecar did not become healthy: ${output}`);
 }
 
 beforeAll(async () => {
@@ -189,24 +254,52 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await Promise.all(
-    processes.map(async (child) => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      await new Promise<void>((resolveExit) => {
-        const timeout = setTimeout(() => child.kill("SIGKILL"), 2_000);
-        child.once("exit", () => {
-          clearTimeout(timeout);
-          resolveExit();
-        });
-        child.kill("SIGTERM");
-      });
-    }),
-  );
+  await Promise.all(processes.map(stopChild));
   if (management)
     await new Promise<void>((resolveClose) =>
       management.close(() => resolveClose()),
     );
   if (scratch) await rm(scratch, { recursive: true, force: true });
+});
+
+it("bounds a health request that ignores cancellation even on a fake global clock", async () => {
+  vi.useFakeTimers();
+  const frozenTime = Date.now();
+  let signal: AbortSignal | undefined;
+  try {
+    await expect(
+      readHealth((received) => {
+        signal = received;
+        return new Promise<Response>(() => {});
+      }, 25),
+    ).rejects.toThrow("Fixture deadline: stage=health-request");
+    expect(signal?.aborted).toBe(true);
+    expect(Date.now()).toBe(frozenTime);
+    expect(vi.isFakeTimers()).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("bounds health response consumption rather than accepting stalled response headers", async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let signal: AbortSignal | undefined;
+  const body = new ReadableStream<Uint8Array>({
+    start(value) {
+      controller = value;
+    },
+  });
+  try {
+    await expect(
+      readHealth(async (received) => {
+        signal = received;
+        return new Response(body, { status: 200 });
+      }, 25),
+    ).rejects.toThrow("Fixture deadline: stage=health-body");
+    expect(signal?.aborted).toBe(true);
+  } finally {
+    controller.error(new Error("Fixture stream cleanup"));
+  }
 });
 
 async function request(

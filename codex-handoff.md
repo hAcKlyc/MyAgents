@@ -7,6 +7,10 @@
 
 ## Current Snapshot
 
+- **最新核查 MAH-CLIENT-HOST-MGMT-20261012 覆盖下方旧协议阻断判断**：用户要求先核实仅改桌面与 Host 的路径；设备级 `channel.open` 没有 mount 字段，peer TLS/身份通道与 Agent permit 独立。固定本地业务 schema 不证明官方 relay 拒绝扩展；先做原固定协议的无副作用设备握手探针，不预设三个服务仓库都需要改动或权限。
+- 本地资源准备层已交付 PR #6 / main `1d2c806e2700cd70804a1174f27b6ec23acdca68`，完整 CI `38221628350` 六项通过，测试 merge 与主干 tree 相同；下方未完成 CI 和失败 checkpoint 已过期。远程配置/凭据/Agent 创建没有真实验收。
+- 当前隔离分支 `feat/mah-device-channel-probe` 从上述 main 建立。探针只发合法 Open/Accept/TLS/ChannelHello/Ready，不发 Agent invoke、不写配置/凭据、不新增公网端口，原身份留在独立 Rust owner。当前目录缺目标 key generation，需从已有 callable 路由投影取得或明确返回寻址不可用，不能猜代次；零 Agent 的设备目标发现仍待证实。
+
 - **最新接续覆盖下方旧checkpoint**：基础入网已经交付并真实验收，fork main `92fa2c5f24faa026f81ed6567a9bb6211f1bb144`（PR #5，六项CI通过）。Linux Host完成独立官方浏览器授权、签发/Hello/空catalog/policy/服务端Ready；原桌面同账号加入后显示Linux在线，服务重启自动恢复，无需再次登录。
 - 当前用户请求 **MAH-REMOTE-MANAGEMENT-20261012**：从桌面AgentNet给Linux Host配置模型/只写凭据、创建真实持久Agent，无需手工SSH。模型配置现在进入实现范围；不要要求用户向聊天提供密钥。收费模型测试仍需单独费用授权，不以测试调用作为配置界面可用的必要前置。
 - 当前阶段记录与验收清单：`specs/tech_docs/headless_remote_management.md`。主集成分支 `feat/mah-remote-management` 从上述main建立；独立资源owner分支 `feat/mah-host-resources`，同一base。原入网与桌面工作区保留，不reset/覆盖。
