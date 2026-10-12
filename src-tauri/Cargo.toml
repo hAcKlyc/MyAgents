@@ -36,6 +36,7 @@ log = "0.4"
 myagents-media-worker-protocol = { path = "media-worker-protocol" }
 myagents-agent-network-protocol = { path = "agent-network-protocol" }
 myagents-agent-network-crypto = { path = "agent-network-crypto", features = ["os-store"] }
+myagents-host-management-protocol = { path = "host-management-protocol" }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2.2"
 rustls-platform-verifier = "=0.6.2"
