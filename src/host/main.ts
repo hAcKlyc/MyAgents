@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
 import { configureHost, readConfigReceipt, type HostConfig } from './management';
+import { readNetworkStatus } from './network-status';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -167,7 +168,9 @@ async function serve(): Promise<void> {
       return { hostId: identity!.hostId, version: 1, configured: Boolean(config.hostSettings),
         settings: config.hostSettings ?? null, activeSession: active ? { sessionId: active.sessionId, generation: active.generation, closing: active.closing } : null,
         stopping: shuttingDown, capabilities: ['local-session', 'permission', 'stop', 'persistent-history', 'local-config-receipt'],
-        agentNet: { available: false, reason: 'not-integrated' },
+        agentNet: await readNetworkStatus(process.env.MYAGENTS_HOST_NETWORK_STATUS,
+          /^\d+$/.test(process.env.MYAGENTS_HOST_NETWORK_UID ?? '')
+            ? Number(process.env.MYAGENTS_HOST_NETWORK_UID) : undefined, identity!.hostId),
         runtime: { node: process.versions.node, sdkBinaryPresent: existsSync(join(dirname(workerPath), 'claude-agent-sdk', 'claude')) } };
     }
     if (path === '/host/configure') return exclusive(() => configureHost({

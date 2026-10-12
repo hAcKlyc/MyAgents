@@ -524,7 +524,7 @@ impl NetworkRegistry {
             {
                 return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
             }
-            let key = super::identity::load_key(&scope)
+            let key = super::identity_desktop::load_key(&scope)
                 .await?
                 .ok_or_else(|| NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"))?;
             let fingerprint = key.public_fingerprint()?;

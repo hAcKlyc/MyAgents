@@ -192,6 +192,132 @@ impl EncryptedIdentityStore {
         }
         Ok(Self { directory, kek })
     }
+    /// A bounded dynamic secret record, separate from immutable key generations.
+    /// Namespace is authenticated; returned plaintext stays inside the Rust owner.
+    fn state_names(namespace: &str) -> Result<(CString, CString, Vec<u8>), CryptoError> {
+        use sha2::{Digest, Sha256};
+        if namespace.is_empty()
+            || namespace.len() > 256
+            || !namespace
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b))
+        {
+            return Err(CryptoError::CredentialUnsafePath);
+        }
+        let digest = Sha256::digest(namespace.as_bytes());
+        let hash = digest
+            .iter()
+            .map(|v| format!("{v:02x}"))
+            .collect::<String>();
+        Ok((
+            name(&format!("state-{hash}.sealed"))?,
+            name(&format!("state-{hash}.lock"))?,
+            format!("MASTATE1:{namespace}").into_bytes(),
+        ))
+    }
+    fn state_load_locked(
+        &self,
+        record: &CString,
+        aad: &[u8],
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, CryptoError> {
+        let file = match open_at(self.directory.as_raw_fd(), record, libc::O_RDONLY) {
+            Err(CryptoError::CredentialMissing) => {
+                self.directory.sync_all().map_err(uncertain)?;
+                return Ok(None);
+            }
+            other => other?,
+        };
+        private_file(&file)?;
+        let mut bytes = Zeroizing::new(Vec::new());
+        (&file)
+            .take(65536 + 37)
+            .read_to_end(&mut bytes)
+            .map_err(unavailable)?;
+        if bytes.len() < 36 || bytes.len() > 65536 + 36 || &bytes[..8] != b"MASTATE1" {
+            return Err(CryptoError::CredentialCorrupt);
+        }
+        let nonce = aead::Nonce::try_assume_unique_for_key(&bytes[8..20])
+            .map_err(|_| CryptoError::CredentialCorrupt)?;
+        let plain = self
+            .cipher()?
+            .open_in_place(nonce, aead::Aad::from(aad), &mut bytes[20..])
+            .map_err(|_| CryptoError::CredentialCorrupt)?;
+        let result = Zeroizing::new(plain.to_vec());
+        file.sync_all().map_err(uncertain)?;
+        self.directory.sync_all().map_err(uncertain)?;
+        Ok(Some(result))
+    }
+    pub fn load_state(&self, namespace: &str) -> Result<Option<Zeroizing<Vec<u8>>>, CryptoError> {
+        let (record, lock, aad) = Self::state_names(namespace)?;
+        let _guard = self.lock(&lock)?;
+        self.state_load_locked(&record, &aad)
+    }
+    /// Exact plaintext CAS under a kernel lock. All visible writes are followed
+    /// by file/directory durability barriers and authenticated readback.
+    pub fn compare_exchange_state(
+        &self,
+        namespace: &str,
+        expected: Option<&[u8]>,
+        next: &[u8],
+    ) -> Result<(), CryptoError> {
+        if next.len() > 65536 {
+            return Err(CryptoError::CredentialCorrupt);
+        }
+        let (record, lock, aad) = Self::state_names(namespace)?;
+        let _guard = self.lock(&lock)?;
+        let current = self.state_load_locked(&record, &aad)?;
+        if current.as_deref().map(|v| v.as_slice()) != expected {
+            return Err(CryptoError::CredentialConflict);
+        }
+        let mut nonce = [0; 12];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        let mut bytes = Zeroizing::new(next.to_vec());
+        self.cipher()?
+            .seal_in_place_append_tag(
+                aead::Nonce::assume_unique_for_key(nonce),
+                aead::Aad::from(&aad),
+                &mut *bytes,
+            )
+            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        let temporary = name(&format!(".pending-state-{}", uuid::Uuid::new_v4()))?;
+        let mut file = open_at(
+            self.directory.as_raw_fd(),
+            &temporary,
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+        )?;
+        let result = (|| {
+            private_file(&file)?;
+            file.write_all(b"MASTATE1").map_err(uncertain)?;
+            file.write_all(&nonce).map_err(uncertain)?;
+            file.write_all(&bytes).map_err(uncertain)?;
+            file.sync_all().map_err(uncertain)?;
+            if unsafe {
+                libc::renameat(
+                    self.directory.as_raw_fd(),
+                    temporary.as_ptr(),
+                    self.directory.as_raw_fd(),
+                    record.as_ptr(),
+                )
+            } != 0
+            {
+                return Err(CryptoError::CredentialPersistenceUnconfirmed);
+            }
+            self.directory.sync_all().map_err(uncertain)?;
+            let loaded = self
+                .state_load_locked(&record, &aad)?
+                .ok_or(CryptoError::CredentialPersistenceUnconfirmed)?;
+            if loaded.as_slice() != next {
+                return Err(CryptoError::CredentialPersistenceUnconfirmed);
+            }
+            Ok(())
+        })();
+        unsafe {
+            libc::unlinkat(self.directory.as_raw_fd(), temporary.as_ptr(), 0);
+        }
+        result
+    }
     fn names(scope: &KeyScope) -> Result<(CString, CString, Vec<u8>), CryptoError> {
         let hash = scope.credential_name()?;
         let mut aad = MAGIC.to_vec();
@@ -671,6 +797,98 @@ mod tests {
                 store.save_pending(&scope, &key).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn dynamic_secret_cas_is_durable_scope_bound_and_rejects_late_results() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(
+            root.path(),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        let owner = EncryptedIdentityStore::with_kek(
+            &fs::canonicalize(root.path()).unwrap(),
+            Zeroizing::new([42; 32]),
+        )
+        .unwrap();
+        assert!(owner
+            .load_state("official-headless-account-v1")
+            .unwrap()
+            .is_none());
+        let pending = br#"{"revision":"flow1","loginToken":"isolated-placeholder"}"#;
+        owner
+            .compare_exchange_state("official-headless-account-v1", None, pending)
+            .unwrap();
+        assert_eq!(
+            owner
+                .load_state("official-headless-account-v1")
+                .unwrap()
+                .unwrap()
+                .as_slice(),
+            pending
+        );
+        let cancelled = br#"{"revision":"flow2","account":null}"#;
+        owner
+            .compare_exchange_state("official-headless-account-v1", Some(pending), cancelled)
+            .unwrap();
+        assert_eq!(
+            owner
+                .compare_exchange_state(
+                    "official-headless-account-v1",
+                    Some(pending),
+                    b"late-account"
+                )
+                .unwrap_err(),
+            CryptoError::CredentialConflict
+        );
+        let restarted = EncryptedIdentityStore::with_kek(
+            &fs::canonicalize(root.path()).unwrap(),
+            Zeroizing::new([42; 32]),
+        )
+        .unwrap();
+        assert_eq!(
+            restarted
+                .load_state("official-headless-account-v1")
+                .unwrap()
+                .unwrap()
+                .as_slice(),
+            cancelled
+        );
+        assert!(restarted
+            .load_state("other-device-state")
+            .unwrap()
+            .is_none());
+        let wrong = EncryptedIdentityStore::with_kek(
+            &fs::canonicalize(root.path()).unwrap(),
+            Zeroizing::new([41; 32]),
+        )
+        .unwrap();
+        assert_eq!(
+            wrong
+                .load_state("official-headless-account-v1")
+                .unwrap_err(),
+            CryptoError::CredentialCorrupt
+        );
+        assert_eq!(
+            wrong
+                .compare_exchange_state("official-headless-account-v1", None, b"overwrite")
+                .unwrap_err(),
+            CryptoError::CredentialCorrupt
+        );
+        let (record, _, _) =
+            EncryptedIdentityStore::state_names("official-headless-account-v1").unwrap();
+        let record = root.path().join(record.to_str().unwrap());
+        let bytes = std::fs::read(&record).unwrap();
+        assert!(!bytes.windows(cancelled.len()).any(|v| v == cancelled));
+        assert_eq!(std::fs::metadata(&record).unwrap().mode() & 0o7777, 0o600);
+        std::fs::write(&record, b"corrupt").unwrap();
+        assert_eq!(
+            restarted
+                .load_state("official-headless-account-v1")
+                .unwrap_err(),
+            CryptoError::CredentialCorrupt
+        );
     }
 
     // Private test-only constructor and fixed isolated KEK stay out of the

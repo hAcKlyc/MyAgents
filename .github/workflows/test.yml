@@ -15,6 +15,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  headless-network:
+    name: headless AgentNet connector · no desktop
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri/headless-network
+      - name: Validate standalone network owner
+        run: |
+          cargo test --manifest-path src-tauri/headless-network/Cargo.toml --locked
+          cargo clippy --manifest-path src-tauri/headless-network/Cargo.toml --locked --all-targets -- -D clippy::disallowed_methods -D clippy::disallowed_macros
+          cargo build --manifest-path src-tauri/headless-network/Cargo.toml --locked --release --bin myagents-host-network
+          cargo tree --manifest-path src-tauri/headless-network/Cargo.toml --locked > /tmp/headless-network-dependencies.txt
+          if rg -i 'tauri|webkit|gtk|keyring|secret-service' /tmp/headless-network-dependencies.txt; then
+            echo 'Headless network owner unexpectedly depends on a desktop backend' >&2
+            exit 1
+          fi
+          python3 scripts/host/network-install.test.py
+      - name: Record Linux artifact provenance
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p output/headless-network
+          cp src-tauri/headless-network/target/release/myagents-host-network output/headless-network/
+          cp scripts/host/network-install.py scripts/host/network-control.py output/headless-network/
+          cd output/headless-network
+          sha256sum myagents-host-network network-install.py network-control.py > SHA256SUMS
+          cat SHA256SUMS
+          printf '%s\n' "$SOURCE_COMMIT" > source-commit.txt
+          ldd myagents-host-network > native-dependencies.txt
+          if rg -i 'gtk|webkit|dbus|gobject' native-dependencies.txt; then
+            echo 'Headless network artifact unexpectedly links desktop libraries' >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headless-network-linux
+          path: output/headless-network/
+          if-no-files-found: error
+
   # The headless identity store must build without Tauri/GTK or a desktop
   # credential service. Actual systemd projection is a separate server gate.
   headless-identity:
