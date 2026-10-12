@@ -315,11 +315,26 @@ pub async fn cmd_stop_all_sidecars(
 
 /// Command: Shutdown for update — blocks until all child processes are fully terminated.
 /// Must be called before relaunch() to prevent NSIS installer file-lock errors on Windows.
+fn ensure_update_shutdown_enabled() -> Result<(), &'static str> {
+    if crate::app_dirs::IS_MOXBOT {
+        Err("UPDATER_DISABLED_FOR_MOXBOT")
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub async fn cmd_shutdown_for_update(
     app_handle: AppHandle,
     state: State<'_, ManagedSidecar>,
 ) -> Result<(), String> {
+    // This IPC command is reachable independently of the updater UI flow.
+    // Reject before taking the shutdown gate or touching any child process.
+    if let Err(reason) = ensure_update_shutdown_enabled() {
+        logger::info(&app_handle, format!("[updater] shutdown rejected: {reason}"));
+        return Err(reason.to_string());
+    }
+
     #[cfg(target_os = "windows")]
     {
         let _ = state;
@@ -340,6 +355,19 @@ pub async fn cmd_shutdown_for_update(
         let _guard = begin_update_shutdown()?;
         crate::cliproxy::quiesce_for_update().await.map_err(|error| error.message)?;
         shutdown_for_update_verified(&app_handle, &state)
+    }
+}
+
+#[cfg(test)]
+mod update_shutdown_profile_tests {
+    #[test]
+    fn shutdown_entrypoint_is_disabled_only_for_moxbot_profile() {
+        let result = super::ensure_update_shutdown_enabled();
+        if crate::app_dirs::IS_MOXBOT {
+            assert_eq!(result, Err("UPDATER_DISABLED_FOR_MOXBOT"));
+        } else {
+            assert_eq!(result, Ok(()));
+        }
     }
 }
 
@@ -443,7 +471,10 @@ pub fn cmd_initialize_bundled_workspace<R: Runtime>(
     app_handle: AppHandle<R>,
 ) -> Result<InitBundledWorkspaceResult, String> {
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let mino_dest = home_dir.join(".myagents").join("projects").join("mino");
+    let mino_dest = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("projects")
+        .join("mino");
 
     // NOTE: Path::exists() follows symlinks, so a dangling
     // ~/.myagents/projects/mino link returns false here and we'd fall
@@ -492,7 +523,9 @@ pub fn cmd_create_bot_workspace<R: Runtime>(
     workspace_name: String,
 ) -> Result<InitBundledWorkspaceResult, String> {
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let projects_dir = home_dir.join(".myagents").join("projects");
+    let projects_dir = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("projects");
 
     // Sanitize name: remove @, replace non-alphanumeric (except CJK) with dash, trim
     let sanitized = sanitize_workspace_name(&workspace_name);
@@ -531,7 +564,9 @@ pub fn cmd_create_bot_workspace<R: Runtime>(
 #[tauri::command]
 pub fn cmd_remove_bot_workspace(workspace_path: String) -> Result<(), String> {
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let projects_dir = home_dir.join(".myagents").join("projects");
+    let projects_dir = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("projects");
 
     let target = PathBuf::from(&workspace_path);
     // Canonicalize both paths to prevent traversal attacks
@@ -557,7 +592,9 @@ pub fn cmd_remove_bot_workspace(workspace_path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn cmd_remove_template_folder(template_path: String) -> Result<(), String> {
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let templates_dir = home_dir.join(".myagents").join("templates");
+    let templates_dir = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("templates");
 
     if !templates_dir.exists() {
         return Err("Templates directory does not exist".to_string());
@@ -693,7 +730,9 @@ pub fn cmd_create_workspace_from_template(
 
     // Validate source is under ~/.myagents/templates/
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let templates_dir = home_dir.join(".myagents").join("templates");
+    let templates_dir = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("templates");
     if templates_dir.exists() {
         let canon_templates = templates_dir
             .canonicalize()
@@ -797,7 +836,9 @@ fn resolve_template_source<R: Runtime>(
             return Err(format!("Template source not found: {}", p));
         }
         let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-        let templates_dir = home_dir.join(".myagents").join("templates");
+        let templates_dir = home_dir
+            .join(crate::app_dirs::APP_DATA_DIR_NAME)
+            .join("templates");
         if !templates_dir.exists() {
             return Err("Templates directory does not exist".to_string());
         }
@@ -919,7 +960,9 @@ pub fn cmd_copy_folder_to_templates(
     }
 
     let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
-    let templates_dir = home_dir.join(".myagents").join("templates");
+    let templates_dir = home_dir
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("templates");
     fs::create_dir_all(&templates_dir)
         .map_err(|e| format!("Failed to create templates dir: {}", e))?;
 
@@ -984,7 +1027,7 @@ pub async fn cmd_sync_admin_agent<R: Runtime>(app_handle: AppHandle<R>) -> Resul
 
 fn sync_admin_agent_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<bool, String> {
     let home = dirs::home_dir().ok_or("Home dir not found")?;
-    let dest = home.join(".myagents");
+    let dest = home.join(crate::app_dirs::APP_DATA_DIR_NAME);
 
     // Version gate
     let ver_file = dest.join(".admin-agent-version");
@@ -1190,7 +1233,9 @@ pub(crate) async fn sync_system_skills_for_startup<R: Runtime>(
 
 fn ensure_system_skills_installation_current() -> Result<(), String> {
     let home = dirs::home_dir().ok_or("Home dir not found")?;
-    ensure_system_skills_installation_current_at(&home.join(".myagents"))
+    ensure_system_skills_installation_current_at(
+        &home.join(crate::app_dirs::APP_DATA_DIR_NAME),
+    )
 }
 
 fn ensure_system_skills_installation_current_at(myagents_dir: &Path) -> Result<(), String> {
@@ -1228,7 +1273,7 @@ fn ensure_system_skills_installation_current_at(myagents_dir: &Path) -> Result<(
 
 fn sync_system_skills_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<bool, String> {
     let home = dirs::home_dir().ok_or("Home dir not found")?;
-    let myagents_dir = home.join(".myagents");
+    let myagents_dir = home.join(crate::app_dirs::APP_DATA_DIR_NAME);
     let skills_dir = myagents_dir.join("skills");
 
     let res = app_handle
@@ -2167,6 +2212,8 @@ const CREDENTIAL_PATHS: &[&str] = &[
     ".config/op",
     ".myagents/codex/auth.json",
     ".myagents/credentials",
+    ".moxbot/codex/auth.json",
+    ".moxbot/credentials",
 ];
 #[cfg(target_os = "macos")]
 const MAC_SENSITIVE_SUBDIRS: &[&str] = &[
@@ -2262,7 +2309,6 @@ fn reject_blacklisted_path_with_home(resolved: &Path, home: &Path) -> Result<(),
                 return Err("Access denied: protected credential path".to_string());
             }
         }
-
         #[cfg(target_os = "macos")]
         for name in MAC_SENSITIVE_SUBDIRS {
             if path_starts_with_identity(resolved, &home.join(name)) {
@@ -2365,25 +2411,31 @@ mod path_safety_crosscheck_tests {
     }
 
     #[test]
-    fn managed_codex_blacklist_protects_only_auth_file() {
+    fn both_app_profiles_protect_credentials_but_allow_ordinary_files() {
         let home = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/controlled-test-home");
-        assert!(validate_file_path_with_home(
-            &home.join(".myagents/codex/auth.json").to_string_lossy(),
-            &home,
-        )
-        .is_err());
-        assert!(validate_file_path_with_home(
-            &home
-                .join(".myagents/codex/generated_images/thread/call.png")
-                .to_string_lossy(),
-            &home,
-        )
-        .is_ok());
-        assert!(validate_file_path_with_home(
-            &home.join(".myagents/codex/config.toml").to_string_lossy(),
-            &home,
-        )
-        .is_ok());
+        for protected in [
+            ".myagents/codex/auth.json",
+            ".myagents/credentials/token.json",
+            ".moxbot/codex/auth.json",
+            ".moxbot/credentials/token.json",
+        ] {
+            assert!(
+                validate_file_path_with_home(&home.join(protected).to_string_lossy(), &home)
+                    .is_err(),
+                "{protected} must remain protected across profile switches"
+            );
+        }
+        for allowed in [
+            ".myagents/codex/generated_images/thread/call.png",
+            ".myagents/codex/config.toml",
+            ".moxbot/codex/generated_images/thread/call.png",
+            ".moxbot/codex/config.toml",
+        ] {
+            assert!(
+                validate_file_path_with_home(&home.join(allowed).to_string_lossy(), &home).is_ok(),
+                "ordinary file {allowed} should remain readable"
+            );
+        }
     }
 
     #[test]

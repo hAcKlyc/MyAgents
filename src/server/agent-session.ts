@@ -1,3 +1,4 @@
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { desktopContextOf } from '../shared/agentMentions';
 import { buildTurnProviderAnalytics } from './session-core/turn-analytics';
 import { selectBuiltinRewindBoundary } from './session-core/builtin-rewind-boundary';
@@ -6066,7 +6067,7 @@ const WINDOWS_UTF8_BASH_ENV_CONTENT = [
 
 function ensureWindowsUtf8BashEnvScript(home: string): string | undefined {
   if (!home) return undefined;
-  const scriptDir = resolve(home, '.myagents', 'runtime');
+  const scriptDir = resolve(home, APP_DATA_DIR_NAME, 'runtime');
   const scriptPath = resolve(scriptDir, WINDOWS_UTF8_BASH_ENV_FILENAME);
   try {
     ensureDirSync(scriptDir);
@@ -10777,13 +10778,19 @@ async function resolveBuiltinForkSource(source: SessionMetadata, visited = new S
  * This stays Record-specific: it is a safety policy for one bounded product
  * surface, not a general shell parser or command allowlist framework.
  */
+function profileCliPattern(pattern: RegExp): RegExp {
+  return APP_CLI_NAME === 'myagents'
+    ? pattern
+    : new RegExp(pattern.source.replace(/^\^myagents/, '^moxbot'), pattern.flags);
+}
+
 export function isAutoAllowedRecordCliCommand(command: string): boolean {
   const cmd = command.trim();
   return (
-    /^myagents[ \t]+record[ \t]+list(?:[ \t]+(?:--kind[ \t]+(?:text|audio)|--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+thought[ \t]+list(?:[ \t]+(?:--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+(?:--content[ \t]+)?'[^']*'[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+--content-file[ \t]+[^ \t\n\r;|&<>$`'"]+[ \t]*$/.test(cmd)
+    profileCliPattern(/^myagents[ \t]+record[ \t]+list(?:[ \t]+(?:--kind[ \t]+(?:text|audio)|--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+thought[ \t]+list(?:[ \t]+(?:--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+(?:--content[ \t]+)?'[^']*'[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+--content-file[ \t]+[^ \t\n\r;|&<>$`'"]+[ \t]*$/).test(cmd)
   );
 }
 
@@ -11582,8 +11589,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
 
           // 1. Widget design contract: `myagents widget [readme|list|<module>] [<module>...]`
           //    — module names limited to `[a-z][a-z0-9-]*`.
-          if (/^myagents[ \t]+widget(?:[ \t]+(?:readme|list))?(?:[ \t]+[a-z][a-z0-9-]*)*[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents widget readme auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+widget(?:[ \t]+(?:readme|list))?(?:[ \t]+[a-z][a-z0-9-]*)*[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} widget readme auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>
@@ -11593,8 +11600,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // 2. Cron / IM read-only surface (zero-arg listings + readme):
           //    `myagents cron list|status|readme [--json]`
           //    `myagents im channels|readme [--json]`
-          if (/^myagents[ \t]+(?:cron[ \t]+(?:list|status|readme)|im[ \t]+(?:channels|readme))(?:[ \t]+--json)?[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents readonly CLI auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+(?:cron[ \t]+(?:list|status|readme)|im[ \t]+(?:channels|readme))(?:[ \t]+--json)?[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} readonly CLI auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>
@@ -11604,8 +11611,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // 3. Cron run history: `myagents cron runs <taskId> [--limit N] [--full] [--json]`
           //    — taskId is an opaque slug-style id (alphanumerics + dash/underscore,
           //    bounded length); --limit takes a small integer. Order-agnostic flags.
-          if (/^myagents[ \t]+cron[ \t]+runs[ \t]+[a-zA-Z0-9_-]{1,64}(?:[ \t]+(?:--limit[ \t]+\d{1,4}|--full|--json))*[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents cron runs auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+cron[ \t]+runs[ \t]+[a-zA-Z0-9_-]{1,64}(?:[ \t]+(?:--limit[ \t]+\d{1,4}|--full|--json))*[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} cron runs auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>

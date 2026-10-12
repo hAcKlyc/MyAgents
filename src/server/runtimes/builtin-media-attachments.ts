@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * builtin-media-attachments — turn builtin in-process MCP media-tool output
  * (edge-tts audio / gemini-image image) into first-class `ToolAttachment[]`,
@@ -76,7 +77,7 @@ function toolDirName(toolName: string): string {
 function ensureToolGeneratedDir(toolName: string, workspace?: string): string {
   const dir = workspace
     ? path.join(workspace, 'myagents_files', toolDirName(toolName))
-    : path.join(homedir(), '.myagents', 'generated', toolDirName(toolName));
+    : path.join(homedir(), APP_DATA_DIR_NAME, 'generated', toolDirName(toolName));
   ensureDirSync(dir);
   if (workspace) ensureGitignorePattern(workspace, 'myagents_files/');
   return dir;

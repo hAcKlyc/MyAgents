@@ -448,6 +448,22 @@ html[data-color-scheme='dark'] {
   margin-bottom: 0.3em;
 }
 
+.app-profile-wordmark {
+  display: block;
+  width: max-content;
+  font-family: var(--font-display);
+  font-size: 0.64em;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.global-sidebar-brand-logotype.app-profile-wordmark {
+  height: auto;
+  font-size: 0.8em;
+}
+
 /* Sidebar layout reaches its final 256px/64px slot in one commit so Chat,
    Browser, Terminal, and other resize-sensitive surfaces do not reflow on
    every animation frame. A fixed paint-only material layer then reveals or

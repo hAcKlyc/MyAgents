@@ -214,7 +214,7 @@ fn trusted_managed_roots() -> Vec<PathBuf> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
-    let myagents = home.join(".myagents");
+    let myagents = home.join(crate::app_dirs::APP_DATA_DIR_NAME);
     ["skills", "commands", "agents"]
         .iter()
         .filter_map(|sub| fs::canonicalize(myagents.join(sub)).ok())
@@ -251,7 +251,7 @@ pub fn reject_managed_global_skill_mutation(
     reject_managed_global_skill_mutation_with_root(
         workspace_root,
         lexical_target,
-        &home.join(".myagents").join("skills"),
+        &home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("skills"),
     )
 }
 

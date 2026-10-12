@@ -156,14 +156,12 @@ function validateWorkspaceForRegistration(rawPath: string, admitPinnedWorkspace?
   const normalized = resolve(safety.canonical);
   const identity = normalizeWorkspacePathIdentity(normalized);
   const rootIdentity = normalizeWorkspacePathIdentity(parse(normalized).root);
-  const privateDataIdentity = normalizeWorkspacePathIdentity(
-    resolve(homedir(), '.myagents'),
-  );
+  const privateDataIdentities = ['.myagents', '.moxbot'].map(directory =>
+    normalizeWorkspacePathIdentity(resolve(homedir(), directory)));
   if (
     !identity ||
     identity === rootIdentity ||
-    identity === privateDataIdentity ||
-    identity.startsWith(`${privateDataIdentity}/`)
+    privateDataIdentities.some(privateIdentity => identity === privateIdentity || identity.startsWith(`${privateIdentity}/`))
   ) {
     throw new WorkspaceAgentRegistrationError(
       'WORKSPACE_PATH_UNSAFE',

@@ -432,8 +432,8 @@ pub fn find_live_processes_by_pid(pids: &[u32]) -> Vec<ProcessMatch> {
 /// Query whether a specific PID corresponds to a MyAgents process.
 /// Uses the executable path (`GetModuleFileNameExW` underneath), so it is
 /// reliable whether the process was spawned via shortcut, installer, or
-/// direct path. Case-insensitive substring match to absorb Windows
-/// filesystem case quirks (`MyAgents` vs `myagents`).
+/// direct path. Only the current executable can own a replacement lock;
+/// a different product or a recycled PID must never be killed.
 pub fn is_myagents_pid(pid: u32) -> bool {
     let mut system = System::new();
     let only: [Pid; 1] = [Pid::from_u32(pid)];
@@ -452,13 +452,40 @@ pub fn is_myagents_pid(pid: u32) -> bool {
         .exe()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|| proc.name().to_string_lossy().into_owned());
-    let lower = haystack.to_ascii_lowercase();
-    lower.contains("myagents")
+    // A recycled PID or another product's binary is never replacement authority.
+    // Compare the actual executable, not a brand substring shared by both builds.
+    std::env::current_exe().ok().is_some_and(|current| {
+        normalize_path_boundary(&haystack)
+            == normalize_path_boundary(&current.to_string_lossy())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moxbot_recovery_roots_exclude_original_app_and_sdk() {
+        let roots = normalized_roots(&[
+            PathBuf::from("/Applications/MoX bot.app/Contents/Resources"),
+            PathBuf::from("/Users/alice/.moxbot"),
+        ]);
+        for command in [
+            "/Applications/MyAgents.app/Contents/Resources/nodejs/bin/node --myagents-sidecar",
+            "node /Applications/MyAgents.app/Contents/Resources/claude-agent-sdk/cli.js",
+            "node /Users/alice/.myagents/mcp/server.js",
+            "node /Users/alice/.moxbot-backup/mcp/server.js",
+        ] {
+            assert!(process_match_reason(&normalize(command), None, &[], &roots).is_none());
+        }
+        assert!(process_match_reason(
+            &normalize("node /Applications/MoX bot.app/Contents/Resources/server-dist.js --moxbot-sidecar"),
+            None, &[], &roots,
+        ).is_some());
+        assert!(process_match_reason(
+            &normalize("node /Users/alice/.moxbot/mcp/server.js"), None, &[], &roots,
+        ).is_some());
+    }
 
     #[test]
     fn root_match_accepts_windows_separator_variants() {

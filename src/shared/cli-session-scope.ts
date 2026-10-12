@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from './appProfile';
 export const CLI_SESSION_HEADER = 'x-myagents-session-id';
 
 export function isCliProductSessionId(value: string): boolean {
@@ -13,7 +14,7 @@ export function cliSessionScopeError(requested: string | null, current: string |
     error: 'The CLI request does not belong to this Sidecar Session.',
     recoveryHint: {
       message: 'Retry from the active Session so its current routing context is used.',
-      recoveryCommand: 'myagents agent current --json',
+      recoveryCommand: `${APP_CLI_NAME} agent current --json`,
     },
   };
 }

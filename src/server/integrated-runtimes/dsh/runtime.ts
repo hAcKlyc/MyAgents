@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import { buildTurnProviderAnalytics, type TurnProviderAnalytics } from '../../session-core/turn-analytics';
 import type { AskUserQuestionAnswers } from '../../../shared/types/askUserQuestion';
 import { dshSessionOwnedPaths } from './owned-paths';
@@ -529,7 +530,7 @@ async function createOwnedRoots(productSessionId: string): Promise<Readonly<{
   attachmentRoot: string;
 }>> {
   const { runtimeHome: requestedRuntimeHome, attachmentRoot: requestedAttachmentRoot } =
-    dshSessionOwnedPaths(join(getHomeDir(), '.myagents'), productSessionId);
+    dshSessionOwnedPaths(join(getHomeDir(), APP_DATA_DIR_NAME), productSessionId);
   await Promise.all([
     mkdir(requestedRuntimeHome, { recursive: true, mode: 0o700 }),
     mkdir(requestedAttachmentRoot, { recursive: true, mode: 0o700 }),

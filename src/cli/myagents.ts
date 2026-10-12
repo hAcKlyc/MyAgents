@@ -24,6 +24,7 @@ import {
 } from '../shared/externalCliCapabilities';
 import { networkAddress } from '../shared/agentNetworkRouting';
 import { REMOTE_DEADLINES } from '@myagents/agent-network-protocol';
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { INTERNAL_CLI_FLAGS } from './internalCliFlags';
 
 // ---------------------------------------------------------------------------
@@ -394,7 +395,7 @@ function requirePositional(
     {
       code: 'ARGUMENT_REQUIRED',
       error: `${command} requires <${argName}>.`,
-      suggestedCommand: `myagents ${command} <${argName}>${flagAlternative ? ` --${flagAlternative} <${argName}>` : ''}`,
+      suggestedCommand: `${APP_CLI_NAME} ${command} <${argName}>${flagAlternative ? ` --${flagAlternative} <${argName}>` : ''}`,
     },
     1,
   );
@@ -404,9 +405,9 @@ function requirePositional(
 // Help text
 // ---------------------------------------------------------------------------
 
-export const TOP_HELP = `myagents — MyAgents product capabilities CLI
+export const TOP_HELP = `${APP_CLI_NAME} — MyAgents product capabilities CLI
 
-Usage: myagents <command> [options]
+Usage: ${APP_CLI_NAME} <command> [options]
 
 Commands:
   anydoc    Convert one local document to Markdown (including offline OCR)
@@ -452,103 +453,101 @@ Choose by intent:
   copy the complete qualified ID and use the same Session commands.
 
 Examples:
-  myagents mcp list
-  myagents mcp show playwright
-  myagents mcp add --id playwright --type stdio --command npx --args @playwright/mcp@latest
-  myagents mcp enable playwright --scope both
-  myagents mcp oauth discover notion-mcp
-  myagents mcp oauth start notion-mcp
-  myagents vision readme
-  myagents vision analyze --image myagents_files/screenshot.png --prompt "Summarize the UI state"
-  myagents speech transcribe --file myagents_files/meeting.m4a
-  myagents model list
-  myagents model set-key deepseek sk-xxx
-  myagents skill list
-  myagents skill add vercel-labs/skills --skill react-best-practices
-  myagents skill add https://github.com/anthropics/skills --plugin document-skills
-  myagents skill add ./private-skill --dry-run
-  myagents skill add "npx skills add foo/bar --skill baz" --force
-  myagents skill remove my-skill
-  myagents skill sync
-  myagents task readme
-  myagents goal get
-  myagents goal create --objective-file goal-objective.txt --max-executions 12
-  myagents goal update --status complete
-  myagents runtime list                       # see installed runtimes + install hints
-  myagents runtime describe codex             # models + permission modes
-  myagents runtime diagnose codex             # auth / features / MCP / apps / env snapshot (issue #194)
-  myagents diagnose runtime codex             # alias for runtime diagnose
-  myagents agent list --archived              # archived Agent workspaces
-  myagents agent create --workspacePath /absolute/path --json
-  myagents agent current --json               # compact current context diagnostic
-  myagents agent show <agentId>                # identity + effective defaults
-  myagents agent network-diagnose --json      # protocol/devices/connection state
-  myagents session list --agent <agentId>      # recent reusable contexts
-  myagents session start --agent <agentId> -p "review this" # fresh context
-  myagents session get <sessionId> --limit 5 --json
-  myagents agent archive <agent-id>
-  myagents agent unarchive <agent-id>
-  myagents task list --query "review" --limit 20
-  myagents task get <taskId>            # returns metadata + docs paths
+  ${APP_CLI_NAME} mcp list
+  ${APP_CLI_NAME} mcp show playwright
+  ${APP_CLI_NAME} mcp add --id playwright --type stdio --command npx --args @playwright/mcp@latest
+  ${APP_CLI_NAME} mcp enable playwright --scope both
+  ${APP_CLI_NAME} mcp oauth discover notion-mcp
+  ${APP_CLI_NAME} mcp oauth start notion-mcp
+  ${APP_CLI_NAME} vision readme
+  ${APP_CLI_NAME} vision analyze --image myagents_files/screenshot.png --prompt "Summarize the UI state"
+  ${APP_CLI_NAME} speech transcribe --file myagents_files/meeting.m4a
+  ${APP_CLI_NAME} model list
+  ${APP_CLI_NAME} model set-key deepseek sk-xxx
+  ${APP_CLI_NAME} skill list
+  ${APP_CLI_NAME} skill add vercel-labs/skills --skill react-best-practices
+  ${APP_CLI_NAME} skill add https://github.com/anthropics/skills --plugin document-skills
+  ${APP_CLI_NAME} skill add ./private-skill --dry-run
+  ${APP_CLI_NAME} skill add "npx skills add foo/bar --skill baz" --force
+  ${APP_CLI_NAME} skill remove my-skill
+  ${APP_CLI_NAME} skill sync
+  ${APP_CLI_NAME} task readme
+  ${APP_CLI_NAME} goal get
+  ${APP_CLI_NAME} goal create --objective-file goal-objective.txt --max-executions 12
+  ${APP_CLI_NAME} goal update --status complete
+  ${APP_CLI_NAME} runtime list                       # see installed runtimes + install hints
+  ${APP_CLI_NAME} runtime describe codex             # models + permission modes
+  ${APP_CLI_NAME} runtime diagnose codex             # auth / features / MCP / apps / env snapshot (issue #194)
+  ${APP_CLI_NAME} diagnose runtime codex             # alias for runtime diagnose
+  ${APP_CLI_NAME} agent list --archived              # archived Agent workspaces
+  ${APP_CLI_NAME} agent create --workspacePath /absolute/path --json
+  ${APP_CLI_NAME} agent current --json               # compact current context diagnostic
+  ${APP_CLI_NAME} agent show <agentId>                # identity + effective defaults
+  ${APP_CLI_NAME} agent network-diagnose --json      # protocol/devices/connection state
+  ${APP_CLI_NAME} session list --agent <agentId>      # recent reusable contexts
+  ${APP_CLI_NAME} session start --agent <agentId> -p "review this" # fresh context
+  ${APP_CLI_NAME} session get <sessionId> --limit 5 --json
+  ${APP_CLI_NAME} agent archive <agent-id>
+  ${APP_CLI_NAME} agent unarchive <agent-id>
+  ${APP_CLI_NAME} task list --query "review" --limit 20
+  ${APP_CLI_NAME} task get <taskId>            # returns metadata + docs paths
                                         # (task.md is canonical; retained
                                         #  legacy docs are listed if present)
-  myagents task comments <taskId> --limit 50
-  myagents task comment <taskId> --body-file result.md
-  myagents task append-session <taskId> <sessionId>
-  myagents task run <taskId>
-  myagents task start <taskId>          # resume a stopped schedule
-  myagents task stop <taskId>           # pause schedule and active execution
-  myagents task runs <taskId> --limit 5
-  myagents task exit --reason "goal achieved" # only inside an eligible Task run
-  myagents task run-now <taskId>        # bypass Detector; does not change checkpoint
-  myagents task rerun <taskId>
-  myagents task trigger validate --spec-file trigger.json
-  myagents task trigger test <taskId> --expect quiet|activate
+  ${APP_CLI_NAME} task comments <taskId> --limit 50
+  ${APP_CLI_NAME} task comment <taskId> --body-file result.md
+  ${APP_CLI_NAME} task append-session <taskId> <sessionId>
+  ${APP_CLI_NAME} task run <taskId>
+  ${APP_CLI_NAME} task start <taskId>          # resume a stopped schedule
+  ${APP_CLI_NAME} task stop <taskId>           # pause schedule and active execution
+  ${APP_CLI_NAME} task runs <taskId> --limit 5
+  ${APP_CLI_NAME} task exit --reason "goal achieved" # only inside an eligible Task run
+  ${APP_CLI_NAME} task run-now <taskId>        # bypass Detector; does not change checkpoint
+  ${APP_CLI_NAME} task rerun <taskId>
+  ${APP_CLI_NAME} task trigger validate --spec-file trigger.json
+  ${APP_CLI_NAME} task trigger test <taskId> --expect quiet|activate
     # Test does not commit MyAgents checkpoint/Activation state, but the local
     # command really runs and its own external side effects are not rolled back.
-  myagents task check-now <taskId>
-  myagents task reset-checkpoint <taskId>
-  myagents task create-direct --name "review PR" \\
-      --taskMdContent "Review this PR and verify the acceptance criteria" \\
-      --runtime codex --model gpt-5.2 --permissionMode full-auto
+  ${APP_CLI_NAME} task check-now <taskId>
+  ${APP_CLI_NAME} task reset-checkpoint <taskId>
+  ${APP_CLI_NAME} task create-direct --name "review PR" \\\n      --taskMdContent "Review this PR and verify the acceptance criteria" \\\n      --runtime codex --model gpt-5.2 --permissionMode full-auto
     # Per-task runtime/model/permissionMode overrides — consult
-    #   myagents runtime list  +  myagents runtime describe <runtime>
+    #   ${APP_CLI_NAME} runtime list  +  ${APP_CLI_NAME} runtime describe <runtime>
     # before choosing values. Omit any flag to inherit the agent workspace default.
-  myagents task create-attached --name "Space Issue #123" \\
-      --workspaceId proj --workspacePath /path/to/proj \\
-      --taskMdContent-file task.md --source space-issue --sourceIssueId iss_123
-  myagents space list --json
-  myagents space --help
-  myagents space whoami --space <slug> --json
-  myagents space goal list --space <slug> --json
-  myagents space issue list --space <slug> --goal <goalId> --state todo --limit 30
-  myagents space issue view <issueId> --space <slug> --comments --json
-  myagents space issue claim <issueId> --space <slug> --deliveryId <deliveryId>
-  myagents space issue claim <issueId> --space <slug> --deliveryId <deliveryId> --create-attached \\
-      --workspaceId proj --workspacePath /path/to/proj \\
-      --name "Space Issue #123" --taskMdContent-file task.md
-  myagents space issue comment <issueId> --space <slug> --body-file result.md --attachment report.pdf
-  myagents space issue comment get <issueId> <commentId> --space <slug> --json
-  myagents space issue complete <issueId> --space <slug> --taskId <taskId> --body-file result.md \\
-      --message "completed Space issue"
-  myagents space issue attachment add <issueId> --space <slug> --file report.pdf
-  myagents space issue close <issueId> --space <slug>
-  myagents space attachment download <attachmentId> --space <slug> --output myagents_files/space/file.bin
-  myagents record list
-  myagents plugin list
-  myagents cc-plugin list
-  myagents cc-plugin install anthropics/example-plugin
-  myagents cc-plugin install file:///path/to/dev-plugin
-  myagents cc-plugin enable my-plugin
-  myagents version
-  myagents reload
+  ${APP_CLI_NAME} task create-attached --name "Space Issue #123" \\\n      --workspaceId proj --workspacePath /path/to/proj \\\n      --taskMdContent-file task.md --source space-issue --sourceIssueId iss_123
+  ${APP_CLI_NAME} space list --json
+  ${APP_CLI_NAME} space --help
+  ${APP_CLI_NAME} space whoami --space <slug> --json
+  ${APP_CLI_NAME} space goal list --space <slug> --json
+  ${APP_CLI_NAME} space issue list --space <slug> --goal <goalId> --state todo --limit 30
+  ${APP_CLI_NAME} space issue view <issueId> --space <slug> --comments --json
+  ${APP_CLI_NAME} space issue claim <issueId> --space <slug> --deliveryId <deliveryId>
+  ${APP_CLI_NAME} space issue claim <issueId> --space <slug> --deliveryId <deliveryId> --create-attached \\\n      --workspaceId proj --workspacePath /path/to/proj \\\n      --name "Space Issue #123" --taskMdContent-file task.md
+  ${APP_CLI_NAME} space issue comment <issueId> --space <slug> --body-file result.md --attachment report.pdf
+  ${APP_CLI_NAME} space issue comment get <issueId> <commentId> --space <slug> --json
+  ${APP_CLI_NAME} space issue complete <issueId> --space <slug> --taskId <taskId> --body-file result.md \\\n      --message "completed Space issue"
+  ${APP_CLI_NAME} space issue attachment add <issueId> --space <slug> --file report.pdf
+  ${APP_CLI_NAME} space issue close <issueId> --space <slug>
+  ${APP_CLI_NAME} space attachment download <attachmentId> --space <slug> --output myagents_files/space/file.bin
+  ${APP_CLI_NAME} record list
+  ${APP_CLI_NAME} plugin list
+  ${APP_CLI_NAME} cc-plugin list
+  ${APP_CLI_NAME} cc-plugin install anthropics/example-plugin
+  ${APP_CLI_NAME} cc-plugin install file:///path/to/dev-plugin
+  ${APP_CLI_NAME} cc-plugin enable my-plugin
+  ${APP_CLI_NAME} version
+  ${APP_CLI_NAME} reload
 
-Run 'myagents <command> --help' for details on a specific command.`;
+Run '${APP_CLI_NAME} <command> --help' for details on a specific command.`;
 
 export function publicCliHelp(positional: string[]): string | undefined {
   const group = positional[0];
   if (!group) {
-    return `myagents — MyAgents local external CLI\n\nUsage: myagents <public-command> [options]\n\nPublic commands:\n${EXTERNAL_CLI_PUBLIC_COMMANDS.map((command) => `  myagents ${command}`).join('\n')}\n\nExternal use requires the MyAgents app to be running, External Calls enabled in Settings, and MYAGENTS_API_TOKEN set.`;
+    return `${APP_CLI_NAME} — MyAgents local external CLI
+
+Usage: ${APP_CLI_NAME} <public-command> [options]
+
+Public commands:
+${EXTERNAL_CLI_PUBLIC_COMMANDS.map((command) => `  ${APP_CLI_NAME} ${command}`).join('\n')}\n\nExternal use requires the MyAgents app to be running, External Calls enabled in Settings, and MYAGENTS_API_TOKEN set.`;
   }
   const publicGroups = new Set([
     'status',
@@ -564,8 +563,8 @@ export function publicCliHelp(positional: string[]): string | undefined {
   if (matched && matched.commandLength === positional.length) {
     const invokedCommand = positional.slice(0, matched.commandLength).join(' ');
     const usage = matched.capability.usage.replace(
-      `myagents ${matched.capability.command}`,
-      `myagents ${invokedCommand}`,
+      `${APP_CLI_NAME} ${matched.capability.command}`,
+      `${APP_CLI_NAME} ${invokedCommand}`,
     );
     const allowedFlags = matched.capability.flags.length > 0
       ? matched.capability.flags.map(flag => `--${flag}`).join(', ')
@@ -576,7 +575,7 @@ export function publicCliHelp(positional: string[]): string | undefined {
     const matching = EXTERNAL_CLI_PUBLIC_COMMANDS.filter(
       (command) => command === group || command.startsWith(`${group} `),
     );
-    return `${group} — public external CLI commands\n\n${matching.map((command) => `  myagents ${command}`).join('\n')}\n\nExternal use requires the MyAgents app to be running, External Calls enabled in Settings, and MYAGENTS_API_TOKEN set.`;
+    return `${group} — public external CLI commands\n\n${matching.map((command) => `  ${APP_CLI_NAME} ${command}`).join('\n')}\n\nExternal use requires the MyAgents app to be running, External Calls enabled in Settings, and MYAGENTS_API_TOKEN set.`;
   }
   return undefined;
 }
@@ -793,7 +792,7 @@ export function adminHttpErrorResult(
       code: 'SESSION_SIDECAR_REQUIRED',
       error: 'Reload requires a Session Sidecar; the current Global Sidecar does not own session runtime state.',
       suggestion: 'Run the command from an active MyAgents chat session, or open its help for details.',
-      suggestedCommand: 'myagents reload --help',
+      suggestedCommand: `${APP_CLI_NAME} reload --help`,
     };
   }
   return {
@@ -945,7 +944,7 @@ export function printResult(
     const missing = data.missingKeys as string[] | undefined;
     if (missing && missing.length > 0) {
       console.log(`\nDeclared but unconfigured: ${missing.join(', ')}`);
-      console.log(`  → Run: myagents tool env ${String(data.name)} set ${missing[0]}=<value>`);
+      console.log(`  → Run: ${APP_CLI_NAME} tool env ${String(data.name)} set ${missing[0]}=<value>`);
     }
     if (result.hint) console.log(`\n${result.hint}`);
     return;
@@ -1003,7 +1002,7 @@ export function printResult(
     if (data.dispatchedAt) {
       console.log(`  dispatched: ${formatCronInstantWithUtc(data.dispatchedAt, resolveLocalTimezone())}`);
     }
-    console.log(`  runs:    myagents cron runs ${data.taskId ?? '<id>'} --limit 1`);
+    console.log(`  runs:    ${APP_CLI_NAME} cron runs ${data.taskId ?? '<id>'} --limit 1`);
     return;
   }
   if ((group === 'cron' || group === 'task') && action === 'stop') {
@@ -1014,7 +1013,7 @@ export function printResult(
     console.log(`  status: ${status}`);
     printTaskNextExecution(data?.nextExecutionAt);
     if (status === 'blocked') {
-      console.log(`  restart: myagents task rerun ${taskId}`);
+      console.log(`  restart: ${APP_CLI_NAME} task rerun ${taskId}`);
     }
     return;
   }
@@ -1254,7 +1253,7 @@ export function printResult(
     if (messages.length === 0) console.log('(no readable text messages)');
     if (session.hasMoreBefore === true && messages[0]?.id) {
       console.log(
-        `Earlier: myagents session get ${String(session.id)} --before ${String(messages[0].id)}`,
+        `Earlier: ${APP_CLI_NAME} session get ${String(session.id)} --before ${String(messages[0].id)}`,
       );
     }
     return;
@@ -1270,7 +1269,7 @@ export function printResult(
     } else {
       console.log('  result:  MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block.');
     }
-    console.log(`  follow-up: myagents session send ${String(result.sessionId ?? '<sessionId>')} -p "<prompt>"`);
+    console.log(`  follow-up: ${APP_CLI_NAME} session send ${String(result.sessionId ?? '<sessionId>')} -p "<prompt>"`);
     console.log('  observation: start/send already return the result automatically; use watch for separately observed work.');
     return;
   }
@@ -1375,7 +1374,7 @@ export function printResult(
     const docs = (task.docs as Record<string, unknown> | undefined) ?? {};
     if (docs.taskMd) console.log(`  task.md: ${String(docs.taskMd)}`);
     printTaskNextExecution(task.nextExecutionAt ?? data.nextExecutionAt);
-    console.log(`  inspect: myagents task get ${String(task.id ?? task.taskId ?? '<taskId>')}`);
+    console.log(`  inspect: ${APP_CLI_NAME} task get ${String(task.id ?? task.taskId ?? '<taskId>')}`);
     return;
   }
   if (group === 'space' && action === 'issue' && shouldCreateAttachedTaskForClaim(flags)) {
@@ -1500,7 +1499,7 @@ function printTaskCreateResult(data: Record<string, unknown>): void {
   const id = String(task?.id ?? '');
   const name = String(task?.name ?? '');
   const home = process.env.HOME ?? '';
-  const absDocs = `${home}/.myagents/tasks/${id}/`;
+  const absDocs = `${home}/${APP_DATA_DIR_NAME}/tasks/${id}/`;
   const displayDocs = home && absDocs.startsWith(home)
     ? `~${absDocs.slice(home.length)}`
     : absDocs;
@@ -1542,7 +1541,7 @@ function printTaskCreateResult(data: Record<string, unknown>): void {
 
   const nextSteps = data?.nextSteps as Record<string, string> | undefined;
   const isAttached = task?.dispatchOrigin === 'attached-session';
-  const dispatch = nextSteps?.dispatch ?? (!isAttached && id ? `myagents task run ${id}` : '');
+  const dispatch = nextSteps?.dispatch ?? (!isAttached && id ? `${APP_CLI_NAME} task run ${id}` : '');
   if (dispatch) console.log(`  dispatch:  ${dispatch}`);
   const inspect = nextSteps?.inspect;
   if (inspect && isAttached) console.log(`  inspect:   ${inspect}`);
@@ -1579,11 +1578,11 @@ function printSpaceClaimAttachedResult(data: Record<string, unknown>): void {
   if (claimId) console.log(`  claim_id:  ${claimId}`);
   if (taskId) console.log(`  task_id:   ${taskId}`);
   if (sessionId) console.log(`  session:   ${sessionId}`);
-  if (taskId) console.log(`  inspect:   myagents task get ${taskId}`);
+  if (taskId) console.log(`  inspect:   ${APP_CLI_NAME} task get ${taskId}`);
   if (issueId && taskId) {
-    console.log(`  finish:    myagents space issue complete ${shellQuoteArg(issueId)}${spaceArg}${workspaceArg} --taskId ${shellQuoteArg(taskId)} --body-file result.md --message "completed Space issue"`);
+    console.log(`  finish:    ${APP_CLI_NAME} space issue complete ${shellQuoteArg(issueId)}${spaceArg}${workspaceArg} --taskId ${shellQuoteArg(taskId)} --body-file result.md --message "completed Space issue"`);
   } else if (issueId) {
-    console.log(`  complete:  myagents space issue complete ${shellQuoteArg(issueId)}${spaceArg}${workspaceArg}`);
+    console.log(`  complete:  ${APP_CLI_NAME} space issue complete ${shellQuoteArg(issueId)}${spaceArg}${workspaceArg}`);
   }
 }
 
@@ -1636,9 +1635,9 @@ function printSpaceGoalList(data: Record<string, unknown>, flags: Record<string,
   }
   console.log('');
   console.log('Use an active GOAL ID exactly as returned:');
-  console.log(`  create: myagents space issue create --space ${shellQuoteArg(slug)} ... --goal <goalId>`);
-  console.log(`  move:   myagents space issue update <issueId> --space ${shellQuoteArg(slug)} --goal <goalId>`);
-  console.log(`  inbox:  myagents space issue update <issueId> --space ${shellQuoteArg(slug)} --clear-goal`);
+  console.log(`  create: ${APP_CLI_NAME} space issue create --space ${shellQuoteArg(slug)} ... --goal <goalId>`);
+  console.log(`  move:   ${APP_CLI_NAME} space issue update <issueId> --space ${shellQuoteArg(slug)} --goal <goalId>`);
+  console.log(`  inbox:  ${APP_CLI_NAME} space issue update <issueId> --space ${shellQuoteArg(slug)} --clear-goal`);
 }
 
 function printSpaceIssueUpdate(data: Record<string, unknown>, flags: Record<string, unknown>): void {
@@ -1656,7 +1655,7 @@ function printSpaceIssueUpdate(data: Record<string, unknown>, flags: Record<stri
   console.log(`  goal: ${goalId ? `${goalPathLabel || '(unnamed Goal)'} (${goalId})` : 'Inbox'}`);
   if (state) console.log(`  state: ${state}`);
   if (issueId && slug) {
-    console.log(`  inspect: myagents space issue view ${shellQuoteArg(issueId)} --space ${shellQuoteArg(slug)} --json`);
+    console.log(`  inspect: ${APP_CLI_NAME} space issue view ${shellQuoteArg(issueId)} --space ${shellQuoteArg(slug)} --json`);
   }
 }
 
@@ -1684,7 +1683,7 @@ function printRuntimeList(rows: Array<Record<string, unknown>>): void {
     if (hint) console.log(`    \u2192 ${String(hint)}`);
   }
   console.log('');
-  console.log('Describe a runtime:  myagents runtime describe <runtime>');
+  console.log(`Describe a runtime:  ${APP_CLI_NAME} runtime describe <runtime>`);
 }
 
 /**
@@ -1714,7 +1713,7 @@ function printRuntimeDescribe(data: Record<string, unknown>): void {
     console.log(`  ${String(discovery.message ?? 'Model list is temporarily unavailable.')}`);
   } else if (models.length === 0) {
     console.log(runtime === 'dsh'
-      ? '  Models come from the selected Provider. Run: myagents model list'
+      ? `  Models come from the selected Provider. Run: ${APP_CLI_NAME} model list`
       : '  (none reported — runtime may not be installed, or has no static model list)');
   } else {
     for (const m of models) {
@@ -1931,7 +1930,7 @@ function printAgentShow(data: Record<string, unknown>): void {
   console.log(`  Claude plugins: ${fmt(defaults.enabledPluginIds)}`);
   console.log(`  official tools: ${fmt(defaults.enabledOfficialToolIds)}`);
   console.log('');
-  console.log('Describe this runtime:  myagents runtime describe <runtime>');
+  console.log(`Describe this runtime:  ${APP_CLI_NAME} runtime describe <runtime>`);
 }
 
 /**
@@ -2423,7 +2422,7 @@ function printCronStatus(data: Record<string, unknown>): void {
     console.log(`Next execution: ${formatCronInstantWithUtc(data.nextExecutionAt, localTz)}`);
   }
   if (data.lastExecutedAt || data.nextExecutionAt) {
-    console.log(`Display timezone: ${localTz} (${timezoneOffset(Date.now(), localTz, 'utc')}); per-task cron tz is shown by 'myagents cron list'.`);
+    console.log(`Display timezone: ${localTz} (${timezoneOffset(Date.now(), localTz, 'utc')}); per-task cron tz is shown by '${APP_CLI_NAME} cron list'.`);
   }
 }
 
@@ -2746,10 +2745,10 @@ function printTaskDetail(task: Record<string, unknown>): void {
 
   // Footer — next-step hints so the AI / user doesn't have to guess
   console.log('\nNext steps:');
-  console.log('  myagents task update-status <id> <status> [--message ...]  # transition state machine');
-  console.log('  myagents task run <id>                                     # dispatch immediately');
-  console.log('  myagents task rerun <id>                                   # re-arm stopped/blocked task');
-  console.log('  myagents task --help                                       # full Task CLI reference');
+  console.log(`  ${APP_CLI_NAME} task update-status <id> <status> [--message ...]  # transition state machine`);
+  console.log(`  ${APP_CLI_NAME} task run <id>                                     # dispatch immediately`);
+  console.log(`  ${APP_CLI_NAME} task rerun <id>                                   # re-arm stopped/blocked task`);
+  console.log(`  ${APP_CLI_NAME} task --help                                       # full Task CLI reference`);
 }
 
 function printThoughtList(thoughts: Array<Record<string, unknown>>): void {
@@ -2920,8 +2919,8 @@ function printAnydocResult(action: string, result: Record<string, unknown>): voi
     console.log(`AnyDoc job accepted: ${jobId}`);
     console.log(`Status: ${state}`);
     console.log(`Output when ready: ${String(output.documentPath ?? '(unknown)')}`);
-    console.log(`→ Run: myagents anydoc status ${jobId}`);
-    console.log(`→ Run: myagents anydoc cancel ${jobId}`);
+    console.log(`→ Run: ${APP_CLI_NAME} anydoc status ${jobId}`);
+    console.log(`→ Run: ${APP_CLI_NAME} anydoc cancel ${jobId}`);
     return;
   }
   console.log(`AnyDoc job: ${jobId}`);
@@ -2973,8 +2972,8 @@ async function waitForAnydocJob(
   let lastStage = '';
   const onInterrupt = () => {
     console.error(`AnyDoc wait interrupted; job ${jobId} is still app-owned and was not cancelled.`);
-    console.error(`→ Run: myagents anydoc status ${jobId}`);
-    console.error(`→ Run: myagents anydoc cancel ${jobId}`);
+    console.error(`→ Run: ${APP_CLI_NAME} anydoc status ${jobId}`);
+    console.error(`→ Run: ${APP_CLI_NAME} anydoc cancel ${jobId}`);
     process.exit(130);
   };
   process.once('SIGINT', onInterrupt);
@@ -2987,7 +2986,7 @@ async function waitForAnydocJob(
           success: false,
           code: 'DOCUMENT_PROTOCOL_ERROR',
           error: 'The status response did not contain the expected document job.',
-          suggestion: `Retry with myagents anydoc status ${jobId}.`,
+          suggestion: `Retry with ${APP_CLI_NAME} anydoc status ${jobId}.`,
         };
       }
       const state = String(job.state ?? '');
@@ -3066,8 +3065,8 @@ function printSpeechResult(action: string, result: Record<string, unknown>): voi
     console.log(`Speech job accepted: ${jobId}`);
     console.log(`Status: ${state}`);
     console.log(`Output when ready: ${String(output.transcriptMarkdownPath ?? '(unknown)')}`);
-    console.log(`→ Run: myagents speech status ${jobId}`);
-    console.log(`→ Run: myagents speech cancel ${jobId}`);
+    console.log(`→ Run: ${APP_CLI_NAME} speech status ${jobId}`);
+    console.log(`→ Run: ${APP_CLI_NAME} speech cancel ${jobId}`);
     return;
   }
   console.log(`Speech job: ${jobId}`);
@@ -3096,8 +3095,8 @@ async function waitForSpeechJob(
   let lastStage = '';
   const onInterrupt = () => {
     console.error(`Speech wait interrupted; job ${jobId} is still app-owned and was not cancelled.`);
-    console.error(`→ Run: myagents speech status ${jobId}`);
-    console.error(`→ Run: myagents speech cancel ${jobId}`);
+    console.error(`→ Run: ${APP_CLI_NAME} speech status ${jobId}`);
+    console.error(`→ Run: ${APP_CLI_NAME} speech cancel ${jobId}`);
     process.exit(130);
   };
   process.once('SIGINT', onInterrupt);
@@ -3110,7 +3109,7 @@ async function waitForSpeechJob(
           success: false,
           code: 'SPEECH_PROTOCOL_ERROR',
           error: 'The status response did not contain the expected speech job.',
-          suggestion: `Retry with myagents speech status ${jobId}.`,
+          suggestion: `Retry with ${APP_CLI_NAME} speech status ${jobId}.`,
         };
       }
       const state = String(job.state ?? '');
@@ -3324,8 +3323,8 @@ export function rejectUnsupportedSpaceDryRun(
   exitSpaceInputError(
     flags,
     'DRY_RUN_UNSUPPORTED',
-    `myagents ${command} does not support --dry-run. No changes were applied.`,
-    `Read myagents ${command} --help; remove --dry-run only when ready to apply the mutation.`,
+    `${APP_CLI_NAME} ${command} does not support --dry-run. No changes were applied.`,
+    `Read ${APP_CLI_NAME} ${command} --help; remove --dry-run only when ready to apply the mutation.`,
   );
 }
 
@@ -3482,7 +3481,7 @@ export function validateCliCommand(
       suggestion: isRetiredDocumentDraft
         ? 'Use the published local document conversion command group.'
         : 'List the commands supported by this MyAgents build.',
-      suggestedCommand: isRetiredDocumentDraft ? 'myagents anydoc --help' : 'myagents --help',
+      suggestedCommand: isRetiredDocumentDraft ? `${APP_CLI_NAME} anydoc --help` : `${APP_CLI_NAME} --help`,
     };
   }
   if (helpMode && positional.length === 1) return undefined;
@@ -3502,7 +3501,7 @@ export function validateCliCommand(
       return {
         code: 'SUBCOMMAND_REQUIRED',
         error: `Missing subcommand for: ${positional.join(' ')}`,
-        suggestedCommand: `myagents ${group} --help`,
+        suggestedCommand: `${APP_CLI_NAME} ${group} --help`,
       };
     }
   }
@@ -3512,7 +3511,7 @@ export function validateCliCommand(
     code: 'UNKNOWN_COMMAND',
     error: `Unknown command: ${command}`,
     suggestion: `List the published ${group} commands and retry with one of them.`,
-    suggestedCommand: `myagents ${group} --help`,
+    suggestedCommand: `${APP_CLI_NAME} ${group} --help`,
   };
 }
 
@@ -3537,8 +3536,8 @@ export function validateDryRunSupport(
   if (DRY_RUN_PREVIEW_COMMANDS.has(command)) return undefined;
   return {
     code: 'DRY_RUN_UNSUPPORTED',
-    error: `myagents ${command} does not support --dry-run. No changes were applied.`,
-    suggestion: `Read myagents ${command} --help; remove --dry-run only when ready to run the command.`,
+    error: `${APP_CLI_NAME} ${command} does not support --dry-run. No changes were applied.`,
+    suggestion: `Read ${APP_CLI_NAME} ${command} --help; remove --dry-run only when ready to run the command.`,
   };
 }
 
@@ -3555,12 +3554,12 @@ export function validateInternalCliInvocation(positional: string[], flags: Recor
   const unknown = Object.keys(flags).find(flag => !globals.has(flag) && !allowed.has(flag));
   if (unknown) return {
     code: 'UNKNOWN_FLAG',
-    error: `Unknown flag for '${positional.join(' ') || 'myagents'}': ${flagSpelling(flags, unknown)}.`,
-    suggestion: `Run myagents ${positional.slice(0, 2).join(' ')} --help for supported options.`,
+    error: `Unknown flag for '${positional.join(' ') || APP_CLI_NAME}': ${flagSpelling(flags, unknown)}.`,
+    suggestion: `Run ${APP_CLI_NAME} ${positional.slice(0, 2).join(' ')} --help for supported options.`,
   };
   if (!groupHelp && ((action === 'readme' && group !== 'widget' && positional.length > 2)
     || (['status', 'version', 'reload'].includes(group ?? '') && positional.length > 1))) {
-    return { code: 'ARGUMENT_INVALID', error: 'Unexpected positional arguments.', suggestion: `Run myagents ${group} --help.` };
+    return { code: 'ARGUMENT_INVALID', error: 'Unexpected positional arguments.', suggestion: `Run ${APP_CLI_NAME} ${group} --help.` };
   }
   if (!groupHelp && publicLeaf && publicLeaf.capability.maxPositionals !== undefined) {
     const maximum = route === 'task/create-direct' ? 1 : publicLeaf.capability.maxPositionals;
@@ -3584,7 +3583,7 @@ export function validateExternalCliInvocation(
       ? {
         code: 'UNKNOWN_FLAG',
         error: `Unknown public CLI flag: ${flagSpelling(flags, unsupported)}.`,
-        suggestion: 'Run myagents --help for the supported public commands.',
+        suggestion: `Run ${APP_CLI_NAME} --help for the supported public commands.`,
       }
       : undefined;
   }
@@ -3598,7 +3597,7 @@ export function validateExternalCliInvocation(
         ? {
           code: 'UNKNOWN_FLAG',
           error: `Unknown public CLI flag: ${flagSpelling(flags, unsupported)}.`,
-          suggestion: `Run myagents ${group} --help for the supported public commands.`,
+          suggestion: `Run ${APP_CLI_NAME} ${group} --help for the supported public commands.`,
         }
         : undefined;
     }
@@ -3610,13 +3609,13 @@ export function validateExternalCliInvocation(
       return {
         code: 'SUBCOMMAND_REQUIRED',
         error: `Missing subcommand for: ${positional.join(' ')}`,
-        suggestedCommand: `myagents ${group} --help`,
+        suggestedCommand: `${APP_CLI_NAME} ${group} --help`,
       };
     }
     return {
       code: 'UNKNOWN_COMMAND',
       error: `Unknown public command: ${positional.join(' ')}`,
-      suggestion: 'Run myagents --help for the supported public commands.',
+      suggestion: `Run ${APP_CLI_NAME} --help for the supported public commands.`,
     };
   }
   const unsupported = Object.keys(flags).find(
@@ -3626,7 +3625,7 @@ export function validateExternalCliInvocation(
     return {
       code: 'UNKNOWN_FLAG',
       error: `Unknown flag for '${matched.capability.command}': ${flagSpelling(flags, unsupported)}.`,
-      suggestion: `Run myagents ${matched.capability.command} --help for the supported flags.`,
+      suggestion: `Run ${APP_CLI_NAME} ${matched.capability.command} --help for the supported flags.`,
     };
   }
 
@@ -3681,8 +3680,8 @@ function requireSpaceSlug(flags: Record<string, unknown>): string {
   return exitAgentCliError(flags, {
     code: 'SPACE_REQUIRED',
     error: 'This command requires --space <slug>.',
-    suggestion: 'Run `myagents space list --json`, then retry with one returned slug.',
-    suggestedCommand: 'myagents space list --json',
+    suggestion: `Run \`${APP_CLI_NAME} space list --json\`, then retry with one returned slug.`,
+    suggestedCommand: `${APP_CLI_NAME} space list --json`,
   });
 }
 
@@ -3698,8 +3697,8 @@ function requireSpacePositional(
   return exitAgentCliError(flags, {
     code: 'ARGUMENT_REQUIRED',
     error: `${command} requires <${argName}>.`,
-    suggestion: `Run \`myagents ${command} --help\` and retry with <${argName}>${flagAlternative ? ` or --${flagAlternative} <${argName}>` : ''}.`,
-    suggestedCommand: `myagents ${command} --help`,
+    suggestion: `Run \`${APP_CLI_NAME} ${command} --help\` and retry with <${argName}>${flagAlternative ? ` or --${flagAlternative} <${argName}>` : ''}.`,
+    suggestedCommand: `${APP_CLI_NAME} ${command} --help`,
   });
 }
 
@@ -3715,7 +3714,7 @@ function optionalSpaceStringFlag(
     flags,
     'FLAG_VALUE_REQUIRED',
     `${command} requires --${flagName} <value>.`,
-    `Run \`myagents ${command} --help\`, then retry with a non-empty --${flagName} value.`,
+    `Run \`${APP_CLI_NAME} ${command} --help\`, then retry with a non-empty --${flagName} value.`,
   );
 }
 
@@ -3806,7 +3805,7 @@ function resolveImMediaFilePath(
     return exitAgentCliError(flags, {
       code: 'FILE_COUNT_INVALID',
       error: 'im send-media accepts exactly one --file <path>.',
-      suggestion: 'Run `myagents im send-media --help`, then retry with one absolute file path.',
+      suggestion: `Run \`${APP_CLI_NAME} im send-media --help\`, then retry with one absolute file path.`,
     });
   }
 
@@ -3819,7 +3818,7 @@ function resolveImMediaFilePath(
     return exitAgentCliError(flags, {
       code: 'FILE_REQUIRED',
       error: 'im send-media requires --file <path>.',
-      suggestion: 'Run `myagents im send-media --help`, then retry with one absolute file path.',
+      suggestion: `Run \`${APP_CLI_NAME} im send-media --help\`, then retry with one absolute file path.`,
     });
   }
 
@@ -4462,7 +4461,7 @@ async function completeSpaceIssueWithLocalFollowup(
         success: false,
         code: 'LOCAL_TASK_READ_FAILED',
         error: `Cannot complete the Space Issue because attached Task ${taskId} could not be read: ${String(taskRead.error ?? 'unknown error')}.`,
-        suggestion: `Run \`myagents task get ${shellQuoteArg(taskId)} --json\` to verify the Task id, then retry without changing the cloud Issue.`,
+        suggestion: `Run \`${APP_CLI_NAME} task get ${shellQuoteArg(taskId)} --json\` to verify the Task id, then retry without changing the cloud Issue.`,
         data: { issueId, taskId, taskRead },
       };
     }
@@ -4496,7 +4495,7 @@ async function completeSpaceIssueWithLocalFollowup(
       code: stringValue(completeResult, 'code') ?? 'SPACE_ISSUE_COMPLETE_FAILED',
       error: String(completeResult.error ?? 'Issue completion failed'),
       suggestion: stringValue(completeResult, 'suggestion')
-        ?? 'Inspect the Issue with `myagents space issue view <issueId> --space <slug> --json`, then retry only after resolving the reported cloud conflict.',
+        ?? `Inspect the Issue with \`${APP_CLI_NAME} space issue view <issueId> --space <slug> --json\`, then retry only after resolving the reported cloud conflict.`,
       data: {
         issueId,
         issueComplete: completeResult,
@@ -4523,7 +4522,7 @@ async function completeSpaceIssueWithLocalFollowup(
           error: `Issue completed but local task status update failed: ${String(taskResult.error ?? 'unknown error')}.`,
           suggestion: `Rerun the recovery command to finish the local Task transition; the cloud Issue is already complete.`,
           recoveryHint: {
-            recoveryCommand: `myagents space issue complete ${shellQuoteArg(issueId)} --space ${shellQuoteArg(String(completeBody.spaceSlug))} --workspacePath ${shellQuoteArg(workspacePath)} --taskId ${shellQuoteArg(taskId)} --message "completed Space issue"`,
+            recoveryCommand: `${APP_CLI_NAME} space issue complete ${shellQuoteArg(issueId)} --space ${shellQuoteArg(String(completeBody.spaceSlug))} --workspacePath ${shellQuoteArg(workspacePath)} --taskId ${shellQuoteArg(taskId)} --message "completed Space issue"`,
             message: 'Cloud Issue is already complete; rerun the Space completion command so it can finish the local Task transition safely.',
           },
           data: {
@@ -4602,7 +4601,7 @@ function resolveSessionPromptText(
       {
         code: 'PROMPT_REQUIRED',
         error: `session ${action} requires --prompt "<text>" or --prompt-file <path>`,
-        suggestedCommand: `myagents session ${action} --help`,
+        suggestedCommand: `${APP_CLI_NAME} session ${action} --help`,
       },
       3,
     );
@@ -4618,8 +4617,8 @@ function resolveSessionPromptText(
             '-p / --prompt content contains newlines; use --prompt-file so shells preserve the complete request.',
           suggestedCommand:
             action === 'send'
-              ? 'myagents session send <sessionId> --prompt-file <path>'
-              : 'myagents session start --agent <agentId> --prompt-file <path>',
+              ? `${APP_CLI_NAME} session send <sessionId> --prompt-file <path>`
+              : `${APP_CLI_NAME} session start --agent <agentId> --prompt-file <path>`,
         },
         3,
       );
@@ -4633,8 +4632,8 @@ function resolveSessionPromptText(
           error: `-p / --prompt content is ${promptBytes} bytes, exceeds ${MAX_PROMPT_BYTES} (4 KB) limit.`,
           suggestedCommand:
             action === 'send'
-              ? 'myagents session send <sessionId> --prompt-file <path>'
-              : 'myagents session start --agent <agentId> --prompt-file <path>',
+              ? `${APP_CLI_NAME} session send <sessionId> --prompt-file <path>`
+              : `${APP_CLI_NAME} session start --agent <agentId> --prompt-file <path>`,
         },
         3,
       );
@@ -4662,7 +4661,7 @@ function buildAnydocRequestBody(
       code: 'UNKNOWN_COMMAND',
       error: `Unknown AnyDoc command: ${action}`,
       suggestion: 'Inspect the published AnyDoc commands.',
-      suggestedCommand: 'myagents anydoc --help',
+      suggestedCommand: `${APP_CLI_NAME} anydoc --help`,
     });
   }
   const unsupported = Object.keys(flags).find(key => !allowed.has(key));
@@ -4670,9 +4669,9 @@ function buildAnydocRequestBody(
     const displayFlag = unsupported.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`);
     return exitAgentCliError(flags, {
       code: unsupported === 'dryRun' ? 'DRY_RUN_UNSUPPORTED' : 'FLAG_UNSUPPORTED',
-      error: `myagents anydoc ${action} does not support --${displayFlag}.`,
+      error: `${APP_CLI_NAME} anydoc ${action} does not support --${displayFlag}.`,
       suggestion: 'Read the exact leaf help and retry with only documented options.',
-      suggestedCommand: `myagents anydoc ${action} --help`,
+      suggestedCommand: `${APP_CLI_NAME} anydoc ${action} --help`,
     });
   }
 
@@ -4683,7 +4682,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_FILE_COUNT_INVALID',
         error: 'anydoc convert requires exactly one --file <input>.',
         suggestion: 'Choose one supported local document and retry.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     if (rest.length > 0) {
@@ -4691,7 +4690,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_ARGUMENT_UNEXPECTED',
         error: `anydoc convert does not accept positional input: ${rest.join(' ')}`,
         suggestion: 'Pass the single input through --file <input>.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     if (flags.waitInvalidValue !== undefined) {
@@ -4699,7 +4698,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_WAIT_VALUE_INVALID',
         error: '--wait is a presence flag and does not accept true or false.',
         suggestion: 'Use bare --wait, or omit it for immediate acceptance.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     if (flags.output !== undefined && (typeof flags.output !== 'string' || !flags.output.trim())) {
@@ -4707,7 +4706,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_OUTPUT_PATH_INVALID',
         error: '--output requires a directory path.',
         suggestion: 'Pass an output root directory, not a document filename.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     if (flags.password !== undefined && typeof flags.password !== 'string') {
@@ -4715,7 +4714,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_PASSWORD_VALUE_REQUIRED',
         error: '--password requires a value.',
         suggestion: 'Pass the document password or omit --password.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     const source = files[0].trim();
@@ -4724,7 +4723,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_SOURCE_PATH_INVALID',
         error: 'anydoc convert accepts one local file path, not a URL.',
         suggestion: 'Choose a local file and retry.',
-        suggestedCommand: 'myagents anydoc convert --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc convert --help`,
       });
     }
     const pathMod = require('path') as typeof import('path');
@@ -4742,7 +4741,7 @@ function buildAnydocRequestBody(
       return exitAgentCliError(flags, {
         code: 'DOCUMENT_ARGUMENT_UNEXPECTED',
         error: 'anydoc list does not accept positional arguments.',
-        suggestedCommand: 'myagents anydoc list --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc list --help`,
       });
     }
     const rawLimit = flags.limit ?? '20';
@@ -4752,7 +4751,7 @@ function buildAnydocRequestBody(
         code: 'DOCUMENT_LIST_LIMIT_INVALID',
         error: '--limit must be an integer from 1 to 100.',
         suggestion: 'Retry with --limit 20 or another allowed value.',
-        suggestedCommand: 'myagents anydoc list --help',
+        suggestedCommand: `${APP_CLI_NAME} anydoc list --help`,
       });
     }
     return { limit };
@@ -4763,7 +4762,7 @@ function buildAnydocRequestBody(
       code: 'DOCUMENT_JOB_ID_REQUIRED',
       error: `anydoc ${action} requires exactly one <job-id>.`,
       suggestion: 'Copy the exact job ID from anydoc list.',
-      suggestedCommand: 'myagents anydoc list',
+      suggestedCommand: `${APP_CLI_NAME} anydoc list`,
     });
   }
   return { jobId: rest[0].trim() };
@@ -4787,7 +4786,7 @@ function buildSpeechRequestBody(
       code: 'UNKNOWN_COMMAND',
       error: `Unknown speech command: ${action}`,
       suggestion: 'Inspect the published speech commands.',
-      suggestedCommand: 'myagents speech --help',
+      suggestedCommand: `${APP_CLI_NAME} speech --help`,
     });
   }
   const unsupported = Object.keys(flags).find(key => !allowed.has(key));
@@ -4795,9 +4794,9 @@ function buildSpeechRequestBody(
     const displayFlag = unsupported.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`);
     return exitAgentCliError(flags, {
       code: unsupported === 'dryRun' ? 'DRY_RUN_UNSUPPORTED' : 'FLAG_UNSUPPORTED',
-      error: `myagents speech ${action} does not support --${displayFlag}.`,
+      error: `${APP_CLI_NAME} speech ${action} does not support --${displayFlag}.`,
       suggestion: 'Session and Workspace scope are injected automatically; use only documented options.',
-      suggestedCommand: `myagents speech ${action} --help`,
+      suggestedCommand: `${APP_CLI_NAME} speech ${action} --help`,
     });
   }
   if (action === 'transcribe') {
@@ -4807,7 +4806,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_FILE_COUNT_INVALID',
         error: 'speech transcribe requires exactly one --file <input>.',
         suggestion: 'Choose one local audio/video attachment in the current Workspace.',
-        suggestedCommand: 'myagents speech transcribe --help',
+        suggestedCommand: `${APP_CLI_NAME} speech transcribe --help`,
       });
     }
     if (rest.length > 0) {
@@ -4815,7 +4814,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_ARGUMENT_UNEXPECTED',
         error: `speech transcribe does not accept positional input: ${rest.join(' ')}`,
         suggestion: 'Pass the single input through --file <input>.',
-        suggestedCommand: 'myagents speech transcribe --help',
+        suggestedCommand: `${APP_CLI_NAME} speech transcribe --help`,
       });
     }
     if (flags.waitInvalidValue !== undefined) {
@@ -4823,7 +4822,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_WAIT_VALUE_INVALID',
         error: '--wait is a presence flag and does not accept true or false.',
         suggestion: 'Use bare --wait, or omit it for immediate acceptance.',
-        suggestedCommand: 'myagents speech transcribe --help',
+        suggestedCommand: `${APP_CLI_NAME} speech transcribe --help`,
       });
     }
     if (flags.output !== undefined && (typeof flags.output !== 'string' || !flags.output.trim())) {
@@ -4831,7 +4830,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_OUTPUT_PATH_INVALID',
         error: '--output requires a directory path.',
         suggestion: 'Pass an output root inside the current Workspace.',
-        suggestedCommand: 'myagents speech transcribe --help',
+        suggestedCommand: `${APP_CLI_NAME} speech transcribe --help`,
       });
     }
     const source = files[0].trim();
@@ -4840,7 +4839,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_SOURCE_PATH_INVALID',
         error: 'speech transcribe accepts one local file path, not a URL.',
         suggestion: 'Choose a local attachment in the current Workspace.',
-        suggestedCommand: 'myagents speech transcribe --help',
+        suggestedCommand: `${APP_CLI_NAME} speech transcribe --help`,
       });
     }
     const pathMod = require('path') as typeof import('path');
@@ -4856,7 +4855,7 @@ function buildSpeechRequestBody(
       return exitAgentCliError(flags, {
         code: 'SPEECH_ARGUMENT_UNEXPECTED',
         error: 'speech list does not accept positional arguments.',
-        suggestedCommand: 'myagents speech list --help',
+        suggestedCommand: `${APP_CLI_NAME} speech list --help`,
       });
     }
     const rawLimit = flags.limit ?? '20';
@@ -4866,7 +4865,7 @@ function buildSpeechRequestBody(
         code: 'SPEECH_LIST_LIMIT_INVALID',
         error: '--limit must be an integer from 1 to 100.',
         suggestion: 'Retry with --limit 20 or another allowed value.',
-        suggestedCommand: 'myagents speech list --help',
+        suggestedCommand: `${APP_CLI_NAME} speech list --help`,
       });
     }
     return { limit };
@@ -4876,7 +4875,7 @@ function buildSpeechRequestBody(
       code: 'SPEECH_JOB_ID_REQUIRED',
       error: `speech ${action} requires exactly one <job-id>.`,
       suggestion: 'Copy the exact job ID from speech list.',
-      suggestedCommand: 'myagents speech list',
+      suggestedCommand: `${APP_CLI_NAME} speech list`,
     });
   }
   return { jobId: rest[0].trim() };
@@ -4910,9 +4909,9 @@ function assertSupportedCronFlags(
   const displayFlag = unsupported.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`);
   exitAgentCliError(flags, {
     code: 'FLAG_UNSUPPORTED',
-    error: `myagents cron ${action} does not support --${displayFlag}.`,
+    error: `${APP_CLI_NAME} cron ${action} does not support --${displayFlag}.`,
     suggestion: 'Retry with only the documented Cron fields; unsupported flags are never ignored.',
-    suggestedCommand: 'myagents cron readme',
+    suggestedCommand: `${APP_CLI_NAME} cron readme`,
   });
 }
 
@@ -4975,7 +4974,7 @@ export function buildRequestBody(
         : '';
       if (!objective) {
         console.error('Error: goal create requires --objective-file <local-path>.');
-        console.error('  Usage: myagents goal create --objective-file goal-objective.txt');
+        console.error(`  Usage: ${APP_CLI_NAME} goal create --objective-file goal-objective.txt`);
         process.exit(2);
       }
       const deadline = parseGoalDeadlineFlag(flags.deadline);
@@ -5000,7 +4999,7 @@ export function buildRequestBody(
       const status = ((flags.status as string | undefined) ?? '').trim();
       if (status !== 'complete' && status !== 'blocked') {
         console.error('Error: goal update requires --status complete|blocked.');
-        console.error('  Usage: myagents goal update --status complete');
+        console.error(`  Usage: ${APP_CLI_NAME} goal update --status complete`);
         process.exit(2);
       }
       const reason = (
@@ -5210,7 +5209,7 @@ export function buildRequestBody(
             flags,
             'ISSUE_UPDATE_EMPTY',
             'space issue update requires at least one metadata field.',
-            'Run `myagents space issue update --help` and provide title, body, Goal, or human-only metadata.',
+            `Run \`${APP_CLI_NAME} space issue update --help\` and provide title, body, Goal, or human-only metadata.`,
           );
         }
         return {
@@ -5467,8 +5466,8 @@ export function buildRequestBody(
       return exitSpaceInputError(
         flags,
         'COMMAND_MOVED',
-        `myagents issue only reads an Issue; "${action}" is not supported by this alias.`,
-        `Use myagents space issue ${action} ... with an explicit --space <slug>.`,
+        `${APP_CLI_NAME} issue only reads an Issue; "${action}" is not supported by this alias.`,
+        `Use ${APP_CLI_NAME} space issue ${action} ... with an explicit --space <slug>.`,
       );
     }
     const positionalIssueId = action === 'list' || action === 'get' ? rest[0] : action;
@@ -5603,7 +5602,7 @@ export function buildRequestBody(
           code: 'WORKSPACE_PATH_REQUIRED',
           error: 'agent create requires --workspacePath <absolute-path>.',
           suggestedCommand:
-            'myagents agent create --workspacePath /absolute/path --json',
+            `${APP_CLI_NAME} agent create --workspacePath /absolute/path --json`,
         });
       }
       return { workspacePath };
@@ -6016,7 +6015,7 @@ export function buildRequestBody(
           error:
             'External task creation cannot use --preselectedSessionId current.',
           suggestion:
-            'Pass an explicit Session id from `myagents session list --agent <agentId> --json`.',
+            `Pass an explicit Session id from \`${APP_CLI_NAME} session list --agent <agentId> --json\`.`,
         });
       }
       // Resolve task.md body: `--taskMdFile` (industry-standard for long
@@ -6209,7 +6208,7 @@ export function buildRequestBody(
   if (group === 'record' || group === 'thought') {
     if (action === 'list') {
       if (group === 'thought' && flags.kind !== undefined) {
-        console.error('Error: thought list does not support --kind. Use myagents record list --kind text|audio.');
+        console.error(`Error: thought list does not support --kind. Use ${APP_CLI_NAME} record list --kind text|audio.`);
         process.exit(1);
       }
       const kind = typeof flags.kind === 'string' ? flags.kind : undefined;
@@ -6323,7 +6322,7 @@ export function buildRequestBody(
           {
             code: 'AGENT_REQUIRED',
             error: 'session list requires --agent <agentId>.',
-            suggestedCommand: 'myagents agent list --json',
+            suggestedCommand: `${APP_CLI_NAME} agent list --json`,
           },
           3,
         );
@@ -6364,7 +6363,7 @@ export function buildRequestBody(
           {
             code: 'AGENT_REQUIRED',
             error: 'session start requires --agent <agentId>.',
-            suggestedCommand: 'myagents agent list --json',
+            suggestedCommand: `${APP_CLI_NAME} agent list --json`,
           },
           3,
         );
@@ -6455,12 +6454,12 @@ export function buildRequestBody(
     if (action === 'watch') {
       const targetSessionId = rest[0] ?? flags.targetSessionId ?? flags.to;
       if (typeof targetSessionId !== 'string' || !targetSessionId.trim() || rest.length > 1) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: 'myagents session watch --help' });
+        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: `${APP_CLI_NAME} session watch --help` });
       }
       const unsupportedFlag = ['prompt', 'promptFile', 'then', 'thenFile', 'thenPrompt', 'thenPromptFile']
         .find((key) => flags[key] !== undefined);
       if (unsupportedFlag) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch does not accept prompt/then flags. Use `myagents session send` to ask the target session to do new work.' });
+        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: `session watch does not accept prompt/then flags. Use \`${APP_CLI_NAME} session send\` to ask the target session to do new work.` });
       }
       return { targetSessionId: targetSessionId.trim() };
     }
@@ -6578,7 +6577,7 @@ export function normalizeScheduleFlag(
     const kind = obj.kind;
     if (kind === 'loop') {
       console.error('Error: Cron Loop has retired. Use Goal Mode instead:');
-      console.error('  myagents goal create --objective-file <path>');
+      console.error(`  ${APP_CLI_NAME} goal create --objective-file <path>`);
       process.exit(2);
     }
     if (kind !== 'at' && kind !== 'every' && kind !== 'cron') {
@@ -6709,8 +6708,8 @@ function resolvePreselectedSessionId(
     return exitAgentCliError(flags, {
       code: 'TASK_SESSION_REQUIRED',
       error: '--preselectedSessionId requires current or a Session id.',
-      suggestion: 'Pass `--preselectedSessionId current` inside a MyAgents Session, or use an id from `myagents session list --agent <agentId> --json`.',
-      suggestedCommand: 'myagents session list --agent <agentId> --json',
+      suggestion: `Pass \`--preselectedSessionId current\` inside a MyAgents Session, or use an id from \`${APP_CLI_NAME} session list --agent <agentId> --json\`.`,
+      suggestedCommand: `${APP_CLI_NAME} session list --agent <agentId> --json`,
     });
   }
   const value = raw.trim();
@@ -6720,8 +6719,8 @@ function resolvePreselectedSessionId(
   return exitAgentCliError(flags, {
     code: 'CURRENT_SESSION_UNAVAILABLE',
     error: '--preselectedSessionId current requires MYAGENTS_SESSION_ID.',
-    suggestion: 'Run this command inside a MyAgents Session, or pass an explicit id from `myagents session list --agent <agentId> --json`.',
-    suggestedCommand: 'myagents session list --agent <agentId> --json',
+    suggestion: `Run this command inside a MyAgents Session, or pass an explicit id from \`${APP_CLI_NAME} session list --agent <agentId> --json\`.`,
+    suggestedCommand: `${APP_CLI_NAME} session list --agent <agentId> --json`,
   });
 }
 
@@ -6742,8 +6741,8 @@ function validateTaskSessionBinding(
     exitAgentCliError(flags, {
       code: 'TASK_SESSION_REQUIRED',
       error: '--runMode single-session requires --preselectedSessionId current|<session-id>.',
-      suggestion: 'Use `current` inside MyAgents, or choose a materialized id from `myagents session list --agent <agentId> --json`.',
-      suggestedCommand: 'myagents session list --agent <agentId> --json',
+      suggestion: `Use \`current\` inside MyAgents, or choose a materialized id from \`${APP_CLI_NAME} session list --agent <agentId> --json\`.`,
+      suggestedCommand: `${APP_CLI_NAME} session list --agent <agentId> --json`,
     });
   }
 }
@@ -6975,7 +6974,7 @@ function buildNotificationFromFlags(
       return exitAgentCliError(flags, {
         code: 'NOTIFICATION_CHANNEL_INVALID',
         error:
-          '--notificationBotChannelId requires a bot id (e.g. --notificationBotChannelId feishu_main). See: myagents im channels',
+          `--notificationBotChannelId requires a bot id (e.g. --notificationBotChannelId feishu_main). See: ${APP_CLI_NAME} im channels`,
       });
     }
     out.botChannelId = channel;
@@ -7133,7 +7132,7 @@ if (!process.env.VITEST) {
             error: message,
             suggestion:
               'Check the command leaf help and retry with explicit, non-empty flag values.',
-            suggestedCommand: `myagents ${rawArgs
+            suggestedCommand: `${APP_CLI_NAME} ${rawArgs
               .slice(0, 4)
               .filter((arg) => !arg.startsWith('-'))
               .join(' ')} --help`,

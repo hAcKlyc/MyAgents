@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -56,7 +57,7 @@ export interface GlobalSkillInventoryOptions {
 
 function defaultSkillsRoot(): string {
   const { home, temp } = getCrossPlatformEnv();
-  return resolve(home || temp, '.myagents', 'skills');
+  return resolve(home || temp, APP_DATA_DIR_NAME, 'skills');
 }
 
 function stableValue(value: unknown): unknown {

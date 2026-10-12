@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../../shared/appProfile';
 import { CODEX_SUBSCRIPTION_PROVIDER_ID } from '../../shared/config-types';
 import type { ProviderEnv } from '../provider-types';
 import {
@@ -14,9 +15,9 @@ export type TaskProviderRoutingOwner =
 export function taskProviderRoutingRecovery(owner: TaskProviderRoutingOwner): string {
   switch (owner.kind) {
     case 'task':
-      return `Task '${owner.taskId}' owns this override. Run 'myagents task update ${owner.taskId} --providerId <providerId> --model <model>'.`;
+      return `Task '${owner.taskId}' owns this override. Run '${APP_CLI_NAME} task update ${owner.taskId} --providerId <providerId> --model <model>'.`;
     case 'agent':
-      return `Agent '${owner.agentId}' supplied this default. Run 'myagents agent set ${owner.agentId} providerId <providerId>' and then set its model.`;
+      return `Agent '${owner.agentId}' supplied this default. Run '${APP_CLI_NAME} agent set ${owner.agentId} providerId <providerId>' and then set its model.`;
     case 'session':
       return `Session '${owner.sessionId}' owns this frozen route. Change that Session's provider/model or create a new Session.`;
   }

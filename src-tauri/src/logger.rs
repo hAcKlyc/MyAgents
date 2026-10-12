@@ -245,7 +245,7 @@ fn get_logs_dir() -> PathBuf {
     LOGS_DIR
         .get_or_init(|| {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            home.join(".myagents").join("logs")
+            home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("logs")
         })
         .clone()
 }

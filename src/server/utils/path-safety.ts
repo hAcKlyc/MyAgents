@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Node 镜像的 path-safety helpers — 与 Rust `src-tauri/src/commands.rs::validate_file_path`
  * 黑名单条目保持同步。
@@ -46,6 +47,8 @@ const CREDENTIAL_PATHS: readonly string[] = [
   '.config/op',
   '.myagents/codex/auth.json',
   '.myagents/credentials',
+  '.moxbot/codex/auth.json',
+  '.moxbot/credentials',
 ];
 
 const MAC_SENSITIVE_SUBDIRS: readonly string[] = [
@@ -74,7 +77,7 @@ export const __blacklistForCrossCheck = {
 } as const;
 
 /** Trusted root for MyAgents-owned tool attachments (relative to $HOME). */
-export const TOOL_ATTACHMENT_ROOT_REL = '.myagents/generated/tool-attachments';
+export const TOOL_ATTACHMENT_ROOT_REL = `${APP_DATA_DIR_NAME}/generated/tool-attachments`;
 
 export interface PathSafetyOk {
   ok: true;

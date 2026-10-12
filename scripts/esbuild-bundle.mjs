@@ -27,6 +27,11 @@ import { preparePlaywrightControlRuntime } from './prepare-playwright-control-ru
 import { dshBuildDefines } from './integrated-runtimes/dsh-build-selection.mjs';
 import { verifyAgentNetworkProtocol } from './verify-agent-network-protocol.mjs';
 
+const APP_BUILD_PROFILE = process.env.MYAGENTS_BUILD_PROFILE ?? 'myagents';
+if (!['myagents', 'moxbot'].includes(APP_BUILD_PROFILE)) {
+  throw new Error('MYAGENTS_BUILD_PROFILE must be myagents or moxbot');
+}
+
 await verifyAgentNetworkProtocol();
 
 // Read package.json version once and inject as a compile-time constant.
@@ -181,6 +186,7 @@ await build({
   target: 'node22',
   define: {
     ...dshBuildDefines(fileURLToPath(new URL('..', import.meta.url))),
+    __MYAGENTS_BUILD_PROFILE__: JSON.stringify(APP_BUILD_PROFILE),
     // Compile-time version constant. Replaces `process.env.npm_package_version`
     // fallbacks across the codebase so `myagents version` reports the real
     // shipped build instead of a stale hardcoded string in production.

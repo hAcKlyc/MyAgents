@@ -140,3 +140,6 @@ myagents_files/
 
 # Local design playgrounds (HTML prototypes, previews), review only
 /playground/
+
+# Derived MoX bot guides/templates; authoritative source stays in bundled-*
+/src-tauri/resources/moxbot-bundled/

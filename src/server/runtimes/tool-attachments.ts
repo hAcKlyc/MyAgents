@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * saveToolAttachment — 统一入口，把 (base64 / 已落盘绝对路径 / 远程 URL) 三种
  * 来源都转成 ToolAttachment，前端用 ToolAttachmentGallery 统一渲染。
@@ -212,7 +213,7 @@ export function isAllowedExternalAttachmentPrefix(canonical: string): boolean {
   const allowedPrefixes = [
     getToolAttachmentRoot(),
     path.join(HOME, '.codex'),
-    path.join(HOME, '.myagents'),
+    path.join(HOME, APP_DATA_DIR_NAME),
     // Codex can also save into the project workspace; the workspacePath isn't
     // known here, so we allow ~/Documents and ~/Desktop as a pragmatic default.
     // These are still subject to blacklist (no credential paths etc.).

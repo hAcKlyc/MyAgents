@@ -409,7 +409,7 @@ fn inject_terminal_env(cmd: &mut CommandBuilder, app: &AppHandle, sidecar_port: 
 
     // ~/.myagents/bin (CLI launchers and registered tools)
     if let Some(home) = dirs::home_dir() {
-        let cli_bin = home.join(".myagents").join("bin");
+        let cli_bin = home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("bin");
         extra_paths.push(cli_bin.to_string_lossy().into());
     }
 

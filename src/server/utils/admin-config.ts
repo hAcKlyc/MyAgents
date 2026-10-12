@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Sidecar-side config read/write for Admin API
  *
@@ -98,7 +99,7 @@ import {
 function getConfigDir(): string {
   const home = getHomeDirOrNull();
   if (!home) throw new Error('Cannot determine home directory');
-  return resolve(home, '.myagents');
+  return resolve(home, APP_DATA_DIR_NAME);
 }
 
 function getConfigPath(): string {
@@ -942,7 +943,7 @@ export function redactSecret(value: string): string {
 export function getProvidersDir(): string {
   const home = getHomeDirOrNull();
   if (!home) throw new Error('Cannot determine home directory');
-  return resolve(home, '.myagents', 'providers');
+  return resolve(home, APP_DATA_DIR_NAME, 'providers');
 }
 
 function lstatIfPresent(

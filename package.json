@@ -67,7 +67,7 @@
     "test": "npm run test:classification && npm run test:build-scripts && npm run test:unit && npm run test:dom && npm run test:integration",
     "test:classification": "node scripts/check-test-classification.mjs",
     "test:linux-package": "node --test scripts/linux-package.test.mjs scripts/stage-claude-sdk-linux.test.mjs",
-    "test:build-scripts": "node --test scripts/build-resource-download.test.mjs scripts/npm-runtime-cache.test.mjs scripts/build-assets.test.mjs scripts/rust-build-cache.test.mjs scripts/package-cliproxy-component.test.mjs scripts/prepare-cliproxy.test.mjs scripts/patch-react-virtuoso.test.mjs scripts/patch-codemirror-view.test.mjs scripts/prepare-cuse-bundle.test.mjs scripts/node-runtime.test.mjs scripts/windows-node-runtime-install.test.mjs scripts/browser-runtime-packaging.test.mjs scripts/build-resource-staging.test.mjs scripts/cli-bundle-contract.test.mjs scripts/document-processing-build-tools.test.mjs scripts/document-processing-resource-cache.test.mjs scripts/package-speech-model-set.test.mjs scripts/prepare-native-inference.test.mjs scripts/prepare-speech-model-mirror.test.mjs scripts/server-bundle-browser-host.test.mjs scripts/sherpa-source-extraction.test.mjs scripts/speech-inference-resource-cache.test.mjs scripts/speech-quality-benchmark.test.mjs scripts/integrated-runtimes/dsh-handoff-policy.test.mjs scripts/integrated-runtimes/prepare-dsh-runtime.test.mjs scripts/server-bundle-dsh-web.test.mjs scripts/verify-agent-network-protocol.test.mjs scripts/verify-claude-sdk-wrapper.test.mjs scripts/host/build.test.mjs scripts/host/install.test.mjs scripts/host/bootstrap.test.mjs",
+    "test:build-scripts": "node --test scripts/build-resource-download.test.mjs scripts/npm-runtime-cache.test.mjs scripts/build-assets.test.mjs scripts/rust-build-cache.test.mjs scripts/package-cliproxy-component.test.mjs scripts/prepare-cliproxy.test.mjs scripts/patch-react-virtuoso.test.mjs scripts/patch-codemirror-view.test.mjs scripts/prepare-cuse-bundle.test.mjs scripts/node-runtime.test.mjs scripts/windows-node-runtime-install.test.mjs scripts/browser-runtime-packaging.test.mjs scripts/build-resource-staging.test.mjs scripts/cli-bundle-contract.test.mjs scripts/document-processing-build-tools.test.mjs scripts/document-processing-resource-cache.test.mjs scripts/package-speech-model-set.test.mjs scripts/prepare-native-inference.test.mjs scripts/prepare-speech-model-mirror.test.mjs scripts/server-bundle-browser-host.test.mjs scripts/sherpa-source-extraction.test.mjs scripts/speech-inference-resource-cache.test.mjs scripts/speech-quality-benchmark.test.mjs scripts/integrated-runtimes/dsh-handoff-policy.test.mjs scripts/integrated-runtimes/prepare-dsh-runtime.test.mjs scripts/server-bundle-dsh-web.test.mjs scripts/verify-agent-network-protocol.test.mjs scripts/verify-claude-sdk-wrapper.test.mjs scripts/host/build.test.mjs scripts/host/install.test.mjs scripts/host/bootstrap.test.mjs scripts/prepare-moxbot-bundles.test.mjs",
     "test:unit": "vitest run --project unit",
     "test:dom": "vitest run --project dom",
     "test:integration": "vitest run --project integration",
@@ -104,7 +104,8 @@
     "verify:dsh-runtime:fresh": "node scripts/integrated-runtimes/verify-dsh-dev-freshness.mjs",
     "build:assets": "npm run build:web && npm run build:server && npm run build:bridge && npm run build:cli",
     "build:sharp-runtime": "node scripts/prepare-sharp-runtime.mjs",
-    "verify:agent-network-protocol": "node scripts/verify-agent-network-protocol.mjs"
+    "verify:agent-network-protocol": "node scripts/verify-agent-network-protocol.mjs",
+    "tauri:build:moxbot": "node scripts/build-moxbot.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.0.2",

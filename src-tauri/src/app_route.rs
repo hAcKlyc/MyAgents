@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Runtime};
 
-const APP_ROUTE_SCHEME: &str = "myagents";
+const APP_ROUTE_SCHEME: &str = crate::app_dirs::APP_URL_SCHEME;
 const APP_ROUTE_AUTHORITY: &str = "open";
 const MAX_ID_BYTES: usize = 200;
 
@@ -200,19 +200,19 @@ impl AppRoute {
 
     pub fn to_deep_link(&self) -> String {
         match self {
-            Self::SpaceHome { .. } => "myagents://open/v1/spaces".to_string(),
+            Self::SpaceHome { .. } => format!("{APP_ROUTE_SCHEME}://open/v1/spaces"),
             Self::SpaceIssues { params, .. } => {
-                format!("myagents://open/v1/spaces/{}/issues", params.space_id)
+                format!("{APP_ROUTE_SCHEME}://open/v1/spaces/{}/issues", params.space_id)
             }
             Self::SpaceTools { params, .. } => {
-                format!("myagents://open/v1/spaces/{}/tools", params.space_id)
+                format!("{APP_ROUTE_SCHEME}://open/v1/spaces/{}/tools", params.space_id)
             }
             Self::SpaceIssue { params, .. } => format!(
-                "myagents://open/v1/spaces/{}/issues/{}",
+                "{APP_ROUTE_SCHEME}://open/v1/spaces/{}/issues/{}",
                 params.space_id, params.issue_id
             ),
             Self::TaskComment { params, .. } => format!(
-                "myagents://open/v1/tasks/{}/comments/{}",
+                "{APP_ROUTE_SCHEME}://open/v1/tasks/{}/comments/{}",
                 params.task_id, params.comment_id
             ),
         }

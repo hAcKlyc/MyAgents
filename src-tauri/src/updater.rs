@@ -33,7 +33,9 @@ static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 // Linux is distributed as deb; the AppImage updater cannot install it.
 fn update_disabled_reason(is_debug_build: bool, platform: &str) -> Option<&'static str> {
-    if platform == "linux" {
+    if crate::app_dirs::IS_MOXBOT {
+        Some("UPDATER_DISABLED_FOR_MOXBOT")
+    } else if platform == "linux" {
         Some("UPDATER_MANUAL_INSTALL_REQUIRED")
     } else if is_debug_build {
         Some("UPDATER_DISABLED_IN_DEVELOPMENT")
@@ -100,7 +102,7 @@ struct PendingUpdateMeta {
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn get_myagents_dir() -> Result<std::path::PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    Ok(home.join(".myagents"))
+    Ok(home.join(crate::app_dirs::APP_DATA_DIR_NAME))
 }
 
 /// Atomically save pending update bytes + metadata to disk

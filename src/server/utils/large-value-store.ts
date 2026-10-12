@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Large Value Store — Pattern 2 (v0.2.0 structural refactors).
  *
@@ -75,7 +76,7 @@ const META_PART_RE = /^[a-f0-9]{8,32}\.meta\.json\.part$/;
 function getRefsDir(): string {
   const override = process.env.MYAGENTS_REFS_DIR;
   if (override && override.length > 0) return override;
-  return join(homedir(), ".myagents", "refs");
+  return join(homedir(), APP_DATA_DIR_NAME, "refs");
 }
 
 function ensureRefsDir(): string {

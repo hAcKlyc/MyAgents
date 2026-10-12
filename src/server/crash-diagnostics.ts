@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import {
   appendFileSync,
   existsSync,
@@ -13,7 +14,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const CRASH_LOG_FILE_MAX_BYTES = 50 * 1024 * 1024;
 export const CRASH_LOG_MAX_AGE_MS = 30 * DAY_MS;
-export const DEFAULT_CRASH_LOG_DIR = join(homedir(), '.myagents', 'logs', 'crash');
+export const DEFAULT_CRASH_LOG_DIR = join(homedir(), APP_DATA_DIR_NAME, 'logs', 'crash');
 
 const CRASH_DEDUPE_WINDOW_MS = 60_000;
 const CRASH_DEDUPE_DUMP_LIMIT = 3;
