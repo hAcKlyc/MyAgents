@@ -166,6 +166,7 @@ export function createHostResourceOwner(input: Options) {
       if (!Object.hasOwn(roots, body.rootId)) fail('RESOURCE_ROOT_UNKNOWN');
       const hash = digest(options.hostId, roots, body);
       let activeWorkspace: ReturnType<typeof workspace> | undefined;
+      let handledFailure: { error: unknown; result: Extract<HostResourceResult, {status: 'unconfirmed'}> } | undefined;
       return withWorkspaceAgentRegistrationIntent(async register => {
         checkAuthority();
         const current = ledger(loadConfig(strict), options);
@@ -219,11 +220,19 @@ export function createHostResourceOwner(input: Options) {
             target.verify();
             return structuredClone(confirmed);
           } finally { activeWorkspace = undefined; target.close(); }
-        } catch {
+        } catch (error) {
           // rename/fsync failures may have committed. The original ID is the only recovery handle.
-          return {mutationId: body.mutationId, status: 'unconfirmed', errorCode: 'RESOURCE_UNCONFIRMED'};
+          const result = {mutationId: body.mutationId, status: 'unconfirmed' as const, errorCode: 'RESOURCE_UNCONFIRMED' as const};
+          handledFailure = {error, result};
+          return result;
         }
-      }, {strictPersistence: true, notify: false, assertWorkspace: path => { const pinned = activeWorkspace; if (!pinned || pinned.path !== path) return fail('RESOURCE_PATH_UNAVAILABLE'); pinned.verify(); }});
+      }, {strictPersistence: true, notify: false, assertWorkspace: path => { const pinned = activeWorkspace; if (!pinned || pinned.path !== path) return fail('RESOURCE_PATH_UNAVAILABLE'); pinned.verify(); }}).catch(error => {
+        // The generic scope drains and rethrows failed registrations, including
+        // those deliberately handled by its callback. Preserve only this exact
+        // handled failure; lock/preflight/unrelated failures still reject.
+        if (handledFailure && handledFailure.error === error) return handledFailure.result;
+        throw error;
+      });
     },
   };
 }

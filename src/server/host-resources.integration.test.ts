@@ -136,6 +136,23 @@ it('scoped registration drains real Project-first failures before unlocking and 
     expect(() => closed(workspace)).toThrow('REGISTRATION_INTENT_CLOSED');
   } finally { rmSync(workspace,{recursive:true,force:true}); }
 });
+it('generic intent still drains and throws an explicitly caught real registration failure', async () => {
+  const workspace = mkdtempSync(join(process.cwd(), '.mah-resource-registration-'));
+  let caught: unknown;
+  try {
+    mkdirSync(config + '.tmp');
+    const result = withWorkspaceAgentRegistrationIntent(async register => {
+      try { await register(workspace); }
+      catch (error) { caught = error; return {status:'unconfirmed'}; }
+      return {status:'persisted'};
+    }, {strictPersistence:true,notify:false});
+    await expect(result).rejects.toMatchObject({code:'AGENT_MATERIALIZATION_DEFERRED'});
+    await expect(result).rejects.toBe(caught);
+    expect(loadProjects({strict:true})[0].agentId).toBeTruthy();
+    expect(loadConfig({strict:true}).agents).toBeUndefined();
+    expect(fs.existsSync(join(home,'.myagents','agent-config-intent.lock'))).toBe(false);
+  } finally { rmSync(workspace,{recursive:true,force:true}); }
+});
 it.runIf(process.platform !== 'linux')('never uses a weaker string-path mkdir fallback on non-Linux', async () => {
   const request = body('new', 'create');
   expect(await owner.mutate(request)).toMatchObject({status: 'unconfirmed'});
@@ -182,7 +199,7 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
     expect((await owner.mutate(request)).status).toBe('unconfirmed');
     mkdirSync(join(root, 'existing'), {mode:0o700});
     mkdirSync(config + '.tmp'); // config materialization must fail after the real Project claim commits.
-    expect((await owner.mutate(request)).status).toBe('unconfirmed');
+    expect(await owner.mutate(request)).toEqual({mutationId:request.mutationId,status:'unconfirmed',errorCode:'RESOURCE_UNCONFIRMED'});
     const claim = loadProjects({strict:true})[0]; expect(claim.agentId).toBeTruthy();
     expect(loadConfig({strict:true}).agents).toBeUndefined();
     expect((await owner.receipt(request.mutationId))?.status).toBe('pending');
