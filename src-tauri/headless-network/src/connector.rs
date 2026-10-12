@@ -21,7 +21,10 @@ use myagents_agent_network_protocol::{
 };
 use std::{
     path::Path,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use tokio_tungstenite::tungstenite::Message;
@@ -83,24 +86,57 @@ pub(crate) fn control_gate(
     }
     Ok(())
 }
+fn consume_join_grant(run: &AtomicBool, connection: &AtomicBool) -> bool {
+    let run_granted = run.swap(false, Ordering::AcqRel);
+    let connection_granted = connection.swap(false, Ordering::AcqRel);
+    run_granted && connection_granted
+}
 async fn connect(
     owner: &Owner,
     path: Option<&Path>,
     backoff: &mut ReconnectBackoff,
+    owned: Option<&crate::owned::Connection>,
+    join_authorized: &AtomicBool,
+    admission_failed: &mut bool,
 ) -> Result<(), NetworkError> {
-    let official = crate::auth::OfficialAccountSession::capture()?;
-    official.upsert_device().await?;
-    let account = NetworkAccountSession::Official(official);
+    let account = if let Some(owned) = owned {
+        owned
+            .account(join_authorized.load(Ordering::Acquire))
+            .await?
+    } else {
+        let official = crate::auth::OfficialAccountSession::capture()?;
+        official.upsert_device().await?;
+        NetworkAccountSession::Official(official)
+    };
     publish(owner, path, "initializing", None, false, None)?;
     let identity =
         NetworkIdentity::initialize_with_store(account, None, owner.store.clone()).await?;
-    let transport = NetworkTransport::new(
+    let transport = NetworkTransport::new_with_public_ca(
         &identity.network_url,
         identity.device_key(),
         MemoryBudget::default(),
+        identity.account.public_tls_ca(),
     )?;
+    if let NetworkAccountSession::Owned(account) = &identity.account {
+        // One operator grant belongs to this run, not each reconnect.
+        let grant = consume_join_grant(join_authorized, &account.join_authorized);
+        if let Err(error) =
+            crate::agent_network::owned_admission::enroll(&identity, &transport, grant).await
+        {
+            *admission_failed = true;
+            return Err(error);
+        }
+    }
     let mut socket = transport.websocket(&identity.token).await?;
-    send(&mut socket, hello()).await?;
+    send(
+        &mut socket,
+        if owned.is_some() {
+            management_hello()
+        } else {
+            hello()
+        },
+    )
+    .await?;
     let (scope, local, _) = initial_hello(&mut socket, &identity).await?;
     publish(owner, path, "catalog", Some(&scope.network_id), false, None)?;
     let uploaded = transport
@@ -141,6 +177,7 @@ async fn connect(
         Some(Ok(Message::Text(text)))=>{
         if text=="ma-network-pong"{continue;}
         let envelope=ServerEnvelope::parse(text.as_bytes()).map_err(|_|NetworkError::new("CONTROL_INVALID"))?;
+        if owned.is_some() { crate::agent_network::owned_profile::control(&envelope.message)?; }
         control_gate(&envelope.message,&scope,true,true)?;
         match envelope.message{
         ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;},
@@ -163,13 +200,39 @@ async fn connect(
     }
 }
 pub(crate) async fn run(owner: Arc<Owner>, path: Option<&Path>) -> Result<(), NetworkError> {
+    run_context(owner, None, path, false).await
+}
+pub(crate) async fn run_owned(
+    owner: Arc<Owner>,
+    connection: &crate::owned::Connection,
+    path: Option<&Path>,
+    join_authorized: bool,
+) -> Result<(), NetworkError> {
+    run_context(owner, Some(connection), path, join_authorized).await
+}
+fn management_hello() -> ClientMessage {
+    ClientMessage::Hello {
+        client_version: env!("CARGO_PKG_VERSION").into(),
+        capabilities: vec!["tls13-mtls".into()],
+        previous_connection: None,
+    }
+}
+async fn run_context(
+    owner: Arc<Owner>,
+    owned: Option<&crate::owned::Connection>,
+    path: Option<&Path>,
+    join_authorized: bool,
+) -> Result<(), NetworkError> {
+    let join_authorized = AtomicBool::new(join_authorized);
+    let mut admission_failed = false;
     let mut backoff = ReconnectBackoff::default();
     loop {
         publish(&owner, path, "connecting", None, false, None)?;
-        let result = tokio::select! {r=connect(&owner,path,&mut backoff)=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
+        let result = tokio::select! {r=connect(&owner,path,&mut backoff,owned,&join_authorized,&mut admission_failed)=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
         let error = result.unwrap_err();
         let state = if [
             "SPACE_REAUTH_REQUIRED",
+            "OWNED_REAUTH_REQUIRED",
             "ACCOUNT_AUTH_REVOKED",
             "NOT_AUTHENTICATED",
         ]
@@ -184,6 +247,10 @@ pub(crate) async fn run(owner: Arc<Owner>, path: Option<&Path>) -> Result<(), Ne
             "unavailable"
         };
         publish(&owner, path, state, None, false, Some(&error.code))?;
+        // An uncertain enrollment mutation is not a transport retry.
+        if admission_failed {
+            return Err(error);
+        }
         let id = uuid::Uuid::new_v4();
         let delay = backoff.next(
             u16::from_le_bytes([id.as_bytes()[0], id.as_bytes()[1]]),
@@ -195,6 +262,25 @@ pub(crate) async fn run(owner: Arc<Owner>, path: Option<&Path>) -> Result<(), Ne
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn owned_hello_does_not_advertise_agent_execution_and_join_is_not_replayed() {
+        let owned = serde_json::to_value(management_hello()).unwrap();
+        assert_eq!(owned["capabilities"], serde_json::json!(["tls13-mtls"]));
+        let official = serde_json::to_value(hello()).unwrap();
+        assert_eq!(official["capabilities"].as_array().unwrap().len(), 4);
+        let run = AtomicBool::new(true);
+        let first_connection = AtomicBool::new(true);
+        assert!(consume_join_grant(&run, &first_connection));
+        assert!(!first_connection.load(Ordering::Acquire));
+        // Even a newly constructed connection cannot reuse the old operator grant.
+        let reconnected = AtomicBool::new(true);
+        assert!(!consume_join_grant(&run, &reconnected));
+        assert!(!reconnected.load(Ordering::Acquire));
+        assert!(!consume_join_grant(
+            &AtomicBool::new(false),
+            &AtomicBool::new(true)
+        ));
+    }
     #[test]
     fn empty_catalog_is_real_explicit_zero_and_validated() {
         let value = empty_catalog(uuid::Uuid::new_v4().to_string()).unwrap();

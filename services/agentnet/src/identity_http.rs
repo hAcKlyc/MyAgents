@@ -115,6 +115,19 @@ impl IdentityService {
             .with_state(state)
     }
 
+    /// Narrow public material for the unauthenticated instance descriptor.
+    /// This deliberately excludes signer private keys and every user/device
+    /// projection; the values come from the already-loaded issuer key set.
+    pub(crate) fn public_instance_material(&self) -> PublicInstanceMaterial {
+        PublicInstanceMaterial {
+            issuer: self.profile.issuer.clone(),
+            service_id: self.profile.service_id.clone(),
+            environment: self.profile.environment.clone(),
+            root_certificate: self.keys.root_certificate_pem().to_owned(),
+            jwks: self.keys.jwks(),
+        }
+    }
+
     fn with_session<T>(
         &self,
         headers: &HeaderMap,
@@ -172,6 +185,14 @@ impl IdentityService {
             .map_err(|_| IdentityHttpError::internal())?;
         Ok(issued)
     }
+}
+
+pub(crate) struct PublicInstanceMaterial {
+    pub(crate) issuer: String,
+    pub(crate) service_id: String,
+    pub(crate) environment: String,
+    pub(crate) root_certificate: String,
+    pub(crate) jwks: Value,
 }
 
 #[derive(Deserialize)]

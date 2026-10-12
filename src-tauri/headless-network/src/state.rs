@@ -94,18 +94,7 @@ impl Owner {
             .ok_or_else(|| NetworkError::new("OWNER_UNAVAILABLE"))
     }
     pub fn read(&self) -> Result<StateRead, NetworkError> {
-        let binding = self.store.load_state(DEVICE_NAMESPACE)?;
-        match binding {
-            Some(v) if v.as_slice() != self.device_id.as_bytes() => {
-                return Err(NetworkError::new("ACCOUNT_STATE_SCOPE_MISMATCH"))
-            }
-            Some(_) => {}
-            None => self.store.compare_exchange_state(
-                DEVICE_NAMESPACE,
-                None,
-                self.device_id.as_bytes(),
-            )?,
-        }
+        bind_device(&self.store, &self.device_id)?;
         let raw = self.store.load_state(&self.namespace())?;
         let state = match &raw {
             Some(v) => {
@@ -160,6 +149,22 @@ impl Owner {
         s.account = None;
         s.revision = uuid::Uuid::new_v4().to_string();
         self.commit(raw.as_deref().map(|v| v.as_slice()), &s)
+    }
+}
+
+pub(crate) fn bind_device(
+    store: &EncryptedIdentityStore,
+    device: &str,
+) -> Result<(), NetworkError> {
+    match store.load_state(DEVICE_NAMESPACE)? {
+        Some(v) if v.as_slice() != device.as_bytes() => {
+            Err(NetworkError::new("ACCOUNT_STATE_SCOPE_MISMATCH"))
+        }
+        Some(_) => Ok(()),
+        None => {
+            store.compare_exchange_state(DEVICE_NAMESPACE, None, device.as_bytes())?;
+            Ok(())
+        }
     }
 }
 

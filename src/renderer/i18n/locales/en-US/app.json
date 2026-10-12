@@ -1389,6 +1389,25 @@
     "chooseNetwork": "Choose network",
     "officialNetwork": "MyAgents official network",
     "joinSelfhost": "Join a self-hosted network",
+    "ownedLogin": {
+      "mode": "Account sign-in",
+      "hint": "Sign in through your browser. The session is stored in the operating system credential store; tokens are not shown here.",
+      "start": "Continue in browser",
+      "started": "Sign-in request created. Complete it in your browser, then check the status here.",
+      "waiting": "Waiting for browser sign-in",
+      "expires": "This request expires at {{time}}.",
+      "openBrowser": "Open browser",
+      "browserOpened": "Browser opened. Complete sign-in there, then check again.",
+      "check": "Check sign-in",
+      "pending": "Sign-in is still pending.",
+      "cancel": "Cancel sign-in",
+      "advanced": "Advanced connection options",
+      "caFile": "Public TLS CA certificate file (optional)",
+      "caHint": "Use only when the service uses a private test CA. This certificate is pinned for this connection; the instance's inner AgentNet certificate is not used for public HTTPS trust."
+    },
+    "legacyKey": {
+      "mode": "Device key (legacy)"
+    },
     "serviceUrl": "Service URL",
     "deviceKey": "Device key",
     "selfhostHint": "This key binds one device. Devices in this network share trust. Joining does not automatically expose any Agent.",

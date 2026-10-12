@@ -229,8 +229,8 @@ impl AgentNetwork {
         let _ = app.emit("agent-network:changed", snapshot);
     }
     pub(crate) fn deactivate(&self) {
-        if let Some(NetworkAccountSession::Selfhost(account)) = &self.account {
-            account.active.store(false, Ordering::Release);
+        if let Some(account) = &self.account {
+            account.deactivate();
         }
         self.stop();
     }
@@ -646,24 +646,34 @@ async fn connect(
         }
         _ => NetworkIdentity::initialize(account, None).await?,
     };
-    let transport = Arc::new(NetworkTransport::new(
+    let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
         identity.device_key(),
         owner.memory.clone(),
+        identity.account.public_tls_ca(),
     )?);
+    if let NetworkAccountSession::Owned(account) = &identity.account {
+        let join = account.join_authorized.swap(false, Ordering::AcqRel);
+        super::owned_admission::enroll(&identity, &transport, join).await?;
+    }
     let mut socket = transport.websocket(&identity.token).await?;
     send(
         &mut socket,
         ClientMessage::Hello {
             client_version: env!("CARGO_PKG_VERSION").into(),
-            capabilities: ["tls13-mtls", "typed-rpc", "permit-v1", "return-v1"]
-                .map(str::to_owned)
-                .to_vec(),
+            capabilities: if identity.account.is_management_only() {
+                vec!["tls13-mtls".into()]
+            } else {
+                ["tls13-mtls", "typed-rpc", "permit-v1", "return-v1"]
+                    .map(str::to_owned)
+                    .to_vec()
+            },
             previous_connection: previous,
         },
     )
     .await?;
     let (scope, local, resume) = initial_hello(&mut socket, &identity).await?;
+    let management_only = identity.account.is_management_only();
     *previous_out = Some((identity.account.binding_id().to_owned(), resume));
     let connection_lifetime = ConnectionLifetime(Arc::new(AtomicBool::new(true)));
     let mut work: FuturesUnordered<BoxFuture<'static, Work>> = FuturesUnordered::new();
@@ -696,6 +706,7 @@ async fn connect(
         identity.token.clone(),
         scope.clone(),
         catalog_seq,
+        management_only,
     ));
     loop {
         identity.account.ensure_current()?;
@@ -710,6 +721,7 @@ async fn connect(
                         if text=="ma-network-pong" {continue;}
                         let envelope = ServerEnvelope::parse(text.as_bytes()).map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
                         if envelope.message.scope().is_some_and(|current| current != &scope) { return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH")); }
+                        if management_only { super::owned_profile::control(&envelope.message)?; }
                         match envelope.message {
                             ServerMessage::Ready { catalog_seq: accepted, .. } if ready_requested && accepted == catalog_seq && local_policy.is_some() => {
                                 hydrated = true;
@@ -732,6 +744,10 @@ async fn connect(
                             }
                             ServerMessage::ChannelOffer { channel_id, initiator, responder, initiator_connection_epoch,
                                 responder_connection_epoch, initiator_binding, responder_binding, .. } => {
+                                if management_only {
+                                    send(&mut socket, ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
+                                    continue;
+                                }
                                 if work.len() >= budget("pending") { return Err(NetworkError::new("NETWORK_REQUEST_CAPACITY")); }
                                 if let Err(error) = pairs.reserve(&channel_id) {
                                     send(&mut socket, ClientMessage::Close { scope: scope.clone(), channel_id, reason: error.code }).await?;
@@ -1031,6 +1047,14 @@ async fn connect(
                 }
             }
             Some(command) = commands.recv() => {
+                if management_only {
+                    match &command {
+                        Command::Metadata(metadata) => {
+                            if let Err(error) = super::owned_profile::metadata(&metadata.request.route()) {command.reject(error);continue;}
+                        }
+                        _ => {command.reject(NetworkError::new("OWNED_PROFILE_UNSUPPORTED"));continue;}
+                    }
+                }
                 if let Command::Watches(command)=command {
                     if command.generation!=generation { let _=command.reply.send(Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"))); continue; }
                     let (result,routes)=source_returns.watches(&command.source_session,command.cancel.as_deref(),command.all);
@@ -1082,12 +1106,12 @@ async fn connect(
                     Work::Metadata { allocation, reply: command.reply, result }
                 }.boxed());
             }
-            _ = owner.catalog_changed.notified(), if !catalog_busy => {
+            _ = owner.catalog_changed.notified(), if !catalog_busy && !management_only => {
                 catalog_seq = catalog_seq.checked_add(1).filter(|value| *value <= 9_007_199_254_740_991)
                     .ok_or_else(|| NetworkError::new("CATALOG_SEQUENCE_EXHAUSTED"))?;
                 catalog_busy = true; ready_requested = false;
                 local_policy = None;
-                work.push(catalog_work(manager.clone(), transport.clone(), identity.token.clone(), scope.clone(), catalog_seq));
+                work.push(catalog_work(manager.clone(), transport.clone(), identity.token.clone(), scope.clone(), catalog_seq, management_only));
             }
             _ = tick.tick() => {
                 source_returns.expire();
@@ -1218,10 +1242,17 @@ fn catalog_work(
     token: zeroize::Zeroizing<String>,
     scope: ConnectionScope,
     catalog_seq: u64,
+    management_only: bool,
 ) -> BoxFuture<'static, Work> {
     async move {
         let result = async {
-            let items = read_local_catalog(&manager).await?;
+            // This profile has no Agent invocation authority. Its explicit
+            // empty catalog is not a fallback after failing to read local data.
+            let items = if management_only {
+                Vec::new()
+            } else {
+                read_local_catalog(&manager).await?
+            };
             let snapshot = CatalogSnapshot {
                 version: 1,
                 connection_epoch: scope.connection_epoch.clone(),
