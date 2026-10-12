@@ -2,19 +2,26 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T03:30:30.544486+08:00 -->
-<!-- codex-handoff:latest-anchor=mah-linux-20261012 -->
+<!-- codex-handoff:last-updated=2026-10-12T10:29:20+08:00 -->
+<!-- codex-handoff:latest-anchor=mah-ui-pages-20261012 -->
 
 ## Current Snapshot
 
 - Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
-- Current task: MAH-LINUX-20261012：Linux 无桌面 Host、隔离真机安装与本地执行，然后 AgentNet 远程配置。
-- Latest anchor: mah-linux-20261012。
+- Current task: MAH-UI-PAGES-20261012 四页 renderer 准备层已完成本地验收，交由主聊天统一集成；MAH-LINUX-20261012 的 Linux/AgentNet 接续仍由原 owner 管理。
+- Latest anchor: mah-ui-pages-20261012；下方 Linux owner checkpoint 保持原记录。
 - Branch / commit: `feat/mah-headless-identity-store`，基线 fork main `d190f8fde103e3f261cf21406a05be5c0355489e`；已验收运行包源码 `8b5b7820263fd9a96361e58d50072c5a05436946`。实际状态以 git 和主聊天私有 QA 为准。
 - Important files: `src/renderer/api/hostManagement.ts`、`features/agent-network/HostManagement.tsx`、`hostManagementState.ts`、`DeviceDetails.tsx`、相关测试、中英文 app locale；边界说明 `specs/tech_docs/host_management_ui.md`。
 - Key decisions: 共同接口仍为方案 v0；类型只是 UI seam。生产 adapter 明确协议不支持，不发送草案命令；不可手改 vendored 1.1.0 artifact。Host owner 裁决权限、revision、持久化及生效；凭据只写。Provider/credential 独立提交；未知写入只查原 mutationId；Session 出生快照不被新默认覆盖。
 - Dependencies: 用户指定 Kimi 测试；AIRouter 已配置 Kimi K3，但 Host 所需凭据安全文件路径尚待补充。Agenthub 协议源码与测试实例仍未取得访问；不手改 vendor。测试服务器连接信息保留在主聊天的私有测试记录，不进入本公开 Git 仓库。
 - Next step: 完成独立 crypto/store 整合和完整门禁，使用指定可信 CI artifact 在隔离 Rust UID 下验收 systemd 加密存储；取得安全凭据后验证 Kimi，取得 authority 后接入实际 AgentNet。
+
+## Desktop UI continuation checkpoint
+
+- MAH-UI-PAGES-20261012：在实际当前 `feat/mah-headless-identity-store` / `dd5494b3` 上续作；保留 Linux/身份存储成果，未切换分支。主聊天继续拥有 Host、正式协议、主干合入与发布。本段不改变下方 Linux owner 的验收结论。
+- 四页 UI 准备层已实现：工作区/Agent、MCP/Skills、审批、日志，生产能力仍明确不可用。没有新 Tauri/wire 方法，没有修改 vendor、Host/云端/身份后端。正式来源仍是 Agenthub，v0 类型仅为 renderer seam。
+- 84/84 聚焦 unit/DOM、typecheck、修改文件 lint 与 Web build 已通过；独立 UI 视觉/响应式在三视口及中英文24组合通过，已测交互通过。R-UI-01 名称残留已修复并独立复验，主审复验放弃及正式适配器门禁。此段随本轮 Conventional Commit 交付；准确 SHA 与 patch/bundle 见同级 outputs/MAH-UI-PAGES-DELIVERY.md。本聊天没有推送、合入或发布。
+- 接续重点：用 authority 发布的设备级能力/人类 grant/typed owner 投影替换 optional pages adapter。资源CAS冲突不能重设baseline，未知操作只查原ID；审批绑定Session/request/turn/Runtime及fresh read token；日志有界且Host必须真正脱敏。真实业务与生产验收保持开放。
 
 ## Latest owner checkpoint
 
@@ -53,3 +60,13 @@
 - bb995c23 的 API 原型已在 Ubuntu 下载并验证旧公开制品归档；raw installer 超时，installer未运行，test Host恢复active、仍为000e9632。原型不是已发布的修复制品。
 - scripts/host将installer通过git show固定提交后嵌入bootstrap；HostManagement修复点击准入signal与busy顺序，StrictMode回归通过。主智能体集成，两个既有native worker独立打包/审查，无模型执行。
 - 新提交、完整CI、PR #2合入、实际新版在线安装仍待下一步；Kimi凭据和Agenthub authority依赖未解除，主Goal active。
+
+
+### 2026-10-12 — desktop UI continuation — MAH-UI-PAGES-20261012
+
+- Summary: 用户要求续做四类管理页，确认分支由主智能体决定。沿用实际当前身份存储分支，隔离 renderer 文件所有权，不改 Host/协议/生产。
+- Changes: 五Tab导航、owner范围内资源配置与CAS回执、权限/计划/必答问题、脱敏日志分页；跨页草稿保护，断线/身份/权限变化废弃迟到结果。正式adapter无pages，所有真实功能仍协议门禁。
+- Verification: 84项unit/DOM聚焦回归通过，typecheck/修改文件lint/Webbuild通过；依赖边界0errors、15个既有孤立模块warnings。独立视觉/响应式24组合通过；资源配置/CAS/unknown/审批/日志、加载/测试失败、Escape/Tab及合成IME已测交互通过。R-UI-01修复后三路径独立复验通过；主审检查放弃后输入清空和production适配器不可用。原生IME/Tauri/真实Host/完整身份权限组合未验证。
+- Collaboration: 主智能体集成与最终验收，资源实现worker请求gpt-6-luna/medium，复用独立UI验收worker先前请求gpt-6-luna/medium；运行实际model/effort、token与费用未知，未调用AIRouter。资源模块共3轮修复（主审2轮、独立UI1轮），独立复验闭环。三名参与者，文件范围互斥，无模型升级，用量/收益未知。
+- Evidence: outputs/MAH-UI-PAGES-DELIVERY.md、MAH-UI-PAGES-INDEPENDENT-REVIEW.md、ui-pages-evidence/、verification/pages-*；loopback fixture位于work/host-pages-ui，端口5189，不含真实凭据。
+- Next: 主聊天读取本轮本地提交和outputs交付记录，统一同步最新main、按CI/审查整合；接正式authority后再验真实两设备权限/持久化/MCP/审批/日志。不得将fixture结果当作真实成功。
