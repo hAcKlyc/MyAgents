@@ -18,6 +18,7 @@ import urllib.parse
 
 USER = "myagents-host-network-test"
 GROUP = USER
+NODE_USER = "myagents-host-test"
 NODE_IDENTITY = pathlib.Path("/var/lib/myagents-host-test/host-identity.json")
 STATE = pathlib.Path("/var/lib/myagents-host-network-test")
 CREDENTIAL = pathlib.Path("/etc/myagents-host-network-test/identity-kek.cred")
@@ -32,12 +33,41 @@ HOST_UNIT = pathlib.Path("/etc/systemd/system/myagents-host-test.service")
 HOST_DROPIN_DIR = pathlib.Path("/etc/systemd/system/myagents-host-test.service.d")
 HOST_DROPIN = HOST_DROPIN_DIR / "owned-management.conf"
 MANAGEMENT_SOCKET = pathlib.Path("/run/myagents-host-network-test/management.sock")
+PROFILE = "myagents-test"
+
+def select_profile(profile: str) -> None:
+    global PROFILE, USER, GROUP, NODE_USER, NODE_IDENTITY, STATE, CREDENTIAL, DAEMON_UNIT, AUTH_UNIT, BIN, PIN_PATH, STATUS_FILE
+    global OWNED_CONFIG, OWNED_CA, HOST_UNIT, HOST_DROPIN_DIR, HOST_DROPIN, MANAGEMENT_SOCKET, DAEMON_DROPIN_DIR, JOIN_DROPIN
+    profiles = {"myagents-test": ("myagents-host-network-test", "myagents-host-test"),
+                "moxbot-test": ("moxbot-host-network-test", "moxbot-host-test")}
+    if profile not in profiles:
+        raise ValueError("profile must be myagents-test or moxbot-test")
+    if profile == PROFILE:
+        return
+    network, host = profiles[profile]
+    PROFILE, USER, GROUP, NODE_USER = profile, network, network, host
+    NODE_IDENTITY = pathlib.Path("/var/lib") / host / "host-identity.json"
+    STATE = pathlib.Path("/var/lib") / network
+    CREDENTIAL = pathlib.Path("/etc") / network / "identity-kek.cred"
+    DAEMON_UNIT = network + ".service"
+    AUTH_UNIT = network + "-auth.service"
+    BIN = pathlib.Path("/opt") / network / "current" / "myagents-host-network"
+    PIN_PATH = pathlib.Path("/opt") / network / "device-id.json"
+    STATUS_FILE = pathlib.Path("/run") / network / "status.json"
+    OWNED_CONFIG = pathlib.Path("/etc") / network / "owned-instance.json"
+    OWNED_CA = pathlib.Path("/etc") / network / "owned-instance-ca.pem"
+    HOST_UNIT = pathlib.Path("/etc/systemd/system") / (host + ".service")
+    HOST_DROPIN_DIR = pathlib.Path("/etc/systemd/system") / (host + ".service.d")
+    HOST_DROPIN = HOST_DROPIN_DIR / "owned-management.conf"
+    MANAGEMENT_SOCKET = pathlib.Path("/run") / network / "management.sock"
+    DAEMON_DROPIN_DIR = pathlib.Path("/etc/systemd/system") / (network + ".service.d")
+    JOIN_DROPIN = DAEMON_DROPIN_DIR / "one-shot-join.conf"
 DAEMON_DROPIN_DIR = pathlib.Path("/etc/systemd/system/myagents-host-network-test.service.d")
 JOIN_DROPIN = DAEMON_DROPIN_DIR / "one-shot-join.conf"
 
 
 def host_id() -> str:
-    node = pwd.getpwnam("myagents-host-test")
+    node = pwd.getpwnam(NODE_USER)
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         for component in NODE_IDENTITY.parts[1:-1]:
@@ -150,15 +180,16 @@ def _read_root_unit(path: pathlib.Path) -> str | None:
 
 
 def owned_config() -> dict | None:
-    if not os.path.lexists("/etc/myagents-host-network-test"):
+    etc_dir = pathlib.Path("/etc") / USER
+    if not os.path.lexists(etc_dir):
         unit_path = pathlib.Path("/etc/systemd/system") / DAEMON_UNIT
         unit_text = _read_root_unit(unit_path)
         if unit_text is not None and "--owned-instance" in unit_text:
             raise ValueError("owned service is missing its root-owned instance configuration")
         return None
-    _assert_no_symlink(pathlib.Path("/etc/myagents-host-network-test"))
+    _assert_no_symlink(etc_dir)
     try:
-        directory = pathlib.Path("/etc/myagents-host-network-test").lstat()
+        directory = etc_dir.lstat()
         info = OWNED_CONFIG.lstat()
     except FileNotFoundError:
         unit_path = pathlib.Path("/etc/systemd/system") / DAEMON_UNIT
@@ -192,7 +223,7 @@ def owned_config() -> dict | None:
     if value["caFile"] not in (None, str(OWNED_CA)):
         raise ValueError("owned network CA path is not fixed")
     ipc = (value["managementSocket"], value["managementHostUid"], value["managementGid"])
-    if ipc != (None, None, None) and ipc != (str(MANAGEMENT_SOCKET), pwd.getpwnam("myagents-host-test").pw_uid,
+    if ipc != (None, None, None) and ipc != (str(MANAGEMENT_SOCKET), pwd.getpwnam(NODE_USER).pw_uid,
                                               pwd.getpwnam(USER).pw_gid):
         raise ValueError("owned network IPC identity is invalid")
     if value["caFile"]:
@@ -349,7 +380,7 @@ def _remove_created_host_dropin(created: bool) -> None:
 
 
 def _network_join_override(config: dict, device_id: str) -> bytes:
-    binary = "/opt/myagents-host-network-test/current/myagents-host-network"
+    binary = str(BIN)
     args = [binary, "run", "--state-dir", str(STATE), "--unit", DAEMON_UNIT,
             "--credential", "identity-kek", "--device-id", device_id, "--device-name", "Linux-Host",
             "--status-file", str(STATUS_FILE), "--owned-instance", config["ownedInstance"]]
@@ -367,7 +398,7 @@ def _network_join_override(config: dict, device_id: str) -> bytes:
 def _activate_owned(command: str, config: dict, device_id: str) -> int:
     if not config["ownedInstance"]:
         raise ValueError("owned instance configuration is missing")
-    host_was_active = subprocess.run(["systemctl", "is-active", "--quiet", "myagents-host-test.service"], check=False).returncode == 0
+    host_was_active = subprocess.run(["systemctl", "is-active", "--quiet", HOST_UNIT.name], check=False).returncode == 0
     created_host_dropin = False
     join_override_created = False
     try:
@@ -390,7 +421,7 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
             _wait_management_socket(config)
             _, created_host_dropin = _host_dropin(config)
             subprocess.run(["systemctl", "daemon-reload"], check=True)
-            subprocess.run(["systemctl", "restart" if host_was_active else "start", "myagents-host-test.service"], check=True)
+            subprocess.run(["systemctl", "restart" if host_was_active else "start", HOST_UNIT.name], check=True)
         if join_override_created:
             JOIN_DROPIN.unlink()
             subprocess.run(["systemctl", "daemon-reload"], check=True)
@@ -398,7 +429,7 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
     except BaseException:
         _remove_created_host_dropin(created_host_dropin)
         if created_host_dropin and host_was_active:
-            subprocess.run(["systemctl", "restart", "myagents-host-test.service"], check=False,
+            subprocess.run(["systemctl", "restart", HOST_UNIT.name], check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["systemctl", "stop", DAEMON_UNIT], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if join_override_created:
@@ -407,7 +438,8 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
         raise
 
 
-def run_control(command: str) -> int:
+def run_control(command: str, profile: str = "myagents-test") -> int:
+    select_profile(profile)
     if os.geteuid() != 0:
         raise PermissionError("run this operator control as root")
     if command not in {"start", "wait", "cancel", "logout", "status", "run", "join"}:
@@ -436,7 +468,7 @@ def run_control(command: str) -> int:
         "--property=UMask=0077", "--property=NoNewPrivileges=yes", "--property=PrivateTmp=yes",
         "--property=ProtectSystem=strict", "--property=ProtectHome=yes",
         "--property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
-        f"--property=ReadOnlyPaths=/run/myagents-host-network-test",
+        f"--property=ReadOnlyPaths={STATUS_FILE.parent}",
     ]
     if command in {"start", "wait", "cancel", "logout"}:
         args.extend([
@@ -459,9 +491,10 @@ def run_control(command: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("start", "wait", "cancel", "logout", "status", "run", "join"))
+    parser.add_argument("--profile", choices=("myagents-test", "moxbot-test"), default="myagents-test")
     args = parser.parse_args()
     try:
-        return run_control(args.command)
+        return run_control(args.command, args.profile)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(json.dumps({"status": "error", "code": "NETWORK_CONTROL_REJECTED", "detail": str(exc)}), file=sys.stderr)
         return 1

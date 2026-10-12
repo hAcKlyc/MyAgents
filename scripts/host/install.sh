@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly PREFIX=/opt/myagents-host-test
-readonly STATE=/var/lib/myagents-host-test
-readonly SERVICE=myagents-host-test
-readonly USER_NAME=myagents-host-test
-readonly UNIT=/etc/systemd/system/myagents-host-test.service
-readonly PROVIDER_CREDENTIAL_DIR=/etc/myagents-host-test/credentials
-readonly PROVIDER_CREDENTIAL=/etc/myagents-host-test/credentials/provider-key.cred
 DRY_RUN=0
 ARCHIVE=
 EXPECTED_SHA=
+PROFILE=myagents-test
 while (($#)); do
   case "$1" in
     --dry-run) DRY_RUN=1; shift ;;
     --sha256) (($# >= 2)) || { echo '--sha256 requires an independently obtained digest' >&2; exit 2; }; EXPECTED_SHA=$2; shift 2 ;;
+    --profile) (($# >= 2)) || { echo '--profile requires a fixed profile name' >&2; exit 2; }; PROFILE=$2; shift 2 ;;
     --*) echo "Unsupported option: $1" >&2; exit 2 ;;
     *) [[ -z "$ARCHIVE" ]] || { echo 'Only one archive is accepted' >&2; exit 2; }; ARCHIVE=$1; shift ;;
   esac
 done
+case "$PROFILE" in
+  myagents-test) PACKAGE_ROOT=myagents-host-test; CLI_NAME=myagents-host; DESCRIPTION='MyAgents local Linux Host (test installation)'; PREFIX=/opt/myagents-host-test; STATE=/var/lib/myagents-host-test; SERVICE=myagents-host-test; USER_NAME=myagents-host-test; UNIT=/etc/systemd/system/myagents-host-test.service; ETC=/etc/myagents-host-test; RUN_NAME=myagents-host-test ;;
+  moxbot-test) PACKAGE_ROOT=moxbot-host-test; CLI_NAME=moxbot-host; DESCRIPTION='MoX bot local Linux Host (test installation)'; PREFIX=/opt/moxbot-host-test; STATE=/var/lib/moxbot-host-test; SERVICE=moxbot-host-test; USER_NAME=moxbot-host-test; UNIT=/etc/systemd/system/moxbot-host-test.service; ETC=/etc/moxbot-host-test; RUN_NAME=moxbot-host-test ;;
+  *) echo 'Profile must be myagents-test or moxbot-test' >&2; exit 2 ;;
+esac
+PROVIDER_CREDENTIAL_DIR=$ETC/credentials
+PROVIDER_CREDENTIAL=$ETC/credentials/provider-key.cred
 [[ -n "$ARCHIVE" && -f "$ARCHIVE" ]] || { echo 'Usage: install.sh [--dry-run] ARCHIVE.tar.gz --sha256 EXPECTED_SHA256' >&2; exit 2; }
 [[ "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'A caller-supplied 64-digit --sha256 is required' >&2; exit 2; }
 ACTUAL_SHA=$(sha256sum -- "$ARCHIVE" | awk '{print $1}')
@@ -61,12 +63,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python3 - "$ARCHIVE" "$STAGE" <<'PY'
+python3 - "$ARCHIVE" "$STAGE" "$PACKAGE_ROOT" "$PROFILE" <<'PY'
 import hashlib, json, os, pathlib, stat, sys, tarfile
-archive, stage = sys.argv[1:]
+archive, stage, package_root, expected_profile = sys.argv[1:]
 with tarfile.open(archive, 'r:gz') as tf:
     members = tf.getmembers()
-    root = pathlib.PurePosixPath('myagents-host-test')
+    root = pathlib.PurePosixPath(package_root)
     for member in members:
         path = pathlib.PurePosixPath(member.name)
         if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != root.name:
@@ -80,7 +82,11 @@ if len(manifests) != 1:
     raise SystemExit('Archive must contain exactly one release manifest')
 manifest_path = manifests[0]
 manifest = json.loads(manifest_path.read_text())
-if manifest.get('schemaVersion') != 1 or manifest.get('target') != 'linux-x64-glibc':
+manifest_profile = manifest.get('profile')
+# Legacy packages predate profile metadata and have only ever used the fixed MyAgents namespace.
+if manifest_profile is None and expected_profile == 'myagents-test' and package_root == 'myagents-host-test':
+    manifest_profile = 'myagents-test'
+if manifest.get('schemaVersion') != 1 or manifest.get('target') != 'linux-x64-glibc' or manifest_profile != expected_profile:
     raise SystemExit('Unsupported package manifest or target')
 release = manifest_path.parent
 release_id = manifest.get('releaseId')
@@ -107,8 +113,8 @@ if actual != seen:
     raise SystemExit('Release contains unlisted or missing files')
 print(release_id)
 PY
-RELEASE_ID=$(python3 -c 'import json,glob,os,sys; p=glob.glob(sys.argv[1]+"/myagents-host-test/releases/*/manifest.json"); print(json.load(open(p[0]))["releaseId"])' "$STAGE")
-RELEASE_SOURCE="$STAGE/myagents-host-test/releases/$RELEASE_ID"
+RELEASE_ID=$(python3 -c 'import json,glob,os,sys; p=glob.glob(sys.argv[1]+"/"+sys.argv[2]+"/releases/*/manifest.json"); print(json.load(open(p[0]))["releaseId"])' "$STAGE" "$PACKAGE_ROOT")
+RELEASE_SOURCE="$STAGE/$PACKAGE_ROOT/releases/$RELEASE_ID"
 [[ -x "$RELEASE_SOURCE/resources/nodejs/bin/node" && -x "$RELEASE_SOURCE/resources/claude-agent-sdk/claude" ]] || { echo 'Required bundled runtimes are not executable' >&2; exit 1; }
 if ((DRY_RUN)); then printf 'Verified unsigned test package %s (%s)\n' "$RELEASE_ID" "$ACTUAL_SHA"; exit 0; fi
 ((EUID == 0)) || { echo 'Install requires root; --dry-run does not' >&2; exit 1; }
@@ -171,9 +177,9 @@ PY
 # END_SHARED_TRANSACTION_LOCK
 acquire_install_transaction_lock "$INSTALL_LOCK" 0 0
 if [[ -L "$PREFIX/current" && "$(readlink "$PREFIX/current")" == "releases/$RELEASE_ID" && -d "$PREFIX/releases/$RELEASE_ID" ]]; then
-  [[ -d /etc/myagents-host-test && ! -L /etc/myagents-host-test \
-    && "$(stat -c '%u' /etc/myagents-host-test)" == 0 \
-    && "$(stat -c '%a' /etc/myagents-host-test)" == 700 \
+  [[ -d "$ETC" && ! -L "$ETC" \
+    && "$(stat -c '%u' "$ETC")" == 0 \
+    && "$(stat -c '%a' "$ETC")" == 700 \
     && -d "$PROVIDER_CREDENTIAL_DIR" && ! -L "$PROVIDER_CREDENTIAL_DIR" \
     && "$(stat -c '%u' "$PROVIDER_CREDENTIAL_DIR")" == 0 \
     && "$(stat -c '%a' "$PROVIDER_CREDENTIAL_DIR")" == 700 \
@@ -240,7 +246,7 @@ else
   install -d -o "$USER_NAME" -g "$USER_NAME" -m 0700 "$STATE" "$STATE/home"
 fi
 install -d -o root -g root -m 0755 "$PREFIX/releases"
-for config_dir in /etc/myagents-host-test /etc/myagents-host-test/credentials; do
+for config_dir in "$ETC" "$PROVIDER_CREDENTIAL_DIR"; do
   if [[ -e "$config_dir" ]]; then
     [[ -d "$config_dir" && ! -L "$config_dir" && "$(stat -c '%u' "$config_dir")" == 0 \
       && "$(stat -c '%a' "$config_dir")" == 700 ]] || { echo "Unsafe root credential directory: $config_dir" >&2; exit 1; }
@@ -306,47 +312,47 @@ ln -s "releases/$RELEASE_ID" "$PREFIX/current.next"
 mv -Tf "$PREFIX/current.next" "$PREFIX/current"
 LINK_CHANGED=1
 install -d -o root -g root -m 0755 "$PREFIX/bin"
-install -o root -g root -m 0755 "$RELEASE_SOURCE/bin/myagents-host" "$PREFIX/bin/myagents-host"
-install -d -o root -g root -m 0700 /etc/myagents-host-test
-CREDENTIAL_LINES='LoadCredentialEncrypted=provider-key:/etc/myagents-host-test/credentials/provider-key.cred'
-LEGACY_KIMI_CREDENTIAL=/etc/myagents-host-test/credentials/kimi.cred
+install -o root -g root -m 0755 "$RELEASE_SOURCE/bin/$CLI_NAME" "$PREFIX/bin/$CLI_NAME"
+install -d -o root -g root -m 0700 "$ETC"
+CREDENTIAL_LINES="LoadCredentialEncrypted=provider-key:$PROVIDER_CREDENTIAL"
+LEGACY_KIMI_CREDENTIAL=$ETC/credentials/kimi.cred
 if [[ -e "$LEGACY_KIMI_CREDENTIAL" || -L "$LEGACY_KIMI_CREDENTIAL" ]]; then
   [[ -f "$LEGACY_KIMI_CREDENTIAL" && ! -L "$LEGACY_KIMI_CREDENTIAL" \
     && "$(stat -c '%u' "$LEGACY_KIMI_CREDENTIAL")" == 0 \
     && "$(stat -c '%g' "$LEGACY_KIMI_CREDENTIAL")" == 0 \
     && "$(stat -c '%a' "$LEGACY_KIMI_CREDENTIAL")" == 600 \
     && "$(stat -c '%h' "$LEGACY_KIMI_CREDENTIAL")" == 1 ]] || { echo 'Legacy Kimi credential must be a root-owned mode-0600 single-link regular file' >&2; exit 1; }
-  CREDENTIAL_LINES+=$'\nLoadCredentialEncrypted=kimi:/etc/myagents-host-test/credentials/kimi.cred'
+  CREDENTIAL_LINES+=$'\nLoadCredentialEncrypted=kimi:'"$LEGACY_KIMI_CREDENTIAL"
 fi
 cat > "$STAGE/service" <<UNITFILE
 [Unit]
-Description=MyAgents local Linux Host (test installation)
+Description=$DESCRIPTION
 After=network.target
 
 [Service]
 Type=simple
-User=myagents-host-test
-Group=myagents-host-test
-WorkingDirectory=/opt/myagents-host-test/current/resources
-Environment=HOME=/var/lib/myagents-host-test/home
-Environment=MYAGENTS_HOST_STATE_DIR=/var/lib/myagents-host-test
+User=$USER_NAME
+Group=$USER_NAME
+WorkingDirectory=$PREFIX/current/resources
+Environment=HOME=$STATE/home
+Environment=MYAGENTS_HOST_STATE_DIR=$STATE
 Environment=MYAGENTS_HOST_MODE=1
-Environment=MYAGENTS_HOST_SOCKET=/run/myagents-host-test/control.sock
+Environment=MYAGENTS_HOST_SOCKET=/run/$RUN_NAME/control.sock
 Environment=MYAGENTS_HOST_LOCK_HELD=1
 Environment=MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL=provider-key
-RuntimeDirectory=myagents-host-test
+RuntimeDirectory=$RUN_NAME
 RuntimeDirectoryMode=0700
-StateDirectory=myagents-host-test
+StateDirectory=$RUN_NAME
 StateDirectoryMode=0700
 UMask=0077
-ExecStart=/usr/bin/flock --no-fork -n /var/lib/myagents-host-test/host.lock /opt/myagents-host-test/current/resources/nodejs/bin/node /opt/myagents-host-test/current/resources/host-main.mjs --serve
+ExecStart=/usr/bin/flock --no-fork -n $STATE/host.lock $PREFIX/current/resources/nodejs/bin/node $PREFIX/current/resources/host-main.mjs --serve
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/var/lib/myagents-host-test /run/myagents-host-test
+ReadWritePaths=$STATE /run/$RUN_NAME
 $CREDENTIAL_LINES
 
 [Install]
@@ -359,7 +365,7 @@ systemctl enable "$SERVICE" >/dev/null
 systemctl start "$SERVICE"
 READY=0
 for _ in $(seq 1 45); do
-  if systemctl is-active --quiet "$SERVICE" && "$PREFIX/bin/myagents-host" doctor >"$STAGE/doctor.json" 2>"$STAGE/doctor.err" \
+  if systemctl is-active --quiet "$SERVICE" && "$PREFIX/bin/$CLI_NAME" doctor >"$STAGE/doctor.json" 2>"$STAGE/doctor.err" \
     && python3 - "$STAGE/doctor.json" <<'PY'
 import json, re, sys
 try:

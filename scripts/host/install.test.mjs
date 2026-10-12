@@ -11,10 +11,11 @@ const digest = path => createHash('sha256').update(require('node:fs').readFileSy
 const source = readFileSync(installer, 'utf8');
 const lockHelper = source.split('# BEGIN_SHARED_TRANSACTION_LOCK\n')[1]?.split('# END_SHARED_TRANSACTION_LOCK')[0];
 assert.ok(lockHelper, 'shared transaction lock helper markers exist');
-function packageFixture(t, mode = 'valid') {
+function packageFixture(t, mode = 'valid', profile = 'myagents-test') {
   const root = mkdtempSync(join(tmpdir(), 'myagents-host-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const release = join(root, 'tree/myagents-host-test/releases/test-1');
+  const packageRoot = profile === 'moxbot-test' ? 'moxbot-host-test' : 'myagents-host-test';
+  const release = join(root, `tree/${packageRoot}/releases/test-1`);
   mkdirSync(join(release, 'resources/nodejs/bin'), { recursive: true });
   mkdirSync(join(release, 'resources/claude-agent-sdk'), { recursive: true });
   for (const path of ['resources/nodejs/bin/node', 'resources/claude-agent-sdk/claude']) {
@@ -24,16 +25,18 @@ function packageFixture(t, mode = 'valid') {
     const bytes = require('node:fs').readFileSync(join(release, path));
     return { path, size: bytes.length, mode: 0o755, sha256: createHash('sha256').update(bytes).digest('hex') };
   });
-  writeFileSync(join(release, 'manifest.json'), JSON.stringify({ schemaVersion: 1, releaseId: 'test-1', target: 'linux-x64-glibc', files }));
+  const manifest = { schemaVersion: 1, releaseId: 'test-1', target: 'linux-x64-glibc', files };
+  if (mode !== 'legacy-manifest') manifest.profile = profile;
+  writeFileSync(join(release, 'manifest.json'), JSON.stringify(manifest));
   if (mode === 'tampered') writeFileSync(join(release, files[0].path), 'tampered');
   if (mode === 'unlisted') writeFileSync(join(release, 'extra'), 'extra');
   const archive = join(root, 'package.tar.gz');
-  const tar = spawnSync('tar', ['-czf', archive, '-C', join(root, 'tree'), 'myagents-host-test']);
+  const tar = spawnSync('tar', ['-czf', archive, '-C', join(root, 'tree'), packageRoot]);
   assert.equal(tar.status, 0, tar.stderr?.toString());
   return { root, archive };
 }
-function run(archive, sha = digest(archive)) {
-  return spawnSync('/bin/bash', [installer, '--dry-run', archive, '--sha256', sha], { encoding: 'utf8' });
+function run(archive, sha = digest(archive), profile = 'myagents-test') {
+  return spawnSync('/bin/bash', [installer, '--dry-run', archive, '--sha256', sha, '--profile', profile], { encoding: 'utf8' });
 }
 
 test('installer dry-run verifies caller digest and package manifest before any privileged action', t => {
@@ -41,6 +44,29 @@ test('installer dry-run verifies caller digest and package manifest before any p
   const result = run(archive);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /Verified unsigned test package test-1/);
+});
+
+test('fixed moxbot profile verifies only the moxbot package namespace', t => {
+  const { archive } = packageFixture(t, 'valid', 'moxbot-test');
+  const accepted = run(archive, digest(archive), 'moxbot-test');
+  assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+  const mismatched = run(archive, digest(archive), 'myagents-test');
+  assert.notEqual(mismatched.status, 0);
+  assert.match(mismatched.stderr, /Unsafe archive path|Unsupported package manifest/);
+});
+
+test('legacy unmarked archive remains limited to the original MyAgents namespace', t => {
+  const { archive } = packageFixture(t, 'legacy-manifest');
+  assert.equal(run(archive).status, 0);
+  const mox = run(archive, digest(archive), 'moxbot-test');
+  assert.notEqual(mox.status, 0);
+});
+
+test('installer refuses an open-ended profile name', t => {
+  const { archive } = packageFixture(t);
+  const result = spawnSync('/bin/bash', [installer, '--dry-run', archive, '--sha256', digest(archive), '--profile', '/tmp/arbitrary'], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Profile must be myagents-test or moxbot-test/);
 });
 
 test('installer rejects digest mismatch before archive processing', t => {

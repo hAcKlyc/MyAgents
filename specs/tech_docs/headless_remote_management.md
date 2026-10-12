@@ -6,11 +6,11 @@
 
 ### 本轮真实验收与修复（2026-10-13）
 
-- [x] 工作分支 `76ce62dc` 的完整 Test 六项与 owned 服务 CI 成功（38309847312 / 38309847313）；制品源为 PR merge `e50a74648f0d7cf8709f95ccdae4df8f72f998a9`，tree 与 HEAD 相同。完整 Linux Host、网络和服务制品已下载并核验摘要；不改写 source-commit。
+- [x] 工作分支 `91aca8b1` 的完整 Test 六项与 owned 服务 CI 成功（38312452871 / 38312452856）；`76ce62dc` 前序 CI 同样通过；制品源为 PR merge `e50a74648f0d7cf8709f95ccdae4df8f72f998a9`，tree 与 HEAD 相同。完整 Linux Host、网络和服务制品已下载并核验摘要；不改写 source-commit。
 - [x] 101.42.11.29 隔离联合环境中，实际两个网络客户端完成 PKCE、加密持久化与明确入网；生产 Controller 经签名 TLS/Pairs 和真实 Node Unix IPC 获得 snapshot，保存模型配置、合成测试凭据与禁用 Agent；真实进程重启后 snapshot、配置回执与凭据回执均读回。模型调用为 0，尚不证明模型执行。
-- [ ] 资源原回执查询在初始化认证处被 `PROOF_REJECTED` 拒绝。三轮真机记录一致；只读数据库聚合显示源设备各遗留 8 个未消费挑战。源码确认 owned 身份恢复误走静态 enrollment 的撤销预探针，丢弃第一条 challenge，再正常消费第二条，逐次耗尽既有上限。已将预探针限定为持静态 enrollment key 的 legacy Selfhost；Owned/官方均不运行该预探针，正常 consumed PoP 和服务端上限保持。owner 差异定向检查、既有 identity 检查、主集成完整 headless 测试及 clippy 通过，独立源码审阅未发现确认的 P1/P2。新 Linux 制品与额外 12 次真实恢复连接复验仍待完成。
+- [x] 资源原回执故障已修复并在真机复验：owned 身份恢复仅走正常 consumed PoP，静态 enrollment 撤销预探针只适用于 legacy Selfhost。三轮旧失败及 source 8 个未消费挑战证据保留，服务端上限未改。主集成 headless 118 项、定向 owner/identity、clippy 和独立源码审阅通过。新制品源 `191b3e7bc2932c09698905abeaa6c1401a0e5b89` 与 `91aca8b1` tree 相同；真 Linux run `20261012215305` 完成三类原回执、真实重启、额外 12 次生产身份恢复、幂等/CAS/原目标 scope fence，全程 0 模型调用。此项证明原生 Controller 联调，不证明桌面表单或 SDK 模型执行。
 - [x] 首次 snapshot 的 Ready 循环依赖已修复并在真 Linux 联调通过：同设备、当前 live epoch、joined、Syncing/Ready 绑定的只读保全 GET 检查持久 catalog 和全部 lifecycle；只有明确空才上传新空目录。原 SelfPolicy/公共目录权限保持。主集成 117 项 headless、9 项真实 DPoP HTTP 检查与独立审阅通过。
-- [ ] 统一安装接线已实现并通过 network 22、unified 8、Node 7 项测试及独立审阅；三入口共享事务锁、验证 FD，检查真实 enabled/active 回滚。旧 0750 runtime 配置会被拒绝，需受控迁移；尚未在保持原两服务 active 的独立命名空间完成统一安装真实 systemd 验收。
+- [ ] 统一安装新增封闭 `myagents-test` / `moxbot-test` profile：MoX 使用独立固定账户、units、HOME/state、身份 pin、credentials、CA 和 IPC；build/manifest/bootstrap/installer 配对检查，旧无 profile 包仅兼容原 MyAgents 根。共享事务锁不变，无任意 prefix 覆盖。Node24 25、network 24、unified 9 项测试及独立分面终审通过；主集成 Node24 25 项无 skip。尚未完成干净 MoX 制品的真实 systemd 安装/回滚及原两服务状态保全验收。MoX Host 内部 `.myagents` 位于独立 service HOME，不共享桌面或原 Host 数据。
 - [x] 已交付 `MoX-bot-Trial-macos-arm64-76ce62dc.zip`，独立应用身份 `com.moxbot.app`、数据目录 `~/.moxbot`，含 Space 构建配置，19 类资源和包摘要核验通过；原 MyAgents 及旧试用包保留。Apple Silicon 内部包，ad-hoc 签名、未公证。
 - [ ] Mac 当前锁屏，已请求用户解锁；本版真实并行启动、桌面独立登录、配置表单和 Linux 持久化仍待验收。PR #14 保持 draft，main 尚未包含本轮管理变更。
 

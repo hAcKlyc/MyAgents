@@ -40,6 +40,33 @@ TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
 OWNED_CONFIG = ETC / "owned-instance.json"
 OWNED_CA = ETC / "owned-instance-ca.pem"
 MANAGEMENT_SOCKET = pathlib.Path("/run/myagents-host-network-test/management.sock")
+PROFILE = "myagents-test"
+RUN_DIR = pathlib.Path("/run/myagents-host-network-test")
+
+def select_profile(profile: str) -> None:
+    global PROFILE, USER, NODE_USER, PREFIX, RELEASES, CURRENT, STATE, ETC, CREDENTIAL
+    global UNIT_NAME, UNIT_PATH, MARKER, DEVICE_PIN, IDENTITY, TMPFILES_PATH, OWNED_CONFIG, OWNED_CA, MANAGEMENT_SOCKET, RUN_DIR
+    profiles = {"myagents-test": ("myagents-host-network-test", "myagents-host-test"),
+                "moxbot-test": ("moxbot-host-network-test", "moxbot-host-test")}
+    if profile not in profiles:
+        raise InstallError("profile must be myagents-test or moxbot-test")
+    if profile == PROFILE:
+        return
+    network, host = profiles[profile]
+    PROFILE = profile
+    USER, NODE_USER = network, host
+    PREFIX = pathlib.Path("/opt") / network
+    RELEASES, CURRENT = PREFIX / "releases", PREFIX / "current"
+    STATE, ETC = pathlib.Path("/var/lib") / network, pathlib.Path("/etc") / network
+    CREDENTIAL = ETC / "identity-kek.cred"
+    UNIT_NAME = network + ".service"
+    UNIT_PATH = pathlib.Path("/etc/systemd/system") / UNIT_NAME
+    MARKER, DEVICE_PIN = PREFIX / "fixture.json", PREFIX / "device-id.json"
+    IDENTITY = pathlib.Path("/var/lib") / host / "host-identity.json"
+    TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d") / (network + ".conf")
+    OWNED_CONFIG, OWNED_CA = ETC / "owned-instance.json", ETC / "owned-instance-ca.pem"
+    MANAGEMENT_SOCKET = pathlib.Path("/run") / network / "management.sock"
+    RUN_DIR = pathlib.Path("/run") / network
 
 
 class InstallError(RuntimeError):
@@ -169,13 +196,16 @@ def validate_marker(marker: pathlib.Path, expected_owner: int = 0, expected_grou
         value = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise InstallError("existing fixture marker is invalid") from exc
-    if value != {"kind": "myagents-headless-network", "serviceUser": USER}:
+    expected = {"kind": "myagents-headless-network", "serviceUser": USER}
+    if PROFILE != "myagents-test":
+        expected["profile"] = PROFILE
+    if value != expected:
         raise InstallError("existing fixture marker does not authorize this installation")
     return True
 
 
 def _check_fixture() -> bool:
-    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, OWNED_CONFIG, OWNED_CA, pathlib.Path("/run/myagents-host-network-test")):
+    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, OWNED_CONFIG, OWNED_CA, RUN_DIR):
         _assert_plain_root_path(path)
     if validate_marker(MARKER):
         return True
@@ -430,7 +460,7 @@ def owned_config_text(args: argparse.Namespace, host_uid: int, network_gid: int)
 
 
 def _unit_text(host_id: str, owned: dict | None = None) -> str:
-    status_dir = pathlib.Path("/run/myagents-host-network-test")
+    status_dir = RUN_DIR
     status_file = status_dir / "status.json"
     extra = ""
     if owned:
@@ -484,11 +514,12 @@ def _runtime_group(network_account: pwd.struct_passwd, node_account: pwd.struct_
 def _tmpfiles_text(network_account: pwd.struct_passwd, node_account: pwd.struct_passwd,
                    owned: dict | None = None) -> str:
     runtime_gid = _runtime_group(network_account, node_account, owned)
-    return (f"d /run/myagents-host-network-test 2750 {network_account.pw_uid} {runtime_gid} - -\n"
-            f"f /run/myagents-host-network-test/status.json 0640 {network_account.pw_uid} {runtime_gid} - -\n")
+    return (f"d {RUN_DIR} 2750 {network_account.pw_uid} {runtime_gid} - -\n"
+            f"f {RUN_DIR}/status.json 0640 {network_account.pw_uid} {runtime_gid} - -\n")
 
 
 def install(args: argparse.Namespace) -> None:
+    select_profile(getattr(args, "profile", "myagents-test"))
     if os.geteuid() != 0:
         raise InstallError("run the installer as root")
     if not sys.platform.startswith("linux") or os.uname().machine not in ("x86_64", "amd64"):
@@ -562,7 +593,10 @@ def install(args: argparse.Namespace) -> None:
             else:
                 create_device_pin(host_id)
                 marker_tmp = PREFIX / ".fixture-new"
-                marker_tmp.write_text(json.dumps({"kind": "myagents-headless-network", "serviceUser": USER}) + "\n", encoding="utf-8")
+                marker_value = {"kind": "myagents-headless-network", "serviceUser": USER}
+                if PROFILE != "myagents-test":
+                    marker_value["profile"] = PROFILE
+                marker_tmp.write_text(json.dumps(marker_value) + "\n", encoding="utf-8")
                 os.chown(marker_tmp, 0, 0)
                 os.chmod(marker_tmp, 0o600)
                 os.replace(marker_tmp, MARKER)
@@ -602,7 +636,7 @@ def install(args: argparse.Namespace) -> None:
                     raise InstallError("same release service unit has changed")
                 node_account = pwd.getpwnam(NODE_USER)
                 expected_tmpfiles = _tmpfiles_text(account, node_account, owned_value)
-                tmpfiles_path = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
+                tmpfiles_path = TMPFILES_PATH
                 if not tmpfiles_path.exists() or tmpfiles_path.is_symlink():
                     raise InstallError("same release is missing its managed tmpfiles rule")
                 tmpfiles_st = tmpfiles_path.lstat()
@@ -631,7 +665,7 @@ def install(args: argparse.Namespace) -> None:
             _create_credential()
             # The directory and replaceable status inode share a group so status.rs's
             # same-directory atomic replacement preserves the expected group.
-            status_dir = pathlib.Path("/run/myagents-host-network-test")
+            status_dir = RUN_DIR
             runtime_gid = _runtime_group(account, node_account, owned_value)
             if not status_dir.exists():
                 os.mkdir(status_dir, 0o2750)
@@ -725,6 +759,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("artifact_dir", help="absolute CI artifact directory")
     parser.add_argument("sha256", help="independently trusted artifact binary SHA-256")
     parser.add_argument("source_commit", help="independently trusted 40-character source commit")
+    parser.add_argument("--profile", choices=("myagents-test", "moxbot-test"), default="myagents-test")
     parser.add_argument("--owned-instance", help="explicit HTTPS origin for an owned AgentNet instance")
     parser.add_argument("--public-tls-ca-file", help="optional root-owned PEM CA for the owned instance")
     parser.add_argument("--management-socket", help="fixed owned IPC socket path; requires the Host UID")

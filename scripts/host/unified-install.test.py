@@ -32,6 +32,16 @@ def fake_elf() -> bytes:
 
 
 class UnifiedInstallTests(unittest.TestCase):
+    def test_profiles_select_only_fixed_host_namespaces(self) -> None:
+        installer.select_profile("moxbot-test")
+        self.assertEqual(str(installer.HOST_PREFIX), "/opt/moxbot-host-test")
+        self.assertEqual(str(installer.HOST_CURRENT), "/opt/moxbot-host-test/current")
+        self.assertEqual(installer.HOST_SERVICE, "moxbot-host-test.service")
+        with self.assertRaises(installer.UnifiedInstallError):
+            installer.select_profile("/opt/custom")
+        installer.select_profile("myagents-test")
+        self.assertEqual(str(installer.HOST_PREFIX), "/opt/myagents-host-test")
+
     def test_transaction_lock_reentry_contention_and_foreign_fd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -120,7 +130,7 @@ class UnifiedInstallTests(unittest.TestCase):
                         host_archive=str(host_archive), host_sha256=hashlib.sha256(host_bytes).hexdigest(),
                         network_artifact_dir=str(artifacts), network_sha256=hashlib.sha256(network_bytes).hexdigest(),
                         network_source_commit="c" * 40, owned_instance="https://owned.example",
-                        public_tls_ca_file=None,
+                        public_tls_ca_file=None, profile="moxbot-test",
                     )
                 installer.install(args)
             self.assertEqual(len(run_calls), 3)
@@ -128,7 +138,10 @@ class UnifiedInstallTests(unittest.TestCase):
             self.assertEqual(pathlib.Path(run_calls[0][0][1]).name, "install.sh")
             self.assertIn("--dry-run", run_calls[0][0])
             self.assertEqual(pathlib.Path(run_calls[1][0][1]).name, "install.sh")
+            self.assertIn("moxbot-test", run_calls[0][0])
+            self.assertIn("moxbot-test", run_calls[1][0])
             self.assertEqual(pathlib.Path(run_calls[2][0][1]).name, "network-install.py")
+            self.assertIn("moxbot-test", run_calls[2][0])
             self.assertIn("--owned-instance", run_calls[2][0])
             self.assertIn("--management-socket", run_calls[2][0])
             self.assertIn("--management-host-uid", run_calls[2][0])

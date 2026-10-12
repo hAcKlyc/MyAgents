@@ -103,6 +103,37 @@ class SnapshotTests(unittest.TestCase):
 
 
 class FixtureTests(unittest.TestCase):
+    def test_profiles_are_closed_and_disjoint(self) -> None:
+        installer.select_profile("moxbot-test")
+        control.select_profile("moxbot-test")
+        self.assertEqual(str(installer.PREFIX), "/opt/moxbot-host-network-test")
+        self.assertEqual(str(installer.IDENTITY), "/var/lib/moxbot-host-test/host-identity.json")
+        self.assertEqual(str(installer.CREDENTIAL), "/etc/moxbot-host-network-test/identity-kek.cred")
+        self.assertEqual(installer.UNIT_NAME, "moxbot-host-network-test.service")
+        self.assertEqual(str(control.HOST_UNIT), "/etc/systemd/system/moxbot-host-test.service")
+        self.assertEqual(str(control.STATUS_FILE), "/run/moxbot-host-network-test/status.json")
+        with self.assertRaises(installer.InstallError):
+            installer.select_profile("/var/lib/arbitrary")
+        with self.assertRaises(ValueError):
+            control.select_profile("/var/lib/arbitrary")
+        installer.select_profile("myagents-test")
+        control.select_profile("myagents-test")
+
+    def test_profile_marker_cannot_authorize_the_other_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = pathlib.Path(tmp) / "fixture.json"
+            installer.select_profile("moxbot-test")
+            marker.write_text(json.dumps({"kind": "myagents-headless-network",
+                                          "serviceUser": "moxbot-host-network-test",
+                                          "profile": "moxbot-test"}), encoding="utf-8")
+            os.chmod(marker, 0o600)
+            self.assertTrue(installer.validate_marker(marker, os.geteuid(), os.getegid()))
+            marker.write_text(json.dumps({"kind": "myagents-headless-network",
+                                          "serviceUser": "myagents-host-network-test"}), encoding="utf-8")
+            with self.assertRaises(installer.InstallError):
+                installer.validate_marker(marker, os.geteuid(), os.getegid())
+            installer.select_profile("myagents-test")
+
     def test_transaction_lock_reentry_contention_and_foreign_fd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -341,7 +372,7 @@ class ControlTests(unittest.TestCase):
             with mock.patch.object(control.pwd, "getpwnam", return_value=type("Account", (), {"pw_uid": 7001})()):
                 self.assertIn(f"SupplementaryGroups={control.USER}\n",
                               control._management_dropin_bytes(config).decode("ascii"))
-            self.assertLess(order.index(("socket-ready",)), order.index(("systemctl", "restart", "myagents-host-test.service")))
+            self.assertLess(order.index(("socket-ready",)), order.index(("systemctl", "restart", host_unit.name)))
             self.assertTrue(any(call[:2] == ("systemctl", "start") and call[2] == control.DAEMON_UNIT for call in order))
 
     def test_listener_failure_stops_network_without_restarting_host(self) -> None:

@@ -21,6 +21,20 @@ HOST_CURRENT = HOST_PREFIX / "current"
 HOST_UNIT = pathlib.Path("/etc/systemd/system/myagents-host-test.service")
 HOST_SERVICE = "myagents-host-test.service"
 UNIFIED_LOCK = pathlib.Path("/run/myagents-host-unified-install.lock")
+PROFILE = "myagents-test"
+HOST_USER = "myagents-host-test"
+
+def select_profile(profile: str) -> None:
+    global PROFILE, HOST_USER, HOST_PREFIX, HOST_CURRENT, HOST_UNIT, HOST_SERVICE
+    profiles = {"myagents-test": "myagents-host-test", "moxbot-test": "moxbot-host-test"}
+    if profile not in profiles:
+        raise UnifiedInstallError("profile must be myagents-test or moxbot-test")
+    PROFILE = profile
+    HOST_USER = profiles[profile]
+    HOST_PREFIX = pathlib.Path("/opt") / HOST_USER
+    HOST_CURRENT = HOST_PREFIX / "current"
+    HOST_UNIT = pathlib.Path("/etc/systemd/system") / (HOST_USER + ".service")
+    HOST_SERVICE = HOST_USER + ".service"
 
 
 class UnifiedInstallError(RuntimeError):
@@ -153,7 +167,7 @@ def _restore_host(snapshot: dict) -> bool:
         if snapshot["unit"] is None:
             HOST_UNIT.unlink(missing_ok=True)
         else:
-            fd, name = tempfile.mkstemp(prefix=".myagents-host-test.service.rollback.", dir=HOST_UNIT.parent)
+            fd, name = tempfile.mkstemp(prefix=f".{HOST_USER}.service.rollback.", dir=HOST_UNIT.parent)
             try:
                 os.fchown(fd, 0, 0)
                 os.fchmod(fd, snapshot["unitMode"])
@@ -227,6 +241,7 @@ def _acquire_lock(expected_uid: int = 0, expected_gid: int = 0) -> int:
 
 
 def install(args: argparse.Namespace) -> None:
+    select_profile(getattr(args, "profile", "myagents-test"))
     if os.geteuid() != 0:
         raise UnifiedInstallError("run unified installation as root")
     if not sys.platform.startswith("linux") or os.uname().machine not in ("x86_64", "amd64"):
@@ -241,6 +256,7 @@ def install(args: argparse.Namespace) -> None:
         raise UnifiedInstallError("network installer is unavailable")
     network_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(network_module)
+    network_module.select_profile(PROFILE)
     ca_bytes = None
     try:
         owned_instance = network_module.validate_owned_origin(args.owned_instance)
@@ -280,12 +296,12 @@ def install(args: argparse.Namespace) -> None:
                 raise UnifiedInstallError("network artifact failed pinned snapshot verification") from exc
 
             dry_run = ["bash", str(ROOT / "install.sh"), str(host_archive),
-                       "--sha256", args.host_sha256, "--dry-run"]
+                       "--sha256", args.host_sha256, "--profile", PROFILE, "--dry-run"]
             if subprocess.run(dry_run, check=False).returncode != 0:
                 raise UnifiedInstallError("Host archive failed its non-mutating package validation")
 
             host_command = ["bash", str(ROOT / "install.sh"), str(host_archive),
-                            "--sha256", args.host_sha256]
+                            "--sha256", args.host_sha256, "--profile", PROFILE]
             locked_env = os.environ.copy()
             locked_env["MYAGENTS_HOST_TRANSACTION_LOCK_FD"] = str(lock_fd)
             host_result = subprocess.run(host_command, check=False, pass_fds=(lock_fd,), env=locked_env)
@@ -293,11 +309,11 @@ def install(args: argparse.Namespace) -> None:
                 if not _restore_host(before):
                     raise UnifiedInstallError("Host install failed and prior Host state could not be restored")
                 raise UnifiedInstallError("Host package installation failed; its installer performed its own rollback")
-            node_user = pwd.getpwnam("myagents-host-test")
+            node_user = pwd.getpwnam(HOST_USER)
             network_command = [sys.executable, str(network_script),
                                str(network_snapshot_dir), args.network_sha256,
-                               args.network_source_commit, "--owned-instance", owned_instance,
-                               "--management-socket", "/run/myagents-host-network-test/management.sock",
+                               args.network_source_commit, "--profile", PROFILE, "--owned-instance", owned_instance,
+                               "--management-socket", str(network_module.MANAGEMENT_SOCKET),
                                "--management-host-uid", str(node_user.pw_uid)]
             if staged_ca_path is not None:
                 network_command.extend(["--public-tls-ca-file", str(staged_ca_path)])
@@ -320,6 +336,7 @@ def main() -> int:
     parser.add_argument("--network-sha256", required=True)
     parser.add_argument("--network-source-commit", required=True)
     parser.add_argument("--owned-instance", required=True)
+    parser.add_argument("--profile", choices=("myagents-test", "moxbot-test"), default="myagents-test")
     parser.add_argument("--public-tls-ca-file")
     args = parser.parse_args()
     try:
