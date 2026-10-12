@@ -1,0 +1,548 @@
+#!/usr/bin/env python3
+"""Install the isolated headless AgentNet test consumer from a pinned CI artifact."""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import grp
+import hashlib
+import json
+import os
+import pathlib
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import uuid
+
+USER = "myagents-host-network-test"
+NODE_USER = "myagents-host-test"
+PREFIX = pathlib.Path("/opt/myagents-host-network-test")
+RELEASES = PREFIX / "releases"
+CURRENT = PREFIX / "current"
+STATE = pathlib.Path("/var/lib/myagents-host-network-test")
+ETC = pathlib.Path("/etc/myagents-host-network-test")
+CREDENTIAL = ETC / "identity-kek.cred"
+UNIT_NAME = "myagents-host-network-test.service"
+UNIT_PATH = pathlib.Path("/etc/systemd/system") / UNIT_NAME
+MARKER = PREFIX / "fixture.json"
+DEVICE_PIN = PREFIX / "device-id.json"
+IDENTITY = pathlib.Path("/var/lib/myagents-host-test/host-identity.json")
+ARTIFACT = "myagents-host-network"
+MAX_BINARY = 128 * 1024 * 1024
+INSTALL_LOCK = pathlib.Path("/run/myagents-host-network-test-install.lock")
+TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
+
+
+class InstallError(RuntimeError):
+    pass
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def copy_snapshot(artifact_dir: str, destination: pathlib.Path,
+                  expected_sha256: str, expected_commit: str) -> pathlib.Path:
+    """Copy fixed artifact names from pinned directory/file descriptors, then verify."""
+    source = pathlib.PurePosixPath(artifact_dir)
+    if not source.is_absolute() or ".." in source.parts or "." in source.parts:
+        raise InstallError("artifact directory must be an absolute normalized path")
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for part in source.parts[1:]:
+            if not part:
+                continue
+            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        for name, limit in ((ARTIFACT, MAX_BINARY), ("source-commit.txt", 100)):
+            src = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+            try:
+                info = os.fstat(src)
+                if not stat.S_ISREG(info.st_mode) or info.st_size <= 0 or info.st_size > limit or info.st_nlink != 1:
+                    raise InstallError(f"unsafe artifact file: {name}")
+                dst_path = destination / name
+                out_fd = os.open(dst_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+                try:
+                    copied = 0
+                    with os.fdopen(os.dup(src), "rb") as inp, os.fdopen(out_fd, "wb", closefd=False) as out:
+                        while chunk := inp.read(65536):
+                            copied += len(chunk)
+                            if copied > limit:
+                                raise InstallError(f"artifact file grew beyond limit: {name}")
+                            out.write(chunk)
+                        out.flush()
+                        os.fsync(out.fileno())
+                    if copied != info.st_size:
+                        raise InstallError(f"artifact file changed while copying: {name}")
+                finally:
+                    os.close(out_fd)
+            finally:
+                os.close(src)
+    finally:
+        os.close(fd)
+
+    source_text = (destination / "source-commit.txt").read_text(encoding="ascii")
+    if source_text != expected_commit + "\n":
+        raise InstallError("artifact source commit does not match trusted commit")
+    binary = destination / ARTIFACT
+    if sha256_file(binary) != expected_sha256:
+        raise InstallError("artifact SHA-256 does not match trusted digest")
+    with binary.open("rb") as f:
+        header = f.read(20)
+    if len(header) != 20 or header[:6] != b"\x7fELF\x02\x01" or int.from_bytes(header[18:20], "little") != 62:
+        raise InstallError("artifact is not a Linux x86_64 ELF")
+    os.chmod(binary, 0o500)
+    os.chmod(destination / "source-commit.txt", 0o400)
+    return binary
+
+
+def _run(args: list[str], *, input_bytes: bytes | None = None, check: bool = True,
+         stdout: int | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(args, input=input_bytes, check=check, stdout=stdout)
+
+
+def _assert_plain_root_path(path: pathlib.Path) -> None:
+    """Reject symlinks in any existing component; installation paths are constants."""
+    current = pathlib.Path("/")
+    for part in path.parts[1:]:
+        current = current / part
+        try:
+            st = current.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            raise InstallError(f"refusing symlink in protected path: {current}")
+
+
+def validate_marker(marker: pathlib.Path, expected_owner: int = 0, expected_group: int = 0) -> bool:
+    if not marker.exists() and not marker.is_symlink():
+        return False
+    st = marker.lstat()
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != expected_owner or st.st_gid != expected_group or stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1:
+        raise InstallError("existing fixture marker is unsafe")
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise InstallError("existing fixture marker is invalid") from exc
+    if value != {"kind": "myagents-headless-network", "serviceUser": USER}:
+        raise InstallError("existing fixture marker does not authorize this installation")
+    return True
+
+
+def _check_fixture() -> bool:
+    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, pathlib.Path("/run/myagents-host-network-test")):
+        _assert_plain_root_path(path)
+    if validate_marker(MARKER):
+        return True
+    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH):
+        if path.exists() or path.is_symlink():
+            raise InstallError(f"unmarked existing path is preserved: {path}")
+    try:
+        pwd.getpwnam(USER)
+    except KeyError:
+        return False
+    raise InstallError("unmarked service account already exists; refusing to take it over")
+
+
+def _validate_existing_user() -> pwd.struct_passwd:
+    try:
+        entry = pwd.getpwnam(USER)
+    except KeyError as exc:
+        raise InstallError("marked fixture is missing its service account") from exc
+    if (entry.pw_uid == 0 or entry.pw_gid == 0 or grp.getgrgid(entry.pw_gid).gr_name != USER or entry.pw_dir != str(STATE)
+            or entry.pw_shell not in ("/usr/sbin/nologin", "/sbin/nologin")):
+        raise InstallError("existing service account does not match the isolated fixture")
+    if any(USER in group.gr_mem and group.gr_gid != entry.pw_gid for group in grp.getgrall()):
+        raise InstallError("service account has unexpected supplementary group access")
+    return entry
+
+
+def _verify_dir(path: pathlib.Path, owner: int, group: int, mode: int) -> None:
+    st = path.lstat()
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != owner or st.st_gid != group or stat.S_IMODE(st.st_mode) != mode:
+        raise InstallError(f"directory has unexpected owner or mode: {path}")
+
+
+def _create_credential() -> None:
+    if CREDENTIAL.exists() or CREDENTIAL.is_symlink():
+        st = CREDENTIAL.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1:
+            raise InstallError("existing identity credential is unsafe")
+        return
+    fd, tmp_name = tempfile.mkstemp(prefix=".identity-kek.", dir=ETC)
+    os.close(fd)
+    tmp = pathlib.Path(tmp_name)
+    os.chmod(tmp, 0o600)
+    try:
+        # KEK bytes are piped directly to systemd-creds; they never enter argv/env/file/log.
+        raw = os.urandom(32)
+        _run(["systemd-creds", "encrypt", "--name=identity-kek", "--with-key=host", "-", str(tmp)], input_bytes=raw)
+        del raw
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, CREDENTIAL)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _read_identity() -> str:
+    node_account = pwd.getpwnam(NODE_USER)
+    path = IDENTITY
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for component in path.parts[1:-1]:
+            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        parent_info = os.fstat(fd)
+        if not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != node_account.pw_uid or stat.S_IMODE(parent_info.st_mode) != 0o700:
+            raise InstallError("existing Host state directory is not private to the Node UID")
+        identity_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+        try:
+            st = os.fstat(identity_fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != node_account.pw_uid or st.st_gid != node_account.pw_gid
+                    or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600 or st.st_size > 4096):
+                raise InstallError("existing Host identity file is unsafe")
+            raw = os.read(identity_fd, 4097)
+        finally:
+            os.close(identity_fd)
+    finally:
+        os.close(fd)
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise InstallError("existing Host identity file is invalid") from exc
+    if not isinstance(value, dict) or set(value) != {"hostId", "schemaVersion"}:
+        raise InstallError("existing Host identity has invalid schema")
+    host_id = value.get("hostId")
+    if value.get("schemaVersion") != 1 or not is_canonical_uuid(host_id):
+        raise InstallError("existing Host identity has invalid schema")
+    return host_id
+
+
+def is_canonical_uuid(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+def parse_device_pin(data: bytes) -> str:
+    try:
+        value = json.loads(data)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise InstallError("device identity pin is invalid") from exc
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "hostId"} or value.get("schemaVersion") != 1 or not is_canonical_uuid(value.get("hostId")):
+        raise InstallError("device identity pin has invalid schema")
+    return value["hostId"]
+
+
+def read_device_pin(path: pathlib.Path = DEVICE_PIN, *, owner: int = 0, group: int = 0) -> str:
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for component in path.parts[1:-1]:
+            next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        parent = os.fstat(fd)
+        if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != owner or parent.st_gid != group:
+            raise InstallError("device identity pin directory is unsafe")
+        try:
+            pin_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+        except FileNotFoundError as exc:
+            raise InstallError("device identity pin is missing; refusing to re-pin") from exc
+        try:
+            info = os.fstat(pin_fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_gid != group or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size <= 0 or info.st_size > 4096:
+                raise InstallError("device identity pin is unsafe")
+            data = os.read(pin_fd, 4097)
+        finally:
+            os.close(pin_fd)
+    finally:
+        os.close(fd)
+    return parse_device_pin(data)
+
+
+def verify_device_pin(current_host_id: str, pin_host_id: str) -> None:
+    if not is_canonical_uuid(current_host_id) or current_host_id != pin_host_id:
+        raise InstallError("Node Host identity differs from the root-managed device pin")
+
+
+def create_device_pin(host_id: str, path: pathlib.Path | None = None, *, owner: int = 0, group: int = 0) -> None:
+    path = path or DEVICE_PIN
+    if not is_canonical_uuid(host_id):
+        raise InstallError("cannot pin a noncanonical Host identity")
+    if path.exists() or path.is_symlink():
+        raise InstallError("device identity pin already exists; refusing to replace it")
+    _write_atomic(path, json.dumps({"schemaVersion": 1, "hostId": host_id}, separators=(",", ":")) + "\n", 0o600, owner, group)
+    if read_device_pin(path, owner=owner, group=group) != host_id:
+        raise InstallError("new device identity pin did not verify")
+
+
+def _write_atomic(path: pathlib.Path, data: str, mode: int, owner: int = 0, group: int = 0) -> None:
+    temp = path.with_name("." + path.name + ".new")
+    if temp.exists() or temp.is_symlink():
+        raise InstallError(f"unexpected temporary path exists: {temp}")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fchown(fd, owner, group)
+        os.fchmod(fd, mode)
+    finally:
+        os.close(fd)
+    os.replace(temp, path)
+    dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _unit_text(host_id: str) -> str:
+    status_dir = pathlib.Path("/run/myagents-host-network-test")
+    status_file = status_dir / "status.json"
+    return f"""[Unit]
+Description=MyAgents headless AgentNet test connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={USER}
+Group={USER}
+Environment=HOME={STATE}/home
+ExecStart={CURRENT}/{ARTIFACT} run --state-dir {STATE} --unit {UNIT_NAME} --credential identity-kek --device-id {host_id} --device-name Linux-Host --status-file {status_file}
+LoadCredentialEncrypted=identity-kek:{CREDENTIAL}
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths={STATE} {status_dir}
+KillMode=control-group
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def install(args: argparse.Namespace) -> None:
+    if os.geteuid() != 0:
+        raise InstallError("run the installer as root")
+    if not sys.platform.startswith("linux") or os.uname().machine not in ("x86_64", "amd64"):
+        raise InstallError("this test installer supports Linux x86_64 only")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.sha256) or not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
+        raise InstallError("trusted SHA-256 and 40-character source commit are required")
+    with tempfile.TemporaryDirectory(prefix="myagents-network-artifact-") as temp:
+        os.chmod(temp, 0o700)
+        snap = pathlib.Path(temp)
+        snap_binary = copy_snapshot(args.artifact_dir, snap, args.sha256, args.source_commit)
+        fixture = _check_fixture()
+        # Lock must cover all mutations and rollback; use an inherited FD held here.
+        lock_fd = os.open(INSTALL_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            lock_st = os.fstat(lock_fd)
+            if not stat.S_ISREG(lock_st.st_mode) or lock_st.st_uid != 0 or lock_st.st_nlink != 1 or stat.S_IMODE(lock_st.st_mode) != 0o600:
+                raise InstallError("installation lock file is unsafe")
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _check_fixture()
+            # Validate all read-only external inputs before creating the service UID.
+            host_id = _read_identity()
+            if fixture:
+                verify_device_pin(host_id, read_device_pin())
+            node_account = pwd.getpwnam(NODE_USER)
+            if not fixture:
+                _run(["useradd", "--system", "--user-group", "--no-create-home", "--home-dir", str(STATE), "--shell", "/usr/sbin/nologin", USER])
+            account = _validate_existing_user()
+
+            for path, parent_mode in ((PREFIX, 0o755), (RELEASES, 0o755), (STATE, 0o700), (ETC, 0o700)):
+                if not path.exists():
+                    os.mkdir(path, parent_mode)
+                    os.chown(path, 0 if path != STATE else account.pw_uid, 0 if path != STATE else account.pw_gid)
+                    os.chmod(path, parent_mode)
+            _verify_dir(PREFIX, 0, 0, 0o755)
+            _verify_dir(RELEASES, 0, 0, 0o755)
+            _verify_dir(STATE, account.pw_uid, account.pw_gid, 0o700)
+            _verify_dir(ETC, 0, 0, 0o700)
+            home_dir = STATE / "home"
+            if not home_dir.exists():
+                os.mkdir(home_dir, 0o700)
+                os.chown(home_dir, account.pw_uid, account.pw_gid)
+                os.chmod(home_dir, 0o700)
+            _verify_dir(home_dir, account.pw_uid, account.pw_gid, 0o700)
+            if fixture:
+                _verify_dir(STATE, account.pw_uid, account.pw_gid, 0o700)
+            else:
+                create_device_pin(host_id)
+                marker_tmp = PREFIX / ".fixture-new"
+                marker_tmp.write_text(json.dumps({"kind": "myagents-headless-network", "serviceUser": USER}) + "\n", encoding="utf-8")
+                os.chown(marker_tmp, 0, 0)
+                os.chmod(marker_tmp, 0o600)
+                os.replace(marker_tmp, MARKER)
+
+            release = RELEASES / args.source_commit
+            release_binary = release / ARTIFACT
+            release_exists = release.exists() or release.is_symlink()
+            if release_exists:
+                st = release.lstat()
+                if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != 0o755:
+                    raise InstallError("existing release directory is unsafe")
+                bst = release_binary.lstat() if release_binary.exists() or release_binary.is_symlink() else None
+                if bst is None or not stat.S_ISREG(bst.st_mode) or bst.st_uid != 0 or bst.st_gid != 0 or bst.st_nlink != 1 or stat.S_IMODE(bst.st_mode) != 0o755 or sha256_file(release_binary) != args.sha256:
+                    raise InstallError("release commit already exists with different or unsafe bytes")
+
+            old_current: str | None = None
+            if CURRENT.exists() or CURRENT.is_symlink():
+                current_st = CURRENT.lstat()
+                if not stat.S_ISLNK(current_st.st_mode):
+                    raise InstallError("current release pointer is not a symlink")
+                old_current = os.readlink(CURRENT)
+                if not re.fullmatch(r"releases/[0-9a-f]{40}", old_current):
+                    raise InstallError("current release pointer is outside managed release paths")
+            if old_current == f"releases/{args.source_commit}":
+                credential_st = CREDENTIAL.lstat() if CREDENTIAL.exists() or CREDENTIAL.is_symlink() else None
+                if credential_st is None or not stat.S_ISREG(credential_st.st_mode) or credential_st.st_uid != 0 or credential_st.st_gid != 0 or credential_st.st_nlink != 1 or stat.S_IMODE(credential_st.st_mode) != 0o600:
+                    raise InstallError("existing identity credential is unsafe")
+                if not UNIT_PATH.exists() or UNIT_PATH.is_symlink():
+                    raise InstallError("same release is missing its managed service unit")
+                unit_st = UNIT_PATH.lstat()
+                if not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_gid != 0 or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644 or UNIT_PATH.read_text(encoding="utf-8") != _unit_text(host_id):
+                    raise InstallError("same release service unit has changed")
+                node_account = pwd.getpwnam(NODE_USER)
+                expected_tmpfiles = (f"d /run/myagents-host-network-test 2750 {account.pw_uid} {node_account.pw_gid} - -\n"
+                                     f"f /run/myagents-host-network-test/status.json 0640 {account.pw_uid} {node_account.pw_gid} - -\n")
+                tmpfiles_path = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
+                if not tmpfiles_path.exists() or tmpfiles_path.is_symlink():
+                    raise InstallError("same release is missing its managed tmpfiles rule")
+                tmpfiles_st = tmpfiles_path.lstat()
+                if not stat.S_ISREG(tmpfiles_st.st_mode) or tmpfiles_st.st_uid != 0 or tmpfiles_st.st_gid != 0 or tmpfiles_st.st_nlink != 1 or stat.S_IMODE(tmpfiles_st.st_mode) != 0o644 or tmpfiles_path.read_text(encoding="utf-8") != expected_tmpfiles:
+                    raise InstallError("same release tmpfiles rule has changed")
+                print(json.dumps({"status": "ok", "result": "same-release-verified", "sourceCommit": args.source_commit}))
+                return
+
+            if fixture and _run(["systemctl", "is-active", "--quiet", UNIT_NAME], check=False).returncode == 0:
+                raise InstallError("service is active; back up and stop it before installing a different release")
+
+            if not release_exists:
+                stage = RELEASES / (".stage-" + args.source_commit)
+                if stage.exists() or stage.is_symlink():
+                    raise InstallError("staging directory already exists; preserve it for review")
+                os.mkdir(stage, 0o700)
+                stage_binary = stage / ARTIFACT
+                shutil.copyfile(snap_binary, stage_binary, follow_symlinks=False)
+                os.chown(stage_binary, 0, 0)
+                os.chmod(stage_binary, 0o755)
+                if sha256_file(stage_binary) != args.sha256:
+                    raise InstallError("installed release changed during copy")
+                os.chmod(stage, 0o755)
+                os.rename(stage, release)
+
+            _create_credential()
+            # Status projection is writable only by the network UID and readable by the Node group.
+            status_dir = pathlib.Path("/run/myagents-host-network-test")
+            if not status_dir.exists():
+                os.mkdir(status_dir, 0o2750)
+                os.chown(status_dir, account.pw_uid, node_account.pw_gid)
+                os.chmod(status_dir, 0o2750)
+            _verify_dir(status_dir, account.pw_uid, node_account.pw_gid, 0o2750)
+            status_file = status_dir / "status.json"
+            if not status_file.exists() and not status_file.is_symlink():
+                fd = os.open(status_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
+                os.close(fd)
+                os.chown(status_file, account.pw_uid, node_account.pw_gid)
+                os.chmod(status_file, 0o640)
+            else:
+                status_st = status_file.lstat()
+                if not stat.S_ISREG(status_st.st_mode) or status_st.st_uid != account.pw_uid or status_st.st_gid != node_account.pw_gid or stat.S_IMODE(status_st.st_mode) != 0o640 or status_st.st_nlink != 1:
+                    raise InstallError("existing runtime status file is unsafe")
+
+            tmpfiles_path = TMPFILES_PATH
+            tmpfiles_text = (f"d /run/myagents-host-network-test 2750 {account.pw_uid} {node_account.pw_gid} - -\n"
+                             f"f /run/myagents-host-network-test/status.json 0640 {account.pw_uid} {node_account.pw_gid} - -\n")
+            previous_tmpfiles: str | None = None
+            if tmpfiles_path.exists() or tmpfiles_path.is_symlink():
+                existing = tmpfiles_path.lstat()
+                if not stat.S_ISREG(existing.st_mode) or existing.st_uid != 0 or existing.st_nlink != 1 or stat.S_IMODE(existing.st_mode) != 0o644 or tmpfiles_path.read_text(encoding="utf-8") != tmpfiles_text:
+                    raise InstallError("existing tmpfiles rule differs; preserve it for review")
+                previous_tmpfiles = tmpfiles_text
+            else:
+                _write_atomic(tmpfiles_path, tmpfiles_text, 0o644)
+
+            unit_tmp = UNIT_PATH.with_name("." + UNIT_NAME + ".tmp")
+            unit_text = _unit_text(host_id)
+            previous_unit: str | None = None
+            if UNIT_PATH.exists() or UNIT_PATH.is_symlink():
+                unit_st = UNIT_PATH.lstat()
+                if not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644:
+                    raise InstallError("existing service unit is unsafe")
+                # Only replace the exact unit format emitted by this installer.
+                previous = UNIT_PATH.read_text(encoding="utf-8")
+                if "Description=MyAgents headless AgentNet test connector\n" not in previous or f"User={USER}\n" not in previous:
+                    raise InstallError("existing service unit is not owned by this installer")
+                previous_unit = previous
+            _write_atomic(UNIT_PATH, unit_text, 0o644)
+
+            try:
+                link_tmp = PREFIX / ".current-new"
+                if link_tmp.exists() or link_tmp.is_symlink():
+                    raise InstallError("unexpected current staging path exists")
+                os.symlink(pathlib.Path("releases") / args.source_commit, link_tmp)
+                os.replace(link_tmp, CURRENT)
+                _run(["systemctl", "daemon-reload"])
+            except BaseException:
+                if old_current is None:
+                    CURRENT.unlink(missing_ok=True)
+                else:
+                    restore_link = PREFIX / ".current-rollback"
+                    restore_link.unlink(missing_ok=True)
+                    os.symlink(old_current, restore_link)
+                    os.replace(restore_link, CURRENT)
+                if previous_unit is None:
+                    UNIT_PATH.unlink(missing_ok=True)
+                else:
+                    _write_atomic(UNIT_PATH, previous_unit, 0o644)
+                if previous_tmpfiles is None:
+                    tmpfiles_path.unlink(missing_ok=True)
+                _run(["systemctl", "daemon-reload"], check=False)
+                raise
+            print(json.dumps({"status": "ok", "result": "installed", "sourceCommit": args.source_commit,
+                              "unit": UNIT_NAME, "activation": "explicit operator action required"}))
+        finally:
+            os.close(lock_fd)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("artifact_dir", help="absolute CI artifact directory")
+    parser.add_argument("sha256", help="independently trusted artifact binary SHA-256")
+    parser.add_argument("source_commit", help="independently trusted 40-character source commit")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    try:
+        install(parse_args())
+    except (InstallError, OSError, subprocess.CalledProcessError, ValueError, KeyError) as exc:
+        print(json.dumps({"status": "error", "code": "NETWORK_INSTALL_REJECTED", "detail": str(exc)}), file=sys.stderr)
+        sys.exit(1)

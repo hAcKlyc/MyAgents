@@ -51,6 +51,8 @@ npm-debug.log*
 
 # Tauri / Rust
 src-tauri/target/
+src-tauri/headless-network/target/
+scripts/host/__pycache__/
 src-tauri/document-worker/target/
 src-tauri/media-worker/target/
 # Standalone tests of the shared library generate their own cache/lock.

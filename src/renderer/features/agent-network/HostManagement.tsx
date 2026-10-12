@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRightIcon } from "@/components/icons";
 import { isImeComposingEvent } from "@/utils/imeKeyboard";
@@ -17,6 +17,8 @@ import {
   type HostReceipt,
   type HostSnapshot,
 } from "@/api/hostManagement";
+import { HostResourcePages } from "./HostResourcePages";
+import { HostActivityPages } from "./HostActivityPages";
 import {
   getHostDraft,
   getHostPending,
@@ -45,6 +47,15 @@ export function HostManagement({
 }) {
   const { t } = useTranslation("app");
   const [expanded, setExpanded] = useState(false);
+  const sectionId = useId();
+  const pages = [
+    "provider",
+    "workspaces",
+    "extensions",
+    "approvals",
+    "logs",
+  ] as const;
+  const [selected, setSelected] = useState<(typeof pages)[number]>("provider");
   const [response, setResponse] = useState<{
     key: string;
     adapter: HostManagementAdapter;
@@ -121,7 +132,7 @@ export function HostManagement({
       <button
         type="button"
         aria-expanded={expanded}
-        aria-controls="network-host-management"
+        aria-controls={sectionId}
         onClick={() => setExpanded((value) => !value)}
         className="flex w-full items-center gap-2 rounded-xl px-3.5 py-3 text-left focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
       >
@@ -136,49 +147,119 @@ export function HostManagement({
         </span>
       </button>
       <div
-        id="network-host-management"
+        id={sectionId}
         hidden={!expanded}
         className="border-t border-[var(--line-subtle)] px-3.5 py-4"
       >
-        {access === null ? (
-          <p
-            role="status"
-            aria-busy="true"
-            className="text-sm text-[var(--ink-muted)]"
-          >
-            {t("agentNetwork.host.loading")}
-          </p>
-        ) : access.status !== "ready" ? (
-          <div className="space-y-3">
-            <p
-              role={access.status === "unavailable" ? "alert" : "status"}
-              className="text-sm text-[var(--ink-secondary)]"
+        <div
+          role="tablist"
+          aria-label={t("agentNetwork.host.pages.navigation")}
+          className="mb-4 flex flex-wrap gap-1 rounded-lg bg-[var(--paper-inset)] p-1"
+        >
+          {pages.map((page, index) => (
+            <button
+              key={page}
+              type="button"
+              role="tab"
+              id={`${sectionId}-${page}-tab`}
+              aria-selected={selected === page}
+              aria-controls={`${sectionId}-panel`}
+              tabIndex={selected === page ? 0 : -1}
+              className={`min-w-0 rounded-md px-2.5 py-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-[var(--accent)] ${selected === page ? "bg-[var(--paper)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-muted)] hover:bg-[var(--hover-bg)]"}`}
+              onClick={() => setSelected(page)}
+              onKeyDown={(event) => {
+                if (isImeComposingEvent(event)) return;
+                const next =
+                  event.key === "ArrowRight"
+                    ? (index + 1) % pages.length
+                    : event.key === "ArrowLeft"
+                      ? (index + pages.length - 1) % pages.length
+                      : event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? pages.length - 1
+                          : null;
+                if (next === null) return;
+                event.preventDefault();
+                setSelected(pages[next]);
+                document
+                  .getElementById(`${sectionId}-${pages[next]}-tab`)
+                  ?.focus();
+              }}
             >
-              {t(
-                `agentNetwork.host.${access.status === "unsupported" ? access.reason : access.status}`,
-              )}
+              {t(`agentNetwork.host.pages.tabs.${page}`)}
+            </button>
+          ))}
+        </div>
+        <div
+          role="tabpanel"
+          id={`${sectionId}-panel`}
+          aria-labelledby={`${sectionId}-${selected}-tab`}
+        >
+          {access === null ? (
+            <p
+              role="status"
+              aria-busy="true"
+              className="text-sm text-[var(--ink-muted)]"
+            >
+              {t("agentNetwork.host.loading")}
             </p>
-            {access.status === "unavailable" && (
-              <button
-                type="button"
-                className={secondary}
-                onClick={() => setRetry((value) => value + 1)}
+          ) : access.status !== "ready" ? (
+            <div className="space-y-3">
+              <p
+                role={access.status === "unavailable" ? "alert" : "status"}
+                className="text-sm text-[var(--ink-secondary)]"
               >
-                {t("agentNetwork.retry")}
-              </button>
-            )}
-          </div>
-        ) : (
-          <HostConfiguration
-            key={hostAddressKey(access.snapshot.address)}
-            initial={access.snapshot}
-            online={online}
-            adapter={adapter}
-            onAccessChanged={(next) =>
-              setResponse({ key: requestKey, adapter, access: next })
-            }
-          />
-        )}
+                {t(
+                  `agentNetwork.host.${access.status === "unsupported" ? access.reason : access.status}`,
+                )}
+              </p>
+              {access.status === "unavailable" && (
+                <button
+                  type="button"
+                  className={secondary}
+                  onClick={() => setRetry((value) => value + 1)}
+                >
+                  {t("agentNetwork.retry")}
+                </button>
+              )}
+            </div>
+          ) : selected !== "provider" ? (
+            selected === "workspaces" || selected === "extensions" ? (
+              <HostResourcePages
+                key={hostAddressKey(access.snapshot.address)}
+                snapshot={{
+                  ...access.snapshot,
+                  online: online && access.snapshot.online,
+                }}
+                adapter={adapter.pages}
+                page={selected}
+                active={expanded}
+              />
+            ) : (
+              <HostActivityPages
+                key={hostAddressKey(access.snapshot.address)}
+                snapshot={{
+                  ...access.snapshot,
+                  online: online && access.snapshot.online,
+                }}
+                adapter={adapter.pages}
+                page={selected}
+                active={expanded}
+              />
+            )
+          ) : (
+            <HostConfiguration
+              key={hostAddressKey(access.snapshot.address)}
+              initial={access.snapshot}
+              online={online}
+              adapter={adapter}
+              onAccessChanged={(next) =>
+                setResponse({ key: requestKey, adapter, access: next })
+              }
+            />
+          )}
+        </div>
       </div>
     </section>
   );
@@ -223,9 +304,8 @@ function HostConfiguration({
   if (lifetime.current === null) lifetime.current = new AbortController();
   useEffect(() => {
     const previous = lifetime.current;
-    const abort = previous && !previous.signal.aborted
-      ? previous
-      : new AbortController();
+    const abort =
+      previous && !previous.signal.aborted ? previous : new AbortController();
     lifetime.current = abort;
     if (previous?.signal.aborted) {
       busyRef.current = false;

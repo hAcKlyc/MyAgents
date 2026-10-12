@@ -94,8 +94,12 @@ function fixture(snapshot = host()) {
   } satisfies HostManagementAdapter;
 }
 async function mount(adapter = fixture(), online = true, strict = false) {
-  const content = <HostManagement locator={locator} online={online} adapter={adapter} />;
-  const rendered = render(strict ? <StrictMode>{content}</StrictMode> : content);
+  const content = (
+    <HostManagement locator={locator} online={online} adapter={adapter} />
+  );
+  const rendered = render(
+    strict ? <StrictMode>{content}</StrictMode> : content,
+  );
   fireEvent.click(screen.getByRole("button", { name: /Host 管理/ }));
   await screen.findByLabelText("默认模型");
   return { ...rendered, adapter };
@@ -115,6 +119,29 @@ describe("Host management UI v0 seam (isolated fixtures only)", () => {
       await screen.findByText(/当前客户端协议尚未提供/),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("默认模型")).not.toBeInTheDocument();
+  });
+  it("all preparation pages remain protocol-gated and navigation supports keyboard focus", async () => {
+    render(<HostManagement locator={locator} online />);
+    fireEvent.click(screen.getByRole("button", { name: /Host 管理/ }));
+    await screen.findByText(/当前客户端协议尚未提供/);
+    const first = screen.getByRole("tab", { name: "环境 / Provider" });
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowRight", isComposing: true });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "工作区 / Agent" })).toHaveFocus();
+    for (const name of ["工作区 / Agent", "MCP / Skills", "审批", "日志"]) {
+      fireEvent.click(screen.getByRole("tab", { name }));
+      expect(screen.getByRole("tabpanel")).toHaveTextContent(
+        "当前客户端协议尚未提供",
+      );
+      expect(
+        screen.queryByRole("button", { name: "批准" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "保存资源配置" }),
+      ).not.toBeInTheDocument();
+    }
   });
   it("IME Enter and WebKit keyCode 229 do not save; an ordinary Enter submits once", async () => {
     const adapter = fixture();
