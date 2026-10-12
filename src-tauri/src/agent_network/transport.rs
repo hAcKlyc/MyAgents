@@ -428,6 +428,12 @@ pub(crate) enum NetworkRoute<'a> {
         cursor: Option<&'a str>,
         limit: usize,
     },
+    /// Device-scoped projection available before the public Agent catalog is Ready.
+    /// It deliberately has no target-device parameter and is only selected by owned policy hydration.
+    OwnedSelfPolicy {
+        cursor: Option<&'a str>,
+        limit: usize,
+    },
     Callable {
         network_id: &'a str,
         cursor: Option<&'a str>,
@@ -461,7 +467,7 @@ impl NetworkRoute<'_> {
         match self {
             Self::Network => MetadataKind::Network,
             Self::Devices { .. } => MetadataKind::Devices,
-            Self::Agents { .. } => MetadataKind::Agents,
+            Self::Agents { .. } | Self::OwnedSelfPolicy { .. } => MetadataKind::Agents,
             Self::Callable { .. } => MetadataKind::Callable,
             Self::Catalog => MetadataKind::Catalog,
             Self::Membership { .. } => MetadataKind::Membership,
@@ -489,6 +495,10 @@ impl NetworkRoute<'_> {
                     uuid(device_id)?,
                     page(*cursor, *limit)?
                 ),
+            ),
+            Self::OwnedSelfPolicy { cursor, limit } => (
+                reqwest::Method::GET,
+                format!("/api/agent-network/policy/self{}", page(*cursor, *limit)?),
             ),
             Self::Callable {
                 network_id,
@@ -590,6 +600,31 @@ mod tests {
             network_id: network,
             device_id: "家里 Windows",
             write: true
+        }
+        .path()
+        .is_err());
+    }
+    #[test]
+    fn owned_self_policy_has_fixed_scoped_route_and_agents_schema() {
+        let route = NetworkRoute::OwnedSelfPolicy {
+            cursor: Some("11111111-1111-4111-8111-111111111111"),
+            limit: 50,
+        };
+        let (method, path) = route.path().unwrap();
+        assert_eq!(method, reqwest::Method::GET);
+        assert_eq!(
+            path,
+            "/api/agent-network/policy/self?limit=50&cursor=11111111-1111-4111-8111-111111111111"
+        );
+        assert!(matches!(&route, NetworkRoute::OwnedSelfPolicy { .. }));
+        assert!(matches!(route.response_kind(), MetadataKind::Agents));
+        let valid_page = serde_json::json!({"items":[],"nextCursor":null,"complete":true});
+        assert!(validate_metadata(route.response_kind(), &valid_page).is_ok());
+        let with_unknown_field = serde_json::json!({"items":[],"nextCursor":null,"complete":true,"scope":"other-device"});
+        assert!(validate_metadata(route.response_kind(), &with_unknown_field).is_err());
+        assert!(NetworkRoute::OwnedSelfPolicy {
+            cursor: Some("not-a-canonical-uuid"),
+            limit: 50,
         }
         .path()
         .is_err());

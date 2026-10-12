@@ -32,6 +32,23 @@ pub(crate) async fn hydrate(
     token: &str,
     local: &DeviceScope,
 ) -> Result<LocalPolicy, NetworkError> {
+    hydrate_with_profile(transport, token, local, false).await
+}
+
+pub(crate) async fn hydrate_owned(
+    transport: &NetworkTransport,
+    token: &str,
+    local: &DeviceScope,
+) -> Result<LocalPolicy, NetworkError> {
+    hydrate_with_profile(transport, token, local, true).await
+}
+
+async fn hydrate_with_profile(
+    transport: &NetworkTransport,
+    token: &str,
+    local: &DeviceScope,
+    management_only: bool,
+) -> Result<LocalPolicy, NetworkError> {
     let mut cursor = None::<String>;
     let mut scanned = 0;
     let device = loop {
@@ -81,11 +98,12 @@ pub(crate) async fn hydrate(
     loop {
         let page = transport
             .json(
-                NetworkRoute::Agents {
-                    device_id: &local.device_id,
-                    cursor: cursor.as_deref(),
-                    limit: budget("pageMax"),
-                },
+                agent_page_route(
+                    management_only,
+                    &local.device_id,
+                    cursor.as_deref(),
+                    budget("pageMax"),
+                ),
                 token,
                 None,
             )
@@ -132,4 +150,41 @@ pub(crate) async fn hydrate(
         membership_revision,
         mounts,
     })
+}
+
+fn agent_page_route<'a>(
+    management_only: bool,
+    device_id: &'a str,
+    cursor: Option<&'a str>,
+    limit: usize,
+) -> NetworkRoute<'a> {
+    if management_only {
+        NetworkRoute::OwnedSelfPolicy { cursor, limit }
+    } else {
+        NetworkRoute::Agents {
+            device_id,
+            cursor,
+            limit,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policy_hydration_selects_self_only_route_for_management_profile() {
+        let cursor_value = "11111111-1111-4111-8111-111111111111";
+        let cursor = Some(cursor_value);
+        let owned = agent_page_route(true, "22222222-2222-4222-8222-222222222222", cursor, 50);
+        assert!(
+            matches!(owned, NetworkRoute::OwnedSelfPolicy { cursor: Some(value), limit: 50 } if value == cursor_value)
+        );
+
+        let official = agent_page_route(false, "22222222-2222-4222-8222-222222222222", cursor, 50);
+        assert!(
+            matches!(official, NetworkRoute::Agents { device_id, cursor: Some(value), limit: 50 } if device_id == "22222222-2222-4222-8222-222222222222" && value == cursor_value)
+        );
+    }
 }

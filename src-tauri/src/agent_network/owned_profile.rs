@@ -26,6 +26,7 @@ pub(crate) fn metadata(route: &NetworkRoute<'_>) -> Result<(), NetworkError> {
         NetworkRoute::Network
             | NetworkRoute::Devices { .. }
             | NetworkRoute::Agents { .. }
+            | NetworkRoute::OwnedSelfPolicy { .. }
             | NetworkRoute::Membership { .. }
             | NetworkRoute::DeviceName { .. }
             | NetworkRoute::Receipt { .. }
@@ -59,6 +60,11 @@ mod tests {
         })
         .is_err());
         assert!(metadata(&NetworkRoute::Devices {
+            cursor: None,
+            limit: 1
+        })
+        .is_ok());
+        assert!(metadata(&NetworkRoute::OwnedSelfPolicy {
             cursor: None,
             limit: 1
         })
