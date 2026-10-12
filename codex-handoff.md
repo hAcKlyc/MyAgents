@@ -3,9 +3,17 @@
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
 <!-- codex-handoff:last-updated=2026-10-12T10:29:20+08:00 -->
-<!-- codex-handoff:latest-anchor=mah-ui-pages-20261012 -->
+<!-- codex-handoff:latest-anchor=mah-remote-management-20261012 -->
 
 ## Current Snapshot
+
+- **最新接续覆盖下方旧checkpoint**：基础入网已经交付并真实验收，fork main `92fa2c5f24faa026f81ed6567a9bb6211f1bb144`（PR #5，六项CI通过）。Linux Host完成独立官方浏览器授权、签发/Hello/空catalog/policy/服务端Ready；原桌面同账号加入后显示Linux在线，服务重启自动恢复，无需再次登录。
+- 当前用户请求 **MAH-REMOTE-MANAGEMENT-20261012**：从桌面AgentNet给Linux Host配置模型/只写凭据、创建真实持久Agent，无需手工SSH。模型配置现在进入实现范围；不要要求用户向聊天提供密钥。收费模型测试仍需单独费用授权，不以测试调用作为配置界面可用的必要前置。
+- 当前阶段记录与验收清单：`specs/tech_docs/headless_remote_management.md`。主集成分支 `feat/mah-remote-management` 从上述main建立；独立资源owner分支 `feat/mah-host-resources`，同一base。原入网与桌面工作区保留，不reset/覆盖。
+- 实质依赖：1.1.0无设备级Host管理契约，正式renderer adapter仍不可用。授权GitHub账号目前不可访问Agenthub、MyAgents_AgentNet、MyAgents_space，官方测试部署入口未知；已经向用户询问。现有Agent invoke、roster/membership不得充当管理隧道，不手改vendor，不新增公网管理端口，不把fixture称为远程配置。
+- 可独立推进：复用原 `registerWorkspaceAgent`/持久registry，补齐Host受限workspace创建、同锁域损坏拒写与幂等恢复；默认Agent disabled、无channels、不触发模型或自动任务。凭据动态写入owner与正式权限/grant须明确后再连接真实链路。
+
+### Historical snapshot (superseded)
 
 - Status: 已按用户授权 fork 到 heavenzhang/MyAgents；桌面 UI 首批及协议 authority 文档修复已交付 fork main（4267bdb9）。Linux Host 实现、专项测试及独立静态复核已通过；服务器安装、配置/身份重启、锁/幂等/失败回滚及禁止模型执行的 Session 持久化验收已通过，尚未完成真实 Kimi 执行与 AgentNet 联调。
 - Current task: MAH-UI-PAGES-20261012 四页 renderer 准备层已完成本地验收，交由主聊天统一集成；MAH-LINUX-20261012 的 Linux/AgentNet 接续仍由原 owner 管理。
