@@ -64,6 +64,8 @@ impl std::fmt::Debug for IssuedSession {
 pub struct SessionProjection {
     pub account: AccountProjection,
     pub device_id: String,
+    /// Stable, random server-side identity. This is not a bearer credential.
+    pub session_handle: String,
     pub expires_at: i64,
 }
 
@@ -84,7 +86,7 @@ impl AuthStore {
         let state_dir = validate_state_dir(state_dir.as_ref())?;
         let database = state_dir.join("auth.sqlite3");
         create_private_database_file(&database)?;
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             &database,
             OpenFlags::SQLITE_OPEN_READ_WRITE
                 | OpenFlags::SQLITE_OPEN_CREATE
@@ -125,6 +127,7 @@ impl AuthStore {
                    ON sessions(principal_id, expires_at);",
             )
             .map_err(|_| AuthError::Storage)?;
+        migrate_session_handles(&mut connection)?;
         validate_database_file(&database)?;
         Ok(Self {
             connection: Mutex::new(connection),
@@ -187,9 +190,9 @@ impl AuthStore {
         }
         transaction
             .execute(
-                "INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at)
-                 VALUES(?1,?2,?3,?4,?5)",
-                params![token_hash, account.principal_id, device_id, now, expires_at],
+                "INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at,session_handle)
+                 VALUES(?1,?2,?3,?4,?5,?6)",
+                params![token_hash, account.principal_id, device_id, now, expires_at, Uuid::new_v4().to_string()],
             )
             .map_err(|_| AuthError::Storage)?;
         transaction.commit().map_err(|_| AuthError::Storage)?;
@@ -201,21 +204,39 @@ impl AuthStore {
     }
 
     pub fn validate_session(&self, token: &str) -> Result<SessionProjection, AuthError> {
+        self.with_valid_session(token, Ok)
+    }
+
+    /// Run a bounded synchronous identity operation under the live session's
+    /// database gate. Revocation through any service connection cannot race the
+    /// operation: the IMMEDIATE transaction lasts until the callback completes.
+    /// The callback must not re-enter AuthStore or perform network I/O.
+    pub fn with_valid_session<T, E: From<AuthError>>(
+        &self,
+        token: &str,
+        operation: impl FnOnce(SessionProjection) -> Result<T, E>,
+    ) -> Result<T, E> {
         if token.len() != 43
             || !token
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
         {
-            return Err(AuthError::SessionRejected);
+            return Err(AuthError::SessionRejected.into());
         }
         let token_hash = Sha256::digest(token.as_bytes()).to_vec();
-        let now = unix_seconds().map_err(|_| AuthError::SessionRejected)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Storage)?;
-        connection
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let now = unix_seconds().map_err(E::from)?;
+        let projection = transaction
             .query_row(
-                "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at
-                 FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
-                 WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+                "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
+             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+             WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
                 params![token_hash, now],
                 |row| {
                     Ok(SessionProjection {
@@ -225,12 +246,58 @@ impl AuthStore {
                         },
                         device_id: row.get(2)?,
                         expires_at: row.get(3)?,
+                        session_handle: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|_| E::from(AuthError::Storage))?
+            .ok_or_else(|| E::from(AuthError::SessionRejected))?;
+        let expires_at = projection.expires_at;
+        if expires_at <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
+        }
+        let result = operation(projection)?;
+        if expires_at <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
+        }
+        transaction
+            .commit()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        Ok(result)
+    }
+
+    /// Internal authorization lookup for already verified device credentials.
+    /// An HTTP caller must never treat possession of this UUID as authentication.
+    pub fn validate_session_handle(&self, handle: &str) -> Result<SessionProjection, AuthError> {
+        let handle = canonical_uuid(handle).ok_or(AuthError::SessionRejected)?;
+        let connection = self.connection.lock().map_err(|_| AuthError::Storage)?;
+        let now = unix_seconds().map_err(|_| AuthError::SessionRejected)?;
+        let projection = connection
+            .query_row(
+                "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
+             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+             WHERE s.session_handle=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+                params![handle, now],
+                |row| {
+                    Ok(SessionProjection {
+                        account: AccountProjection {
+                            principal_id: row.get(0)?,
+                            network_id: row.get(1)?,
+                        },
+                        device_id: row.get(2)?,
+                        expires_at: row.get(3)?,
+                        session_handle: row.get(4)?,
                     })
                 },
             )
             .optional()
             .map_err(|_| AuthError::Storage)?
-            .ok_or(AuthError::SessionRejected)
+            .ok_or(AuthError::SessionRejected)?;
+        if projection.expires_at <= unix_seconds().map_err(|_| AuthError::SessionRejected)? {
+            return Err(AuthError::SessionRejected);
+        }
+        Ok(projection)
     }
 
     pub fn revoke_session(&self, token: &str) -> Result<(), AuthError> {
@@ -262,6 +329,55 @@ impl AuthStore {
             .map_err(|_| AuthError::Storage)?;
         Ok(())
     }
+}
+
+/// Preserve pre-handle authentication databases. Serialize migration across
+/// service instances and assign independent random handles, never token digests.
+fn migrate_session_handles(connection: &mut Connection) -> Result<(), AuthError> {
+    let tx = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| AuthError::Storage)?;
+    let has_column = {
+        let mut statement = tx
+            .prepare("PRAGMA table_info(sessions)")
+            .map_err(|_| AuthError::Storage)?;
+        let names = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|_| AuthError::Storage)?;
+        let mut found = false;
+        for name in names {
+            found |= name.map_err(|_| AuthError::Storage)? == "session_handle";
+        }
+        found
+    };
+    if !has_column {
+        tx.execute_batch("ALTER TABLE sessions ADD COLUMN session_handle TEXT;")
+            .map_err(|_| AuthError::Storage)?;
+    }
+    let hashes = {
+        let mut statement = tx
+            .prepare("SELECT token_hash FROM sessions WHERE session_handle IS NULL")
+            .map_err(|_| AuthError::Storage)?;
+        statement
+            .query_map([], |row| row.get::<_, Vec<u8>>(0))
+            .map_err(|_| AuthError::Storage)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Storage)?
+    };
+    for hash in hashes {
+        tx.execute(
+            "UPDATE sessions SET session_handle=?2 WHERE token_hash=?1 AND session_handle IS NULL",
+            params![hash, Uuid::new_v4().to_string()],
+        )
+        .map_err(|_| AuthError::Storage)?;
+    }
+    tx.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS sessions_handle ON sessions(session_handle);
+       CREATE TRIGGER IF NOT EXISTS sessions_require_handle BEFORE INSERT ON sessions
+       WHEN NEW.session_handle IS NULL BEGIN SELECT RAISE(ABORT,'session handle required'); END;",
+    )
+    .map_err(|_| AuthError::Storage)?;
+    tx.commit().map_err(|_| AuthError::Storage)
 }
 
 fn unix_seconds() -> Result<i64, AuthError> {
@@ -351,6 +467,262 @@ fn validate_database_file(path: &Path) -> Result<(), AuthError> {
         return Err(AuthError::UnsafePath);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn session_operation_serializes_revocation_across_service_connections() {
+        let state = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config = AuthConfig {
+            network_id: Uuid::new_v4().to_string(),
+            login_ttl: Duration::from_secs(300),
+            session_ttl: Duration::from_secs(3600),
+        };
+        let store = std::sync::Arc::new(AuthStore::open(state.path(), &config).unwrap());
+        let other = AuthStore::open(state.path(), &config).unwrap();
+        let principal = Uuid::new_v4().to_string();
+        let device = Uuid::new_v4().to_string();
+        let handle = Uuid::new_v4().to_string();
+        let bearer = URL_SAFE_NO_PAD.encode([4_u8; 32]);
+        let now = unix_seconds().unwrap();
+        {
+            let conn = store.connection.lock().unwrap();
+            conn.execute(
+                "INSERT INTO principals VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    "https://gate.example.test",
+                    "subject",
+                    principal,
+                    config.network_id,
+                    now
+                ],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at,session_handle) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![Sha256::digest(bearer.as_bytes()).to_vec(),principal,device,now,now+3600,handle]).unwrap();
+        }
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_store = store.clone();
+        let operation_token = bearer.clone();
+        let operation = std::thread::spawn(move || {
+            worker_store.with_valid_session::<_, AuthError>(&operation_token, |projection| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok(projection)
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+        let (revoked_tx, revoked_rx) = std::sync::mpsc::channel();
+        let revocation = std::thread::spawn(move || {
+            attempted_tx.send(()).unwrap();
+            let result = other.revoke_session(&bearer);
+            revoked_tx.send(result).unwrap();
+        });
+        attempted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            revoked_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        );
+        release_tx.send(()).unwrap();
+        let projection = operation.join().unwrap().unwrap();
+        revoked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        revocation.join().unwrap();
+        assert_eq!(
+            store
+                .validate_session_handle(&projection.session_handle)
+                .unwrap_err(),
+            AuthError::SessionRejected
+        );
+    }
+
+    #[test]
+    fn blocked_bearer_and_handle_lookups_reject_session_expiring_while_waiting() {
+        let state = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config = AuthConfig {
+            network_id: Uuid::new_v4().to_string(),
+            login_ttl: Duration::from_secs(300),
+            session_ttl: Duration::from_secs(3600),
+        };
+        let store = std::sync::Arc::new(AuthStore::open(state.path(), &config).unwrap());
+        let principal = Uuid::new_v4().to_string();
+        let device = Uuid::new_v4().to_string();
+        let handle = Uuid::new_v4().to_string();
+        let bearer = URL_SAFE_NO_PAD.encode([3_u8; 32]);
+        let now = unix_seconds().unwrap();
+        {
+            let conn = store.connection.lock().unwrap();
+            conn.execute(
+                "INSERT INTO principals VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    "https://clock.example.test",
+                    "subject",
+                    principal,
+                    config.network_id,
+                    now
+                ],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at,session_handle) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![Sha256::digest(bearer.as_bytes()).to_vec(),principal,device,now,now+3600,handle]).unwrap();
+        }
+        for by_handle in [false, true] {
+            let conn = store.connection.lock().unwrap();
+            let expires = unix_seconds().unwrap() + 1;
+            conn.execute("UPDATE sessions SET expires_at=?1", params![expires])
+                .unwrap();
+            let worker_store = store.clone();
+            let worker_bearer = bearer.clone();
+            let worker_handle = handle.clone();
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                if by_handle {
+                    worker_store.validate_session_handle(&worker_handle)
+                } else {
+                    worker_store.validate_session(&worker_bearer)
+                }
+            });
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            // Keep the production lookup blocked across the real wall-clock expiry.
+            std::thread::sleep(Duration::from_millis(100));
+            while unix_seconds().unwrap() < expires {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            drop(conn);
+            assert_eq!(
+                worker.join().unwrap().unwrap_err(),
+                AuthError::SessionRejected
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_sessions_gain_distinct_stable_handles_without_losing_revocation() {
+        let state = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config = AuthConfig {
+            network_id: Uuid::new_v4().to_string(),
+            login_ttl: Duration::from_secs(300),
+            session_ttl: Duration::from_secs(3600),
+        };
+        let database = state.path().join("auth.sqlite3");
+        create_private_database_file(&database).unwrap();
+        let connection = Connection::open(&database).unwrap();
+        connection.execute_batch("CREATE TABLE principals (issuer TEXT NOT NULL, subject TEXT NOT NULL,
+            principal_id TEXT NOT NULL UNIQUE, network_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+            PRIMARY KEY (issuer,subject));
+            CREATE TABLE sessions (token_hash BLOB PRIMARY KEY,
+            principal_id TEXT NOT NULL REFERENCES principals(principal_id), device_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER);").unwrap();
+        let principal = Uuid::new_v4().to_string();
+        let device = Uuid::new_v4().to_string();
+        let now = unix_seconds().unwrap();
+        connection
+            .execute(
+                "INSERT INTO principals VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    "https://legacy.example.test",
+                    "subject",
+                    principal,
+                    config.network_id,
+                    now
+                ],
+            )
+            .unwrap();
+        let valid = URL_SAFE_NO_PAD.encode([1_u8; 32]);
+        let revoked = URL_SAFE_NO_PAD.encode([2_u8; 32]);
+        for (token, revoked_at) in [(&valid, None), (&revoked, Some(now))] {
+            connection
+                .execute(
+                    "INSERT INTO sessions VALUES(?1,?2,?3,?4,?5,?6)",
+                    params![
+                        Sha256::digest(token.as_bytes()).to_vec(),
+                        principal,
+                        device,
+                        now,
+                        now + 3600,
+                        revoked_at
+                    ],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        let store = AuthStore::open(state.path(), &config).unwrap();
+        let projection = store.validate_session(&valid).unwrap();
+        assert_eq!(projection.account.principal_id, principal);
+        assert_eq!(projection.device_id, device);
+        assert_eq!(
+            canonical_uuid(&projection.session_handle).unwrap(),
+            projection.session_handle
+        );
+        assert_eq!(
+            store
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
+        assert_eq!(
+            store.validate_session(&revoked).unwrap_err(),
+            AuthError::SessionRejected
+        );
+        {
+            let conn = store.connection.lock().unwrap();
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(DISTINCT session_handle) FROM sessions",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 2);
+            assert!(conn.execute("INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at) VALUES(?1,?2,?3,?4,?5)",
+                params![vec![0_u8;32], principal, device, now, now+3600]).is_err());
+        }
+        drop(store);
+        let reopened = AuthStore::open(state.path(), &config).unwrap();
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
+        reopened.revoke_session(&valid).unwrap();
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap_err(),
+            AuthError::SessionRejected
+        );
+        assert_eq!(
+            reopened
+                .validate_session_handle(&Uuid::new_v4().to_string())
+                .unwrap_err(),
+            AuthError::SessionRejected
+        );
+    }
 }
 
 #[cfg(not(unix))]

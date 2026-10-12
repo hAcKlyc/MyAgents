@@ -1,3 +1,4 @@
+use crate::identity_http::{IdentityHttpConfig, IdentityService};
 use crate::{AuthConfig, AuthError, AuthStore, VerifiedSubject};
 use axum::{
     Json, Router,
@@ -54,6 +55,8 @@ pub struct ServiceFileConfig {
     pub ca_bundle: Option<PathBuf>,
     #[serde(default = "default_session_ttl")]
     pub session_ttl_seconds: u64,
+    #[serde(default)]
+    pub identity: Option<IdentityHttpConfig>,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -91,7 +94,7 @@ struct App {
     client: ServiceClient,
     http: Client,
     origin: Url,
-    store: AuthStore,
+    store: Arc<AuthStore>,
     flow: Flow,
     verification: Verification,
 }
@@ -257,11 +260,23 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         RedirectUrl::new(config.callback_url.clone()).map_err(|_| AuthError::OidcConfiguration)?,
     );
     let auth = AuthConfig {
-        network_id: config.network_id,
+        network_id: config.network_id.clone(),
         login_ttl: Duration::from_secs(300),
         session_ttl: Duration::from_secs(config.session_ttl_seconds),
     };
-    let store = AuthStore::open(&config.state_dir, &auth)?;
+    let store = Arc::new(AuthStore::open(&config.state_dir, &auth)?);
+    let identity = config
+        .identity
+        .as_ref()
+        .map(|identity_config| {
+            IdentityService::open(
+                store.clone(),
+                &config.state_dir,
+                identity_config,
+                &config.network_id,
+            )
+        })
+        .transpose()?;
     let app = Arc::new(App {
         client,
         http,
@@ -273,16 +288,20 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         },
         verification,
     });
-    let router = Router::new()
+    let mut router = Router::new()
         .route("/auth/login/start", post(start))
         .route("/auth/callback", get(callback))
         .route("/auth/login/poll", post(poll))
         .route("/auth/login/cancel", delete(cancel))
         .route("/auth/session", get(session).delete(revoke))
         .route("/health", get(health))
-        .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
-        .layer(axum::middleware::map_response(no_store))
         .with_state(app);
+    if let Some(identity) = identity {
+        router = router.merge(identity.router());
+    }
+    let router = router
+        .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
+        .layer(axum::middleware::map_response(no_store));
     let listener = TcpListener::bind(config.listen)
         .await
         .map_err(|_| AuthError::Configuration)?;
@@ -1002,7 +1021,7 @@ mod tests {
             login_ttl: Duration::from_secs(300),
             session_ttl: Duration::from_secs(3600),
         };
-        let store = AuthStore::open(dir.path(), &auth).unwrap();
+        let store = Arc::new(AuthStore::open(dir.path(), &auth).unwrap());
         let http = Client::builder()
             .redirect(Policy::none())
             .https_only(true)
@@ -1034,6 +1053,7 @@ mod tests {
             listen: "127.0.0.1:15558".parse().unwrap(),
             ca_bundle: None,
             session_ttl_seconds: 3600,
+            identity: None,
         };
         assert!(validate_config(&good).is_ok());
         let mut bad = good;

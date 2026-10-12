@@ -5,12 +5,14 @@
 //! can construct a `VerifiedSubject`, which is the only input accepted by the
 //! durable account/session owner.
 
+mod identity_http;
 mod oidc;
 mod server;
 mod store;
 #[cfg(test)]
 mod transactions;
 
+pub use identity_http::IdentityHttpConfig;
 pub use oidc::{OidcVerifier, VerifiedSubject};
 pub use server::{ServiceFileConfig, serve_from_config};
 pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionProjection};
@@ -18,6 +20,16 @@ pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionP
 pub use transactions::{LoginCallback, LoginStart, LoginTransactions};
 
 use std::time::Duration;
+
+/// Explicit operator initialization. Existing keys are never overwritten.
+pub fn initialize_identity_keys(path: impl AsRef<std::path::Path>) -> Result<(), AuthError> {
+    if !path.as_ref().is_absolute() {
+        return Err(AuthError::Configuration);
+    }
+    myagents_agentnet_identity_core::ServiceKeys::generate_initial(path)
+        .map(|_| ())
+        .map_err(|_| AuthError::Configuration)
+}
 
 /// Public service configuration contains no user/session secrets.
 #[derive(Clone)]
@@ -237,7 +249,20 @@ mod tests {
         let account = session.account.clone();
         let bearer = session.into_token();
         assert_eq!(account.network_id, NETWORK);
-        assert_eq!(store.validate_session(&bearer).unwrap().device_id, DEVICE_A);
+        let projection = store.validate_session(&bearer).unwrap();
+        assert_eq!(projection.device_id, DEVICE_A);
+        assert_eq!(
+            uuid::Uuid::parse_str(&projection.session_handle)
+                .unwrap()
+                .to_string(),
+            projection.session_handle
+        );
+        assert_eq!(
+            store
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
         assert_eq!(
             finish(
                 &transactions,
@@ -255,6 +280,12 @@ mod tests {
 
         let reopened = AuthStore::open(dir.path(), &config).unwrap();
         assert_eq!(reopened.validate_session(&bearer).unwrap().account, account);
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
         let raw_db = std::fs::read(dir.path().join("auth.sqlite3")).unwrap();
         assert!(
             !raw_db
@@ -264,6 +295,12 @@ mod tests {
         reopened.expire_session_for_test(&bearer).unwrap();
         assert_eq!(
             reopened.validate_session(&bearer).unwrap_err(),
+            AuthError::SessionRejected
+        );
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap_err(),
             AuthError::SessionRejected
         );
 
@@ -281,9 +318,17 @@ mod tests {
         .unwrap();
         assert_eq!(second_session.account, account);
         let second_bearer = second_session.into_token();
+        let second_projection = reopened.validate_session(&second_bearer).unwrap();
+        assert_ne!(second_projection.session_handle, projection.session_handle);
         reopened.revoke_session(&second_bearer).unwrap();
         assert_eq!(
             reopened.validate_session(&second_bearer).unwrap_err(),
+            AuthError::SessionRejected
+        );
+        assert_eq!(
+            reopened
+                .validate_session_handle(&second_projection.session_handle)
+                .unwrap_err(),
             AuthError::SessionRejected
         );
     }
