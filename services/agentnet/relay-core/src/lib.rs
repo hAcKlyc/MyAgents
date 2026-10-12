@@ -197,7 +197,9 @@ struct Channel {
     initiator_epoch: String,
     responder_epoch: String,
     initiator_binding: String,
-    responder_binding: Option<String>,
+    responder_binding: String,
+    initiator_accepted: bool,
+    responder_accepted: bool,
     initiator_ready: bool,
     responder_ready: bool,
     created_at_ms: i64,
@@ -450,7 +452,10 @@ impl RelayCore {
     ) -> Result<Vec<Effect>, RelayError> {
         let (channel_id, _) = decode_tls_frame(bytes).map_err(|_| RelayError::Frame)?;
         let channel = self.channels.get(&channel_id).ok_or(RelayError::Channel)?;
-        if channel.state != ChannelState::Ready {
+        if channel.state == ChannelState::Offered
+            || (channel.state == ChannelState::Accepted
+                && now_ms.saturating_sub(channel.created_at_ms) > budget("handshakeMs") as i64)
+        {
             return Err(RelayError::Channel);
         }
         self.live_connection(connection_id, now_unix)?;
@@ -664,7 +669,7 @@ impl RelayCore {
         if self.channels.contains_key(channel_id) {
             return Err(RelayError::Replay);
         }
-        let responder_binding = match value["targetBinding"].as_str() {
+        let requested_responder_binding = match value["targetBinding"].as_str() {
             Some(binding) => {
                 verify_peer_binding(
                     &self.config,
@@ -678,39 +683,81 @@ impl RelayCore {
             }
             None => None,
         };
-        let connection_epoch = initiator.connection_epoch.clone();
-        let offer = json!({
-            "version":1,
-            "controlId":Uuid::new_v4().to_string(),
-            "type":"channel.offer",
-            "serviceId":self.config.service_id,
-            "networkId":self.config.network_id,
-            "bootEpoch":self.boot_epoch,
-            "connectionEpoch":responder.connection_epoch,
-            "channelId":channel_id,
-            "initiator":initiator.device.scope,
-            "responder":responder.device.scope,
-            "initiatorConnectionEpoch":connection_epoch,
-            "responderConnectionEpoch":responder.connection_epoch,
-            "initiatorBinding":initiator.device.signed_binding,
-            "responderBinding":responder_binding,
-        });
-        let (initiator_scope, responder_scope) = (
-            initiator.device.scope.clone(),
-            responder.device.scope.clone(),
-        );
+        let responder_binding = responder.device.signed_binding.clone();
+        if requested_responder_binding
+            .as_ref()
+            .is_some_and(|binding| binding != &responder_binding)
+        {
+            return Err(RelayError::Unauthorized);
+        }
+        let open_scope = initiator.device.scope.clone();
+        let target_scope = responder.device.scope.clone();
+        let (
+            initiator_id,
+            responder_id,
+            initiator_scope,
+            responder_scope,
+            initiator_epoch,
+            responder_epoch,
+            initiator_binding,
+            responder_binding,
+        ) = if scope_key(&open_scope) < scope_key(&target_scope) {
+            (
+                connection_id.to_owned(),
+                target_id.clone(),
+                open_scope,
+                target_scope,
+                initiator.connection_epoch.clone(),
+                responder.connection_epoch.clone(),
+                initiator.device.signed_binding.clone(),
+                responder.device.signed_binding.clone(),
+            )
+        } else {
+            (
+                target_id.clone(),
+                connection_id.to_owned(),
+                target_scope,
+                open_scope,
+                responder.connection_epoch.clone(),
+                initiator.connection_epoch.clone(),
+                responder.device.signed_binding.clone(),
+                initiator.device.signed_binding.clone(),
+            )
+        };
+        let offer_for = |connection_epoch: &str| {
+            json!({
+                "version":1,
+                "controlId":Uuid::new_v4().to_string(),
+                "type":"channel.offer",
+                "serviceId":self.config.service_id,
+                "networkId":self.config.network_id,
+                "bootEpoch":self.boot_epoch,
+                "connectionEpoch":connection_epoch,
+                "channelId":channel_id,
+                "initiator":initiator_scope,
+                "responder":responder_scope,
+                "initiatorConnectionEpoch":initiator_epoch,
+                "responderConnectionEpoch":responder_epoch,
+                "initiatorBinding":initiator_binding,
+                "responderBinding":responder_binding,
+            })
+        };
+        let opener_offer = offer_for(&initiator.connection_epoch);
+        let target_offer = offer_for(&responder.connection_epoch);
         self.channels.insert(
             channel_id.to_owned(),
             Channel {
                 id: channel_id.to_owned(),
-                initiator: connection_id.to_owned(),
-                responder: target_id.clone(),
+                initiator: initiator_id,
+                responder: responder_id,
                 initiator_scope,
                 responder_scope,
-                initiator_epoch: connection_epoch,
-                responder_epoch: responder.connection_epoch.clone(),
-                initiator_binding: initiator.device.signed_binding.clone(),
+                initiator_epoch,
+                responder_epoch,
+                initiator_binding,
                 responder_binding,
+                initiator_accepted: false,
+                responder_accepted: false,
                 initiator_ready: false,
                 responder_ready: false,
                 created_at_ms: now_ms,
@@ -720,7 +767,10 @@ impl RelayCore {
                 reverse: Direction::default(),
             },
         );
-        Ok(vec![control_effect(&target_id, offer)?])
+        Ok(vec![
+            control_effect(connection_id, opener_offer)?,
+            control_effect(&target_id, target_offer)?,
+        ])
     }
 
     fn accept_channel(
@@ -730,71 +780,121 @@ impl RelayCore {
         now_unix: i64,
         now_ms: i64,
     ) -> Result<Vec<Effect>, RelayError> {
-        let (responder_scope, responder_epoch, responder_certificate_fp, responder_binding_id) = {
-            let responder = self.live_connection(connection_id, now_unix)?;
+        let (accepting_scope, accepting_epoch, accepting_certificate_fp, accepting_binding_id) = {
+            let accepting = self.live_connection(connection_id, now_unix)?;
             (
-                responder.device.scope.clone(),
-                responder.connection_epoch.clone(),
-                responder.device.certificate_fingerprint.clone(),
-                responder.device.binding_id.clone(),
+                accepting.device.scope.clone(),
+                accepting.connection_epoch.clone(),
+                accepting.device.certificate_fingerprint.clone(),
+                accepting.device.binding_id.clone(),
             )
         };
         let channel_id = value["channelId"].as_str().ok_or(RelayError::Control)?;
         let binding = value["signedBinding"].as_str().ok_or(RelayError::Control)?;
         let channel = self.channels.get(channel_id).ok_or(RelayError::Channel)?;
         if channel.state != ChannelState::Offered
-            || channel.responder != connection_id
-            || channel.responder_epoch != responder_epoch
             || now_ms.saturating_sub(channel.created_at_ms) > budget("handshakeMs") as i64
         {
             return Err(RelayError::Channel);
         }
+        let is_initiator = if channel.initiator == connection_id
+            && channel.initiator_epoch == accepting_epoch
+            && channel.initiator_scope == accepting_scope
+        {
+            if channel.initiator_accepted {
+                return Err(RelayError::Replay);
+            }
+            true
+        } else if channel.responder == connection_id
+            && channel.responder_epoch == accepting_epoch
+            && channel.responder_scope == accepting_scope
+        {
+            if channel.responder_accepted {
+                return Err(RelayError::Replay);
+            }
+            false
+        } else {
+            return Err(RelayError::Channel);
+        };
+        let expected_binding = if is_initiator {
+            &channel.initiator_binding
+        } else {
+            &channel.responder_binding
+        };
+        if binding != expected_binding {
+            return Err(RelayError::Unauthorized);
+        }
         verify_peer_binding(
             &self.config,
-            &responder_scope,
-            &responder_certificate_fp,
-            &responder_binding_id,
+            &accepting_scope,
+            &accepting_certificate_fp,
+            &accepting_binding_id,
             binding,
             now_unix,
         )?;
-        if channel
-            .responder_binding
-            .as_ref()
-            .is_some_and(|offered| offered != binding)
-        {
-            return Err(RelayError::Unauthorized);
+        let (
+            initiator_id,
+            responder_id,
+            initiator_scope,
+            responder_scope,
+            initiator_epoch,
+            responder_epoch,
+            initiator_binding,
+            responder_binding,
+        ) = (
+            channel.initiator.clone(),
+            channel.responder.clone(),
+            channel.initiator_scope.clone(),
+            channel.responder_scope.clone(),
+            channel.initiator_epoch.clone(),
+            channel.responder_epoch.clone(),
+            channel.initiator_binding.clone(),
+            channel.responder_binding.clone(),
+        );
+        for (peer_id, peer_scope, peer_epoch, peer_binding) in [
+            (
+                &initiator_id,
+                &initiator_scope,
+                &initiator_epoch,
+                &initiator_binding,
+            ),
+            (
+                &responder_id,
+                &responder_scope,
+                &responder_epoch,
+                &responder_binding,
+            ),
+        ] {
+            let peer = self.live_connection(peer_id, now_unix)?;
+            if peer.device.scope != *peer_scope || peer.connection_epoch != *peer_epoch {
+                return Err(RelayError::Connection);
+            }
+            verify_peer_binding(
+                &self.config,
+                peer_scope,
+                &peer.device.certificate_fingerprint,
+                &peer.device.binding_id,
+                peer_binding,
+                now_unix,
+            )?;
         }
-        let initiator_id = channel.initiator.clone();
-        let initiator_epoch = channel.initiator_epoch.clone();
-        let initiator_binding = channel.initiator_binding.clone();
-        let initiator_connection = self
-            .connections
-            .get(&initiator_id)
-            .ok_or(RelayError::Connection)?;
-        if initiator_connection.connection_epoch != initiator_epoch {
-            return Err(RelayError::Connection);
-        }
-        self.live_connection(&initiator_id, now_unix)?;
-        verify_peer_binding(
-            &self.config,
-            &initiator_connection.device.scope,
-            &initiator_connection.device.certificate_fingerprint,
-            &initiator_connection.device.binding_id,
-            &initiator_binding,
-            now_unix,
-        )?;
         let channel = self
             .channels
             .get_mut(channel_id)
             .ok_or(RelayError::Channel)?;
-        channel.responder_binding = Some(binding.to_owned());
+        if is_initiator {
+            channel.initiator_accepted = true;
+        } else {
+            channel.responder_accepted = true;
+        }
+        channel.last_activity_ms = now_ms;
+        if !channel.initiator_accepted || !channel.responder_accepted {
+            return Ok(Vec::new());
+        }
         channel.state = ChannelState::Accepted;
-        let responder_binding = binding.to_owned();
         let channel_id = channel.id.clone();
-        let responder_id = channel.responder.clone();
-        let responder_epoch = channel.responder_epoch.clone();
         let a = json!({"version":1,"controlId":Uuid::new_v4().to_string(),"type":"channel.accepted","serviceId":self.config.service_id,"networkId":self.config.network_id,"bootEpoch":self.boot_epoch,"connectionEpoch":initiator_epoch,"channelId":channel_id,"initiatorBinding":initiator_binding,"responderBinding":responder_binding});
-        let b = json!({"version":1,"controlId":Uuid::new_v4().to_string(),"type":"channel.accepted","serviceId":self.config.service_id,"networkId":self.config.network_id,"bootEpoch":self.boot_epoch,"connectionEpoch":responder_epoch,"channelId":channel_id,"initiatorBinding":channel.initiator_binding,"responderBinding":binding});
+        let b = json!({"version":1,"controlId":Uuid::new_v4().to_string(),"type":"channel.accepted","serviceId":self.config.service_id,"networkId":self.config.network_id,"bootEpoch":self.boot_epoch,"connectionEpoch":responder_epoch,"channelId":channel_id,"initiatorBinding":initiator_binding,"responderBinding":responder_binding});
         Ok(vec![
             control_effect(&initiator_id, a)?,
             control_effect(&responder_id, b)?,
@@ -1227,7 +1327,10 @@ mod tests {
     struct DeviceFixture {
         authorized: AuthorizedDevice,
         access: ValidatedAccess,
-        device_key: DevicePrivateKey,
+        device_key: std::sync::Arc<DevicePrivateKey>,
+        tls_identity: std::sync::Arc<myagents_agent_network_crypto::TlsIdentity>,
+        root_certificate: String,
+        binding_san: String,
         request: IdentityRequest,
         snapshot: TrustedLiveSnapshot,
         signed_binding: String,
@@ -1273,10 +1376,14 @@ mod tests {
         }
 
         fn device(&self) -> DeviceFixture {
-            let device_id = Uuid::new_v4().to_string();
+            self.device_with_id(Uuid::new_v4())
+        }
+
+        fn device_with_id(&self, device_id: Uuid) -> DeviceFixture {
+            let device_id = device_id.to_string();
             let session_handle = Uuid::new_v4().to_string();
             let identity_binding_id = Uuid::new_v4().to_string();
-            let key = DevicePrivateKey::generate().unwrap();
+            let key = std::sync::Arc::new(DevicePrivateKey::generate().unwrap());
             let request = IdentityRequest {
                 principal_id: self.principal_id.clone(),
                 device_id: device_id.clone(),
@@ -1286,6 +1393,14 @@ mod tests {
                 csr_pem: key.csr().unwrap(),
             };
             let issued = self.keys.issue(&self.profile, &request).unwrap();
+            let leaf = issued.certificate.as_deref().unwrap();
+            let mut chain = myagents_agent_network_crypto::certificate_chain(leaf).unwrap();
+            for pem in &issued.certificate_chain {
+                chain.extend(myagents_agent_network_crypto::certificate_chain(pem).unwrap());
+            }
+            let tls_identity = std::sync::Arc::new(
+                myagents_agent_network_crypto::TlsIdentity::new(chain, key.clone()).unwrap(),
+            );
             let admission = myagents_agentnet_admission_core::AdmissionValidator::new(
                 myagents_agentnet_admission_core::ExpectedService {
                     https_origin_canonical: self.profile.issuer.clone(),
@@ -1342,6 +1457,12 @@ mod tests {
                 authorized,
                 access,
                 device_key: key,
+                tls_identity,
+                root_certificate: issued.certificate_chain.last().unwrap().clone(),
+                binding_san: format!(
+                    "{}.devices.{}.invalid",
+                    request.identity_binding_id, self.profile.service_id
+                ),
                 request,
                 snapshot,
                 signed_binding,
@@ -1403,7 +1524,7 @@ mod tests {
         fn ready_pair(&mut self, now_ms: i64) -> (String, String, Value, Value, String) {
             let first = self.device();
             let second = self.device();
-            let (first_id, first_hello, _, _) = self.connect_ready(first);
+            let (first_id, first_hello, first_binding, _) = self.connect_ready(first);
             let (second_id, second_hello, second_binding, _) = self.connect_ready(second);
             let channel_id = Uuid::new_v4().to_string();
             let open = client_control(
@@ -1426,6 +1547,22 @@ mod tests {
                     now_ms,
                 )
                 .unwrap();
+            let accept_first = client_control(
+                &first_hello,
+                "channel.accept",
+                json!({"channelId":channel_id,"signedBinding":first_binding}),
+            );
+            assert!(self
+                .core
+                .handle_control(
+                    &first_id,
+                    &serde_json::to_vec(&accept_first).unwrap(),
+                    None,
+                    self.now,
+                    now_ms + 1,
+                )
+                .unwrap()
+                .is_empty());
             let accept = client_control(
                 &second_hello,
                 "channel.accept",
@@ -1437,7 +1574,7 @@ mod tests {
                     &serde_json::to_vec(&accept).unwrap(),
                     None,
                     self.now,
-                    now_ms + 1,
+                    now_ms + 2,
                 )
                 .unwrap();
             for (connection_id, hello) in [(&first_id, &first_hello), (&second_id, &second_hello)] {
@@ -1448,7 +1585,7 @@ mod tests {
                         &serde_json::to_vec(&ready).unwrap(),
                         None,
                         self.now,
-                        now_ms + 2,
+                        now_ms + 3,
                     )
                     .unwrap();
             }
@@ -1498,12 +1635,423 @@ mod tests {
         value
     }
 
+    #[allow(clippy::too_many_arguments)] // Explicit endpoints, peer control envelope and credit state.
+    fn relay_tls_chunk(
+        core: &mut RelayCore,
+        channel_id: &str,
+        sender_connection: &str,
+        receiver_connection: &str,
+        receiver_hello: &Value,
+        receiver: &mut myagents_agent_network_crypto::InnerTls,
+        tls_chunk: &[u8],
+        received_bytes: &mut u64,
+        credit_sequence: &mut u64,
+        now_unix: i64,
+        now_ms: i64,
+    ) -> Vec<u8> {
+        let frame =
+            myagents_agent_network_protocol::encode_tls_frame(channel_id, tls_chunk).unwrap();
+        let effects = core
+            .forward_frame(sender_connection, &frame, now_unix, now_ms)
+            .unwrap();
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::OpaqueFrame {
+                target_connection_id,
+                bytes,
+            } => {
+                assert_eq!(target_connection_id, receiver_connection);
+                assert_eq!(bytes, &frame);
+            }
+            _ => panic!("expected opaque TLS frame forwarding"),
+        }
+        let (got_channel, payload) =
+            myagents_agent_network_protocol::decode_tls_frame(&frame).unwrap();
+        assert_eq!(got_channel, channel_id);
+        let plaintext = receiver.feed(payload).unwrap();
+        *received_bytes += frame.len() as u64;
+        *credit_sequence += 1;
+        let credit = client_control(
+            receiver_hello,
+            "credit.release",
+            json!({
+                "channelId":channel_id,
+                "sequence":*credit_sequence,
+                "receivedBytes":*received_bytes,
+            }),
+        );
+        core.handle_control(
+            receiver_connection,
+            &serde_json::to_vec(&credit).unwrap(),
+            None,
+            now_unix,
+            now_ms,
+        )
+        .unwrap();
+        plaintext
+    }
+
+    #[test]
+    fn accepted_relays_real_mtls_and_channel_hello_before_ready_then_business_after_ready() {
+        use myagents_agent_network_crypto::{private_roots, InnerTls};
+        use myagents_agent_network_protocol::{
+            encode_object, BusinessObject, ChannelHello, ObjectDecoder,
+        };
+
+        let mut fixture = Fixture::new();
+        let first = fixture
+            .device_with_id(Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap());
+        let second = fixture
+            .device_with_id(Uuid::parse_str("ffffffff-ffff-4fff-bfff-ffffffffffff").unwrap());
+        let first_identity = first.tls_identity.clone();
+        let second_identity = second.tls_identity.clone();
+        let first_root = first.root_certificate.clone();
+        let second_root = second.root_certificate.clone();
+        let first_san = first.binding_san.clone();
+        let second_san = second.binding_san.clone();
+        let first_fp = first.snapshot.current_certificate_fingerprint.clone();
+        let second_fp = second.snapshot.current_certificate_fingerprint.clone();
+        let (first_id, first_hello, first_binding, first_scope) = fixture.connect_ready(first);
+        let (second_id, second_hello, second_binding, second_scope) = fixture.connect_ready(second);
+        let channel_id = Uuid::new_v4().to_string();
+
+        let open = client_control(
+            &second_hello,
+            "channel.open",
+            json!({
+                "channelId":channel_id,
+                "targetDeviceId":first_scope.device_id,
+                "targetKeyGeneration":first_scope.key_generation,
+                "targetConnectionEpoch":first_hello["connectionEpoch"],
+                "targetBinding":null,
+            }),
+        );
+        let offered = fixture
+            .core
+            .handle_control(
+                &second_id,
+                &serde_json::to_vec(&open).unwrap(),
+                None,
+                fixture.now,
+                5_000,
+            )
+            .unwrap();
+        assert_eq!(offered.len(), 2);
+        assert!(offered
+            .iter()
+            .all(|effect| effect.control_json().unwrap()["type"] == "channel.offer"));
+        let first_offer = offered
+            .iter()
+            .find(|effect| effect.target_id() == Some(first_id.as_str()))
+            .unwrap()
+            .control_json()
+            .unwrap();
+        let second_offer = offered
+            .iter()
+            .find(|effect| effect.target_id() == Some(second_id.as_str()))
+            .unwrap()
+            .control_json()
+            .unwrap();
+        assert_eq!(
+            first_offer["connectionEpoch"],
+            first_hello["connectionEpoch"]
+        );
+        assert_eq!(
+            second_offer["connectionEpoch"],
+            second_hello["connectionEpoch"]
+        );
+        assert_eq!(
+            first_offer["initiator"],
+            serde_json::to_value(&first_scope).unwrap()
+        );
+        assert_eq!(
+            first_offer["responder"],
+            serde_json::to_value(&second_scope).unwrap()
+        );
+        assert_eq!(second_offer["initiator"], first_offer["initiator"]);
+        assert_eq!(second_offer["responder"], first_offer["responder"]);
+
+        let roots_client = private_roots(&first_root).unwrap();
+        let roots_server = private_roots(&second_root).unwrap();
+        let mut client =
+            InnerTls::client(first_identity.as_ref(), roots_client, second_san, second_fp).unwrap();
+        let mut server =
+            InnerTls::server(second_identity.as_ref(), roots_server, first_san, first_fp).unwrap();
+
+        // The initiator has a genuine TLS ClientHello queued before Accept.
+        let client_hello_chunk = client.drain_chunk().unwrap().unwrap();
+        let client_hello_frame =
+            myagents_agent_network_protocol::encode_tls_frame(&channel_id, &client_hello_chunk)
+                .unwrap();
+        assert_eq!(
+            fixture
+                .core
+                .forward_frame(&first_id, &client_hello_frame, fixture.now, 5_001),
+            Err(RelayError::Channel)
+        );
+
+        let accept_first = client_control(
+            &first_hello,
+            "channel.accept",
+            json!({"channelId":channel_id,"signedBinding":first_binding}),
+        );
+        assert!(fixture
+            .core
+            .handle_control(
+                &first_id,
+                &serde_json::to_vec(&accept_first).unwrap(),
+                None,
+                fixture.now,
+                5_002,
+            )
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            fixture.core.handle_control(
+                &first_id,
+                &serde_json::to_vec(&accept_first).unwrap(),
+                None,
+                fixture.now,
+                5_002,
+            ),
+            Err(RelayError::Replay)
+        );
+        assert_eq!(
+            fixture
+                .core
+                .forward_frame(&first_id, &client_hello_frame, fixture.now, 5_002),
+            Err(RelayError::Channel)
+        );
+        let accept_second = client_control(
+            &second_hello,
+            "channel.accept",
+            json!({"channelId":channel_id,"signedBinding":second_binding}),
+        );
+        let accepted = fixture
+            .core
+            .handle_control(
+                &second_id,
+                &serde_json::to_vec(&accept_second).unwrap(),
+                None,
+                fixture.now,
+                5_003,
+            )
+            .unwrap();
+        assert!(accepted
+            .iter()
+            .all(|effect| effect.control_json().unwrap()["type"] == "channel.accepted"));
+
+        let mut first_received = 0;
+        let mut second_received = 0;
+        let mut first_credit_sequence = 0;
+        let mut second_credit_sequence = 0;
+        let mut first_plaintext = Vec::new();
+        let mut second_plaintext = Vec::new();
+        second_plaintext.extend(relay_tls_chunk(
+            &mut fixture.core,
+            &channel_id,
+            &first_id,
+            &second_id,
+            &second_hello,
+            &mut server,
+            &client_hello_chunk,
+            &mut second_received,
+            &mut second_credit_sequence,
+            fixture.now,
+            5_009,
+        ));
+        for step in 0..64 {
+            let mut progressed = false;
+            if let Some(chunk) = client.drain_chunk().unwrap() {
+                second_plaintext.extend(relay_tls_chunk(
+                    &mut fixture.core,
+                    &channel_id,
+                    &first_id,
+                    &second_id,
+                    &second_hello,
+                    &mut server,
+                    &chunk,
+                    &mut second_received,
+                    &mut second_credit_sequence,
+                    fixture.now,
+                    5_010 + step,
+                ));
+                progressed = true;
+            }
+            if let Some(chunk) = server.drain_chunk().unwrap() {
+                first_plaintext.extend(relay_tls_chunk(
+                    &mut fixture.core,
+                    &channel_id,
+                    &second_id,
+                    &first_id,
+                    &first_hello,
+                    &mut client,
+                    &chunk,
+                    &mut first_received,
+                    &mut first_credit_sequence,
+                    fixture.now,
+                    5_010 + step,
+                ));
+                progressed = true;
+            }
+            if client.verified() && server.verified() && !progressed {
+                break;
+            }
+        }
+        assert!(
+            client.verified(),
+            "client must verify the issued server identity"
+        );
+        assert!(
+            server.verified(),
+            "server must verify the issued client identity"
+        );
+
+        let make_channel_hello = |source: DeviceScope,
+                                  target: DeviceScope,
+                                  source_epoch: &Value,
+                                  target_epoch: &Value| {
+            BusinessObject::Hello(ChannelHello {
+                version: 1,
+                sender_sequence: 1,
+                channel_id: channel_id.clone(),
+                source,
+                target,
+                source_connection_epoch: source_epoch.as_str().unwrap().to_owned(),
+                target_connection_epoch: target_epoch.as_str().unwrap().to_owned(),
+            })
+        };
+        let first_channel_hello = make_channel_hello(
+            first_scope.clone(),
+            second_scope.clone(),
+            &first_hello["connectionEpoch"],
+            &second_hello["connectionEpoch"],
+        );
+        let first_hello_value = serde_json::to_value(first_channel_hello).unwrap();
+        let first_hello_frame = encode_object(&first_hello_value).unwrap();
+        client.write_plaintext(&first_hello_frame).unwrap();
+        let chunk = client.drain_chunk().unwrap().unwrap();
+        second_plaintext.extend(relay_tls_chunk(
+            &mut fixture.core,
+            &channel_id,
+            &first_id,
+            &second_id,
+            &second_hello,
+            &mut server,
+            &chunk,
+            &mut second_received,
+            &mut second_credit_sequence,
+            fixture.now,
+            5_100,
+        ));
+        let mut decoder = ObjectDecoder::default();
+        let received = decoder.push(&second_plaintext).unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(matches!(
+            BusinessObject::parse(received.into_iter().next().unwrap()).unwrap(),
+            BusinessObject::Hello(hello)
+                if hello.source == first_scope
+                    && hello.target == second_scope
+                    && hello.channel_id == channel_id
+        ));
+
+        let second_channel_hello = make_channel_hello(
+            second_scope.clone(),
+            first_scope.clone(),
+            &second_hello["connectionEpoch"],
+            &first_hello["connectionEpoch"],
+        );
+        let second_hello_value = serde_json::to_value(second_channel_hello).unwrap();
+        let second_hello_frame = encode_object(&second_hello_value).unwrap();
+        server.write_plaintext(&second_hello_frame).unwrap();
+        let chunk = server.drain_chunk().unwrap().unwrap();
+        first_plaintext.extend(relay_tls_chunk(
+            &mut fixture.core,
+            &channel_id,
+            &second_id,
+            &first_id,
+            &first_hello,
+            &mut client,
+            &chunk,
+            &mut first_received,
+            &mut first_credit_sequence,
+            fixture.now,
+            5_101,
+        ));
+        let mut decoder = ObjectDecoder::default();
+        let received = decoder.push(&first_plaintext).unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(matches!(
+            BusinessObject::parse(received.into_iter().next().unwrap()).unwrap(),
+            BusinessObject::Hello(hello)
+                if hello.source == second_scope
+                    && hello.target == first_scope
+                    && hello.channel_id == channel_id
+        ));
+
+        for (connection_id, hello) in [(&first_id, &first_hello), (&second_id, &second_hello)] {
+            let ready = client_control(hello, "channel.ready", json!({"channelId":channel_id}));
+            fixture
+                .core
+                .handle_control(
+                    connection_id,
+                    &serde_json::to_vec(&ready).unwrap(),
+                    None,
+                    fixture.now,
+                    5_102,
+                )
+                .unwrap();
+        }
+
+        // Real business JSON stays encrypted in transit and is only forwarded
+        // after the client protocol and relay-ready gates have both completed.
+        let business = json!({
+            "kind":"invoke",
+            "version":1,
+            "opId":Uuid::new_v4().to_string(),
+            "requestId":Uuid::new_v4().to_string(),
+            "senderSequence":2,
+            "source":first_scope,
+            "caller":{"kind":"external-cli","label":"relay-test"},
+            "targetMountId":Uuid::new_v4().to_string(),
+            "method":"agent.show",
+            "params":{"localAgentId":"agent-test"},
+        });
+        myagents_agent_network_protocol::validate_business(&business).unwrap();
+        client
+            .write_plaintext(&encode_object(&business).unwrap())
+            .unwrap();
+        let chunk = client.drain_chunk().unwrap().unwrap();
+        let delivered = relay_tls_chunk(
+            &mut fixture.core,
+            &channel_id,
+            &first_id,
+            &second_id,
+            &second_hello,
+            &mut server,
+            &chunk,
+            &mut second_received,
+            &mut second_credit_sequence,
+            fixture.now,
+            5_103,
+        );
+        let mut decoder = ObjectDecoder::default();
+        let received = decoder.push(&delivered).unwrap();
+        assert_eq!(received.len(), 1);
+        assert!(matches!(
+            BusinessObject::parse(received.into_iter().next().unwrap()).unwrap(),
+            BusinessObject::Invoke(invocation)
+                if invocation.source == first_scope
+                    && invocation.operation.method() == "agent.show"
+        ));
+    }
+
     #[test]
     fn real_signed_devices_pair_ready_and_forward_opaque_frames_with_credit() {
         let mut fixture = Fixture::new();
         let first = fixture.device();
         let second = fixture.device();
-        let (first_id, first_hello, _first_binding, _first_scope) = fixture.connect_ready(first);
+        let (first_id, first_hello, first_binding, _first_scope) = fixture.connect_ready(first);
         let (second_id, second_hello, second_binding, _second_scope) =
             fixture.connect_ready(second);
         let channel_id = Uuid::new_v4().to_string();
@@ -1528,30 +2076,58 @@ mod tests {
                 2_000,
             )
             .unwrap();
-        assert_eq!(offer.len(), 1);
-        assert_eq!(offer[0].target_id(), Some(second_id.as_str()));
-        assert_eq!(offer[0].control_json().unwrap()["type"], "channel.offer");
+        assert_eq!(offer.len(), 2);
+        assert!(offer
+            .iter()
+            .all(|effect| effect.control_json().unwrap()["type"] == "channel.offer"));
         assert_eq!(
-            offer[0].control_json().unwrap()["responderBinding"],
-            Value::Null
+            offer
+                .iter()
+                .filter(|effect| effect.target_id() == Some(first_id.as_str()))
+                .count(),
+            1
         );
+        assert_eq!(
+            offer
+                .iter()
+                .filter(|effect| effect.target_id() == Some(second_id.as_str()))
+                .count(),
+            1
+        );
+        assert!(offer.iter().all(|effect| {
+            effect.control_json().unwrap()["initiatorBinding"].is_string()
+                && effect.control_json().unwrap()["responderBinding"].is_string()
+        }));
 
-        let accept = client_control(
+        let accept_first = client_control(
+            &first_hello,
+            "channel.accept",
+            json!({"channelId":channel_id,"signedBinding":first_binding}),
+        );
+        assert!(fixture
+            .core
+            .handle_control(
+                &first_id,
+                &serde_json::to_vec(&accept_first).unwrap(),
+                None,
+                fixture.now,
+                2_001,
+            )
+            .unwrap()
+            .is_empty());
+        let accept_second = client_control(
             &second_hello,
             "channel.accept",
-            json!({
-                "channelId":channel_id,
-                "signedBinding":second_binding
-            }),
+            json!({"channelId":channel_id,"signedBinding":second_binding}),
         );
         let accepted = fixture
             .core
             .handle_control(
                 &second_id,
-                &serde_json::to_vec(&accept).unwrap(),
+                &serde_json::to_vec(&accept_second).unwrap(),
                 None,
                 fixture.now,
-                2_001,
+                2_002,
             )
             .unwrap();
         assert_eq!(accepted.len(), 2);
@@ -1560,11 +2136,15 @@ mod tests {
             .all(|effect| effect.control_json().unwrap()["type"] == "channel.accepted"));
         let early_frame =
             myagents_agent_network_protocol::encode_tls_frame(&channel_id, &[1]).unwrap();
+        // Offered channels cannot carry bytes. Accepted channels may carry the
+        // opaque TLS handshake needed before either client can announce ready.
         assert_eq!(
             fixture
                 .core
-                .forward_frame(&first_id, &early_frame, fixture.now, 1_000),
-            Err(RelayError::Channel)
+                .forward_frame(&first_id, &early_frame, fixture.now, 1_000)
+                .unwrap()[0]
+                .target_id(),
+            Some(second_id.as_str())
         );
 
         let first_ready = client_control(
@@ -1583,12 +2163,8 @@ mod tests {
             )
             .unwrap()
             .is_empty());
-        assert_eq!(
-            fixture
-                .core
-                .forward_frame(&first_id, &early_frame, fixture.now, 1_000),
-            Err(RelayError::Channel)
-        );
+        // One peer's outer ready signal does not close the TLS path for the
+        // other peer; client-side business readiness has its own crypto gate.
         let second_ready = client_control(
             &second_hello,
             "channel.ready",
@@ -1701,6 +2277,96 @@ mod tests {
     }
 
     #[test]
+    fn canonical_channel_pair_is_stable_when_smaller_scope_opens_and_both_accept() {
+        let mut fixture = Fixture::new();
+        let first = fixture
+            .device_with_id(Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap());
+        let second = fixture
+            .device_with_id(Uuid::parse_str("ffffffff-ffff-4fff-bfff-ffffffffffff").unwrap());
+        let (first_id, first_hello, first_binding, first_scope) = fixture.connect_ready(first);
+        let (second_id, second_hello, second_binding, second_scope) = fixture.connect_ready(second);
+        let channel_id = Uuid::new_v4().to_string();
+        let open = client_control(
+            &first_hello,
+            "channel.open",
+            json!({
+                "channelId":channel_id,
+                "targetDeviceId":second_scope.device_id,
+                "targetKeyGeneration":second_scope.key_generation,
+                "targetConnectionEpoch":second_hello["connectionEpoch"],
+                "targetBinding":null,
+            }),
+        );
+        let offers = fixture
+            .core
+            .handle_control(
+                &first_id,
+                &serde_json::to_vec(&open).unwrap(),
+                None,
+                fixture.now,
+                8_000,
+            )
+            .unwrap();
+        assert_eq!(offers.len(), 2);
+        for (connection_id, hello) in [(&first_id, &first_hello), (&second_id, &second_hello)] {
+            let offer = offers
+                .iter()
+                .find(|effect| effect.target_id() == Some(connection_id.as_str()))
+                .unwrap()
+                .control_json()
+                .unwrap();
+            assert_eq!(offer["connectionEpoch"], hello["connectionEpoch"]);
+            assert_eq!(
+                offer["initiator"],
+                serde_json::to_value(&first_scope).unwrap()
+            );
+            assert_eq!(
+                offer["responder"],
+                serde_json::to_value(&second_scope).unwrap()
+            );
+        }
+
+        let accept_first = client_control(
+            &first_hello,
+            "channel.accept",
+            json!({"channelId":channel_id,"signedBinding":first_binding}),
+        );
+        assert!(fixture
+            .core
+            .handle_control(
+                &first_id,
+                &serde_json::to_vec(&accept_first).unwrap(),
+                None,
+                fixture.now,
+                8_001,
+            )
+            .unwrap()
+            .is_empty());
+        let accept_second = client_control(
+            &second_hello,
+            "channel.accept",
+            json!({"channelId":channel_id,"signedBinding":second_binding}),
+        );
+        let accepted = fixture
+            .core
+            .handle_control(
+                &second_id,
+                &serde_json::to_vec(&accept_second).unwrap(),
+                None,
+                fixture.now,
+                8_002,
+            )
+            .unwrap();
+        assert_eq!(accepted.len(), 2);
+        assert!(accepted.iter().all(|effect| {
+            let value = effect.control_json().unwrap();
+            value["type"] == "channel.accepted"
+                && value["initiatorBinding"].is_string()
+                && value["responderBinding"].is_string()
+        }));
+    }
+
+    #[test]
     fn ready_channels_expire_after_idle_and_active_pair_and_pair_quota_are_scoped() {
         let mut fixture = Fixture::new();
         let base = 50_000;
@@ -1735,7 +2401,7 @@ mod tests {
             Err(RelayError::Channel)
         );
 
-        let expired_at = base + budget("idleChannelMs") as i64 + 3;
+        let expired_at = base + budget("idleChannelMs") as i64 + 4;
         let effects = fixture.core.expire(fixture.now, expired_at);
         assert_eq!(fixture.core.channels.len(), 1);
         assert!(fixture.core.channels.contains_key(&active_channel));
@@ -2095,8 +2761,21 @@ mod tests {
             .core
             .handle_control(&first_id, &open_bytes, None, fixture.now, 10_000)
             .unwrap();
-        assert_eq!(initial_offer.len(), 1);
-        assert_eq!(initial_offer[0].target_id(), Some(second_id.as_str()));
+        assert_eq!(initial_offer.len(), 2);
+        assert_eq!(
+            initial_offer
+                .iter()
+                .filter(|effect| effect.target_id() == Some(first_id.as_str()))
+                .count(),
+            1
+        );
+        assert_eq!(
+            initial_offer
+                .iter()
+                .filter(|effect| effect.target_id() == Some(second_id.as_str()))
+                .count(),
+            1
+        );
         assert_eq!(
             fixture
                 .core
@@ -2148,8 +2827,14 @@ mod tests {
                 20_000,
             )
             .unwrap();
-        assert_eq!(offer.len(), 1);
-        assert_eq!(offer[0].target_id(), Some(second_id.as_str()));
+        assert_eq!(offer.len(), 2);
+        assert_eq!(
+            offer
+                .iter()
+                .filter(|effect| effect.target_id() == Some(second_id.as_str()))
+                .count(),
+            1
+        );
         let (replacement_id, replacement_effects) =
             fixture.core.connect(first_authorized, fixture.now).unwrap();
         assert_ne!(replacement_id, first_id);

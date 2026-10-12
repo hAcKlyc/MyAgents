@@ -36,6 +36,15 @@ the fixed `idleChannelMs` budget unless a valid `channel.ready`, forwarded TLS
 frame, or valid `credit.release` refreshes their monotonic activity timestamp.
 Invalid controls and unsupported messages do not refresh that timeout.
 
+Channel roles follow the fixed canonical full device-scope ordering, independent
+of which peer sends `channel.open`. Both peers receive an Offer and must each
+accept their current signed binding before either receives Accepted. Accepted
+channels relay bounded opaque TLS handshake frames: the actual clients must
+finish mutual TLS and exchange ChannelHello before both can send channel-ready.
+Blocking all opaque frames until Ready would deadlock that handshake. Application
+business admission remains an endpoint responsibility after its cryptographic
+and relay Ready gates; this server cannot distinguish encrypted business bytes.
+
 The crate uses the pinned shared protocol crate and its 1.1 JSON schemas and
 budgets. It is not yet wired into the HTTP/WS server, which must provide the
 live authorization snapshots, catalog proofs, bounded socket delivery, and
