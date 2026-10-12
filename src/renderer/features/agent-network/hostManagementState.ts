@@ -3,6 +3,8 @@ import {
   type HostAddress,
   type HostProviderConfig,
   type HostReceipt,
+  type HostPageReceipt,
+  type HostResourcePatch,
 } from "@/api/hostManagement";
 
 // Window-lifetime drafts only. Credentials never enter this store or disk.
@@ -20,6 +22,12 @@ interface HostLocalState {
   address: HostAddress;
   draft?: HostDraft;
   pending?: HostPending;
+  pageDraft?: { patch: HostResourcePatch; expectedRevision: number };
+  pagePending?: {
+    mutationId: string;
+    resource: "resources" | "interaction";
+    receipt: HostPageReceipt | null;
+  };
 }
 const states = new Map<string, HostLocalState>();
 function state(address: HostAddress): HostLocalState {
@@ -50,4 +58,21 @@ export function clearHostManagementScope(
 }
 export function clearAllHostManagementState() {
   states.clear();
+}
+
+export const getHostPageDraft = (address: HostAddress) =>
+  state(address).pageDraft;
+export function setHostPageDraft(
+  address: HostAddress,
+  draft?: { patch: HostResourcePatch; expectedRevision: number },
+) {
+  state(address).pageDraft = draft;
+}
+export const getHostPagePending = (address: HostAddress) =>
+  state(address).pagePending;
+export function setHostPagePending(
+  address: HostAddress,
+  pending?: HostLocalState["pagePending"],
+) {
+  state(address).pagePending = pending;
 }
