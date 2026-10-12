@@ -154,8 +154,9 @@ impl Channel {
         roots: RootCertStore,
         binding: &VerifiedPeer,
         role: PeerRole,
+        tls_initiator: bool,
     ) -> Result<Self, NetworkError> {
-        let initiator = role == PeerRole::Controller;
+        let management_initiator = role == PeerRole::Controller;
         let channel_id =
             CanonicalUuid::parse(&id).map_err(|_| NetworkError::new("CHANNEL_ID_INVALID"))?;
         let mut channel = Self::new(
@@ -167,12 +168,12 @@ impl Channel {
             identity,
             roots,
             binding,
-            initiator,
+            tls_initiator,
         )?;
         channel.mode = ChannelMode::Management(ManagementChannel {
             role,
-            initiator,
-            state: if initiator {
+            initiator: management_initiator,
+            state: if management_initiator {
                 ManagementState::AwaitAck
             } else {
                 ManagementState::AwaitHello
@@ -199,14 +200,11 @@ impl Channel {
         match &self.mode {
             ChannelMode::Agent => self.crypto_ready() && self.relay_ready,
             ChannelMode::Management(channel) => {
-                self.crypto_ready() && channel.state == ManagementState::Ready
+                self.crypto_ready() && self.relay_ready && channel.state == ManagementState::Ready
             }
         }
     }
     pub(crate) fn mark_relay_ready(&mut self) -> Result<(), NetworkError> {
-        if matches!(self.mode, ChannelMode::Management(_)) {
-            return Err(NetworkError::new("CHANNEL_MODE_MISMATCH"));
-        }
         if !self.crypto_ready() {
             return Err(NetworkError::new("CHANNEL_NOT_READY"));
         }
@@ -395,7 +393,9 @@ impl Channel {
                     if let ChannelMode::Management(management) = &mut self.mode {
                         management.state = ManagementState::Ready;
                     }
-                    events.push(ManagementEvent::Ready);
+                    if self.ready() {
+                        events.push(ManagementEvent::Ready);
+                    }
                 }
                 ManagementMessage::HelloAck {
                     role: peer_role,
@@ -410,13 +410,15 @@ impl Channel {
                     if let ChannelMode::Management(management) = &mut self.mode {
                         management.state = ManagementState::Ready;
                     }
-                    events.push(ManagementEvent::Ready);
+                    if self.ready() {
+                        events.push(ManagementEvent::Ready);
+                    }
                 }
                 ManagementMessage::Request {
                     request_id,
                     method,
                     params,
-                } if state == ManagementState::Ready && role == PeerRole::Host => {
+                } if state == ManagementState::Ready && role == PeerRole::Host && self.ready() => {
                     events.push(ManagementEvent::Request {
                         request_id,
                         method,
@@ -424,7 +426,9 @@ impl Channel {
                     });
                 }
                 ManagementMessage::Response { request_id, result }
-                    if state == ManagementState::Ready && role == PeerRole::Controller =>
+                    if state == ManagementState::Ready
+                        && role == PeerRole::Controller
+                        && self.ready() =>
                 {
                     events.push(ManagementEvent::Response { request_id, result });
                 }
@@ -490,7 +494,7 @@ impl Channel {
             self.failed = true;
             return Err(management_error(error));
         }
-        if management.state != ManagementState::Ready {
+        if management.state != ManagementState::Ready || !self.ready() {
             self.failed = true;
             return Err(NetworkError::new("CHANNEL_MANAGEMENT_NOT_READY"));
         }
@@ -681,6 +685,12 @@ pub(crate) mod tests {
     }
 
     fn management_pair() -> (Channel, Channel, PairSequences, PairSequences) {
+        management_pair_with_tls_initiator(true)
+    }
+
+    fn management_pair_with_tls_initiator(
+        controller_is_tls_initiator: bool,
+    ) -> (Channel, Channel, PairSequences, PairSequences) {
         let fixture = Fixture::new();
         let scope = |n| DeviceScope {
             service_id: "00000000-0000-0000-0000-000000000001".into(),
@@ -719,6 +729,7 @@ pub(crate) mod tests {
             fixture.roots(),
             &binding(&host, &fixture.second, "second.network.invalid"),
             PeerRole::Controller,
+            controller_is_tls_initiator,
         )
         .unwrap();
         let b = Channel::new_management(
@@ -731,6 +742,7 @@ pub(crate) mod tests {
             fixture.roots(),
             &binding(&controller, &fixture.first, "first.network.invalid"),
             PeerRole::Host,
+            !controller_is_tls_initiator,
         )
         .unwrap();
         (a, b, PairSequences::default(), PairSequences::default())
@@ -756,7 +768,7 @@ pub(crate) mod tests {
                         .unwrap(),
                 );
             }
-            if a.ready() && b.ready() {
+            if management_protocol_ready(a) && management_protocol_ready(b) {
                 return events;
             }
         }
@@ -776,6 +788,13 @@ pub(crate) mod tests {
             }
         }
         panic!("TLS handshake did not complete")
+    }
+
+    fn management_protocol_ready(channel: &Channel) -> bool {
+        matches!(
+            &channel.mode,
+            ChannelMode::Management(value) if value.state == ManagementState::Ready
+        )
     }
 
     fn inject_coalesced_agent_and_management(
@@ -815,6 +834,7 @@ pub(crate) mod tests {
                 ),
             })
             .is_err());
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
         let events = complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
         assert!(controller.ready() && host.ready());
         assert!(events
@@ -929,38 +949,35 @@ pub(crate) mod tests {
             management_hello,
         )
         .unwrap();
-        assert!(first_events
+        assert!(!first_events
             .iter()
             .any(|event| matches!(event, ManagementEvent::Ready)));
 
-        let mut saw_ready = false;
         for _ in 0..12 {
             while let Some(frame) = controller.drain_frame().unwrap() {
-                let events = host
-                    .feed_management(decode_tls_frame(&frame).unwrap().1, &mut sh)
+                host.feed_management(decode_tls_frame(&frame).unwrap().1, &mut sh)
                     .unwrap();
-                saw_ready |= events
-                    .iter()
-                    .any(|event| matches!(event, ManagementEvent::Ready));
             }
             while let Some(frame) = host.drain_frame().unwrap() {
-                let events = controller
+                controller
                     .feed_management(decode_tls_frame(&frame).unwrap().1, &mut sc)
                     .unwrap();
-                saw_ready |= events
-                    .iter()
-                    .any(|event| matches!(event, ManagementEvent::Ready));
             }
-            if controller.ready() && host.ready() {
+            if management_protocol_ready(&controller) && management_protocol_ready(&host) {
                 break;
             }
         }
-        assert!(saw_ready && controller.ready() && host.ready());
+        assert!(management_protocol_ready(&controller) && management_protocol_ready(&host));
+        assert!(!controller.ready() && !host.ready());
+        controller.mark_relay_ready().unwrap();
+        host.mark_relay_ready().unwrap();
+        assert!(controller.ready() && host.ready());
     }
 
     #[test]
     fn management_rejects_wrong_role_channel_and_replayed_sequence() {
         let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
         complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
         let request_id = CanonicalUuid::new(uuid::Uuid::new_v4());
         let request = ManagementMessage::Request {
@@ -992,6 +1009,7 @@ pub(crate) mod tests {
         );
 
         let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
         complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
         assert!(controller
             .send_management(ManagementMessage::Response {
@@ -1050,9 +1068,118 @@ pub(crate) mod tests {
         }
     }
 
+    fn establish_management_outer_ready(
+        controller: &mut Channel,
+        host: &mut Channel,
+        sc: &mut PairSequences,
+        sh: &mut PairSequences,
+    ) {
+        for _ in 0..24 {
+            while let Some(frame) = controller.drain_frame().unwrap() {
+                host.feed_management(decode_tls_frame(&frame).unwrap().1, sh)
+                    .unwrap();
+            }
+            while let Some(frame) = host.drain_frame().unwrap() {
+                controller
+                    .feed_management(decode_tls_frame(&frame).unwrap().1, sc)
+                    .unwrap();
+            }
+            if controller.crypto_ready() && host.crypto_ready() {
+                controller.mark_relay_ready().unwrap();
+                host.mark_relay_ready().unwrap();
+                return;
+            }
+        }
+        panic!("outer management channel did not become ready");
+    }
+
+    #[test]
+    fn management_business_readiness_requires_outer_and_management_gates_in_either_order() {
+        // Outer relay readiness arrives first: protocol Hello/Ack completes the
+        // conjunction and emits Ready only then.
+        let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
+        let events = complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        assert!(controller.ready() && host.ready());
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ManagementEvent::Ready)));
+
+        // Protocol readiness arrives first: no business Ready or delivery until
+        // the original outer relay gate is satisfied.
+        let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        assert!(controller.mark_relay_ready().is_err());
+        assert!(host.mark_relay_ready().is_err());
+        let protocol_events =
+            complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        assert!(!controller.ready() && !host.ready());
+        assert!(!protocol_events
+            .iter()
+            .any(|event| matches!(event, ManagementEvent::Ready)));
+        assert!(controller
+            .send_management(ManagementMessage::Request {
+                request_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+                method: myagents_host_management_protocol::ManagementMethod::HostSnapshot,
+                params: RequestParams::Snapshot(
+                    myagents_host_management_protocol::SnapshotParams {},
+                ),
+            })
+            .is_err());
+
+        let blocked = ManagementFrame {
+            namespace: myagents_host_management_protocol::NAMESPACE.into(),
+            version: myagents_host_management_protocol::VERSION,
+            sender_sequence: 2,
+            channel_id: CanonicalUuid::parse(&controller.id).unwrap(),
+            message: ManagementMessage::Request {
+                request_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+                method: myagents_host_management_protocol::ManagementMethod::HostSnapshot,
+                params: RequestParams::Snapshot(
+                    myagents_host_management_protocol::SnapshotParams {},
+                ),
+            },
+        };
+        controller
+            .write_management_message(blocked.message)
+            .unwrap();
+        let frame = controller.drain_frame().unwrap().unwrap();
+        assert!(host
+            .feed_management(decode_tls_frame(&frame).unwrap().1, &mut sh)
+            .is_err());
+
+        let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        host.write_management_message(ManagementMessage::Response {
+            request_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+            result: ResponseResult::Error {
+                code: "NOT_FOUND".into(),
+            },
+        })
+        .unwrap();
+        let frame = host.drain_frame().unwrap().unwrap();
+        assert!(controller
+            .feed_management(decode_tls_frame(&frame).unwrap().1, &mut sc)
+            .is_err());
+
+        // On a fresh channel, outer readiness after protocol readiness completes
+        // the gate. Callers can observe this via Channel::ready().
+        let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
+        complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        assert!(controller.ready() && host.ready());
+
+        // Application roles are independent of which TLS endpoint initiates.
+        let (mut controller, mut host, mut sc, mut sh) = management_pair_with_tls_initiator(false);
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
+        complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        assert!(controller.ready() && host.ready());
+    }
+
     #[test]
     fn management_eof_rejects_partial_frame_and_closes_channel() {
         let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
         complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
         controller.tls.write_plaintext(&[0, 0]).unwrap();
         let partial = controller.drain_frame().unwrap().unwrap();
