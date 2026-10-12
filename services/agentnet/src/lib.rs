@@ -237,7 +237,20 @@ mod tests {
         let account = session.account.clone();
         let bearer = session.into_token();
         assert_eq!(account.network_id, NETWORK);
-        assert_eq!(store.validate_session(&bearer).unwrap().device_id, DEVICE_A);
+        let projection = store.validate_session(&bearer).unwrap();
+        assert_eq!(projection.device_id, DEVICE_A);
+        assert_eq!(
+            uuid::Uuid::parse_str(&projection.session_handle)
+                .unwrap()
+                .to_string(),
+            projection.session_handle
+        );
+        assert_eq!(
+            store
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
         assert_eq!(
             finish(
                 &transactions,
@@ -255,6 +268,12 @@ mod tests {
 
         let reopened = AuthStore::open(dir.path(), &config).unwrap();
         assert_eq!(reopened.validate_session(&bearer).unwrap().account, account);
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap(),
+            projection
+        );
         let raw_db = std::fs::read(dir.path().join("auth.sqlite3")).unwrap();
         assert!(
             !raw_db
@@ -264,6 +283,12 @@ mod tests {
         reopened.expire_session_for_test(&bearer).unwrap();
         assert_eq!(
             reopened.validate_session(&bearer).unwrap_err(),
+            AuthError::SessionRejected
+        );
+        assert_eq!(
+            reopened
+                .validate_session_handle(&projection.session_handle)
+                .unwrap_err(),
             AuthError::SessionRejected
         );
 
@@ -281,9 +306,17 @@ mod tests {
         .unwrap();
         assert_eq!(second_session.account, account);
         let second_bearer = second_session.into_token();
+        let second_projection = reopened.validate_session(&second_bearer).unwrap();
+        assert_ne!(second_projection.session_handle, projection.session_handle);
         reopened.revoke_session(&second_bearer).unwrap();
         assert_eq!(
             reopened.validate_session(&second_bearer).unwrap_err(),
+            AuthError::SessionRejected
+        );
+        assert_eq!(
+            reopened
+                .validate_session_handle(&second_projection.session_handle)
+                .unwrap_err(),
             AuthError::SessionRejected
         );
     }
