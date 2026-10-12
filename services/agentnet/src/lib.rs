@@ -6,6 +6,7 @@
 //! durable account/session owner.
 
 mod identity_http;
+mod network_http;
 mod oidc;
 mod server;
 mod store;
@@ -13,6 +14,7 @@ mod store;
 mod transactions;
 
 pub use identity_http::IdentityHttpConfig;
+pub use network_http::NetworkHttpConfig;
 pub use oidc::{OidcVerifier, VerifiedSubject};
 pub use server::{ServiceFileConfig, serve_from_config};
 pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionProjection};

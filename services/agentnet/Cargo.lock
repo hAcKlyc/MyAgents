@@ -1537,6 +1537,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-agentnet-admission-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "myagents-agent-network-protocol",
+ "p256",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.17",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "myagents-agentnet-device-core"
 version = "0.1.0"
 dependencies = [
@@ -1577,16 +1593,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-agentnet-metadata-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "libc",
+ "myagents-agent-network-protocol",
+ "myagents-agentnet-device-core",
+ "nix",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "time",
+ "uuid",
+]
+
+[[package]]
 name = "myagents-agentnet-service"
 version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "http-body",
  "jsonwebtoken",
  "libc",
  "myagents-agent-network-crypto",
+ "myagents-agentnet-admission-core",
  "myagents-agentnet-device-core",
  "myagents-agentnet-identity-core",
+ "myagents-agentnet-metadata-core",
  "nix",
  "openidconnect",
  "rand 0.9.2",
