@@ -657,8 +657,15 @@ describe('mcp oauth', () => {
     })) as typeof fetch;
 
     const fakeSetTimeout = globalThis.setTimeout;
+    const fakeClearTimeout = globalThis.clearTimeout;
+    const setTimeoutDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'setTimeout')!;
+    const clearTimeoutDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'clearTimeout')!;
     const schedulerHandles: ReturnType<typeof setTimeout>[] = [];
-    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation((...args) => {
+    // A spyOn created under fake timers can reinstall its captured fake timer
+    // when Vitest restores registered spies again at the file boundary, after
+    // afterEach has restored the real clock. These call-recording functions do
+    // not register restoration of the global timer properties.
+    const timeoutSpy = vi.fn((...args: Parameters<typeof setTimeout>) => {
       const handle = fakeSetTimeout(...args);
       // Attribute the handle at creation to the real scheduler owner, rather
       // than counting every timer/job on Vitest's shared fake clock.
@@ -667,7 +674,9 @@ describe('mcp oauth', () => {
       }
       return handle;
     });
-    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const clearTimeoutSpy = vi.fn((...args: Parameters<typeof clearTimeout>) => fakeClearTimeout(...args));
+    Object.defineProperty(globalThis, 'setTimeout', { ...setTimeoutDescriptor, value: timeoutSpy });
+    Object.defineProperty(globalThis, 'clearTimeout', { ...clearTimeoutDescriptor, value: clearTimeoutSpy });
     let unrelatedHandle: ReturnType<typeof setTimeout> | undefined;
 
     try {
@@ -701,8 +710,8 @@ describe('mcp oauth', () => {
     } finally {
       stopTokenRefreshScheduler();
       if (unrelatedHandle !== undefined) clearTimeout(unrelatedHandle);
-      clearTimeoutSpy.mockRestore();
-      timeoutSpy.mockRestore();
+      Object.defineProperty(globalThis, 'clearTimeout', clearTimeoutDescriptor);
+      Object.defineProperty(globalThis, 'setTimeout', setTimeoutDescriptor);
       abortTimeoutSpy.mockRestore();
     }
   });
