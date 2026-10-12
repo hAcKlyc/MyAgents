@@ -55,6 +55,13 @@ jobs:
           cargo test --locked --manifest-path services/agentnet/device-core/Cargo.toml
           cargo clippy --locked --all-targets --manifest-path services/agentnet/device-core/Cargo.toml -- -D warnings
           cargo fmt --manifest-path services/agentnet/device-core/Cargo.toml --check
+      - name: Validate network admission, metadata ownership and bounded relay
+        run: |
+          for core in admission-core metadata-core relay-core; do
+            cargo test --locked --manifest-path services/agentnet/$core/Cargo.toml
+            cargo clippy --locked --all-targets --manifest-path services/agentnet/$core/Cargo.toml -- -D warnings
+            cargo fmt --manifest-path services/agentnet/$core/Cargo.toml --check
+          done
       - name: Record service artifact provenance
         env:
           SOURCE_COMMIT: ${{ github.sha }}
