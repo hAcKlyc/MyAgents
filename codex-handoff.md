@@ -2,7 +2,7 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T15:19:24+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-12T15:47:57+08:00 -->
 <!-- codex-handoff:latest-anchor=mah-remote-management-20261012 -->
 
 ## Current Snapshot
@@ -11,7 +11,8 @@
 - 当前用户请求 **MAH-REMOTE-MANAGEMENT-20261012**：从桌面AgentNet给Linux Host配置模型/只写凭据、创建真实持久Agent，无需手工SSH。模型配置现在进入实现范围；不要要求用户向聊天提供密钥。收费模型测试仍需单独费用授权，不以测试调用作为配置界面可用的必要前置。
 - 当前阶段记录与验收清单：`specs/tech_docs/headless_remote_management.md`。主集成分支 `feat/mah-remote-management` 从上述main建立；独立资源owner分支 `feat/mah-host-resources`，同一base。原入网与桌面工作区保留，不reset/覆盖。
 - 实质依赖：1.1.0无设备级Host管理契约，正式renderer adapter仍不可用。授权GitHub账号目前不可访问Agenthub、MyAgents_AgentNet、MyAgents_space，官方测试部署入口未知；已经向用户询问。现有Agent invoke、roster/membership不得充当管理隧道，不手改vendor，不新增公网管理端口，不把fixture称为远程配置。
-- 可独立推进：复用原 `registerWorkspaceAgent`/持久registry，补齐Host受限workspace创建、同锁域损坏拒写与幂等恢复；默认Agent disabled、无channels、不触发模型或自动任务。凭据动态写入owner与正式权限/grant须明确后再连接真实链路。
+- 本地资源准备层已实现：复用原 `registerWorkspaceAgent`/持久registry，Host受限workspace创建、同锁域损坏拒写与幂等恢复；默认Agent disabled、无channels、不触发模型或自动任务。独立审查、macOS聚焦/既有registry回归与Linux隔离scratch检查通过，PR #6完整CI和主干交付待完成。未连接Socket/wire/UI，未改正在运行的Host数据，凭据动态写入owner与正式权限/grant须明确后再连接真实链路。
+- 资源源码提交 `3cf77e19e1c48fce6c428b100d6e735cc98fa947`，主集成 `f4be625eb4a9ad1727436255ad2348fcb15f658f`；[PR #6](https://github.com/heavenzhang/MyAgents/pull/6) 是本地准备层交付入口，远程模型配置和Agent创建没有验收通过。
 
 ### Historical snapshot (superseded)
 
