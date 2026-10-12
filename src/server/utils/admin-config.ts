@@ -18,8 +18,10 @@ import {
   closeSync,
   unlinkSync,
   lstatSync,
+  constants,
+  fstatSync,
 } from 'fs';
-import { resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
 import { resolveHostProviderCredential } from './host-credentials';
 import { stripBom } from '../../shared/utils';
@@ -255,7 +257,49 @@ export interface ProjectSlim {
 // Config read/write
 // ---------------------------------------------------------------------------
 
-export function loadConfig(): AdminAppConfig {
+/** Opt-in for local Host mutations: never recover malformed authority from a backup. */
+export interface PersistenceReadOptions { strict?: boolean }
+export class RegistryCorruptError extends Error {
+  constructor() { super('REGISTRY_CORRUPT'); this.name = 'RegistryCorruptError'; }
+}
+function strictRecord(path: string): unknown {
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new RegistryCorruptError();
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new RegistryCorruptError();
+    return JSON.parse(stripBom(readFileSync(fd, 'utf-8')));
+  } catch { throw new RegistryCorruptError(); }
+  finally { closeSync(fd); }
+}
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+function validIdentityRows(value: unknown, project: boolean): boolean {
+  if (!Array.isArray(value)) return false;
+  const ids = new Set<string>();
+  return value.every(row => {
+    if (!record(row) || typeof row.id !== 'string' || !row.id || ids.has(row.id) ||
+        typeof row.name !== 'string') return false;
+    ids.add(row.id);
+    return project
+      ? typeof row.path === 'string' && isAbsolute(row.path) && (row.agentId === undefined || (typeof row.agentId === 'string' && !!row.agentId)) &&
+        ['hidden', 'internal'].every(key => row[key] === undefined || typeof row[key] === 'boolean') &&
+        (row.archivedAt === undefined || typeof row.archivedAt === 'string')
+      : typeof row.enabled === 'boolean' && (row.channels === undefined || Array.isArray(row.channels));
+  });
+}
+
+export function loadConfig(options: PersistenceReadOptions = {}): AdminAppConfig {
+  if (options.strict) {
+    const value = strictRecord(getConfigPath());
+    if (value === undefined) return {};
+    if (!record(value) || (value.agents !== undefined && !validIdentityRows(value.agents, false))) throw new RegistryCorruptError();
+    return value as AdminAppConfig;
+  }
   const configPath = getConfigPath();
   if (!existsSync(configPath)) {
     return normalizeThemeConfigRecord({}) as unknown as AdminAppConfig;
@@ -313,6 +357,7 @@ export async function withConfigLock(
   modifier: (
     config: AdminAppConfig,
   ) => AdminAppConfig | Promise<AdminAppConfig>,
+  options: PersistenceReadOptions = {},
 ): Promise<AdminAppConfig> {
   const configPath = getConfigPath();
   const configDir = getConfigDir();
@@ -330,7 +375,7 @@ export async function withConfigLock(
         staleMs: CONFIG_LOCK_STALE_MS,
       },
       async () => {
-        const config = loadConfig();
+        const config = loadConfig(options);
         const before = JSON.stringify(config);
         const modified = normalizeThemeConfigRecord(
           await modifier(config),
@@ -343,8 +388,8 @@ export async function withConfigLock(
         const tmpPath = configPath + '.tmp';
         const bakPath = configPath + '.bak';
 
-        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2));
-        if (existsSync(configPath)) {
+        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2), options.strict);
+        if (!options.strict && existsSync(configPath)) {
           try {
             copyFileSync(configPath, bakPath);
           } catch {
@@ -369,8 +414,9 @@ export async function atomicModifyConfig(
   modifier: (
     config: AdminAppConfig,
   ) => AdminAppConfig | Promise<AdminAppConfig>,
+  options: PersistenceReadOptions = {},
 ): Promise<AdminAppConfig> {
-  return withConfigLock(modifier);
+  return withConfigLock(modifier, options);
 }
 
 /**
@@ -400,8 +446,10 @@ export async function withAgentConfigIntentLock<T>(
   }
 }
 
-function writeFileSynced(path: string, content: string): void {
-  const fd = openSync(path, 'w', 0o600);
+function writeFileSynced(path: string, content: string, strict = false): void {
+  // A strict owner never follows a pre-existing temp symlink or truncates a hardlink.
+  if (strict) { try { unlinkSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } }
+  const fd = openSync(path, strict ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW : 'w', 0o600);
   try {
     writeFileSync(fd, content, 'utf-8');
     fsyncSync(fd);
@@ -425,7 +473,13 @@ function fsyncDir(dir: string): void {
 // Projects read/write
 // ---------------------------------------------------------------------------
 
-export function loadProjects(): ProjectSlim[] {
+export function loadProjects(options: PersistenceReadOptions = {}): ProjectSlim[] {
+  if (options.strict) {
+    const value = strictRecord(getProjectsPath());
+    if (value === undefined) return [];
+    if (!validIdentityRows(value, true)) throw new RegistryCorruptError();
+    return value as ProjectSlim[];
+  }
   const path = getProjectsPath();
   if (!existsSync(path)) return [];
   try {
@@ -463,6 +517,7 @@ export function saveProjects(projects: ProjectSlim[]): void {
  */
 export async function atomicModifyProjects(
   modifier: (projects: ProjectSlim[]) => ProjectSlim[] | Promise<ProjectSlim[]>,
+  options: PersistenceReadOptions = {},
 ): Promise<ProjectSlim[]> {
   const projectsPath = getProjectsPath();
   const configDir = getConfigDir();
@@ -479,7 +534,7 @@ export async function atomicModifyProjects(
         staleMs: CONFIG_LOCK_STALE_MS,
       },
       async () => {
-        const projects = loadProjects();
+        const projects = loadProjects(options);
         const before = JSON.stringify(projects);
         const modified = await modifier(projects);
 
@@ -488,7 +543,7 @@ export async function atomicModifyProjects(
         }
 
         const tmpPath = projectsPath + '.tmp';
-        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2));
+        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2), options.strict);
         try {
           renameSync(tmpPath, projectsPath);
           fsyncDir(configDir);
