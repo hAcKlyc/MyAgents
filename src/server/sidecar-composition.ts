@@ -81,6 +81,7 @@ const SESSION_EXACT_PATHS = new Set([
   '/api/audio',
   '/api/interaction-scenario/set',
   '/api/mcp/set',
+  '/api/mcp/retry',
   '/api/memory/update',
   '/api/model/set',
   '/api/official-tools/session-enable',

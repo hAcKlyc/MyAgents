@@ -282,7 +282,7 @@ describe('Goal orchestrator', () => {
       permissionMode: 'fullAgency',
     }));
     const runInjectedTurn = vi.fn(async (request: InjectedTurnRequest) => {
-      expect(await request.beforeDispatch?.()).toEqual({ accepted: true });
+      expect(await request.beforeDispatch?.()).toMatchObject({ accepted: true });
       await request.onTerminal?.({
         status: 'complete',
         text: 'progress',
@@ -297,7 +297,7 @@ describe('Goal orchestrator', () => {
     });
 
     const result = await createGoalOrchestrator(client).runScheduledTurn(
-      { prepareScheduledTurn, runInjectedTurn },
+      { prepareScheduledTurn, runInjectedTurn, getLiveSessionState: () => ({ sessionState: 'idle', isBusy: false }) },
       {
         goal: goal(),
         queueId: 'goal-queue-3',
@@ -318,6 +318,70 @@ describe('Goal orchestrator', () => {
     });
   });
 
+  it.each(['background', 'foreground'] as const)('defers automatic continuation during %s work without claiming or counting a turn', async (work) => {
+    const client = clientWithGoal();
+    const prepareScheduledTurn = vi.fn(async () => ({ success: true }));
+    const runInjectedTurn = vi.fn(async () => ({ success: true }));
+    const getLiveSessionState = vi.fn(() => ({
+      sessionState: work === 'foreground' ? 'running' : 'idle',
+      isBusy: work === 'foreground',
+      hasBackgroundWork: work === 'background',
+    }));
+    const orchestrator = createGoalOrchestrator(client);
+    for (let i = 0; i < 470; i++) {
+      expect(await orchestrator.runScheduledTurn({ prepareScheduledTurn, runInjectedTurn, getLiveSessionState }, {
+        goal: goal(), queueId: `wait-${i}`, expectedControlRevision: 3, turnNumber: 3,
+      })).toMatchObject({ success: false, code: 'goal_work_pending' });
+    }
+    expect(prepareScheduledTurn).not.toHaveBeenCalled();
+    expect(runInjectedTurn).not.toHaveBeenCalled();
+    expect(client).not.toHaveBeenCalled();
+    getLiveSessionState.mockReturnValue({ sessionState: 'idle', isBusy: false, hasBackgroundWork: false });
+    expect(await orchestrator.runScheduledTurn({ prepareScheduledTurn, runInjectedTurn, getLiveSessionState }, {
+      goal: goal(), queueId: 'resumed', expectedControlRevision: 3, turnNumber: 3,
+    })).toMatchObject({ success: true });
+    expect(runInjectedTurn).toHaveBeenCalledOnce();
+  });
+
+  it.each(['preparation', 'promotion', 'claim', 'commit'] as const)('rechecks background work at %s and releases only authority it acquired', async (stage) => {
+    const client = clientWithGoal();
+    let hasBackgroundWork = false;
+    const release = vi.fn();
+    const prepareScheduledTurn = vi.fn(async () => {
+      if (stage === 'preparation') hasBackgroundWork = true;
+      return { success: true, release };
+    });
+    const baseClient = client.getMockImplementation()!;
+    client.mockImplementation(async (...args) => {
+      const result = await baseClient(...args);
+      if (stage === 'claim' && args[0] === '/api/goal/turn/claim') hasBackgroundWork = true;
+      return result;
+    });
+    const runInjectedTurn = vi.fn(async (request: InjectedTurnRequest) => {
+      if (stage === 'promotion') hasBackgroundWork = true;
+      let decision = await request.beforeDispatch!();
+      if (stage === 'commit') {
+        expect(decision.accepted).toBe(true);
+        hasBackgroundWork = true;
+        decision = decision.validateAtCommit!();
+        await decision.rollbackBeforeReject;
+      }
+      expect(decision).toMatchObject({ accepted: false, code: 'goal_work_pending' });
+      await request.beforeDispatch!.cancel?.();
+      return { success: false, enqueued: false };
+    });
+    const result = await createGoalOrchestrator(client).runScheduledTurn({
+      prepareScheduledTurn, runInjectedTurn,
+      getLiveSessionState: () => ({ sessionState: 'idle', isBusy: false, hasBackgroundWork }),
+    }, { goal: goal(), queueId: 'deferred', expectedControlRevision: 3, turnNumber: 3 });
+    expect(result).toMatchObject({ success: false, code: 'goal_work_pending' });
+    expect(release).toHaveBeenCalledOnce();
+    const claimed = stage === 'claim' || stage === 'commit';
+    expect(client.mock.calls.filter(([path]) => path === '/api/goal/turn/claim')).toHaveLength(claimed ? 1 : 0);
+    expect(client.mock.calls.filter(([path]) => path === '/api/goal/turn/abort')).toHaveLength(claimed ? 1 : 0);
+    expect(client.mock.calls.some(([path]) => path === '/api/goal/turn/finalize')).toBe(false);
+  });
+
   it('keeps a claimed Goal turn authoritative when runtime termination is unconfirmed', async () => {
     const client = clientWithGoal();
     scheduledMocks.metadata = { origin: { kind: 'desktop', surface: 'unknown' }, source: '' };
@@ -328,7 +392,7 @@ describe('Goal orchestrator', () => {
       permissionMode: 'fullAgency',
     }));
     const runInjectedTurn = vi.fn(async (request: InjectedTurnRequest) => {
-      expect(await request.beforeDispatch?.()).toEqual({ accepted: true });
+      expect(await request.beforeDispatch?.()).toMatchObject({ accepted: true });
       return {
         success: false,
         enqueued: true,
@@ -339,7 +403,7 @@ describe('Goal orchestrator', () => {
     });
 
     const result = await createGoalOrchestrator(client).runScheduledTurn(
-      { prepareScheduledTurn, runInjectedTurn },
+      { prepareScheduledTurn, runInjectedTurn, getLiveSessionState: () => ({ sessionState: 'idle', isBusy: false }) },
       {
         goal: goal(),
         queueId: 'goal-orphan-turn',

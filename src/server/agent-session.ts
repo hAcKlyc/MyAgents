@@ -306,6 +306,8 @@ import {
   hasQueryBackgroundTask,
   hasQueryBackgroundTasks,
   readQueryBackgroundTasks,
+  hasQueryBackgroundWork,
+  replaceQueryBackgroundActivity,
   readQueryMcpStatuses,
   awaitSessionTermination as awaitBuiltinSessionTermination,
   clearAbortFlag,
@@ -10095,6 +10097,10 @@ function isSessionIdle(): boolean {
   return sessionState === 'idle';
 }
 
+export function hasBuiltinBackgroundWork(): boolean {
+  return hasQueryBackgroundWork();
+}
+
 export async function waitForSessionIdle(
   timeoutMs: number = 600000,
   pollIntervalMs: number = 500
@@ -12746,6 +12752,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // The exact Query lifecycle owner admits each execution and deduplicates
       // its two terminal channels. A resumed task keeps task_id, not run_id.
       if (sdkMessage.type === 'system') {
+        if (sdkMessage.subtype === 'background_tasks_changed') {
+          replaceQueryBackgroundActivity(activeQuery, sdkMessage.tasks);
+        }
         const taskMsg = sdkMessage as { subtype?: string; task_id?: string; run_id?: string;
           tool_use_id?: string; description?: string; task_type?: string;
           status?: string; summary?: string; output_file?: string;
@@ -14469,8 +14478,8 @@ async function* messageGenerator(
 
     // Finish every asynchronous setup step while the item is still
     // cancellable. The prepared-session claim below is the final awaited
-    // transition; after it wins, ownership transfers synchronously to the
-    // active turn with no cancellation seam in between.
+    // transition; after it wins, revalidate the domain guard and transfer
+    // ownership synchronously to the active turn.
     try {
       if (!item.wasQueued) {
         await prepareSessionPlansForUserTurn({ clearStale: true });
@@ -14509,6 +14518,17 @@ async function* messageGenerator(
       });
       continue;
     }
+    setCommittingTurnAdmissionQueueId(item.id);
+    if (!await claimPreparedMaterializationForTurnAdmission(item.messageText, item.sessionBirthOrigin)) {
+      setCommittingTurnAdmissionQueueId(null);
+      await rejectPromotedMessageBeforeDispatch(item, {
+        accepted: false,
+        code: 'dispatch_canceled',
+        error: 'Session materialization was rolled back before turn admission.',
+      });
+      continue;
+    }
+
     if (guardResult?.validateAtCommit) {
       let commitResult: DispatchGuardResult;
       try {
@@ -14523,17 +14543,6 @@ async function* messageGenerator(
         await rejectPromotedMessageBeforeDispatch(item, commitResult);
         continue;
       }
-    }
-
-    setCommittingTurnAdmissionQueueId(item.id);
-    if (!await claimPreparedMaterializationForTurnAdmission(item.messageText, item.sessionBirthOrigin)) {
-      setCommittingTurnAdmissionQueueId(null);
-      await rejectPromotedMessageBeforeDispatch(item, {
-        accepted: false,
-        code: 'dispatch_canceled',
-        error: 'Session materialization was rolled back before turn admission.',
-      });
-      continue;
     }
 
     // Direct-send items (wasQueued=false): enqueueUserMessage already surfaced

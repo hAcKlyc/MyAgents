@@ -174,7 +174,8 @@ export async function handleGoalExecuteSyncRoute(
     }
     return jsonResponse({
       success: false,
-      error: result.error ?? 'Goal execution failed',
+      error: result.error ?? (result.code === 'goal_work_pending' ? 'Session work is still running' : 'Goal execution failed'),
+      ...(result.code ? { code: result.code } : {}),
       ...(activeSessionId ? { sessionId: activeSessionId } : {}),
     }, result.status ?? 503);
   }

@@ -271,6 +271,8 @@ export type SessionEngineLiveState = {
   waitingForUser?: boolean;
   /** Start of the current product transcript turn; absent during pre-warm. */
   executionStartedAt?: string;
+  /** Runtime-owned non-ambient work that can outlive the root turn. */
+  hasBackgroundWork?: boolean;
 };
 
 export type SessionEngineLatestResult = {

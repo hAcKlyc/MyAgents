@@ -96,10 +96,10 @@ function runtimeMcpServerId(toolName: string): string | null {
   return separator > 0 ? remainder.slice(0, separator) : null;
 }
 
-function isMcpErrorState(
+function hasMcpStatusNotice(
   state: McpEffectiveServerState,
-): state is Extract<McpEffectiveServerState, 'failed' | 'needs_auth'> {
-  return state === 'failed' || state === 'needs_auth';
+): boolean {
+  return state !== 'ready' && state !== 'disabled';
 }
 
 function ModelSelectionScrollSync({
@@ -1904,7 +1904,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                           )}
                           {mcpEffectiveSnapshot && (() => {
                             const effective = mcpServerState(mcpEffectiveSnapshot, server.id);
-                            if (!effective || !isMcpErrorState(effective.state)) return null;
+                            if (!effective || !hasMcpStatusNotice(effective.state)) return null;
                             return (
                               <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot.observationStale} busy={isLoading} onRetry={onMcpRetry} />
                             );
@@ -1930,7 +1930,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                     {server.description}
                                   </div>
                                 )}
-                                {isEnabled && effective && isMcpErrorState(effective.state) && (
+                                {isEnabled && effective && hasMcpStatusNotice(effective.state) && (
                                   <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={onMcpRetry} />
                                 )}
                               </div>

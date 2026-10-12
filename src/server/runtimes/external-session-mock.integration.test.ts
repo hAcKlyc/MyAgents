@@ -3392,8 +3392,11 @@ describe('external SessionEngine with fake runtime', () => {
   });
 
 
-  it('retries failed Managed Codex MCP with the same configuration through idle replacement', async () => {
-    const harness = await createHarness([], {
+  it.each([
+    ['failed', false], ['stopped', false], ['failed', true], ['stopped', true],
+    ['failed', 'concurrent-prewarm'],
+  ] as const)('recovers %s Managed Codex MCP with startup failure %s without replay or config writes', async (state, failStartup) => {
+    const harness = await createHarness([{ kind: 'success', text: 'interrupted reply', completeDelayMs: 60_000 }], {
       runtimeSource: 'managed-provider',
     });
     const sessionId = 'session-mcp-retry';
@@ -3432,12 +3435,11 @@ describe('external SessionEngine with fake runtime', () => {
       () => Boolean(harness.engine.getStreamReplaySnapshot().systemInitPayload),
       'MCP retry prewarm',
     );
-    const messages = harness.engine.getStreamReplaySnapshot().replayMessages;
     const configBefore = readFileSync(
       join(harness.home, '.myagents', 'config.json'),
       'utf8',
     );
-    harness.runtime.emitForTest({
+    const publishUnavailable = () => harness.runtime.emitForTest({
       kind: 'mcp_effective_update',
       configGeneration: 1,
       configFingerprint: 'unchanged',
@@ -3448,29 +3450,76 @@ describe('external SessionEngine with fake runtime', () => {
         {
           id: 'playwright',
           desired: true,
-          state: 'failed',
-          errorCode: 'MCP_CONNECTION_TIMEOUT',
+          state,
+          ...(state === 'failed' ? { errorCode: 'MCP_CONNECTION_TIMEOUT' } : {}),
           toolCount: 0,
           attemptGeneration: 1,
           updatedAt: 1,
         },
       ],
     });
+    if (state === 'stopped') {
+      const sent = await harness.engine.sendDesktopMessage({
+        ...desktopRequest(sessionId, workspacePath, 'original message'), permissionMode: getMaxPermissionForRuntime('codex'),
+      });
+      expect(sent.success, sent.error).toBe(true);
+      await expect(sent.dispatchAcceptance).resolves.toEqual({ accepted: true });
+      expect(harness.engine.isBusy()).toBe(true);
+      const stop = harness.runtime.stopSession.bind(harness.runtime);
+      vi.spyOn(harness.runtime, 'stopSession').mockImplementationOnce(async process => {
+        publishUnavailable();
+        await stop(process);
+      });
+      expect(await harness.engine.stopTurn()).toEqual({ success: true, alreadyStopped: false });
+    } else {
+      publishUnavailable();
+    }
+    const messages = harness.engine.getStreamReplaySnapshot().replayMessages;
+    const sentBeforeRetry = [...harness.runtime.sentMessages];
+    const startsBeforeRetry = [...harness.runtime.startSessionInitialMessages];
     expect(
       harness.engine.getStreamReplaySnapshot().mcpEffectiveSnapshot?.servers[0]
         .state,
-    ).toBe('failed');
+    ).toBe(state);
     expect(await harness.engine.retryMcpServer('unknown')).toMatchObject({
       success: false,
       errorCode: 'server_not_failed',
     });
+    let competingPrewarm: Promise<{ prewarmed: boolean }> | undefined;
+    if (failStartup === 'concurrent-prewarm') {
+      const lifecycle = await import('./external-session/lifecycle');
+      const invalidate = lifecycle.invalidateExternalMcpEffectiveSnapshot;
+      harness.runtime.deferNextStart();
+      vi.spyOn(lifecycle, 'invalidateExternalMcpEffectiveSnapshot').mockImplementationOnce(() => {
+        const snapshot = invalidate();
+        competingPrewarm = harness.externalSession.prewarmExternalSession({ sessionId, workspacePath, scenario: { type: 'desktop' } });
+        return snapshot;
+      });
+    } else if (failStartup) {
+      vi.spyOn(harness.runtime, 'startSession').mockRejectedValueOnce(new Error('synthetic spawn failure'));
+    }
     const retry = harness.engine.retryMcpServer('playwright');
     expect(await harness.engine.retryMcpServer('playwright')).toMatchObject({
       success: false,
       errorCode: 'session_busy',
     });
-    expect(await retry).toEqual({ success: true });
-    expect(harness.runtime.startSessionInitialMessages).toHaveLength(2);
+    if (failStartup === 'concurrent-prewarm') {
+      expect(await retry).toEqual({ success: false, status: 502, errorCode: 'retry_failed' });
+      expect(harness.engine.getStreamReplaySnapshot().mcpEffectiveSnapshot).toBeNull();
+      harness.runtime.releaseStart();
+      expect(await competingPrewarm).toEqual({ prewarmed: true });
+    } else if (failStartup) {
+      expect(await retry).toEqual({ success: false, status: 502, errorCode: 'retry_failed' });
+      expect(harness.engine.getStreamReplaySnapshot().mcpEffectiveSnapshot).toMatchObject({
+        sessionId, tools: [], observationStale: false,
+        servers: [{ id: 'playwright', desired: true, state: 'failed', errorCode: 'MCP_STARTUP_FAILED', toolCount: 0 }],
+      });
+      expect(await harness.engine.retryMcpServer('playwright')).toEqual({ success: true });
+    } else {
+      expect(await retry).toEqual({ success: true });
+    }
+    expect(harness.runtime.startSessionInitialMessages).toEqual([...startsBeforeRetry, undefined]);
+    expect(harness.runtime.sentMessages).toEqual(sentBeforeRetry);
     expect(harness.engine.getStreamReplaySnapshot().replayMessages).toEqual(
       messages,
     );
@@ -3496,6 +3545,30 @@ describe('external SessionEngine with fake runtime', () => {
       status: 400,
       errorCode: 'unsupported_runtime',
     });
+  });
+
+  it.each([false, true])('passes failure cleanup intent from a rejected guarded Codex send (prewarmed: %s)', async prewarmed => {
+    const harness = await createHarness([], { runtimeSource: 'managed-provider' });
+    const sessionId = 'session-codex-send-failure';
+    const workspacePath = join(harness.home, 'workspace');
+    mkdirSync(workspacePath, { recursive: true });
+    await harness.sessionStore.saveSessionMetadata({
+      id: sessionId, agentDir: workspacePath, title: 'existing Goal Session', createdAt: 't', lastActiveAt: 't',
+      runtime: 'codex', runtimeSource: 'managed-provider',
+    });
+    await harness.externalSession.restoreExternalSessionState(sessionId, workspacePath, { type: 'desktop' });
+    if (prewarmed) await harness.externalSession.prewarmExternalSession({ sessionId, workspacePath, scenario: { type: 'desktop' } });
+    vi.spyOn(harness.runtime, 'sendMessage').mockRejectedValueOnce(new Error('synthetic turn/start rejected'));
+    const stop = vi.spyOn(harness.runtime, 'stopSession');
+    const result = await runInjectedTurn(harness, {
+      prompt: 'guarded continuation', sessionId, workspacePath,
+      scenario: { type: 'cron', taskId: 'goal-protocol-failure', intervalMinutes: 15, aiCanExit: false },
+      timeoutMs: 1000, pollMs: 10,
+      beforeDispatch: async () => ({ accepted: true }),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('synthetic turn/start rejected');
+    expect(stop).toHaveBeenCalledWith(expect.anything(), 'failure');
   });
 
 

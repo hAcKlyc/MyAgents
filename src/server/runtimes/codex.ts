@@ -2759,6 +2759,8 @@ class CodexProcess implements RuntimeProcess {
   // exited with code 143" session_complete emitted by proc.exited.then — the
   // caller already owns the error surface. Issue #105.
   intentionalKillDuringStartup = false;
+  /** Latched on this exact process before asynchronous teardown starts. */
+  shutdownReason: 'stop' | 'failure' | null = null;
 
   constructor(proc: Subprocess) {
     this.proc = proc;
@@ -3881,7 +3883,8 @@ export class CodexRuntime implements AgentRuntime {
       const lease = owner.lease;
       owner.lease = null;
       owner.state = 'settled';
-      void settleMcpStartupLease(lease, ready ? 'ready' : 'failed');
+      void settleMcpStartupLease(lease, codexProc.exited && codexProc.shutdownReason === 'stop'
+        ? 'released' : ready ? 'ready' : 'failed');
     };
     const publishMcpEffective = (observationStale = false): void => {
       const now = Date.now();
@@ -3896,7 +3899,9 @@ export class CodexRuntime implements AgentRuntime {
         servers: effectiveMcpServerNames.map(name => {
           const liveState = liveMcpStates.get(name) ?? 'starting';
           const catalogObserved = observedMcpToolCounts.has(name);
-          const state = admissionQueuedServerNames.has(name)
+          const state = codexProc.exited
+            ? codexProc.shutdownReason === 'stop' ? 'stopped' as const : 'failed' as const
+            : admissionQueuedServerNames.has(name)
             ? 'queued' as const
             : authBlockedMcpServerNames.has(name)
               ? 'needs_auth' as const
@@ -3921,7 +3926,7 @@ export class CodexRuntime implements AgentRuntime {
     };
     const publishMcpToolCatalog = (tools: string[]): void => {
       lastNativeMcpToolCatalog = [...new Set(tools)].sort();
-      const combinedTools = [...new Set([...tools, ...extensionToolCatalog])].sort();
+      const combinedTools = codexProc.exited ? [] : [...new Set([...tools, ...extensionToolCatalog])].sort();
       if (
         combinedTools.length === lastMcpToolCatalog.length
         && combinedTools.every((tool, index) => tool === lastMcpToolCatalog[index])
@@ -3957,6 +3962,7 @@ export class CodexRuntime implements AgentRuntime {
             emitMcpToolCatalog(servers);
           })
           .catch((err) => {
+            if (codexProc.exited || revision !== mcpCatalogRevision) return;
             console.warn('[codex] MCP tool catalog refresh failed:', summarizeCodexErrorForLog(err));
             publishMcpEffective(true);
           });
@@ -3966,6 +3972,7 @@ export class CodexRuntime implements AgentRuntime {
 
     // Wire up notification handler to emit UnifiedEvents
     codexProc.rpc.setNotificationHandler((method, params) => {
+      if (codexProc.exited) return;
       if (method === 'mcpServer/startupStatus/updated') {
         const status = params as CodexMcpStartupStatusNotification;
         const belongsToActiveThread = status.threadId === null
@@ -4093,14 +4100,15 @@ export class CodexRuntime implements AgentRuntime {
         mcpCatalogRefreshTimer = null;
       }
       mcpStartup.fail(new Error(`Codex process exited during MCP startup with code ${code}`));
-      for (const name of launchConfig.mcpServerNames) {
+      for (const name of effectiveMcpServerNames) {
         liveMcpStates.set(name, 'failed');
         mcpFailureCodes.set(name, 'MCP_RUNTIME_EXITED');
       }
       readyMcpServerNames.clear();
       observedMcpToolCounts.clear();
       authBlockedMcpServerNames.clear();
-      lastNativeMcpToolCatalog = [];
+      publishMcpToolCatalog([]);
+      mcpDispatch = { state: 'released', releaseReason: codexProc.shutdownReason === 'stop' ? 'cancelled' : 'terminal_status' };
       mcpCatalogRevision += 1;
       settleManagedAdmissionIfTerminal();
       publishMcpEffective();
@@ -4466,7 +4474,7 @@ export class CodexRuntime implements AgentRuntime {
       // so restart the process boundary before another user turn can enter.
       if (codexProc.compactControl === control || control.restartRequired) {
         if (codexProc.compactControl === control) codexProc.compactControl = null;
-        await this.stopSession(codexProc);
+        await this.stopSession(codexProc, 'failure');
       }
       throw error;
     } finally {
@@ -4685,7 +4693,7 @@ export class CodexRuntime implements AgentRuntime {
     const admission = codexProc.activeRootTurnAdmission;
     if (!admission) throw new Error('Codex root turn response has no admission owner');
     if (admission.notificationTurnId && admission.notificationTurnId !== runtimeTurnId) {
-      void this.stopSession(codexProc);
+      void this.stopSession(codexProc, 'failure');
       throw new Error('Codex root turn id mismatch between response and notification');
     }
     admission.responseTurnId = runtimeTurnId;
@@ -4713,7 +4721,7 @@ export class CodexRuntime implements AgentRuntime {
       || (admission.responseTurnId && admission.responseTurnId !== runtimeTurnId)
     ) {
       codexProc.activeRootTurnAdmission = null;
-      void this.stopSession(codexProc);
+      void this.stopSession(codexProc, 'failure');
       return false;
     }
     admission.notificationTurnId = runtimeTurnId;
@@ -4747,7 +4755,7 @@ export class CodexRuntime implements AgentRuntime {
     codexProc.pendingMainTurnCompletion = events;
     codexProc.releaseHeldMainTurnOnExit = true;
     console.warn('[codex] Restarting runtime after unresolved sub-agent correlation at root terminal');
-    void this.stopSession(codexProc);
+    void this.stopSession(codexProc, 'failure');
   }
 
   private takeReadyPendingMainTurn(codexProc: CodexProcess): UnifiedEvent[] | null {
@@ -4791,7 +4799,7 @@ export class CodexRuntime implements AgentRuntime {
           `[codex] Child turn interrupt failed thread=${JSON.stringify(summarizeSensitiveValueForLog(threadId))}; restarting runtime to preserve the held root boundary: ${summarizeCodexErrorForLog(err)}`,
         );
         codexProc.releaseHeldMainTurnOnExit = true;
-        await this.stopSession(codexProc);
+        await this.stopSession(codexProc, 'failure');
       } finally {
         codexProc.subAgentInterruptsInFlight.delete(key);
       }
@@ -4847,9 +4855,10 @@ export class CodexRuntime implements AgentRuntime {
     codexProc.rpc.respond(pending.rpcId, action.result);
   }
 
-  async stopSession(process: RuntimeProcess): Promise<void> {
+  async stopSession(process: RuntimeProcess, reason: 'stop' | 'failure' = 'stop'): Promise<void> {
     const codexProc = process as CodexProcess;
     if (codexProc.exited) return;
+    codexProc.shutdownReason ??= reason;
     this.rejectCompactControl(codexProc, new Error('Managed Codex context compaction was interrupted'));
     codexProc.abortPendingHostCalls('Managed Codex Host tool call interrupted because the Session stopped');
 
