@@ -204,17 +204,23 @@ struct StateQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeviceInfo {
-    device_name: String,
+    device_name: Option<String>,
     platform: String,
-    os_version: String,
+    os_version: Option<String>,
     app_version: String,
 }
 
 impl DeviceInfo {
     fn validate(&self) -> Result<(), IdentityHttpError> {
-        if self.device_name.len() > 256
+        if self
+            .device_name
+            .as_ref()
+            .is_some_and(|name| name.len() > 256)
             || self.platform.len() > 64
-            || self.os_version.len() > 128
+            || self
+                .os_version
+                .as_ref()
+                .is_some_and(|version| version.len() > 128)
             || self.app_version.len() > 128
         {
             return Err(IdentityHttpError::bad_request("IDENTITY_REQUEST_INVALID"));
@@ -738,7 +744,7 @@ mod tests {
         let router = service.router();
         let device_key = DevicePrivateKey::generate().unwrap();
         let csr = device_key.csr().unwrap();
-        let initial_body = json!({"deviceId":device_id,"csr":csr,"expectedKeyGeneration":null,"deviceInfo":{"deviceName":"test","platform":"linux","osVersion":"test","appVersion":"test"}});
+        let initial_body = json!({"deviceId":device_id,"csr":csr,"expectedKeyGeneration":null,"deviceInfo":{"deviceName":null,"platform":"linux","osVersion":null,"appVersion":"test"}});
         let (status, issued, headers) = request(
             router.clone(),
             Some(&token),
