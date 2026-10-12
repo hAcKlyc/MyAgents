@@ -73,11 +73,24 @@ enum Command {
     Watches(WatchesCommand),
     Metadata(MetadataCommand),
     Rpc(RpcCommand),
+    Management(ManagementCommand),
     Return { generation: u64, callback: Callback },
+}
+struct ManagementCommand {
+    generation: u64,
+    queued_at: Instant,
+    request: super::management_controller::ManagementRequest,
+    sent: Arc<AtomicBool>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    _allocation: Allocation,
+    reply: oneshot::Sender<Result<super::management_controller::ManagementResponse, NetworkError>>,
 }
 impl Command {
     fn reject(self, error: NetworkError) {
         match self {
+            Self::Management(command) => {
+                let _ = command.reply.send(Err(error));
+            }
             Self::Watches(command) => {
                 let _ = command.reply.send(Err(error));
             }
@@ -111,6 +124,7 @@ pub(crate) struct AgentNetwork {
     catalog_changed: Arc<Notify>,
     commands: mpsc::Sender<Command>,
     receiver: Mutex<Option<mpsc::Receiver<Command>>>,
+    management_slot: Arc<tokio::sync::Semaphore>,
 }
 pub(crate) type ManagedConnection = Arc<AgentNetwork>;
 pub(crate) use super::registry::ManagedAgentNetwork;
@@ -153,6 +167,7 @@ impl AgentNetwork {
             catalog_changed: Arc::new(Notify::new()),
             commands,
             receiver: Mutex::new(Some(receiver)),
+            management_slot: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
     pub(crate) fn snapshot(&self) -> NetworkSnapshot {
@@ -239,6 +254,64 @@ impl AgentNetwork {
             value.generation = value.generation.saturating_add(1);
             value.shutdown = true;
         });
+    }
+    pub(crate) async fn management(
+        &self,
+        request: super::management_controller::ManagementRequest,
+    ) -> Result<super::management_controller::ManagementResponse, NetworkError> {
+        let snapshot = self.snapshot();
+        if request.connection_id != self.connection_id
+            || request.auth_generation != snapshot.auth_generation
+            || snapshot.principal_id.as_deref() != Some(request.principal_id.as_str())
+            || snapshot.network_id.as_deref() != Some(request.network_id.as_str())
+        {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        if !self
+            .account
+            .as_ref()
+            .is_some_and(NetworkAccountSession::is_management_only)
+        {
+            return Err(NetworkError::new("OWNED_PROFILE_UNSUPPORTED"));
+        }
+        if snapshot.state != "ready" {
+            return Err(NetworkError::new("CONNECTOR_NOT_READY"));
+        }
+        request.message(myagents_host_management_protocol::CanonicalUuid::new(
+            uuid::Uuid::new_v4(),
+        ))?;
+        let allocation = self
+            .memory
+            .reserve(measure(&request.params)?.0.saturating_mul(3) + budget("controlBytes"))?;
+        let permit = self
+            .management_slot
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| NetworkError::new("HOST_MANAGEMENT_BUSY"))?;
+        let mutation = request.mutation();
+        let sent = Arc::new(AtomicBool::new(false));
+        let phase = *self.boundary.borrow();
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .try_send(Command::Management(ManagementCommand {
+                generation: phase.generation,
+                queued_at: Instant::now(),
+                request,
+                sent: sent.clone(),
+                _permit: permit,
+                _allocation: allocation,
+                reply,
+            }))
+            .map_err(|_| NetworkError::new("NETWORK_REQUEST_CAPACITY"))?;
+        // Dropping the owning connection or a deadline never proves a write failed.
+        tokio::time::timeout(Duration::from_secs(34), response)
+            .await
+            .map_err(|_| {
+                super::management_controller::lost(mutation, sent.load(Ordering::Acquire))
+            })?
+            .map_err(|_| {
+                super::management_controller::lost(mutation, sent.load(Ordering::Acquire))
+            })?
     }
     pub(crate) async fn request(&self, request: MetadataRequest) -> Result<Value, NetworkError> {
         // Validate before queueing, and keep the queued payload metadata-only.
@@ -677,7 +750,14 @@ async fn connect(
     *previous_out = Some((identity.account.binding_id().to_owned(), resume));
     let connection_lifetime = ConnectionLifetime(Arc::new(AtomicBool::new(true)));
     let mut work: FuturesUnordered<BoxFuture<'static, Work>> = FuturesUnordered::new();
-    let mut pairs = Pairs::new(owner.memory.clone());
+    let mut pairs = if management_only {
+        Pairs::new_management(
+            owner.memory.clone(),
+            myagents_host_management_protocol::PeerRole::Controller,
+        )
+    } else {
+        Pairs::new(owner.memory.clone())
+    };
     let mut calls = Calls::default();
     let mut source_returns = SourceReturns::default();
     let mut target_returns = TargetReturns::new(manager.clone(), owner.connection_id.clone());
@@ -873,6 +953,11 @@ async fn connect(
                     Some(Ok(Message::Binary(bytes))) => {
                         let (channel_id, payload) = myagents_agent_network_protocol::decode_tls_frame(&bytes)
                             .map_err(|_| NetworkError::new("TLS_FRAME_INVALID"))?;
+                        if management_only {
+                            pairs.remove(&channel_id);
+                            send(&mut socket,ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
+                            continue;
+                        }
                         match pairs.feed(&channel_id, payload) {
                             Ok((objects,_decoded_allocation)) => {
                                 let (sequence,received_bytes)=pairs.release_credit(&channel_id,bytes.len())?;
@@ -1047,6 +1132,30 @@ async fn connect(
                 }
             }
             Some(command) = commands.recv() => {
+                if let Command::Management(command) = command {
+                    if command.reply.is_closed() || !management_only || command.generation != generation || !hydrated
+                        || command.request.auth_generation != owner.snapshot().auth_generation
+                        || command.request.connection_id != owner.connection_id
+                        || command.request.principal_id != local.principal_id
+                        || command.request.network_id != local.network_id {
+                        let _=command.reply.send(Err(NetworkError::new("CONNECTOR_NOT_READY")));
+                        continue;
+                    }
+                    let remaining = Duration::from_secs(30).checked_sub(command.queued_at.elapsed());
+                    let result = match remaining {
+                        Some(remaining) => tokio::time::timeout(remaining, super::management_controller::execute(&mut socket,&transport,&identity,&local,&scope,&mut pairs,&command.request,command.sent.clone()))
+                            .await.unwrap_or_else(|_|Err(super::management_controller::lost(command.request.mutation(),command.sent.load(Ordering::Acquire)))),
+                        None => Err(super::management_controller::lost(command.request.mutation(),false)),
+                    };
+                    let result=if owner.generation()!=generation || identity.account.ensure_current().is_err() {
+                        Err(super::management_controller::lost(command.request.mutation(),command.sent.load(Ordering::Acquire)))
+                    } else {result};
+                    let failed=result.is_err();
+                    let _=command.reply.send(result);
+                    if failed { return Err(NetworkError::new("HOST_MANAGEMENT_CONNECTION_RESET")); }
+                    last_server=Instant::now();last_ping=Instant::now();
+                    continue;
+                }
                 if management_only {
                     match &command {
                         Command::Metadata(metadata) => {

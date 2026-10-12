@@ -15,6 +15,7 @@ mod incoming;
 mod jwt;
 mod local_owner;
 mod memory;
+mod management_controller;
 mod owned_account_desktop;
 mod owned_admission;
 mod owned_login;

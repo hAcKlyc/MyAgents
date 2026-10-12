@@ -13,6 +13,20 @@
 - [x] `Pairs` 显式管理模式和管理消息收发已实现，管理角色与 canonical TLS 发起方分离，复用原设备 scope、证书、epoch、序列、信用和内存约束。库内回归与独立审查完成；本轮管理通道工作分支的 CI 与主干交付仍待完成。
 - [ ] 实际 Desktop controller / Headless Host actor 与 Node 专用窄管理 IPC 正在工作分支集成；设备寻址 endpoint 已实现并完成三项认证/Ready/撤销回归。寻址仅是当前 snapshot，不授予管理写权限。随后将模型配置、只写凭据和资源 owner 接到真实桌面表单。当前生产 adapter 仍明确 unavailable，不能把以上基础收发能力称为完整远程管理。
 
+### 设备管理通道接线（工作分支，未发布）
+
+任务 ID 沿用 `MAH-REMOTE-MANAGEMENT-20261012`；目标与真实桌面验收标准不变。
+
+- [x] 独立服务的认证设备寻址、双端 Ready/当前 session/撤销门禁，零 Agent 设备无需虚构目录对象。
+- [x] 桌面 Tauri `cmd_agent_network_management`、owned Controller、实际目标签名地址与 Offer/Accepted/TLS 校验；固定四方法：`host.snapshot`、`config.set`、`resources.create`、`receipt.get`。
+- [x] Host 显式启用的 reverse Unix IPC，真实 peer UID；原本地 control socket 保持 0600。管理 grant 加密绑定本地设备、服务、环境、网络、主体与登录 binding，服务/网络变化也命中同一 grant 而拒绝隐式继承。
+- [x] Node 全局有界串行管理队列、断线重连、旧响应隔离、未知写入和原回执查询；真实资源 owner 新增受限且只读的 root/revision/Agent inspection，尚未扩展到管理 wire。
+- [x] 主集成定向检查：109 项 headless 测试，Node IPC/资源检查 20 项通过、9 项 Linux-only 尚待 CI；TypeScript 与定向 lint 通过。独立审查发现 sent 边界把本地拒绝误报未知写，已修并用真实 Pairs 预算故障回归验证。
+- [ ] 本轮完整 CI、Linux flock/资源测试、干净源码制品和主干交付。
+- [ ] 真 Linux 两个 owned 设备经服务/真实签名 TLS/Node IPC 保存配置和创建禁用 Agent，读取回执及进程重启恢复；尚无该联合验收。
+- [ ] 动态加密模型凭据 owner、只写 wire、资源读取 wire 和真实桌面表单；当前 Renderer adapter 仍 unavailable，不生成虚假环境/权限/配置成功投影。
+- [ ] 一键安装包统一 Node Host 与网络 owner 的服务配置，以及真实桌面远程模型配置/Agent 创建验收。本轮 CI 会输出可信源码来源的 Linux Node Host 包，但不代表安装器已经完成统一。
+
 接线约束：owned TLS profile 只发布空 catalog，不上传本地 Agent 目录或发送 Agent RPC/permit；管理应用使用独立 codec 和固定 Controller/Host 角色。Relay 的 ChannelReady 分支必须立即 drain 排队的管理 Ready 事件，不能等待下一帧。身份/网络/账户代次变化后关闭通道及待办；发送或写后记账失败关闭受影响 pair、报告原始 failure，不自动重复写入。模型凭据继续经产品能力配置，本阶段不获取密钥或调用收费模型。
 
 测试部署仅使用已授权服务器的回环监听、隔离配置和唯一临时 unit/container。保留原两个 Host 服务和已有公网监听；部署前记录制品源码/摘要和原状态备份。原生桌面界面、远程配置业务、真实模型执行和正式生产发布分别保持独立验收项。

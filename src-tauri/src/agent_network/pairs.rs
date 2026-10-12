@@ -713,7 +713,7 @@ impl Pairs {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::crypto::{certificate_fingerprint, tests::Fixture, TlsIdentity};
     use super::super::identity::PeerIdentity;
     use super::*;
@@ -785,7 +785,7 @@ mod tests {
         )
     }
 
-    fn installed_management_pair() -> (Pairs, Pairs, DeviceScope, DeviceScope, String) {
+    pub(crate) fn installed_management_pair() -> (Pairs, Pairs, DeviceScope, DeviceScope, String) {
         let (first, second) = management_scopes();
         let channel_id = "00000000-0000-0000-0000-000000000006".to_owned();
         let fixture = Fixture::new();
@@ -814,7 +814,11 @@ mod tests {
         (a, b, first, second, channel_id)
     }
 
-    fn exchange_management(a: &mut Pairs, b: &mut Pairs, id: &str) -> (bool, bool) {
+    pub(crate) fn management_budget(pairs: &Pairs) -> super::super::memory::MemoryBudget {
+        pairs.memory.clone()
+    }
+
+    pub(crate) fn exchange_management(a: &mut Pairs, b: &mut Pairs, id: &str) -> (bool, bool) {
         let mut ready_a = false;
         let mut ready_b = false;
         for _ in 0..32 {

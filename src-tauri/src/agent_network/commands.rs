@@ -359,3 +359,15 @@ pub(crate) async fn cmd_agent_network_remove(
 ) -> Result<super::registry::RegistryView, NetworkError> {
     state.inner().remove(app, connection_id).await
 }
+
+/// Owned management only; the registry and actor validate every locator fence.
+#[tauri::command]
+pub(crate) async fn cmd_agent_network_management(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    request: super::management_controller::ManagementRequest,
+) -> Result<super::management_controller::ManagementResponse, NetworkError> {
+    state
+        .connection(&request.connection_id)?
+        .management(request)
+        .await
+}
