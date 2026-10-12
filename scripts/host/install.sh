@@ -116,6 +116,116 @@ PY
 RELEASE_ID=$(python3 -c 'import json,glob,os,sys; p=glob.glob(sys.argv[1]+"/"+sys.argv[2]+"/releases/*/manifest.json"); print(json.load(open(p[0]))["releaseId"])' "$STAGE" "$PACKAGE_ROOT")
 RELEASE_SOURCE="$STAGE/$PACKAGE_ROOT/releases/$RELEASE_ID"
 [[ -x "$RELEASE_SOURCE/resources/nodejs/bin/node" && -x "$RELEASE_SOURCE/resources/claude-agent-sdk/claude" ]] || { echo 'Required bundled runtimes are not executable' >&2; exit 1; }
+# Compare an existing installed release to the already-verified archive tree.
+# The installed tree is trusted only when every path is a root-owned, non-writable
+# directory or regular file with exactly the archive's bytes and manifest modes.
+verify_release_bytes() {
+  python3 - "$1" "$2" "$3" "$4" <<'PY'
+# BEGIN_RELEASE_VERIFIER
+import hashlib, json, os, pathlib, stat, sys
+source, installed = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+expected_uid, expected_gid = int(sys.argv[3]), int(sys.argv[4])
+
+def fail():
+    raise SystemExit(1)
+
+def trusted_dir(path, mode=0o755):
+    try:
+        st = path.lstat()
+    except OSError:
+        fail()
+    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode) or st.st_uid != expected_uid \
+            or st.st_gid != expected_gid or stat.S_IMODE(st.st_mode) != mode:
+        fail()
+
+def regular_bytes(path, mode, expected_data=None):
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode) or before.st_nlink != 1 \
+                or before.st_uid != expected_uid or before.st_gid != expected_gid \
+                or stat.S_IMODE(before.st_mode) != mode:
+            fail()
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            opened = os.fstat(fd)
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino) \
+                    or not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 \
+                    or opened.st_uid != expected_uid or opened.st_gid != expected_gid \
+                    or stat.S_IMODE(opened.st_mode) != mode:
+                fail()
+            chunks = []
+            while True:
+                chunk = os.read(fd, 1024 * 1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            data = b''.join(chunks)
+            after = os.fstat(fd)
+            if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != \
+                    (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
+                fail()
+        finally:
+            os.close(fd)
+    except OSError:
+        fail()
+    if expected_data is not None and data != expected_data:
+        fail()
+    return data
+
+try:
+    source_manifest = (source / 'manifest.json').read_bytes()
+    installed_manifest = regular_bytes(installed / 'manifest.json', 0o644)
+    if installed_manifest != source_manifest:
+        fail()
+    manifest = json.loads(source_manifest)
+    if manifest.get('schemaVersion') != 1 or manifest.get('target') != 'linux-x64-glibc' \
+            or not isinstance(manifest.get('releaseId'), str) or not isinstance(manifest.get('files'), list):
+        fail()
+    expected_files = {}
+    expected_dirs = {'.'}
+    for item in manifest['files']:
+        if not isinstance(item, dict) or set(item) != {'path', 'size', 'mode', 'sha256'}:
+            fail()
+        rel = pathlib.PurePosixPath(item['path'])
+        if rel.is_absolute() or not rel.parts or '..' in rel.parts or '.' in rel.parts \
+                or str(rel) in expected_files or not isinstance(item['size'], int) or isinstance(item['size'], bool) or item['size'] < 0 \
+                or not isinstance(item['mode'], int) or isinstance(item['mode'], bool) or not 0 <= item['mode'] <= 0o777 \
+                or item['mode'] & 0o022 \
+                or not isinstance(item['sha256'], str) or len(item['sha256']) != 64 \
+                or any(c not in '0123456789abcdef' for c in item['sha256']):
+            fail()
+        expected_files[str(rel)] = item
+        for parent in rel.parents:
+            if str(parent) != '.':
+                expected_dirs.add(str(parent))
+    if not expected_files:
+        fail()
+
+    trusted_dir(installed.parent.parent)
+    trusted_dir(installed.parent)
+    trusted_dir(installed)
+    actual_files, actual_dirs = set(), {'.'}
+    for path in installed.rglob('*'):
+        rel = path.relative_to(installed).as_posix()
+        st = path.lstat()
+        if stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode):
+            actual_dirs.add(rel)
+            trusted_dir(path)
+        elif stat.S_ISREG(st.st_mode) and not stat.S_ISLNK(st.st_mode):
+            actual_files.add(rel)
+        else:
+            fail()
+    if actual_dirs != expected_dirs or actual_files != set(expected_files) | {'manifest.json'}:
+        fail()
+    for rel, item in expected_files.items():
+        data = regular_bytes(installed.joinpath(*pathlib.PurePosixPath(rel).parts), item['mode'])
+        if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256']:
+            fail()
+except (OSError, ValueError, TypeError, KeyError):
+    fail()
+# END_RELEASE_VERIFIER
+PY
+}
 if ((DRY_RUN)); then printf 'Verified unsigned test package %s (%s)\n' "$RELEASE_ID" "$ACTUAL_SHA"; exit 0; fi
 ((EUID == 0)) || { echo 'Install requires root; --dry-run does not' >&2; exit 1; }
 command -v systemctl >/dev/null || { echo 'systemd is required' >&2; exit 1; }
@@ -190,27 +300,9 @@ if [[ -L "$PREFIX/current" && "$(readlink "$PREFIX/current")" == "releases/$RELE
     && "$(stat -c '%h' "$PROVIDER_CREDENTIAL")" == 1 ]] || {
     echo 'Already-installed release has a missing or unsafe provider master credential' >&2; exit 1;
   }
-  python3 - "$RELEASE_SOURCE" "$PREFIX/releases/$RELEASE_ID" <<'PY'
-import hashlib, json, pathlib, stat, sys
-source, installed = map(pathlib.Path, sys.argv[1:])
-source_manifest = (source / 'manifest.json').read_bytes()
-installed_manifest = (installed / 'manifest.json').read_bytes()
-if source_manifest != installed_manifest:
-    raise SystemExit('Installed release manifest differs from this archive')
-m = json.loads(source_manifest)
-expected = set()
-for item in m['files']:
-    rel = pathlib.PurePosixPath(item['path'])
-    if rel.is_absolute() or '..' in rel.parts: raise SystemExit('Unsafe installed manifest path')
-    expected.add(str(rel))
-    path = installed.joinpath(*rel.parts)
-    if path.is_symlink() or not path.is_file(): raise SystemExit(f'Installed release file is missing or unsafe: {rel}')
-    data = path.read_bytes()
-    if len(data) != item['size'] or hashlib.sha256(data).hexdigest() != item['sha256'] or stat.S_IMODE(path.stat().st_mode) != item['mode']:
-        raise SystemExit(f'Installed release file differs from verified archive: {rel}')
-actual = {p.relative_to(installed).as_posix() for p in installed.rglob('*') if p.is_file() and p.name != 'manifest.json'}
-if actual != expected: raise SystemExit('Installed release contains unlisted or missing files')
-PY
+  verify_release_bytes "$RELEASE_SOURCE" "$PREFIX/releases/$RELEASE_ID" 0 0 || {
+    echo 'Already-installed release differs from the verified archive or has unsafe ownership/modes' >&2; exit 1;
+  }
   printf 'Already installed and verified release %s; no changes made.\n' "$RELEASE_ID"
   exit 0
 fi
@@ -296,11 +388,16 @@ else
   }
 fi
 DEST="$PREFIX/releases/$RELEASE_ID"
-[[ ! -e "$DEST" ]] || { echo "Release id already exists; refusing to replace: $RELEASE_ID" >&2; exit 1; }
-CREATED_RELEASE=$DEST
-cp -a "$RELEASE_SOURCE" "$DEST"
-chown -R root:root "$DEST"
-chmod -R go-w "$DEST"
+if [[ -e "$DEST" || -L "$DEST" ]]; then
+  verify_release_bytes "$RELEASE_SOURCE" "$DEST" 0 0 || {
+    echo "Release id already exists with different or unsafe files; refusing to replace: $RELEASE_ID" >&2; exit 1;
+  }
+else
+  CREATED_RELEASE=$DEST
+  cp -a "$RELEASE_SOURCE" "$DEST"
+  chown -R root:root "$DEST"
+  chmod -R go-w "$DEST"
+fi
 if [[ -f "$UNIT" ]]; then cp -p "$UNIT" "$STAGE/previous-unit"; fi
 if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then PREVIOUS_ENABLED=1; fi
 if [[ -L "$PREFIX/current" ]]; then

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,8 @@ const digest = path => createHash('sha256').update(require('node:fs').readFileSy
 const source = readFileSync(installer, 'utf8');
 const lockHelper = source.split('# BEGIN_SHARED_TRANSACTION_LOCK\n')[1]?.split('# END_SHARED_TRANSACTION_LOCK')[0];
 assert.ok(lockHelper, 'shared transaction lock helper markers exist');
+const releaseVerifier = source.split('# BEGIN_RELEASE_VERIFIER\n')[1]?.split('# END_RELEASE_VERIFIER')[0];
+assert.ok(releaseVerifier, 'release verifier markers exist');
 function packageFixture(t, mode = 'valid', profile = 'myagents-test') {
   const root = mkdtempSync(join(tmpdir(), 'myagents-host-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -33,7 +35,7 @@ function packageFixture(t, mode = 'valid', profile = 'myagents-test') {
   const archive = join(root, 'package.tar.gz');
   const tar = spawnSync('tar', ['-czf', archive, '-C', join(root, 'tree'), packageRoot]);
   assert.equal(tar.status, 0, tar.stderr?.toString());
-  return { root, archive };
+  return { root, archive, release };
 }
 function run(archive, sha = digest(archive), profile = 'myagents-test') {
   return spawnSync('/bin/bash', [installer, '--dry-run', archive, '--sha256', sha, '--profile', profile], { encoding: 'utf8' });
@@ -133,4 +135,49 @@ test('transaction lock rejects an inherited descriptor for a different inode', t
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unsafe inherited installation transaction lock descriptor|Unsafe installation transaction lock descriptor/);
+});
+
+function installedReleaseFixture(t) {
+  const { root, release } = packageFixture(t);
+  const prefix = join(root, 'installed');
+  const releases = join(prefix, 'releases');
+  const installed = join(releases, 'test-1');
+  mkdirSync(releases, { recursive: true, mode: 0o755 });
+  chmodSync(prefix, 0o755); chmodSync(releases, 0o755);
+  cpSync(release, installed, { recursive: true, preserveTimestamps: true });
+  const uid = spawnSync('id', ['-u'], { encoding: 'utf8' }).stdout.trim();
+  const gid = spawnSync('id', ['-g'], { encoding: 'utf8' }).stdout.trim();
+  const verify = (expectedUid = uid, expectedGid = gid) => spawnSync('python3', ['-c', releaseVerifier, release, installed, String(expectedUid), String(expectedGid)], { encoding: 'utf8' });
+  return { root, release, prefix, releases, installed, verify, uid, gid };
+}
+
+test('an existing release is reusable only when manifest and every installed file match safely', t => {
+  const fixture = installedReleaseFixture(t);
+  const matching = fixture.verify();
+  assert.equal(matching.status, 0, matching.stdout + matching.stderr);
+
+  writeFileSync(join(fixture.installed, 'resources/nodejs/bin/node'), '#!/bin/sh\nexit 9\n');
+  const differentBytes = fixture.verify();
+  assert.notEqual(differentBytes.status, 0);
+
+  const extraFile = installedReleaseFixture(t);
+  writeFileSync(join(extraFile.installed, 'unexpected'), 'unlisted');
+  assert.notEqual(extraFile.verify().status, 0);
+});
+
+test('release verifier rejects changed modes, symlink entries, and unexpected owner', t => {
+  const changedMode = installedReleaseFixture(t);
+  chmodSync(join(changedMode.installed, 'resources/claude-agent-sdk/claude'), 0o700);
+  assert.notEqual(changedMode.verify().status, 0);
+
+  const symlink = installedReleaseFixture(t);
+  const binary = join(symlink.installed, 'resources/claude-agent-sdk/claude');
+  rmSync(binary);
+  writeFileSync(join(symlink.root, 'replacement'), '#!/bin/sh\n');
+  const link = spawnSync('ln', ['-s', join(symlink.root, 'replacement'), binary]);
+  assert.equal(link.status, 0, link.stderr?.toString());
+  assert.notEqual(symlink.verify().status, 0);
+
+  const wrongOwner = installedReleaseFixture(t);
+  assert.notEqual(wrongOwner.verify(Number(wrongOwner.uid) + 1, wrongOwner.gid).status, 0);
 });

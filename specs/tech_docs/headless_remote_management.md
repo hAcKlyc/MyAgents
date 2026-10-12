@@ -6,11 +6,12 @@
 
 ### 本轮真实验收与修复（2026-10-13）
 
-- [x] 工作分支 `91aca8b1` 的完整 Test 六项与 owned 服务 CI 成功（38312452871 / 38312452856）；`76ce62dc` 前序 CI 同样通过；制品源为 PR merge `e50a74648f0d7cf8709f95ccdae4df8f72f998a9`，tree 与 HEAD 相同。完整 Linux Host、网络和服务制品已下载并核验摘要；不改写 source-commit。
+- [x] 工作分支 `91aca8b1` 的完整 Test 六项与 owned 服务 CI 成功（38312452871 / 38312452856）；91 制品源为 PR merge `191b3e7bc2932c09698905abeaa6c1401a0e5b89`，tree 与 `91aca8b1` 相同。`76ce62dc` 前序 CI 同样通过，旧制品源 `e50a74648f0d7cf8709f95ccdae4df8f72f998a9` 对应其旧 tree。完整 Linux Host、网络和服务制品均按各自来源核验，不改写 source-commit。
 - [x] 101.42.11.29 隔离联合环境中，实际两个网络客户端完成 PKCE、加密持久化与明确入网；生产 Controller 经签名 TLS/Pairs 和真实 Node Unix IPC 获得 snapshot，保存模型配置、合成测试凭据与禁用 Agent；真实进程重启后 snapshot、配置回执与凭据回执均读回。模型调用为 0，尚不证明模型执行。
 - [x] 资源原回执故障已修复并在真机复验：owned 身份恢复仅走正常 consumed PoP，静态 enrollment 撤销预探针只适用于 legacy Selfhost。三轮旧失败及 source 8 个未消费挑战证据保留，服务端上限未改。主集成 headless 118 项、定向 owner/identity、clippy 和独立源码审阅通过。新制品源 `191b3e7bc2932c09698905abeaa6c1401a0e5b89` 与 `91aca8b1` tree 相同；真 Linux run `20261012215305` 完成三类原回执、真实重启、额外 12 次生产身份恢复、幂等/CAS/原目标 scope fence，全程 0 模型调用。此项证明原生 Controller 联调，不证明桌面表单或 SDK 模型执行。
 - [x] 首次 snapshot 的 Ready 循环依赖已修复并在真 Linux 联调通过：同设备、当前 live epoch、joined、Syncing/Ready 绑定的只读保全 GET 检查持久 catalog 和全部 lifecycle；只有明确空才上传新空目录。原 SelfPolicy/公共目录权限保持。主集成 117 项 headless、9 项真实 DPoP HTTP 检查与独立审阅通过。
 - [ ] 统一安装新增封闭 `myagents-test` / `moxbot-test` profile：MoX 使用独立固定账户、units、HOME/state、身份 pin、credentials、CA 和 IPC；build/manifest/bootstrap/installer 配对检查，旧无 profile 包仅兼容原 MyAgents 根。共享事务锁不变，无任意 prefix 覆盖。Node24 25、network 24、unified 9 项测试及独立分面终审通过；主集成 Node24 25 项无 skip。尚未完成干净 MoX 制品的真实 systemd 安装/回滚及原两服务状态保全验收。MoX Host 内部 `.myagents` 位于独立 service HOME，不共享桌面或原 Host 数据。
+- [x] `9c6a815f` 六项 Test CI（38313991914）与 owned 服务 CI（38313991910）全部通过；原生 network/完整 MoX Host 制品来源 `b98294c7244c072fba9d45d83330c8f7be5680bd`，tree 与 `9c6a815f` 相同。真实服务器只读预检发现 systemctl 属性实际顺序为 LoadState/ActiveState/UnitFileState，旧位置解析会拒绝安装。已改严格属性名解析，补足新 unit 回滚前 disable，允许完整核验后复用同包 orphan release；独立源码审阅通过。真机失败回滚、同包重试与幂等验收仍待执行。
 - [x] 已交付 `MoX-bot-Trial-macos-arm64-76ce62dc.zip`，独立应用身份 `com.moxbot.app`、数据目录 `~/.moxbot`，含 Space 构建配置，19 类资源和包摘要核验通过；原 MyAgents 及旧试用包保留。Apple Silicon 内部包，ad-hoc 签名、未公证。
 - [ ] Mac 当前锁屏，已请求用户解锁；本版真实并行启动、桌面独立登录、配置表单和 Linux 持久化仍待验收。PR #14 保持 draft，main 尚未包含本轮管理变更。
 

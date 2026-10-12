@@ -87,22 +87,33 @@ class UnifiedInstallTests(unittest.TestCase):
     def test_systemd_state_parser_requires_known_enabled_and_active_values(self) -> None:
         with mock.patch.object(
             installer.subprocess, "run",
-            return_value=types.SimpleNamespace(returncode=0, stdout="loaded\nenabled\nactive\n"),
+            return_value=types.SimpleNamespace(returncode=0, stdout="LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"),
         ):
             self.assertEqual(installer._host_service_state(),
                              {"present": True, "enabled": True, "active": True})
         with mock.patch.object(
             installer.subprocess, "run",
-            return_value=types.SimpleNamespace(returncode=0, stdout="not-found\n\ninactive\n"),
+            return_value=types.SimpleNamespace(returncode=0, stdout="UnitFileState=\nLoadState=not-found\nActiveState=inactive\n"),
         ):
             self.assertEqual(installer._host_service_state(),
                              {"present": False, "enabled": False, "active": False})
         with mock.patch.object(
             installer.subprocess, "run",
-            return_value=types.SimpleNamespace(returncode=0, stdout="loaded\nmasked\nfailed\n"),
+            return_value=types.SimpleNamespace(returncode=0, stdout="LoadState=loaded\nUnitFileState=masked\nActiveState=failed\n"),
         ):
             with self.assertRaises(installer.UnifiedInstallError):
                 installer._host_service_state()
+
+    def test_systemd_state_parser_rejects_missing_duplicate_or_unknown_properties(self) -> None:
+        for output in (
+                "LoadState=loaded\nActiveState=active\n",
+                "LoadState=loaded\nActiveState=active\nUnitFileState=enabled\nLoadState=loaded\n",
+                "LoadState=loaded\nActiveState=active\nUnitFileState=enabled\nMainPID=42\n",
+                "loaded\nenabled\nactive\n"):
+            with self.subTest(output=output), mock.patch.object(
+                    installer.subprocess, "run", return_value=types.SimpleNamespace(returncode=0, stdout=output)):
+                with self.assertRaises(installer.UnifiedInstallError):
+                    installer._host_service_state()
 
     def test_valid_install_calls_only_pinned_local_installers_in_order(self) -> None:
         with tempfile.TemporaryDirectory(dir=SCRIPT.parent) as tmp:
@@ -264,6 +275,41 @@ class UnifiedInstallTests(unittest.TestCase):
                             "servicePresent": True, "enabled": False, "active": False}
                 self.assertTrue(installer._restore_host(snapshot))
             self.assertTrue(any(call.args[0][:2] == ["systemctl", "daemon-reload"] for call in run.call_args_list))
+
+    def test_absent_snapshot_removes_enablement_links_before_removing_new_unit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            current = root / "current"
+            current.symlink_to("releases/new")
+            unit = root / "host.service"
+            unit.write_bytes(b"new unit\n")
+            wants = root / "wants.service"
+            wants.symlink_to(unit)
+            calls = []
+
+            def run(args):
+                calls.append(args[1])
+                if args[1] == "disable":
+                    self.assertTrue(unit.exists())
+                    wants.unlink()
+                if args[1] == "daemon-reload":
+                    self.assertFalse(unit.exists())
+                    self.assertFalse(os.path.lexists(wants))
+                return types.SimpleNamespace(returncode=0)
+
+            with (
+                    mock.patch.object(installer, "HOST_CURRENT", current),
+                    mock.patch.object(installer, "HOST_UNIT", unit),
+                    mock.patch.object(installer, "HOST_SERVICE", "host.service"),
+                    mock.patch.object(installer, "_safe_current", side_effect=["releases/new", None]),
+                    mock.patch.object(installer, "_run", side_effect=run),
+                    mock.patch.object(installer, "_host_service_state", return_value={"present": False, "enabled": False, "active": False}),
+            ):
+                snapshot = {"current": None, "unit": None, "unitMode": None,
+                            "servicePresent": False, "enabled": False, "active": False}
+                self.assertTrue(installer._restore_host(snapshot))
+            self.assertEqual(calls, ["stop", "disable", "daemon-reload"])
+            self.assertFalse(os.path.lexists(current))
 
     def test_network_installer_failure_triggers_host_snapshot_rollback(self) -> None:
         with tempfile.TemporaryDirectory(dir=SCRIPT.parent) as tmp:

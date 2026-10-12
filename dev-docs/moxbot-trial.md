@@ -12,10 +12,10 @@ MoX bot 关闭 MyAgents 官方应用更新通道，后续试用版本手动替�
 
 - [x] 应用标识、实际状态路径、设备身份、CLI 和 OS 深链隔离代码。
 - [x] MoX bot 启动恢复只清理自身资源和状态目录中的残留进程。
-- [ ] 默认 MyAgents 回归与 MoX bot 构建 profile 测试。
-- [ ] 原生包签名和资源验证。
+- [x] 默认 MyAgents 回归与 MoX bot 构建 profile 测试（CI 38313991914 全部通过，双 JS profile 构建成功）。
+- [x] 原生包 ad-hoc 签名、精确资源和 ZIP CRC/解压验证；未 Developer ID 签名或公证。
 - [ ] 保留 MyAgents 运行的双应用启动、配置持久化和 MoX bot 重启检查。
 - [ ] 提交、CI、合入 fork main、远端同步核实。
-- [ ] 安装包交付。
+- [x] `MoX-bot-Trial-macos-arm64-76ce62dc.zip` 已交付，SHA-256 `961cbb092ae5a71c6434b7397ffc98be37d220bfabcb1d9c4539ac5c812b7ae1`。
 
 远程模型配置及创建 Linux Agent 的独立服务联调仍属于 MAH-SELFHOST-SERVICE-20261012，不能用本次并行启动验收代替。

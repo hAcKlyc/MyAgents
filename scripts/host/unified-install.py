@@ -51,13 +51,20 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
 def _host_service_state() -> dict:
     result = subprocess.run(
         ["systemctl", "show", "--property=LoadState", "--property=UnitFileState", "--property=ActiveState",
-         "--value", HOST_SERVICE],
+         HOST_SERVICE],
         check=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
     )
-    values = result.stdout.splitlines()
-    if result.returncode != 0 or len(values) != 3:
+    fields = {}
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if not separator or key not in {"LoadState", "UnitFileState", "ActiveState"} or key in fields:
+            raise UnifiedInstallError("Host service state could not be verified")
+        fields[key] = value
+    if result.returncode != 0 or set(fields) != {"LoadState", "UnitFileState", "ActiveState"}:
         raise UnifiedInstallError("Host service state could not be verified")
-    load_state, unit_file_state, active_state = values
+    load_state = fields["LoadState"]
+    unit_file_state = fields["UnitFileState"]
+    active_state = fields["ActiveState"]
     if load_state == "not-found":
         if unit_file_state or active_state not in {"inactive", "failed"}:
             raise UnifiedInstallError("Host service has an unexpected unloaded state")
@@ -155,6 +162,10 @@ def _restore_host(snapshot: dict) -> bool:
         if now_current == snapshot["current"] and now_unit == snapshot["unit"] and _matches_service_state(snapshot):
             return True
         if _run(["systemctl", "stop", HOST_SERVICE]).returncode not in (0, 5):
+            return False
+        # Remove the newly-created enablement links while its unit still exists.
+        # daemon-reload alone leaves dangling Wants symlinks after unit removal.
+        if snapshot["unit"] is None and now_unit is not None and _run(["systemctl", "disable", HOST_SERVICE]).returncode != 0:
             return False
         if snapshot["current"] is None:
             HOST_CURRENT.unlink(missing_ok=True)
