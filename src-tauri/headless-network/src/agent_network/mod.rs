@@ -70,3 +70,21 @@ pub(crate) mod connection;
 
 #[path = "../connector.rs"]
 pub(crate) mod connector;
+
+// Retain original fixed-protocol implementation and its established signatures.
+#[allow(clippy::too_many_arguments)]
+#[path = "../../../src/agent_network/channel.rs"]
+pub(crate) mod channel;
+// Original timeout iterator is reused unchanged; the probe itself has no lint exemptions.
+#[allow(clippy::filter_map_bool_then)]
+#[path = "../../../src/agent_network/pairs.rs"]
+pub(crate) mod pairs;
+
+// Original pair parity tests use business error projections, never the probe runtime.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+#[path = "../../../src/agent_network/calls.rs"]
+pub(crate) mod calls;
+#[cfg(test)]
+#[path = "../../../src/agent_network/incoming.rs"]
+pub(crate) mod incoming;

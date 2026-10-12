@@ -21,8 +21,9 @@ base64 = "0.22"
 url = "2"
 jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["rust_crypto"] }
 libc = "0.2.180"
+rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 [dev-dependencies]
+myagents-agent-network-crypto = { path = "../agent-network-crypto", features = ["test-support"] }
 tempfile = "3"
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }

@@ -18,6 +18,7 @@ async fn execute() -> Result<(), NetworkError> {
             "--device-id",
             "--device-name",
             "--status-file",
+            "--target-device-id",
         ]
         .contains(&key.as_str())
             || options.contains_key(&key)
@@ -63,6 +64,12 @@ async fn execute() -> Result<(), NetworkError> {
         device_id: device,
     }
     .install()?;
+    // The one-shot probe must not read account state while its run owner is active.
+    let _probe_lock = if command == "probe-device-channel" {
+        Some(status::run_lock(&root)?)
+    } else {
+        None
+    };
     let (s, raw) = owner.read()?;
     if raw.is_none() {
         owner.commit(None, &s)?;
@@ -77,6 +84,22 @@ async fn execute() -> Result<(), NetworkError> {
         "auth-cancel" => {
             owner.cancel()?;
             println!("{}", serde_json::json!({"status":"cancelled"}));
+        }
+        "probe-device-channel" => {
+            let target = required("--target-device-id")?;
+            if uuid::Uuid::parse_str(&target)
+                .map(|v| v.to_string())
+                .as_deref()
+                != Ok(target.as_str())
+            {
+                return Err(NetworkError::new("TARGET_DEVICE_INVALID"));
+            }
+            let result = crate::probe::run(owner, &target).await?;
+            println!(
+                "{}",
+                serde_json::to_string(&result)
+                    .map_err(|_| NetworkError::new("PROBE_RESULT_INVALID"))?
+            );
         }
         "run" => {
             let _lock = status::run_lock(&root)?;
