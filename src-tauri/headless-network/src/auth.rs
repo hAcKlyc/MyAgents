@@ -171,13 +171,82 @@ fn text(v: &Value, k: &str) -> Result<String, NetworkError> {
         .ok_or_else(|| NetworkError::new("AUTH_RESPONSE_INVALID"))
 }
 fn authorization_url(v: &str) -> Result<(), NetworkError> {
-    let u = url::Url::parse(v).map_err(|_| NetworkError::new("AUTH_URL_INVALID"))?;
-    if u.origin().ascii_serialization() != ORIGIN
+    let invalid = || NetworkError::new("AUTH_URL_INVALID");
+    let u = url::Url::parse(v).map_err(|_| invalid())?;
+    if u.scheme() != "https"
         || !u.username().is_empty()
         || u.password().is_some()
         || u.fragment().is_some()
     {
-        return Err(NetworkError::new("AUTH_URL_INVALID"));
+        return Err(invalid());
+    }
+    if u.origin().ascii_serialization() == ORIGIN {
+        return Ok(());
+    }
+    if u.origin().ascii_serialization() != "https://accounts.google.com"
+        || u.path() != "/o/oauth2/v2/auth"
+    {
+        return Err(invalid());
+    }
+    let mut query = std::collections::HashMap::new();
+    for (key, value) in u.query_pairs() {
+        if ![
+            "client_id",
+            "redirect_uri",
+            "response_type",
+            "scope",
+            "state",
+            "prompt",
+        ]
+        .contains(&key.as_ref())
+            || query.insert(key.into_owned(), value.into_owned()).is_some()
+        {
+            return Err(invalid());
+        }
+    }
+    if query.get("response_type").map(String::as_str) != Some("code")
+        || query.get("redirect_uri").map(String::as_str)
+            != Some("https://space.myagents.io/api/auth/google/callback")
+    {
+        return Err(invalid());
+    }
+    let client = query
+        .get("client_id")
+        .and_then(|v| v.strip_suffix(".apps.googleusercontent.com"))
+        .ok_or_else(invalid)?;
+    if client.is_empty()
+        || client.len() > 256
+        || !client
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+    {
+        return Err(invalid());
+    }
+    let state = query.get("state").ok_or_else(invalid)?;
+    if state.is_empty()
+        || state.len() > 2048
+        || !state
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    {
+        return Err(invalid());
+    }
+    let scope = query.get("scope").ok_or_else(invalid)?;
+    if scope.is_empty()
+        || scope.len() > 2048
+        || !scope.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
+    {
+        return Err(invalid());
+    }
+    if query.get("prompt").is_some_and(|v| {
+        v.is_empty()
+            || v.len() > 128
+            || !v
+                .split(' ')
+                .all(|p| ["none", "consent", "select_account"].contains(&p))
+            || v.split(' ').any(|p| p == "none") && v != "none"
+    }) {
+        return Err(invalid());
     }
     Ok(())
 }
@@ -303,6 +372,145 @@ mod tests {
             "https://space.myagents.io/login#token=x",
         ] {
             assert!(authorization_url(v).is_err());
+        }
+    }
+    fn google_url() -> url::Url {
+        let mut url = url::Url::parse("https://accounts.google.com/o/oauth2/v2/auth").unwrap();
+        url.query_pairs_mut().extend_pairs([
+            (
+                "client_id",
+                "1234567890-isolated.apps.googleusercontent.com",
+            ),
+            (
+                "redirect_uri",
+                "https://space.myagents.io/api/auth/google/callback",
+            ),
+            ("response_type", "code"),
+            ("scope", "openid email profile"),
+            ("state", "isolated-state_1234567890"),
+            ("prompt", "select_account"),
+        ]);
+        url
+    }
+    fn google_parameter(key: &str, value: Option<&str>) -> url::Url {
+        let mut url = google_url();
+        let pairs = url
+            .query_pairs()
+            .filter(|(k, _)| k != key)
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect::<Vec<_>>();
+        url.set_query(None);
+        url.query_pairs_mut().extend_pairs(pairs);
+        if let Some(value) = value {
+            url.query_pairs_mut().append_pair(key, value);
+        }
+        url
+    }
+    #[test]
+    fn google_oauth_accepts_only_fixed_callback_and_closed_parameters() {
+        assert!(authorization_url(google_url().as_str()).is_ok());
+        assert!(authorization_url(google_parameter("prompt", None).as_str()).is_ok());
+        for (key, value) in [
+            (
+                "redirect_uri",
+                "https://attacker.invalid/api/auth/google/callback",
+            ),
+            (
+                "redirect_uri",
+                "https://space.myagents.io/api/auth/google/callback?next=evil",
+            ),
+            (
+                "redirect_uri",
+                "https://space.myagents.io/api/auth/google/callback#x",
+            ),
+            (
+                "redirect_uri",
+                "https://user@space.myagents.io/api/auth/google/callback",
+            ),
+            (
+                "redirect_uri",
+                "https://space.myagents.io/api/auth/google/callback/",
+            ),
+            ("response_type", "token"),
+            ("client_id", "attacker.example"),
+            ("client_id", ".apps.googleusercontent.com"),
+            (
+                "client_id",
+                "evil.apps.googleusercontent.com.attacker.invalid",
+            ),
+            ("state", ""),
+            ("state", "a b"),
+            ("state", "a\nb"),
+            ("scope", ""),
+            ("prompt", "none consent"),
+            ("untrusted", "x"),
+        ] {
+            assert!(
+                authorization_url(google_parameter(key, Some(value)).as_str()).is_err(),
+                "{key}"
+            );
+        }
+        for key in [
+            "client_id",
+            "redirect_uri",
+            "response_type",
+            "scope",
+            "state",
+        ] {
+            assert!(authorization_url(google_parameter(key, None).as_str()).is_err());
+        }
+        assert!(
+            authorization_url(google_parameter("state", Some(&"x".repeat(2049))).as_str()).is_err()
+        );
+    }
+    #[test]
+    fn google_oauth_rejects_duplicate_parameters_and_other_endpoints() {
+        for key in [
+            "client_id",
+            "redirect_uri",
+            "response_type",
+            "scope",
+            "state",
+            "prompt",
+        ] {
+            let mut url = google_url();
+            let value = url
+                .query_pairs()
+                .find(|(k, _)| k == key)
+                .unwrap()
+                .1
+                .into_owned();
+            url.query_pairs_mut().append_pair(key, &value);
+            assert!(authorization_url(url.as_str()).is_err());
+        }
+        let encoded_duplicate = format!("{}&st%61te=second", google_url());
+        assert!(authorization_url(&encoded_duplicate).is_err());
+        for origin in [
+            "http://accounts.google.com",
+            "https://accounts.google.com:444",
+            "https://accounts.google.com.attacker.invalid",
+            "https://user@accounts.google.com",
+        ] {
+            let mut url = google_url();
+            let other = url::Url::parse(origin).unwrap();
+            url.set_scheme(other.scheme()).unwrap();
+            url.set_host(other.host_str()).unwrap();
+            url.set_port(other.port()).unwrap();
+            url.set_username(other.username()).unwrap();
+            assert!(authorization_url(url.as_str()).is_err());
+        }
+        let mut url = google_url();
+        url.set_fragment(Some("secret"));
+        assert!(authorization_url(url.as_str()).is_err());
+        for path in [
+            "/o/oauth2/auth",
+            "/o/oauth2/v2/auth/",
+            "/login",
+            "/o/oauth2/v2/auth%2f",
+        ] {
+            let mut url = google_url();
+            url.set_path(path);
+            assert!(authorization_url(url.as_str()).is_err());
         }
     }
 }
