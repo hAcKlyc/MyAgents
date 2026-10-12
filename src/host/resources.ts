@@ -125,9 +125,15 @@ function workspace(root: string, relativePath: string, create: boolean, recoveri
       verify();
       const target = `/proc/self/fd/${parent}/${pieces[i]}`;
       path = join(path, pieces[i]);
-      if (create && i === pieces.length - 1) {
+      if (create) {
         try { mkdirSync(target, {mode: 0o700}); fsyncSync(parent); }
-        catch (error) { if (!recovering || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        catch (error) {
+          // Existing intermediates still pass openDirectory's pinned inode,
+          // owner, permission and O_NOFOLLOW checks. A fresh leaf stays
+          // exclusive; only recovery of its original intent may reuse it.
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST'
+            || (i === pieces.length - 1 && !recovering)) throw error;
+        }
       }
       parent = openDirectory(target, path, false);
     }

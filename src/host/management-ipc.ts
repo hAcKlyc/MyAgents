@@ -2,6 +2,7 @@ import { createConnection, type Socket } from "node:net";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { HostConfigError } from "./management";
+import { HostProviderCredentialError } from "./provider-credentials";
 
 const MAX_FRAME = 64 * 1024;
 const MAX_RECEIVE = 256 * 1024;
@@ -15,6 +16,7 @@ const METHODS = new Set([
   "host.snapshot",
   "config.set",
   "resources.create",
+  "credential.set",
   "receipt.get",
 ]);
 type Request = {
@@ -50,6 +52,14 @@ function plain(value: unknown): value is Record<string, unknown> {
 }
 function validParams(method: string, params: Record<string, unknown>): boolean {
   if (method === "host.snapshot") return exactKeys(params, []);
+  if (method === "credential.set") return (
+    exactKeys(params, ['expectedRevision', 'providerId', 'credential', 'mutationId'])
+    && Number.isSafeInteger(params.expectedRevision) && Number(params.expectedRevision) >= 0
+    && params.providerId === 'moonshot-coding'
+    && typeof params.credential === 'string' && params.credential.trim().length > 0
+    && Buffer.byteLength(params.credential, 'utf8') <= 16 * 1024 && !/[\r\n\0]/.test(params.credential)
+    && typeof params.mutationId === 'string' && UUID.test(params.mutationId)
+  );
   if (method === "config.set") {
     const fields = [
       "expectedRevision",
@@ -108,7 +118,7 @@ function validParams(method: string, params: Record<string, unknown>): boolean {
       exactKeys(params, ["mutationId", "owner"]) &&
       typeof params.mutationId === "string" &&
       UUID.test(params.mutationId) &&
-      (params.owner === "config" || params.owner === "resources")
+      (params.owner === "config" || params.owner === "resources" || params.owner === "credentials")
     );
   return false;
 }
@@ -478,7 +488,7 @@ export async function connectHostManagementIpc(options: {
               }
             } catch (error) {
               const code =
-                error instanceof HostConfigError
+                error instanceof HostConfigError || error instanceof HostProviderCredentialError
                   ? error.code
                   : "OWNER_OPERATION_FAILED";
               if (

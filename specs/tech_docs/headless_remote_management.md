@@ -18,16 +18,20 @@
 任务 ID 沿用 `MAH-REMOTE-MANAGEMENT-20261012`；目标与真实桌面验收标准不变。
 
 - [x] 独立服务的认证设备寻址、双端 Ready/当前 session/撤销门禁，零 Agent 设备无需虚构目录对象。
-- [x] 桌面 Tauri `cmd_agent_network_management`、owned Controller、实际目标签名地址与 Offer/Accepted/TLS 校验；固定四方法：`host.snapshot`、`config.set`、`resources.create`、`receipt.get`。
+- [x] 桌面 Tauri `cmd_agent_network_management`、owned Controller、实际目标签名地址与 Offer/Accepted/TLS 校验；固定五方法：`host.snapshot`、`config.set`、`credential.set`、`resources.create`、`receipt.get`。
 - [x] Host 显式启用的 reverse Unix IPC，真实 peer UID；原本地 control socket 保持 0600。管理 grant 加密绑定本地设备、服务、环境、网络、主体与登录 binding，服务/网络变化也命中同一 grant 而拒绝隐式继承。
-- [x] Node 全局有界串行管理队列、断线重连、旧响应隔离、未知写入和原回执查询；真实资源 owner 新增受限且只读的 root/revision/Agent inspection，尚未扩展到管理 wire。
+- [x] Node 全局有界串行管理队列、断线重连、旧响应隔离、未知写入和原回执查询；真实资源 owner 的受限 root/revision/Agent inspection 已接 snapshot wire。
 - [x] 主集成定向检查：109 项 headless 测试，Node IPC/资源检查 20 项通过、9 项 Linux-only 尚待 CI；TypeScript 与定向 lint 通过。独立审查发现 sent 边界把本地拒绝误报未知写，已修并用真实 Pairs 预算故障回归验证。
 - [ ] 本轮完整 CI、Linux flock/资源测试、干净源码制品和主干交付。
 - [ ] 真 Linux 两个 owned 设备经服务/真实签名 TLS/Node IPC 保存配置和创建禁用 Agent，读取回执及进程重启恢复；尚无该联合验收。
-- [ ] 动态加密模型凭据 owner、只写 wire、资源读取 wire 和真实桌面表单；当前 Renderer adapter 仍 unavailable，不生成虚假环境/权限/配置成功投影。
+- [x] AES-256-GCM 动态模型凭据 owner、加密 CAS/回执账本、只写 `credential.set` 和无秘密的 snapshot；专用 Unix IPC 接真实 owner。初始化仅限主进程本次新建的私有目录，密文丢失或损坏拒绝重置。会话 generation 一次性握手接收所需模型凭据，主进程不向子进程环境转交 systemd master-key 目录；普通 config 仅保存引用，活动 worker 使用出生时的内存快照。
+- [x] Node installer 首次生成并保留 root 专有的 systemd 加密 `provider-key`，不会把模型密钥放入安装命令或环境；本地仅验证脚本与 dry-run，真实 Linux systemd 投影和回滚尚待验收。
+- [ ] 真实桌面表单；当前 Renderer adapter 仍 unavailable，不生成虚假环境/权限/配置成功投影。
 - [ ] 一键安装包统一 Node Host 与网络 owner 的服务配置，以及真实桌面远程模型配置/Agent 创建验收。本轮 CI 会输出可信源码来源的 Linux Node Host 包，但不代表安装器已经完成统一。
 
 接线约束：owned TLS profile 只发布空 catalog，不上传本地 Agent 目录或发送 Agent RPC/permit；管理应用使用独立 codec 和固定 Controller/Host 角色。Relay 的 ChannelReady 分支必须立即 drain 排队的管理 Ready 事件，不能等待下一帧。身份/网络/账户代次变化后关闭通道及待办；发送或写后记账失败关闭受影响 pair、报告原始 failure，不自动重复写入。模型凭据继续经产品能力配置，本阶段不获取密钥或调用收费模型。
+
+本阶段追加验证：111 项 headless Rust、协议 11 项单测与 6 项既有 codec 集成、Node 21 项 owner/IPC/真实 Session bootstrap 检查通过；没有收费模型调用。原 CI 捕获 IPC `/tmp` 父目录权限与 subprocess 测试分类缺口，已保留生产校验修复。随后 Linux CI 捕获本地 Host 测试缺少发布 bundle 的 CJS bridge，以及嵌套工作区缺失父目录；前者已对齐真实构建，后者沿原 root directory-fd authority 逐层创建、fsync 并保留独占叶目录与原意图恢复。主审另发现 Linux 凭据目录的 `/proc/self/fd` 最终链接不能以 `O_NOFOLLOW` 重开；现直接校验并 fsync 原 pinned fd，保留写后未知结果和原回执恢复的故障回归。本地 21 项相关集成、类型检查和定向 lint 再次通过。`8fad3268` 的独立服务 Linux CI 已成功，JavaScript CI 两项故障由本轮修复；新源码完整 Linux CI 与原生联合验收仍是开放门禁。
 
 测试部署仅使用已授权服务器的回环监听、隔离配置和唯一临时 unit/container。保留原两个 Host 服务和已有公网监听；部署前记录制品源码/摘要和原状态备份。原生桌面界面、远程配置业务、真实模型执行和正式生产发布分别保持独立验收项。
 

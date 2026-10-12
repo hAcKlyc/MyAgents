@@ -6,6 +6,8 @@ readonly STATE=/var/lib/myagents-host-test
 readonly SERVICE=myagents-host-test
 readonly USER_NAME=myagents-host-test
 readonly UNIT=/etc/systemd/system/myagents-host-test.service
+readonly PROVIDER_CREDENTIAL_DIR=/etc/myagents-host-test/credentials
+readonly PROVIDER_CREDENTIAL=/etc/myagents-host-test/credentials/provider-key.cred
 DRY_RUN=0
 ARCHIVE=
 EXPECTED_SHA=
@@ -28,6 +30,7 @@ STAGE=$(mktemp -d)
 BACKUP_LINK=
 LINK_CHANGED=0
 CREATED_RELEASE=
+PROVIDER_CREDENTIAL_TMP=
 RESTORE_OLD_SERVICE=0
 UNIT_CHANGED=0
 PREVIOUS_ENABLED=0
@@ -50,6 +53,9 @@ cleanup() {
     if ((RESTORE_OLD_SERVICE && PREVIOUS_ENABLED)); then systemctl start "$SERVICE" >/dev/null 2>&1 || true; fi
   fi
   if ((result != 0)) && [[ -n "$CREATED_RELEASE" && -d "$CREATED_RELEASE" ]]; then rm -rf -- "$CREATED_RELEASE"; fi
+  if [[ -n "$PROVIDER_CREDENTIAL_TMP" && -f "$PROVIDER_CREDENTIAL_TMP" && ! -L "$PROVIDER_CREDENTIAL_TMP" ]]; then
+    rm -f -- "$PROVIDER_CREDENTIAL_TMP"
+  fi
   rm -rf -- "$STAGE"
   exit "$result"
 }
@@ -114,6 +120,19 @@ if [[ ! -e "$INSTALL_LOCK" ]]; then (umask 077; : >"$INSTALL_LOCK"); fi
 exec 9>>"$INSTALL_LOCK"
 flock -n 9 || { echo 'Another installation or rollback transaction is active' >&2; exit 1; }
 if [[ -L "$PREFIX/current" && "$(readlink "$PREFIX/current")" == "releases/$RELEASE_ID" && -d "$PREFIX/releases/$RELEASE_ID" ]]; then
+  [[ -d /etc/myagents-host-test && ! -L /etc/myagents-host-test \
+    && "$(stat -c '%u' /etc/myagents-host-test)" == 0 \
+    && "$(stat -c '%a' /etc/myagents-host-test)" == 700 \
+    && -d "$PROVIDER_CREDENTIAL_DIR" && ! -L "$PROVIDER_CREDENTIAL_DIR" \
+    && "$(stat -c '%u' "$PROVIDER_CREDENTIAL_DIR")" == 0 \
+    && "$(stat -c '%a' "$PROVIDER_CREDENTIAL_DIR")" == 700 \
+    && -f "$PROVIDER_CREDENTIAL" && ! -L "$PROVIDER_CREDENTIAL" \
+    && "$(stat -c '%u' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%g' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%a' "$PROVIDER_CREDENTIAL")" == 600 \
+    && "$(stat -c '%h' "$PROVIDER_CREDENTIAL")" == 1 ]] || {
+    echo 'Already-installed release has a missing or unsafe provider master credential' >&2; exit 1;
+  }
   python3 - "$RELEASE_SOURCE" "$PREFIX/releases/$RELEASE_ID" <<'PY'
 import hashlib, json, pathlib, stat, sys
 source, installed = map(pathlib.Path, sys.argv[1:])
@@ -178,6 +197,47 @@ for config_dir in /etc/myagents-host-test /etc/myagents-host-test/credentials; d
     install -d -o root -g root -m 0700 "$config_dir"
   fi
 done
+if [[ -e "$PROVIDER_CREDENTIAL" || -L "$PROVIDER_CREDENTIAL" ]]; then
+  [[ -f "$PROVIDER_CREDENTIAL" && ! -L "$PROVIDER_CREDENTIAL" \
+    && "$(stat -c '%u' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%g' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%a' "$PROVIDER_CREDENTIAL")" == 600 \
+    && "$(stat -c '%h' "$PROVIDER_CREDENTIAL")" == 1 ]] || {
+    echo 'Provider master credential must be a root-owned mode-0600 single-link regular file' >&2; exit 1;
+  }
+else
+  command -v systemd-creds >/dev/null || { echo 'systemd-creds is required to initialize the provider master credential' >&2; exit 1; }
+  PROVIDER_CREDENTIAL_TMP=$(mktemp "$PROVIDER_CREDENTIAL_DIR/.provider-key.XXXXXX")
+  chmod 0600 "$PROVIDER_CREDENTIAL_TMP"
+  if ! head -c 32 /dev/urandom | systemd-creds encrypt --name=provider-key --with-key=host - "$PROVIDER_CREDENTIAL_TMP" >/dev/null 2>&1; then
+    echo 'Could not encrypt the provider master credential with the systemd host key' >&2
+    exit 1
+  fi
+  chown root:root "$PROVIDER_CREDENTIAL_TMP"
+  chmod 0600 "$PROVIDER_CREDENTIAL_TMP"
+  [[ -f "$PROVIDER_CREDENTIAL_TMP" && ! -L "$PROVIDER_CREDENTIAL_TMP" \
+    && "$(stat -c '%u' "$PROVIDER_CREDENTIAL_TMP")" == 0 \
+    && "$(stat -c '%g' "$PROVIDER_CREDENTIAL_TMP")" == 0 \
+    && "$(stat -c '%a' "$PROVIDER_CREDENTIAL_TMP")" == 600 \
+    && "$(stat -c '%h' "$PROVIDER_CREDENTIAL_TMP")" == 1 \
+    && "$(stat -c '%s' "$PROVIDER_CREDENTIAL_TMP")" -gt 0 ]] || {
+    echo 'systemd-creds produced an unsafe provider master credential' >&2; exit 1;
+  }
+  sync -f "$PROVIDER_CREDENTIAL_TMP"
+  # A hard link publishes the fsynced inode atomically without replacing any
+  # file that appeared after the initial existence check.
+  ln -T -- "$PROVIDER_CREDENTIAL_TMP" "$PROVIDER_CREDENTIAL"
+  rm -f -- "$PROVIDER_CREDENTIAL_TMP"
+  PROVIDER_CREDENTIAL_TMP=
+  sync -f "$PROVIDER_CREDENTIAL_DIR"
+  [[ -f "$PROVIDER_CREDENTIAL" && ! -L "$PROVIDER_CREDENTIAL" \
+    && "$(stat -c '%u' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%g' "$PROVIDER_CREDENTIAL")" == 0 \
+    && "$(stat -c '%a' "$PROVIDER_CREDENTIAL")" == 600 \
+    && "$(stat -c '%h' "$PROVIDER_CREDENTIAL")" == 1 ]] || {
+    echo 'Published provider master credential failed its filesystem checks' >&2; exit 1;
+  }
+fi
 DEST="$PREFIX/releases/$RELEASE_ID"
 [[ ! -e "$DEST" ]] || { echo "Release id already exists; refusing to replace: $RELEASE_ID" >&2; exit 1; }
 CREATED_RELEASE=$DEST
@@ -197,12 +257,15 @@ LINK_CHANGED=1
 install -d -o root -g root -m 0755 "$PREFIX/bin"
 install -o root -g root -m 0755 "$RELEASE_SOURCE/bin/myagents-host" "$PREFIX/bin/myagents-host"
 install -d -o root -g root -m 0700 /etc/myagents-host-test
-CREDENTIAL_LINE=
-CREDENTIAL=/etc/myagents-host-test/credentials/kimi.cred
-if [[ -e "$CREDENTIAL" || -L "$CREDENTIAL" ]]; then
-  [[ -f "$CREDENTIAL" && ! -L "$CREDENTIAL" && "$(stat -c '%u' "$CREDENTIAL")" == 0 \
-    && "$(stat -c '%a' "$CREDENTIAL")" == 600 ]] || { echo 'Kimi credential must be a root-owned mode-0600 regular file' >&2; exit 1; }
-  CREDENTIAL_LINE='LoadCredentialEncrypted=kimi:/etc/myagents-host-test/credentials/kimi.cred'
+CREDENTIAL_LINES='LoadCredentialEncrypted=provider-key:/etc/myagents-host-test/credentials/provider-key.cred'
+LEGACY_KIMI_CREDENTIAL=/etc/myagents-host-test/credentials/kimi.cred
+if [[ -e "$LEGACY_KIMI_CREDENTIAL" || -L "$LEGACY_KIMI_CREDENTIAL" ]]; then
+  [[ -f "$LEGACY_KIMI_CREDENTIAL" && ! -L "$LEGACY_KIMI_CREDENTIAL" \
+    && "$(stat -c '%u' "$LEGACY_KIMI_CREDENTIAL")" == 0 \
+    && "$(stat -c '%g' "$LEGACY_KIMI_CREDENTIAL")" == 0 \
+    && "$(stat -c '%a' "$LEGACY_KIMI_CREDENTIAL")" == 600 \
+    && "$(stat -c '%h' "$LEGACY_KIMI_CREDENTIAL")" == 1 ]] || { echo 'Legacy Kimi credential must be a root-owned mode-0600 single-link regular file' >&2; exit 1; }
+  CREDENTIAL_LINES+=$'\nLoadCredentialEncrypted=kimi:/etc/myagents-host-test/credentials/kimi.cred'
 fi
 cat > "$STAGE/service" <<UNITFILE
 [Unit]
@@ -219,6 +282,7 @@ Environment=MYAGENTS_HOST_STATE_DIR=/var/lib/myagents-host-test
 Environment=MYAGENTS_HOST_MODE=1
 Environment=MYAGENTS_HOST_SOCKET=/run/myagents-host-test/control.sock
 Environment=MYAGENTS_HOST_LOCK_HELD=1
+Environment=MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL=provider-key
 RuntimeDirectory=myagents-host-test
 RuntimeDirectoryMode=0700
 StateDirectory=myagents-host-test
@@ -232,7 +296,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/myagents-host-test /run/myagents-host-test
-$CREDENTIAL_LINE
+$CREDENTIAL_LINES
 
 [Install]
 WantedBy=multi-user.target

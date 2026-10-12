@@ -196,6 +196,21 @@ it.runIf(process.platform !== 'linux')('never uses a weaker string-path mkdir fa
 });
 
 describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace authority', () => {
+  it('creates and fsyncs private missing ancestors for a nested Agent while retaining exclusive leaf and mutation identity', async () => {
+    const request = body('parent/nested/workspace', 'create');
+    const result = await owner.mutate(request);
+    expect(result).toMatchObject({ status: 'persisted', revision: 1,
+      resource: { workspacePath: join(root, 'parent/nested/workspace'), enabled: false } });
+    for (const path of ['parent', 'parent/nested', 'parent/nested/workspace'])
+      expect(lstatSync(join(root, path)).mode & 0o777).toBe(0o700);
+    const restarted = createHostResourceOwner({ hostId, roots: { local: root } });
+    expect(await restarted.mutate(request)).toEqual(result);
+    expect(await restarted.receipt(request.mutationId)).toEqual(result);
+    await expect(restarted.mutate({ ...body('parent/nested/workspace', 'create'), expectedRevision: 1 }))
+      .rejects.toThrow('RESOURCE_ALREADY_EXISTS');
+    expect(loadProjects({ strict: true })).toHaveLength(1);
+    expect(loadConfig({ strict: true }).agents).toHaveLength(1);
+  });
   it('creates disabled Agent through the original registry; duplicates/restart retain identity and exact receipt', async () => {
     const request = body('new', 'create');
     const results = await Promise.all([owner.mutate(request), owner.mutate(request)]);

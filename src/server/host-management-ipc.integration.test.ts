@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { build } from "esbuild";
-import { mkdtemp, chmod, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, chmod, mkdir, rm, writeFile, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -713,6 +713,9 @@ it.skipIf(process.getuid?.() === 0)(
     await writeFile(join(state, "host.lock"), "", { mode: 0o600 });
     await mkdir(ipcDir, { mode: 0o750 });
     await chmod(ipcDir, 0o750);
+    const keyDir = join(scratch, 'systemd-credential-fixture');
+    await mkdir(keyDir, { mode: 0o700 });
+    await writeFile(join(keyDir, 'provider-key'), Buffer.alloc(32, 0x42), { mode: 0o600 });
     await build({
       entryPoints: [resolve("src/host/main.ts")],
       outfile: entry,
@@ -754,6 +757,9 @@ it.skipIf(process.getuid?.() === 0)(
           MYAGENTS_HOST_MANAGEMENT_IPC: ipcPath,
           MYAGENTS_HOST_MANAGEMENT_NETWORK_UID: String(uid),
           MYAGENTS_HOST_MANAGEMENT_GID: String(gid),
+          MYAGENTS_HOST_MODE: '1',
+          CREDENTIALS_DIRECTORY: keyDir,
+          MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL: 'provider-key',
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -794,7 +800,22 @@ it.skipIf(process.getuid?.() === 0)(
       settings: null,
       activeSession: null,
       agentNet: { available: false },
+      credentials: { configured: false, revision: 0, writeAvailable: true },
+      resources: { version: 1, revision: 0, roots: [{ rootId: 'workspaces' }], agents: [] },
     });
+    const credentialId = randomUUID();
+    const syntheticSecret = 'ipc-test-only-provider-secret-never-use-for-network';
+    const credentialRequest = { providerId: 'moonshot-coding', credential: syntheticSecret,
+      expectedRevision: 0, mutationId: credentialId };
+    const credentialReceipt = await sendRequest('credential.set', credentialRequest);
+    expect(credentialReceipt).toMatchObject({ kind: 'credential-receipt', status: 'persisted',
+      mutationId: credentialId, revision: 1, effect: 'new-session' });
+    expect(await sendRequest('credential.set', credentialRequest)).toEqual(credentialReceipt);
+    expect(await sendRequest('receipt.get', { mutationId: credentialId, owner: 'credentials' })).toEqual(credentialReceipt);
+    const snapshot = await sendRequest('host.snapshot', {});
+    expect(snapshot).toMatchObject({ credentials: { configured: true, revision: 1, writeAvailable: true } });
+    expect(JSON.stringify(snapshot)).not.toContain(syntheticSecret);
+    expect((await readFile(join(state, 'provider-credentials', 'credentials.enc'), 'utf8'))).not.toContain(syntheticSecret);
     const configId = randomUUID();
     expect(
       await sendRequest("config.set", {
@@ -811,6 +832,9 @@ it.skipIf(process.getuid?.() === 0)(
       revision: 1,
       effect: "new-session",
     });
+    const persistedConfig = await readFile(join(home, '.myagents', 'config.json'), 'utf8');
+    expect(persistedConfig).not.toContain(syntheticSecret);
+    expect(JSON.parse(persistedConfig).providerApiKeys).toEqual({ 'moonshot-coding': 'host-provider-credential:moonshot-coding' });
     expect(
       await sendRequest("receipt.get", {
         mutationId: configId,
@@ -848,6 +872,9 @@ it.skipIf(process.getuid?.() === 0)(
         kind: "resource-receipt",
         status: "persisted",
         mutationId: resourceId,
+      });
+      expect(await sendRequest('host.snapshot', {})).toMatchObject({
+        resources: { revision: 1, agents: [{ enabled: false, archived: false }] },
       });
     }
     const disconnectedMutation = randomUUID();

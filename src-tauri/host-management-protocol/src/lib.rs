@@ -4,7 +4,7 @@
 //! channel, authorize a peer, dispatch owner operations, or claim that a
 //! request succeeded. The TLS/channel owner must perform those steps.
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::fmt;
 use uuid::Uuid;
 
@@ -86,6 +86,8 @@ pub enum Owner {
     Config,
     #[serde(rename = "resources")]
     Resources,
+    #[serde(rename = "credentials")]
+    Credentials,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +96,8 @@ pub enum ManagementMethod {
     HostSnapshot,
     #[serde(rename = "config.set")]
     ConfigSet,
+    #[serde(rename = "credential.set")]
+    CredentialSet,
     #[serde(rename = "resources.create")]
     ResourcesCreate,
     #[serde(rename = "receipt.get")]
@@ -143,6 +147,7 @@ pub enum ManagementMessage {
 pub enum RequestParams {
     Snapshot(SnapshotParams),
     ConfigSet(ConfigSetParams),
+    CredentialSet(CredentialSetParams),
     ResourcesCreate(ResourcesCreateParams),
     ReceiptGet(ReceiptGetParams),
 }
@@ -163,6 +168,26 @@ pub struct ConfigSetParams {
     pub workspace: Option<String>,
     pub execution_authorized: bool,
     pub mutation_id: CanonicalUuid,
+}
+/// The secret is transmitted only inside the authenticated encrypted channel.
+/// Debug output must remain safe through Frame/RequestParams nesting too.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CredentialSetParams {
+    pub expected_revision: u64,
+    pub provider_id: String,
+    pub credential: String,
+    pub mutation_id: CanonicalUuid,
+}
+impl fmt::Debug for CredentialSetParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CredentialSetParams")
+            .field("expected_revision", &self.expected_revision)
+            .field("provider_id", &self.provider_id)
+            .field("credential", &"[REDACTED]")
+            .field("mutation_id", &self.mutation_id)
+            .finish()
+    }
 }
 fn deserialize_workspace<'de, D: Deserializer<'de>>(
     deserializer: D,
@@ -194,8 +219,9 @@ pub struct ReceiptGetParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ResponseResult {
-    Snapshot(HostSnapshot),
+    Snapshot(Box<HostSnapshot>),
     ConfigReceipt(ConfigReceipt),
+    CredentialReceipt(CredentialReceipt),
     ResourceReceipt(ResourceReceipt),
     ReceiptNotFound {
         #[serde(rename = "mutationId")]
@@ -218,6 +244,40 @@ pub struct HostSnapshot {
     pub capabilities: Vec<HostCapability>,
     pub agent_net: AgentNetStatus,
     pub runtime: RuntimeStatus,
+    pub credentials: CredentialsStatus,
+    pub resources: ResourcesSnapshot,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CredentialsStatus {
+    pub provider_id: String,
+    pub configured: bool,
+    pub revision: u64,
+    pub write_available: bool,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourcesSnapshot {
+    pub version: u8,
+    pub revision: u64,
+    pub roots: Vec<ResourceRoot>,
+    pub agents: Vec<ResourceAgent>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceRoot {
+    pub root_id: String,
+    pub workspace_path: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourceAgent {
+    pub agent_id: String,
+    pub project_id: String,
+    pub name: String,
+    pub workspace_path: String,
+    pub enabled: bool,
+    pub archived: bool,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -276,6 +336,22 @@ pub enum ConfigReceipt {
     NotFound {
         #[serde(rename = "mutationId")]
         mutation_id: CanonicalUuid,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum CredentialReceipt {
+    Persisted {
+        #[serde(rename = "mutationId")]
+        mutation_id: CanonicalUuid,
+        revision: u64,
+        effect: ConfigEffect,
+    },
+    Conflict {
+        #[serde(rename = "mutationId")]
+        mutation_id: CanonicalUuid,
+        revision: u64,
+        effect: ConfigEffect,
     },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -357,6 +433,10 @@ impl Frame {
                     (ManagementMethod::HostSnapshot, RequestParams::Snapshot(_))
                         | (ManagementMethod::ConfigSet, RequestParams::ConfigSet(_))
                         | (
+                            ManagementMethod::CredentialSet,
+                            RequestParams::CredentialSet(_)
+                        )
+                        | (
                             ManagementMethod::ResourcesCreate,
                             RequestParams::ResourcesCreate(_)
                         )
@@ -388,6 +468,17 @@ fn validate_params(params: &RequestParams) -> Result<(), CodecError> {
             }
             Ok(())
         }
+        RequestParams::CredentialSet(p) => {
+            if !safe_revision(p.expected_revision)
+                || p.provider_id != "moonshot-coding"
+                || p.credential.trim().is_empty()
+                || p.credential.len() > 16 * 1024
+                || p.credential.bytes().any(|b| matches!(b, 0 | b'\r' | b'\n'))
+            {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
         RequestParams::ResourcesCreate(p) => {
             if !safe_revision(p.expected_revision)
                 || !valid_root_id(&p.root_id)
@@ -404,12 +495,17 @@ fn validate_result(result: &ResponseResult) -> Result<(), CodecError> {
         ResponseResult::Error { code } if !valid_error_code(code) => Err(CodecError::InvalidFrame),
         ResponseResult::Snapshot(snapshot) => validate_snapshot(snapshot),
         ResponseResult::ConfigReceipt(receipt) => validate_config_receipt(receipt),
+        ResponseResult::CredentialReceipt(receipt) => validate_credential_receipt(receipt),
         ResponseResult::ResourceReceipt(receipt) => validate_resource_receipt(receipt),
         _ => Ok(()),
     }
 }
 fn validate_snapshot(s: &HostSnapshot) -> Result<(), CodecError> {
     if s.version != 1
+        || s.credentials.provider_id != "moonshot-coding"
+        || !safe_revision(s.credentials.revision)
+        || (s.credentials.configured && s.credentials.revision == 0)
+        || validate_resources_snapshot(&s.resources).is_err()
         || s.capabilities.len() > 16
         || s.settings
             .as_ref()
@@ -422,6 +518,49 @@ fn validate_snapshot(s: &HostSnapshot) -> Result<(), CodecError> {
         return Err(CodecError::InvalidFrame);
     }
     Ok(())
+}
+fn validate_resources_snapshot(s: &ResourcesSnapshot) -> Result<(), CodecError> {
+    if s.version != 1 || !safe_revision(s.revision) || s.roots.len() > 16 || s.agents.len() > 128 {
+        return Err(CodecError::InvalidFrame);
+    }
+    let mut root_ids = std::collections::HashSet::new();
+    for root in &s.roots {
+        if !valid_root_id(&root.root_id)
+            || !valid_absolute_path(&root.workspace_path)
+            || !root_ids.insert(root.root_id.as_str())
+        {
+            return Err(CodecError::InvalidFrame);
+        }
+    }
+    let mut agent_ids = std::collections::HashSet::new();
+    for agent in &s.agents {
+        if agent.agent_id.is_empty()
+            || agent.agent_id.len() > 256
+            || agent.project_id.is_empty()
+            || agent.project_id.len() > 256
+            || agent.name.len() > 512
+            || !valid_absolute_path(&agent.workspace_path)
+            || !agent_ids.insert(agent.agent_id.as_str())
+        {
+            return Err(CodecError::InvalidFrame);
+        }
+    }
+    Ok(())
+}
+fn validate_credential_receipt(r: &CredentialReceipt) -> Result<(), CodecError> {
+    let valid = match r {
+        CredentialReceipt::Persisted {
+            revision, effect, ..
+        } => *revision > 0 && safe_revision(*revision) && *effect == ConfigEffect::NewSession,
+        CredentialReceipt::Conflict {
+            revision, effect, ..
+        } => safe_revision(*revision) && *effect == ConfigEffect::None,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(CodecError::InvalidFrame)
+    }
 }
 fn validate_config_receipt(r: &ConfigReceipt) -> Result<(), CodecError> {
     match r {
@@ -648,5 +787,277 @@ impl FrameDecoder {
             self.bytes = self.bytes[consumed..].to_vec();
         }
         Ok(frames)
+    }
+}
+
+#[cfg(test)]
+mod credential_and_snapshot_tests {
+    use super::*;
+    use serde_json::json;
+    fn id() -> CanonicalUuid {
+        CanonicalUuid::new(Uuid::new_v4())
+    }
+    fn frame(message: ManagementMessage) -> Frame {
+        Frame {
+            namespace: NAMESPACE.into(),
+            version: VERSION,
+            sender_sequence: 1,
+            channel_id: id(),
+            message,
+        }
+    }
+    fn credential(value: &str) -> Frame {
+        frame(ManagementMessage::Request {
+            request_id: id(),
+            method: ManagementMethod::CredentialSet,
+            params: RequestParams::CredentialSet(CredentialSetParams {
+                expected_revision: 0,
+                provider_id: "moonshot-coding".into(),
+                credential: value.into(),
+                mutation_id: id(),
+            }),
+        })
+    }
+    fn snapshot() -> HostSnapshot {
+        HostSnapshot {
+            version: 1,
+            host_id: id(),
+            configured: false,
+            settings: None,
+            active_session: None,
+            stopping: false,
+            capabilities: vec![],
+            agent_net: AgentNetStatus {
+                available: true,
+                reason: None,
+            },
+            runtime: RuntimeStatus {
+                node: "24.0.0".into(),
+                sdk_binary_present: false,
+            },
+            credentials: CredentialsStatus {
+                provider_id: "moonshot-coding".into(),
+                configured: false,
+                revision: 0,
+                write_available: false,
+            },
+            resources: ResourcesSnapshot {
+                version: 1,
+                revision: 0,
+                roots: vec![ResourceRoot {
+                    root_id: "workspace".into(),
+                    workspace_path: "/var/lib/isolated/workspaces".into(),
+                }],
+                agents: vec![ResourceAgent {
+                    agent_id: "agent-1".into(),
+                    project_id: "project-1".into(),
+                    name: "isolated".into(),
+                    workspace_path: "/var/lib/isolated/workspaces/one".into(),
+                    enabled: false,
+                    archived: false,
+                }],
+            },
+        }
+    }
+    fn snapshot_frame(s: HostSnapshot) -> Frame {
+        frame(ManagementMessage::Response {
+            request_id: id(),
+            result: ResponseResult::Snapshot(Box::new(s)),
+        })
+    }
+    fn decode_json(value: serde_json::Value) -> Result<Vec<Frame>, CodecError> {
+        let body = serde_json::to_vec(&value).unwrap();
+        let mut bytes = (body.len() as u32).to_be_bytes().to_vec();
+        bytes.extend(body);
+        FrameDecoder::default().push(&bytes)
+    }
+    #[test]
+    fn credential_round_trip_is_bounded_utf8_and_redacted_through_frame_debug() {
+        let value = "isolated-secret-fixture";
+        let valid = credential(value);
+        assert_eq!(
+            FrameDecoder::default()
+                .push(&encode_frame(&valid).unwrap())
+                .unwrap(),
+            vec![valid.clone()]
+        );
+        let debug = format!("{valid:?}");
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains(value));
+        assert!(credential(&"é".repeat(8192)).validate().is_ok());
+        for invalid in [
+            String::new(),
+            "x\ny".into(),
+            "x\ry".into(),
+            "x\0y".into(),
+            "é".repeat(8193),
+        ] {
+            assert_eq!(
+                credential(&invalid).validate(),
+                Err(CodecError::InvalidFrame)
+            );
+        }
+        let mut wrong = credential(value);
+        if let ManagementMessage::Request {
+            params: RequestParams::CredentialSet(p),
+            ..
+        } = &mut wrong.message
+        {
+            p.provider_id = "other-provider".into();
+        }
+        assert!(wrong.validate().is_err());
+        if let ManagementMessage::Request {
+            params: RequestParams::CredentialSet(p),
+            ..
+        } = &mut wrong.message
+        {
+            p.provider_id = "moonshot-coding".into();
+            p.expected_revision = MAX_SAFE_SEQUENCE + 1;
+        }
+        assert!(wrong.validate().is_err());
+    }
+    #[test]
+    fn credential_and_receipt_closed_keys_reject_secret_projection() {
+        let mut value = serde_json::to_value(credential("fixture-only")).unwrap();
+        value["message"]["params"]["extra"] = json!(true);
+        assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        let receipt = CredentialReceipt::Persisted {
+            mutation_id: id(),
+            revision: 1,
+            effect: ConfigEffect::NewSession,
+        };
+        let valid = frame(ManagementMessage::Response {
+            request_id: id(),
+            result: ResponseResult::CredentialReceipt(receipt),
+        });
+        assert!(encode_frame(&valid).is_ok());
+        let mut value = serde_json::to_value(valid).unwrap();
+        value["message"]["result"]["credential"] = json!("fixture-only");
+        assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        let value = json!({"kind":"credential-receipt","status":"not-found","mutationId":id()});
+        assert!(serde_json::from_value::<ResponseResult>(value).is_err());
+        let not_found = frame(ManagementMessage::Response {
+            request_id: id(),
+            result: ResponseResult::ReceiptNotFound {
+                mutation_id: id(),
+                owner: Owner::Credentials,
+            },
+        });
+        assert!(encode_frame(&not_found).is_ok());
+        let raw = serde_json::to_string(&credential("fixture-only"))
+            .unwrap()
+            .replace(
+                "\"credential\":\"fixture-only\"",
+                "\"credential\":\"fixture-only\",\"credential\":\"different\"",
+            );
+        assert!(serde_json::from_str::<Frame>(&raw).is_err());
+    }
+    #[test]
+    fn credential_receipts_have_safe_revision_and_actual_effect() {
+        for receipt in [
+            CredentialReceipt::Persisted {
+                mutation_id: id(),
+                revision: 0,
+                effect: ConfigEffect::NewSession,
+            },
+            CredentialReceipt::Persisted {
+                mutation_id: id(),
+                revision: 1,
+                effect: ConfigEffect::None,
+            },
+            CredentialReceipt::Conflict {
+                mutation_id: id(),
+                revision: 0,
+                effect: ConfigEffect::NewSession,
+            },
+            CredentialReceipt::Conflict {
+                mutation_id: id(),
+                revision: MAX_SAFE_SEQUENCE + 1,
+                effect: ConfigEffect::None,
+            },
+        ] {
+            assert!(validate_credential_receipt(&receipt).is_err());
+        }
+        assert!(
+            validate_credential_receipt(&CredentialReceipt::Conflict {
+                mutation_id: id(),
+                revision: 0,
+                effect: ConfigEffect::None
+            })
+            .is_ok()
+        );
+    }
+    #[test]
+    fn snapshot_requires_both_closed_nonsecret_owner_projections() {
+        let valid = snapshot_frame(snapshot());
+        assert!(encode_frame(&valid).is_ok());
+        for key in ["credentials", "resources"] {
+            let mut value = serde_json::to_value(&valid).unwrap();
+            value["message"]["result"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        }
+        for key in ["credential", "hash", "permissionGuess"] {
+            let mut value = serde_json::to_value(&valid).unwrap();
+            value["message"]["result"]["credentials"][key] = json!("fixture-only");
+            assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        }
+        let mut value = serde_json::to_value(&valid).unwrap();
+        value["message"]["result"]["resources"]["roots"][0]["credential"] = json!("fixture-only");
+        assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        let mut value = serde_json::to_value(valid).unwrap();
+        value["message"]["result"]["resources"]["agents"][0]["extra"] = json!(true);
+        assert_eq!(decode_json(value), Err(CodecError::InvalidJson));
+        let mut s = snapshot();
+        s.credentials.configured = true;
+        assert!(snapshot_frame(s.clone()).validate().is_err());
+        s.credentials.revision = 1;
+        assert!(snapshot_frame(s).validate().is_ok());
+    }
+    #[test]
+    fn snapshot_rejects_duplicates_limits_and_invalid_paths() {
+        let mut s = snapshot();
+        s.resources.roots.push(s.resources.roots[0].clone());
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.agents.push(s.resources.agents[0].clone());
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.roots = (0..17)
+            .map(|i| ResourceRoot {
+                root_id: format!("root-{i}"),
+                workspace_path: "/isolated".into(),
+            })
+            .collect();
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.agents = (0..129)
+            .map(|i| ResourceAgent {
+                agent_id: format!("agent-{i}"),
+                ..s.resources.agents[0].clone()
+            })
+            .collect();
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.roots[0].workspace_path = "relative".into();
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.agents[0].workspace_path = format!("/{}", "x".repeat(4096));
+        assert!(snapshot_frame(s).validate().is_err());
+        let mut s = snapshot();
+        s.resources.agents = (0..128)
+            .map(|i| ResourceAgent {
+                agent_id: format!("agent-{i}"),
+                workspace_path: format!("/{}", "x".repeat(2000)),
+                ..s.resources.agents[0].clone()
+            })
+            .collect();
+        assert!(snapshot_frame(s.clone()).validate().is_ok());
+        assert_eq!(
+            encode_frame(&snapshot_frame(s)),
+            Err(CodecError::FrameTooLarge)
+        );
     }
 }

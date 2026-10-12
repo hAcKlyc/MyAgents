@@ -14,7 +14,11 @@ sudo scripts/host/install.sh output/host/myagents-host-test-<release>.tar.gz --s
 
 The paths, service account, unit, and socket are fixed to the `myagents-host-test` test installation. Repeating the same currently installed release is a verified no-op; a different release is refused while the service or Host lock is busy. Updates require an operator to inspect state and stop the service first. The installer waits for the service's Unix-socket `doctor` response with the expected Node version and SDK binary before it reports success. Automatic online updates and production signing are not implemented. Rollback has passed an isolated Ubuntu 24.04/systemd 255 forced-startup-failure check; the prior release, service, identity and settings were restored.
 
-The first install can start without an API credential. To add one later, keep the plaintext source in a root-only location, encrypt it to the systemd host key, and install only the encrypted credential under the root-owned configuration directory:
+On first installation, the installer creates a random 32-byte provider-store master key in memory, pipes it directly to `systemd-creds encrypt --name=provider-key --with-key=host`, and atomically publishes only the encrypted file at `/etc/myagents-host-test/credentials/provider-key.cred`. The service receives it through `LoadCredentialEncrypted=provider-key:…` as `CREDENTIALS_DIRECTORY/provider-key`; Node uses it only to encrypt provider credentials saved through the local product configuration flow. The master key is not a model credential. It is never written in plaintext to a file, argument, environment variable, or installer output. A valid existing file is reused without rotation; an unsafe file or failed encryption stops installation. Once published, the encrypted key is preserved across rollback and reinstall.
+
+This installer-side key lifecycle is not yet a complete remote UI or unified credential-management installation. The product form and its end-to-end persistence/runtime acceptance remain integration gates. Do not manually create a provider key or enter a real model credential for this test step.
+
+Legacy Kimi projection remains supported for existing installations. New installs can include a pre-existing encrypted Kimi credential in the generated unit; for a running older installation, the historical manual procedure is:
 
 ```sh
 sudo install -d -o root -g root -m 0700 /etc/myagents-host-test/credentials
@@ -36,9 +40,9 @@ sudo systemctl daemon-reload
 sudo systemctl restart myagents-host-test
 ```
 
-The Host resolves this credential reference when it initializes a Session. Restarting the service after adding or replacing the encrypted file is required; changing the Host's persisted config alone does not load a new systemd credential. Do not put plaintext keys in the repository, service unit, or Host configuration.
+The Host resolves this legacy credential reference when it initializes a Session. Restarting the service after adding or replacing the encrypted file is required; changing the Host's persisted config alone does not load a new systemd credential. Do not put plaintext keys in the repository, service unit, or Host configuration. This remains a compatibility procedure, not the recommended path for new provider credentials.
 
-The package does not enable Playwright/browser execution. Its bundled Node is self-contained; the installer and wrapper do not require system Node. Root installation, Linux runtime bootstrap, systemd readiness, encrypted credential projection, busy-update refusal, identity/config persistence and failed-startup rollback have been checked on an isolated Ubuntu 24.04 host. A synthetic credential with execution authorization disabled proved Session creation and persistence without model calls; real Kimi execution and AgentNet remain open acceptance gates. See `specs/tech_docs/linux_host.md`.
+The package does not enable Playwright/browser execution. Its bundled Node is self-contained; the installer and wrapper do not require system Node. Root installation, Linux runtime bootstrap, systemd readiness, busy-update refusal, identity/config persistence and failed-startup rollback have been checked on an isolated Ubuntu 24.04 host. This provider-key installer change has only shell/static validation so far; `systemd-creds` host-key encryption and projection still require an isolated Linux install check. A synthetic credential with execution authorization disabled proved Session creation and persistence without model calls; real model execution and AgentNet remain open acceptance gates. See `specs/tech_docs/linux_host.md`.
 
 ## Recoverable local configuration
 

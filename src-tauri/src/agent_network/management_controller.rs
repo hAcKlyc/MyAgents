@@ -41,7 +41,9 @@ impl ManagementRequest {
     pub(crate) fn mutation(&self) -> bool {
         matches!(
             self.method,
-            ManagementMethod::ConfigSet | ManagementMethod::ResourcesCreate
+            ManagementMethod::ConfigSet
+                | ManagementMethod::CredentialSet
+                | ManagementMethod::ResourcesCreate
         )
     }
     pub(crate) fn message(&self, id: CanonicalUuid) -> Result<ManagementMessage, NetworkError> {
@@ -130,6 +132,20 @@ fn response_matches(request: &ManagementRequest, result: &ResponseResult) -> boo
             ),
         ) => false,
         (RequestParams::ResourcesCreate(p), ResponseResult::ResourceReceipt(r)) => {
+            serde_json::to_value(r)
+                .ok()
+                .and_then(|v| v.get("mutationId").cloned())
+                == serde_json::to_value(p.mutation_id).ok()
+        }
+        (RequestParams::CredentialSet(p), ResponseResult::CredentialReceipt(r)) => {
+            serde_json::to_value(r)
+                .ok()
+                .and_then(|v| v.get("mutationId").cloned())
+                == serde_json::to_value(p.mutation_id).ok()
+        }
+        (RequestParams::ReceiptGet(p), ResponseResult::CredentialReceipt(r))
+            if p.owner == myagents_host_management_protocol::Owner::Credentials =>
+        {
             serde_json::to_value(r)
                 .ok()
                 .and_then(|v| v.get("mutationId").cloned())
@@ -595,6 +611,74 @@ mod tests {
                 owner: myagents_host_management_protocol::Owner::Config
             }
         ));
+    }
+    #[test]
+    fn credential_write_and_receipt_are_bound_to_original_mutation_and_owner() {
+        use myagents_host_management_protocol::{
+            ConfigEffect, CredentialReceipt, CredentialSetParams, Owner,
+        };
+        let mut r = request();
+        let id = CanonicalUuid::new(uuid::Uuid::new_v4());
+        r.method = ManagementMethod::CredentialSet;
+        r.params = RequestParams::CredentialSet(CredentialSetParams {
+            expected_revision: 0,
+            provider_id: "moonshot-coding".into(),
+            credential: "isolated-fixture-only".into(),
+            mutation_id: id,
+        });
+        assert!(r.mutation());
+        assert!(r.message(CanonicalUuid::new(uuid::Uuid::new_v4())).is_ok());
+        let valid = ResponseResult::CredentialReceipt(CredentialReceipt::Persisted {
+            mutation_id: id,
+            revision: 1,
+            effect: ConfigEffect::NewSession,
+        });
+        assert!(response_matches(&r, &valid));
+        assert!(!response_matches(
+            &r,
+            &ResponseResult::CredentialReceipt(CredentialReceipt::Conflict {
+                mutation_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+                revision: 1,
+                effect: ConfigEffect::None
+            })
+        ));
+        assert!(!response_matches(
+            &r,
+            &ResponseResult::ConfigReceipt(
+                myagents_host_management_protocol::ConfigReceipt::NotFound { mutation_id: id }
+            )
+        ));
+        assert!(!response_matches(
+            &r,
+            &ResponseResult::ReceiptNotFound {
+                mutation_id: id,
+                owner: Owner::Credentials
+            }
+        ));
+        r.method = ManagementMethod::ReceiptGet;
+        r.params = RequestParams::ReceiptGet(myagents_host_management_protocol::ReceiptGetParams {
+            mutation_id: id,
+            owner: Owner::Credentials,
+        });
+        assert!(!r.mutation());
+        assert!(response_matches(&r, &valid));
+        assert!(response_matches(
+            &r,
+            &ResponseResult::ReceiptNotFound {
+                mutation_id: id,
+                owner: Owner::Credentials
+            }
+        ));
+        r.params = RequestParams::ReceiptGet(myagents_host_management_protocol::ReceiptGetParams {
+            mutation_id: id,
+            owner: Owner::Config,
+        });
+        assert!(!response_matches(&r, &valid));
+        r.params = RequestParams::ReceiptGet(myagents_host_management_protocol::ReceiptGetParams {
+            mutation_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+            owner: Owner::Credentials,
+        });
+        assert!(!response_matches(&r, &valid));
     }
     #[test]
     fn request_method_and_params_remain_closed() {

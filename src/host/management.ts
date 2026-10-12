@@ -27,6 +27,7 @@ type Owner = {
   writeConfig(config: HostConfig): Promise<void>;
   workspacePath(value: string): Promise<string>;
   busy(): boolean;
+  credentialReference?: string;
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export class HostConfigError extends Error {
@@ -138,7 +139,7 @@ export async function configureHost(owner: Owner, body: Record<string, unknown>)
   };
   const receipt: ConfigReceipt | undefined = id ? { mutationId: id, status: 'persisted', revision: next.revision, effect: 'new-session', settings: next } : undefined;
   await persist({ ...config,
-    providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': 'systemd-credential:kimi' },
+    providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': owner.credentialReference ?? 'systemd-credential:kimi' },
     hostSettings: next,
     ...(receipt ? { hostConfigReceipts: { ...receipts, entries: [...receipts.entries, { requestHash, receipt }] } } : {}),
   });
