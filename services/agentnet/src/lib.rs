@@ -5,12 +5,14 @@
 //! can construct a `VerifiedSubject`, which is the only input accepted by the
 //! durable account/session owner.
 
+mod identity_http;
 mod oidc;
 mod server;
 mod store;
 #[cfg(test)]
 mod transactions;
 
+pub use identity_http::IdentityHttpConfig;
 pub use oidc::{OidcVerifier, VerifiedSubject};
 pub use server::{ServiceFileConfig, serve_from_config};
 pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionProjection};
@@ -18,6 +20,16 @@ pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionP
 pub use transactions::{LoginCallback, LoginStart, LoginTransactions};
 
 use std::time::Duration;
+
+/// Explicit operator initialization. Existing keys are never overwritten.
+pub fn initialize_identity_keys(path: impl AsRef<std::path::Path>) -> Result<(), AuthError> {
+    if !path.as_ref().is_absolute() {
+        return Err(AuthError::Configuration);
+    }
+    myagents_agentnet_identity_core::ServiceKeys::generate_initial(path)
+        .map(|_| ())
+        .map_err(|_| AuthError::Configuration)
+}
 
 /// Public service configuration contains no user/session secrets.
 #[derive(Clone)]

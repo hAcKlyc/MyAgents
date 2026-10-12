@@ -204,21 +204,39 @@ impl AuthStore {
     }
 
     pub fn validate_session(&self, token: &str) -> Result<SessionProjection, AuthError> {
+        self.with_valid_session(token, Ok)
+    }
+
+    /// Run a bounded synchronous identity operation under the live session's
+    /// database gate. Revocation through any service connection cannot race the
+    /// operation: the IMMEDIATE transaction lasts until the callback completes.
+    /// The callback must not re-enter AuthStore or perform network I/O.
+    pub fn with_valid_session<T, E: From<AuthError>>(
+        &self,
+        token: &str,
+        operation: impl FnOnce(SessionProjection) -> Result<T, E>,
+    ) -> Result<T, E> {
         if token.len() != 43
             || !token
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
         {
-            return Err(AuthError::SessionRejected);
+            return Err(AuthError::SessionRejected.into());
         }
         let token_hash = Sha256::digest(token.as_bytes()).to_vec();
-        let connection = self.connection.lock().map_err(|_| AuthError::Storage)?;
-        let now = unix_seconds().map_err(|_| AuthError::SessionRejected)?;
-        let projection = connection
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let now = unix_seconds().map_err(E::from)?;
+        let projection = transaction
             .query_row(
                 "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
-                 FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
-                 WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+             WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
                 params![token_hash, now],
                 |row| {
                     Ok(SessionProjection {
@@ -233,12 +251,20 @@ impl AuthStore {
                 },
             )
             .optional()
-            .map_err(|_| AuthError::Storage)?
-            .ok_or(AuthError::SessionRejected)?;
-        if projection.expires_at <= unix_seconds().map_err(|_| AuthError::SessionRejected)? {
-            return Err(AuthError::SessionRejected);
+            .map_err(|_| E::from(AuthError::Storage))?
+            .ok_or_else(|| E::from(AuthError::SessionRejected))?;
+        let expires_at = projection.expires_at;
+        if expires_at <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
         }
-        Ok(projection)
+        let result = operation(projection)?;
+        if expires_at <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
+        }
+        transaction
+            .commit()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        Ok(result)
     }
 
     /// Internal authorization lookup for already verified device credentials.
@@ -447,6 +473,81 @@ fn validate_database_file(path: &Path) -> Result<(), AuthError> {
 mod migration_tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn session_operation_serializes_revocation_across_service_connections() {
+        let state = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config = AuthConfig {
+            network_id: Uuid::new_v4().to_string(),
+            login_ttl: Duration::from_secs(300),
+            session_ttl: Duration::from_secs(3600),
+        };
+        let store = std::sync::Arc::new(AuthStore::open(state.path(), &config).unwrap());
+        let other = AuthStore::open(state.path(), &config).unwrap();
+        let principal = Uuid::new_v4().to_string();
+        let device = Uuid::new_v4().to_string();
+        let handle = Uuid::new_v4().to_string();
+        let bearer = URL_SAFE_NO_PAD.encode([4_u8; 32]);
+        let now = unix_seconds().unwrap();
+        {
+            let conn = store.connection.lock().unwrap();
+            conn.execute(
+                "INSERT INTO principals VALUES(?1,?2,?3,?4,?5)",
+                params![
+                    "https://gate.example.test",
+                    "subject",
+                    principal,
+                    config.network_id,
+                    now
+                ],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at,session_handle) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![Sha256::digest(bearer.as_bytes()).to_vec(),principal,device,now,now+3600,handle]).unwrap();
+        }
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_store = store.clone();
+        let operation_token = bearer.clone();
+        let operation = std::thread::spawn(move || {
+            worker_store.with_valid_session::<_, AuthError>(&operation_token, |projection| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok(projection)
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
+        let (revoked_tx, revoked_rx) = std::sync::mpsc::channel();
+        let revocation = std::thread::spawn(move || {
+            attempted_tx.send(()).unwrap();
+            let result = other.revoke_session(&bearer);
+            revoked_tx.send(result).unwrap();
+        });
+        attempted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            revoked_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        );
+        release_tx.send(()).unwrap();
+        let projection = operation.join().unwrap().unwrap();
+        revoked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        revocation.join().unwrap();
+        assert_eq!(
+            store
+                .validate_session_handle(&projection.session_handle)
+                .unwrap_err(),
+            AuthError::SessionRejected
+        );
+    }
 
     #[test]
     fn blocked_bearer_and_handle_lookups_reject_session_expiring_while_waiting() {
