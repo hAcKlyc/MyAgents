@@ -152,7 +152,11 @@ async fn connect(
             catalog_ack::CatalogAckError::NotCurrent => "CATALOG_NOT_CURRENT",
         })
     })?;
-    let mut policy = policy::hydrate(&transport, &identity.token, &local).await?;
+    let mut policy = if owned.is_some() {
+        policy::hydrate_owned(&transport, &identity.token, &local).await?
+    } else {
+        policy::hydrate(&transport, &identity.token, &local).await?
+    };
     send(
         &mut socket,
         ClientMessage::Ready {
@@ -181,7 +185,7 @@ async fn connect(
         control_gate(&envelope.message,&scope,true,true)?;
         match envelope.message{
         ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;},
-        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=policy::hydrate(&transport,&identity.token,&local).await?;publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;},
+        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=if owned.is_some(){policy::hydrate_owned(&transport,&identity.token,&local).await?}else{policy::hydrate(&transport,&identity.token,&local).await?};publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;},
         ServerMessage::Changed{..}|ServerMessage::ChannelClosed{..}|ServerMessage::RouteClosed{..}=>{},
         ServerMessage::ChannelOffer{channel_id,..}=>{send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;},
         ServerMessage::Error{code,retryable}=>{let mut e=NetworkError::cloud(&code,400);e.retryable=retryable;return Err(e);},

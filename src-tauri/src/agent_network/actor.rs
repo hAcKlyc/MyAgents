@@ -1185,7 +1185,11 @@ async fn connect(
                 async move {
                     Work::Hydrate {
                         catalog_seq,
-                        result: hydrate(&transport, &token, &local).await,
+                        result: if management_only {
+                            super::policy::hydrate_owned(&transport, &token, &local).await
+                        } else {
+                            hydrate(&transport, &token, &local).await
+                        },
                     }
                 }
                 .boxed(),
