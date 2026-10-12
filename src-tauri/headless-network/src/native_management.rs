@@ -131,14 +131,11 @@ fn make_request(
         params: input.params,
     })
 }
-fn empty_source(value: &serde_json::Value) -> Result<(), NetworkError> {
-    match (
-        value.get("items").and_then(|v| v.as_array()),
-        value.get("complete").and_then(|v| v.as_bool()),
-    ) {
-        (Some(items), Some(true)) if items.is_empty() => Ok(()),
-        (Some(items), _) if !items.is_empty() => Err(NetworkError::new("SOURCE_CATALOG_NOT_EMPTY")),
-        _ => Err(NetworkError::new("SOURCE_CATALOG_INVALID")),
+fn require_empty_source(empty: bool) -> Result<(), NetworkError> {
+    if empty {
+        Ok(())
+    } else {
+        Err(NetworkError::new("SOURCE_CATALOG_NOT_EMPTY"))
     }
 }
 async fn ready(
@@ -156,18 +153,9 @@ async fn ready(
     )
     .await?;
     let (scope, local, _) = initial_hello(socket, identity).await?;
-    let source = transport
-        .json(
-            NetworkRoute::Agents {
-                device_id: &local.device_id,
-                cursor: None,
-                limit: 1,
-            },
-            &identity.token,
-            None,
-        )
-        .await?;
-    empty_source(&source)?;
+    // Self preservation is live-epoch authenticated but deliberately does not
+    // require the new catalog ACK or public directory Ready state.
+    require_empty_source(transport.catalog_self_preservation(&identity.token).await?)?;
     let ack = transport
         .json(
             NetworkRoute::Catalog,
@@ -348,14 +336,11 @@ mod tests {
             .is_ok());
     }
     #[test]
-    fn catalog_must_be_actual_complete_empty() {
-        assert!(empty_source(&serde_json::json!({"items":[],"complete":true})).is_ok());
-        for value in [
-            serde_json::json!({"items":[{}],"complete":true}),
-            serde_json::json!({"items":[],"complete":false}),
-            serde_json::json!({"items":[]}),
-        ] {
-            assert!(empty_source(&value).is_err());
-        }
+    fn preservation_must_explicitly_prove_empty_before_put() {
+        assert!(require_empty_source(true).is_ok());
+        assert_eq!(
+            require_empty_source(false).unwrap_err().code,
+            "SOURCE_CATALOG_NOT_EMPTY"
+        );
     }
 }

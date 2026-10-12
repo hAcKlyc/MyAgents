@@ -782,6 +782,143 @@ impl MetadataStore {
         Ok(state)
     }
 
+    /// Read-only preservation gate for a zero-Agent owner, before its new
+    /// catalog is uploaded. Unlike policy hydration this includes historical
+    /// and removed records, and does not require a new-epoch catalog ACK.
+    pub fn self_catalog_empty(
+        &self,
+        context: &SessionContext,
+        trusted_active_epoch: &str,
+    ) -> Result<bool, MetadataError> {
+        validate_context(context)?;
+        if !canonical_uuid(trusted_active_epoch) {
+            return Err(MetadataError::InvalidInput);
+        }
+        let mut connection = self.connection.lock().map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        let state = tx
+            .query_row(
+                "SELECT joined,presence,connection_epoch,catalog_epoch,catalog_seq FROM devices
+             WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+                params![context.network_id, context.principal_id, context.device_id],
+                |row| {
+                    Ok((
+                        row.get::<_, bool>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| MetadataError::Storage)?
+            .ok_or(MetadataError::DeviceNotRegistered)?;
+        if !state.0
+            || !matches!(state.1.as_str(), "syncing" | "ready")
+            || state.2.as_deref() != Some(trusted_active_epoch)
+        {
+            return Err(MetadataError::CatalogStale);
+        }
+        let stored = tx.query_row(
+            "SELECT connection_epoch,catalog_seq,payload_hash,payload_json,length(CAST(payload_json AS BLOB)) FROM catalogs
+             WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+            params![context.network_id,context.principal_id,context.device_id],
+            |row| {
+                let length: i64 = row.get(4)?;
+                if length<0 || length as usize>budget("catalogBytes") {return Err(rusqlite::Error::InvalidQuery);}
+                Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?))
+            },
+        ).optional().map_err(|_| MetadataError::Storage)?;
+        let snapshot = if let Some((epoch, seq, hash, payload)) = &stored {
+            let value: Value = serde_json::from_str(payload).map_err(|_| MetadataError::Storage)?;
+            validate_catalog(&value).map_err(|_| MetadataError::Storage)?;
+            let snapshot: CatalogSnapshot =
+                serde_json::from_str(payload).map_err(|_| MetadataError::Storage)?;
+            let mut seen = std::collections::HashSet::new();
+            if digest(payload.as_bytes()) != *hash
+                || !canonical_uuid(epoch)
+                || *seq <= 0
+                || *seq > MAX_GENERATION
+                || snapshot.connection_epoch != *epoch
+                || snapshot.catalog_seq != *seq as u64
+                || state.3.as_deref() != Some(epoch.as_str())
+                || state.4 != *seq
+                || snapshot.items.len() > budget("catalogItems")
+                || snapshot
+                    .items
+                    .iter()
+                    .any(|item| !seen.insert(&item.local_agent_id))
+            {
+                return Err(MetadataError::Storage);
+            }
+            Some(snapshot)
+        } else {
+            if state.3.is_some() || state.4 != 0 {
+                return Err(MetadataError::Storage);
+            }
+            None
+        };
+        let mut all_items = std::collections::HashMap::new();
+        {
+            let mut statement=tx.prepare("SELECT local_agent_id,item_json,length(CAST(item_json AS BLOB)) FROM catalog_items
+                WHERE network_id=?1 AND principal_id=?2 AND device_id=?3").map_err(|_|MetadataError::Storage)?;
+            let mut rows = statement
+                .query(params![
+                    context.network_id,
+                    context.principal_id,
+                    context.device_id
+                ])
+                .map_err(|_| MetadataError::Storage)?;
+            let mut total = 0usize;
+            while let Some(row) = rows.next().map_err(|_| MetadataError::Storage)? {
+                let length: i64 = row.get(2).map_err(|_| MetadataError::Storage)?;
+                if length < 0 {
+                    return Err(MetadataError::Storage);
+                }
+                total = total
+                    .checked_add(length as usize)
+                    .filter(|n| *n <= budget("catalogBytes"))
+                    .ok_or(MetadataError::Storage)?;
+                if all_items.len() >= budget("catalogItems") {
+                    return Err(MetadataError::Storage);
+                }
+                let id: String = row.get(0).map_err(|_| MetadataError::Storage)?;
+                let raw: String = row.get(1).map_err(|_| MetadataError::Storage)?;
+                let value: Value =
+                    serde_json::from_str(&raw).map_err(|_| MetadataError::Storage)?;
+                validate_catalog(&json!({"version":1,"connectionEpoch":trusted_active_epoch,"catalogSeq":1,"items":[value.clone()]})).map_err(|_|MetadataError::Storage)?;
+                if value["localAgentId"].as_str() != Some(id.as_str())
+                    || all_items.insert(id, value).is_some()
+                {
+                    return Err(MetadataError::Storage);
+                }
+            }
+        }
+        if let Some(snapshot) = &snapshot {
+            for item in &snapshot.items {
+                let value = serde_json::to_value(item).map_err(|_| MetadataError::Storage)?;
+                if all_items.get(&item.local_agent_id) != Some(&value) {
+                    return Err(MetadataError::Storage);
+                }
+            }
+        } else if !all_items.is_empty() {
+            return Err(MetadataError::Storage);
+        }
+        let empty = all_items.is_empty()
+            && snapshot
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.items.is_empty());
+        validate_context(context)?;
+        tx.commit().map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        Ok(empty)
+    }
+
     /// Returns a device's own policy catalog during trusted Syncing hydration
     /// or after Ready. The epoch is supplied by the live relay registry, never
     /// by the caller's session payload; each cursor read repeats the DB/epoch
@@ -1911,5 +2048,212 @@ mod profile_pin_tests {
                 .count(),
             1
         );
+    }
+}
+
+#[cfg(test)]
+mod preservation_tests {
+    use super::*;
+    use base64::Engine;
+    fn fixture() -> (tempfile::TempDir, MetadataStore, SessionContext, String) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let store = MetadataStore::open(
+            dir.path(),
+            MetadataProfile {
+                service_id: Uuid::new_v4().to_string(),
+                environment: "development".into(),
+                network_name: "isolated".into(),
+            },
+        )
+        .unwrap();
+        let context = SessionContext {
+            principal_id: Uuid::new_v4().to_string(),
+            network_id: Uuid::new_v4().to_string(),
+            device_id: Uuid::new_v4().to_string(),
+            session_handle: Uuid::new_v4().to_string(),
+            expires_at: now_seconds().unwrap() + 3600,
+        };
+        let record = DeviceRecord {
+            principal_id: context.principal_id.clone(),
+            network_id: context.network_id.clone(),
+            device_id: context.device_id.clone(),
+            identity_binding_id: Uuid::new_v4().to_string(),
+            key_generation: 1,
+            key_fingerprint: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7; 32]),
+            csr_pem: "verified fixture".into(),
+        };
+        store
+            .register_device(
+                &context,
+                &record,
+                &DeviceInfo {
+                    name: "isolated".into(),
+                    platform: "linux".into(),
+                    os_version: "test".into(),
+                    app_version: "test".into(),
+                },
+            )
+            .unwrap();
+        store
+            .mutate_membership(
+                &context,
+                &context.device_id,
+                true,
+                0,
+                &Uuid::new_v4().to_string(),
+            )
+            .unwrap();
+        let epoch = Uuid::new_v4().to_string();
+        store
+            .set_presence(&context, 1, &epoch, Presence::Syncing, None)
+            .unwrap();
+        (dir, store, context, epoch)
+    }
+    fn snapshot(epoch: &str, seq: u64, removed: Option<bool>) -> CatalogSnapshot {
+        CatalogSnapshot {
+            version: 1,
+            connection_epoch: epoch.into(),
+            catalog_seq: seq,
+            items: removed
+                .into_iter()
+                .map(|removed| myagents_agent_network_protocol::CatalogItem {
+                    local_agent_id: "isolated-agent".into(),
+                    local_workspace_id: "isolated-workspace".into(),
+                    name: "isolated".into(),
+                    path: "/srv/isolated".into(),
+                    lifecycle: if removed {
+                        myagents_agent_network_protocol::CatalogLifecycle::Removed
+                    } else {
+                        myagents_agent_network_protocol::CatalogLifecycle::Active
+                    },
+                    exposure_revision: 0,
+                    icon: None,
+                })
+                .collect(),
+        }
+    }
+    #[test]
+    fn before_ack_and_reconnect_old_empty_catalog_are_read_only() {
+        let (_dir, store, context, epoch) = fixture();
+        assert!(store.self_catalog_empty(&context, &epoch).unwrap());
+        assert_eq!(
+            store
+                .list_self_policy(&context, &epoch, None, 1)
+                .unwrap_err(),
+            MetadataError::CatalogStale
+        );
+        assert_eq!(
+            store
+                .read_relay_state(&context, &context.device_id)
+                .unwrap()
+                .durable_ack_seq,
+            None
+        );
+        store
+            .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, 1, None))
+            .unwrap();
+        store
+            .set_presence(&context, 1, &epoch, Presence::Ready, Some(1))
+            .unwrap();
+        assert!(store.self_catalog_empty(&context, &epoch).unwrap());
+        let next = Uuid::new_v4().to_string();
+        store
+            .set_presence(&context, 1, &next, Presence::Syncing, None)
+            .unwrap();
+        assert!(store.self_catalog_empty(&context, &next).unwrap());
+        assert_eq!(
+            store
+                .read_relay_state(&context, &context.device_id)
+                .unwrap()
+                .catalog_epoch
+                .as_deref(),
+            Some(epoch.as_str())
+        );
+        assert_eq!(
+            store.self_catalog_empty(&context, &epoch).unwrap_err(),
+            MetadataError::CatalogStale
+        );
+        let foreign = SessionContext {
+            principal_id: Uuid::new_v4().to_string(),
+            ..context.clone()
+        };
+        assert!(store.self_catalog_empty(&foreign, &next).is_err());
+        store
+            .set_presence(&context, 1, &next, Presence::Offline, None)
+            .unwrap();
+        assert!(store.self_catalog_empty(&context, &next).is_err());
+    }
+    #[test]
+    fn active_removed_and_historical_rows_are_never_empty() {
+        let (_dir, store, context, epoch) = fixture();
+        for (seq, removed) in [(1, false), (2, true)] {
+            store
+                .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, seq, Some(removed)))
+                .unwrap();
+            assert!(!store.self_catalog_empty(&context, &epoch).unwrap());
+        }
+        store
+            .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, 3, None))
+            .unwrap();
+        assert!(store
+            .list_self_policy(&context, &epoch, None, 1)
+            .unwrap()
+            .items
+            .is_empty());
+        assert!(!store.self_catalog_empty(&context, &epoch).unwrap());
+        let next = Uuid::new_v4().to_string();
+        store
+            .set_presence(&context, 1, &next, Presence::Syncing, None)
+            .unwrap();
+        assert!(!store.self_catalog_empty(&context, &next).unwrap());
+    }
+    #[test]
+    fn corrupt_payload_and_orphan_projection_fail_closed() {
+        let (_dir, store, context, epoch) = fixture();
+        store
+            .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, 1, Some(false)))
+            .unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("UPDATE catalog_items SET item_json='{}'", [])
+            .unwrap();
+        assert_eq!(
+            store.self_catalog_empty(&context, &epoch).unwrap_err(),
+            MetadataError::Storage
+        );
+        store
+            .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, 2, Some(false)))
+            .unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM catalog_items", [])
+            .unwrap();
+        assert_eq!(
+            store.self_catalog_empty(&context, &epoch).unwrap_err(),
+            MetadataError::Storage
+        );
+        store
+            .upload_catalog(&context, 1, &epoch, &snapshot(&epoch, 3, Some(false)))
+            .unwrap();
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute("UPDATE catalogs SET payload_hash='bad'", [])
+            .unwrap();
+        assert_eq!(
+            store.self_catalog_empty(&context, &epoch).unwrap_err(),
+            MetadataError::Storage
+        );
+        let expired = SessionContext {
+            expires_at: 0,
+            ..context.clone()
+        };
+        assert!(store.self_catalog_empty(&expired, &epoch).is_err());
     }
 }

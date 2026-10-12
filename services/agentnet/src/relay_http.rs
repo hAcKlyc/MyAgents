@@ -42,11 +42,47 @@ pub fn router(controller: Arc<RelayController>) -> Router<()> {
         )
         .route("/api/agent-network/policy/self", get(self_policy))
         .route(
+            "/api/agent-network/catalog/self-preservation",
+            get(self_catalog_preservation),
+        )
+        .route(
             "/api/agent-network/devices/{device}/address",
             get(device_address),
         )
         .layer(middleware::from_fn(no_store))
         .with_state(state)
+}
+
+async fn self_catalog_preservation(
+    State(state): State<Arc<HttpState>>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if uri.query().is_some() || !bounded_headers(&headers) {
+        return fixed_error(StatusCode::BAD_REQUEST, "INVALID_REQUEST");
+    }
+    let controller = state.controller.clone();
+    let auth_headers = headers.clone();
+    let auth_uri = uri.clone();
+    let access = match run_blocking(state.clone(), move || {
+        controller.admit_http(&auth_headers, &Method::GET, &auth_uri)
+    })
+    .await
+    {
+        Ok(Ok(access)) => access,
+        Ok(Err(response)) => return *response,
+        Err(status) => return fixed_error(status, "RELAY_UNAVAILABLE"),
+    };
+    let controller = state.controller.clone();
+    match run_blocking(state, move || controller.self_catalog_preservation(&access)).await {
+        Ok(Ok(empty)) => (
+            StatusCode::OK,
+            Json(json!({"ok":true,"data":{"empty":empty}})),
+        )
+            .into_response(),
+        Ok(Err(error)) => relay_error(error),
+        Err(status) => fixed_error(status, "RELAY_UNAVAILABLE"),
+    }
 }
 
 async fn device_address(
@@ -592,6 +628,45 @@ pub(crate) mod tests {
             .merge(fixture.service.router())
             .merge(router(controller));
 
+        let preservation_uri = "/api/agent-network/catalog/self-preservation";
+        let headers =
+            signed_headers(&routes, &fixture, &device, "GET", preservation_uri, false).await;
+        let preserved = response(routes.clone(), Method::GET, preservation_uri, headers, "").await;
+        assert_eq!(preserved.status(), StatusCode::OK);
+        assert_eq!(preserved.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(preserved.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"ok":true,"data":{"empty":true}})
+        );
+        let headers =
+            signed_headers(&routes, &fixture, &device, "GET", preservation_uri, false).await;
+        let query = response(
+            routes.clone(),
+            Method::GET,
+            &format!("{preservation_uri}?device=foreign"),
+            headers,
+            "",
+        )
+        .await;
+        assert_eq!(query.status(), StatusCode::BAD_REQUEST);
+        let challenge = response(
+            routes.clone(),
+            Method::GET,
+            preservation_uri,
+            bearer_headers(&device),
+            "",
+        )
+        .await;
+        let nonce = challenge.headers()["dpop-nonce"].to_str().unwrap();
+        let mut headers = bearer_headers(&device);
+        headers.insert(
+            "dpop",
+            HeaderValue::from_str(&fixture.proof(&device, "POST", preservation_uri, Some(nonce)))
+                .unwrap(),
+        );
+        let wrong = response(routes.clone(), Method::GET, preservation_uri, headers, "").await;
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
         let policy_uri = "/api/agent-network/policy/self";
         let headers = signed_headers(&routes, &fixture, &device, "GET", policy_uri, false).await;
         let before_catalog = response(routes.clone(), Method::GET, policy_uri, headers, "").await;
@@ -661,6 +736,91 @@ pub(crate) mod tests {
         let bytes = to_bytes(policy.into_body(), 64 * 1024).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn preservation_http_includes_removed_records_and_never_uploads() {
+        let fixture = Fixture::new();
+        let device = fixture.device("preservation-owner");
+        let (controller, epoch, _) = joined_syncing_controller(&fixture, &device).await;
+        let routes = router(controller);
+        let catalog_uri = "/v1/devices/self/catalog";
+        let headers = signed_headers(&routes, &fixture, &device, "PUT", catalog_uri, true).await;
+        let body=json!({"version":1,"connectionEpoch":epoch,"catalogSeq":1,"items":[{
+            "localAgentId":"isolated-agent","localWorkspaceId":"isolated-workspace","name":"isolated",
+            "path":"/srv/isolated","lifecycle":"removed","exposureRevision":0
+        }]}).to_string();
+        let uploaded = response(routes.clone(), Method::PUT, catalog_uri, headers, &body).await;
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let uri = "/api/agent-network/catalog/self-preservation";
+        let headers = signed_headers(&routes, &fixture, &device, "GET", uri, false).await;
+        let result = response(routes.clone(), Method::GET, uri, headers, "").await;
+        assert_eq!(result.status(), StatusCode::OK);
+        assert_eq!(result.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"ok":true,"data":{"empty":false}})
+        );
+        let policy_uri = "/api/agent-network/policy/self";
+        let headers = signed_headers(&routes, &fixture, &device, "GET", policy_uri, false).await;
+        let result = response(routes, Method::GET, policy_uri, headers, "").await;
+        assert_eq!(result.status(), StatusCode::OK);
+        let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["data"]["items"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn preservation_rechecks_live_revocation_expiry_membership_and_epoch() {
+        for scenario in ["revoked", "expired", "left", "stale-epoch"] {
+            let fixture = Fixture::new();
+            let device = fixture.device("preservation-live-owner");
+            let (controller, epoch, _) = joined_syncing_controller(&fixture, &device).await;
+            let routes = router(controller);
+            let uri = "/api/agent-network/catalog/self-preservation";
+            // This genuine proof was minted while the owner was still current.
+            let headers = signed_headers(&routes, &fixture, &device, "GET", uri, false).await;
+            match scenario {
+                "revoked" => fixture.auth.revoke_session(&device.account_token).unwrap(),
+                "expired" => fixture
+                    .auth
+                    .expire_session_for_test(&device.account_token)
+                    .unwrap(),
+                "left" => {
+                    let leave = format!(
+                        "/v1/networks/{}/devices/{}/leave",
+                        fixture.network, device.context.device_id
+                    );
+                    let body=json!({"mutationId":uuid::Uuid::new_v4().to_string(),"expectedMembershipRevision":1}).to_string();
+                    assert_eq!(
+                        fixture.request(&device, "POST", &leave, &body).await.0,
+                        StatusCode::OK
+                    );
+                }
+                "stale-epoch" => fixture
+                    .service
+                    .metadata
+                    .set_presence(
+                        &device.context,
+                        1,
+                        &uuid::Uuid::new_v4().to_string(),
+                        myagents_agentnet_metadata_core::Presence::Syncing,
+                        None,
+                    )
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            let result = response(routes, Method::GET, uri, headers, "").await;
+            assert_eq!(result.status(), StatusCode::FORBIDDEN, "{scenario}");
+            assert_eq!(result.headers()[header::CACHE_CONTROL], "no-store");
+            let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes).unwrap(),
+                json!({"ok":false,"error":{"code":"RELAY_REJECTED"}})
+            );
+            let _ = epoch;
+        }
     }
 
     #[tokio::test]

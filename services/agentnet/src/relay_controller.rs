@@ -154,6 +154,30 @@ impl RelayController {
         })
     }
 
+    /// No catalog rewrite: the authenticated current device can inspect its
+    /// complete persisted source before uploading a new zero-Agent catalog.
+    pub(crate) fn self_catalog_preservation(
+        &self,
+        access: &ValidatedAccess,
+    ) -> Result<bool, RelayFailure> {
+        let connection_id = self.connection_for_access(access)?;
+        self.with_live(access, |live| {
+            if !live.metadata.joined {
+                return Err(rejected());
+            }
+            let epoch = self.recheck_connection(&connection_id, access)?;
+            if live.metadata.connection_epoch.as_deref() != Some(epoch.as_str())
+                || !matches!(live.metadata.presence, Presence::Syncing | Presence::Ready)
+            {
+                return Err(rejected());
+            }
+            self.network
+                .metadata
+                .self_catalog_empty(&live.context, &epoch)
+                .map_err(map_metadata)
+        })
+    }
+
     /// Resolve a zero-Agent device only from the live relay and durable owners.
     /// Both sessions are locked together; directory metadata is never enough.
     pub(crate) fn device_address(

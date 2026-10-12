@@ -78,6 +78,26 @@ fn decode_device_address(
     response.data.validate(local, device)?;
     Ok(response.data)
 }
+const PRESERVATION_PATH: &str = "/api/agent-network/catalog/self-preservation";
+fn decode_catalog_preservation(bytes: &[u8]) -> Result<bool, NetworkError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Data {
+        empty: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Envelope {
+        ok: bool,
+        data: Data,
+    }
+    let response: Envelope =
+        serde_json::from_slice(bytes).map_err(|_| NetworkError::new("SOURCE_CATALOG_INVALID"))?;
+    if !response.ok {
+        return Err(NetworkError::new("SOURCE_CATALOG_INVALID"));
+    }
+    Ok(response.data.empty)
+}
 pub(crate) struct NetworkTransport {
     memory: super::memory::MemoryBudget,
     origin: url::Url,
@@ -86,6 +106,50 @@ pub(crate) struct NetworkTransport {
     nonce: Mutex<Option<String>>,
 }
 impl NetworkTransport {
+    /// Owned-only device-scoped preservation proof, not vendor metadata or a write grant.
+    pub(crate) async fn catalog_self_preservation(
+        &self,
+        token: &str,
+    ) -> Result<bool, NetworkError> {
+        let method = reqwest::Method::GET;
+        let url = self
+            .origin
+            .join(PRESERVATION_PATH)
+            .map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
+        let diagnostic = RequestDiagnostic::new("agent-network", &method, PRESERVATION_PATH);
+        let mut response = self
+            .authenticated(
+                self.client.get(url.clone()),
+                &method,
+                &url,
+                token,
+                &diagnostic,
+            )
+            .await?;
+        let status = response.status();
+        let retry_after = super::reconnect::retry_after(&response);
+        let mut request_id = response_request_id(&response);
+        let mut allocation = self.memory.reserve(0)?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_TRANSPORT_FAILED"))?
+        {
+            let size = bytes
+                .len()
+                .checked_add(chunk.len())
+                .filter(|size| *size <= 8192)
+                .ok_or_else(|| NetworkError::new("SOURCE_CATALOG_INVALID"))?;
+            allocation.resize(size.saturating_mul(2))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return decode_response(status, &bytes, retry_after, &mut request_id)
+                .and_then(|_| Err(NetworkError::new("SOURCE_CATALOG_INVALID")));
+        }
+        decode_catalog_preservation(&bytes)
+    }
     pub(crate) async fn device_address(
         &self,
         token: &str,
@@ -970,6 +1034,30 @@ mod device_address_tests {
             let mut bad = address.clone();
             bad.scope.key_generation = generation;
             assert!(bad.validate(&local, &bad.scope.device_id).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod preservation_tests {
+    use super::*;
+    #[test]
+    fn preservation_is_closed_bool_on_fixed_self_route() {
+        assert_eq!(
+            PRESERVATION_PATH,
+            "/api/agent-network/catalog/self-preservation"
+        );
+        assert!(decode_catalog_preservation(br#"{"ok":true,"data":{"empty":true}}"#).unwrap());
+        assert!(!decode_catalog_preservation(br#"{"ok":true,"data":{"empty":false}}"#).unwrap());
+        for bytes in [
+            br#"{"ok":true,"data":{"empty":true,"token":"unexpected"}}"#.as_slice(),
+            br#"{"ok":true,"data":{"empty":true,"empty":false}}"#,
+            br#"{"ok":true,"data":{"empty":"true"}}"#,
+            br#"{"ok":false,"data":{"empty":true}}"#,
+            br#"{"ok":true,"data":{}}"#,
+            br#"{"ok":true,"data":{"empty":true},"scope":{}}"#,
+        ] {
+            assert!(decode_catalog_preservation(bytes).is_err());
         }
     }
 }
