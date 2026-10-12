@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { constants } from 'node:fs';
 import { copyFile, mkdir, open, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -13,7 +14,7 @@ import { syncTranscriptDirectory } from './file';
 
 /** Fork-owned copies are prepared before the target history is published. */
 export async function copyForkAttachments(messages: readonly SessionMessage[], targetId: string): Promise<SessionMessage[]> {
-  const userRoot = path.join(homedir(), '.myagents', 'attachments');
+  const userRoot = path.join(homedir(), APP_DATA_DIR_NAME, 'attachments');
   const toolRoot = getToolAttachmentRoot();
   const copy = async (source: string, destination: string, root: string, maxBytes?: number) => {
     const checked = validateExternalReadPathNode(source, { canonicalizeSymlinks: true });
@@ -83,7 +84,7 @@ export async function copyForkAttachments(messages: readonly SessionMessage[], t
 
 /** Only a fresh, unpublished fork transaction may remove these target roots. */
 export async function discardForkAttachments(targetId: string): Promise<void> {
-  for (const root of [path.join(homedir(), '.myagents', 'attachments'), getToolAttachmentRoot()]) {
+  for (const root of [path.join(homedir(), APP_DATA_DIR_NAME, 'attachments'), getToolAttachmentRoot()]) {
     await rm(path.join(root, targetId), { recursive: true, force: true });
   }
 }

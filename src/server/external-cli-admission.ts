@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../shared/appProfile';
 import { timingSafeEqual } from 'node:crypto';
 
 import {
@@ -74,7 +75,7 @@ export async function admitAdminRequest(
         code: 'EXTERNAL_CLI_CAPABILITY_NOT_OPEN',
         error: `The command route '${route}' is available only inside MyAgents.`,
         suggestion:
-          'Use `myagents --help` to list the public external commands.',
+          `Use \`${APP_CLI_NAME} --help\` to list the public external commands.`,
       },
     };
   }

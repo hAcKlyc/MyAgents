@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 // Edge TTS MCP Tool — Free text-to-speech using Microsoft Edge's online TTS API
 // Self-implemented WebSocket protocol (no npm dependency)
 // In-process MCP server (same pattern as gemini-image-tool)
@@ -71,7 +72,7 @@ function getGeneratedAudioDir(): string {
   const workspace = edgeTtsConfig?.workspace;
   const dir = workspace
     ? join(workspace, 'myagents_files', 'generated_audio')
-    : join(homedir(), '.myagents', 'generated_audio');
+    : join(homedir(), APP_DATA_DIR_NAME, 'generated_audio');
   if (!existsSync(dir)) {
     ensureDirSync(dir);
     if (workspace) ensureGitignorePattern(workspace, 'myagents_files/');

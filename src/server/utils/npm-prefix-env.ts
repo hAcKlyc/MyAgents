@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { normalize, win32 as pathWin32 } from 'path';
 
 const NPM_PREFIX_ENV_KEYS = [
@@ -16,8 +17,8 @@ export function getMyAgentsNpmGlobalPrefix(
 ): string | null {
   if (!home) return null;
   return isWindowsPlatform(platform)
-    ? pathWin32.resolve(home, '.myagents', 'npm-global')
-    : `${home}/.myagents/npm-global`;
+    ? pathWin32.resolve(home, APP_DATA_DIR_NAME, 'npm-global')
+    : `${home}/${APP_DATA_DIR_NAME}/npm-global`;
 }
 
 export function getMyAgentsNpmGlobalBinDir(

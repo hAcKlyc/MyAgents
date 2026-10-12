@@ -244,6 +244,9 @@ fn should_request_exit_confirmation(code: Option<i32>, confirmed: bool) -> bool 
 
 fn app_context() -> tauri::Context<tauri::Wry> {
     let context = tauri::generate_context!();
+    if crate::app_dirs::IS_MOXBOT {
+        assert_eq!(context.config().identifier, "com.moxbot.app", "MoX bot requires its isolated bundle configuration");
+    }
     #[cfg(target_os = "windows")]
     let context = {
         let mut context = context;
@@ -1103,7 +1106,7 @@ pub fn run() {
                 WebviewUrl::default(),
             )
             .scroll_bar_style(crate::webview_policy::scroll_bar_style())
-            .title("MyAgents")
+            .title(crate::app_dirs::APP_DISPLAY_NAME)
             .inner_size(1200.0, 800.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)

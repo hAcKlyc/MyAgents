@@ -30,6 +30,15 @@ function getBuildVersions() {
 
 const buildVersions = getBuildVersions();
 
+function getBuildProfile(): 'myagents' | 'moxbot' {
+  const profile = process.env.MYAGENTS_BUILD_PROFILE;
+  if (profile === undefined) return 'myagents';
+  if (profile === 'myagents' || profile === 'moxbot') return profile;
+  throw new Error('MYAGENTS_BUILD_PROFILE must be either "myagents" or "moxbot"');
+}
+
+const buildProfile = getBuildProfile();
+
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
   plugins: [react(), tailwindcss()],
@@ -57,6 +66,9 @@ export default defineConfig({
   // Define environment variables for client code
   define: {
     ...dshBuildDefines(__dirname),
+    // Keep product identity closed and identical to the Node/Rust profile
+    // selected for this build. `src/shared/appProfile.ts` consumes this value.
+    '__MYAGENTS_BUILD_PROFILE__': JSON.stringify(buildProfile),
     // DEBUG_MODE: true when VITE_DEBUG_MODE is set or in dev server mode
     '__DEBUG_MODE__': JSON.stringify(process.env.VITE_DEBUG_MODE === 'true'),
     // Build-time version info for developer mode

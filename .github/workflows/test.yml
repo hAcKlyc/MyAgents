@@ -134,6 +134,10 @@ jobs:
       - run: npm run build:bridge
       - run: npm run build:cli
       - run: npm run build:web
+      - name: Build isolated MoX bot JS profiles
+        run: npm run build:assets
+        env:
+          MYAGENTS_BUILD_PROFILE: moxbot
 
   # Rust gate: cargo test plus project redline Clippy rules. We only deny
   # disallowed_methods/macros here; ordinary Clippy warnings stay non-fatal
@@ -189,6 +193,10 @@ jobs:
           printf 'ci placeholder\n' > src-tauri/resources/playwright-control/playwright/.ci-placeholder
           printf 'ci placeholder\n' > src-tauri/resources/playwright-control/playwright-core/.ci-placeholder
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - name: Validate isolated MoX bot Rust profile
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked app_profile_tests
+        env:
+          MYAGENTS_BUILD_PROFILE: moxbot
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D clippy::disallowed_methods -D clippy::disallowed_macros
 
   # `--all-targets` above covers Rust target kinds for Linux; it does not

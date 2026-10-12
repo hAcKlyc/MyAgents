@@ -299,8 +299,8 @@ fn reconcile_launchers(
     // Install the extensionless entry first. If the second rename fails, an
     // old Windows .cmd will try to parse this shell launcher as JavaScript and
     // fail closed instead of executing the old business payload.
-    let mut changed = install_launcher(&bin_dir.join("myagents"), posix.as_bytes(), true)?;
-    changed |= install_launcher(&bin_dir.join("myagents.cmd"), windows.as_bytes(), false)?;
+    let mut changed = install_launcher(&bin_dir.join(crate::app_dirs::APP_CLI_NAME), posix.as_bytes(), true)?;
+    changed |= install_launcher(&bin_dir.join(format!("{}.cmd", crate::app_dirs::APP_CLI_NAME)), windows.as_bytes(), false)?;
 
     let retired_marker = data_dir.join(".cli-version");
     match fs::symlink_metadata(&retired_marker) {

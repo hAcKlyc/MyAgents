@@ -39,6 +39,7 @@ import { track } from '@/analytics';
 import myAgentsLogo from '@/assets/runtime-icons/myagents.png';
 import { updateSession, type SessionMetadata } from '@/api/sessionClient';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
+import { APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import FeedbackPopover from '@/components/FeedbackPopover';
 import AccountEntry from '@/features/account/AccountEntry';
@@ -1163,7 +1164,7 @@ export default memo(function GlobalSidebar({
               aria-hidden={!expanded}
               data-global-sidebar-brand-name
             >
-              <MyAgentsLogotype variant="compact" className="global-sidebar-brand-logotype" title="MyAgents" />
+              <MyAgentsLogotype variant="compact" className="global-sidebar-brand-logotype" title={APP_DISPLAY_NAME} />
             </span>
           </button>
           {searchAvailable && (

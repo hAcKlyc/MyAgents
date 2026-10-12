@@ -24,6 +24,7 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import DropZoneOverlay from '@/components/DropZoneOverlay';
 import SimpleChatInput, {
   type ImageAttachment,
@@ -651,7 +652,7 @@ export default memo(function BrandSection({
         <h1 className="theme-product-wordmark theme-launcher-hero-title">
           <MyAgentsLogotype
             className="launcher-hero-logotype"
-            title={resolvedTheme.hero.productName}
+            title={APP_BUILD_PROFILE === 'moxbot' ? APP_DISPLAY_NAME : resolvedTheme.hero.productName}
           />
         </h1>
         {/* 品牌 slogan 的 15px/17px 是 DESIGN.md §3.3 立档的展示型字号（display 用途），

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export interface PromptCacheKeyInput {
-  appNamespace: 'myagents';
+  appNamespace: 'myagents' | 'moxbot';
   providerId: string;
   model: string | undefined;
   sessionId: string | undefined;

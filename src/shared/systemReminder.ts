@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from './appProfile';
 export const SYSTEM_REMINDER_OPEN = '<system-reminder>';
 export const SYSTEM_REMINDER_CLOSE = '</system-reminder>';
 export const FLOATING_BALL_CONTEXT_TAG = 'FLOATING_BALL_CONTEXT';
@@ -271,7 +272,7 @@ export function buildTaskCommentReminder(input: TaskCommentReminderInput): strin
     '<instruction>',
     'This user query was posted from the local MyAgents Task comment timeline.',
     'Read and act on the visible comment.',
-    `To reply on that Task timeline, write the reply body to a UTF-8 file and run \`myagents task comment ${escapeSystemReminderText(input.taskId)} --body-file <reply-file> --reply-to ${escapeSystemReminderText(input.commentId)} --json\`.`,
+    `To reply on that Task timeline, write the reply body to a UTF-8 file and run \`${APP_CLI_NAME} task comment ${escapeSystemReminderText(input.taskId)} --body-file <reply-file> --reply-to ${escapeSystemReminderText(input.commentId)} --json\`.`,
     'Do not assume your normal assistant output is copied back automatically.',
     '</instruction>',
     '<task>',
@@ -318,12 +319,12 @@ function goalTerminalGuidance(input: GoalReminderInput): string[] {
       'Termination policy:',
       '- The user disabled autonomous Goal termination. You cannot mark this Goal complete or blocked.',
       '- Keep the Goal active even if you believe it is complete or blocked; report your evidence or blocker in the response and wait for the user or system to decide the terminal state.',
-      '- Do not call `myagents goal update` for this Goal.',
+      `- Do not call \`${APP_CLI_NAME} goal update\` for this Goal.`,
     ];
   }
   return [
     'If the Goal is achieved, run:',
-    '  myagents goal update --status complete',
+    `  ${APP_CLI_NAME} goal update --status complete`,
     '',
     'Blocked audit:',
     '- Do not mark the Goal blocked the first time a blocker appears.',
@@ -333,24 +334,24 @@ function goalTerminalGuidance(input: GoalReminderInput): string[] {
     '- Never use status "blocked" merely because the work is hard, slow, uncertain, incomplete, or would benefit from clarification.',
     '',
     'If the strict blocked audit is satisfied, run:',
-    '  myagents goal update --status blocked',
+    `  ${APP_CLI_NAME} goal update --status blocked`,
     '',
-    'Do not call myagents goal update unless the Goal is complete or the strict blocked audit above is satisfied. Do not mark a Goal complete merely because you are stopping, because the user interrupted a turn, or because you made partial progress.',
+    `Do not call ${APP_CLI_NAME} goal update unless the Goal is complete or the strict blocked audit above is satisfied. Do not mark a Goal complete merely because you are stopping, because the user interrupted a turn, or because you made partial progress.`,
   ];
 }
 
 function goalTerminalCommandGuidance(input: GoalReminderInput): string[] {
   if (input.aiCanExit === false) {
     return [
-      'The user disabled autonomous Goal termination. Do not call `myagents goal update`; report completion evidence or blockers without changing the Goal status.',
+      `The user disabled autonomous Goal termination. Do not call \`${APP_CLI_NAME} goal update\`; report completion evidence or blockers without changing the Goal status.`,
     ];
   }
   return [
     'If the updated Goal is achieved, run:',
-    '  myagents goal update --status complete',
+    `  ${APP_CLI_NAME} goal update --status complete`,
     '',
     'If the strict blocked audit is satisfied, run:',
-    '  myagents goal update --status blocked',
+    `  ${APP_CLI_NAME} goal update --status blocked`,
   ];
 }
 

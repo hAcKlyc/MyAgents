@@ -1,3 +1,4 @@
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * Unified system prompt assembly for MyAgents.
  *
@@ -54,7 +55,7 @@ MyAgents 负责会话管理、工具权限、定时任务、IM Bot 集成、工�
 
 当前执行 Runtime: {{runtimeName}}
 
-用户全局配置目录: ~/.myagents
+用户全局配置目录: ~/${APP_DATA_DIR_NAME}
 当对话涉及日期、时间或星期时,先用 Bash 执行 \`date\` 获取准确的当前时间再作判断——系统信息中的日期可能已过期。
 </myagents-identity>`;
 
@@ -69,7 +70,7 @@ const TMPL_CHANNEL_IM = `<myagents-interaction-channel>
 const TMPL_CRON_TASK = `<myagents-cron-task-instructions>
 你正处于心跳循环任务模式 (Task ID: {{taskId}})。每隔 {{intervalText}} 系统触发唤醒你一次。{{#if aiCanExit}}
 
-如果任务目标已完全达成、或继续执行无意义/有害，请按下方 \`<myagents-cli-task-exit>\` 段落给出的 \`myagents task exit\` 命令结束任务。{{/if}}
+如果任务目标已完全达成、或继续执行无意义/有害，请按下方 \`<myagents-cli-task-exit>\` 段落给出的 \`${APP_CLI_NAME} task exit\` 命令结束任务。{{/if}}
 </myagents-cron-task-instructions>`;
 
 const TMPL_HEARTBEAT = `<myagents-heartbeat-instructions>

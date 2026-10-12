@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from './appProfile';
 export const MAX_ATTACHMENT_BYTES = 32 * 1024 * 1024; // 32 MB
 export const ATTACHMENTS_DIR_NAME = 'attachments';
 
@@ -52,11 +53,11 @@ export const API_ENDPOINTS = {
  * File system paths for Skills & Commands
  */
 export const FS_PATHS = {
-    USER_SKILLS_DIR: '~/.myagents/skills/',
-    USER_COMMANDS_DIR: '~/.myagents/commands/',
+    USER_SKILLS_DIR: `~/${APP_DATA_DIR_NAME}/skills/`,
+    USER_COMMANDS_DIR: `~/${APP_DATA_DIR_NAME}/commands/`,
     PROJECT_SKILLS_DIR: '.claude/skills/',
     PROJECT_COMMANDS_DIR: '.claude/commands/',
-    USER_AGENTS_DIR: '~/.myagents/agents/',
+    USER_AGENTS_DIR: `~/${APP_DATA_DIR_NAME}/agents/`,
     PROJECT_AGENTS_DIR: '.claude/agents/',
 } as const;
 

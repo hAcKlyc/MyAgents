@@ -20,6 +20,7 @@ import {
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isTauri } from '@/api/tauriClient';
+import { APP_BUILD_PROFILE } from '../../shared/appProfile';
 
 interface CustomTitleBarProps {
     children: ReactNode;  // TabBar component
@@ -229,7 +230,7 @@ export default function CustomTitleBar({
                     install mid-replacement could land on inconsistent
                     cache/disk state. Reappears automatically when the
                     replacement commits (with the new version). */}
-                {updateReady && !updatePreparing && (
+                {APP_BUILD_PROFILE === 'myagents' && updateReady && !updatePreparing && (
                     <>
                         <button
                             onClick={updateInstalling ? undefined : onRestartAndUpdate}

@@ -1,3 +1,4 @@
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { nextAgentNetworkExposureRevision } from "../shared/config-types";
 import { resolveAgentConfigMutation, mutationForAgentModelSelection, type AgentModelSelection } from '../shared/agentConfigMutation';
 import { APP_BUILD_IDENTITY, SIDECAR_BUILD_IDENTITY, SIDECAR_STARTED_AT } from './build-identity';
@@ -350,7 +351,7 @@ export async function handleMcpShow(payload: {
       success: false,
       error: 'Missing required argument: <mcp-id>',
       recoveryHint: {
-        recoveryCommand: 'myagents mcp list',
+        recoveryCommand: `${APP_CLI_NAME} mcp list`,
         message: 'See valid MCP server ids.',
       },
     };
@@ -363,7 +364,7 @@ export async function handleMcpShow(payload: {
       success: false,
       error: `MCP server '${id}' not found.`,
       recoveryHint: {
-        recoveryCommand: 'myagents mcp list',
+        recoveryCommand: `${APP_CLI_NAME} mcp list`,
         message: 'See valid MCP server ids.',
       },
     };
@@ -499,7 +500,7 @@ export async function handleMcpAdd(payload: {
   return {
     success: true,
     data: { id: server.id, name: server.name },
-    hint: 'Server added. Use "myagents mcp enable" to activate.',
+    hint: `Server added. Use "${APP_CLI_NAME} mcp enable" to activate.`,
   };
 }
 
@@ -699,9 +700,9 @@ export async function handleMcpTest(payload: {
   if (!getEnabledMcpServerIds(config).includes(id)) {
     return {
       success: false,
-      error: `MCP server '${id}' is disabled globally. Enable it with myagents mcp enable ${id} --scope global.`,
+      error: `MCP server '${id}' is disabled globally. Enable it with ${APP_CLI_NAME} mcp enable ${id} --scope global.`,
       recoveryHint: {
-        recoveryCommand: `myagents mcp enable ${id} --scope global`,
+        recoveryCommand: `${APP_CLI_NAME} mcp enable ${id} --scope global`,
         message: 'Global enablement is required before this server can be used in a Session.',
       },
     };
@@ -769,7 +770,7 @@ export async function handleMcpTest(payload: {
           sessionScoped: true,
         },
         recoveryHint: {
-          recoveryCommand: 'myagents mcp test myagents-browser',
+          recoveryCommand: `${APP_CLI_NAME} mcp test myagents-browser`,
           message:
             'Run this check from an active MyAgents Agent Session after the application Browser Host is ready.',
         },
@@ -894,7 +895,7 @@ export async function handleMcpTest(payload: {
     if (statusCode === 401 || statusCode === 403) {
       const hint = usedStoredOAuth
         ? 'OAuth token may be expired or revoked. Try re-authorizing.'
-        : 'This server may require OAuth authorization. Use Settings UI or `myagents mcp oauth start`.';
+        : `This server may require OAuth authorization. Use Settings UI or \`${APP_CLI_NAME} mcp oauth start\`.`;
       return {
         success: false,
         error: `Authentication failed (HTTP ${statusCode}). ${hint}`,
@@ -1310,7 +1311,7 @@ export async function handleModelVerify(payload: {
         code: 'SUBSCRIPTION_AUTH_OWNER_REQUIRED',
         error: `Provider '${id}' uses a host-managed subscription login, not a MyAgents API key.`,
         recoveryHint: {
-          recoveryCommand: 'myagents model list --json',
+          recoveryCommand: `${APP_CLI_NAME} model list --json`,
           message:
             'Open Settings → Model Providers, complete the subscription login there, and verify it from that screen.',
         },
@@ -1321,7 +1322,7 @@ export async function handleModelVerify(payload: {
     if (!apiKey) {
       return {
         success: false,
-        error: `No API key set for provider '${id}'. Use 'myagents model set-key' first.`,
+        error: `No API key set for provider '${id}'. Use '${APP_CLI_NAME} model set-key' first.`,
       };
     }
 
@@ -1486,7 +1487,7 @@ export async function handleModelAdd(payload: {
   return {
     success: true,
     data: { id: providerObj.id, name: providerObj.name, models: modelIds },
-    hint: `Provider added. Use 'myagents model set-key ${providerObj.id} <key>' to set API key.`,
+    hint: `Provider added. Use '${APP_CLI_NAME} model set-key ${providerObj.id} <key>' to set API key.`,
   };
 }
 
@@ -1771,7 +1772,7 @@ export async function handleAgentCurrent(): Promise<AdminResponse> {
         success: false,
         error: `Current workspace is not linked to a visible Agent project: ${workspacePath}`,
         recoveryHint: {
-          recoveryCommand: 'myagents agent list',
+          recoveryCommand: `${APP_CLI_NAME} agent list`,
           message: 'Inspect addressable Agent workspaces.',
         },
       };
@@ -1818,7 +1819,7 @@ export async function handleAgentEnable(payload: {
       success: false,
       error: `Agent '${id}' belongs to an archived workspace.`,
       recoveryHint: {
-        recoveryCommand: `myagents agent unarchive ${lifecycleAgentId}`,
+        recoveryCommand: `${APP_CLI_NAME} agent unarchive ${lifecycleAgentId}`,
         message:
           'Unarchive the Agent workspace before enabling proactive capabilities.',
       },
@@ -1879,7 +1880,7 @@ export async function handleAgentArchive(payload: {
       success: false,
       error: `Agent '${id}' not found.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message: 'See valid agent ids.',
       },
     };
@@ -1917,7 +1918,7 @@ export async function handleAgentArchive(payload: {
       success: false,
       error: `Agent '${id}' has no linked workspace project.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message:
           'Archive works on Agent workspaces registered in projects.json.',
       },
@@ -1991,7 +1992,7 @@ export async function handleAgentUnarchive(payload: {
       success: false,
       error: `Agent '${id}' not found.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list --archived',
+        recoveryCommand: `${APP_CLI_NAME} agent list --archived`,
         message: 'See archived agent ids.',
       },
     };
@@ -2009,7 +2010,7 @@ export async function handleAgentUnarchive(payload: {
       success: false,
       error: `Agent '${id}' has no linked workspace project.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list --archived',
+        recoveryCommand: `${APP_CLI_NAME} agent list --archived`,
         message:
           'Unarchive works on Agent workspaces registered in projects.json.',
       },
@@ -2265,7 +2266,7 @@ export async function handleAgentSet(payload: {
               ok: false,
               response: {
                 success: false,
-                error: `Invalid runtimeConfig.permissionMode for ${runtime}. Run 'myagents runtime describe ${runtime}' for valid values.`,
+                error: `Invalid runtimeConfig.permissionMode for ${runtime}. Run '${APP_CLI_NAME} runtime describe ${runtime}' for valid values.`,
               },
             };
           }
@@ -2322,7 +2323,7 @@ export async function handleAgentSet(payload: {
             ok: false,
             response: {
               success: false,
-              error: `Unknown providerId: '${normalizedValue}'. Run 'myagents model list' to inspect available providers.`,
+              error: `Unknown providerId: '${normalizedValue}'. Run '${APP_CLI_NAME} model list' to inspect available providers.`,
             },
           };
         }
@@ -2598,7 +2599,7 @@ function validateConfigMutationKey(key: string, action: 'set' | 'unset'): AdminR
     configKeyDistance(a.toLowerCase(), key.toLowerCase()) - configKeyDistance(b.toLowerCase(), key.toLowerCase()))[0];
   const suggestion = candidate && configKeyDistance(candidate.toLowerCase(), key.toLowerCase()) <= 3
     ? ` Did you mean '${candidate}'?` : '';
-  return { success: false, error: `Unknown config key '${key}'.${suggestion} Run 'myagents config list' for stored keys and types.` };
+  return { success: false, error: `Unknown config key '${key}'.${suggestion} Run '${APP_CLI_NAME} config list' for stored keys and types.` };
 }
 
 /** Discover normalized config shape without returning values or traversing secret maps. */
@@ -2791,7 +2792,7 @@ export async function handleReload(workspacePath?: string): Promise<AdminRespons
   // before mutating any in-memory state, so a scan failure doesn't leave the
   // caller with a half-applied reload (MCP pushed but agents stale).
   const home = getHomeDirOrNull();
-  const userAgentsBaseDir = home ? join(home, '.myagents', 'agents') : '';
+  const userAgentsBaseDir = home ? join(home, APP_DATA_DIR_NAME, 'agents') : '';
   const projAgentsDir = effectiveWorkspace
     ? join(effectiveWorkspace, '.claude', 'agents')
     : '';
@@ -2832,12 +2833,12 @@ export async function handleReload(workspacePath?: string): Promise<AdminRespons
 // added to the RuntimeType union, `--help` picks it up automatically.
 const RUNTIMES_ENUM_LINE = VALID_RUNTIMES.join(' | ');
 
-const CLI_TOOL_REGISTRY_DISABLED_HELP = `myagents tool — CLI tool registry
+const CLI_TOOL_REGISTRY_DISABLED_HELP = `${APP_CLI_NAME} tool — CLI tool registry
 
 This experimental feature is currently disabled.
 
 Enable it from Settings → About & Feedback → Lab → CLI tool registry before
-using 'myagents tool ...'. The stable built-in myagents CLI commands
+using '${APP_CLI_NAME} tool ...'. The stable built-in myagents CLI commands
 (cron, record, im, widget, task, runtime, etc.) remain available.`;
 
 function taskLeafHelp(input: {
@@ -2869,20 +2870,20 @@ RECOVERY
 }
 
 const LEAF_HELP: Record<string, string> = {
-  status: `myagents status — Show current configuration and active Session status
+  status: `${APP_CLI_NAME} status — Show current configuration and active Session status
 
 Read-only. Reports MCP selection/readiness, provider fallback, visible Agent
 count and the current Session MCP snapshot when observable.
 OPTIONS
   --json    Return the structured response
   -h, --help    Show this help without running the command`,
-  version: `myagents version — Show the App and Sidecar build identity
+  version: `${APP_CLI_NAME} version — Show the App and Sidecar build identity
 
 Read-only. Reports version, build mode, source identity, and Node version.
 OPTIONS
   --json    Return the structured response
   -h, --help    Show this help without running the command`,
-  reload: `myagents reload — Reload configuration for the current Session
+  reload: `${APP_CLI_NAME} reload — Reload configuration for the current Session
 
 Requires a Session Sidecar. Re-reads MCP and sub-agent configuration and
 applies it at the current Runtime's configuration boundary. This does not
@@ -2895,7 +2896,7 @@ OPTIONS
 
 const HELP_TEXTS: Record<string, string> = {
   ...LEAF_HELP,
-  anydoc: `myagents anydoc — Convert one local document to Markdown with offline OCR
+  anydoc: `${APP_CLI_NAME} anydoc — Convert one local document to Markdown with offline OCR
 
 Commands:
   convert                  Submit one local document conversion job
@@ -2904,8 +2905,8 @@ Commands:
   cancel <job-id>          Cancel a queued or running job
   list                     List recent jobs
 
-Run myagents anydoc <command> --help for the exact contract.`,
-  'anydoc/convert': `myagents anydoc convert — Submit one local document conversion
+Run ${APP_CLI_NAME} anydoc <command> --help for the exact contract.`,
+  'anydoc/convert': `${APP_CLI_NAME} anydoc convert — Submit one local document conversion
 
 WHEN TO CALL
   Convert one Office, OpenDocument, RTF, EPUB, CSV, PDF, PNG, JPEG, or WebP file to Markdown.
@@ -2933,12 +2934,12 @@ OUTPUT
   <output-root>/<job-id>/document.md and referenced assets/. Omitting --output uses the current Workspace; if none is available, pass --output explicitly.
 
 EXAMPLES
-  myagents anydoc convert --file ./proposal.docx
-  myagents anydoc convert --file ./scan.pdf --output ./converted --wait
+  ${APP_CLI_NAME} anydoc convert --file ./proposal.docx
+  ${APP_CLI_NAME} anydoc convert --file ./scan.pdf --output ./converted --wait
 
 ERROR RECOVERY
   Follow the returned code, suggestion, and recovery command. Use status or cancel with the accepted job ID.`,
-  'anydoc/status': `myagents anydoc status <job-id> — Inspect one conversion job
+  'anydoc/status': `${APP_CLI_NAME} anydoc status <job-id> — Inspect one conversion job
 
 WHEN TO CALL
   Check the current stage, terminal result, warnings, metrics, or artifact path.
@@ -2960,11 +2961,11 @@ OUTPUT
   Current job state, stage, output paths, warnings, error, metrics, and pipeline versions.
 
 EXAMPLES
-  myagents anydoc status 20260815_7f3a91c2b6d4
+  ${APP_CLI_NAME} anydoc status 20260815_7f3a91c2b6d4
 
 ERROR RECOVERY
-  Copy the exact ID from myagents anydoc list.`,
-  'anydoc/wait': `myagents anydoc wait <job-id> — Wait for one conversion job
+  Copy the exact ID from ${APP_CLI_NAME} anydoc list.`,
+  'anydoc/wait': `${APP_CLI_NAME} anydoc wait <job-id> — Wait for one conversion job
 
 WHEN TO CALL
   Continue only after a previously accepted job has finished.
@@ -2986,11 +2987,11 @@ OUTPUT
   The terminal job and artifact path, or its structured terminal error.
 
 EXAMPLES
-  myagents anydoc wait 20260815_7f3a91c2b6d4
+  ${APP_CLI_NAME} anydoc wait 20260815_7f3a91c2b6d4
 
 ERROR RECOVERY
   After Ctrl-C, run status or cancel with the printed job ID.`,
-  'anydoc/cancel': `myagents anydoc cancel <job-id> — Cancel one conversion job
+  'anydoc/cancel': `${APP_CLI_NAME} anydoc cancel <job-id> — Cancel one conversion job
 
 WHEN TO CALL
   Stop a queued or running conversion whose result is no longer needed.
@@ -3012,11 +3013,11 @@ OUTPUT
   The updated job receipt.
 
 EXAMPLES
-  myagents anydoc cancel 20260815_7f3a91c2b6d4
+  ${APP_CLI_NAME} anydoc cancel 20260815_7f3a91c2b6d4
 
 ERROR RECOVERY
   Use list to recover an exact job ID; terminal jobs cannot be cancelled.`,
-  'anydoc/list': `myagents anydoc list — List recent conversion jobs
+  'anydoc/list': `${APP_CLI_NAME} anydoc list — List recent conversion jobs
 
 WHEN TO CALL
   Discover a job ID or review recent local conversion history.
@@ -3038,11 +3039,11 @@ OUTPUT
   Jobs ordered by createdAt, newest first.
 
 EXAMPLES
-  myagents anydoc list --limit 20
+  ${APP_CLI_NAME} anydoc list --limit 20
 
 ERROR RECOVERY
   Retry with a limit from 1 through 100.`,
-  speech: `myagents speech — Transcribe one local audio/video attachment
+  speech: `${APP_CLI_NAME} speech — Transcribe one local audio/video attachment
 
 Commands:
   transcribe --file <input>  Submit one Session-scoped ASR job
@@ -3052,8 +3053,8 @@ Commands:
   list                       List this Session's recent jobs
 
 Session ID and Workspace are bound automatically by MyAgents. Never pass or infer caller scope.
-Run myagents speech <command> --help for the exact contract.`,
-  'speech/transcribe': `myagents speech transcribe --file <input> — Submit one attachment transcription
+Run ${APP_CLI_NAME} speech <command> --help for the exact contract.`,
+  'speech/transcribe': `${APP_CLI_NAME} speech transcribe --file <input> — Submit one attachment transcription
 
 WHEN TO CALL
   Convert one supported local audio/video attachment into an ASR transcript. This command does not create a Record or perform diarization.
@@ -3081,14 +3082,14 @@ OUTPUT
 
 ERROR RECOVERY
   Follow the returned code and suggestion. Missing local models return SPEECH_RESOURCE_REQUIRED; Global CLI returns SPEECH_SESSION_REQUIRED.`,
-  'speech/status': `myagents speech status <job-id> — Inspect one transcription job
+  'speech/status': `${APP_CLI_NAME} speech status <job-id> — Inspect one transcription job
 
 WHEN TO CALL
   Read the current stage or terminal result of one job submitted by this exact Session.
 EFFECT
   Performs one read-only exact-Session lookup.
 OPTIONS
-  <job-id>                 Required exact ID from myagents speech list
+  <job-id>                 Required exact ID from ${APP_CLI_NAME} speech list
   --json                   Machine-readable output
 IDENTITY / PATH SAFETY
   Caller scope is injected automatically. Jobs from other Sessions are indistinguishable from missing jobs.
@@ -3097,15 +3098,15 @@ ASYNC / EXIT
 OUTPUT
   Job state, stage, safe artifact paths, metrics, and structured terminal error.
 ERROR RECOVERY
-  Copy the exact ID from myagents speech list.`,
-  'speech/wait': `myagents speech wait <job-id> — Wait for one transcription job
+  Copy the exact ID from ${APP_CLI_NAME} speech list.`,
+  'speech/wait': `${APP_CLI_NAME} speech wait <job-id> — Wait for one transcription job
 
 WHEN TO CALL
   Continue only after a previously accepted job from this Session has finished.
 EFFECT
   Polls status with bounded backoff and never creates another job.
 OPTIONS
-  <job-id>                 Required exact ID from myagents speech list
+  <job-id>                 Required exact ID from ${APP_CLI_NAME} speech list
   --json                   Emit one JSON document only after completion
 IDENTITY / PATH SAFETY
   Caller scope is injected automatically; no Session or Workspace option exists.
@@ -3115,14 +3116,14 @@ OUTPUT
   The terminal job and published transcript paths, or its structured terminal error.
 ERROR RECOVERY
   After Ctrl-C, run status or cancel with the printed job ID.`,
-  'speech/cancel': `myagents speech cancel <job-id> — Cancel one transcription job
+  'speech/cancel': `${APP_CLI_NAME} speech cancel <job-id> — Cancel one transcription job
 
 WHEN TO CALL
   Stop a queued or running job from this exact Session when its result is no longer needed.
 EFFECT
   Requests cancellation from the app-owned speech scheduler; repeating cancel is safe.
 OPTIONS
-  <job-id>                 Required exact ID from myagents speech list
+  <job-id>                 Required exact ID from ${APP_CLI_NAME} speech list
   --json                   Machine-readable output
 IDENTITY / PATH SAFETY
   Caller scope is injected automatically. Partial output is never published as a successful artifact.
@@ -3132,7 +3133,7 @@ OUTPUT
   The updated job receipt.
 ERROR RECOVERY
   Use list to recover an exact job ID; terminal jobs cannot be cancelled.`,
-  'speech/list': `myagents speech list — List recent transcription jobs from this Session
+  'speech/list': `${APP_CLI_NAME} speech list — List recent transcription jobs from this Session
 
 WHEN TO CALL
   Discover a job ID or review the calling Session's local transcription history.
@@ -3150,38 +3151,40 @@ OUTPUT
 ERROR RECOVERY
   Retry with a limit from 1 through 100.`,
   'mcp/add': taskLeafHelp({
-    usage: 'myagents mcp add --id <id> [connection options] [--dry-run]',
+    usage: `${APP_CLI_NAME} mcp add --id <id> [connection options] [--dry-run]`,
     when: 'Use when registering a new custom MCP server.',
     effect:
       'Validates the proposed server and, unless --dry-run is set, persists it in config.json.',
     options:
-      '  --dry-run              Validate and preview without writing config.json\n  See myagents mcp --help for transport options.',
+      `  --dry-run              Validate and preview without writing config.json
+  See ${APP_CLI_NAME} mcp --help for transport options.`,
     mutation:
       '--dry-run does not write or persist configuration. Without it, this mutates app configuration.',
     output: 'The normalized server preview or the created server ID.',
     example:
-      '  myagents mcp add --id docs --type http --url https://example.test/mcp --dry-run',
+      `  ${APP_CLI_NAME} mcp add --id docs --type http --url https://example.test/mcp --dry-run`,
     recovery:
       'If validation fails, correct the reported field and repeat the same dry-run.',
   }),
   'model/add': taskLeafHelp({
     usage:
-      'myagents model add --id <id> --name <name> --base-url <url> --models <model> [--dry-run]',
+      `${APP_CLI_NAME} model add --id <id> --name <name> --base-url <url> --models <model> [--dry-run]`,
     when: 'Use when registering a custom API-key-backed model provider.',
     effect:
       'Validates the provider and, unless --dry-run is set, persists its provider definition.',
     options:
-      '  --dry-run              Validate and preview without persisting provider files or config\n  See myagents model --help for protocol and model options.',
+      `  --dry-run              Validate and preview without persisting provider files or config
+  See ${APP_CLI_NAME} model --help for protocol and model options.`,
     mutation:
       '--dry-run does not write or persist provider configuration. Without it, this mutates app configuration.',
     output: 'The normalized provider preview or the created provider ID.',
     example:
-      '  myagents model add --id acme --name Acme --base-url https://api.example.test --models acme-chat --dry-run',
+      `  ${APP_CLI_NAME} model add --id acme --name Acme --base-url https://api.example.test --models acme-chat --dry-run`,
     recovery:
       'Resolve the validation error and repeat the dry-run before applying the mutation.',
   }),
   'model/verify': taskLeafHelp({
-    usage: 'myagents model verify <provider-id> [--model <model>]',
+    usage: `${APP_CLI_NAME} model verify <provider-id> [--model <model>]`,
     when: 'Use to verify an API-key provider or an SDK-native subscription.',
     effect:
       'API-key providers send a minimal provider probe. SDK-native subscriptions use their SDK login; host/runtime-managed subscriptions redirect to their credential owner.',
@@ -3190,22 +3193,22 @@ ERROR RECOVERY
     mutation:
       'A successful verification persists only verification status and time; it never copies subscription credentials.',
     output: 'Verification success, or an actionable credential-owner error.',
-    example: '  myagents model verify anthropic-sub --model claude-sonnet-5',
+    example: `  ${APP_CLI_NAME} model verify anthropic-sub --model claude-sonnet-5`,
     recovery:
       'For subscription authentication errors, follow the returned Settings or runtime recovery hint.',
   }),
   'config/list': taskLeafHelp({
-    usage: 'myagents config list [prefix] [--json]',
+    usage: `${APP_CLI_NAME} config list [prefix] [--json]`,
     when: 'Use to discover current normalized configuration keys, types, and whether config set supports them.',
     effect: 'Enumerates one object level from the existing config reader, without values.',
     options: '  prefix                 Optional dotted object path; omit for top-level keys',
     mutation: 'Read-only. Sensitive maps remain opaque.',
     output: 'Key, type, sensitivity, settable flag and description. Absent optional keys are not listed.',
-    example: '  myagents config list proxySettings --json',
+    example: `  ${APP_CLI_NAME} config list proxySettings --json`,
     recovery: 'Use config get for leaf values and dedicated commands for credential fields.',
   }),
   'config/set': taskLeafHelp({
-    usage: 'myagents config set <key> <value> [--dry-run]',
+    usage: `${APP_CLI_NAME} config set <key> <value> [--dry-run]`,
     when: 'Use when changing one supported application configuration key.',
     effect:
       'Validates the key and value against supported simple preferences, then persists unless --dry-run is set.',
@@ -3214,21 +3217,21 @@ ERROR RECOVERY
     mutation:
       '--dry-run does not write or persist config.json. Without it, this mutates application configuration.',
     output: 'The parsed key/value preview or the persisted value.',
-    example: '  myagents config set uiLanguage en-US --dry-run',
+    example: `  ${APP_CLI_NAME} config set uiLanguage en-US --dry-run`,
     recovery:
-      'Run myagents config list to discover keys, then config get <key> to inspect its value.',
+      `Run ${APP_CLI_NAME} config list to discover keys, then config get <key> to inspect its value.`,
   }),
   'config/unset': taskLeafHelp({
-    usage: 'myagents config unset <key> [--dry-run]',
+    usage: `${APP_CLI_NAME} config unset <key> [--dry-run]`,
     when: 'Use to remove a stored configuration key, including an old accidental key.',
     effect: 'Removes the exact stored key after rejecting protected and sensitive fields.',
     options: '  --dry-run              Validate the removal without writing config.json',
     mutation: 'Without --dry-run, this mutates application configuration.',
     output: 'The removed key or a dry-run preview.',
-    example: '  myagents config unset notARealKey --dry-run',
-    recovery: 'Run myagents config list to inspect stored keys.',
+    example: `  ${APP_CLI_NAME} config unset notARealKey --dry-run`,
+    recovery: `Run ${APP_CLI_NAME} config list to inspect stored keys.`,
   }),
-  mcp: `myagents mcp — Manage MCP tool servers
+  mcp: `${APP_CLI_NAME} mcp — Manage MCP tool servers
 
 Commands:
   list                     List all MCP servers
@@ -3271,7 +3274,7 @@ Options for 'oauth start' (manual mode):
   --scopes         Scopes (comma or space separated)
   --callback-port  Local callback port`,
 
-  vision: `myagents vision — Official image-understanding helper
+  vision: `${APP_CLI_NAME} vision — Official image-understanding helper
 
 Commands:
   readme                   Show the full image-understanding tool guide
@@ -3284,13 +3287,13 @@ Options for 'analyze':
   --json                   Output machine-readable JSON
 
 Examples:
-  myagents vision readme
-  myagents vision analyze --image @myagents_files/screenshot.png --prompt-file inspect.txt
+  ${APP_CLI_NAME} vision readme
+  ${APP_CLI_NAME} vision analyze --image @myagents_files/screenshot.png --prompt-file inspect.txt
 
 Use --prompt-file for user-provided, multiline, quoted, or shell-sensitive text.
 The configured image-understanding model is selected in Settings -> Toolbox.`,
 
-  model: `myagents model — Manage model providers
+  model: `${APP_CLI_NAME} model — Manage model providers
 
 Commands:
   list                     List all providers (preset + custom)
@@ -3315,7 +3318,7 @@ Options for 'add':
   --vendor        Vendor name
   --website-url   Provider website`,
 
-  config: `myagents config — Read/write application config
+  config: `${APP_CLI_NAME} config — Read/write application config
 
 Commands:
   list [prefix]           Discover current keys, types and descriptions (no values)
@@ -3323,11 +3326,11 @@ Commands:
   set <key> <value>       Set a config value
   unset <key>             Remove a stored config value`,
 
-  cron: `myagents cron — Manage scheduled tasks
+  cron: `${APP_CLI_NAME} cron — Manage scheduled tasks
 
 Commands:
   list                     List all cron tasks
-                           Inspect one task with: myagents task get <taskId>
+                           Inspect one task with: ${APP_CLI_NAME} task get <taskId>
   add                      Create a new cron task
   start <id>               Start a stopped task
   stop <id>                Stop a running task
@@ -3357,9 +3360,9 @@ Options for 'update' <id>:
   accepted as an alias for --prompt here. --prompt-file is supported and
   cannot be combined with --prompt or --message.
 
-See 'myagents task readme' for the canonical automation + exit flow.`,
+See '${APP_CLI_NAME} task readme' for the canonical automation + exit flow.`,
 
-  goal: `myagents goal — Manage the current session Goal Mode
+  goal: `${APP_CLI_NAME} goal — Manage the current session Goal Mode
 
 Goal Mode turns the current MyAgents session into a long-running objective. MyAgents
 keeps starting the next turn with the current session context until the Goal is
@@ -3425,12 +3428,12 @@ Rules:
     the Goal runs until another end condition or user/system control stops it.
 
 Examples:
-  myagents goal get
-  myagents goal create --objective-file goal-objective.txt --deadline 2026-07-22T09:00:00+08:00 --max-executions 12
-  myagents goal update --status complete
-  myagents goal update --status blocked`,
+  ${APP_CLI_NAME} goal get
+  ${APP_CLI_NAME} goal create --objective-file goal-objective.txt --deadline 2026-07-22T09:00:00+08:00 --max-executions 12
+  ${APP_CLI_NAME} goal update --status complete
+  ${APP_CLI_NAME} goal update --status blocked`,
 
-  plugin: `myagents plugin — Manage OpenClaw channel plugins (IM adapters from npm)
+  plugin: `${APP_CLI_NAME} plugin — Manage OpenClaw channel plugins (IM adapters from npm)
 
 Commands:
   list                     List installed plugins
@@ -3438,9 +3441,9 @@ Commands:
   remove <plugin-id>       Uninstall a plugin
 
 Note: for Claude plugins (Anthropic plugin protocol — skills + agents + MCP
-+ hooks bundled as a directory), use 'myagents cc-plugin' instead.`,
++ hooks bundled as a directory), use '${APP_CLI_NAME} cc-plugin' instead.`,
 
-  'cc-plugin': `myagents cc-plugin — Manage Claude plugins (PRD 0.2.17)
+  'cc-plugin': `${APP_CLI_NAME} cc-plugin — Manage Claude plugins (PRD 0.2.17)
 
 Commands:
   list                                       List installed plugins + enabled state
@@ -3452,18 +3455,18 @@ Commands:
   show <name|--id ID>                        Show manifest + component inventory
 
 Examples:
-  myagents cc-plugin install anthropics/example-plugin
-  myagents cc-plugin install https://github.com/foo/bar/tree/v1.0/sub/plugin
-  myagents cc-plugin install file:///Users/me/dev/my-plugin
-  myagents cc-plugin enable my-plugin
-  myagents cc-plugin show my-plugin
-  myagents cc-plugin uninstall my-plugin --purgeData
+  ${APP_CLI_NAME} cc-plugin install anthropics/example-plugin
+  ${APP_CLI_NAME} cc-plugin install https://github.com/foo/bar/tree/v1.0/sub/plugin
+  ${APP_CLI_NAME} cc-plugin install file:///Users/me/dev/my-plugin
+  ${APP_CLI_NAME} cc-plugin enable my-plugin
+  ${APP_CLI_NAME} cc-plugin show my-plugin
+  ${APP_CLI_NAME} cc-plugin uninstall my-plugin --purgeData
 
-Plugins land in ~/.myagents/plugins/<name>/ and are activated on next session
+Plugins land in ~/${APP_DATA_DIR_NAME}/plugins/<name>/ and are activated on next session
 pre-warm (~1s). Different concept from OpenClaw channel plugins above —
 unrelated storage, unrelated semantics.`,
 
-  runtime: `myagents runtime — Inspect Agent Runtimes (v0.1.69+)
+  runtime: `${APP_CLI_NAME} runtime — Inspect Agent Runtimes (v0.1.69+)
 
 Commands:
   list                            List all known runtimes + install status
@@ -3472,9 +3475,9 @@ Commands:
 Valid runtimes: ${RUNTIMES_ENUM_LINE}
 
 Examples:
-  myagents runtime list                       # which runtimes are installed?
-  myagents runtime list --json
-  myagents runtime describe codex             # models + permission modes for codex
+  ${APP_CLI_NAME} runtime list                       # which runtimes are installed?
+  ${APP_CLI_NAME} runtime list --json
+  ${APP_CLI_NAME} runtime describe codex             # models + permission modes for codex
 
 Why this exists:
   'runtime describe' is the command to consult BEFORE choosing values for
@@ -3482,16 +3485,16 @@ Why this exists:
   for those flags intentionally does NOT list models or modes — values depend
   on which CLI you have installed and are dynamic. Use this command instead.`,
 
-  space: `myagents space — Discover Cloud Goals and work with Space Issues
+  space: `${APP_CLI_NAME} space — Discover Cloud Goals and work with Space Issues
 
 IDENTITY AND SPACE SELECTION
-  Start with \`myagents space list --json\`. Every Space business command
+  Start with \`${APP_CLI_NAME} space list --json\`. Every Space business command
   requires an explicit canonical \`--space <slug>\`; there is no implicit
   default. If the current workspace is actively registered in that Space,
   commands act as that Registered Agent. Otherwise they act as the signed-in
   User with the same permissions as the UI. A delivery-bound Session refuses
   identity or workspace mismatches instead of silently falling back to User.
-  Run \`myagents space whoami --space <slug> --json\` when identity is unclear.
+  Run \`${APP_CLI_NAME} space whoami --space <slug> --json\` when identity is unclear.
 
 COMMANDS
   list                                          List available Space slugs
@@ -3510,23 +3513,23 @@ COMMANDS
   attachment download <id> --space <slug>       Download attachment bytes safely
 
 DISCOVERY FLOW FOR AGENTS
-  1. myagents space list --json
-  2. myagents space whoami --space <slug> --json
-  3. myagents space goal list --space <slug> --json
-     myagents space assignee list --space <slug> --json
+  1. ${APP_CLI_NAME} space list --json
+  2. ${APP_CLI_NAME} space whoami --space <slug> --json
+  3. ${APP_CLI_NAME} space goal list --space <slug> --json
+     ${APP_CLI_NAME} space assignee list --space <slug> --json
   4. Create/update using returned stable IDs
-  5. myagents space issue view <issueId> --space <slug> --json
+  5. ${APP_CLI_NAME} space issue view <issueId> --space <slug> --json
 
 GOAL NAMESPACES
-  myagents goal ...             Local Session Goal Mode
-  myagents space goal list ...  Cloud Space organization Goals
+  ${APP_CLI_NAME} goal ...             Local Session Goal Mode
+  ${APP_CLI_NAME} space goal list ...  Cloud Space organization Goals
 
 HELP
   Run the exact command with --help for its Agent-oriented contract, for example:
-  myagents space goal list --help
-  myagents space issue update --help`,
+  ${APP_CLI_NAME} space goal list --help
+  ${APP_CLI_NAME} space issue update --help`,
 
-  'space/issue': `myagents space issue — Read and mutate Cloud Space Issues
+  'space/issue': `${APP_CLI_NAME} space issue — Read and mutate Cloud Space Issues
 
 Commands:
   create                         Publish a new Issue; omit --goal for Inbox
@@ -3539,9 +3542,9 @@ Commands:
                                  Separate responsibility/workflow mutations
 
 Run an exact leaf with --help before acting. Goal discovery is:
-  myagents space goal list --space <slug> --json`,
+  ${APP_CLI_NAME} space goal list --space <slug> --json`,
 
-  'space/list': `myagents space list — Discover canonical Space slugs
+  'space/list': `${APP_CLI_NAME} space list — Discover canonical Space slugs
 
 WHEN TO CALL
   Before any Space operation when the target slug is unknown or stale.
@@ -3559,11 +3562,11 @@ OUTPUT
   Canonical slugs accepted by every other Space command. spaceKind=official identifies
   the official community; use its returned slug for CLI calls, not the navigation alias.
 EXAMPLES
-  myagents space list --json
+  ${APP_CLI_NAME} space list --json
 RECOVERY
   If the expected Space is absent, verify membership in the Space UI and retry.`,
 
-  'space/whoami': `myagents space whoami — Resolve the effective Space actor
+  'space/whoami': `${APP_CLI_NAME} space whoami — Resolve the effective Space actor
 
 WHEN TO CALL
   Before a mutation when you are unsure whether this workspace acts as User or Registered Agent.
@@ -3582,11 +3585,11 @@ FILE SAFETY
 OUTPUT
   Effective actor type/id/name, membership role, and binding source.
 EXAMPLES
-  myagents space whoami --space myagents --json
+  ${APP_CLI_NAME} space whoami --space ${APP_CLI_NAME} --json
 RECOVERY
-  Run \`myagents space list --json\` if the slug is rejected; remove duplicate registrations if binding is ambiguous.`,
+  Run \`${APP_CLI_NAME} space list --json\` if the slug is rejected; remove duplicate registrations if binding is ambiguous.`,
 
-  'space/assignee/list': `myagents space assignee list — List valid assignee targets
+  'space/assignee/list': `${APP_CLI_NAME} space assignee list — List valid assignee targets
 
 WHEN TO CALL
   Before creating an Issue with --assignee.
@@ -3604,11 +3607,11 @@ FILE SAFETY
 OUTPUT
   items with assigneeId, type, name, isSelf, and Agent owner metadata when applicable.
 EXAMPLES
-  myagents space assignee list --space myagents --json
+  ${APP_CLI_NAME} space assignee list --space ${APP_CLI_NAME} --json
 RECOVERY
   Run space whoami if expected candidates are missing; do not invent or strip the ID prefix.`,
 
-  'space/goal/list': `myagents space goal list — List the Cloud Goal tree for one Space
+  'space/goal/list': `${APP_CLI_NAME} space goal list — List the Cloud Goal tree for one Space
 
 WHEN TO CALL
   Before using --goal on space issue create, update, or list. Copy a stable active Goal ID; never guess from a title or path.
@@ -3626,15 +3629,15 @@ FILE SAFETY
 OUTPUT
   The full Goal tree with stable id, parentGoalId, depth, context, archivedAt, and goalPathLabel. No pagination.
 EXAMPLES
-  myagents space goal list --space myagents --json
-  myagents space goal list --space myagents --include-archived --json
+  ${APP_CLI_NAME} space goal list --space ${APP_CLI_NAME} --json
+  ${APP_CLI_NAME} space goal list --space ${APP_CLI_NAME} --include-archived --json
 RECOVERY
   Run space list for a valid slug and space whoami for identity. If a write rejects a Goal, list active Goals again and copy a current items[].id.
 
 NOTE
-  \`myagents goal ...\` controls local Session Goal Mode. \`myagents space goal list ...\` reads Cloud Space organization Goals; they are different resources.`,
+  \`${APP_CLI_NAME} goal ...\` controls local Session Goal Mode. \`${APP_CLI_NAME} space goal list ...\` reads Cloud Space organization Goals; they are different resources.`,
 
-  'space/issue/create': `myagents space issue create — Create a Space Issue atomically
+  'space/issue/create': `${APP_CLI_NAME} space issue create — Create a Space Issue atomically
 
 WHEN TO CALL
   When the User or current Agent needs to publish a new request, problem, or work item. Run space goal list before choosing --goal.
@@ -3652,13 +3655,13 @@ FILE SAFETY
 OUTPUT
   The created Issue including goalId, goalPathLabel, and top-level attachment metadata.
 EXAMPLES
-  myagents space issue create --space myagents --title "Inbox request" --body-file issue.md --json
-  myagents space goal list --space myagents --json
-  myagents space issue create --space myagents --title "Login fails" --body-file issue.md --goal goal_cli --attachment screenshot.png --json
+  ${APP_CLI_NAME} space issue create --space ${APP_CLI_NAME} --title "Inbox request" --body-file issue.md --json
+  ${APP_CLI_NAME} space goal list --space ${APP_CLI_NAME} --json
+  ${APP_CLI_NAME} space issue create --space ${APP_CLI_NAME} --title "Login fails" --body-file issue.md --goal goal_cli --attachment screenshot.png --json
 RECOVERY
   For a rejected Goal, list active Goals again and copy data.items[].id; never guess from title/path. Run whoami for identity and assignee list for a rejected assignee ID.`,
 
-  'space/issue/update': `myagents space issue update — Edit an existing Space Issue's metadata
+  'space/issue/update': `${APP_CLI_NAME} space issue update — Edit an existing Space Issue's metadata
 
 WHEN TO CALL
   To edit title/body, move a published Issue to an active Space Goal, return it to Inbox, or change human-only metadata.
@@ -3680,17 +3683,17 @@ FILE SAFETY
 OUTPUT
   The authoritative updated Issue, including goalId, goalPathLabel, state, assignee, notificationVersion, and updatedAt.
 EXAMPLES
-  myagents space goal list --space myagents --json
-  myagents space issue update iss_123 --space myagents --goal goal_cli --json
-  myagents space issue update iss_123 --space myagents --clear-goal --json
-  myagents space issue update iss_123 --space myagents --title "Updated title" --body-file issue.md --human-only false --json
+  ${APP_CLI_NAME} space goal list --space ${APP_CLI_NAME} --json
+  ${APP_CLI_NAME} space issue update iss_123 --space ${APP_CLI_NAME} --goal goal_cli --json
+  ${APP_CLI_NAME} space issue update iss_123 --space ${APP_CLI_NAME} --clear-goal --json
+  ${APP_CLI_NAME} space issue update iss_123 --space ${APP_CLI_NAME} --title "Updated title" --body-file issue.md --human-only false --json
 RECOVERY
   For a rejected Goal, list active Goals again and copy data.items[].id. For a conflict, view the current Issue and retry intentionally. For permission errors, run space whoami.
 
 NOTE
   Omit both --goal and --clear-goal to leave Goal unchanged. Use --clear-goal, never --goal null/inbox/empty, to move the Issue to Inbox.`,
 
-  'space/issue/comment': `myagents space issue comment — Post a comment with optional attachments
+  'space/issue/comment': `${APP_CLI_NAME} space issue comment — Post a comment with optional attachments
 
 WHEN TO CALL
   To add progress, evidence, a reply, or files to an existing Issue.
@@ -3707,12 +3710,12 @@ FILE SAFETY
 OUTPUT
   The created comment with nested attachment metadata.
 EXAMPLES
-  myagents space issue comment iss_123 --space myagents --body-file reply.md --attachment report.pdf --json
-  myagents space issue comment iss_123 --space myagents --attachment evidence.zip --json
+  ${APP_CLI_NAME} space issue comment iss_123 --space ${APP_CLI_NAME} --body-file reply.md --attachment report.pdf --json
+  ${APP_CLI_NAME} space issue comment iss_123 --space ${APP_CLI_NAME} --attachment evidence.zip --json
 RECOVERY
   Use issue view to refresh state. If a file is rejected, choose a regular workspace file and retry the whole atomic operation.`,
 
-  'space/issue/comment/get': `myagents space issue comment get — Read one complete comment
+  'space/issue/comment/get': `${APP_CLI_NAME} space issue comment get — Read one complete comment
 
 WHEN TO CALL
   When a delivery trigger says a comment is truncated or you need its exact attachment metadata.
@@ -3729,11 +3732,11 @@ FILE SAFETY
 OUTPUT
   One full comment with attachments.
 EXAMPLES
-  myagents space issue comment get iss_123 comment_456 --space myagents --json
+  ${APP_CLI_NAME} space issue comment get iss_123 comment_456 --space ${APP_CLI_NAME} --json
 RECOVERY
   Run issue view to verify current IDs if the Issue or comment is not found.`,
 
-  'space/issue/complete': `myagents space issue complete — Complete an Issue with an optional result comment
+  'space/issue/complete': `${APP_CLI_NAME} space issue complete — Complete an Issue with an optional result comment
 
 WHEN TO CALL
   Only after the requested work is actually complete.
@@ -3750,11 +3753,11 @@ FILE SAFETY
 OUTPUT
   Cloud completion, stable operation key, and local Task transition result.
 EXAMPLES
-  myagents space issue complete iss_123 --space myagents --taskId task_123 --body-file result.md --attachment artifact.zip --json
+  ${APP_CLI_NAME} space issue complete iss_123 --space ${APP_CLI_NAME} --taskId task_123 --body-file result.md --attachment artifact.zip --json
 RECOVERY
   Treat an already-complete response as success. Rerun the same command if only the local Task transition failed.`,
 
-  'space/issue/attachment/add': `myagents space issue attachment add — Add top-level files to a published Issue
+  'space/issue/attachment/add': `${APP_CLI_NAME} space issue attachment add — Add top-level files to a published Issue
 
 WHEN TO CALL
   To supplement the Issue body itself after publication, not to attach files to a comment.
@@ -3771,11 +3774,11 @@ FILE SAFETY
 OUTPUT
   Added top-level attachment metadata and updated Issue facts.
 EXAMPLES
-  myagents space issue attachment add iss_123 --space myagents --file report.pdf --file screenshot.png --json
+  ${APP_CLI_NAME} space issue attachment add iss_123 --space ${APP_CLI_NAME} --file report.pdf --file screenshot.png --json
 RECOVERY
   Use issue comment instead when the files belong to a new comment.`,
 
-  'space/attachment/download': `myagents space attachment download — Download one attachment
+  'space/attachment/download': `${APP_CLI_NAME} space attachment download — Download one attachment
 
 WHEN TO CALL
   After issue/comment metadata gives an attachment id and its bytes are needed.
@@ -3792,11 +3795,11 @@ FILE SAFETY
 OUTPUT
   Name, relativePath, fullPath, and sizeBytes.
 EXAMPLES
-  myagents space attachment download att_123 --space myagents --output myagents_files/space/report.pdf --json
+  ${APP_CLI_NAME} space attachment download att_123 --space ${APP_CLI_NAME} --output myagents_files/space/report.pdf --json
 RECOVERY
   Re-read the Issue/comment for a current attachment id; verify --space with space list.`,
 
-  'space/issue/list': `myagents space issue list — List Issues in one explicit Space
+  'space/issue/list': `${APP_CLI_NAME} space issue list — List Issues in one explicit Space
 
 WHEN TO CALL
   To discover current Issue ids or filter work before reading one Issue.
@@ -3816,13 +3819,13 @@ FILE SAFETY
 OUTPUT
   A cursor-paged Issue list.
 EXAMPLES
-  myagents space goal list --space myagents --json
-  myagents space issue list --space myagents --goal goal_product --include-subtree true --state todo --json
-  myagents space issue list --space myagents --goal inbox --json
+  ${APP_CLI_NAME} space goal list --space ${APP_CLI_NAME} --json
+  ${APP_CLI_NAME} space issue list --space ${APP_CLI_NAME} --goal goal_product --include-subtree true --state todo --json
+  ${APP_CLI_NAME} space issue list --space ${APP_CLI_NAME} --goal inbox --json
 RECOVERY
   Run space list for a valid slug and goal list for a current Goal ID; set --include-subtree false to match only that exact Goal.`,
 
-  'space/issue/get': `myagents space issue view — Read the current server state of one Issue
+  'space/issue/get': `${APP_CLI_NAME} space issue view — Read the current server state of one Issue
 
 WHEN TO CALL
   Before acting on an Issue or after receiving a delivery trigger.
@@ -3839,11 +3842,11 @@ FILE SAFETY
 OUTPUT
   Issue detail including issue.goalId and issue.goalPathLabel, top-level attachments, latest comments, and claim facts. goalId=null means Inbox in human output.
 EXAMPLES
-  myagents space issue view iss_123 --space myagents --comments --json
+  ${APP_CLI_NAME} space issue view iss_123 --space ${APP_CLI_NAME} --comments --json
 RECOVERY
   List Issues again if the id is stale; Goal reference/context comes from this current server detail, not delivery metadata.`,
 
-  'space/issue/comments': `myagents space issue comments — Page older Issue comments
+  'space/issue/comments': `${APP_CLI_NAME} space issue comments — Page older Issue comments
 
 WHEN TO CALL
   When issue view reports more comments beyond its latest-five window.
@@ -3860,11 +3863,11 @@ FILE SAFETY
 OUTPUT
   Comment items plus hasMore/nextCursor.
 EXAMPLES
-  myagents space issue comments iss_123 --space myagents --limit 20 --json
+  ${APP_CLI_NAME} space issue comments iss_123 --space ${APP_CLI_NAME} --limit 20 --json
 RECOVERY
   Re-run issue view to obtain current pagination facts if a cursor is rejected.`,
 
-  'space/issue/status': `myagents space issue status — Change an Issue workflow state
+  'space/issue/status': `${APP_CLI_NAME} space issue status — Change an Issue workflow state
 
 WHEN TO CALL
   Only when the requested workflow transition is intentional.
@@ -3881,11 +3884,11 @@ FILE SAFETY
 OUTPUT
   Updated state facts.
 EXAMPLES
-  myagents space issue status iss_123 todo --space myagents --json
+  ${APP_CLI_NAME} space issue status iss_123 todo --space ${APP_CLI_NAME} --json
 RECOVERY
   Read the Issue again and choose a permitted transition; do not retry permission failures blindly.`,
 
-  'space/issue/claim': `myagents space issue claim — Claim responsibility for an Issue
+  'space/issue/claim': `${APP_CLI_NAME} space issue claim — Claim responsibility for an Issue
 
 WHEN TO CALL
   When the current Registered Agent will own and process the Issue.
@@ -3902,11 +3905,11 @@ FILE SAFETY
 OUTPUT
   Claim facts and, when requested, the attached Task/session linkage.
 EXAMPLES
-  myagents space issue claim iss_123 --space myagents --deliveryId del_123 --json
+  ${APP_CLI_NAME} space issue claim iss_123 --space ${APP_CLI_NAME} --deliveryId del_123 --json
 RECOVERY
   Read the current Issue first; if attached Task creation fails, follow the returned rollback/recovery command.`,
 
-  'space/issue/close': `myagents space issue close — Close an Issue without a completion payload
+  'space/issue/close': `${APP_CLI_NAME} space issue close — Close an Issue without a completion payload
 
 WHEN TO CALL
   When Cloud workflow rules allow the resolved actor to close the Issue directly.
@@ -3923,11 +3926,11 @@ FILE SAFETY
 OUTPUT
   Closed Issue facts.
 EXAMPLES
-  myagents space issue close iss_123 --space myagents --json
+  ${APP_CLI_NAME} space issue close iss_123 --space ${APP_CLI_NAME} --json
 RECOVERY
   Read the Issue and use comment or complete when close is not permitted.`,
 
-  'space/issue/cancel-claim': `myagents space issue cancel-claim — Release the current claim
+  'space/issue/cancel-claim': `${APP_CLI_NAME} space issue cancel-claim — Release the current claim
 
 WHEN TO CALL
   For explicit rollback/recovery of a claim that should no longer be owned.
@@ -3944,11 +3947,11 @@ FILE SAFETY
 OUTPUT
   Claim cancellation and reopened Issue facts.
 EXAMPLES
-  myagents space issue cancel-claim iss_123 --space myagents --rollback --json
+  ${APP_CLI_NAME} space issue cancel-claim iss_123 --space ${APP_CLI_NAME} --rollback --json
 RECOVERY
   Re-read the Issue if the notification version changed; never fabricate rollback values.`,
 
-  task: `myagents task — Manage Task Center tasks
+  task: `${APP_CLI_NAME} task — Manage Task Center tasks
 
 Commands:
   list                            Compact current-workspace list (--query / --limit supported)
@@ -4019,21 +4022,21 @@ emits a warning when you do):
                                           +HH:MM, not +HH)
 
 IM / desktop notification (forward to a bot configured via
-\`myagents im channels\` — without --notificationBotChannelId the task runs
+\`${APP_CLI_NAME} im channels\` — without --notificationBotChannelId the task runs
 silently to disk, even if you set --notificationDesktop):
-  --notificationBotChannelId <id>  IM bot id (see 'myagents im channels')
+  --notificationBotChannelId <id>  IM bot id (see '${APP_CLI_NAME} im channels')
   --notificationBotThread <chat>   Override bot routing thread / channel id
   --notificationDesktop true|false Desktop notification toggle (default: true)
   --notificationEvents done,blocked,endCondition  Comma-separated events filter
 
 Per-task RUNTIME overrides (all optional; omit to inherit workspace defaults):
   --runtime            Override runtime (${RUNTIMES_ENUM_LINE})
-                       See: myagents runtime list
+                       See: ${APP_CLI_NAME} runtime list
   --providerId         Override builtin provider; must be paired with --model
   --model              Override model — values depend on runtime
-                       See: myagents runtime describe <runtime>
+                       See: ${APP_CLI_NAME} runtime describe <runtime>
   --permissionMode     Override permission mode — values depend on runtime
-                       See: myagents runtime describe <runtime>
+                       See: ${APP_CLI_NAME} runtime describe <runtime>
   --runtimeConfig      JSON string for runtime-specific extra config
   --mcpEnabledServers  Comma-separated MCP ids; "" means explicit no MCP
 
@@ -4087,29 +4090,29 @@ Output:
     inheritedFromWorkspace[], nextSteps.{dispatch,inspect,complete}).
 
 Examples:
-  myagents task list --query "review" --limit 20
-  myagents task create-direct --name "review PR" \\
+  ${APP_CLI_NAME} task list --query "review" --limit 20
+  ${APP_CLI_NAME} task create-direct --name "review PR" \\
       --taskMdContent "Review the latest PR and verify the acceptance criteria" \\
       --runtime codex --model gpt-5.2 --permissionMode full-auto
   # Recurring + IM push — was GUI-only before issue #205
-  myagents task create-direct --name "issue triage" \\
+  ${APP_CLI_NAME} task create-direct --name "issue triage" \\
       --taskMdFile /tmp/triage-prompt.md \\
       --executionMode recurring --intervalMinutes 180 \\
       --notificationBotChannelId feishu_main
-  myagents task create-attached --name "Space Issue #123" \\
+  ${APP_CLI_NAME} task create-attached --name "Space Issue #123" \\
       --workspaceId my-proj --workspacePath /path/to/my-proj \\
       --taskMdContent-file task.md --source space-issue --sourceIssueId iss_123
-  myagents task run t_abc123
-  myagents task run-now t_abc123  # force AI without running Detector
-  myagents task update t_abc123 --intervalMinutes 240   # change cadence after the fact
-  myagents task update-status t_abc123 done --message "shipped in v0.1.70"
+  ${APP_CLI_NAME} task run t_abc123
+  ${APP_CLI_NAME} task run-now t_abc123  # force AI without running Detector
+  ${APP_CLI_NAME} task update t_abc123 --intervalMinutes 240   # change cadence after the fact
+  ${APP_CLI_NAME} task update-status t_abc123 done --message "shipped in v0.1.70"
 
 Related:
-  myagents agent show <id>          Inspect an agent's effective defaults first,
+  ${APP_CLI_NAME} agent show <id>          Inspect an agent's effective defaults first,
                                     so you know what you are overriding.`,
 
   'task/list': taskLeafHelp({
-    usage: 'myagents task list — Discover Tasks in the current workspace',
+    usage: `${APP_CLI_NAME} task list — Discover Tasks in the current workspace`,
     when: 'Before creating a possible duplicate, or when the Task id is unknown.',
     effect:
       'Read-only. Defaults to the current workspace and returns a compact projection; task get owns full detail.',
@@ -4119,13 +4122,13 @@ Related:
       'None; never starts AI. JSON omits expanded sessionIds and returns sessionCount.',
     output:
       'Compact identity, status, schedule, detector type, counters, nextExecutionAt, and execution health.',
-    example: 'myagents task list --query "release" --limit 20 --json',
+    example: `${APP_CLI_NAME} task list --query "release" --limit 20 --json`,
     recovery:
-      'Use myagents agent current --json when current workspace resolution fails; use task get <id> for full data.',
+      `Use ${APP_CLI_NAME} agent current --json when current workspace resolution fails; use task get <id> for full data.`,
   }),
 
   'task/get': taskLeafHelp({
-    usage: 'myagents task get <taskId> — Read one authoritative Task',
+    usage: `${APP_CLI_NAME} task get <taskId> — Read one authoritative Task`,
     when: 'After creation/mutation or whenever full configuration, docs, sessions, or Detector health is needed.',
     effect:
       'Read-only. Returns the full ordinary Task plus docs paths, runtime health, and computed nextExecutionAt.',
@@ -4134,13 +4137,13 @@ Related:
     mutation: 'None; never starts AI.',
     output:
       'Full Task record. Unlike task list, sessionIds and detailed Trigger state are intentionally included.',
-    example: 'myagents task get <taskId> --json',
+    example: `${APP_CLI_NAME} task get <taskId> --json`,
     recovery: 'Run task list --query <name> if the id is unknown.',
   }),
 
   'task/create-direct': taskLeafHelp({
     usage:
-      'myagents task create-direct --name <name> --taskMdFile <path> — Create a Task',
+      `${APP_CLI_NAME} task create-direct --name <name> --taskMdFile <path> — Create a Task`,
     when: 'When work must persist beyond this turn and run once in the future, on a schedule, or after a conditional check.',
     effect:
       'Creates a Todo Task in the current workspace. Omit workspace flags normally; pass both only for explicit cross-workspace creation.',
@@ -4151,14 +4154,14 @@ Related:
     output:
       'Persisted Task, caller audit provenance, docs path, overrides, nextExecutionAt, and next-step commands.',
     example:
-      'myagents task create-direct --name "daily review" --taskMdFile task-action.md --executionMode recurring --cronExpression "0 9 * * *" --json',
+      `${APP_CLI_NAME} task create-direct --name "daily review" --taskMdFile task-action.md --executionMode recurring --cronExpression "0 9 * * *" --json`,
     recovery:
       'Run task get <id> to verify. agent current is diagnostic, not a prerequisite.',
   }),
 
   'task/create-attached': taskLeafHelp({
     usage:
-      'myagents task create-attached --name <name> --sourceIssueId <id> — Attach current Session work',
+      `${APP_CLI_NAME} task create-attached --name <name> --sourceIssueId <id> — Attach current Session work`,
     when: 'Only for a claimed Space Issue already executing in the current MyAgents Session.',
     effect:
       'Creates a Running attached-session Task linked to the Space Issue and current canonical Session.',
@@ -4167,13 +4170,13 @@ Related:
     mutation: 'Creates lifecycle state but does not start a second AI turn.',
     output: 'Attached Task, docs, and current Session linkage.',
     example:
-      'myagents task create-attached --name "Issue" --sourceIssueId <id> --taskMdFile task.md --workspaceId <id> --workspacePath <abs> --json',
+      `${APP_CLI_NAME} task create-attached --name "Issue" --sourceIssueId <id> --taskMdFile task.md --workspaceId <id> --workspacePath <abs> --json`,
     recovery:
       'Run only inside a Session with MYAGENTS_SESSION_ID; use the Space claim recovery command on partial failure.',
   }),
 
   'task/update': taskLeafHelp({
-    usage: 'myagents task update <taskId> [fields] — Patch Task configuration',
+    usage: `${APP_CLI_NAME} task update <taskId> [fields] — Patch Task configuration`,
     when: 'When a non-running Task schedule, action, Trigger, notification, or runtime override must change.',
     effect:
       'Updates the existing Task under its authoritative lock; omitted fields stay unchanged.',
@@ -4181,13 +4184,13 @@ Related:
       '  <taskId>             Required Task id\n  Use create-direct schedule/runtime flags; --clear-trigger restores always\n  --clearProviderOverride / --clearRuntimeOverride / --clearMcpOverride',
     mutation: 'Rejected while Running/Verifying; does not start AI.',
     output: 'Authoritative updated Task and docs.',
-    example: 'myagents task update <taskId> --intervalMinutes 30 --json',
+    example: `${APP_CLI_NAME} task update <taskId> --intervalMinutes 30 --json`,
     recovery:
       'Stop first when a running Task must be edited; inspect task get after failure.',
   }),
 
   'task/run': taskLeafHelp({
-    usage: 'myagents task run <taskId> — Enable a Todo Task',
+    usage: `${APP_CLI_NAME} task run <taskId> — Enable a Todo Task`,
     when: 'Immediately after a Todo Task has been created and verified.',
     effect: 'Moves Todo to Running and arms the existing scheduler.',
     options:
@@ -4196,13 +4199,13 @@ Related:
       'Does not wait for an AI result. Interval recurrence without startAt gets a tick in about 2 seconds; Cron waits for its next wall-clock tick; scheduled waits for dispatchAt.',
     output:
       'Current Task, attemptOrdinal, and scheduler-computed nextExecutionAt.',
-    example: 'myagents task run <taskId> --json',
+    example: `${APP_CLI_NAME} task run <taskId> --json`,
     recovery:
       'Use task rerun for a terminal/stopped Task, or task get to inspect a schedule error.',
   }),
 
   'task/start': taskLeafHelp({
-    usage: 'myagents task start <taskId> — Resume a stopped schedule',
+    usage: `${APP_CLI_NAME} task start <taskId> — Resume a stopped schedule`,
     when: 'When a previously stopped scheduled/recurring Task should continue.',
     effect:
       'Re-arms the existing schedule through the Cron compatibility adapter; it does not bypass the Detector.',
@@ -4212,13 +4215,13 @@ Related:
       'May schedule the next tick near now when the preserved interval anchor is overdue; returned nextExecutionAt is authoritative.',
     output:
       'Current Task status and nextExecutionAt; never an empty success object.',
-    example: 'myagents task start <taskId> --json',
+    example: `${APP_CLI_NAME} task start <taskId> --json`,
     recovery:
       'Use task get for schedule/Trigger health, or task rerun when the Task is terminal.',
   }),
 
   'task/rerun': taskLeafHelp({
-    usage: 'myagents task rerun <taskId> — Re-dispatch a terminal Task',
+    usage: `${APP_CLI_NAME} task rerun <taskId> — Re-dispatch a terminal Task`,
     when: 'When blocked, stopped, done, or archived work should start again from Todo.',
     effect:
       'Writes the audited rerun transition and arms the same Task scheduler.',
@@ -4227,13 +4230,13 @@ Related:
     mutation:
       'May start AI asynchronously according to the Task schedule; attached-session Tasks cannot rerun.',
     output: 'Current Task, attemptOrdinal, and nextExecutionAt.',
-    example: 'myagents task rerun <taskId> --json',
+    example: `${APP_CLI_NAME} task rerun <taskId> --json`,
     recovery:
       'Use task get when the current state or unresolved execution blocks rerun.',
   }),
 
   'task/stop': taskLeafHelp({
-    usage: 'myagents task stop <taskId> — Pause a Task',
+    usage: `${APP_CLI_NAME} task stop <taskId> — Pause a Task`,
     when: 'When future ticks and any active execution must stop.',
     effect:
       'Stops the scheduler/execution and preserves command Detector checkpoint state.',
@@ -4242,14 +4245,14 @@ Related:
     mutation:
       'Mutates lifecycle; does not delete the Task or its workspace script.',
     output: 'Current stopped state and nextExecutionAt=null.',
-    example: 'myagents task stop <taskId> --json',
+    example: `${APP_CLI_NAME} task stop <taskId> --json`,
     recovery:
       'Use task start to resume or reset-checkpoint only when the managed cursor must be cleared.',
   }),
 
   'task/runs': taskLeafHelp({
     usage:
-      'myagents task runs <taskId> [--limit N] — Read recent AI execution history',
+      `${APP_CLI_NAME} task runs <taskId> [--limit N] — Read recent AI execution history`,
     when: 'To inspect settled AI outputs/errors after asynchronous admission.',
     effect:
       'Read-only compatibility projection over the existing Task run history.',
@@ -4258,14 +4261,14 @@ Related:
     mutation: 'None; never waits, retries, or starts AI.',
     output:
       'Recent settled run rows; no new execution-receipt protocol is added.',
-    example: 'myagents task runs <taskId> --limit 5 --json',
+    example: `${APP_CLI_NAME} task runs <taskId> --limit 5 --json`,
     recovery:
       'Use task get for current executionState when no settled row exists yet.',
   }),
 
   'task/update-status': taskLeafHelp({
     usage:
-      'myagents task update-status <taskId> <status> — Write an ordinary lifecycle transition',
+      `${APP_CLI_NAME} task update-status <taskId> <status> — Write an ordinary lifecycle transition`,
     when: 'When the current actor legitimately advances running work to verifying/done/blocked/stopped.',
     effect:
       'Applies the existing Task state machine with caller actor/source audit.',
@@ -4275,61 +4278,61 @@ Related:
       'Mutates lifecycle; illegal transitions and Agent archive attempts fail closed.',
     output: 'Authoritative Task, transition, and nextExecutionAt.',
     example:
-      'myagents task update-status <taskId> done --message "shipped" --json',
+      `${APP_CLI_NAME} task update-status <taskId> done --message "shipped" --json`,
     recovery:
       'Read task get and choose a legal next state; do not forge actor/source flags.',
   }),
 
   'task/comments': taskLeafHelp({
-    usage: 'myagents task comments <taskId> — Read Task discussion history',
+    usage: `${APP_CLI_NAME} task comments <taskId> — Read Task discussion history`,
     when: 'Inspect user/Agent comments before replying or resuming work.',
     effect: 'Read-only paginated Task timeline; does not start AI.',
     options: '  --before <commentId>  Exclusive earlier-page anchor\n  --limit <1..100>      Page size\n  --json               Machine-readable response',
     mutation: 'None; no Session injection or execution.',
     output: 'Comment page in data, with IDs for pagination and replies.',
-    example: 'myagents task comments <taskId> --limit 20 --json',
+    example: `${APP_CLI_NAME} task comments <taskId> --limit 20 --json`,
     recovery: 'Copy taskId from task list; reread the latest page if the anchor disappeared.',
   }),
   'task/comment': taskLeafHelp({
-    usage: 'myagents task comment [taskId] — Reply on a Task timeline',
+    usage: `${APP_CLI_NAME} task comment [taskId] — Reply on a Task timeline`,
     when: 'Report progress/results or answer a comment from the associated Task Session.',
     effect: 'Appends a durable Agent comment using the exact Session association.',
     options: '  --body TEXT          Comment text; exclusive with --body-file\n  --body-file PATH     Multiline/shell-sensitive UTF-8 input\n  --reply-to <id>      Comment being answered\n  --json               Machine-readable response',
     mutation: 'Writes a comment; does not create a Task or start another execution. Requires the injected MYAGENTS_SESSION_ID.',
     output: 'Created comment in data. Acceptance is not Task completion.',
-    example: 'myagents task comment <taskId> --body-file result.md --reply-to <commentId>',
+    example: `${APP_CLI_NAME} task comment <taskId> --body-file result.md --reply-to <commentId>`,
     recovery: 'Use the explicit taskId from the reminder outside an active Task turn; omitted ID resolves only from an eligible associated context. Inspect task comments before retrying a lost response.',
   }),
   'task/append-session': taskLeafHelp({
     usage:
-      'myagents task append-session <taskId> <sessionId> — Link an existing Session',
+      `${APP_CLI_NAME} task append-session <taskId> <sessionId> — Link an existing Session`,
     when: 'When work moved into another Session and the Task history should reference it.',
     effect: 'Adds the canonical Session id once to the existing Task.',
     options: '  <taskId> <sessionId> Both required',
     mutation:
       'Mutates Task metadata only; does not message or start that Session.',
     output: 'Authoritative Task with updated sessionIds.',
-    example: 'myagents task append-session <taskId> <sessionId> --json',
+    example: `${APP_CLI_NAME} task append-session <taskId> <sessionId> --json`,
     recovery:
       'Use session discovery to obtain a real id; never use a workspace path as Session identity.',
   }),
 
   'task/exit': taskLeafHelp({
     usage:
-      'myagents task exit --reason <text> — End the currently executing eligible Task',
+      `${APP_CLI_NAME} task exit --reason <text> — End the currently executing eligible Task`,
     when: 'Only from inside that Task run when aiCanExit is enabled and the recurring goal is genuinely finished.',
     effect: 'Requests terminal settlement for the active Task-owned turn.',
     options: '  --reason <text>      Concise completion reason',
     mutation:
       'Mutates only the active authorized Task run; rejected outside Task context.',
     output: 'Accepted Task exit request.',
-    example: 'myagents task exit --reason "goal achieved" --json',
+    example: `${APP_CLI_NAME} task exit --reason "goal achieved" --json`,
     recovery:
       'Use ordinary error handling for transient failures; do not exit a Task that still serves user intent.',
   }),
 
   'task/run-now': taskLeafHelp({
-    usage: 'myagents task run-now <taskId> — Force one AI turn',
+    usage: `${APP_CLI_NAME} task run-now <taskId> — Force one AI turn`,
     when: 'For an explicit manual execution that must bypass activation filtering.',
     effect: 'Dispatches one AI execution without running the Detector.',
     options:
@@ -4338,13 +4341,13 @@ Related:
       'Starts AI asynchronously; schedule anchor and Detector checkpoint are unchanged.',
     output:
       'Admission data including taskId and sessionId. It is not a terminal execution receipt.',
-    example: 'myagents task run-now <taskId> --json',
+    example: `${APP_CLI_NAME} task run-now <taskId> --json`,
     recovery:
       'Use task runs <id> and task get <id> to inspect the eventual result.',
   }),
 
   'task/check-now': taskLeafHelp({
-    usage: 'myagents task check-now <taskId> — Run the persisted Detector now',
+    usage: `${APP_CLI_NAME} task check-now <taskId> — Run the persisted Detector now`,
     when: 'After a production Detector is deployed or repaired and a real stateful check is intended.',
     effect:
       'Runs the Detector with persisted checkpoint, commits checkpoint/health, and activates AI only on activate.',
@@ -4354,14 +4357,14 @@ Related:
       'quiet commits state without AI; activate starts AI asynchronously; failure commits health/backoff and is not a decision.',
     output:
       'Detector result and, on activate, durable admission identity. It is not a terminal execution receipt.',
-    example: 'myagents task check-now <taskId> --json',
+    example: `${APP_CLI_NAME} task check-now <taskId> --json`,
     recovery:
       'Use trigger test first for no-commit diagnosis, then task get for health and checkpoint.',
   }),
 
   'task/trigger/validate': taskLeafHelp({
     usage:
-      'myagents task trigger validate --spec-file <json> — Validate a Trigger',
+      `${APP_CLI_NAME} task trigger validate --spec-file <json> — Validate a Trigger`,
     when: 'Before running or attaching a command Detector spec.',
     effect:
       'Parses and validates strict Trigger v1 JSON without executing the command.',
@@ -4370,14 +4373,14 @@ Related:
     mutation: 'None; never runs a process or AI.',
     output: 'Normalized Trigger on success; precise schema error on failure.',
     example:
-      'myagents task trigger validate --spec-file trigger.production.json --json',
+      `${APP_CLI_NAME} task trigger validate --spec-file trigger.production.json --json`,
     recovery:
       'Read myagents-task-automation/references/command-detector.md and correct the strict schema.',
   }),
 
   'task/trigger/test': taskLeafHelp({
     usage:
-      'myagents task trigger test <taskId>|--spec-file <json> — Execute a Detector without committing MyAgents state',
+      `${APP_CLI_NAME} task trigger test <taskId>|--spec-file <json> — Execute a Detector without committing MyAgents state`,
     when: 'During fixture validation or diagnosis before a real check-now.',
     effect:
       'Really executes the command using a snapshot/fixture checkpoint but does not commit MyAgents checkpoint, health, events, or AI activation.',
@@ -4387,14 +4390,14 @@ Related:
       'No MyAgents state or AI mutation. Script file/network/database side effects are real and are not rolled back.',
     output: 'Structured quiet/activate result or harness failure diagnostics.',
     example:
-      'myagents task trigger test --spec-file trigger.test.json --workspacePath /abs/workspace --expect quiet --json',
+      `${APP_CLI_NAME} task trigger test --spec-file trigger.test.json --workspacePath /abs/workspace --expect quiet --json`,
     recovery:
       'Isolate fixtures; a failure is a program/harness error, not a third decision.',
   }),
 
   'task/reset-checkpoint': taskLeafHelp({
     usage:
-      'myagents task reset-checkpoint <taskId> — Clear MyAgents-managed Detector checkpoint',
+      `${APP_CLI_NAME} task reset-checkpoint <taskId> — Clear MyAgents-managed Detector checkpoint`,
     when: 'Only when the persisted cursor must intentionally restart from null.',
     effect:
       'Clears the platform checkpoint and advances its revision; preserves check history and script-owned state.',
@@ -4402,14 +4405,14 @@ Related:
       '  <taskId>             Required command-Detector Task id\n  --json               Return the new state',
     mutation: 'Mutates checkpoint only; does not run the Detector or AI.',
     output: 'Authoritative Trigger runtime state after reset.',
-    example: 'myagents task reset-checkpoint <taskId> --json',
+    example: `${APP_CLI_NAME} task reset-checkpoint <taskId> --json`,
     recovery:
       'Use task get first; do not reset merely to hide a Detector failure.',
   }),
 
   'task/archive': taskLeafHelp({
     usage:
-      'myagents task archive <taskId> — Move a completed Task to long-lived archive',
+      `${APP_CLI_NAME} task archive <taskId> — Move a completed Task to long-lived archive`,
     when: 'When a completed Task should leave active views but remain recoverable and auditable.',
     effect: 'Transitions Done to Archived. This is a user-only product action.',
     options:
@@ -4417,13 +4420,13 @@ Related:
     mutation:
       'Mutates lifecycle; Agent callers are rejected by the Task authority.',
     output: 'Authoritative archived Task and nextExecutionAt=null.',
-    example: 'myagents task archive <taskId> --message "shipped" --json',
+    example: `${APP_CLI_NAME} task archive <taskId> --message "shipped" --json`,
     recovery: 'A user can use task rerun to reactivate an archived Task.',
   }),
 
   'task/delete': taskLeafHelp({
     usage:
-      'myagents task delete <taskId> — Irreversibly remove a Task from product use',
+      `${APP_CLI_NAME} task delete <taskId> — Irreversibly remove a Task from product use`,
     when: 'Only after the user confirms the exact Task to remove.',
     effect:
       'Stops execution, removes Trigger runtime state/pending activation, and hides the Task from ordinary surfaces. An internal tombstone/audit remains for authority and migration safety.',
@@ -4432,13 +4435,13 @@ Related:
     mutation:
       'Irreversible product deletion. It does not delete workspace-owned scripts, databases, or external state.',
     output: 'Deletion receipt with status=deleted and nextExecutionAt=null.',
-    example: 'myagents task delete <taskId> --json',
+    example: `${APP_CLI_NAME} task delete <taskId> --json`,
     recovery:
       'There is no undelete command. Recreate a Task if deletion was a mistake; clean scripts only under separate explicit user intent.',
   }),
 
   'task/readme': taskLeafHelp({
-    usage: 'myagents task readme — Read the compact Task automation contract',
+    usage: `${APP_CLI_NAME} task readme — Read the compact Task automation contract`,
     when: 'When the Task product model or canonical lifecycle is unclear before choosing a leaf command.',
     effect:
       'Read-only. Explains action, schedule, activation, Session routing, lifecycle, and safety boundaries.',
@@ -4446,11 +4449,11 @@ Related:
       '  --json               Return the readme text in a machine-readable response',
     mutation: 'None; never creates a Task, runs a Detector, or starts AI.',
     output: 'Current Task command model and links to exact leaf help.',
-    example: 'myagents task readme',
-    recovery: 'Use myagents task <leaf> --help for exact input/output details.',
+    example: `${APP_CLI_NAME} task readme`,
+    recovery: `Use ${APP_CLI_NAME} task <leaf> --help for exact input/output details.`,
   }),
 
-  im: `myagents im — IM Bot capabilities (run 'myagents im readme' for long-form docs)
+  im: `${APP_CLI_NAME} im — IM Bot capabilities (run '${APP_CLI_NAME} im readme' for long-form docs)
 
 Commands:
   channels                            List configured IM bots (works anywhere)
@@ -4459,10 +4462,10 @@ Commands:
   wake [--text <text>]                Trigger a heartbeat wake (IM session only)
   readme                              Full reference + when-to-use guidance
 
-Use 'myagents im channels' to discover bot ids for --notificationBotChannelId
-on 'myagents task create-direct / update'.`,
+Use '${APP_CLI_NAME} im channels' to discover bot ids for --notificationBotChannelId
+on '${APP_CLI_NAME} task create-direct / update'.`,
 
-  record: `myagents record — Manage unified text and audio Records
+  record: `${APP_CLI_NAME} record — Manage unified text and audio Records
 
 Commands:
   get <record-id>                Read the complete Record
@@ -4473,18 +4476,18 @@ Commands:
 New workflows use this command. Creating audio Records and starting microphone
 recording remain desktop product actions.`,
 
-  'record/list': `myagents record list — Find saved text and audio Records
+  'record/list': `${APP_CLI_NAME} record list — Find saved text and audio Records
 
 Read-only. Use --kind text|audio, --tag <tag>, --query <text>, and --limit N
 to filter. Default is active Records; --archived selects archived Records,
 --all includes both. --json returns success and data containing Record summaries.
 Use record get <recordId> for full content. This never starts AI.`,
-  'record/get': `myagents record get <recordId> — Read a complete Record
+  'record/get': `${APP_CLI_NAME} record get <recordId> — Read a complete Record
 
 Read-only. Copy the exact ID from record list. --json returns the stored Record
 in data, including content and available processing results. Audio creation and
 microphone recording are desktop actions. Missing IDs fail without starting AI.`,
-  'record/create': `myagents record create <content> — Capture a text Record
+  'record/create': `${APP_CLI_NAME} record create <content> — Capture a text Record
 
 Choose one input: positional text, --content TEXT, or --content-file PATH (UTF-8,
 at most 1 MB). If combined, file takes precedence over --content and positional text.
@@ -4492,24 +4495,24 @@ Prefer --content-file for multiline or shell-sensitive text; paths resolve from
 the CLI working directory. --json returns the created Record in data.
 Writes a durable Record without starting AI or recording audio. If a response
 is interrupted, inspect record list before retrying to avoid duplicate Records.`,
-  'record/delete': `myagents record delete <recordId> — Delete one Record
+  'record/delete': `${APP_CLI_NAME} record delete <recordId> — Delete one Record
 
 Copy the exact ID from record list. Cancels processing and deletes the Record
 through its original owner. --json returns the deletion receipt in data.
 This is a mutation; there is no --dry-run. Read record get first when needed.`,
 
-  thought: `myagents thought — Legacy compatibility alias for text Records
+  thought: `${APP_CLI_NAME} thought — Legacy compatibility alias for text Records
 
 Published scripts may continue to use list/create. New Agent workflows use
-'myagents record'; this alias does not read the legacy Thought directory.`,
+'${APP_CLI_NAME} record'; this alias does not read the legacy Thought directory.`,
 
-  widget: `myagents widget — Generative UI widget design guidelines
-(run 'myagents widget readme' for the full design system + modules)
+  widget: `${APP_CLI_NAME} widget — Generative UI widget design guidelines
+(run '${APP_CLI_NAME} widget readme' for the full design system + modules)
 
 Use to render inline charts / SVG / dashboards in desktop Chat replies.
 IM bot sessions don't render widgets.`,
 
-  skill: `myagents skill — Manage MyAgents skills (user skills live under ~/.myagents/skills/)
+  skill: `${APP_CLI_NAME} skill — Manage MyAgents skills (user skills live under ~/${APP_DATA_DIR_NAME}/skills/)
 
 Commands:
   list [--verbose]           List skills; include normal admission details with --verbose [--workspace <path>]
@@ -4524,20 +4527,20 @@ Commands:
   disable <name>             Disable without uninstalling [--scope user|project] [--workspace <path>]
   sync [name ...]            Preview available Claude Code skills without writing
                              [--apply] imports all previewed or selected names into
-                             ~/.myagents/skills/; new imports are disabled until enabled.`,
+                             ~/${APP_DATA_DIR_NAME}/skills/; new imports are disabled until enabled.`,
 
-  'skill/list': `myagents skill list — Discover installed skills
+  'skill/list': `${APP_CLI_NAME} skill list — Discover installed skills
 
 Read-only. --workspace PATH selects the workspace to inspect; otherwise uses
 the current Session workspace. --verbose includes admission and runtime details;
 --json returns the complete records in data. Use skill info <name> to inspect
 one skill before enabling or removing it.`,
-  'skill/info': `myagents skill info <name> — Inspect an installed skill
+  'skill/info': `${APP_CLI_NAME} skill info <name> — Inspect an installed skill
 
 Read-only. --scope user|project selects a scope; --workspace PATH selects the
 project workspace. --json returns frontmatter and body with identity/scope
 metadata in data. Use skill list for enabled state; inspecting does not enable it.`,
-  'skill/add': `myagents skill add <source> — Install a skill
+  'skill/add': `${APP_CLI_NAME} skill add <source> — Install a skill
 
 Sources: GitHub owner/repo or URL, HTTPS .zip, local directory, .zip or .skill.
 Use an absolute path, file://, ./ or ../ for local input. --scope user|project
@@ -4545,32 +4548,32 @@ defaults to user. --plugin <id> or --skill <id> selects an item from a repositor
 --dry-run previews without installation; --force permits replacement.
 --json returns installation results in data. Inspect skill list after a lost
 response before retrying; use skill enable explicitly as needed.`,
-  'skill/remove': `myagents skill remove <name> — Uninstall an installed skill
+  'skill/remove': `${APP_CLI_NAME} skill remove <name> — Uninstall an installed skill
 
 --scope user|project and --workspace PATH select the original skill owner.
 --dry-run previews removal; --json returns the result in data.
 Use skill list/info to select the exact name and scope before removing.`,
-  'skill/enable': `myagents skill enable <name> — Enable an installed skill
+  'skill/enable': `${APP_CLI_NAME} skill enable <name> — Enable an installed skill
 
 --scope user|project and --workspace PATH select the skill owner. --json returns
 the updated enabled state in data. This changes skill selection, not an Agent's
 network exposure. Effective availability follows the current Runtime's extension
 update boundary; use skill list --verbose to inspect it.`,
-  'skill/disable': `myagents skill disable <name> — Disable without uninstalling
+  'skill/disable': `${APP_CLI_NAME} skill disable <name> — Disable without uninstalling
 
 --scope user|project and --workspace PATH select the skill owner. --json returns
 the updated enabled state in data. Files remain installed. Effective availability
 follows the Runtime extension update boundary; inspect skill list --verbose.`,
-  'skill/sync': `myagents skill sync [name ...] — Discover or import Claude Code skills
+  'skill/sync': `${APP_CLI_NAME} skill sync [name ...] — Discover or import Claude Code skills
 
 Without --apply, previews available names and does not write. --apply imports
 all previewed candidates or the specified names into the user skill directory.
 New imports are disabled until skill enable. --json returns applied, synced or
 preview folders and failures in data. Preview again if a candidate disappeared.`,
 
-  tool: `myagents tool — CLI tool registry (user tools live under ~/.myagents/tools/)
+  tool: `${APP_CLI_NAME} tool — CLI tool registry (user tools live under ~/${APP_DATA_DIR_NAME}/tools/)
 
-Registered tools get a shim on ~/.myagents/bin (already on PATH in every agent
+Registered tools get a shim on ~/${APP_DATA_DIR_NAME}/bin (already on PATH in every agent
 session and terminal) and their description is injected into every new
 session's context, so future AI sessions discover them automatically.
 Create standards-compliant tools with the tool-creator skill.
@@ -4578,7 +4581,7 @@ Create standards-compliant tools with the tool-creator skill.
 Commands:
   list                       List registered tools + enabled state [--json]
   add <dir>                  Register a tool dir (must contain tool.json + entry)
-                             [--dry-run]. Copies the dir into ~/.myagents/tools/
+                             [--dry-run]. Copies the dir into ~/${APP_DATA_DIR_NAME}/tools/
                              unless it is already there.
   remove <name>              Unregister (keeps the tool dir; --purge deletes it)
   enable <name>              Show the tool in new sessions' context
@@ -4590,21 +4593,21 @@ Commands:
   env <name> delete KEY      Remove env keys
 
 Notes:
-  - Tool names must not shadow existing commands (~/.myagents/bin precedes
+  - Tool names must not shadow existing commands (~/${APP_DATA_DIR_NAME}/bin precedes
     system paths on PATH) — add rejects collisions.
   - description in tool.json is capped at 800 chars (it goes into the system
     prompt of every session).
   - Registry changes affect other sessions at their next start.`,
 
-  diagnose: `myagents diagnose — Diagnostic helpers
+  diagnose: `${APP_CLI_NAME} diagnose — Diagnostic helpers
 
 Commands:
   diagnose runtime <type>    Inspect why a runtime is not detected / responding.
-                             Same as 'myagents runtime diagnose <type>'; the
+                             Same as '${APP_CLI_NAME} runtime diagnose <type>'; the
                              top-level form is provided so AI guesses route
                              to a real handler (issue #194).`,
 
-  agent: `myagents agent — Discover stable Workspace Agent identities
+  agent: `${APP_CLI_NAME} agent — Discover stable Workspace Agent identities
 
 Every user-visible Workspace selects one stable Agent identity through
 Project.agentId. Historical extra/orphan Agents remain addressable by exact ID.
@@ -4648,10 +4651,10 @@ without hiding healthy targets. Project lifecycle commands require an exact
 Project.agentId claim.
 
 Collaboration flow:
-  myagents agent list
-  myagents agent show <agentId>
-  myagents session list --agent <agentId>
-  myagents session start --agent <agentId> -p "<prompt>"
+  ${APP_CLI_NAME} agent list
+  ${APP_CLI_NAME} agent show <agentId>
+  ${APP_CLI_NAME} session list --agent <agentId>
+  ${APP_CLI_NAME} session start --agent <agentId> -p "<prompt>"
 
 agent list includes local Agents and callable Agents on other devices in the
 all active networks. Use --network NAME_OR_CONNECTION_ID to filter list or diagnostics. Select using name, description, networkName, deviceName and isLocal; copy the
@@ -4659,36 +4662,36 @@ full agentId. Remote references begin ma-agent:1 and execute on the target devic
 Only discovery and Session collaboration accept network references; local
 enable/disable/set/archive/channel commands do not manage remote Agents.
 For reusable execution context use session; for durable work, scheduling and
-run tracking use task. See myagents session --help and myagents task readme.`,
+run tracking use task. See ${APP_CLI_NAME} session --help and ${APP_CLI_NAME} task readme.`,
 
-  'agent/create': `myagents agent create --workspacePath <absolute-path> — Register a local workspace
+  'agent/create': `${APP_CLI_NAME} agent create --workspacePath <absolute-path> — Register a local workspace
 
 Creates or resolves the stable Workspace Agent identity through the original
 Project/Agent owner. --workspacePath is required; --json returns identity in data.
 This does not start AI or open network access. Inspect agent list before retrying.`,
-  'agent/enable': `myagents agent enable <agentId> — Enable local proactive capabilities
+  'agent/enable': `${APP_CLI_NAME} agent enable <agentId> — Enable local proactive capabilities
 
 Use a local ID from agent list (or --id). Enables Heartbeat, Memory Update and
 Memory Evo; channels keep their own enabled state. Explicit Session addressing
 does not require this flag. This is not the Agent Network exposure switch.
 --json returns the mutation result; inspect agent show to verify configuration.`,
-  'agent/disable': `myagents agent disable <agentId> — Pause local proactive capabilities
+  'agent/disable': `${APP_CLI_NAME} agent disable <agentId> — Pause local proactive capabilities
 
 Use a local ID from agent list (or --id). Pauses Heartbeat, Memory Update and
 Memory Evo; channels keep their own enabled state. Does not disable explicit
 Session collaboration or close network exposure. --json returns the result.`,
-  'agent/archive': `myagents agent archive <agentId> — Archive a local Agent workspace
+  'agent/archive': `${APP_CLI_NAME} agent archive <agentId> — Archive a local Agent workspace
 
 Use an exact local Project-backed ID from agent list (or --id). Archives its
 workspace and pauses proactive channels through the original lifecycle owner.
 History remains readable. --json returns the result. Use agent list --archived
 to inspect archived identities; agent unarchive restores the workspace.`,
-  'agent/unarchive': `myagents agent unarchive <agentId> — Restore a local Agent workspace
+  'agent/unarchive': `${APP_CLI_NAME} agent unarchive <agentId> — Restore a local Agent workspace
 
 Use an exact local Project-backed ID from agent list --archived (or --id).
 Restores its workspace visibility through the lifecycle owner. --json returns
 the result. Inspect agent show for the resulting configuration.`,
-  'agent/set': `myagents agent set <agentId> <key> <value> — Change local Agent configuration
+  'agent/set': `${APP_CLI_NAME} agent set <agentId> <key> <value> — Change local Agent configuration
 
 Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode.
 Values are parsed as JSON when valid; quote strings/JSON for your shell.
@@ -4699,7 +4702,7 @@ has its own lifecycle; Agent defaults do not prove its effective permissions.
 --json returns the result. Read agent show first; network references and unknown
 keys are not supported. There is no --dry-run.`,
 
-  'agent/list': `myagents agent list — Discover addressable Workspace Agents
+  'agent/list': `${APP_CLI_NAME} agent list — Discover addressable Workspace Agents
 
 WHEN TO CALL
   Before choosing a collaboration target, or to identify this Session's Agent.
@@ -4728,14 +4731,14 @@ IDENTITY / PERMISSIONS
   selectors. enabled controls proactive behavior, not explicit addressability.
 
 EXAMPLES
-  myagents agent list
-  myagents agent list --archived --json
+  ${APP_CLI_NAME} agent list
+  ${APP_CLI_NAME} agent list --archived --json
 
 RECOVERY
   No current marker is valid from Global/terminal contexts or when the caller
   is filtered out. Identity conflicts are reported instead of guessed.`,
 
-  'agent/current': `myagents agent current — Inspect only this CLI caller's current context
+  'agent/current': `${APP_CLI_NAME} agent current — Inspect only this CLI caller's current context
 
 WHEN TO CALL
   When a diagnostic needs the current Agent, workspace, or Session identity.
@@ -4748,11 +4751,11 @@ OUTPUT
 IDENTITY / PERMISSIONS
   This is diagnostic only; Task create/list already inherit the current workspace.
 EXAMPLE
-  myagents agent current --json
+  ${APP_CLI_NAME} agent current --json
 RECOVERY
-  Run myagents agent list if the current workspace is not Project-linked.`,
+  Run ${APP_CLI_NAME} agent list if the current workspace is not Project-linked.`,
 
-  'agent/show': `myagents agent show <agentId> — Inspect one Agent identity
+  'agent/show': `${APP_CLI_NAME} agent show <agentId> — Inspect one Agent identity
 
 WHEN TO CALL
   After agent list, when you need the target Workspace or Session birth defaults.
@@ -4778,13 +4781,13 @@ IDENTITY / PERMISSIONS
   not describe an existing Session's effective gate.
 
 EXAMPLE
-  myagents agent show <agentId>
+  ${APP_CLI_NAME} agent show <agentId>
 
 RECOVERY
-  Run myagents agent list (or agent list --archived) to obtain a visible Agent
+  Run ${APP_CLI_NAME} agent list (or agent list --archived) to obtain a visible Agent
   ID. Archived and compatible historical orphan Agents remain inspectable.`,
 
-  session: `myagents session — Discover and collaborate across Agent Sessions
+  session: `${APP_CLI_NAME} session — Discover and collaborate across Agent Sessions
 
 An Agent owns many isolated Sessions. The same commands accept discovered
 ma-agent:1 / ma-session:1 qualified network references. Remote execution uses
@@ -4796,8 +4799,8 @@ Choose by context intent:
   Observe only:        session watch <sessionId>
 
 Discover before choosing:
-  myagents agent list
-  myagents session list --agent <agentId>
+  ${APP_CLI_NAME} agent list
+  ${APP_CLI_NAME} session list --agent <agentId>
 
 start and send are asynchronous admission requests: success means the target
 accepted the request, not that work completed. By default the final target turn
@@ -4808,16 +4811,16 @@ get reads visible transcript text; state reads the current three-state activity.
 watch observes completion without assigning work or approving it remotely.
 
 Run exact leaf help for flags, output, exit codes, and recovery:
-  myagents session list --help
-  myagents session start --help
-  myagents session send --help
-  myagents session watch --help
-  myagents session state --help
-  myagents session get --help
-  myagents session watches --help
-  myagents session unwatch --help`,
+  ${APP_CLI_NAME} session list --help
+  ${APP_CLI_NAME} session start --help
+  ${APP_CLI_NAME} session send --help
+  ${APP_CLI_NAME} session watch --help
+  ${APP_CLI_NAME} session state --help
+  ${APP_CLI_NAME} session get --help
+  ${APP_CLI_NAME} session watches --help
+  ${APP_CLI_NAME} session unwatch --help`,
 
-  'session/list': `myagents session list --agent <agentId> — Recent reusable contexts
+  'session/list': `${APP_CLI_NAME} session list --agent <agentId> — Recent reusable contexts
 
 WHEN TO CALL
   After agent list, when deciding whether prior context should be preserved.
@@ -4841,14 +4844,14 @@ IDENTITY / PERMISSIONS
   adopts the target Session's configuration.
 
 EXAMPLE
-  myagents session list --agent <agentId> --limit 10
+  ${APP_CLI_NAME} session list --agent <agentId> --limit 10
 
 RECOVERY
-  Run myagents agent list (or agent list --archived) for a valid Agent ID.
+  Run ${APP_CLI_NAME} agent list (or agent list --archived) for a valid Agent ID.
   Archived Agent history remains readable; hidden targets are rejected and
   identity conflicts fail closed with diagnostics.`,
 
-  'session/get': `myagents session get <sessionId> — Read visible transcript text
+  'session/get': `${APP_CLI_NAME} session get <sessionId> — Read visible transcript text
 
 WHEN TO CALL
   Inspect what was asked and answered in an existing local or remote Session.
@@ -4874,13 +4877,13 @@ OUTPUT
 IDENTITY / PERMISSIONS
   Read the original target Session; the caller does not adopt or override it.
 EXAMPLE
-  myagents session get <sessionId> --limit 20 --json
+  ${APP_CLI_NAME} session get <sessionId> --limit 20 --json
 RECOVERY
   Copy the full selector from session list. If an anchor disappeared, read the
   latest page again. Exit 0 means the read succeeded; CLI argument errors exit 2,
   owner/query errors exit nonzero. Use session state for current activity.`,
 
-  'session/start': `myagents session start --agent <agentId> — Start clean work
+  'session/start': `${APP_CLI_NAME} session start --agent <agentId> — Start clean work
 
 WHEN TO CALL
   When the target Agent should work in a brand-new isolated context. Use send
@@ -4908,8 +4911,8 @@ IDENTITY / PERMISSIONS
   are rejected.
 
 EXAMPLES
-  myagents session start --agent <agentId> -p "Review this change"
-  myagents session start --agent <agentId> --prompt-file request.txt --no-reply
+  ${APP_CLI_NAME} session start --agent <agentId> -p "Review this change"
+  ${APP_CLI_NAME} session start --agent <agentId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Agent/lifecycle rejection. Exit 2: delivery rejection, transport
@@ -4917,7 +4920,7 @@ RECOVERY
   unconfirmed receipt, keep its IDs, run session list --agent <agentId>, and do
   not automatically resend. Inline newline or >4 KB input must use a file.`,
 
-  'session/send': `myagents session send <sessionId> — Assign work in existing context
+  'session/send': `${APP_CLI_NAME} session send <sessionId> — Assign work in existing context
 
 WHEN TO CALL
   When a known Session should do new work and retain its existing context.
@@ -4942,14 +4945,14 @@ IDENTITY / PERMISSIONS
   runtime, configuration, context, and permissions.
 
 EXAMPLES
-  myagents session send <sessionId> -p "Run the focused tests"
-  myagents session send <sessionId> --prompt-file request.txt --no-reply
+  ${APP_CLI_NAME} session send <sessionId> -p "Run the focused tests"
+  ${APP_CLI_NAME} session send <sessionId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: delivery failure/rejection.
   Exit 3: argument error. Inline newline or >4 KB input must use a file.`,
 
-  'session/state': `myagents session state <sessionId> — Read current activity
+  'session/state': `${APP_CLI_NAME} session state <sessionId> — Read current activity
 
 Returns exactly idle, running or waiting_user_action. waiting_user_action means the target
 needs its own user's tool/plan approval or required structured answer before
@@ -4957,22 +4960,22 @@ root work can continue. Ordinary text questions and nonblocking child work do
 not establish that state. This read never wakes the target or approves anything.
 Unreadable state is a retryable query error. idle is not proof of success; use
 session get for results. --json preserves the machine-readable state.`,
-  'session/watches': `myagents session watches — List this Session's active observations
+  'session/watches': `${APP_CLI_NAME} session watches — List this Session's active observations
 
 Lists local and network watchId, target Session and executing turn. Registrations
 end on completion, cancellation or the original network connection ending.
 start/send automatic results are separate and do not appear as observations.`,
-  'session/unwatch': `myagents session unwatch <watchId> | --all — Cancel observations
+  'session/unwatch': `${APP_CLI_NAME} session unwatch <watchId> | --all — Cancel observations
 
 Choose one watchId from session watches, or explicitly --all. Does not stop the
 target, cancel start/send automatic results or retract an admitted Inbox message.
 A return already being delivered remains pending until its settlement.`,
-  'agent/network-diagnose': `myagents agent network-diagnose [--network <name-or-connection-id>] [--cursor <cursor>] [--limit 1..100] --json
+  'agent/network-diagnose': `${APP_CLI_NAME} agent network-diagnose [--network <name-or-connection-id>] [--cursor <cursor>] [--limit 1..100] --json
 
 Read network protocol/capabilities and paginated device appVersion and identity
 metadata on demand. Correlate deviceId with agent list; errors contain stage,
 code and requestId without task contents. Both devices need this dev protocol.`,
-  'session/watch': `myagents session watch <sessionId> — Observe without assigning work
+  'session/watch': `${APP_CLI_NAME} session watch <sessionId> — Observe without assigning work
 
 WHEN TO CALL
   When current work depends on another Session's current/latest result and no
@@ -5000,7 +5003,7 @@ IDENTITY / PERMISSIONS
   watch never changes target context, configuration, or permissions.
 
 EXAMPLE
-  myagents session watch <sessionId>
+  ${APP_CLI_NAME} session watch <sessionId>
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: watch delivery failure.
@@ -5028,14 +5031,14 @@ export function handleHelp(payload: { path?: string[] }): AdminResponse {
       return { success: true, data: { text: CLI_TOOL_REGISTRY_DISABLED_HELP } };
     }
     const sharedReference = matchedKey === group && lookupPath.length > 1 && !Object.hasOwn(LEAF_HELP, matchedKey)
-      ? `Help for "myagents ${path.join(' ')}" uses the shared "myagents ${matchedKey.replaceAll('/', ' ')}" reference below. This is not a separate help page for the full invocation; use the options documented for the selected action.\n\n`
+      ? `Help for "${APP_CLI_NAME} ${path.join(' ')}" uses the shared "${APP_CLI_NAME} ${matchedKey.replaceAll('/', ' ')}" reference below. This is not a separate help page for the full invocation; use the options documented for the selected action.\n\n`
       : '';
     return { success: true, data: { text: sharedReference + HELP_TEXTS[matchedKey] } };
   }
 
   const groups = [...new Set(Object.keys(HELP_TEXTS).map(key => key.split('/')[0]))]
     .filter(key => !Object.hasOwn(LEAF_HELP, key)).sort();
-  const commands = `Command groups (run "myagents <group> --help" for details):
+  const commands = `Command groups (run "${APP_CLI_NAME} <group> --help" for details):
   ${groups.join(', ')}
 
 Leaf commands:
@@ -5045,9 +5048,11 @@ Leaf commands:
     code: 'UNKNOWN_COMMAND_GROUP',
     error: `Unknown command group "${group}".`,
     suggestion: commands,
-    suggestedCommand: 'myagents --help',
+    suggestedCommand: `${APP_CLI_NAME} --help`,
   };
-  return { success: true, data: { text: `myagents — Available commands\n\n${commands}` } };
+  return { success: true, data: { text: `${APP_CLI_NAME} — Available commands
+
+${commands}` } };
 }
 
 export async function handleAnydocConvert(payload: {
@@ -5110,7 +5115,7 @@ function resolveSpeechAdminCaller(): SpeechAdminCaller | AdminResponse {
         'Speech recognition requires an active MyAgents Session with an authoritative Workspace.',
       suggestion:
         'Run the command from the MyAgents chat Session that should own the job.',
-      suggestedCommand: 'myagents speech --help',
+      suggestedCommand: `${APP_CLI_NAME} speech --help`,
     };
   }
   const enabled = getEffectiveOfficialToolIdsForSession(
@@ -5124,7 +5129,7 @@ function resolveSpeechAdminCaller(): SpeechAdminCaller | AdminResponse {
       error: 'Speech recognition is not enabled for the current Session.',
       suggestion:
         'Enable Speech Recognition for this Agent or Workspace, then start a new Session.',
-      suggestedCommand: 'myagents speech --help',
+      suggestedCommand: `${APP_CLI_NAME} speech --help`,
     };
   }
   return { sidecarId };
@@ -5322,7 +5327,7 @@ export async function handleCronCreate(
     return {
       success: false,
       error:
-        'Loop schedules are Goal Mode tasks. Use myagents goal create --objective-file <path> after writing the objective to that file; do not use myagents cron add.',
+        `Loop schedules are Goal Mode tasks. Use ${APP_CLI_NAME} goal create --objective-file <path> after writing the objective to that file; do not use ${APP_CLI_NAME} cron add.`,
     };
   }
 
@@ -5689,7 +5694,7 @@ function resolveTaskWorkspace(
         success: false,
         error: `workspaceId does not identify a registered Task project: ${explicitId}`,
         recoveryHint: {
-          recoveryCommand: 'myagents agent list',
+          recoveryCommand: `${APP_CLI_NAME} agent list`,
           message: 'Choose a visible Project-backed Agent workspace.',
         },
       },
@@ -5705,7 +5710,7 @@ function resolveTaskWorkspace(
         success: false,
         error: `workspaceId '${explicitId}' does not own workspacePath '${explicitPath}'.`,
         recoveryHint: {
-          recoveryCommand: 'myagents agent current --json',
+          recoveryCommand: `${APP_CLI_NAME} agent current --json`,
           message:
             'Use the id and path from the same Project-backed Agent workspace.',
         },
@@ -5721,7 +5726,7 @@ function resolveTaskWorkspace(
         success: false,
         error: 'Current workspace could not be resolved to a Task project.',
         recoveryHint: {
-          recoveryCommand: 'myagents agent current --json',
+          recoveryCommand: `${APP_CLI_NAME} agent current --json`,
           message:
             'Pass --workspaceId or --workspacePath from a visible Project-backed Agent workspace.',
         },
@@ -5865,9 +5870,9 @@ function withTaskAgentReceipt(
           summary: boundSession
             ? 'Execution results stay in the Task bound Session and are not copied into Task comments automatically.'
             : 'Execution results stay in Task execution Sessions and run history; they are not pushed back to the creating Session or copied into Task comments automatically.',
-          inspectTaskCommand: `myagents task get ${taskId} --json`,
-          inspectRunsCommand: `myagents task runs ${taskId} --limit 5 --full --json`,
-          inspectCommentsCommand: `myagents task comments ${taskId} --limit 50 --json`,
+          inspectTaskCommand: `${APP_CLI_NAME} task get ${taskId} --json`,
+          inspectRunsCommand: `${APP_CLI_NAME} task runs ${taskId} --limit 5 --full --json`,
+          inspectCommentsCommand: `${APP_CLI_NAME} task comments ${taskId} --limit 50 --json`,
         },
       },
     },
@@ -6243,12 +6248,12 @@ function enrichTaskCreateResponse(
   if (taskId) {
     enriched.nextSteps = options.attached
       ? {
-          inspect: `myagents task get ${taskId}`,
-          complete: `myagents task update-status ${taskId} done --message "<summary>"`,
+          inspect: `${APP_CLI_NAME} task get ${taskId}`,
+          complete: `${APP_CLI_NAME} task update-status ${taskId} done --message "<summary>"`,
         }
       : {
-          dispatch: `myagents task run ${taskId}`,
-          inspect: `myagents task get ${taskId}`,
+          dispatch: `${APP_CLI_NAME} task run ${taskId}`,
+          inspect: `${APP_CLI_NAME} task get ${taskId}`,
         };
   }
   return withTaskAgentReceipt({ ...response, data: enriched }, 'create', {
@@ -6530,7 +6535,7 @@ export async function handleImWake(payload: {
     return {
       success: false,
       error:
-        'No IM context in this session. `myagents im wake` only works inside an IM Bot / Agent Channel session.',
+        `No IM context in this session. \`${APP_CLI_NAME} im wake\` only works inside an IM Bot / Agent Channel session.`,
     };
   }
   const resp = await managementApi('/api/im/wake', 'POST', {
@@ -6634,7 +6639,7 @@ export async function handleImSendMedia(payload: {
 // it calls `myagents X readme` to pull the full usage doc on demand.
 // ---------------------------------------------------------------------------
 
-const README_TASK_AUTOMATION = `myagents task — Scheduled and conditional automation
+const README_TASK_AUTOMATION = `${APP_CLI_NAME} task — Scheduled and conditional automation
 
 PRODUCT MODEL
   Every future or recurring automation is one Task:
@@ -6683,7 +6688,7 @@ SCHEDULE CREATION
 END CONDITIONS
   --deadline <ISO-with-offset>       Stop starting new AI turns after the instant
   --maxExecutions <n>                Cap settled AI turns; quiet checks do not count
-  --aiCanExit true|false             Allow/disallow 'myagents task exit'
+  --aiCanExit true|false             Allow/disallow '${APP_CLI_NAME} task exit'
 
 LIFECYCLE
   create --json -> parse taskId -> get --json -> run --json.
@@ -6706,16 +6711,16 @@ SAFETY
   trigger test runs the external command for real; only MyAgents state is not
   committed, so isolate fixtures and external side effects.`;
 
-const README_CRON = `myagents cron — Compatibility scheduled-task commands
+const README_CRON = `${APP_CLI_NAME} cron — Compatibility scheduled-task commands
 
 NOTE
   Cron is not a separate store or scheduler. New Agent workflows use the
-  canonical guide 'myagents task readme'; these commands remain compatible for
+  canonical guide '${APP_CLI_NAME} task readme'; these commands remain compatible for
   existing users and scripts.
 
 WHAT
   Create, list, stop, and delete scheduled AI tasks (cron / interval / one-shot).
-  Inspect one task with the canonical 'myagents task get <taskId>' command.
+  Inspect one task with the canonical '${APP_CLI_NAME} task get <taskId>' command.
   Tasks run inside MyAgents regardless of which runtime the current chat uses.
   A task can deliver results to an IM channel.
 
@@ -6745,7 +6750,7 @@ TIME SEMANTICS
 
 COMMANDS
   list                            List tasks in the current workspace
-                                  For one task: myagents task get <taskId>
+                                  For one task: ${APP_CLI_NAME} task get <taskId>
   status                          Totals + next execution time
   add OPTIONS                     Create a new task
   start <taskId>                  Enable scheduled task (resume from stopped).
@@ -6782,7 +6787,7 @@ STATUS VOCABULARY (in 'list' / 'status' output and --json)
   status=Stopped  +  '*' marker        →  rare; a scheduled tick was already
                                           in flight when the task got stopped
 
-CREATE OPTIONS (myagents cron add ...)
+CREATE OPTIONS (${APP_CLI_NAME} cron add ...)
   --name <text>                   Human-readable label (optional)
   --prompt <text>                 The prompt the AI runs each tick. For short
                                   prompts use this. For multi-line / complex
@@ -6809,7 +6814,7 @@ CREATE OPTIONS (myagents cron add ...)
                                   Optional Task execution overrides. Omit all
                                   override flags to inherit the target Agent.
 
-UPDATE OPTIONS (myagents cron update <taskId> ...)
+UPDATE OPTIONS (${APP_CLI_NAME} cron update <taskId> ...)
   --name / --prompt / --message / --prompt-file / --schedule / --every
   --runtime / --runtime-config / --provider-id / --model / --permission-mode
 
@@ -6821,37 +6826,37 @@ UPDATE OPTIONS (myagents cron update <taskId> ...)
 
 EXAMPLES
   # Short prompt, 30 min interval
-  myagents cron add --name ping --prompt "ping example.com, report latency" --every 30
+  ${APP_CLI_NAME} cron add --name ping --prompt "ping example.com, report latency" --every 30
 
   # Long prompt from file (the recommended path)
   printf '%s\\n' 'Check the build log for new errors.' \\
     'If errors found, summarize and tag me.' > /tmp/cron-check.txt
-  myagents cron add --name build-watch --prompt-file /tmp/cron-check.txt --every 15
+  ${APP_CLI_NAME} cron add --name build-watch --prompt-file /tmp/cron-check.txt --every 15
 
   # Wall-clock daily run at 09:00 in this machine's local timezone
-  myagents cron add --name daily-report --prompt "write daily report" \\
+  ${APP_CLI_NAME} cron add --name daily-report --prompt "write daily report" \\
     --schedule "0 9 * * *"
 
   # Wall-clock daily run in an explicit non-local timezone
-  myagents cron add --name ny-open --prompt "check market open news" \\
+  ${APP_CLI_NAME} cron add --name ny-open --prompt "check market open news" \\
     --schedule '{"kind":"cron","expr":"30 9 * * 1-5","tz":"America/New_York"}'
 
   # Look at recent runs
-  myagents cron list
-  myagents cron runs <taskId> --limit 5
+  ${APP_CLI_NAME} cron list
+  ${APP_CLI_NAME} cron runs <taskId> --limit 5
 
 EXIT FROM INSIDE A TASK
   If you are currently running as a scheduled Task AND the task creator enabled
   "Allow AI to exit", call:
-    myagents task exit --reason "goal achieved"
+    ${APP_CLI_NAME} task exit --reason "goal achieved"
   to mark the task complete and stop future executions.
 
 DO NOT
   Use system cron / crontab / at / launchctl — they can't see MyAgents state.
-  Only the \`myagents task\` canonical surface or compatible \`myagents cron\`
+  Only the \`${APP_CLI_NAME} task\` canonical surface or compatible \`${APP_CLI_NAME} cron\`
   commands can create tasks inside MyAgents.`;
 
-const README_IM = `myagents im — IM Bot capabilities
+const README_IM = `${APP_CLI_NAME} im — IM Bot capabilities
 
 WHAT
   Commands that act on the current IM chat (Telegram / Feishu / DingTalk /
@@ -6881,18 +6886,18 @@ COMMANDS
 
 EXAMPLES
   # Generate a CSV and send it
-  myagents im send-media --file /tmp/report.csv --caption "Today's numbers"
+  ${APP_CLI_NAME} im send-media --file /tmp/report.csv --caption "Today's numbers"
 
   # Send a generated chart image
-  myagents im send-media --file /tmp/chart.png
+  ${APP_CLI_NAME} im send-media --file /tmp/chart.png
 
   # Discover available IM channels
-  myagents im channels --json
+  ${APP_CLI_NAME} im channels --json
 
   # Wake yourself with a hint
-  myagents im wake --text "build finished, time to summarize"`;
+  ${APP_CLI_NAME} im wake --text "build finished, time to summarize"`;
 
-const README_WIDGET = `myagents widget — Generative UI widget design guidelines
+const README_WIDGET = `${APP_CLI_NAME} widget — Generative UI widget design guidelines
 
 WHAT
   Returns the MyAgents widget design system (color palette, component specs, layout rules) and the output format you MUST use to embed an interactive widget in a chat reply. Widgets render inline in the conversation — charts, SVG diagrams, interactive explainers, dashboards.
@@ -6906,7 +6911,7 @@ WHEN NOT TO CALL
   - IM bot sessions (widgets only render in the desktop client)
 
 COMMAND
-  myagents widget readme <module1> [<module2> ...]
+  ${APP_CLI_NAME} widget readme <module1> [<module2> ...]
 
 MODULES
   chart         Chart.js line/bar/pie patterns, palette hex values, dashboards
@@ -6916,17 +6921,17 @@ MODULES
   art           SVG illustration / visual metaphor
 
 EXAMPLES
-  myagents widget readme chart
-  myagents widget readme chart interactive
-  myagents widget readme dashboard
+  ${APP_CLI_NAME} widget readme chart
+  ${APP_CLI_NAME} widget readme chart interactive
+  ${APP_CLI_NAME} widget readme dashboard
 
 The output begins with the required <generative-ui-widget> output format contract; do not skip reading it.`;
 
-const README_THOUGHT = `myagents thought — Legacy compatibility alias for text Records
+const README_THOUGHT = `${APP_CLI_NAME} thought — Legacy compatibility alias for text Records
 
 COMPATIBILITY
   This published alias maps list/create to the canonical RecordStore and keeps
-  the legacy JSON shape. New Agent workflows must use 'myagents record'.
+  the legacy JSON shape. New Agent workflows must use '${APP_CLI_NAME} record'.
 
 COMMANDS
   list [--tag X] [--limit N] [--json]
@@ -6943,7 +6948,7 @@ COMMANDS
   --tag flag on create.
 
 RECOVERY
-  Run 'myagents record --help' and replace this alias in new commands. This
+  Run '${APP_CLI_NAME} record --help' and replace this alias in new commands. This
   compatibility surface cannot create audio Records.`;
 
 async function spaceManagementResponse(
@@ -7985,7 +7990,7 @@ export async function handleRuntimeDescribe(
       success: false,
       error: 'Missing required argument: runtime',
       recoveryHint: {
-        recoveryCommand: 'myagents runtime list',
+        recoveryCommand: `${APP_CLI_NAME} runtime list`,
         message: 'See valid runtime names.',
       },
     };
@@ -7995,7 +8000,7 @@ export async function handleRuntimeDescribe(
       success: false,
       error: `Unknown runtime: '${runtimeArg}'. Valid: ${VALID_RUNTIMES.join(', ')}.`,
       recoveryHint: {
-        recoveryCommand: 'myagents runtime list',
+        recoveryCommand: `${APP_CLI_NAME} runtime list`,
         message: 'See valid runtime names + install status.',
       },
     };
@@ -8018,7 +8023,7 @@ export async function handleRuntimeDescribe(
         defaultPermissionMode: getDefaultRuntimePermissionMode('builtin'),
         defaultPermissionModeSource: 'runtime-catalog-fallback',
         note:
-          'Built-in runtime uses the configured provider + model from `myagents model list`. ' +
+          `Built-in runtime uses the configured provider + model from \`${APP_CLI_NAME} model list\`. ` +
           'It does not have a runtime-specific model catalogue — override `--model` with any ' +
           'model id supported by the active provider.',
       } satisfies RuntimeDescribeResult & { note: string },
@@ -8053,7 +8058,7 @@ export async function handleRuntimeDescribe(
         code: 'RUNTIME_MODEL_DISCOVERY_FAILED',
         error: `Failed to discover ${RUNTIME_DISPLAY_NAMES[runtimeArg]} models: ${detail}`,
         recoveryHint: {
-          recoveryCommand: `myagents runtime diagnose ${runtimeArg} --json`,
+          recoveryCommand: `${APP_CLI_NAME} runtime diagnose ${runtimeArg} --json`,
           message: 'Inspect runtime installation and authentication, then retry.',
         },
       };
@@ -8098,7 +8103,7 @@ export async function handleRuntimeDiagnose(payload: {
       success: false,
       error: 'Missing required argument: runtime',
       recoveryHint: {
-        recoveryCommand: 'myagents runtime list',
+        recoveryCommand: `${APP_CLI_NAME} runtime list`,
         message: 'See valid runtime names.',
       },
     };
@@ -8219,7 +8224,7 @@ export async function handleAgentShow(payload: {
       success: false,
       error: 'Missing required argument: <agent-id>',
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message: 'See valid agent ids.',
       },
     };
@@ -8248,7 +8253,7 @@ export async function handleAgentShow(payload: {
       success: false,
       error: `Agent '${id}' not found.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message: 'See valid agent ids.',
       },
     };
@@ -8370,7 +8375,7 @@ export async function handleSessionList(payload: {
       success: false,
       error: 'Missing required option: --agent <agentId>',
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message: 'Discover a stable Agent id first.',
       },
     };
@@ -8407,7 +8412,7 @@ export async function handleSessionList(payload: {
       success: false,
       error: `Agent '${agentId}' not found.`,
       recoveryHint: {
-        recoveryCommand: 'myagents agent list',
+        recoveryCommand: `${APP_CLI_NAME} agent list`,
         message:
           'See visible active Agent ids; use --archived for archived workspaces.',
       },
@@ -8652,7 +8657,7 @@ async function validateTaskOverrides(
         success: false,
         error: `Invalid --runtime value: '${String(payload.runtime)}'. Valid: ${VALID_RUNTIMES.join(', ')}.`,
         recoveryHint: {
-          recoveryCommand: 'myagents runtime list',
+          recoveryCommand: `${APP_CLI_NAME} runtime list`,
           message: 'See valid runtimes + install status.',
         },
       };
@@ -8698,9 +8703,9 @@ async function validateTaskOverrides(
           '--model / --permissionMode requires either an explicit --runtime, ' +
           'or a resolvable workspace (via --workspacePath / --workspaceId matching an agent).',
         recoveryHint: {
-          recoveryCommand: 'myagents agent list',
+          recoveryCommand: `${APP_CLI_NAME} agent list`,
           message:
-            'Find your agent, then `myagents agent show <id>` to see its default runtime.',
+            `Find your agent, then \`${APP_CLI_NAME} agent show <id>\` to see its default runtime.`,
         },
       };
     }
@@ -8749,7 +8754,7 @@ async function validateTaskOverrides(
           success: false,
           error: `Runtime '${effectiveRuntime}' is not installed on this machine.`,
           recoveryHint: {
-            recoveryCommand: 'myagents runtime list',
+            recoveryCommand: `${APP_CLI_NAME} runtime list`,
             message: 'See which runtimes are available + install hints.',
           },
         };
@@ -8759,7 +8764,7 @@ async function validateTaskOverrides(
         success: false,
         error: `Runtime '${effectiveRuntime}' detection failed.`,
         recoveryHint: {
-          recoveryCommand: 'myagents runtime list',
+          recoveryCommand: `${APP_CLI_NAME} runtime list`,
           message: 'See which runtimes are available.',
         },
       };
@@ -8784,7 +8789,7 @@ async function validateTaskOverrides(
         success: false,
         error: `--permissionMode must be a string (got ${typeof payload.permissionMode}).`,
         recoveryHint: {
-          recoveryCommand: `myagents runtime describe ${effectiveRuntime}`,
+          recoveryCommand: `${APP_CLI_NAME} runtime describe ${effectiveRuntime}`,
           message: 'See valid permission modes.',
         },
       };
@@ -8807,7 +8812,7 @@ async function validateTaskOverrides(
         success: false,
         error: `--permissionMode '${payload.permissionMode}' is not valid for runtime '${effectiveRuntime}'. Valid: ${modes.map((m) => m.value).join(', ')}.`,
         recoveryHint: {
-          recoveryCommand: `myagents runtime describe ${effectiveRuntime}`,
+          recoveryCommand: `${APP_CLI_NAME} runtime describe ${effectiveRuntime}`,
           message: 'See valid permission modes for this runtime.',
         },
       };
@@ -8837,7 +8842,7 @@ async function validateTaskOverrides(
         success: false,
         error: `Provider/model '${providerId}/${modelOverride}' is not an enabled ordinary API route configured for DSH.`,
         recoveryHint: {
-          recoveryCommand: 'myagents model list',
+          recoveryCommand: `${APP_CLI_NAME} model list`,
           message: 'Choose a model from an enabled API Provider.',
         },
       };
@@ -8854,7 +8859,7 @@ async function validateTaskOverrides(
         success: false,
         error: `--model must be a string (got ${typeof modelOverride}).`,
         recoveryHint: {
-          recoveryCommand: `myagents runtime describe ${effectiveRuntime}`,
+          recoveryCommand: `${APP_CLI_NAME} runtime describe ${effectiveRuntime}`,
           message: 'See valid model ids for this runtime.',
         },
       };
@@ -8876,7 +8881,7 @@ async function validateTaskOverrides(
           success: false,
           error: `--model '${modelOverride}' is not available for runtime '${effectiveRuntime}'. Examples: ${examples || '(none found)'}.`,
           recoveryHint: {
-            recoveryCommand: `myagents runtime describe ${effectiveRuntime}`,
+            recoveryCommand: `${APP_CLI_NAME} runtime describe ${effectiveRuntime}`,
             message: 'See the full model list.',
           },
         };
@@ -9027,7 +9032,7 @@ function mcpAlreadyExistsResponse(id: string): AdminResponse {
     success: false,
     error: `MCP server '${id}' already exists; mcp add only creates new servers`,
     recoveryHint: {
-      recoveryCommand: `myagents mcp show ${id}`,
+      recoveryCommand: `${APP_CLI_NAME} mcp show ${id}`,
       message:
         'Inspect the existing definition. Remove it first if you intend to replace it.',
     },
@@ -9071,7 +9076,7 @@ function projectMcpMutationFailure(
     success: false,
     error: `Cannot ${action} MCP server '${id}' for project scope: ${projectMcpMutationReason(result)}.`,
     recoveryHint: {
-      recoveryCommand: `myagents mcp ${action} ${id} --scope global`,
+      recoveryCommand: `${APP_CLI_NAME} mcp ${action} ${id} --scope global`,
       message:
         'Use global scope, or open/register the target workspace before changing project-scoped MCP settings.',
     },
@@ -9463,7 +9468,7 @@ function requireCliToolRegistryEnabled(): AdminResponse | null {
       'CLI tool registry is disabled. Enable it in Settings → About & Feedback → Lab first.',
     recoveryHint: {
       message:
-        '打开「设置 → 关于&反馈 → 实验室 → CLI 工具注册表」后再使用 myagents tool。',
+        `打开「设置 → 关于&反馈 → 实验室 → CLI 工具注册表」后再使用 ${APP_CLI_NAME} tool。`,
     },
   };
 }
@@ -9488,7 +9493,7 @@ export function handleToolList(): AdminResponse {
     data: { tools: registry.tools.map((t) => enrichCliTool(t, config)) },
     hint:
       registry.tools.length === 0
-        ? 'No CLI tools registered yet. Create one with the tool-creator skill, then `myagents tool add <dir>`.'
+        ? `No CLI tools registered yet. Create one with the tool-creator skill, then \`${APP_CLI_NAME} tool add <dir>\`.`
         : undefined,
   };
 }
@@ -9504,7 +9509,7 @@ export function handleToolInfo(payload: { name?: string }): AdminResponse {
       success: false,
       error: `CLI tool '${name}' is not registered`,
       recoveryHint: {
-        recoveryCommand: 'myagents tool list',
+        recoveryCommand: `${APP_CLI_NAME} tool list`,
         message: 'See registered tools.',
       },
     };
@@ -9525,7 +9530,7 @@ export async function handleToolAdd(payload: {
       error:
         'Missing required field: dir (path to the tool directory containing tool.json)',
       recoveryHint: {
-        recoveryCommand: 'myagents tool add ~/.myagents/tools/<name>',
+        recoveryCommand: `${APP_CLI_NAME} tool add ~/${APP_DATA_DIR_NAME}/tools/<name>`,
         message:
           'The dir must contain tool.json + the entry script (see the tool-creator skill).',
       },
@@ -9573,7 +9578,7 @@ export async function handleToolAdd(payload: {
         success: false,
         error: `CLI tool '${manifest.name}' is already registered (dir: ${existing.dir})`,
         recoveryHint: {
-          recoveryCommand: `myagents tool info ${manifest.name}`,
+          recoveryCommand: `${APP_CLI_NAME} tool info ${manifest.name}`,
           message: `To update it, edit the tool at ${existing.dir} and re-run tool add there; to replace it, remove first (note: remove drops stored env keys).`,
         },
       };
@@ -9608,7 +9613,7 @@ export async function handleToolAdd(payload: {
         success: false,
         error: `CLI tool '${manifest.name}' disappeared during refresh (concurrent remove?)`,
         recoveryHint: {
-          recoveryCommand: 'myagents tool add ' + srcDir,
+          recoveryCommand: `${APP_CLI_NAME} tool add ` + srcDir,
           message: 'Re-run to register it fresh.',
         },
       };
@@ -9760,7 +9765,7 @@ export async function handleToolAdd(payload: {
       success: false,
       error: `CLI tool '${manifest.name}' is already registered`,
       recoveryHint: {
-        recoveryCommand: `myagents tool info ${manifest.name}`,
+        recoveryCommand: `${APP_CLI_NAME} tool info ${manifest.name}`,
         message: 'Remove it first if you want to re-register.',
       },
     };
@@ -9781,7 +9786,7 @@ export async function handleToolAdd(payload: {
 
   const envHint =
     (manifest.envKeys ?? []).length > 0
-      ? ` It declares env keys [${(manifest.envKeys ?? []).join(', ')}] — set them via \`myagents tool env ${manifest.name} set KEY=value\`.`
+      ? ` It declares env keys [${(manifest.envKeys ?? []).join(', ')}] — set them via \`${APP_CLI_NAME} tool env ${manifest.name} set KEY=value\`.`
       : '';
   return {
     success: true,
@@ -9812,7 +9817,7 @@ export async function handleToolRemove(payload: {
       success: false,
       error: `CLI tool '${name}' is not registered`,
       recoveryHint: {
-        recoveryCommand: 'myagents tool list',
+        recoveryCommand: `${APP_CLI_NAME} tool list`,
         message: 'See registered tools.',
       },
     };
@@ -9838,7 +9843,7 @@ export async function handleToolRemove(payload: {
     hint: purge
       ? purgeable
         ? undefined
-        : `Tool dir ${removed.dir} is outside ~/.myagents/tools — not deleted; remove it manually if intended.`
+        : `Tool dir ${removed.dir} is outside ~/${APP_DATA_DIR_NAME}/tools — not deleted; remove it manually if intended.`
       : `Tool dir kept at ${removed.dir} (pass --purge to delete it too).`,
   };
 }
@@ -9865,7 +9870,7 @@ async function setToolEnabled(
       success: false,
       error: `CLI tool '${name}' is not registered`,
       recoveryHint: {
-        recoveryCommand: 'myagents tool list',
+        recoveryCommand: `${APP_CLI_NAME} tool list`,
         message: 'See registered tools.',
       },
     };
@@ -9909,7 +9914,7 @@ export async function handleToolReadme(payload: {
       success: false,
       error: `CLI tool '${name}' is not registered`,
       recoveryHint: {
-        recoveryCommand: 'myagents tool list',
+        recoveryCommand: `${APP_CLI_NAME} tool list`,
         message: 'See registered tools.',
       },
     };
@@ -9953,7 +9958,7 @@ export async function handleToolEnv(payload: {
       success: false,
       error: `CLI tool '${name}' is not registered`,
       recoveryHint: {
-        recoveryCommand: 'myagents tool list',
+        recoveryCommand: `${APP_CLI_NAME} tool list`,
         message: 'See registered tools.',
       },
     };

@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { randomUUID } from 'crypto';
 import {
   chmodSync,
@@ -70,7 +71,7 @@ function imageMimeFromBytes(buffer: Buffer): string {
 }
 
 function defaultCacheDir(): string {
-  return join(homedir(), '.myagents', 'cache', 'assets');
+  return join(homedir(), APP_DATA_DIR_NAME, 'cache', 'assets');
 }
 
 function ensurePrivateCacheDir(cacheDir: string): void {

@@ -35,6 +35,7 @@ import React, {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -6082,14 +6083,14 @@ export default function Settings({
                   >
                     <MyAgentsLogotype
                       className="launcher-hero-logotype"
-                      title="MyAgents"
+                      title={APP_DISPLAY_NAME}
                     />
                   </h1>
                   <div className="mt-1 flex items-center gap-2">
                     <p className="text-sm font-medium text-[var(--ink-muted)]">
                       Version {appVersion || '...'}
                     </p>
-                    {!linuxDesktop && !propUpdateReady && !updateDownloading && (
+                    {APP_BUILD_PROFILE === 'myagents' && !linuxDesktop && !propUpdateReady && !updateDownloading && (
                       <button
                         type="button"
                         onClick={async () => {
@@ -6129,12 +6130,12 @@ export default function Settings({
                   <p className="mt-3 text-base text-[var(--ink-secondary)]">
                     {tSettings('about.slogan')}
                   </p>
-                  {linuxDesktop && (
+                  {APP_BUILD_PROFILE === 'myagents' && linuxDesktop && (
                     <p className="mt-3 text-sm text-[var(--ink-muted)]">
                       {tSettings('about.manualLinuxUpdate')}
                     </p>
                   )}
-                  {!linuxDesktop && updateDownloading && propUpdateVersion && (
+                  {APP_BUILD_PROFILE === 'myagents' && !linuxDesktop && updateDownloading && propUpdateVersion && (
                     <div className="mt-3 space-y-2">
                       <div className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]">
                         <LoaderIcon className="h-4 w-4 animate-spin text-[var(--accent)]" />
@@ -6161,7 +6162,7 @@ export default function Settings({
                   {/* Hidden during silent replacement (updatePreparing) for the
                                         same reason CustomTitleBar hides its button: pending bytes
                                         are mid-replacement, click would hit inconsistent state. */}
-                  {!linuxDesktop && propUpdateReady && propUpdateVersion && !updatePreparing && (
+                  {APP_BUILD_PROFILE === 'myagents' && !linuxDesktop && propUpdateReady && propUpdateVersion && !updatePreparing && (
                     <div className="mt-3 flex items-center gap-2">
                       <span className="text-sm text-[var(--success)]">
                         {tSettings('about.updateReady', {

@@ -104,7 +104,8 @@
     "verify:dsh-runtime:fresh": "node scripts/integrated-runtimes/verify-dsh-dev-freshness.mjs",
     "build:assets": "npm run build:web && npm run build:server && npm run build:bridge && npm run build:cli",
     "build:sharp-runtime": "node scripts/prepare-sharp-runtime.mjs",
-    "verify:agent-network-protocol": "node scripts/verify-agent-network-protocol.mjs"
+    "verify:agent-network-protocol": "node scripts/verify-agent-network-protocol.mjs",
+    "tauri:build:moxbot": "node scripts/build-moxbot.mjs"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.0.2",

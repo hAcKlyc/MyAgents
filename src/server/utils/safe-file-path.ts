@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Safe file path guard for capabilities that forward AI-supplied paths to
  * filesystem readers (e.g. IM media sending, PDF ingestion, etc.).
@@ -96,7 +97,7 @@ export function assertSafeFilePath(filePath: string, options: SafeFilePathOption
   const allowed = roots.some(root => isUnder(realPath, root));
   if (!allowed) {
     throw new Error(
-      `path "${filePath}" is outside the allowed roots. Only files under the current workspace, ~/.myagents/tmp, or the system temp directory can be read for this operation.`
+      `path "${filePath}" is outside the allowed roots. Only files under the current workspace, ~/${APP_DATA_DIR_NAME}/tmp, or the system temp directory can be read for this operation.`
     );
   }
 
@@ -106,7 +107,7 @@ export function assertSafeFilePath(filePath: string, options: SafeFilePathOption
 function defaultExtraRoots(home: string | null): string[] {
   const roots = [tmpdir()];
   if (home) {
-    roots.push(resolve(home, '.myagents', 'tmp'));
+    roots.push(resolve(home, APP_DATA_DIR_NAME, 'tmp'));
   }
   return roots;
 }

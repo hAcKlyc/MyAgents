@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -127,7 +128,7 @@ function readInheritedProxySnapshot(): Record<string, string | undefined> {
 
 function readInitialProxySettings(): ProxySettings | null {
   try {
-    const raw = readFileSync(join(homedir(), '.myagents', 'config.json'), 'utf8');
+    const raw = readFileSync(join(homedir(), APP_DATA_DIR_NAME, 'config.json'), 'utf8');
     const parsed = JSON.parse(raw.replace(/^\uFEFF/, '')) as { proxySettings?: unknown };
     return coerceProxySettings(parsed.proxySettings);
   } catch {
