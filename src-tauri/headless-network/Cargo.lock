@@ -1391,6 +1391,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-host-management-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "myagents-host-network"
 version = "0.5.2"
 dependencies = [
@@ -1401,6 +1410,7 @@ dependencies = [
  "libc",
  "myagents-agent-network-crypto",
  "myagents-agent-network-protocol",
+ "myagents-host-management-protocol",
  "p256",
  "rcgen",
  "reqwest",
@@ -2784,6 +2794,7 @@ checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 
