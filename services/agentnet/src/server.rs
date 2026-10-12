@@ -8,10 +8,13 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use openidconnect::{
-    AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet, EndpointNotSet,
-    EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
-    TokenResponse,
-    core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata},
+    AuthorizationCode, ClaimsVerificationError, ClientId, ClientSecret, CsrfToken,
+    EndpointMaybeSet, EndpointNotSet, EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge,
+    PkceCodeVerifier, RedirectUrl, Scope, SignatureVerificationError, TokenResponse,
+    core::{
+        CoreAuthenticationFlow, CoreClient, CoreIdTokenVerifier, CoreJsonWebKeySet,
+        CoreProviderMetadata, CoreTokenResponse,
+    },
 };
 use rand::random;
 use reqwest::{Client, redirect::Policy};
@@ -24,7 +27,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
@@ -76,6 +79,7 @@ type ServiceClient = CoreClient<
 enum Phase {
     Pending,
     Exchanging,
+    Failed,
     Ready(VerifiedSubject),
     Consuming,
 }
@@ -89,6 +93,60 @@ struct App {
     origin: Url,
     store: AuthStore,
     flow: Flow,
+    verification: Verification,
+}
+struct Verification {
+    metadata: CoreProviderMetadata,
+    client_id: ClientId,
+    client_secret: ClientSecret,
+    cache: Mutex<KeyCache>,
+}
+struct KeyCache {
+    keys: CoreJsonWebKeySet,
+    generation: u64,
+    refreshing: bool,
+    last_attempt: Option<Instant>,
+}
+impl Verification {
+    fn new(
+        metadata: CoreProviderMetadata,
+        client_id: ClientId,
+        client_secret: ClientSecret,
+    ) -> Self {
+        let keys = metadata.jwks().clone();
+        Self {
+            metadata,
+            client_id,
+            client_secret,
+            cache: Mutex::new(KeyCache {
+                keys,
+                generation: 0,
+                refreshing: false,
+                last_attempt: None,
+            }),
+        }
+    }
+    fn verifier(&self, keys: CoreJsonWebKeySet) -> CoreIdTokenVerifier<'static> {
+        CoreIdTokenVerifier::new_confidential_client(
+            self.client_id.clone(),
+            self.client_secret.clone(),
+            self.metadata.issuer().clone(),
+            keys,
+        )
+        .set_allowed_algs(
+            self.metadata
+                .id_token_signing_alg_values_supported()
+                .clone(),
+        )
+    }
+}
+struct RefreshClaim<'a>(&'a Mutex<KeyCache>);
+impl Drop for RefreshClaim<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut cache) = self.0.lock() {
+            cache.refreshing = false;
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -181,6 +239,11 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     {
         return Err(AuthError::OidcConfiguration);
     }
+    let verification = Verification::new(
+        metadata.clone(),
+        ClientId::new(config.client_id.clone()),
+        ClientSecret::new(config.client_secret.to_string()),
+    );
     let auth_endpoint = metadata.authorization_endpoint().clone();
     let token_endpoint = (*token_endpoint).clone();
     let client = CoreClient::from_provider_metadata(
@@ -208,6 +271,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
             pending: Mutex::new(HashMap::new()),
             ttl: Duration::from_secs(300),
         },
+        verification,
     });
     let router = Router::new()
         .route("/auth/login/start", post(start))
@@ -443,41 +507,190 @@ async fn callback(
     State(app): State<Arc<App>>,
     OriginalUri(uri): OriginalUri,
 ) -> Result<impl IntoResponse, ApiError> {
+    let exchange_app = app.clone();
+    let keys_app = app.clone();
+    callback_using(
+        app,
+        uri,
+        move |code, verifier| async move {
+            let exchange = exchange_app
+                .client
+                .exchange_code(AuthorizationCode::new(code))
+                .set_pkce_verifier(PkceCodeVerifier::new(verifier));
+            let http = exchange_app.http.clone();
+            let origin = exchange_app.origin.clone();
+            tokio::time::timeout(
+                Duration::from_secs(15),
+                exchange.request_async(&move |r| bounded_call(http.clone(), origin.clone(), r)),
+            )
+            .await
+            .map_err(|_| ApiError::Provider)?
+            .map_err(|_| ApiError::Provider)
+        },
+        move || async move {
+            let http = keys_app.http.clone();
+            let origin = keys_app.origin.clone();
+            CoreJsonWebKeySet::fetch_async(keys_app.verification.metadata.jwks_uri(), &move |r| {
+                bounded_call(http.clone(), origin.clone(), r)
+            })
+            .await
+            .map_err(|_| ApiError::Provider)
+        },
+    )
+    .await
+}
+fn ensure_exchange(app: &App, txid: &str, expires: i64) -> Result<(), ApiError> {
+    let all = app.flow.pending.lock().map_err(|_| ApiError::Internal)?;
+    let current = all.get(txid).ok_or(ApiError::BadRequest)?;
+    if current.expires_at != expires
+        || expires <= unix_now().map_err(|_| ApiError::Internal)?
+        || !matches!(current.phase, Phase::Exchanging)
+    {
+        return Err(ApiError::BadRequest);
+    }
+    Ok(())
+}
+fn fail_exchange(app: &App, txid: &str, expires: i64) {
+    if let Ok(mut all) = app.flow.pending.lock()
+        && let Some(current) = all.get_mut(txid)
+        && current.expires_at == expires
+        && matches!(current.phase, Phase::Exchanging)
+    {
+        current.phase = Phase::Failed;
+    }
+}
+struct ExchangeClaim {
+    app: Arc<App>,
+    txid: String,
+    expires: i64,
+}
+impl Drop for ExchangeClaim {
+    fn drop(&mut self) {
+        fail_exchange(&self.app, &self.txid, self.expires);
+    }
+}
+async fn refresh_keys<F, Fut>(
+    app: &App,
+    observed: u64,
+    load: F,
+) -> Result<CoreJsonWebKeySet, ApiError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<CoreJsonWebKeySet, ApiError>>,
+{
+    let wait_started = Instant::now();
+    loop {
+        let wait = {
+            let mut cache = app
+                .verification
+                .cache
+                .lock()
+                .map_err(|_| ApiError::Internal)?;
+            if cache.generation != observed {
+                return Ok(cache.keys.clone());
+            }
+            if cache.refreshing {
+                true
+            } else {
+                if cache
+                    .last_attempt
+                    .is_some_and(|at| at.elapsed() < Duration::from_secs(30))
+                {
+                    return Err(ApiError::Provider);
+                }
+                cache.refreshing = true;
+                cache.last_attempt = Some(Instant::now());
+                false
+            }
+        };
+        if !wait {
+            break;
+        }
+        if wait_started.elapsed() >= Duration::from_secs(15) {
+            return Err(ApiError::Provider);
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let _claim = RefreshClaim(&app.verification.cache);
+    let keys = tokio::time::timeout(Duration::from_secs(15), load())
+        .await
+        .map_err(|_| ApiError::Provider)??;
+    if keys.keys().is_empty() || keys.keys().len() > 32 {
+        return Err(ApiError::Provider);
+    }
+    let mut cache = app
+        .verification
+        .cache
+        .lock()
+        .map_err(|_| ApiError::Internal)?;
+    if cache.generation == observed {
+        cache.generation = cache.generation.checked_add(1).ok_or(ApiError::Internal)?;
+        cache.keys = keys;
+    }
+    Ok(cache.keys.clone())
+}
+async fn callback_using<E, EF, K, KF>(
+    app: Arc<App>,
+    uri: axum::http::Uri,
+    exchange: E,
+    load_keys: K,
+) -> Result<axum::response::Response, ApiError>
+where
+    E: FnOnce(String, String) -> EF,
+    EF: std::future::Future<Output = Result<CoreTokenResponse, ApiError>>,
+    K: FnOnce() -> KF,
+    KF: std::future::Future<Output = Result<CoreJsonWebKeySet, ApiError>>,
+{
     let query = uri.query().ok_or(ApiError::BadRequest)?;
     if query.len() > 8192 {
         return Err(ApiError::BadRequest);
     }
     let mut fields = HashMap::<String, String>::new();
     for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
-        if !matches!(key.as_ref(), "code" | "state")
-            || fields
-                .insert(key.into_owned(), value.into_owned())
-                .is_some()
+        if !matches!(
+            key.as_ref(),
+            "code" | "state" | "error" | "error_description" | "error_uri"
+        ) || fields
+            .insert(key.into_owned(), value.into_owned())
+            .is_some()
         {
             return Err(ApiError::BadRequest);
         }
     }
-    let code = fields
-        .remove("code")
-        .filter(|s| !s.is_empty() && s.len() <= 4096)
-        .ok_or(ApiError::BadRequest)?;
     let state = Zeroizing::new(
         fields
             .remove("state")
-            .filter(|s| s.len() <= 256)
+            .filter(|s| !s.is_empty() && s.len() <= 256)
             .ok_or(ApiError::BadRequest)?,
     );
+    let provider_error = fields.remove("error");
+    let code = fields.remove("code");
+    if provider_error
+        .as_ref()
+        .is_some_and(|e| e.is_empty() || e.len() > 256)
+        || provider_error.is_some() == code.is_some()
+        || (provider_error.is_none()
+            && (fields.contains_key("error_description") || fields.contains_key("error_uri")))
+        || code
+            .as_ref()
+            .is_some_and(|s| s.is_empty() || s.len() > 4096)
+    {
+        return Err(ApiError::BadRequest);
+    }
     let now = unix_now().map_err(|_| ApiError::Internal)?;
     let (txid, nonce, provider_verifier, expires) = {
         let mut all = app.flow.pending.lock().map_err(|_| ApiError::Internal)?;
         all.retain(|_, p| p.expires_at > now);
-        let found = all
+        let (id, p) = all
             .iter_mut()
             .find(|(_, p)| ct_eq(p.state.as_bytes(), state.as_bytes()))
             .ok_or(ApiError::BadRequest)?;
-        let (id, p) = found;
         if p.expires_at <= now || !matches!(p.phase, Phase::Pending) {
             return Err(ApiError::BadRequest);
+        }
+        if provider_error.is_some() {
+            p.phase = Phase::Failed;
+            return Err(ApiError::LoginFailed);
         }
         p.phase = Phase::Exchanging;
         (
@@ -487,52 +700,73 @@ async fn callback(
             p.expires_at,
         )
     };
-    let verifier = PkceCodeVerifier::new(provider_verifier);
-    let exchange = app
-        .client
-        .exchange_code(AuthorizationCode::new(code))
-        .set_pkce_verifier(verifier);
-    let callback_http = app.http.clone();
-    let callback_origin = app.origin.clone();
-    let response = tokio::time::timeout(
-        Duration::from_secs(15),
-        exchange.request_async(&move |r| {
-            bounded_call(callback_http.clone(), callback_origin.clone(), r)
-        }),
-    )
-    .await
-    .map_err(|_| ApiError::Provider)?
-    .map_err(|_| ApiError::Provider)?;
-    let token = response.id_token().ok_or(ApiError::Provider)?;
-    let claims = token
-        .claims(
-            &app.client.id_token_verifier(),
-            &Nonce::new(nonce.to_string()),
-        )
-        .map_err(|_| ApiError::Provider)?;
-    let issuer = claims.issuer().as_str().to_owned();
-    let subject = claims.subject().as_str().to_owned();
-    if subject.is_empty() || subject.len() > 512 || issuer.len() > 2048 {
-        return Err(ApiError::Provider);
+    let _claim = ExchangeClaim {
+        app: app.clone(),
+        txid: txid.clone(),
+        expires,
+    };
+    let result = async {
+        let response = exchange(code.ok_or(ApiError::BadRequest)?, provider_verifier).await?;
+        ensure_exchange(&app, &txid, expires)?;
+        let token = response.id_token().ok_or(ApiError::Provider)?;
+        let nonce = Nonce::new(nonce.to_string());
+        let (keys, generation) = {
+            let cache = app
+                .verification
+                .cache
+                .lock()
+                .map_err(|_| ApiError::Internal)?;
+            (cache.keys.clone(), cache.generation)
+        };
+        let verifier = app.verification.verifier(keys);
+        let subject = match token.claims(&verifier, &nonce) {
+            Ok(claims) => VerifiedSubject::from_verified_claims(
+                claims.issuer().as_str().into(),
+                claims.subject().as_str().into(),
+            )
+            .map_err(|_| ApiError::Provider)?,
+            Err(ClaimsVerificationError::SignatureVerification(
+                SignatureVerificationError::NoMatchingKey
+                | SignatureVerificationError::CryptoError(_),
+            )) => {
+                let keys = refresh_keys(&app, generation, load_keys).await?;
+                ensure_exchange(&app, &txid, expires)?;
+                let verifier = app.verification.verifier(keys);
+                let claims = token
+                    .claims(&verifier, &nonce)
+                    .map_err(|_| ApiError::Provider)?;
+                VerifiedSubject::from_verified_claims(
+                    claims.issuer().as_str().into(),
+                    claims.subject().as_str().into(),
+                )
+                .map_err(|_| ApiError::Provider)?
+            }
+            Err(_) => return Err(ApiError::Provider),
+        };
+        let mut all = app.flow.pending.lock().map_err(|_| ApiError::Internal)?;
+        let current = all.get_mut(&txid).ok_or(ApiError::BadRequest)?;
+        if current.expires_at != expires
+            || expires <= unix_now().map_err(|_| ApiError::Internal)?
+            || !matches!(current.phase, Phase::Exchanging)
+        {
+            return Err(ApiError::BadRequest);
+        }
+        current.phase = Phase::Ready(subject);
+        Ok(())
     }
-    let verified =
-        VerifiedSubject::from_verified_claims(issuer, subject).map_err(|_| ApiError::Provider)?;
-    let mut all = app.flow.pending.lock().map_err(|_| ApiError::Internal)?;
-    let current = all.get_mut(&txid).ok_or(ApiError::BadRequest)?;
-    if current.expires_at != expires
-        || current.expires_at <= unix_now().map_err(|_| ApiError::Internal)?
-        || !matches!(current.phase, Phase::Exchanging)
-    {
-        return Err(ApiError::BadRequest);
+    .await;
+    if let Err(error) = result {
+        fail_exchange(&app, &txid, expires);
+        return Err(error);
     }
-    current.phase = Phase::Ready(verified);
     Ok((
         [
             (header::CACHE_CONTROL, "no-store"),
             (header::PRAGMA, "no-cache"),
         ],
         Html(COMPLETION_PAGE),
-    ))
+    )
+        .into_response())
 }
 
 async fn poll(
@@ -564,6 +798,7 @@ async fn poll(
             )
                 .into_response());
         }
+        Phase::Failed => return Err(ApiError::LoginFailed),
         Phase::Consuming => return Err(ApiError::Busy),
         Phase::Ready(_) => {}
     }
@@ -703,6 +938,7 @@ enum ApiError {
     Unauthorized,
     Busy,
     Provider,
+    LoginFailed,
     Internal,
 }
 impl IntoResponse for ApiError {
@@ -712,6 +948,7 @@ impl IntoResponse for ApiError {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Busy => (StatusCode::SERVICE_UNAVAILABLE, "busy"),
             Self::Provider => (StatusCode::BAD_GATEWAY, "identity_provider_error"),
+            Self::LoginFailed => (StatusCode::UNAUTHORIZED, "login_failed"),
             Self::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
         (
@@ -746,6 +983,11 @@ mod tests {
             "id_token_signing_alg_values_supported":["RS256"]
         }))
         .unwrap();
+        let verification = Verification::new(
+            metadata.clone(),
+            ClientId::new("agentnet-test".into()),
+            ClientSecret::new("unit-test-secret".into()),
+        );
         let client = CoreClient::from_provider_metadata(
             metadata,
             ClientId::new("agentnet-test".into()),
@@ -775,6 +1017,7 @@ mod tests {
                 pending: Mutex::new(HashMap::new()),
                 ttl: Duration::from_secs(300),
             },
+            verification,
         });
         (app, dir)
     }
@@ -897,5 +1140,397 @@ mod tests {
             poll(State(app), Json(poll_request())).await,
             Err(ApiError::BadRequest)
         ));
+    }
+    const TEST_DEVICE: &str = "22222222-2222-4222-8222-222222222222";
+    const TEST_VERIFIER: &str =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    struct Signing {
+        key: rsa::RsaPrivateKey,
+        jwks: CoreJsonWebKeySet,
+        kid: &'static str,
+    }
+    fn signing(rotated: bool) -> &'static Signing {
+        static OLD: std::sync::OnceLock<Signing> = std::sync::OnceLock::new();
+        static NEW: std::sync::OnceLock<Signing> = std::sync::OnceLock::new();
+        let cell = if rotated { &NEW } else { &OLD };
+        cell.get_or_init(|| {
+            use rsa::traits::PublicKeyParts;
+            let key = rsa::RsaPrivateKey::new(&mut rsa::rand_core::OsRng,2048).unwrap();
+            let kid = if rotated { "new-key" } else { "old-key" };
+            let jwks = serde_json::from_value(serde_json::json!({"keys":[{"kty":"RSA","n":URL_SAFE_NO_PAD.encode(key.n().to_bytes_be()),"e":URL_SAFE_NO_PAD.encode(key.e().to_bytes_be()),"kid":kid,"alg":"RS256","use":"sig"}]})).unwrap();
+            Signing { key,jwks,kid }
+        })
+    }
+    fn signed_response(
+        signer: &Signing,
+        nonce: &str,
+        issuer: &str,
+        audience: &str,
+        expires: i64,
+    ) -> CoreTokenResponse {
+        use rsa::pkcs1::EncodeRsaPrivateKey;
+        let mut header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
+        header.kid = Some(signer.kid.into());
+        let claims = serde_json::json!({"iss":issuer,"sub":"isolated-user","aud":audience,"iat":unix_now().unwrap(),"exp":expires,"nonce":nonce});
+        let token = jsonwebtoken::encode(
+            &header,
+            &claims,
+            &jsonwebtoken::EncodingKey::from_rsa_der(signer.key.to_pkcs1_der().unwrap().as_bytes()),
+        )
+        .unwrap();
+        serde_json::from_value(serde_json::json!({"access_token":"test-only-not-authority","token_type":"Bearer","id_token":token})).unwrap()
+    }
+    async fn flow(app: &Arc<App>) -> (StartResponse, axum::http::Uri, String) {
+        let (_, Json(started)) = start(
+            State(app.clone()),
+            Json(StartRequest {
+                device_id: TEST_DEVICE.into(),
+                pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
+            }),
+        )
+        .await
+        .unwrap();
+        let url = Url::parse(&started.authorization_url).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let nonce = url
+            .query_pairs()
+            .find(|(k, _)| k == "nonce")
+            .unwrap()
+            .1
+            .into_owned();
+        let uri = format!("/auth/callback?code=isolated-code&state={state}")
+            .parse()
+            .unwrap();
+        (started, uri, nonce)
+    }
+    fn poll_req(started: &StartResponse) -> PollRequest {
+        PollRequest {
+            transaction_id: started.transaction_id.clone(),
+            device_id: TEST_DEVICE.into(),
+            pkce_verifier: Zeroizing::new(TEST_VERIFIER.into()),
+        }
+    }
+    fn ready_keys(app: &App) {
+        app.verification.cache.lock().unwrap().keys = signing(false).jwks.clone();
+    }
+    fn token(nonce: &str, rotated: bool) -> CoreTokenResponse {
+        signed_response(
+            signing(rotated),
+            nonce,
+            "https://dex.example.test",
+            "agentnet-test",
+            unix_now().unwrap() + 600,
+        )
+    }
+    async fn no_keys() -> Result<CoreJsonWebKeySet, ApiError> {
+        panic!("unexpected refresh")
+    }
+
+    #[tokio::test]
+    async fn provider_error_consumes_valid_state_and_poll_is_terminal_without_raw_detail() {
+        let (app, _dir) = test_app();
+        let (started, uri, _) = flow(&app).await;
+        let state = uri.query().unwrap().split("state=").nth(1).unwrap();
+        let error_uri = format!("/auth/callback?error=access_denied&error_description=private-provider-detail&state={state}").parse().unwrap();
+        let result = callback_using(
+            app.clone(),
+            error_uri,
+            |_, _| async { panic!("no exchange on error") },
+            no_keys,
+        )
+        .await;
+        assert!(matches!(result, Err(ApiError::LoginFailed)));
+        assert!(matches!(
+            poll(State(app.clone()), Json(poll_req(&started))).await,
+            Err(ApiError::LoginFailed)
+        ));
+        assert!(matches!(
+            callback_using(
+                app.clone(),
+                uri,
+                |_, _| async { panic!("late callback") },
+                no_keys
+            )
+            .await,
+            Err(ApiError::BadRequest)
+        ));
+        let response = ApiError::LoginFailed.into_response();
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!({"error":"login_failed"})
+        );
+    }
+    #[tokio::test]
+    async fn exchange_failure_is_terminal_and_late_callback_cannot_reenter() {
+        let (app, _dir) = test_app();
+        let (started, uri, _) = flow(&app).await;
+        assert!(matches!(
+            callback_using(
+                app.clone(),
+                uri.clone(),
+                |_, _| async { Err(ApiError::Provider) },
+                no_keys
+            )
+            .await,
+            Err(ApiError::Provider)
+        ));
+        assert!(matches!(
+            poll(State(app.clone()), Json(poll_req(&started))).await,
+            Err(ApiError::LoginFailed)
+        ));
+        assert!(matches!(
+            callback_using(
+                app,
+                uri,
+                |_, _| async { panic!("second exchange") },
+                no_keys
+            )
+            .await,
+            Err(ApiError::BadRequest)
+        ));
+    }
+    #[tokio::test]
+    async fn invalid_issuer_audience_nonce_and_expiry_never_trigger_refresh_or_ready() {
+        for failure in 0..4 {
+            let (app, _dir) = test_app();
+            ready_keys(&app);
+            let (started, uri, nonce) = flow(&app).await;
+            let response = signed_response(
+                signing(false),
+                if failure == 2 { "wrong-nonce" } else { &nonce },
+                if failure == 0 {
+                    "https://foreign.test"
+                } else {
+                    "https://dex.example.test"
+                },
+                if failure == 1 {
+                    "wrong-audience"
+                } else {
+                    "agentnet-test"
+                },
+                if failure == 3 {
+                    unix_now().unwrap() - 60
+                } else {
+                    unix_now().unwrap() + 600
+                },
+            );
+            assert!(matches!(
+                callback_using(app.clone(), uri, |_, _| async { Ok(response) }, no_keys).await,
+                Err(ApiError::Provider)
+            ));
+            assert!(matches!(
+                poll(State(app), Json(poll_req(&started))).await,
+                Err(ApiError::LoginFailed)
+            ));
+        }
+    }
+    #[tokio::test]
+    async fn rotation_retries_verification_once_and_poll_issues_only_one_session() {
+        let (app, _dir) = test_app();
+        ready_keys(&app);
+        let (started, uri, nonce) = flow(&app).await;
+        callback_using(
+            app.clone(),
+            uri,
+            |_, _| async { Ok(token(&nonce, true)) },
+            || async { Ok(signing(true).jwks.clone()) },
+        )
+        .await
+        .unwrap();
+        assert_eq!(app.verification.cache.lock().unwrap().generation, 1);
+        let (a, b) = tokio::join!(
+            poll(State(app.clone()), Json(poll_req(&started))),
+            poll(State(app.clone()), Json(poll_req(&started)))
+        );
+        assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    }
+    #[tokio::test]
+    async fn cancel_during_rotation_prevents_late_ready() {
+        let (app, _dir) = test_app();
+        ready_keys(&app);
+        let (started, uri, nonce) = flow(&app).await;
+        let cancel_app = app.clone();
+        let result = callback_using(
+            app.clone(),
+            uri,
+            |_, _| async { Ok(token(&nonce, true)) },
+            || async {
+                cancel(
+                    State(cancel_app),
+                    Json(CancelRequest {
+                        transaction_id: started.transaction_id.clone(),
+                        device_id: TEST_DEVICE.into(),
+                        pkce_verifier: Zeroizing::new(TEST_VERIFIER.into()),
+                    }),
+                )
+                .await
+                .unwrap();
+                Ok(signing(true).jwks.clone())
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(ApiError::BadRequest)));
+        assert!(matches!(
+            poll(State(app), Json(poll_req(&started))).await,
+            Err(ApiError::BadRequest)
+        ));
+    }
+    #[tokio::test]
+    async fn expiry_during_rotation_prevents_late_ready() {
+        let (app, _dir) = test_app();
+        ready_keys(&app);
+        let (started, uri, nonce) = flow(&app).await;
+        let result = callback_using(
+            app.clone(),
+            uri,
+            |_, _| async { Ok(token(&nonce, true)) },
+            || async {
+                app.flow
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .get_mut(&started.transaction_id)
+                    .unwrap()
+                    .expires_at = 0;
+                Ok(signing(true).jwks.clone())
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(ApiError::BadRequest)));
+        assert!(matches!(
+            poll(State(app), Json(poll_req(&started))).await,
+            Err(ApiError::BadRequest)
+        ));
+    }
+    #[tokio::test]
+    async fn failed_refresh_is_terminal_and_cooldown_bounds_subsequent_attempts() {
+        let (app, _dir) = test_app();
+        ready_keys(&app);
+        for attempt in 0..2 {
+            let (started, uri, nonce) = flow(&app).await;
+            assert!(matches!(
+                callback_using(
+                    app.clone(),
+                    uri,
+                    |_, _| async { Ok(token(&nonce, true)) },
+                    || async {
+                        assert_eq!(attempt, 0, "cooldown must prevent a second fetch");
+                        Err(ApiError::Provider)
+                    }
+                )
+                .await,
+                Err(ApiError::Provider)
+            ));
+            assert!(matches!(
+                poll(State(app.clone()), Json(poll_req(&started))).await,
+                Err(ApiError::LoginFailed)
+            ));
+        }
+        assert!(!app.verification.cache.lock().unwrap().refreshing);
+    }
+    #[tokio::test]
+    async fn parallel_rotated_callbacks_share_one_bounded_refresh() {
+        let (app, _dir) = test_app();
+        ready_keys(&app);
+        let (_, uri_a, nonce_a) = flow(&app).await;
+        let (_, uri_b, nonce_b) = flow(&app).await;
+        let loads = std::sync::atomic::AtomicUsize::new(0);
+        let a = callback_using(
+            app.clone(),
+            uri_a,
+            |_, _| async { Ok(token(&nonce_a, true)) },
+            || async {
+                loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                Ok(signing(true).jwks.clone())
+            },
+        );
+        let b = callback_using(
+            app.clone(),
+            uri_b,
+            |_, _| async { Ok(token(&nonce_b, true)) },
+            || async {
+                loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(signing(true).jwks.clone())
+            },
+        );
+        let (a, b) = tokio::join!(a, b);
+        assert!(a.is_ok() && b.is_ok());
+        assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn dropping_exchange_or_refresh_marks_failure_and_releases_refresh_claim() {
+        for during_refresh in [false, true] {
+            let (app, _dir) = test_app();
+            ready_keys(&app);
+            let (started, uri, nonce) = flow(&app).await;
+            let result = tokio::time::timeout(
+                Duration::from_millis(10),
+                callback_using(
+                    app.clone(),
+                    uri,
+                    |_, _| async {
+                        if during_refresh {
+                            Ok(token(&nonce, true))
+                        } else {
+                            std::future::pending::<Result<CoreTokenResponse, ApiError>>().await
+                        }
+                    },
+                    std::future::pending::<Result<CoreJsonWebKeySet, ApiError>>,
+                ),
+            )
+            .await;
+            assert!(result.is_err());
+            assert!(!app.verification.cache.lock().unwrap().refreshing);
+            assert!(matches!(
+                poll(State(app), Json(poll_req(&started))).await,
+                Err(ApiError::LoginFailed)
+            ));
+        }
+    }
+    #[tokio::test]
+    async fn refresh_rejects_empty_keys_and_does_not_loop_on_unusable_new_keys() {
+        for mode in 0..3 {
+            let (app, _dir) = test_app();
+            ready_keys(&app);
+            let (started, uri, nonce) = flow(&app).await;
+            let mut calls = 0;
+            let result = callback_using(
+                app.clone(),
+                uri,
+                |_, _| async { Ok(token(&nonce, true)) },
+                || {
+                    calls += 1;
+                    async move {
+                        Ok(match mode {
+                            0 => serde_json::from_value(serde_json::json!({"keys":[]})).unwrap(),
+                            1 => signing(false).jwks.clone(),
+                            _ => {
+                                let value = serde_json::to_value(&signing(false).jwks).unwrap();
+                                serde_json::from_value(
+                                    serde_json::json!({"keys":vec![value["keys"][0].clone();33]}),
+                                )
+                                .unwrap()
+                            }
+                        })
+                    }
+                },
+            )
+            .await;
+            assert!(matches!(result, Err(ApiError::Provider)));
+            assert_eq!(calls, 1);
+            assert!(matches!(
+                poll(State(app), Json(poll_req(&started))).await,
+                Err(ApiError::LoginFailed)
+            ));
+        }
     }
 }
