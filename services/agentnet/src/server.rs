@@ -1,4 +1,5 @@
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
+use crate::network_http::{NetworkHttpConfig, NetworkService};
 use crate::{AuthConfig, AuthError, AuthStore, VerifiedSubject};
 use axum::{
     Json, Router,
@@ -57,6 +58,8 @@ pub struct ServiceFileConfig {
     pub session_ttl_seconds: u64,
     #[serde(default)]
     pub identity: Option<IdentityHttpConfig>,
+    #[serde(default)]
+    pub network: Option<NetworkHttpConfig>,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -277,6 +280,19 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
             )
         })
         .transpose()?;
+    let network = config
+        .network
+        .as_ref()
+        .map(|network_config| {
+            NetworkService::open(
+                store.clone(),
+                &config.state_dir,
+                config.identity.as_ref().ok_or(AuthError::Configuration)?,
+                &config.network_id,
+                network_config,
+            )
+        })
+        .transpose()?;
     let app = Arc::new(App {
         client,
         http,
@@ -298,6 +314,9 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .with_state(app);
     if let Some(identity) = identity {
         router = router.merge(identity.router());
+    }
+    if let Some(network) = network {
+        router = router.merge(network.router());
     }
     let router = router
         .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
@@ -1054,6 +1073,7 @@ mod tests {
             ca_bundle: None,
             session_ttl_seconds: 3600,
             identity: None,
+            network: None,
         };
         assert!(validate_config(&good).is_ok());
         let mut bad = good;

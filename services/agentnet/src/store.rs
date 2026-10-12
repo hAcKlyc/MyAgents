@@ -224,6 +224,41 @@ impl AuthStore {
             return Err(AuthError::SessionRejected.into());
         }
         let token_hash = Sha256::digest(token.as_bytes()).to_vec();
+        self.with_session_query(
+            "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
+             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+             WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+            &token_hash,
+            operation,
+        )
+    }
+
+    /// Internal gate for a cryptographically verified access token's session
+    /// handle. This UUID is never accepted as an HTTP credential by itself.
+    /// Callers must bind the resulting projection to the verified token scope.
+    /// The callback must not re-enter AuthStore or perform network I/O.
+    pub fn with_valid_session_handle<T, E: From<AuthError>>(
+        &self,
+        handle: &str,
+        operation: impl FnOnce(SessionProjection) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let handle = canonical_uuid(handle).ok_or_else(|| E::from(AuthError::SessionRejected))?;
+        self.with_session_query(
+            "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
+             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+             WHERE s.session_handle=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+            &handle,
+            operation,
+        )
+    }
+
+    // Only the two fixed internal queries above reach this helper.
+    fn with_session_query<T, E: From<AuthError>>(
+        &self,
+        query: &'static str,
+        identifier: &dyn rusqlite::ToSql,
+        operation: impl FnOnce(SessionProjection) -> Result<T, E>,
+    ) -> Result<T, E> {
         let mut connection = self
             .connection
             .lock()
@@ -233,23 +268,17 @@ impl AuthStore {
             .map_err(|_| E::from(AuthError::Storage))?;
         let now = unix_seconds().map_err(E::from)?;
         let projection = transaction
-            .query_row(
-                "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
-             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
-             WHERE s.token_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
-                params![token_hash, now],
-                |row| {
-                    Ok(SessionProjection {
-                        account: AccountProjection {
-                            principal_id: row.get(0)?,
-                            network_id: row.get(1)?,
-                        },
-                        device_id: row.get(2)?,
-                        expires_at: row.get(3)?,
-                        session_handle: row.get(4)?,
-                    })
-                },
-            )
+            .query_row(query, params![identifier, now], |row| {
+                Ok(SessionProjection {
+                    account: AccountProjection {
+                        principal_id: row.get(0)?,
+                        network_id: row.get(1)?,
+                    },
+                    device_id: row.get(2)?,
+                    expires_at: row.get(3)?,
+                    session_handle: row.get(4)?,
+                })
+            })
             .optional()
             .map_err(|_| E::from(AuthError::Storage))?
             .ok_or_else(|| E::from(AuthError::SessionRejected))?;
@@ -270,34 +299,7 @@ impl AuthStore {
     /// Internal authorization lookup for already verified device credentials.
     /// An HTTP caller must never treat possession of this UUID as authentication.
     pub fn validate_session_handle(&self, handle: &str) -> Result<SessionProjection, AuthError> {
-        let handle = canonical_uuid(handle).ok_or(AuthError::SessionRejected)?;
-        let connection = self.connection.lock().map_err(|_| AuthError::Storage)?;
-        let now = unix_seconds().map_err(|_| AuthError::SessionRejected)?;
-        let projection = connection
-            .query_row(
-                "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
-             FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
-             WHERE s.session_handle=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
-                params![handle, now],
-                |row| {
-                    Ok(SessionProjection {
-                        account: AccountProjection {
-                            principal_id: row.get(0)?,
-                            network_id: row.get(1)?,
-                        },
-                        device_id: row.get(2)?,
-                        expires_at: row.get(3)?,
-                        session_handle: row.get(4)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(|_| AuthError::Storage)?
-            .ok_or(AuthError::SessionRejected)?;
-        if projection.expires_at <= unix_seconds().map_err(|_| AuthError::SessionRejected)? {
-            return Err(AuthError::SessionRejected);
-        }
-        Ok(projection)
+        self.with_valid_session_handle(handle, Ok)
     }
 
     pub fn revoke_session(&self, token: &str) -> Result<(), AuthError> {
