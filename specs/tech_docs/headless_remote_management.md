@@ -7,11 +7,11 @@
 此前的官方接口核查和服务端仓库权限记录保留为历史证据。当前实际实现位于用户 fork `heavenzhang/MyAgents`，独立服务源码为 `services/agentnet`，不再以获取作者服务端源码作为实现前置。
 
 - [x] 独立登录服务、OIDC/PKCE、身份签发、设备注册、网络 membership 和不解密设备间 TLS 的 relay 已实现；前序服务协议与真实 Linux 回环中转验收通过，已在 fork main 交付。
-- [x] 桌面独立浏览器登录与系统 keyring、无桌面 systemd 加密凭据与独立 instance pin 已实现；官方账号保持独立。当前 PR #13 修复后的完整 CI 已通过，等待 native 复验，未合入主干。
+- [x] 桌面独立浏览器登录与系统 keyring、无桌面 systemd 加密凭据与独立 instance pin 已实现；官方账号保持独立。PR #13 最新七项 CI 已通过；真实 Linux PKCE、加密持久化、明确入网 Ready、重启无新 join grant 和 logout guard 失效已通过。已合入 fork main `e344dac8febabdfa64ad41e35870e85fdf532ff8`，tree 与真实测试制品源完全相同；原生桌面登录仍未验收。
 - [x] 第一轮真实 Linux 客户端验证了 PKCE 登录和加密持久化，随后发现 `deviceName`/`osVersion` 为 null 时身份签发被拒绝。服务修复允许原客户端的可选值，同时保留必需 platform/appVersion 和封闭字段检查；服务 58 项测试及 clippy 通过，最新提交 `80b822da` 已推送。
-- [ ] 修复后真实 Host 的明确入网、Hello/catalog/policy ready、无新 join grant 的进程重启恢复，以及 logout 让运行中 guard 失效。第一轮失败不计作这些项通过。
+- [x] 第三轮真实 Host 的明确入网、Hello/catalog/policy Ready、无新 join grant 的进程重启恢复，以及 logout 让运行中 guard 失效通过。第二轮发现 pre-Ready hydration 请求 Ready-only public catalog 的循环依赖；owned 客户端现沿已有同设备受限 self-policy 路径恢复。前两次失败原证据保留，不计作通过。
 - [x] `Pairs` 显式管理模式和管理消息收发已实现，管理角色与 canonical TLS 发起方分离，复用原设备 scope、证书、epoch、序列、信用和内存约束。库内回归与独立审查完成；本轮管理通道工作分支的 CI 与主干交付仍待完成。
-- [ ] 实际 Desktop controller / Headless Host actor 接线与 Node 专用窄管理 IPC，随后将模型配置、只写凭据和资源 owner 接到真实桌面表单。当前生产 adapter 仍明确 unavailable，不能把以上基础收发能力称为完整远程管理。
+- [ ] 实际 Desktop controller / Headless Host actor 与 Node 专用窄管理 IPC 正在工作分支集成；设备寻址 endpoint 已实现并完成三项认证/Ready/撤销回归。寻址仅是当前 snapshot，不授予管理写权限。随后将模型配置、只写凭据和资源 owner 接到真实桌面表单。当前生产 adapter 仍明确 unavailable，不能把以上基础收发能力称为完整远程管理。
 
 接线约束：owned TLS profile 只发布空 catalog，不上传本地 Agent 目录或发送 Agent RPC/permit；管理应用使用独立 codec 和固定 Controller/Host 角色。Relay 的 ChannelReady 分支必须立即 drain 排队的管理 Ready 事件，不能等待下一帧。身份/网络/账户代次变化后关闭通道及待办；发送或写后记账失败关闭受影响 pair、报告原始 failure，不自动重复写入。模型凭据继续经产品能力配置，本阶段不获取密钥或调用收费模型。
 
