@@ -27,6 +27,8 @@ fork main 基线 `92fa2c5f24faa026f81ed6567a9bb6211f1bb144`。固定协议仍是
 
 源码owner提交 `3cf77e19e1c48fce6c428b100d6e735cc98fa947`，主集成提交 `f4be625eb4a9ad1727436255ad2348fcb15f658f`；交付入口 [PR #6](https://github.com/heavenzhang/MyAgents/pull/6)。Linux专项目录fd与竞争场景还需CI全量通过，本地构建的隔离probe不冒充正式发布制品。
 
+Linux全量CI `38220139540` 捕获资源写入中断回执错误：resource已处理的registration失败，被外层intent的drain再次抛出，覆盖`unconfirmed`。必须保留generic helper对未等待失败的drain/拒绝合同，并在资源owner保留同一失败的原mutation回执；既有Project claim与重试身份不能改变。修复后重新做Linux实际IO故障/恢复与完整CI，未通过前不合并。
+
 ## Owner 与受信任边界
 
 桌面人类管理动作与 Agent invoke 分离。正式 grant 应由服务端 authority 定义和签发，Host验证目标 service/network/principal/device/identity generation、当前连接、操作范围、权限代次及期限。设备在线或同账号不自动授予管理权。本文件列的是待authority确认的设计条件，不定义线上方法名或 schema。

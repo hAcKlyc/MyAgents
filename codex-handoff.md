@@ -13,6 +13,7 @@
 - 实质依赖：1.1.0无设备级Host管理契约，正式renderer adapter仍不可用。授权GitHub账号目前不可访问Agenthub、MyAgents_AgentNet、MyAgents_space，官方测试部署入口未知；已经向用户询问。现有Agent invoke、roster/membership不得充当管理隧道，不手改vendor，不新增公网管理端口，不把fixture称为远程配置。
 - 本地资源准备层已实现：复用原 `registerWorkspaceAgent`/持久registry，Host受限workspace创建、同锁域损坏拒写与幂等恢复；默认Agent disabled、无channels、不触发模型或自动任务。独立审查、macOS聚焦/既有registry回归与Linux隔离scratch检查通过，PR #6完整CI和主干交付待完成。未连接Socket/wire/UI，未改正在运行的Host数据，凭据动态写入owner与正式权限/grant须明确后再连接真实链路。
 - 资源源码提交 `3cf77e19e1c48fce6c428b100d6e735cc98fa947`，主集成 `f4be625eb4a9ad1727436255ad2348fcb15f658f`；[PR #6](https://github.com/heavenzhang/MyAgents/pull/6) 是本地准备层交付入口，远程模型配置和Agent创建没有验收通过。
+- Linux全量CI `38220139540` 五项通过，JS integration新资源用例失败：Agent写入中断时外层intent drain覆盖了resource的unconfirmed回执。已在Linux隔离目录真实复现，必须修复并重新验证，不能跳过此例或放宽generic drain合同；修复/最终CI及主干结果以PR #6与主owner私有执行记录为准。
 
 ### Historical snapshot (superseded)
 
