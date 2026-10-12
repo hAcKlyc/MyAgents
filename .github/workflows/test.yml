@@ -37,15 +37,16 @@ jobs:
             exit 1
           fi
           python3 scripts/host/network-install.test.py
+          python3 scripts/host/unified-install.test.py
       - name: Record Linux artifact provenance
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p output/headless-network
           cp src-tauri/headless-network/target/release/myagents-host-network output/headless-network/
-          cp scripts/host/network-install.py scripts/host/network-control.py output/headless-network/
+          cp scripts/host/network-install.py scripts/host/network-control.py scripts/host/unified-install.py scripts/host/install.sh output/headless-network/
           cd output/headless-network
-          sha256sum myagents-host-network network-install.py network-control.py > SHA256SUMS
+          sha256sum myagents-host-network network-install.py network-control.py unified-install.py install.sh > SHA256SUMS
           cat SHA256SUMS
           printf '%s\n' "$SOURCE_COMMIT" > source-commit.txt
           ldd myagents-host-network > native-dependencies.txt

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import grp
+import ipaddress
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import uuid
 
 USER = "myagents-host-network-test"
@@ -33,12 +35,46 @@ DEVICE_PIN = PREFIX / "device-id.json"
 IDENTITY = pathlib.Path("/var/lib/myagents-host-test/host-identity.json")
 ARTIFACT = "myagents-host-network"
 MAX_BINARY = 128 * 1024 * 1024
-INSTALL_LOCK = pathlib.Path("/run/myagents-host-network-test-install.lock")
+INSTALL_LOCK = pathlib.Path("/run/myagents-host-unified-install.lock")
 TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
+OWNED_CONFIG = ETC / "owned-instance.json"
+OWNED_CA = ETC / "owned-instance-ca.pem"
+MANAGEMENT_SOCKET = pathlib.Path("/run/myagents-host-network-test/management.sock")
 
 
 class InstallError(RuntimeError):
     pass
+
+
+def _acquire_install_lock(expected_uid: int = 0, expected_gid: int = 0) -> int:
+    inherited_text = os.environ.get("MYAGENTS_HOST_TRANSACTION_LOCK_FD")
+    inherited = inherited_text is not None
+    try:
+        if inherited:
+            if not re.fullmatch(r"[1-9][0-9]*", inherited_text) or int(inherited_text) < 3:
+                raise InstallError("inherited transaction lock descriptor is invalid")
+            fd = int(inherited_text)
+        else:
+            fd = os.open(INSTALL_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        info = os.fstat(fd)
+        access_mode = fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE
+        path_info = os.stat(INSTALL_LOCK, follow_symlinks=False)
+        if (access_mode != os.O_RDWR or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != expected_uid or info.st_gid != expected_gid
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+                or stat.S_ISLNK(path_info.st_mode) or path_info.st_dev != info.st_dev or path_info.st_ino != info.st_ino
+                or path_info.st_uid != expected_uid or path_info.st_gid != expected_gid or path_info.st_nlink != 1
+                or stat.S_IMODE(path_info.st_mode) != 0o600):
+            raise InstallError("installation transaction lock is unsafe")
+        descriptor_flags = fcntl.fcntl(fd, fcntl.F_GETFD)
+        if not descriptor_flags & fcntl.FD_CLOEXEC:
+            fcntl.fcntl(fd, fcntl.F_SETFD, descriptor_flags | fcntl.FD_CLOEXEC)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BaseException:
+        if "fd" in locals():
+            os.close(fd)
+        raise
 
 
 def sha256_file(path: pathlib.Path) -> str:
@@ -139,7 +175,7 @@ def validate_marker(marker: pathlib.Path, expected_owner: int = 0, expected_grou
 
 
 def _check_fixture() -> bool:
-    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, pathlib.Path("/run/myagents-host-network-test")):
+    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, OWNED_CONFIG, OWNED_CA, pathlib.Path("/run/myagents-host-network-test")):
         _assert_plain_root_path(path)
     if validate_marker(MARKER):
         return True
@@ -314,9 +350,97 @@ def _write_atomic(path: pathlib.Path, data: str, mode: int, owner: int = 0, grou
         os.close(dir_fd)
 
 
-def _unit_text(host_id: str) -> str:
+def validate_owned_origin(value: str) -> str:
+    if not isinstance(value, str) or not value.isascii() or any(ord(c) <= 0x20 for c in value):
+        raise InstallError("owned instance must be a canonical HTTPS origin")
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise InstallError("owned instance must be a canonical HTTPS origin") from exc
+    host = parsed.hostname
+    if (parsed.scheme != "https" or not host or parsed.username is not None or parsed.password is not None
+            or parsed.query or "?" in value or parsed.fragment or "#" in value or parsed.path != ""
+            or (port is not None and (not 1 <= port <= 65535 or port == 443))):
+        raise InstallError("owned instance must be a canonical HTTPS origin without credentials, path, query, or fragment")
+    if ":" in host:
+        try:
+            host = f"[{ipaddress.IPv6Address(host).compressed}]"
+        except ipaddress.AddressValueError as exc:
+            raise InstallError("owned instance host is invalid") from exc
+    else:
+        if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+            raise InstallError("owned instance host is invalid")
+        host = host.lower()
+    canonical_authority = host + (f":{port}" if port is not None else "")
+    canonical = f"https://{canonical_authority}"
+    if value != canonical:
+        raise InstallError("owned instance must use the canonical HTTPS origin spelling")
+    return canonical
+
+
+def read_ca_source(path_text: str) -> bytes:
+    path = pathlib.Path(path_text)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise InstallError("public TLS CA path must be absolute and canonical")
+    _assert_plain_root_path(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) not in (0o644, 0o640) or info.st_size <= 0 or info.st_size > 1024 * 1024):
+            raise InstallError("public TLS CA file must be a bounded root-owned regular file")
+        data = bytearray()
+        while len(data) <= 1024 * 1024:
+            chunk = os.read(fd, min(65536, 1024 * 1024 + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        if (len(data) != info.st_size or after.st_dev != info.st_dev or after.st_ino != info.st_ino
+                or after.st_size != info.st_size):
+            raise InstallError("public TLS CA changed while being read")
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def owned_config_text(args: argparse.Namespace, host_uid: int, network_gid: int) -> str | None:
+    if not args.owned_instance:
+        if args.public_tls_ca_file or args.management_socket or args.management_host_uid:
+            raise InstallError("owned TLS and management IPC options require --owned-instance")
+        return None
+    origin = validate_owned_origin(args.owned_instance)
+    ipc_values = (args.management_socket, args.management_host_uid)
+    if any(value is not None for value in ipc_values):
+        if any(value is None for value in ipc_values):
+            raise InstallError("management IPC requires the fixed socket and Host UID together")
+        if pathlib.Path(args.management_socket) != MANAGEMENT_SOCKET or args.management_host_uid != host_uid:
+            raise InstallError("management IPC must use the fixed socket and dedicated Node Host UID")
+    if args.public_tls_ca_file:
+        read_ca_source(args.public_tls_ca_file)
+    return json.dumps({
+        "schemaVersion": 1,
+        "ownedInstance": origin,
+        "caFile": str(OWNED_CA) if args.public_tls_ca_file else None,
+        "managementSocket": str(MANAGEMENT_SOCKET) if args.management_socket else None,
+        "managementHostUid": host_uid if args.management_socket else None,
+        "managementGid": network_gid if args.management_socket else None,
+    }, separators=(",", ":")) + "\n"
+
+
+def _unit_text(host_id: str, owned: dict | None = None) -> str:
     status_dir = pathlib.Path("/run/myagents-host-network-test")
     status_file = status_dir / "status.json"
+    extra = ""
+    if owned:
+        extra = f" --owned-instance {owned['ownedInstance']}"
+        if owned["caFile"]:
+            extra += f" --public-tls-ca-file {owned['caFile']}"
+        if owned["managementSocket"]:
+            extra += (f" --management-socket {owned['managementSocket']}"
+                      f" --management-host-uid {owned['managementHostUid']}"
+                      f" --management-gid {owned['managementGid']}")
     return f"""[Unit]
 Description=MyAgents headless AgentNet test connector
 After=network-online.target
@@ -327,7 +451,7 @@ Type=simple
 User={USER}
 Group={USER}
 Environment=HOME={STATE}/home
-ExecStart={CURRENT}/{ARTIFACT} run --state-dir {STATE} --unit {UNIT_NAME} --credential identity-kek --device-id {host_id} --device-name Linux-Host --status-file {status_file}
+ExecStart={CURRENT}/{ARTIFACT} run --state-dir {STATE} --unit {UNIT_NAME} --credential identity-kek --device-id {host_id} --device-name Linux-Host --status-file {status_file}{extra}
 LoadCredentialEncrypted=identity-kek:{CREDENTIAL}
 UMask=0077
 NoNewPrivileges=yes
@@ -347,6 +471,23 @@ WantedBy=multi-user.target
 """
 
 
+def _runtime_group(network_account: pwd.struct_passwd, node_account: pwd.struct_passwd,
+                   owned: dict | None) -> int:
+    # status.rs replaces status.json with a sibling temp file. That file inherits
+    # the setgid directory's group and must match the existing status inode.
+    # Only the owned IPC profile grants Node the network service's group.
+    if owned and owned["managementSocket"]:
+        return network_account.pw_gid
+    return node_account.pw_gid
+
+
+def _tmpfiles_text(network_account: pwd.struct_passwd, node_account: pwd.struct_passwd,
+                   owned: dict | None = None) -> str:
+    runtime_gid = _runtime_group(network_account, node_account, owned)
+    return (f"d /run/myagents-host-network-test 2750 {network_account.pw_uid} {runtime_gid} - -\n"
+            f"f /run/myagents-host-network-test/status.json 0640 {network_account.pw_uid} {runtime_gid} - -\n")
+
+
 def install(args: argparse.Namespace) -> None:
     if os.geteuid() != 0:
         raise InstallError("run the installer as root")
@@ -360,21 +501,46 @@ def install(args: argparse.Namespace) -> None:
         snap_binary = copy_snapshot(args.artifact_dir, snap, args.sha256, args.source_commit)
         fixture = _check_fixture()
         # Lock must cover all mutations and rollback; use an inherited FD held here.
-        lock_fd = os.open(INSTALL_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        lock_fd = _acquire_install_lock()
         try:
-            lock_st = os.fstat(lock_fd)
-            if not stat.S_ISREG(lock_st.st_mode) or lock_st.st_uid != 0 or lock_st.st_nlink != 1 or stat.S_IMODE(lock_st.st_mode) != 0o600:
-                raise InstallError("installation lock file is unsafe")
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             _check_fixture()
             # Validate all read-only external inputs before creating the service UID.
             host_id = _read_identity()
             if fixture:
                 verify_device_pin(host_id, read_device_pin())
             node_account = pwd.getpwnam(NODE_USER)
+            if not args.owned_instance:
+                if args.public_tls_ca_file or args.management_socket or args.management_host_uid:
+                    raise InstallError("owned TLS and management IPC options require --owned-instance")
+            else:
+                validate_owned_origin(args.owned_instance)
+                ipc_values = (args.management_socket, args.management_host_uid)
+                if any(value is not None for value in ipc_values):
+                    if any(value is None for value in ipc_values):
+                        raise InstallError("management IPC requires the fixed socket and Host UID together")
+                    if pathlib.Path(args.management_socket) != MANAGEMENT_SOCKET or args.management_host_uid != node_account.pw_uid:
+                        raise InstallError("management IPC must use the fixed socket and dedicated Node Host UID")
+            ca_bytes = read_ca_source(args.public_tls_ca_file) if args.public_tls_ca_file else None
             if not fixture:
                 _run(["useradd", "--system", "--user-group", "--no-create-home", "--home-dir", str(STATE), "--shell", "/usr/sbin/nologin", USER])
             account = _validate_existing_user()
+            expected_owned_text = owned_config_text(args, node_account.pw_uid, account.pw_gid)
+            owned_value = json.loads(expected_owned_text) if expected_owned_text else None
+            if expected_owned_text is None:
+                if OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
+                    raise InstallError("existing owned-instance configuration cannot be removed implicitly")
+            elif OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
+                cfg_st = OWNED_CONFIG.lstat()
+                if (not stat.S_ISREG(cfg_st.st_mode) or cfg_st.st_uid != 0 or cfg_st.st_gid != 0
+                        or cfg_st.st_nlink != 1 or stat.S_IMODE(cfg_st.st_mode) != 0o600
+                        or OWNED_CONFIG.read_text(encoding="utf-8") != expected_owned_text):
+                    raise InstallError("existing owned-instance configuration differs or is unsafe")
+            if ca_bytes is not None and (OWNED_CA.exists() or OWNED_CA.is_symlink()):
+                ca_st = OWNED_CA.lstat()
+                if (not stat.S_ISREG(ca_st.st_mode) or ca_st.st_uid != 0 or ca_st.st_gid != 0
+                        or ca_st.st_nlink != 1 or stat.S_IMODE(ca_st.st_mode) != 0o644
+                        or OWNED_CA.read_bytes() != ca_bytes):
+                    raise InstallError("existing owned-instance CA differs; preserve it for operator review")
 
             for path, parent_mode in ((PREFIX, 0o755), (RELEASES, 0o755), (STATE, 0o700), (ETC, 0o700)):
                 if not path.exists():
@@ -421,17 +587,21 @@ def install(args: argparse.Namespace) -> None:
                 if not re.fullmatch(r"releases/[0-9a-f]{40}", old_current):
                     raise InstallError("current release pointer is outside managed release paths")
             if old_current == f"releases/{args.source_commit}":
+                if expected_owned_text is None:
+                    if OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
+                        raise InstallError("existing owned-instance configuration differs; refusing to clear it")
+                elif not OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink() or OWNED_CONFIG.read_text(encoding="utf-8") != expected_owned_text:
+                    raise InstallError("same release owned-instance configuration differs")
                 credential_st = CREDENTIAL.lstat() if CREDENTIAL.exists() or CREDENTIAL.is_symlink() else None
                 if credential_st is None or not stat.S_ISREG(credential_st.st_mode) or credential_st.st_uid != 0 or credential_st.st_gid != 0 or credential_st.st_nlink != 1 or stat.S_IMODE(credential_st.st_mode) != 0o600:
                     raise InstallError("existing identity credential is unsafe")
                 if not UNIT_PATH.exists() or UNIT_PATH.is_symlink():
                     raise InstallError("same release is missing its managed service unit")
                 unit_st = UNIT_PATH.lstat()
-                if not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_gid != 0 or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644 or UNIT_PATH.read_text(encoding="utf-8") != _unit_text(host_id):
+                if not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_gid != 0 or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644 or UNIT_PATH.read_text(encoding="utf-8") != _unit_text(host_id, owned_value):
                     raise InstallError("same release service unit has changed")
                 node_account = pwd.getpwnam(NODE_USER)
-                expected_tmpfiles = (f"d /run/myagents-host-network-test 2750 {account.pw_uid} {node_account.pw_gid} - -\n"
-                                     f"f /run/myagents-host-network-test/status.json 0640 {account.pw_uid} {node_account.pw_gid} - -\n")
+                expected_tmpfiles = _tmpfiles_text(account, node_account, owned_value)
                 tmpfiles_path = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
                 if not tmpfiles_path.exists() or tmpfiles_path.is_symlink():
                     raise InstallError("same release is missing its managed tmpfiles rule")
@@ -459,27 +629,28 @@ def install(args: argparse.Namespace) -> None:
                 os.rename(stage, release)
 
             _create_credential()
-            # Status projection is writable only by the network UID and readable by the Node group.
+            # The directory and replaceable status inode share a group so status.rs's
+            # same-directory atomic replacement preserves the expected group.
             status_dir = pathlib.Path("/run/myagents-host-network-test")
+            runtime_gid = _runtime_group(account, node_account, owned_value)
             if not status_dir.exists():
                 os.mkdir(status_dir, 0o2750)
-                os.chown(status_dir, account.pw_uid, node_account.pw_gid)
+                os.chown(status_dir, account.pw_uid, runtime_gid)
                 os.chmod(status_dir, 0o2750)
-            _verify_dir(status_dir, account.pw_uid, node_account.pw_gid, 0o2750)
+            _verify_dir(status_dir, account.pw_uid, runtime_gid, 0o2750)
             status_file = status_dir / "status.json"
             if not status_file.exists() and not status_file.is_symlink():
                 fd = os.open(status_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
                 os.close(fd)
-                os.chown(status_file, account.pw_uid, node_account.pw_gid)
+                os.chown(status_file, account.pw_uid, runtime_gid)
                 os.chmod(status_file, 0o640)
             else:
                 status_st = status_file.lstat()
-                if not stat.S_ISREG(status_st.st_mode) or status_st.st_uid != account.pw_uid or status_st.st_gid != node_account.pw_gid or stat.S_IMODE(status_st.st_mode) != 0o640 or status_st.st_nlink != 1:
+                if not stat.S_ISREG(status_st.st_mode) or status_st.st_uid != account.pw_uid or status_st.st_gid != runtime_gid or stat.S_IMODE(status_st.st_mode) != 0o640 or status_st.st_nlink != 1:
                     raise InstallError("existing runtime status file is unsafe")
 
             tmpfiles_path = TMPFILES_PATH
-            tmpfiles_text = (f"d /run/myagents-host-network-test 2750 {account.pw_uid} {node_account.pw_gid} - -\n"
-                             f"f /run/myagents-host-network-test/status.json 0640 {account.pw_uid} {node_account.pw_gid} - -\n")
+            tmpfiles_text = _tmpfiles_text(account, node_account, owned_value)
             previous_tmpfiles: str | None = None
             if tmpfiles_path.exists() or tmpfiles_path.is_symlink():
                 existing = tmpfiles_path.lstat()
@@ -490,7 +661,7 @@ def install(args: argparse.Namespace) -> None:
                 _write_atomic(tmpfiles_path, tmpfiles_text, 0o644)
 
             unit_tmp = UNIT_PATH.with_name("." + UNIT_NAME + ".tmp")
-            unit_text = _unit_text(host_id)
+            unit_text = _unit_text(host_id, owned_value)
             previous_unit: str | None = None
             if UNIT_PATH.exists() or UNIT_PATH.is_symlink():
                 unit_st = UNIT_PATH.lstat()
@@ -502,8 +673,19 @@ def install(args: argparse.Namespace) -> None:
                     raise InstallError("existing service unit is not owned by this installer")
                 previous_unit = previous
             _write_atomic(UNIT_PATH, unit_text, 0o644)
+            previous_owned_config = OWNED_CONFIG.read_text(encoding="utf-8") if OWNED_CONFIG.exists() else None
+            ca_created = False
 
             try:
+                if expected_owned_text is not None and previous_owned_config is None:
+                    _write_atomic(OWNED_CONFIG, expected_owned_text, 0o600)
+                if ca_bytes is not None and not OWNED_CA.exists():
+                    try:
+                        ca_text = ca_bytes.decode("ascii")
+                    except UnicodeDecodeError as exc:
+                        raise InstallError("public TLS CA must be ASCII PEM") from exc
+                    _write_atomic(OWNED_CA, ca_text, 0o644)
+                    ca_created = True
                 link_tmp = PREFIX / ".current-new"
                 if link_tmp.exists() or link_tmp.is_symlink():
                     raise InstallError("unexpected current staging path exists")
@@ -524,6 +706,12 @@ def install(args: argparse.Namespace) -> None:
                     _write_atomic(UNIT_PATH, previous_unit, 0o644)
                 if previous_tmpfiles is None:
                     tmpfiles_path.unlink(missing_ok=True)
+                if previous_owned_config is None:
+                    OWNED_CONFIG.unlink(missing_ok=True)
+                else:
+                    _write_atomic(OWNED_CONFIG, previous_owned_config, 0o600)
+                if ca_created:
+                    OWNED_CA.unlink(missing_ok=True)
                 _run(["systemctl", "daemon-reload"], check=False)
                 raise
             print(json.dumps({"status": "ok", "result": "installed", "sourceCommit": args.source_commit,
@@ -537,6 +725,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("artifact_dir", help="absolute CI artifact directory")
     parser.add_argument("sha256", help="independently trusted artifact binary SHA-256")
     parser.add_argument("source_commit", help="independently trusted 40-character source commit")
+    parser.add_argument("--owned-instance", help="explicit HTTPS origin for an owned AgentNet instance")
+    parser.add_argument("--public-tls-ca-file", help="optional root-owned PEM CA for the owned instance")
+    parser.add_argument("--management-socket", help="fixed owned IPC socket path; requires the Host UID")
+    parser.add_argument("--management-host-uid", type=int, help="dedicated Node Host UID for IPC peer checking")
     return parser.parse_args()
 
 

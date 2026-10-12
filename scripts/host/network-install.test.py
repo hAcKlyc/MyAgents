@@ -9,6 +9,8 @@ import os
 import pathlib
 import stat
 import tempfile
+import argparse
+import fcntl
 import unittest
 from unittest import mock
 
@@ -101,8 +103,102 @@ class SnapshotTests(unittest.TestCase):
 
 
 class FixtureTests(unittest.TestCase):
-    def test_marker_must_match_exact_test_fixture(self) -> None:
+    def test_transaction_lock_reentry_contention_and_foreign_fd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            lock = root / "transaction.lock"
+            foreign = root / "foreign.lock"
+            foreign.write_bytes(b"")
+            uid, gid = os.geteuid(), os.getegid()
+            with mock.patch.object(installer, "INSTALL_LOCK", lock):
+                held = installer._acquire_install_lock(uid, gid)
+                inherited = fcntl.fcntl(held, fcntl.F_DUPFD, 20)
+                try:
+                    self.assertGreaterEqual(inherited, 20)
+                    with mock.patch.dict(os.environ, {"MYAGENTS_HOST_TRANSACTION_LOCK_FD": str(inherited)}):
+                        reentered = installer._acquire_install_lock(uid, gid)
+                        self.assertEqual(reentered, inherited)
+                        os.close(reentered)
+                    with mock.patch.dict(os.environ, {}, clear=True):
+                        with self.assertRaises(BlockingIOError):
+                            installer._acquire_install_lock(uid, gid)
+                    readonly = os.open(lock, os.O_RDONLY)
+                    try:
+                        with mock.patch.dict(os.environ, {"MYAGENTS_HOST_TRANSACTION_LOCK_FD": str(readonly)}):
+                            with self.assertRaises(installer.InstallError):
+                                installer._acquire_install_lock(uid, gid)
+                    finally:
+                        try:
+                            os.close(readonly)
+                        except OSError:
+                            pass
+                    wrong = os.open(foreign, os.O_RDWR)
+                    try:
+                        with mock.patch.dict(os.environ, {"MYAGENTS_HOST_TRANSACTION_LOCK_FD": str(wrong)}):
+                            with self.assertRaises(installer.InstallError):
+                                installer._acquire_install_lock(uid, gid)
+                    finally:
+                        try:
+                            os.close(wrong)
+                        except OSError:
+                            pass
+                finally:
+                    os.close(held)
+
+    def test_owned_instance_unit_is_opt_in_and_binds_complete_fixed_ipc_tuple(self) -> None:
+        defaults = argparse.Namespace(owned_instance=None, public_tls_ca_file=None,
+                                     management_socket=None, management_host_uid=None)
+        self.assertIsNone(installer.owned_config_text(defaults, 1000, 1001))
+        base_unit = installer._unit_text("11111111-2222-4333-8444-555555555555")
+        self.assertNotIn("--owned-instance", base_unit)
+        self.assertNotIn("--management-socket", base_unit)
+
+        owned = argparse.Namespace(owned_instance="https://owned.example:15557", public_tls_ca_file=None,
+                                   management_socket=str(installer.MANAGEMENT_SOCKET),
+                                   management_host_uid=1000)
+        config = json.loads(installer.owned_config_text(owned, 1000, 7012))
+        self.assertEqual(config["managementGid"], 7012)
+        network_account = type("Account", (), {"pw_uid": 7000, "pw_gid": 7012})()
+        node_account = type("Account", (), {"pw_uid": 1000, "pw_gid": 1001})()
+        # Default official profile keeps Node's primary group on both the
+        # setgid directory and the replaceable status inode. Rust's temp file
+        # inherits this group, so status.rs can atomically replace the file;
+        # Node needs no supplementary group to read it.
+        default_tmpfiles = installer._tmpfiles_text(network_account, node_account)
+        self.assertIn("d /run/myagents-host-network-test 2750 7000 1001 - -", default_tmpfiles)
+        self.assertIn("f /run/myagents-host-network-test/status.json 0640 7000 1001 - -", default_tmpfiles)
+        default_groups = [int(line.split()[4]) for line in default_tmpfiles.splitlines()]
+        self.assertEqual(default_groups, [node_account.pw_gid, node_account.pw_gid])
+
+        # Owned IPC requires Rust's socket parent group to equal the network
+        # primary GID. Node receives that group only in the explicit owned-mode
+        # systemd drop-in; the status inode must match the setgid parent too.
+        owned_tmpfiles = installer._tmpfiles_text(network_account, node_account, config)
+        self.assertIn("d /run/myagents-host-network-test 2750 7000 7012 - -", owned_tmpfiles)
+        self.assertIn("f /run/myagents-host-network-test/status.json 0640 7000 7012 - -", owned_tmpfiles)
+        owned_groups = [int(line.split()[4]) for line in owned_tmpfiles.splitlines()]
+        self.assertEqual(owned_groups, [network_account.pw_gid, network_account.pw_gid])
+        unit = installer._unit_text("11111111-2222-4333-8444-555555555555", config)
+        self.assertIn("--owned-instance https://owned.example:15557", unit)
+        self.assertIn(f"--management-socket {installer.MANAGEMENT_SOCKET}", unit)
+        self.assertIn("--management-host-uid 1000 --management-gid 7012", unit)
+        self.assertNotIn("--join", unit)
+
+    def test_owned_instance_rejects_non_https_ambiguous_origin_and_partial_ipc(self) -> None:
+        for origin in ("http://owned.example", "https://user@owned.example", "https://owned.example/path",
+                       "https://owned.example/", "https://owned.example?", "https://owned.example#",
+                       "https://owned.example:443", "https://owned.example:", "https://OWNED.example",
+                       "https://owned.example;ExecStart=x"):
+            with self.subTest(origin=origin), self.assertRaises(installer.InstallError):
+                installer.validate_owned_origin(origin)
+        partial = argparse.Namespace(owned_instance="https://owned.example", public_tls_ca_file=None,
+                                     management_socket=str(installer.MANAGEMENT_SOCKET),
+                                     management_host_uid=None)
+        with self.assertRaises(installer.InstallError):
+            installer.owned_config_text(partial, 1000, 1001)
+
+    def test_marker_must_match_exact_test_fixture(self) -> None:
+        with tempfile.TemporaryDirectory(dir=SCRIPT.parent) as tmp:
             prefix = pathlib.Path(tmp) / "prefix"
             prefix.mkdir()
             marker = prefix / "fixture.json"
@@ -163,6 +259,113 @@ class FixtureTests(unittest.TestCase):
 
 
 class ControlTests(unittest.TestCase):
+    @mock.patch.object(control, "owned_config", return_value={
+        "schemaVersion": 1,
+        "ownedInstance": "https://owned.example",
+        "caFile": str(control.OWNED_CA),
+        "managementSocket": str(control.MANAGEMENT_SOCKET),
+        "managementHostUid": 1000,
+        "managementGid": 1001,
+    })
+    @mock.patch.object(control, "verified_host_id", return_value="11111111-2222-4333-8444-555555555555")
+    @mock.patch.object(control.subprocess, "run")
+    @mock.patch.object(control.pwd, "getpwnam")
+    @mock.patch.object(control.os, "geteuid", return_value=0)
+    def test_owned_auth_start_passes_fixed_instance_and_ca_without_secret_arguments(self, _uid, get_user, run, _host, _config):
+        get_user.return_value = type("Account", (), {"pw_uid": 7001, "pw_gid": 7001})()
+        run.return_value.returncode = 0
+        self.assertEqual(control.run_control("start"), 0)
+        args = run.call_args.args[0]
+        self.assertIn("owned-auth-start", args)
+        self.assertIn("--owned-instance", args)
+        self.assertIn("https://owned.example", args)
+        self.assertIn("--public-tls-ca-file", args)
+        self.assertNotIn("token", args)
+
+    def test_explicit_join_is_a_separate_fixed_one_shot_override(self) -> None:
+        config = {"ownedInstance": "https://owned.example", "caFile": None,
+                  "managementSocket": str(control.MANAGEMENT_SOCKET),
+                  "managementHostUid": 1000, "managementGid": 7012}
+        override = control._network_join_override(config, "11111111-2222-4333-8444-555555555555").decode()
+        self.assertIn("ExecStart=\n", override)
+        self.assertTrue(override.rstrip().endswith('"--join"'))
+        self.assertIn('"--owned-instance" "https://owned.example"', override)
+
+    def test_canonical_origin_rejects_default_and_empty_port_before_rust(self) -> None:
+        for origin in ("https://owned.example:443", "https://owned.example:", "https://OWNED.example", "https://owned.example/"):
+            with self.subTest(origin=origin):
+                self.assertFalse(control._canonical_owned_origin(origin))
+        self.assertTrue(control._canonical_owned_origin("https://owned.example:15557"))
+
+    def test_join_waits_for_management_socket_before_restarting_host(self) -> None:
+        with tempfile.TemporaryDirectory(dir=SCRIPT.parent) as tmp:
+            root = pathlib.Path(tmp)
+            daemon_dropin = root / "network.service.d"
+            join_dropin = daemon_dropin / "one-shot-join.conf"
+            host_dropin_dir = root / "host.service.d"
+            host_dropin = host_dropin_dir / "owned-management.conf"
+            host_unit = root / "host.service"
+            host_unit.write_text("[Service]\n", encoding="ascii")
+            order = []
+            config = {"ownedInstance": "https://owned.example", "caFile": None,
+                      "managementSocket": str(control.MANAGEMENT_SOCKET),
+                      "managementHostUid": 1000, "managementGid": 7012}
+
+            def run(args, **kwargs):
+                order.append(tuple(args))
+                is_network_probe = args[:3] == ["systemctl", "is-active", "--quiet"] and args[3] == control.DAEMON_UNIT
+                return type("Result", (), {"returncode": 1 if is_network_probe else 0})()
+
+            def write_new(path, payload, mode):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+                os.chmod(path, mode)
+
+            with (
+                mock.patch.object(control, "DAEMON_DROPIN_DIR", daemon_dropin),
+                mock.patch.object(control, "JOIN_DROPIN", join_dropin),
+                mock.patch.object(control, "HOST_DROPIN_DIR", host_dropin_dir),
+                mock.patch.object(control, "HOST_DROPIN", host_dropin),
+                mock.patch.object(control, "HOST_UNIT", host_unit),
+                mock.patch.object(control, "_ensure_root_dropin_dir", side_effect=lambda path: path.mkdir(parents=True, exist_ok=True)),
+                mock.patch.object(control, "_network_join_override", return_value=b"[Service]\\nExecStart=join\\n"),
+                mock.patch.object(control, "_write_new_root_file", side_effect=write_new),
+                mock.patch.object(control, "_wait_management_socket", side_effect=lambda _cfg: order.append(("socket-ready",))),
+                mock.patch.object(control, "_host_dropin", side_effect=lambda _cfg: (b"env", True)),
+                mock.patch.object(control.os, "chown"),
+                mock.patch.object(control.subprocess, "run", side_effect=run),
+            ):
+                self.assertEqual(control._activate_owned("join", config, "11111111-2222-4333-8444-555555555555"), 0)
+
+            self.assertFalse(join_dropin.exists())
+            with mock.patch.object(control.pwd, "getpwnam", return_value=type("Account", (), {"pw_uid": 7001})()):
+                self.assertIn(f"SupplementaryGroups={control.USER}\n",
+                              control._management_dropin_bytes(config).decode("ascii"))
+            self.assertLess(order.index(("socket-ready",)), order.index(("systemctl", "restart", "myagents-host-test.service")))
+            self.assertTrue(any(call[:2] == ("systemctl", "start") and call[2] == control.DAEMON_UNIT for call in order))
+
+    def test_listener_failure_stops_network_without_restarting_host(self) -> None:
+        config = {"ownedInstance": "https://owned.example", "caFile": None,
+                  "managementSocket": str(control.MANAGEMENT_SOCKET),
+                  "managementHostUid": 1000, "managementGid": 7012}
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append(tuple(args))
+            return type("Result", (), {"returncode": 0})()
+
+        with (
+            mock.patch.object(control.subprocess, "run", side_effect=run),
+            mock.patch.object(control, "_wait_management_socket", side_effect=ValueError("socket readiness timeout")),
+            mock.patch.object(control, "_host_dropin") as host_dropin,
+        ):
+            with self.assertRaisesRegex(ValueError, "socket readiness timeout"):
+                control._activate_owned("run", config, "11111111-2222-4333-8444-555555555555")
+        host_dropin.assert_not_called()
+        self.assertIn(("systemctl", "stop", control.DAEMON_UNIT), calls)
+        self.assertFalse(any(call[0] == "systemctl" and call[1] in {"start", "restart"}
+                             and call[-1] == "myagents-host-test.service" for call in calls))
+
     @mock.patch.object(control, "verified_host_id", return_value="11111111-2222-4333-8444-555555555555")
     @mock.patch.object(control.subprocess, "run")
     @mock.patch.object(control.pwd, "getpwnam")

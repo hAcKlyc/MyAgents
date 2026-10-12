@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,9 @@ import test from 'node:test';
 
 const installer = new URL('./install.sh', import.meta.url).pathname;
 const digest = path => createHash('sha256').update(require('node:fs').readFileSync(path)).digest('hex');
+const source = readFileSync(installer, 'utf8');
+const lockHelper = source.split('# BEGIN_SHARED_TRANSACTION_LOCK\n')[1]?.split('# END_SHARED_TRANSACTION_LOCK')[0];
+assert.ok(lockHelper, 'shared transaction lock helper markers exist');
 function packageFixture(t, mode = 'valid') {
   const root = mkdtempSync(join(tmpdir(), 'myagents-host-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -68,4 +71,40 @@ test('installer rejects archive traversal entries before extraction', t => {
   const result = run(archive);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unsafe archive path/);
+});
+
+test('standalone lock contender is rejected and the unified inherited FD 20 lock can reenter', t => {
+  const root = mkdtempSync(join(tmpdir(), 'myagents-host-transaction-lock-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const lock = join(root, 'transaction.lock');
+  const uid = spawnSync('id', ['-u'], { encoding: 'utf8' }).stdout.trim();
+  const gid = spawnSync('id', ['-g'], { encoding: 'utf8' }).stdout.trim();
+  const script = `set -euo pipefail\n${lockHelper}\n` +
+    `acquire_install_transaction_lock "$LOCK_PATH" "${uid}" "${gid}"\n` +
+    `exec 20>&9\nMYAGENTS_HOST_TRANSACTION_LOCK_FD=20 acquire_install_transaction_lock "$LOCK_PATH" "${uid}" "${gid}"\n` +
+    `if (unset MYAGENTS_HOST_TRANSACTION_LOCK_FD; acquire_install_transaction_lock "$LOCK_PATH" "${uid}" "${gid}"); then exit 71; fi\n` +
+    `exec 21<"$LOCK_PATH"\nif MYAGENTS_HOST_TRANSACTION_LOCK_FD=21 acquire_install_transaction_lock "$LOCK_PATH" "${uid}" "${gid}"; then exit 72; fi\n` +
+    `printf 'same-fd-ok\\n'`;
+  const result = spawnSync('/bin/bash', ['-c', script], {
+    encoding: 'utf8', env: { ...process.env, LOCK_PATH: lock },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /same-fd-ok/);
+  assert.match(result.stderr, /Another installation or rollback transaction is active/);
+});
+
+test('transaction lock rejects an inherited descriptor for a different inode', t => {
+  const root = mkdtempSync(join(tmpdir(), 'myagents-host-transaction-foreign-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const lock = join(root, 'transaction.lock');
+  const foreign = join(root, 'foreign.lock');
+  writeFileSync(foreign, ''); chmodSync(foreign, 0o600);
+  const uid = spawnSync('id', ['-u'], { encoding: 'utf8' }).stdout.trim();
+  const gid = spawnSync('id', ['-g'], { encoding: 'utf8' }).stdout.trim();
+  const script = `set -u\n${lockHelper}\nexec 8<>"$FOREIGN_PATH"\nMYAGENTS_HOST_TRANSACTION_LOCK_FD=8 acquire_install_transaction_lock "$LOCK_PATH" "${uid}" "${gid}"`;
+  const result = spawnSync('/bin/bash', ['-c', script], {
+    encoding: 'utf8', env: { ...process.env, LOCK_PATH: lock, FOREIGN_PATH: foreign },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Unsafe inherited installation transaction lock descriptor|Unsafe installation transaction lock descriptor/);
 });

@@ -18,6 +18,35 @@ On first installation, the installer creates a random 32-byte provider-store mas
 
 This installer-side key lifecycle is not yet a complete remote UI or unified credential-management installation. The product form and its end-to-end persistence/runtime acceptance remain integration gates. Do not manually create a provider key or enter a real model credential for this test step.
 
+## Unified local Host + owned AgentNet test installation
+
+`unified-install.py` installs the existing local Host package and the separately pinned AgentNet CI artifact as one root transaction. Supply both independently trusted SHA-256 values, the AgentNet source commit, and the owned service's HTTPS origin. The origin must have no credentials, path, query, or fragment. If the service uses a private test CA, pass a root-owned PEM file; the installer pins its bytes under `/etc/myagents-host-network-test/` and passes the CA to the Rust owner, which performs TLS verification. The owned profile is opt-in; the default network installer still emits the official-profile unit when `--owned-instance` is absent.
+
+```sh
+sudo python3 scripts/host/unified-install.py \
+  --host-archive output/host/myagents-host-test-<release>.tar.gz \
+  --host-sha256 <independently-confirmed-host-sha256> \
+  --network-artifact-dir /absolute/path/to/myagents-host-network-ci-artifact \
+  --network-sha256 <independently-confirmed-network-binary-sha256> \
+  --network-source-commit <40-hex-source-commit> \
+  --owned-instance https://agentnet.example.test \
+  --public-tls-ca-file /root/agentnet-test-ca.pem
+```
+
+The unified command verifies both local artifacts into a private temporary snapshot and performs the Host installer's non-mutating archive check before changing the Host. Unified and standalone Host/network installers share one root-owned transaction lock. The unified installer passes its already-locked file descriptor to both child installers; they verify the descriptor refers to the fixed lock inode and reenter the same open-file-description lock. A concurrent installer from any entry point is rejected. On failure the unified command attempts to restore the prior Host `current` link and service unit, and reports rollback success only after checking the restored link, unit bytes, enabled state, and active state. The network installer preserves its own marker, encrypted credential, identity pin, and state rather than deleting them during a failed attempt. The installer does not start AgentNet, open a listener, sign in, create an owned account, or join a network. The network credential is reused as provisioned and is never rotated by this path.
+
+After installation, use the root-only operator control to complete the chosen owned-instance login explicitly. `start` prints the authorization result to the invoking terminal through a transient systemd unit; it does not put the authorization URL in the journal. Then wait for authorization, and use `join` only when you intentionally want to enroll this Host. The connector must create the fixed management socket before the Node Host receives its IPC environment and restarts. `run` starts the owned connector without requesting a new join; `logout` stops it and revokes the owned session. These operations do not alter the existing default MyAgents Host installation.
+
+```sh
+sudo python3 scripts/host/network-control.py start
+sudo python3 scripts/host/network-control.py wait
+sudo python3 scripts/host/network-control.py join
+# Later, to start without a new enrollment:
+sudo python3 scripts/host/network-control.py run
+```
+
+The owned mode is still a test deployment. No live deployment or two-device acceptance is implied by these local installer tests. In default official mode, the runtime directory and replaceable status file use the Node Host's primary group, so the existing Host can read status without a supplementary group. With owned management IPC enabled, both use the network service's primary group (the setgid directory makes Rust's atomic status replacement inherit the matching GID); only the owned Host unit receives that group as a supplementary group, leaving its normal account groups unchanged. The network service's primary group also owns the management socket. Existing runtime directories with the prior non-setgid `0750` mode fail closed against the new `2750` ownership contract; migrate them only in a controlled maintenance window after stopping the affected services. The Node reverse IPC validates its provisioned socket path and permissions; the Rust connector is responsible for kernel peer-credential checks. Login, membership, and join remain explicit operator actions, and TLS/CA validation depends on the configured Rust owner.
+
 Legacy Kimi projection remains supported for existing installations. New installs can include a pre-existing encrypted Kimi credential in the generated unit; for a running older installation, the historical manual procedure is:
 
 ```sh

@@ -113,12 +113,63 @@ RELEASE_SOURCE="$STAGE/myagents-host-test/releases/$RELEASE_ID"
 if ((DRY_RUN)); then printf 'Verified unsigned test package %s (%s)\n' "$RELEASE_ID" "$ACTUAL_SHA"; exit 0; fi
 ((EUID == 0)) || { echo 'Install requires root; --dry-run does not' >&2; exit 1; }
 command -v systemctl >/dev/null || { echo 'systemd is required' >&2; exit 1; }
-readonly INSTALL_LOCK=/run/myagents-host-test-install.lock
-if [[ ! -e "$INSTALL_LOCK" ]]; then (umask 077; : >"$INSTALL_LOCK"); fi
-[[ -f "$INSTALL_LOCK" && ! -L "$INSTALL_LOCK" && "$(stat -c '%u' "$INSTALL_LOCK")" == 0 \
-  && $((8#$(stat -c '%a' "$INSTALL_LOCK") & 077)) == 0 ]] || { echo 'Unsafe installation lock file' >&2; exit 1; }
-exec 9>>"$INSTALL_LOCK"
-flock -n 9 || { echo 'Another installation or rollback transaction is active' >&2; exit 1; }
+readonly INSTALL_LOCK=/run/myagents-host-unified-install.lock
+# BEGIN_SHARED_TRANSACTION_LOCK
+acquire_install_transaction_lock() {
+  local lock_path=$1 expected_uid=${2:-0} expected_gid=${3:-0} fd=${MYAGENTS_HOST_TRANSACTION_LOCK_FD:-}
+  if [[ -n "$fd" ]]; then
+    [[ "$fd" =~ ^[0-9]+$ && "$fd" -ge 3 ]] || {
+      echo 'Unsafe inherited installation transaction lock descriptor' >&2; return 1;
+    }
+  else
+    python3 - "$lock_path" "$expected_uid" "$expected_gid" >/dev/null 2>&1 <<'PY' || {
+import os, stat, sys
+path, owner, group = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+try:
+    st = os.fstat(fd)
+    entry = os.stat(path, follow_symlinks=False)
+    if (not stat.S_ISREG(st.st_mode) or st.st_uid != owner or st.st_gid != group
+            or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o600
+            or stat.S_ISLNK(entry.st_mode) or (entry.st_dev, entry.st_ino) != (st.st_dev, st.st_ino)):
+        raise SystemExit(1)
+finally:
+    os.close(fd)
+PY
+      echo 'Unsafe installation transaction lock file' >&2; return 1;
+    }
+    exec 9<>"$lock_path"
+    fd=9
+  fi
+  python3 - "$lock_path" "$fd" "$expected_uid" "$expected_gid" >/dev/null 2>&1 <<'PY' || {
+import fcntl, os, stat, sys
+path, descriptor, owner, group = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+fd = os.fstat(descriptor)
+entry = os.stat(path, follow_symlinks=False)
+flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+if (flags & os.O_ACCMODE) != os.O_RDWR or not stat.S_ISREG(fd.st_mode) or fd.st_uid != owner or fd.st_gid != group \
+        or fd.st_nlink != 1 or stat.S_IMODE(fd.st_mode) != 0o600 or stat.S_ISLNK(entry.st_mode) \
+        or (entry.st_dev, entry.st_ino) != (fd.st_dev, fd.st_ino) or entry.st_uid != owner or entry.st_gid != group \
+        or entry.st_nlink != 1 or stat.S_IMODE(entry.st_mode) != 0o600:
+    raise SystemExit(1)
+descriptor_flags = fcntl.fcntl(descriptor, fcntl.F_GETFD)
+if not descriptor_flags & fcntl.FD_CLOEXEC:
+    fcntl.fcntl(descriptor, fcntl.F_SETFD, descriptor_flags | fcntl.FD_CLOEXEC)
+PY
+    echo 'Unsafe installation transaction lock descriptor' >&2; return 1;
+  }
+  python3 - "$fd" >/dev/null 2>&1 <<'PY' || {
+import fcntl, sys
+try:
+    fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except (BlockingIOError, OSError):
+    raise SystemExit(1)
+PY
+    echo 'Another installation or rollback transaction is active' >&2; return 1;
+  }
+}
+# END_SHARED_TRANSACTION_LOCK
+acquire_install_transaction_lock "$INSTALL_LOCK" 0 0
 if [[ -L "$PREFIX/current" && "$(readlink "$PREFIX/current")" == "releases/$RELEASE_ID" && -d "$PREFIX/releases/$RELEASE_ID" ]]; then
   [[ -d /etc/myagents-host-test && ! -L /etc/myagents-host-test \
     && "$(stat -c '%u' /etc/myagents-host-test)" == 0 \
