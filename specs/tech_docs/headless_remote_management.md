@@ -6,11 +6,15 @@
 
 ### 本轮真实验收与修复（2026-10-13）
 
-- [x] `786d3db9` 的完整 Test 六项与 owned 服务 CI 成功；制品由 PR merge `3ae968babd70d29362cbd1f254d925ac67f7fcbc` 构建，tree 与工作分支相同。完整 Linux Host、网络和服务制品已下载并核验摘要；不改写其 source-commit。
-- [x] 101.42.11.29 的隔离联合环境中，两台真实网络客户端完成 PKCE、加密持久化和明确入网；实际 Node 主进程取得 systemd provider-key 并接入真实 Unix IPC。验收脚本前两处启动遗漏已修正，四轮原证据保留。原两个 Host 服务保持 active，隔离 unit/container、回环监听与配置回滚检查通过，模型调用为 0。
-- [ ] 首次生产 Controller snapshot 失败：native 在 Ready 前访问 Ready-only 公共目录，不能安全证明旧目录为空。本轮新增同设备、当前 live epoch、joined、Syncing/Ready 绑定的只读保全 GET，完整检查持久 catalog 及所有 lifecycle 行，不把失败或非 active 投影解释为空；只有明确空才能上传新空目录。原 SelfPolicy/公共目录权限保持。修复源码、独立审阅与定向真实 DPoP 测试已完成；主集成 117 项 headless 与 9 项认证 HTTP 检查通过。新匹配服务/客户端制品与真 Linux 联合复验仍待执行。
-- [ ] 统一安装接线已实现；默认与 owned 管理配置分别使用一致的目录/状态 GID。旧 0750 runtime 配置会被拒绝，需受控迁移，不能直接覆盖现有官方实例。回滚检查实际 enabled/active 状态，三入口共享事务锁并验证传入 FD。独立源码审阅通过；主集成复跑 network installer 22、unified installer 8、Node installer 7（严格失败处理与真实 FD20 重入）项通过。尚无统一安装的真实 systemd 验收。
-- [ ] MoX bot 原生新构建成功，但包验收发现遗漏 Space 构建开关，当前新包被保留为失败证据，未交付。原 `7bb9e3ba` 并行试用包及 MyAgents 保持；补齐公开构建配置后重新打包。Mac 当前锁屏，真实桌面登录、配置表单、键盘与 Linux 持久化仍待验收。
+- [x] 工作分支 `76ce62dc` 的完整 Test 六项与 owned 服务 CI 成功（38309847312 / 38309847313）；制品源为 PR merge `e50a74648f0d7cf8709f95ccdae4df8f72f998a9`，tree 与 HEAD 相同。完整 Linux Host、网络和服务制品已下载并核验摘要；不改写 source-commit。
+- [x] 101.42.11.29 隔离联合环境中，实际两个网络客户端完成 PKCE、加密持久化与明确入网；生产 Controller 经签名 TLS/Pairs 和真实 Node Unix IPC 获得 snapshot，保存模型配置、合成测试凭据与禁用 Agent；真实进程重启后 snapshot、配置回执与凭据回执均读回。模型调用为 0，尚不证明模型执行。
+- [ ] 资源原回执查询在初始化认证处被 `PROOF_REJECTED` 拒绝。三轮真机记录一致；只读数据库聚合显示源设备各遗留 8 个未消费挑战。源码确认 owned 身份恢复误走静态 enrollment 的撤销预探针，丢弃第一条 challenge，再正常消费第二条，逐次耗尽既有上限。已将预探针限定为持静态 enrollment key 的 legacy Selfhost；Owned/官方均不运行该预探针，正常 consumed PoP 和服务端上限保持。owner 差异定向检查、既有 identity 检查、主集成完整 headless 测试及 clippy 通过，独立源码审阅未发现确认的 P1/P2。新 Linux 制品与额外 12 次真实恢复连接复验仍待完成。
+- [x] 首次 snapshot 的 Ready 循环依赖已修复并在真 Linux 联调通过：同设备、当前 live epoch、joined、Syncing/Ready 绑定的只读保全 GET 检查持久 catalog 和全部 lifecycle；只有明确空才上传新空目录。原 SelfPolicy/公共目录权限保持。主集成 117 项 headless、9 项真实 DPoP HTTP 检查与独立审阅通过。
+- [ ] 统一安装接线已实现并通过 network 22、unified 8、Node 7 项测试及独立审阅；三入口共享事务锁、验证 FD，检查真实 enabled/active 回滚。旧 0750 runtime 配置会被拒绝，需受控迁移；尚未在保持原两服务 active 的独立命名空间完成统一安装真实 systemd 验收。
+- [x] 已交付 `MoX-bot-Trial-macos-arm64-76ce62dc.zip`，独立应用身份 `com.moxbot.app`、数据目录 `~/.moxbot`，含 Space 构建配置，19 类资源和包摘要核验通过；原 MyAgents 及旧试用包保留。Apple Silicon 内部包，ad-hoc 签名、未公证。
+- [ ] Mac 当前锁屏，已请求用户解锁；本版真实并行启动、桌面独立登录、配置表单和 Linux 持久化仍待验收。PR #14 保持 draft，main 尚未包含本轮管理变更。
+
+所有本轮隔离单元、容器、回环监听与配置回滚检查通过，原两个 Host 服务保持 active，未增加公网监听。失败证据保留，不能以已通过的部分路径替代完整桌面验收。
 
 
 此前的官方接口核查和服务端仓库权限记录保留为历史证据。当前实际实现位于用户 fork `heavenzhang/MyAgents`，独立服务源码为 `services/agentnet`，不再以获取作者服务端源码作为实现前置。
