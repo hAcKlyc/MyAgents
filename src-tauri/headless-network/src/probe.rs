@@ -59,6 +59,7 @@ struct Target {
     peer: DeviceScope,
     epoch: String,
     binding: Option<String>,
+    membership_revision: u64,
 }
 fn select_device<'a>(
     items: &'a [Value],
@@ -120,6 +121,9 @@ fn select_routing(
             peer,
             epoch: epoch.into(),
             binding,
+            membership_revision: device["membershipRevision"]
+                .as_u64()
+                .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?,
         };
         if selected.as_ref().is_some_and(|old| old != &target) {
             return Err(NetworkError::new("TARGET_ROUTING_METADATA_AMBIGUOUS"));
@@ -203,11 +207,30 @@ fn message_type(message: &ServerMessage) -> &'static str {
         ServerMessage::Error { .. } => "error",
     }
 }
+fn change_scope(change: &myagents_agent_network_protocol::ChangeScope) -> &'static str {
+    use myagents_agent_network_protocol::ChangeScope;
+    match change {
+        ChangeScope::Settings => "settings",
+        ChangeScope::Catalog => "catalog",
+        ChangeScope::Presence => "presence",
+        ChangeScope::Roster => "roster",
+    }
+}
+fn require_same_target(expected: &Target, fresh: &Target) -> Result<(), NetworkError> {
+    if expected != fresh {
+        return Err(NetworkError::new("TARGET_ROUTING_CHANGED"));
+    }
+    Ok(())
+}
+fn control_projection(stage: &'static str, message: &ServerMessage) -> Value {
+    let mut projection = serde_json::json!({"stage":stage,"type":message_type(message)});
+    if let ServerMessage::Changed { change, .. } = message {
+        projection["changeScope"] = change_scope(change).into();
+    }
+    projection
+}
 fn trace_control(stage: &'static str, message: &ServerMessage) {
-    eprintln!(
-        "{}",
-        serde_json::json!({"stage":stage,"type":message_type(message)})
-    );
+    eprintln!("{}", control_projection(stage, message));
 }
 fn require_joined(joined: bool) -> Result<(), NetworkError> {
     if !joined {
@@ -347,13 +370,14 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
             target,
             memory,
             foreign_offers,
+            transport,
         ))
     };
     let setup_result = tokio::time::timeout_at(deadline, setup)
         .await
         .map_err(|_| NetworkError::new("PROBE_DEADLINE_EXCEEDED"))
         .and_then(|result| result);
-    let (mut identity, mut socket, scope, local, target, memory, foreign_offers) =
+    let (mut identity, mut socket, scope, local, target, memory, foreign_offers, transport) =
         match setup_result {
             Ok(result) => result,
             Err(error) => {
@@ -534,7 +558,18 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
                         }
                         message @ ServerMessage::Changed { .. } => {
                             trace_control("handshake", &message);
-                            return Err(NetworkError::new("PROBE_POLICY_CHANGED"));
+                            let fresh_policy =
+                                policy::hydrate(&transport, &identity.token, &local).await?;
+                            require_joined(fresh_policy.joined)?;
+                            let devices = pages(&transport, &identity.token, None).await?;
+                            let fresh_device = select_device(&devices, id, &local)?;
+                            let callable =
+                                pages(&transport, &identity.token, Some(&local.network_id)).await?;
+                            let fresh_target = select_routing(&callable, fresh_device, &local)?;
+                            require_same_target(&target, &fresh_target)?;
+                            // Continue the original single Open only after fresh authority
+                            // confirms unchanged routing. No business retry or re-PUT.
+                            identity.account.ensure_current()?;
                         }
                         unexpected => {
                             trace_control("handshake", &unexpected);
@@ -616,6 +651,48 @@ mod tests {
         json!({"deviceId":device()["deviceId"],"source":{"serviceId":local().service_id,"networkId":local().network_id},"isLocal":false,"membershipRevision":2,"connectionEpoch":device()["catalogEpoch"],"keyGeneration":3,"signedBinding":"nonsecret-selection-fixture"})
     }
     #[test]
+    fn changed_revalidation_allows_only_exact_original_target_snapshot() {
+        let target = select_routing(&[routing()], &device(), &local()).unwrap();
+        require_same_target(&target, &target.clone()).unwrap();
+        let mut changes = Vec::new();
+        let mut changed = target.clone();
+        changed.peer.key_generation += 1;
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.epoch = "changed-epoch".into();
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.membership_revision += 1;
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.binding = None;
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.peer.principal_id = "foreign".into();
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.peer.network_id = "foreign".into();
+        changes.push(changed);
+        let mut changed = target.clone();
+        changed.peer.device_id = "foreign".into();
+        changes.push(changed);
+        for changed in changes {
+            assert_eq!(
+                require_same_target(&target, &changed).unwrap_err().code,
+                "TARGET_ROUTING_CHANGED"
+            );
+        }
+        use myagents_agent_network_protocol::ChangeScope;
+        for (value, name) in [
+            (ChangeScope::Settings, "settings"),
+            (ChangeScope::Catalog, "catalog"),
+            (ChangeScope::Presence, "presence"),
+            (ChangeScope::Roster, "roster"),
+        ] {
+            assert_eq!(change_scope(&value), name);
+        }
+    }
+    #[test]
     fn changed_diagnostics_use_only_static_type_and_rehydrated_join_gate() {
         let scope = ConnectionScope {
             service_id: local().service_id,
@@ -629,8 +706,9 @@ mod tests {
             revision: 999,
         };
         assert_eq!(message_type(&changed), "change.available");
-        let projection = serde_json::json!({"stage":"ready","type":message_type(&changed)});
-        assert_eq!(projection.as_object().unwrap().len(), 2);
+        let projection = control_projection("ready", &changed);
+        assert_eq!(projection.as_object().unwrap().len(), 3);
+        assert_eq!(projection["changeScope"], "catalog");
         assert!(!projection.to_string().contains("999"));
         require_joined(true).unwrap();
         assert_eq!(
