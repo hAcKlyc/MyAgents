@@ -1450,8 +1450,9 @@ mod tests {
             self.inner.heartbeat(id)
         }
         fn disconnect(&self, id: &str) -> Vec<Effect> {
+            let effects = self.inner.disconnect(id);
             self.disconnects.lock().unwrap().push(id.to_owned());
-            self.inner.disconnect(id)
+            effects
         }
         fn delivery_failed(&self, id: &str, channel: &str) -> Vec<Effect> {
             self.inner.delivery_failed(id, channel)
