@@ -316,7 +316,9 @@ def parse_device_pin(data: bytes) -> str:
     return value["hostId"]
 
 
-def read_device_pin(path: pathlib.Path = DEVICE_PIN, *, owner: int = 0, group: int = 0) -> str:
+def read_device_pin(path: pathlib.Path | None = None, *, owner: int = 0, group: int = 0) -> str:
+    # Resolve the default at call time: select_profile() changes DEVICE_PIN.
+    path = DEVICE_PIN if path is None else path
     fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
         for component in path.parts[1:-1]:

@@ -253,6 +253,29 @@ class FixtureTests(unittest.TestCase):
         with self.assertRaises(installer.InstallError):
             installer.parse_device_pin(json.dumps({"schemaVersion": 1, "hostId": pinned.upper()}).encode())
 
+    def test_default_device_pin_follows_selected_profile_at_call_time(self) -> None:
+        myagents_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        moxbot_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            os.chmod(root, 0o755)
+            myagents_pin = root / "myagents-device-id.json"
+            moxbot_pin = root / "moxbot-device-id.json"
+            for path, host_id in ((myagents_pin, myagents_id), (moxbot_pin, moxbot_id)):
+                path.write_text(json.dumps({"schemaVersion": 1, "hostId": host_id}) + "\n", encoding="utf-8")
+                os.chmod(path, 0o600)
+            installer.select_profile("moxbot-test")
+            try:
+                # Model the profile-selected absolute pin while keeping the test
+                # isolated from both fixed /opt namespaces.
+                with mock.patch.object(installer, "DEVICE_PIN", moxbot_pin):
+                    self.assertEqual(installer.read_device_pin(owner=os.getuid(), group=os.getgid()), moxbot_id)
+                installer.select_profile("myagents-test")
+                with mock.patch.object(installer, "DEVICE_PIN", myagents_pin):
+                    self.assertEqual(installer.read_device_pin(owner=os.getuid(), group=os.getgid()), myagents_id)
+            finally:
+                installer.select_profile("myagents-test")
+
     def test_device_pin_rejects_unsafe_mode_symlink_and_missing_pin(self) -> None:
         pinned = "abcdefab-cdef-4abc-8def-abcdefabcdef"
         with tempfile.TemporaryDirectory() as tmp:
