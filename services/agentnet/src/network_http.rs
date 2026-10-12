@@ -49,6 +49,7 @@ pub struct NetworkService {
     pub(super) network_id: String,
     pub(super) service_id: String,
     pub(super) environment: String,
+    network_name: String,
     boot_nonce: String,
     #[cfg(test)]
     test_body_read_timeout: Option<std::time::Duration>,
@@ -114,6 +115,7 @@ impl NetworkService {
             network_id: network_id.into(),
             service_id: identity.service_id.clone(),
             environment: identity.environment.clone(),
+            network_name: config.name.clone(),
             boot_nonce: URL_SAFE_NO_PAD.encode(nonce),
             #[cfg(test)]
             test_body_read_timeout: None,
@@ -127,6 +129,10 @@ impl NetworkService {
             return timeout;
         }
         BODY_READ_TIMEOUT
+    }
+
+    pub(crate) fn public_network_name(&self) -> &str {
+        &self.network_name
     }
 
     pub fn router(&self) -> Router<()> {

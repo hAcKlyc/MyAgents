@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::fs::MetadataExt;
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, feature = "test-support", target_os = "linux"))]
 use std::path::Component;
 use std::path::Path;
 use zeroize::Zeroizing;
@@ -33,7 +33,7 @@ fn name(value: &str) -> Result<CString, CryptoError> {
 }
 
 /// Walk every component without following symlinks and retain the final object.
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, feature = "test-support", target_os = "linux"))]
 fn directory(path: &Path) -> Result<File, CryptoError> {
     if !path.is_absolute() {
         return Err(CryptoError::CredentialUnsafePath);
@@ -177,7 +177,13 @@ impl EncryptedIdentityStore {
         }
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    /// Test-only entry: never compiled into the production credential CLI.
+    #[cfg(feature = "test-support")]
+    pub fn for_test(root: &Path, kek: &[u8; 32]) -> Result<Self, CryptoError> {
+        Self::with_kek(root, Zeroizing::new(*kek))
+    }
+
+    #[cfg(any(test, feature = "test-support", target_os = "linux"))]
     fn with_kek(root: &Path, kek: Zeroizing<[u8; 32]>) -> Result<Self, CryptoError> {
         let directory = directory(root).map_err(|error| {
             if error == CryptoError::CredentialMissing {

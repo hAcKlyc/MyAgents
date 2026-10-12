@@ -1,4 +1,4 @@
-use crate::{agent_network::NetworkError, auth, connector, state::Owner, status};
+use crate::{agent_network::NetworkError, auth, connector, owned, state::Owner, status};
 use myagents_agent_network_crypto::EncryptedIdentityStore;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 pub async fn run() -> Result<(), String> {
@@ -11,6 +11,12 @@ async fn execute() -> Result<(), NetworkError> {
         .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))?;
     let mut options = HashMap::new();
     while let Some(key) = args.next() {
+        if key == "--join" {
+            if options.insert(key, String::new()).is_some() {
+                return Err(NetworkError::new("CLI_USAGE_INVALID"));
+            }
+            continue;
+        }
         if ![
             "--state-dir",
             "--unit",
@@ -19,6 +25,8 @@ async fn execute() -> Result<(), NetworkError> {
             "--device-name",
             "--status-file",
             "--target-device-id",
+            "--owned-instance",
+            "--public-tls-ca-file",
         ]
         .contains(&key.as_str())
             || options.contains_key(&key)
@@ -55,12 +63,66 @@ async fn execute() -> Result<(), NetworkError> {
     }
     crate::device_identity::initialize(device.clone(), options.get("--device-name").cloned())
         .map_err(|_| NetworkError::new("DEVICE_ID_INVALID"))?;
+    let store = Arc::new(EncryptedIdentityStore::from_systemd(
+        &root,
+        &unit,
+        &credential,
+    )?);
+    if let Some(origin) = options.get("--owned-instance") {
+        if ![
+            "owned-auth-start",
+            "owned-auth-wait",
+            "owned-auth-cancel",
+            "owned-auth-logout",
+            "run",
+        ]
+        .contains(&command.as_str())
+            || options.contains_key("--join") && command != "run"
+        {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
+        let ca = options.get("--public-tls-ca-file").map(PathBuf::from);
+        let connection = if matches!(command.as_str(), "owned-auth-cancel" | "owned-auth-logout") {
+            owned::Connection::from_pinned(origin, ca.as_deref(), store.clone(), &device)?
+        } else {
+            owned::Connection::discover(origin, ca.as_deref(), store.clone(), &device).await?
+        };
+        let path = options.get("--status-file").map(PathBuf::from);
+        match command.as_str() {
+            "owned-auth-start" => println!("{}", connection.start().await?),
+            "owned-auth-wait" => {
+                connection.wait().await?;
+                println!("{}", serde_json::json!({"status":"authenticated"}));
+            }
+            "owned-auth-cancel" | "owned-auth-logout" => {
+                connection.cancel().await?;
+                println!("{}", serde_json::json!({"status":"signedOut"}));
+            }
+            "run" => {
+                let _lock = status::run_lock(&root)?;
+                connector::run_owned(
+                    Arc::new(Owner {
+                        store,
+                        device_id: device,
+                    }),
+                    &connection,
+                    path.as_deref(),
+                    options.contains_key("--join"),
+                )
+                .await?;
+            }
+            _ => unreachable!("owned commands validated above"),
+        }
+        return Ok(());
+    }
+    if options.contains_key("--public-tls-ca-file")
+        || options.contains_key("--join")
+        || command.starts_with("owned-")
+    {
+        return Err(NetworkError::new("CLI_USAGE_INVALID"));
+    }
     let owner = Owner {
-        store: Arc::new(EncryptedIdentityStore::from_systemd(
-            &root,
-            &unit,
-            &credential,
-        )?),
+        store,
         device_id: device,
     }
     .install()?;

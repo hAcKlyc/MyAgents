@@ -115,6 +115,19 @@ impl IdentityService {
             .with_state(state)
     }
 
+    /// Narrow public material for the unauthenticated instance descriptor.
+    /// This deliberately excludes signer private keys and every user/device
+    /// projection; the values come from the already-loaded issuer key set.
+    pub(crate) fn public_instance_material(&self) -> PublicInstanceMaterial {
+        PublicInstanceMaterial {
+            issuer: self.profile.issuer.clone(),
+            service_id: self.profile.service_id.clone(),
+            environment: self.profile.environment.clone(),
+            root_certificate: self.keys.root_certificate_pem().to_owned(),
+            jwks: self.keys.jwks(),
+        }
+    }
+
     fn with_session<T>(
         &self,
         headers: &HeaderMap,
@@ -174,6 +187,14 @@ impl IdentityService {
     }
 }
 
+pub(crate) struct PublicInstanceMaterial {
+    pub(crate) issuer: String,
+    pub(crate) service_id: String,
+    pub(crate) environment: String,
+    pub(crate) root_certificate: String,
+    pub(crate) jwks: Value,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StateQuery {
@@ -183,17 +204,23 @@ struct StateQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DeviceInfo {
-    device_name: String,
+    device_name: Option<String>,
     platform: String,
-    os_version: String,
+    os_version: Option<String>,
     app_version: String,
 }
 
 impl DeviceInfo {
     fn validate(&self) -> Result<(), IdentityHttpError> {
-        if self.device_name.len() > 256
+        if self
+            .device_name
+            .as_ref()
+            .is_some_and(|name| name.len() > 256)
             || self.platform.len() > 64
-            || self.os_version.len() > 128
+            || self
+                .os_version
+                .as_ref()
+                .is_some_and(|version| version.len() > 128)
             || self.app_version.len() > 128
         {
             return Err(IdentityHttpError::bad_request("IDENTITY_REQUEST_INVALID"));
@@ -717,7 +744,7 @@ mod tests {
         let router = service.router();
         let device_key = DevicePrivateKey::generate().unwrap();
         let csr = device_key.csr().unwrap();
-        let initial_body = json!({"deviceId":device_id,"csr":csr,"expectedKeyGeneration":null,"deviceInfo":{"deviceName":"test","platform":"linux","osVersion":"test","appVersion":"test"}});
+        let initial_body = json!({"deviceId":device_id,"csr":csr,"expectedKeyGeneration":null,"deviceInfo":{"deviceName":null,"platform":"linux","osVersion":null,"appVersion":"test"}});
         let (status, issued, headers) = request(
             router.clone(),
             Some(&token),

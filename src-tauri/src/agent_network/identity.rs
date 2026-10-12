@@ -298,11 +298,7 @@ impl NetworkIdentity {
         {
             return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
         }
-        if let NetworkAccountSession::Selfhost(instance) = &account {
-            instance
-                .descriptor
-                .ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
-        }
+        account.ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
         let peer = validate_peer(
             &scope,
             key.clone(),

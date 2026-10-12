@@ -325,7 +325,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .route("/auth/session", get(session).delete(revoke))
         .route("/health", get(health))
         .with_state(app);
-    let router = assemble_feature_routes(router, identity, network, relay);
+    let router = assemble_feature_routes(router, identity, network, relay, &config.issuer);
     let router = router
         .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
         .layer(axum::middleware::map_response(no_store));
@@ -349,7 +349,15 @@ fn assemble_feature_routes(
     identity: Option<IdentityService>,
     network: Option<NetworkService>,
     relay: Option<Arc<RelayController>>,
+    login_issuer: &str,
 ) -> Router<()> {
+    let instance =
+        match (&identity, &network, &relay) {
+            (Some(identity), Some(network), Some(_)) => Some(
+                crate::instance_http::InstanceHttp::new(identity, network, login_issuer),
+            ),
+            _ => None,
+        };
     let mut router = router;
     if let Some(identity) = identity {
         router = router.merge(identity.router());
@@ -361,6 +369,9 @@ fn assemble_feature_routes(
         router = router
             .merge(crate::relay_http::router(controller.clone()))
             .merge(RelayTransport::new(controller as Arc<dyn RelayHandler>).router());
+    }
+    if let Some(instance) = instance {
+        router = router.merge(instance.router());
     }
     router
 }
@@ -1115,7 +1126,175 @@ mod tests {
             Some(identity),
             Some(fixture.service.clone()),
             Some(controller),
+            "https://dex.example.test",
         );
+
+        let instance_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent-network/instance")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(instance_response.status(), StatusCode::OK);
+        assert_eq!(
+            instance_response.headers()[header::CACHE_CONTROL],
+            "no-store"
+        );
+        assert_eq!(
+            instance_response.headers()[header::CONTENT_TYPE],
+            "application/json"
+        );
+        let bytes = axum::body::to_bytes(instance_response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let descriptor: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            descriptor
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "version",
+                "profile",
+                "serviceId",
+                "environment",
+                "networkId",
+                "name",
+                "issuer",
+                "loginIssuer",
+                "protocol",
+                "capabilities",
+                "rootCertificate",
+                "jwks"
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(descriptor["version"], 1);
+        assert_eq!(descriptor["profile"], "owned-device-relay-v1");
+        assert_eq!(descriptor["serviceId"], fixture.config.service_id);
+        assert_eq!(descriptor["environment"], "development");
+        assert_eq!(descriptor["networkId"], fixture.network);
+        assert_eq!(descriptor["name"], "Isolated network");
+        assert_eq!(descriptor["issuer"], fixture.config.issuer);
+        assert_eq!(descriptor["loginIssuer"], "https://dex.example.test");
+        assert_eq!(descriptor["protocol"], 1);
+        assert_eq!(
+            descriptor["capabilities"],
+            serde_json::json!(["tls13-mtls"])
+        );
+        let keys =
+            myagents_agentnet_identity_core::ServiceKeys::load(&fixture.config.key_file).unwrap();
+        assert_eq!(descriptor["rootCertificate"], keys.root_certificate_pem());
+        assert_eq!(descriptor["jwks"], keys.jwks());
+        for forbidden in [
+            "principalId",
+            "account",
+            "deviceId",
+            "accessToken",
+            "bootstrapGrant",
+            "typedRpc",
+            "permit",
+            "return",
+            "hostManagement",
+        ] {
+            assert!(!descriptor.as_object().unwrap().contains_key(forbidden));
+        }
+
+        let query_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent-network/instance?anything=1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(query_response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(query_response.headers()[header::CACHE_CONTROL], "no-store");
+        let credential_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent-network/instance")
+                    .header(header::AUTHORIZATION, "Bearer forbidden")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(credential_response.status(), StatusCode::BAD_REQUEST);
+        for credential_header in [header::COOKIE.as_str(), "dpop"] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/agent-network/instance")
+                        .header(credential_header, "ignored")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        }
+        let post_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/agent-network/instance")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(post_response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        let head_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("HEAD")
+                    .uri("/api/agent-network/instance")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head_response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        let no_relay_identity = IdentityService::open(
+            fixture.auth.clone(),
+            fixture.dir.path(),
+            &fixture.config,
+            &fixture.network,
+        )
+        .unwrap();
+        let no_relay_router = assemble_feature_routes(
+            Router::new(),
+            Some(no_relay_identity),
+            Some(fixture.service.clone()),
+            None,
+            "https://dex.example.test",
+        );
+        let absent = no_relay_router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent-network/instance")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(absent.status(), StatusCode::NOT_FOUND);
 
         let identity_response = router
             .clone()

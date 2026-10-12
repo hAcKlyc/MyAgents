@@ -6,6 +6,7 @@
 //! durable account/session owner.
 
 mod identity_http;
+mod instance_http;
 mod network_http;
 mod oidc;
 mod relay_controller;

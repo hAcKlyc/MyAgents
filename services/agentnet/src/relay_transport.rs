@@ -1850,6 +1850,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(matches!(close, ClientMessage::Close(_)));
+        wait_until(|| !server.observed.disconnects.lock().unwrap().is_empty()).await;
         let state = server
             .fixture
             .service

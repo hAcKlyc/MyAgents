@@ -9,6 +9,12 @@ pub(crate) mod identity;
 pub(crate) mod jwt;
 #[path = "../../../src/agent_network/memory.rs"]
 pub(crate) mod memory;
+#[path = "../../../src/agent_network/owned_admission.rs"]
+pub(crate) mod owned_admission;
+#[path = "../../../src/agent_network/owned_login.rs"]
+pub(crate) mod owned_login;
+#[path = "../../../src/agent_network/owned_profile.rs"]
+pub(crate) mod owned_profile;
 #[path = "../../../src/agent_network/policy.rs"]
 pub(crate) mod policy;
 #[path = "../../../src/agent_network/reconnect.rs"]

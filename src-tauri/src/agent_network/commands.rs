@@ -299,6 +299,59 @@ pub(crate) async fn cmd_agent_network_join(
         .await
 }
 #[tauri::command]
+pub(crate) async fn cmd_agent_network_owned_start(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    issuer: String,
+    public_tls_ca_file: Option<String>,
+) -> Result<super::owned_account_desktop::StartedLogin, NetworkError> {
+    state
+        .owned_start(&issuer, public_tls_ca_file.as_deref())
+        .await
+}
+#[tauri::command]
+pub(crate) async fn cmd_agent_network_owned_open_authorization(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    attempt_id: String,
+) -> Result<(), NetworkError> {
+    state.owned_open(&attempt_id).await
+}
+#[tauri::command]
+pub(crate) async fn cmd_agent_network_owned_poll(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    manager: tauri::State<'_, crate::sidecar::ManagedSidecarManager>,
+    attempt_id: String,
+) -> Result<OwnedPollResponse, NetworkError> {
+    match state
+        .inner()
+        .owned_poll(app, manager.inner().clone(), &attempt_id)
+        .await?
+    {
+        Some(registry) => Ok(OwnedPollResponse {
+            status: "authenticated",
+            registry: Some(registry),
+        }),
+        None => Ok(OwnedPollResponse {
+            status: "pending",
+            registry: None,
+        }),
+    }
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OwnedPollResponse {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry: Option<super::registry::RegistryView>,
+}
+#[tauri::command]
+pub(crate) async fn cmd_agent_network_owned_cancel(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    attempt_id: String,
+) -> Result<(), NetworkError> {
+    state.owned_cancel(&attempt_id).await
+}
+#[tauri::command]
 pub(crate) async fn cmd_agent_network_remove(
     app: tauri::AppHandle,
     state: tauri::State<'_, super::actor::ManagedAgentNetwork>,

@@ -1388,6 +1388,25 @@
     "chooseNetwork": "选择网络",
     "officialNetwork": "MyAgents 官方网络",
     "joinSelfhost": "加入自部署网络",
+    "ownedLogin": {
+      "mode": "账号登录",
+      "hint": "通过浏览器完成登录。会话保存在操作系统凭据库中，令牌不会显示在这里。",
+      "start": "在浏览器中继续",
+      "started": "登录请求已创建。请在浏览器完成登录，再回来检查状态。",
+      "waiting": "等待浏览器登录",
+      "expires": "此请求将在 {{time}} 过期。",
+      "openBrowser": "打开浏览器",
+      "browserOpened": "浏览器已打开。完成登录后回来重新检查。",
+      "check": "检查登录状态",
+      "pending": "登录仍在等待中。",
+      "cancel": "取消登录",
+      "advanced": "高级连接选项",
+      "caFile": "公共 HTTPS CA 证书文件（可选）",
+      "caHint": "仅当服务使用私有测试 CA 时填写。该证书会作为此连接的外层 HTTPS 信任；实例的 AgentNet 内层证书不会用于公共 HTTPS 信任。"
+    },
+    "legacyKey": {
+      "mode": "设备 key（旧方式）"
+    },
     "serviceUrl": "服务 URL",
     "deviceKey": "设备 key",
     "selfhostHint": "此 key 仅能绑定一台设备。同网络设备共同信任；加入后不会自动开放任何 Agent。",

@@ -488,6 +488,16 @@ pub(crate) mod tests {
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["ok"], true);
 
+        // Public discovery remains Ready-only. A connecting client must read
+        // its own epoch-bound policy instead, or hydration and Ready deadlock.
+        let public_uri = format!("/v1/devices/{}/agents", device.context.device_id);
+        let headers = signed_headers(&routes, &fixture, &device, "GET", &public_uri, false).await;
+        let public = response(routes.clone(), Method::GET, &public_uri, headers, "").await;
+        assert_eq!(public.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(public.into_body(), 64 * 1024).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], "CATALOG_STALE");
+
         // The client proof binds the configured issuer and path. Host and
         // forwarding headers are deliberately attacker-controlled and ignored.
         let headers = signed_headers(&routes, &fixture, &device, "GET", policy_uri, false).await;
