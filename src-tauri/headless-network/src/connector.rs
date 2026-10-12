@@ -1,3 +1,6 @@
+#[path = "../../src/agent_network/catalog_ack.rs"]
+mod catalog_ack;
+
 use crate::{
     agent_network::{
         account::NetworkAccountSession,
@@ -107,9 +110,12 @@ async fn connect(
             Some(empty_catalog(scope.connection_epoch.clone())?),
         )
         .await?;
-    if uploaded["catalogSeq"] != 1 {
-        return Err(NetworkError::new("CATALOG_INVALID"));
-    }
+    catalog_ack::validate_catalog_ack(&uploaded, &scope.connection_epoch, 1).map_err(|error| {
+        NetworkError::new(match error {
+            catalog_ack::CatalogAckError::Invalid => "CATALOG_INVALID",
+            catalog_ack::CatalogAckError::NotCurrent => "CATALOG_NOT_CURRENT",
+        })
+    })?;
     let mut policy = policy::hydrate(&transport, &identity.token, &local).await?;
     send(
         &mut socket,
