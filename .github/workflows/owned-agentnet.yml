@@ -45,6 +45,11 @@ jobs:
             sudo apt-get install --no-install-recommends -y apache2-utils
           fi
           python3 -m unittest discover -s services/agentnet/deploy -p 'test_*.py'
+      - name: Validate bounded device identity signer
+        run: |
+          cargo test --locked --manifest-path services/agentnet/identity-core/Cargo.toml
+          cargo clippy --locked --all-targets --manifest-path services/agentnet/identity-core/Cargo.toml -- -D warnings
+          cargo fmt --manifest-path services/agentnet/identity-core/Cargo.toml --check
       - name: Record service artifact provenance
         env:
           SOURCE_COMMIT: ${{ github.sha }}

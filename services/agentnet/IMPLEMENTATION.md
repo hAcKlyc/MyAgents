@@ -20,6 +20,8 @@ Current base: fork main 1d2c806e2700cd70804a1174f27b6ec23acdca68. Service worktr
 - [x] Bounded GitHub/public source search and existing selfhost/API/identity contract audit.
 - [x] Authentication foundation: durable account mapping; PKCE/nonce transactions with expiry/single use; bounded session records and revocation; authorization tests against wrong issuer/subject/audience/replay; local restart persistence. Independent review expiry race repaired with final-clock regression.
 - [x] HTTPS-only OIDC discovery/code exchange and loopback HTTP login/poll/cancel/session adapter implemented; local tests/clippy passed. This does not close live login acceptance below.
+- [x] Isolated real Dex HTTPS form/code-exchange acceptance: device/PKCE denials, single-use poll, durable session after restart, stable account, revoke and cancel. Tested CI source e47cdb3b/tree eeeca9f1; not a desktop browser UI or public deployment.
+- [x] Bounded device identity signer: explicit stable keys, signature-verified P-256 CSR, server-controlled SAN/chain, fixed access/bootstrap/peer tokens. This does not implement identity REST authorization or device persistence.
 - [ ] Real Dex-backed browser login, delivery bound to requested device/instance, account-scoped membership and first-device enrollment.
 - [ ] Identity/CSR/PoP/DPoP/JWT endpoints and revocation/rotation parity with existing clients.
 - [ ] Metadata owner, CAS receipts and current zero-Agent device routing descriptor.
