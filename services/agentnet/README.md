@@ -1,12 +1,14 @@
 # Owned AgentNet service
 
-This directory is the independent server implementation for MAH-SELFHOST-SERVICE-20261012. It currently contains an authentication foundation and private Dex deployment preparation. It is **not yet a complete deployable AgentNet**: browser authorization-code exchange, device identity endpoints, metadata and relay, desktop/Host adapters and remote-management acceptance remain open in [IMPLEMENTATION.md](IMPLEMENTATION.md). No existing official account or encrypted Host identity is migrated.
+This directory is the independent server implementation for MAH-SELFHOST-SERVICE-20261012. It contains an authentication core, a loopback HTTP authorization-code adapter and private Dex deployment preparation. It is **not yet a complete deployable AgentNet**: real login acceptance, device identity endpoints, metadata and relay, desktop/Host adapters and remote-management acceptance remain open in [IMPLEMENTATION.md](IMPLEMENTATION.md). No existing official account or encrypted Host identity is migrated.
 
 ## Authentication ownership
 
 Dex supplies the login screen and local accounts, so deployment does not require the upstream official account service. AgentNet verifies OIDC signatures, issuer, audience and nonce with the `openidconnect` crate. The service maps the verified issuer/subject to its own durable principal; it stores only hashes of its own session credentials. PKCE and one-use login transactions bind the delivery to the initiating device. The first account is operator-provisioned; there is no open registration or password grant. The OIDC provider can later be replaced by an existing organization provider.
 
-The authentication foundation is a library and does not yet expose a successful HTTP login endpoint. Signed synthetic ID tokens exercise deterministic denial/persistence tests; they are not evidence of a real Dex login.
+The service executable uses a fixed OIDC provider, validates discovery endpoints before requests and exchanges authorization codes with a distinct provider PKCE verifier. Callback handling retains a verified subject in a bounded, short-lived transaction; client PKCE proof is separately required to claim the session once. Signed synthetic ID tokens and local handler tests exercise deterministic denial/persistence gates; they are not evidence of a real Dex login.
+
+The current routes are `POST /auth/login/start`, `GET /auth/callback`, `POST /auth/login/poll`, `DELETE /auth/login/cancel`, and `GET|DELETE /auth/session`. Session credentials are returned only in a no-store JSON response to the initiating client; they never enter browser redirect URLs. `/health` reports only the authentication phase.
 
 ## Prepare the independent login service
 
@@ -22,12 +24,14 @@ python3 services/agentnet/deploy/bootstrap_auth.py \
 
 The password is prompted without echo; automation may instead use `--password-file` with a mode-0600, owner-controlled regular file. Generated files are mode 0600, directories 0700; they contain a bcrypt hash and generated OIDC client secret. Keep the bundle outside Git. No default password is provided. The generator starts no service and opens no port.
 
-The generated Compose file runs Dex v2.46.0 and binds only `127.0.0.1:15556`. Before use, verify the image digest against the chosen release and record it with the deployment artifact. A separately configured HTTPS ingress must forward the exact issuer path to that loopback listener. Do not publish the container HTTP port. For isolated HTTPS tests, `--tls-cert` and `--tls-key` mount operator-provided private files and configure Dex HTTPS directly; clients must trust that test CA explicitly. A running Dex alone does not enable AgentNet login until the owned-service callback adapter is delivered.
+The generated Compose file runs Dex v2.46.0 and binds only `127.0.0.1:15556`. Before use, verify the image digest against the chosen release and record it with the deployment artifact. A separately configured HTTPS ingress must forward the exact issuer path to that loopback listener. Do not publish the container HTTP port. For isolated HTTPS tests, `--tls-cert` and `--tls-key` mount operator-provided private files and configure Dex HTTPS directly; clients must trust that test CA explicitly.
 
 ```sh
 docker compose -f /absolute/private/path/agentnet-auth/compose.json config --quiet
 docker compose -f /absolute/private/path/agentnet-auth/compose.json up -d
 ```
+
+Run `myagents-agentnet-service --config /absolute/private/service.json` using a mode-0600 owner-controlled file. Required fields are `issuer`, `client_id`, `client_secret`, `callback_url`, `network_id`, `state_dir`, and `listen`; optional fields are `ca_bundle` and `session_ttl_seconds`. Issuer and callback must use HTTPS, callback must end in `/auth/callback`, and `listen` must be loopback. The service state directory must already exist with mode 0700. If explicitly supplied, the CA bundle must be an immutable root-controlled regular file; it is trusted only by this service, not installed into the system trust store. Forward a separate HTTPS service origin to this loopback API. Client secrets must stay out of environment variables, command arguments and request logs.
 
 ## Persistence, backup and rollback
 

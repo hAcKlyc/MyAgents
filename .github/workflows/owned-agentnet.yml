@@ -37,6 +37,7 @@ jobs:
           cargo test --locked --manifest-path services/agentnet/Cargo.toml
           cargo clippy --locked --all-targets --manifest-path services/agentnet/Cargo.toml -- -D warnings
           cargo fmt --manifest-path services/agentnet/Cargo.toml --check
+          cargo build --locked --release --manifest-path services/agentnet/Cargo.toml --bin myagents-agentnet-service
       - name: Validate private deployment preparation
         run: |
           if ! command -v htpasswd >/dev/null; then
@@ -44,3 +45,19 @@ jobs:
             sudo apt-get install --no-install-recommends -y apache2-utils
           fi
           python3 -m unittest discover -s services/agentnet/deploy -p 'test_*.py'
+      - name: Record service artifact provenance
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p output/owned-agentnet
+          cp services/agentnet/target/release/myagents-agentnet-service output/owned-agentnet/
+          cd output/owned-agentnet
+          sha256sum myagents-agentnet-service > SHA256SUMS
+          cat SHA256SUMS
+          printf '%s\n' "$SOURCE_COMMIT" > source-commit.txt
+          ldd myagents-agentnet-service > native-dependencies.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: owned-agentnet-auth-linux
+          path: output/owned-agentnet/
+          if-no-files-found: error

@@ -6,11 +6,15 @@
 //! durable account/session owner.
 
 mod oidc;
+mod server;
 mod store;
+#[cfg(test)]
 mod transactions;
 
 pub use oidc::{OidcVerifier, VerifiedSubject};
+pub use server::{ServiceFileConfig, serve_from_config};
 pub use store::{AccountProjection, AuthError, AuthStore, IssuedSession, SessionProjection};
+#[cfg(test)]
 pub use transactions::{LoginCallback, LoginStart, LoginTransactions};
 
 use std::time::Duration;
@@ -282,6 +286,49 @@ mod tests {
             reopened.validate_session(&second_bearer).unwrap_err(),
             AuthError::SessionRejected
         );
+    }
+
+    #[test]
+    fn login_expiring_during_oidc_verification_cannot_issue_session() {
+        use std::cell::Cell;
+        let dir = private_dir();
+        let config = config();
+        let store = AuthStore::open(dir.path(), &config).unwrap();
+        let fixture = SigningFixture::new();
+        let oidc = fixture.verifier(ISSUER);
+        let transactions = LoginTransactions::new(&config).unwrap();
+        let (pkce_verifier, challenge) = pkce();
+        let started = transactions.begin(DEVICE_A, &challenge).unwrap();
+        let token =
+            Zeroizing::new(fixture.token(ISSUER, "dex-user-expiring", &started.nonce, CLIENT));
+        let verifier = Zeroizing::new(pkce_verifier.to_owned());
+        let reads = Cell::new(0);
+        let result = transactions.complete_with_id_token_using_clock(
+            &store,
+            &oidc,
+            LoginCallback {
+                transaction_id: &started.transaction_id,
+                state: &started.state,
+                device_id: DEVICE_A,
+                pkce_verifier: &verifier,
+                id_token: &token,
+            },
+            || {
+                let current = reads.get();
+                reads.set(current + 1);
+                Ok(if current == 0 {
+                    started.expires_at - 300
+                } else {
+                    started.expires_at
+                })
+            },
+        );
+        assert_eq!(result.unwrap_err(), AuthError::LoginTransaction);
+        let connection = rusqlite::Connection::open(dir.path().join("auth.sqlite3")).unwrap();
+        let session_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(session_count, 0);
     }
 
     #[test]

@@ -70,6 +70,16 @@ pub struct VerifiedSubject {
 }
 
 impl VerifiedSubject {
+    pub(crate) fn from_verified_claims(
+        issuer: String,
+        subject: String,
+    ) -> Result<Self, crate::AuthError> {
+        if issuer.is_empty() || issuer.len() > 2048 || subject.is_empty() || subject.len() > 512 {
+            return Err(crate::AuthError::OidcRejected);
+        }
+        Ok(Self { issuer, subject })
+    }
+
     pub(crate) fn issuer(&self) -> &str {
         &self.issuer
     }

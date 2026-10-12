@@ -97,13 +97,26 @@ impl LoginTransactions {
         oidc: &OidcVerifier,
         callback: LoginCallback<'_>,
     ) -> Result<IssuedSession, AuthError> {
+        self.complete_with_id_token_using_clock(store, oidc, callback, unix_seconds)
+    }
+
+    pub(crate) fn complete_with_id_token_using_clock<F>(
+        &self,
+        store: &AuthStore,
+        oidc: &OidcVerifier,
+        callback: LoginCallback<'_>,
+        mut clock: F,
+    ) -> Result<IssuedSession, AuthError>
+    where
+        F: FnMut() -> Result<i64, AuthError>,
+    {
         let device_id = canonical_uuid(callback.device_id).ok_or(AuthError::LoginTransaction)?;
         let transaction_id =
             canonical_uuid(callback.transaction_id).ok_or(AuthError::LoginTransaction)?;
         if !valid_pkce_verifier(callback.pkce_verifier.as_str()) {
             return Err(AuthError::LoginProof);
         }
-        let now = unix_seconds()?;
+        let now = clock()?;
         let pending = {
             let mut pending = self.pending.lock().map_err(|_| AuthError::Storage)?;
             pending.retain(|_, transaction| transaction.expires_at > now);
@@ -138,9 +151,11 @@ impl LoginTransactions {
                 .get(&transaction_id)
                 .ok_or(AuthError::LoginTransaction)?;
             if current.expires_at != pending.expires_at
+                || current.expires_at <= clock()?
                 || current.device_id != device_id
                 || !constant_time_eq(current.state.as_bytes(), pending.state.as_bytes())
             {
+                transactions.remove(&transaction_id);
                 return Err(AuthError::LoginTransaction);
             }
             transactions.remove(&transaction_id);
