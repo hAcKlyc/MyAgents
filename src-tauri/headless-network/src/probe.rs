@@ -2,6 +2,7 @@
 use crate::{
     agent_network::{
         account::NetworkAccountSession,
+        account_operation::AccountOperation,
         connection::{initial_hello, send},
         identity::NetworkIdentity,
         memory::MemoryBudget,
@@ -29,6 +30,8 @@ pub(crate) struct Report {
     error_code: Option<String>,
     source_catalog_empty: bool,
     target_discovered: bool,
+    target_identity_state_validated: bool,
+    target_routing_without_agent_catalog: bool,
     open_sent: bool,
     offer_verified: bool,
     channel_ready: bool,
@@ -58,7 +61,7 @@ fn emit_failure(report: Report, error: &NetworkError) {
 struct Target {
     peer: DeviceScope,
     epoch: String,
-    binding: Option<String>,
+    key_fingerprint: String,
     membership_revision: u64,
 }
 fn select_device<'a>(
@@ -84,53 +87,66 @@ fn select_device<'a>(
     }
     Ok(target)
 }
-fn select_routing(
-    items: &[Value],
+fn target_from_identity(
+    value: &Value,
     device: &Value,
     local: &DeviceScope,
 ) -> Result<Target, NetworkError> {
-    let mut selected: Option<Target> = None;
-    for item in items.iter().filter(|v| v["deviceId"] == device["deviceId"]) {
-        if item["source"]["serviceId"] != local.service_id
-            || item["source"]["networkId"] != local.network_id
-            || item["isLocal"] != false
-            || item["membershipRevision"] != device["membershipRevision"]
-            || item["connectionEpoch"] != device["catalogEpoch"]
-        {
-            return Err(NetworkError::new("TARGET_ROUTING_SCOPE_MISMATCH"));
-        }
-        let generation = item["keyGeneration"]
-            .as_u64()
-            .filter(|v| *v > 0)
-            .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?;
-        let epoch = item["connectionEpoch"]
-            .as_str()
-            .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?;
-        let binding = match item.get("signedBinding") {
-            Some(Value::Null) => None,
-            Some(Value::String(value)) if !value.is_empty() => Some(value.clone()),
-            _ => return Err(NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE")),
-        };
-        let mut peer = local.clone();
-        peer.device_id = device["deviceId"]
-            .as_str()
-            .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?
-            .into();
-        peer.key_generation = generation;
-        let target = Target {
-            peer,
-            epoch: epoch.into(),
-            binding,
-            membership_revision: device["membershipRevision"]
-                .as_u64()
-                .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?,
-        };
-        if selected.as_ref().is_some_and(|old| old != &target) {
-            return Err(NetworkError::new("TARGET_ROUTING_METADATA_AMBIGUOUS"));
-        }
-        selected = Some(target);
+    myagents_agent_network_protocol::validate_identity_state(value)
+        .map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    let state: myagents_agent_network_protocol::IdentityState =
+        serde_json::from_value(value.clone())
+            .map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    let id = device["deviceId"]
+        .as_str()
+        .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?;
+    // Cross-bind issuer identity to the authenticated same-account Devices row.
+    select_device(std::slice::from_ref(device), id, local)?;
+    if state.service_id != local.service_id
+        || state.environment != local.environment
+        || state.device_id != id
+    {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
     }
-    selected.ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))
+    let (generation, fingerprint) = match (state.key_generation, state.key_fingerprint) {
+        (Some(generation), Some(fingerprint)) => (generation, fingerprint),
+        (None, None) => return Err(NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE")),
+        _ => return Err(NetworkError::new("IDENTITY_STATE_INVALID")),
+    };
+    let epoch = device["catalogEpoch"]
+        .as_str()
+        .filter(|epoch| {
+            uuid::Uuid::parse_str(epoch)
+                .map(|id| id.to_string())
+                .as_deref()
+                == Ok(*epoch)
+        })
+        .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?;
+    let mut peer = local.clone();
+    peer.device_id = id.into();
+    peer.key_generation = generation;
+    Ok(Target {
+        peer,
+        epoch: epoch.into(),
+        key_fingerprint: fingerprint,
+        membership_revision: device["membershipRevision"]
+            .as_u64()
+            .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?,
+    })
+}
+async fn read_target_identity(
+    identity: &NetworkIdentity,
+    device: &Value,
+    local: &DeviceScope,
+) -> Result<Target, NetworkError> {
+    let id = device["deviceId"]
+        .as_str()
+        .ok_or_else(|| NetworkError::new("TARGET_ROUTING_METADATA_UNAVAILABLE"))?;
+    let value = identity
+        .account
+        .request(AccountOperation::IdentityState(id.into()), None)
+        .await?;
+    target_from_identity(&value, device, local)
 }
 fn expected_offer(
     offer: &Offer,
@@ -149,24 +165,13 @@ fn expected_offer(
     }
     Ok(())
 }
-async fn pages(
-    transport: &NetworkTransport,
-    token: &str,
-    network: Option<&str>,
-) -> Result<Vec<Value>, NetworkError> {
+async fn pages(transport: &NetworkTransport, token: &str) -> Result<Vec<Value>, NetworkError> {
     let mut all = Vec::new();
     let mut cursor = None::<String>;
     loop {
-        let route = match network {
-            Some(id) => NetworkRoute::Callable {
-                network_id: id,
-                cursor: cursor.as_deref(),
-                limit: budget("pageMax"),
-            },
-            None => NetworkRoute::Devices {
-                cursor: cursor.as_deref(),
-                limit: budget("pageMax"),
-            },
+        let route = NetworkRoute::Devices {
+            cursor: cursor.as_deref(),
+            limit: budget("pageMax"),
         };
         let page = transport.json(route, token, None).await?;
         let items = page["items"]
@@ -358,10 +363,9 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
             }
         }
         setup_phase = "targetlookup";
-        let devices = pages(&transport, &identity.token, None).await?;
+        let devices = pages(&transport, &identity.token).await?;
         let device = select_device(&devices, id, &local)?;
-        let callable = pages(&transport, &identity.token, Some(&local.network_id)).await?;
-        let target = select_routing(&callable, device, &local)?;
+        let target = read_target_identity(&identity, device, &local).await?;
         Ok((
             identity,
             socket,
@@ -393,6 +397,8 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
         status: "channel-ready",
         source_catalog_empty: true,
         target_discovered: true,
+        target_identity_state_validated: true,
+        target_routing_without_agent_catalog: true,
         foreign_offers_closed: foreign_offers,
         ..Report::default()
     };
@@ -406,7 +412,7 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
                 target_device_id: target.peer.device_id.clone(),
                 target_key_generation: target.peer.key_generation,
                 target_connection_epoch: target.epoch.clone(),
-                target_binding: target.binding.clone(),
+                target_binding: None,
             },
         )
         .await?;
@@ -561,11 +567,10 @@ pub(crate) async fn run(owner: Arc<Owner>, id: &str) -> Result<Report, NetworkEr
                             let fresh_policy =
                                 policy::hydrate(&transport, &identity.token, &local).await?;
                             require_joined(fresh_policy.joined)?;
-                            let devices = pages(&transport, &identity.token, None).await?;
+                            let devices = pages(&transport, &identity.token).await?;
                             let fresh_device = select_device(&devices, id, &local)?;
-                            let callable =
-                                pages(&transport, &identity.token, Some(&local.network_id)).await?;
-                            let fresh_target = select_routing(&callable, fresh_device, &local)?;
+                            let fresh_target =
+                                read_target_identity(&identity, fresh_device, &local).await?;
                             require_same_target(&target, &fresh_target)?;
                             // Continue the original single Open only after fresh authority
                             // confirms unchanged routing. No business retry or re-PUT.
@@ -648,11 +653,11 @@ mod tests {
         json!({"deviceId":"00000000-0000-0000-0000-000000000004","principalId":"isolated","networkId":local().network_id,"joined":true,"connectionState":"ready","membershipRevision":2,"catalogEpoch":"00000000-0000-0000-0000-000000000005"})
     }
     fn routing() -> Value {
-        json!({"deviceId":device()["deviceId"],"source":{"serviceId":local().service_id,"networkId":local().network_id},"isLocal":false,"membershipRevision":2,"connectionEpoch":device()["catalogEpoch"],"keyGeneration":3,"signedBinding":"nonsecret-selection-fixture"})
+        json!({"serviceId":local().service_id,"environment":local().environment,"deviceId":device()["deviceId"],"keyGeneration":3,"keyFingerprint":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"})
     }
     #[test]
     fn changed_revalidation_allows_only_exact_original_target_snapshot() {
-        let target = select_routing(&[routing()], &device(), &local()).unwrap();
+        let target = target_from_identity(&routing(), &device(), &local()).unwrap();
         require_same_target(&target, &target.clone()).unwrap();
         let mut changes = Vec::new();
         let mut changed = target.clone();
@@ -665,7 +670,7 @@ mod tests {
         changed.membership_revision += 1;
         changes.push(changed);
         let mut changed = target.clone();
-        changed.binding = None;
+        changed.key_fingerprint = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".into();
         changes.push(changed);
         let mut changed = target.clone();
         changed.peer.principal_id = "foreign".into();
@@ -779,48 +784,94 @@ mod tests {
         );
     }
     #[test]
-    fn absent_routing_never_guesses_generation_and_conflicting_routing_is_closed() {
-        assert!(
-            matches!(select_routing(&[],&device(),&local()),Err(e) if e.code=="TARGET_ROUTING_METADATA_UNAVAILABLE")
+    fn identity_routing_rejects_bad_schema_scope_null_pair_and_generation_boundaries() {
+        for invalid in [Value::Null, json!({})] {
+            assert!(target_from_identity(&invalid, &device(), &local()).is_err());
+        }
+        for (key, values) in [
+            (
+                "keyGeneration",
+                vec![
+                    json!(0),
+                    json!(-1),
+                    json!(9007199254740992u64),
+                    json!(1.5),
+                    json!("3"),
+                ],
+            ),
+            ("keyFingerprint", vec![json!(""), json!("bad"), json!(3)]),
+        ] {
+            for value in values {
+                let mut state = routing();
+                state[key] = value;
+                assert_eq!(
+                    target_from_identity(&state, &device(), &local())
+                        .err()
+                        .unwrap()
+                        .code,
+                    "IDENTITY_STATE_INVALID"
+                );
+            }
+        }
+        let mut absent = routing();
+        absent["keyGeneration"] = Value::Null;
+        absent["keyFingerprint"] = Value::Null;
+        assert_eq!(
+            target_from_identity(&absent, &device(), &local())
+                .err()
+                .unwrap()
+                .code,
+            "TARGET_ROUTING_METADATA_UNAVAILABLE"
         );
-        let first = routing();
-        let mut other = first.clone();
-        other["keyGeneration"] = json!(4);
-        assert!(
-            matches!(select_routing(&[first,other],&device(),&local()),Err(e) if e.code=="TARGET_ROUTING_METADATA_AMBIGUOUS")
-        );
-        {
-            let mut row = routing();
-            row["keyGeneration"] = Value::Null;
-            assert!(
-                matches!(select_routing(&[row],&device(),&local()),Err(e) if e.code=="TARGET_ROUTING_METADATA_UNAVAILABLE")
+        for key in ["keyGeneration", "keyFingerprint"] {
+            let mut state = routing();
+            state[key] = Value::Null;
+            assert_eq!(
+                target_from_identity(&state, &device(), &local())
+                    .err()
+                    .unwrap()
+                    .code,
+                "IDENTITY_STATE_INVALID"
+            );
+            state.as_object_mut().unwrap().remove(key);
+            assert!(target_from_identity(&state, &device(), &local()).is_err());
+        }
+        for (key, value) in [
+            ("serviceId", json!(local().network_id)),
+            ("environment", json!("production")),
+            ("deviceId", json!(local().device_id)),
+        ] {
+            let mut state = routing();
+            state[key] = value;
+            assert_eq!(
+                target_from_identity(&state, &device(), &local())
+                    .err()
+                    .unwrap()
+                    .code,
+                "IDENTITY_SCOPE_MISMATCH"
             );
         }
-        let mut lazy = routing();
-        lazy["signedBinding"] = Value::Null;
-        assert!(select_routing(&[lazy], &device(), &local())
-            .unwrap()
-            .binding
-            .is_none());
-        for invalid in [json!(""), json!(1), json!({})] {
-            let mut row = routing();
-            row["signedBinding"] = invalid;
-            assert!(select_routing(&[row], &device(), &local()).is_err());
-        }
-        let mut missing = routing();
-        missing.as_object_mut().unwrap().remove("signedBinding");
-        assert!(select_routing(&[missing], &device(), &local()).is_err());
-        let mut row = routing();
-        row["connectionEpoch"] = json!("stale");
-        assert!(
-            matches!(select_routing(&[row],&device(),&local()),Err(e) if e.code=="TARGET_ROUTING_SCOPE_MISMATCH")
+        let mut extra = routing();
+        extra["unexpected"] = true.into();
+        assert!(target_from_identity(&extra, &device(), &local()).is_err());
+        let mut boundary = routing();
+        boundary["keyGeneration"] = json!(9007199254740991u64);
+        assert_eq!(
+            target_from_identity(&boundary, &device(), &local())
+                .unwrap()
+                .peer
+                .key_generation,
+            9007199254740991u64
         );
+        for key in ["catalogEpoch", "membershipRevision"] {
+            let mut row = device();
+            row[key] = Value::Null;
+            assert!(target_from_identity(&routing(), &row, &local()).is_err());
+        }
     }
     #[test]
     fn zero_agent_source_opens_only_a_device_channel_without_mount_operation_or_permit() {
-        let mut lazy = routing();
-        lazy["signedBinding"] = Value::Null;
-        let target = select_routing(&[lazy], &device(), &local()).unwrap();
+        let target = target_from_identity(&routing(), &device(), &local()).unwrap();
         let scope = ConnectionScope {
             service_id: local().service_id,
             network_id: local().network_id,
@@ -835,7 +886,7 @@ mod tests {
             target_device_id: target.peer.device_id,
             target_key_generation: target.peer.key_generation,
             target_connection_epoch: target.epoch,
-            target_binding: target.binding,
+            target_binding: None,
         })
         .unwrap();
         assert_eq!(open["type"], "channel.open");
@@ -851,6 +902,8 @@ mod tests {
             "certificate",
             "target_device_id",
             "connection_epoch",
+            "key_fingerprint",
+            "keyFingerprint",
         ] {
             assert!(report.get(key).is_none());
         }
@@ -891,7 +944,7 @@ mod tests {
     }
     #[test]
     fn signed_offer_still_must_target_the_selected_device_and_epoch() {
-        let target = select_routing(&[routing()], &device(), &local()).unwrap();
+        let target = target_from_identity(&routing(), &device(), &local()).unwrap();
         let scope = ConnectionScope {
             service_id: local().service_id,
             network_id: local().network_id,
@@ -919,7 +972,7 @@ mod tests {
             &offer,
             &local(),
             &scope,
-            &select_routing(&[routing()], &device(), &local()).unwrap()
+            &target_from_identity(&routing(), &device(), &local()).unwrap()
         )
         .is_err());
     }
