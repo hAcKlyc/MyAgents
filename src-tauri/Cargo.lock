@@ -4490,6 +4490,7 @@ dependencies = [
  "minisign-verify",
  "myagents-agent-network-crypto",
  "myagents-agent-network-protocol",
+ "myagents-host-management-protocol",
  "myagents-media-worker-protocol",
  "nix 0.29.0",
  "notify-debouncer-full",
@@ -4590,6 +4591,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "uuid",
+]
+
+[[package]]
+name = "myagents-host-management-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
