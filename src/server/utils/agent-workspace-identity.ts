@@ -118,7 +118,7 @@ export class WorkspaceAgentRegistrationError extends Error {
   }
 }
 
-function validateWorkspaceForRegistration(rawPath: string): string {
+function validateWorkspaceForRegistration(rawPath: string, admitPinnedWorkspace?: (path: string) => void): string {
   const workspacePath = rawPath.trim();
   if (!workspacePath || !isAbsolute(workspacePath)) {
     throw new WorkspaceAgentRegistrationError(
@@ -126,7 +126,12 @@ function validateWorkspaceForRegistration(rawPath: string): string {
       '--workspacePath must be an absolute path.',
     );
   }
-  const safety = validateExternalReadPathNode(workspacePath);
+  // A private Host root may be under /var/lib, which the external arbitrary-read
+  // blacklist deliberately rejects. Only the strict scoped owner can supply a
+  // kernel-pinned admission; public Desktop/CLI registration retains that blacklist.
+  const safety = admitPinnedWorkspace
+    ? (admitPinnedWorkspace(workspacePath), { ok: true as const, canonical: workspacePath })
+    : validateExternalReadPathNode(workspacePath);
   if (!safety.ok) {
     throw new WorkspaceAgentRegistrationError(
       'WORKSPACE_PATH_UNSAFE',
@@ -195,13 +200,48 @@ export interface RegisterWorkspaceAgentResult {
  * Project.agentId commits first, so a retry after an interrupted Agent write
  * reuses the same identity instead of minting a duplicate.
  */
-export async function registerWorkspaceAgent(
-  requestedPath: string,
-): Promise<RegisterWorkspaceAgentResult> {
-  const workspacePath = validateWorkspaceForRegistration(requestedPath);
+interface RegistrationOptions { strictPersistence?: boolean; notify?: boolean; assertWorkspace?: (path: string) => void }
+type ScopedWorkspaceRegistration = (path: string) => Promise<RegisterWorkspaceAgentResult>;
+
+/** The callback and registration share the original composite lock, never a second registry lock. */
+export async function withWorkspaceAgentRegistrationIntent<T>(
+  fn: (register: ScopedWorkspaceRegistration) => Promise<T>,
+  options: RegistrationOptions = {},
+): Promise<T> {
   return withAgentConfigIntentLock(async () => {
-    const initialProjects = loadProjects();
-    const initialConfig = loadConfig();
+    let active = true;
+    const operations: Promise<RegisterWorkspaceAgentResult>[] = [];
+    try {
+      const result = await fn(path => {
+        if (!active) throw new Error('REGISTRATION_INTENT_CLOSED');
+        if (operations.length) throw new Error('REGISTRATION_INTENT_ALREADY_USED');
+        const operation = registerWorkspaceAgentInIntent(path, options);
+        void operation.catch(() => undefined);
+        operations.push(operation);
+        return operation;
+      });
+      active = false;
+      await Promise.all(operations);
+      return result;
+    } finally { active = false; await Promise.allSettled(operations); }
+  });
+}
+
+export async function registerWorkspaceAgent(requestedPath: string): Promise<RegisterWorkspaceAgentResult> {
+  const workspacePath = validateWorkspaceForRegistration(requestedPath);
+  return withWorkspaceAgentRegistrationIntent(register => register(workspacePath));
+}
+
+async function registerWorkspaceAgentInIntent(
+  requestedPath: string, options: RegistrationOptions,
+): Promise<RegisterWorkspaceAgentResult> {
+  const workspacePath = validateWorkspaceForRegistration(requestedPath, options.strictPersistence ? options.assertWorkspace : undefined);
+  const persistence = { strict: options.strictPersistence };
+  if (options.strictPersistence && workspacePath !== requestedPath) throw new Error('REGISTRATION_PATH_CHANGED');
+  options.assertWorkspace?.(workspacePath);
+
+    const initialProjects = loadProjects(persistence);
+    const initialConfig = loadConfig(persistence);
     const matches = initialProjects.filter((project) =>
       workspacePathsEqual(project.path, workspacePath),
     );
@@ -290,6 +330,8 @@ export async function registerWorkspaceAgent(
     let projectAfterCommit: ProjectSlim | undefined;
 
     const projects = await atomicModifyProjects((currentProjects) => {
+      options.assertWorkspace?.(workspacePath);
+      if (options.strictPersistence) loadConfig(persistence);
       const currentMatches = currentProjects.filter((project) =>
         workspacePathsEqual(project.path, workspacePath),
       );
@@ -317,11 +359,12 @@ export async function registerWorkspaceAgent(
           'The workspace registration changed concurrently; retry the command.',
         );
       }
-      const currentConfig = loadConfig();
+      const currentConfig = loadConfig(persistence);
       const reconciled = reconcileAgentWorkspaceIdentities(
         currentProjects,
         currentConfig.agents ?? [],
         {
+          projectIds: options.strictPersistence ? new Set([projectId]) : undefined,
           buildAgent: (project, requestedAgentId) =>
             buildAgentForPersistedProject(
               project,
@@ -334,7 +377,7 @@ export async function registerWorkspaceAgent(
         (project) => project.id === projectId,
       );
       return reconciled.projects;
-    });
+    }, persistence);
 
     projectAfterCommit ??= projects.find((project) => project.id === projectId);
     if (!projectAfterCommit?.agentId) {
@@ -353,10 +396,13 @@ export async function registerWorkspaceAgent(
     let config: AdminAppConfig;
     try {
       config = await atomicModifyConfig((current) => {
+        options.assertWorkspace?.(workspacePath);
+        if (options.strictPersistence) loadProjects(persistence);
         configResult = reconcileAgentWorkspaceIdentities(
           projects,
           current.agents ?? [],
           {
+            projectIds: options.strictPersistence ? new Set([projectId]) : undefined,
             buildAgent: (project, requestedAgentId) =>
               buildAgentForPersistedProject(project, current, requestedAgentId),
           },
@@ -364,7 +410,7 @@ export async function registerWorkspaceAgent(
         return configResult.changed
           ? { ...current, agents: configResult.agents }
           : current;
-      });
+      }, persistence);
     } catch (error) {
       throw new WorkspaceAgentRegistrationError(
         'AGENT_MATERIALIZATION_DEFERRED',
@@ -388,14 +434,15 @@ export async function registerWorkspaceAgent(
         { projectId, agentId: finalAgentId },
       );
     }
-    await broadcastAppConfigChanged({
+    options.assertWorkspace?.(workspacePath);
+    if (options.notify !== false) await broadcastAppConfigChanged({
       section: 'agent-identity',
       action: priorIdentity ? 'register-idempotent' : 'register',
       projectId,
       agentId: finalAgentId,
     });
     return {
-      created: !priorIdentity,
+      created: options.strictPersistence ? !priorIdentity && !legacyIdentity : !priorIdentity,
       agentId: finalAgentId,
       projectId,
       name: agent.name,
@@ -403,7 +450,6 @@ export async function registerWorkspaceAgent(
       enabled: agent.enabled === true,
       archived: false,
     };
-  });
 }
 
 /** Bounded explicit repair. While claims remain ambiguous, fresh starts fail closed.
