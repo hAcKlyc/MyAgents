@@ -28,6 +28,41 @@ beforeEach(() => {
 });
 afterEach(() => {vi.unstubAllEnvs(); vi.restoreAllMocks(); syncBuiltinESMExports(); rmSync(home, {recursive: true, force: true});});
 
+it('inspects only persisted linked Agents in admitted roots without exposing config secrets or repairing disk', async () => {
+  const inside = randomUUID(); const outside = randomUUID();
+  writeFileSync(config, JSON.stringify({providerApiKeys: {private: 'nonsecret-test-sentinel'}, agents: [
+    {id: inside, name: 'Inside', enabled: false, channels: [{botToken: 'nonsecret-test-sentinel'}]},
+    {id: outside, name: 'Outside', enabled: true},
+  ]}));
+  writeFileSync(projects, JSON.stringify([
+    {id: 'inside-project', name: 'Inside', path: join(root, 'nested/work'), agentId: inside},
+    {id: 'outside-project', name: 'Outside', path: root + '-neighbor/work', agentId: outside},
+  ]));
+  const beforeConfig = readFileSync(config, 'utf8'); const beforeProjects = readFileSync(projects, 'utf8');
+  const result = await owner.inspect();
+  expect(result).toEqual({version: 1, revision: 0, roots: [{rootId: 'local', workspacePath: root}], agents: [
+    {agentId: inside, projectId: 'inside-project', name: 'Inside', workspacePath: join(root, 'nested/work'), enabled: false, archived: false},
+  ]});
+  expect(JSON.stringify(result)).not.toContain('nonsecret-test-sentinel');
+  expect(readFileSync(config, 'utf8')).toBe(beforeConfig); expect(readFileSync(projects, 'utf8')).toBe(beforeProjects);
+  expect(await createHostResourceOwner({hostId, roots: {local: root}}).inspect()).toEqual(result);
+});
+it('refuses ambiguous or oversized inspection instead of silently returning an incomplete registry', async () => {
+  const id = randomUUID();
+  writeFileSync(config, JSON.stringify({agents: [{id, name: 'Agent', enabled: false}]}));
+  writeFileSync(projects, JSON.stringify([
+    {id: 'p1', name: 'Agent', path: join(root, 'one'), agentId: id},
+    {id: 'p2', name: 'Agent', path: join(root, 'two'), agentId: id},
+  ]));
+  const before = readFileSync(projects, 'utf8');
+  await expect(owner.inspect()).rejects.toThrow('RESOURCE_REGISTRY_AMBIGUOUS');
+  expect(readFileSync(projects, 'utf8')).toBe(before);
+  const agents = Array.from({length: 300}, (_, index) => ({id: randomUUID(), name: 'x'.repeat(256), enabled: false, index}));
+  writeFileSync(config, JSON.stringify({agents}));
+  writeFileSync(projects, JSON.stringify(agents.map(agent => ({id: `p${agent.index}`, name: agent.name, path: join(root, `a${agent.index}`), agentId: agent.id}))));
+  await expect(owner.inspect()).rejects.toThrow('RESOURCE_PROJECTION_TOO_LARGE');
+});
+
 it('strict config/projects reads refuse malformed disk authority and never use backups', async () => {
   writeFileSync(config, '{'); writeFileSync(config + '.bak', '{"agents":[]}');
   await expect(owner.snapshot()).rejects.toThrow('REGISTRY_CORRUPT');
@@ -172,6 +207,9 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
     expect(lstatSync(join(root, 'new')).mode & 0o777).toBe(0o700);
     const restarted = createHostResourceOwner({hostId, roots: {local: root}});
     expect(await restarted.mutate(request)).toEqual(results[0]);
+    expect(await restarted.inspect()).toMatchObject({version: 1, revision: 1,
+      roots: [{rootId: 'local', workspacePath: root}], agents: [{agentId: agents[0].id,
+        projectId: registry[0].id, workspacePath: join(root, 'new'), enabled: false, archived: false}]});
     const again = await restarted.mutate({...body('new'), expectedRevision:1});
     expect(again).toMatchObject({status:'persisted', resource:{agentId:agents[0].id, projectId:registry[0].id, created:false}});
   });

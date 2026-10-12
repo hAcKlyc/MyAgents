@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
 import { configureHost, readConfigReceipt, type HostConfig } from './management';
 import { readNetworkStatus } from './network-status';
+import { createHostResourceOwner, HostResourceError, type HostResourceRequest } from './resources';
+import { connectHostManagementIpc } from './management-ipc';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -72,6 +74,11 @@ async function serve(): Promise<void> {
   if (identity.schemaVersion !== 1 || !uuidPattern.test(identity.hostId)) throw new Error('Unsupported Host identity');
   let active: Active | null = null;
   let shuttingDown = false;
+  let managementIpc: { close(): Promise<void> } | undefined;
+  const resourceOwner = createHostResourceOwner({
+    hostId: identity.hostId,
+    roots: { workspaces: workspaceRoot },
+  });
   let mutationTail: Promise<unknown> = Promise.resolve();
   const pending = new Map<string, { active: Active; resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'host-session-worker.mjs');
@@ -200,6 +207,101 @@ async function serve(): Promise<void> {
     return workerCall(target, match[2] as HostSessionOperation, body);
   }
 
+  async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (shuttingDown) throw new Error('Host is stopping');
+    return exclusive(async () => {
+      if (shuttingDown) throw new Error('Host is stopping');
+      if (method === 'host.snapshot') {
+        const value = (await dispatch('/host/status', {})) as Record<string, unknown>;
+        return {
+          kind: 'snapshot',
+          version: 1,
+          hostId: value.hostId,
+          configured: value.configured,
+          settings: value.settings,
+          activeSession: value.activeSession,
+          stopping: value.stopping,
+          capabilities: value.capabilities,
+          agentNet: value.agentNet,
+          runtime: value.runtime,
+        };
+      }
+      if (method === 'config.set') {
+        const receipt = await configureHost(
+          {
+            hostId: identity!.hostId,
+            defaultWorkspace: join(workspaceRoot, 'default'),
+            readConfig: () => jsonFile<HostConfig>(configPath, {}),
+            writeConfig: config => atomicJson(configPath, config),
+            workspacePath,
+            busy: () => Boolean(active) || shuttingDown,
+          },
+          params,
+        );
+        if (!('status' in receipt)) throw new Error('Untracked configuration result');
+        if (receipt.status === 'persisted')
+          return {
+            kind: 'config-receipt',
+            status: 'persisted',
+            mutationId: receipt.mutationId,
+            revision: receipt.revision,
+            effect: receipt.effect,
+            settings: receipt.settings,
+          };
+        return {
+          kind: 'config-receipt',
+          status: 'conflict',
+          mutationId: receipt.mutationId,
+          revision: receipt.revision,
+          effect: receipt.effect,
+        };
+      }
+      if (method === 'resources.create') {
+        if (params.rootId !== 'workspaces') throw new HostResourceError('RESOURCE_ROOT_UNKNOWN');
+        const result = await resourceOwner.mutate(params as unknown as HostResourceRequest);
+        if (result.status === 'unconfirmed') return { kind: 'error', code: 'RESOURCE_UNCONFIRMED' };
+        return { kind: 'resource-receipt', ...result };
+      }
+      if (method === 'receipt.get') {
+        const id = params.mutationId as string;
+        if (params.owner === 'config') {
+          const receipt = await readConfigReceipt(await jsonFile<HostConfig>(configPath, {}), identity!.hostId, { mutationId: id });
+          if (!receipt)
+            return {
+              kind: 'config-receipt',
+              status: 'not-found',
+              mutationId: id,
+            };
+          if (receipt.status === 'not-found')
+            return {
+              kind: 'config-receipt',
+              status: 'not-found',
+              mutationId: id,
+            };
+          return receipt.status === 'persisted'
+            ? {
+                kind: 'config-receipt',
+                status: receipt.status,
+                mutationId: receipt.mutationId,
+                revision: receipt.revision,
+                effect: receipt.effect,
+                settings: receipt.settings,
+              }
+            : {
+                kind: 'config-receipt',
+                status: receipt.status,
+                mutationId: receipt.mutationId,
+                revision: receipt.revision,
+                effect: receipt.effect,
+              };
+        }
+        const receipt = await resourceOwner.receipt(id);
+        return receipt ? { kind: 'resource-receipt', ...receipt } : { kind: 'receipt-not-found', mutationId: id, owner: 'resources' };
+      }
+      throw new Error('Unsupported management request');
+    });
+  }
+
   const server = createServer(async (incoming, outgoing) => {
     try {
       if (incoming.method !== 'POST' || incoming.url?.includes('?')) throw new Error('Only typed POST control operations are supported');
@@ -230,10 +332,33 @@ async function serve(): Promise<void> {
   }
   await new Promise<void>((resolveListen, reject) => { server.once('error', reject); server.listen(socket, () => resolveListen()); });
   await chmod(socket, 0o600);
-  console.log('MyAgents Host ready (local Unix socket, AgentNet not integrated)');
+  const managementPath = process.env.MYAGENTS_HOST_MANAGEMENT_IPC;
+  const managementUid = process.env.MYAGENTS_HOST_MANAGEMENT_NETWORK_UID;
+  const managementGid = process.env.MYAGENTS_HOST_MANAGEMENT_GID;
+  if (managementPath !== undefined || managementUid !== undefined || managementGid !== undefined) {
+    try {
+      if (managementPath === undefined || !managementUid || !managementGid || !/^[1-9][0-9]{0,9}$/.test(managementUid) || !/^[1-9][0-9]{0,9}$/.test(managementGid)) {
+        throw new Error('Incomplete Host management IPC configuration');
+      }
+      managementIpc = await connectHostManagementIpc({
+        socketPath: managementPath,
+        expectedUid: Number(managementUid),
+        expectedGid: Number(managementGid),
+        dispatch: dispatchManagement,
+        isShuttingDown: () => shuttingDown,
+        onFailure: code => console.error(`Host management IPC stopped: ${code}`),
+      });
+    } catch (error) {
+      server.close();
+      await unlink(socket).catch(() => {});
+      throw error;
+    }
+  }
+  console.log(`MyAgents Host ready (local Unix socket${managementIpc ? ', management IPC connected' : ''})`);
   const stop = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await managementIpc?.close();
     server.close();
     try { await exclusive(async () => { if (active) await release(active); }); }
     catch { process.exitCode = 1; }

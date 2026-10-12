@@ -138,6 +138,42 @@ jobs:
         run: npm run build:assets
         env:
           MYAGENTS_BUILD_PROFILE: moxbot
+      - name: Cache integrity-pinned Host build resources
+        uses: actions/cache@v4
+        with:
+          path: output/host-ci/cache
+          key: host-linux-resources-${{ hashFiles('scripts/node-runtime.json', 'package-lock.json') }}
+      - name: Build Linux Host test artifact
+        run: |
+          npm run build:host
+          printf '%s\n' "$SOURCE_COMMIT" > output/host-ci/source-commit.txt
+          python3 - <<'PY'
+          import json, os, tarfile
+          from pathlib import Path
+          root = Path('output/host-ci')
+          archives = list(root.glob('myagents-host-test-*.tar.gz'))
+          if len(archives) != 1 or len(list(root.glob('install-*.sh'))) != 1:
+              raise SystemExit('Expected one clean Host archive and bootstrap')
+          with tarfile.open(archives[0], 'r:gz') as archive:
+              manifests = [m for m in archive.getmembers() if m.name.endswith('/manifest.json')]
+              if len(manifests) != 1:
+                  raise SystemExit('Host artifact manifest missing or ambiguous')
+              manifest = json.load(archive.extractfile(manifests[0]))
+          if manifest['sourceDirty'] or manifest['sourceCommit'] != os.environ['SOURCE_COMMIT']:
+              raise SystemExit('Host artifact source provenance mismatch')
+          PY
+        env:
+          MYAGENTS_HOST_OUTPUT: output/host-ci
+          SOURCE_COMMIT: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headless-host-linux
+          path: |
+            output/host-ci/myagents-host-test-*.tar.gz
+            output/host-ci/myagents-host-test-*.tar.gz.sha256
+            output/host-ci/install-*.sh
+            output/host-ci/source-commit.txt
+          if-no-files-found: error
 
   # Rust gate: cargo test plus project redline Clippy rules. We only deny
   # disallowed_methods/macros here; ordinary Clippy warnings stay non-fatal
