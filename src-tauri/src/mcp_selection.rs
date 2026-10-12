@@ -16,6 +16,12 @@ pub(crate) fn normalize_mcp_selection_field(value: &mut serde_json::Value) -> bo
         let text = text.trim();
         match serde_json::from_str::<Value>(text) {
             Ok(parsed) => parsed,
+            // JSON.parse accepts overflowing numbers as Infinity; those arrays
+            // fail the string-only check in TypeScript. Validate syntax without
+            // materializing numbers so Rust never reinterprets them as IDs.
+            Err(_) if serde_json::from_str::<serde::de::IgnoredAny>(text).is_ok() => {
+                serde_json::json!([])
+            }
             Err(_) => {
                 let ids = text
                     .strip_prefix('[')

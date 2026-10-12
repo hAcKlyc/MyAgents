@@ -147,6 +147,42 @@
     }
   },
   {
+    "name": "json-number-overflow",
+    "input": {
+      "mcpEnabledServers": "[1e400]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "json-negative-number-overflow",
+    "input": {
+      "mcpEnabledServers": "[-1e400]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "quoted-numeric-id",
+    "input": {
+      "mcpEnabledServers": "[\"1e400\"]"
+    },
+    "expected": {
+      "mcpEnabledServers": ["1e400"]
+    }
+  },
+  {
+    "name": "legacy-mixed-numeric-id",
+    "input": {
+      "mcpEnabledServers": "[1e400,tavily-search]"
+    },
+    "expected": {
+      "mcpEnabledServers": ["1e400", "tavily-search"]
+    }
+  },
+  {
     "name": "broken-json",
     "input": {
       "mcpEnabledServers": "[\"playwright\",tavily-search]"
