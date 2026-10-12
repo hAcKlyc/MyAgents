@@ -1,5 +1,7 @@
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
 use crate::network_http::{NetworkHttpConfig, NetworkService};
+use crate::relay_controller::RelayController;
+use crate::relay_transport::{RelayHandler, RelayTransport};
 use crate::{AuthConfig, AuthError, AuthStore, VerifiedSubject};
 use axum::{
     Json, Router,
@@ -60,6 +62,8 @@ pub struct ServiceFileConfig {
     pub identity: Option<IdentityHttpConfig>,
     #[serde(default)]
     pub network: Option<NetworkHttpConfig>,
+    #[serde(default)]
+    pub relay: bool,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -293,6 +297,15 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
             )
         })
         .transpose()?;
+    if config.relay && (identity.is_none() || network.is_none()) {
+        return Err(AuthError::Configuration);
+    }
+    let relay = if config.relay {
+        let network = network.clone().ok_or(AuthError::Configuration)?;
+        Some(Arc::new(RelayController::new(network)?))
+    } else {
+        None
+    };
     let app = Arc::new(App {
         client,
         http,
@@ -304,7 +317,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         },
         verification,
     });
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/auth/login/start", post(start))
         .route("/auth/callback", get(callback))
         .route("/auth/login/poll", post(poll))
@@ -312,12 +325,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .route("/auth/session", get(session).delete(revoke))
         .route("/health", get(health))
         .with_state(app);
-    if let Some(identity) = identity {
-        router = router.merge(identity.router());
-    }
-    if let Some(network) = network {
-        router = router.merge(network.router());
-    }
+    let router = assemble_feature_routes(router, identity, network, relay);
     let router = router
         .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
         .layer(axum::middleware::map_response(no_store));
@@ -330,6 +338,31 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         })
         .await
         .map_err(|_| AuthError::Storage)
+}
+
+/// Merge the optional feature routers into the same production router used by
+/// `serve`. NetworkService owns the shared 404/405 fallback contract; the
+/// feature routers must therefore remain route-only and not install a second
+/// fallback.
+fn assemble_feature_routes(
+    router: Router<()>,
+    identity: Option<IdentityService>,
+    network: Option<NetworkService>,
+    relay: Option<Arc<RelayController>>,
+) -> Router<()> {
+    let mut router = router;
+    if let Some(identity) = identity {
+        router = router.merge(identity.router());
+    }
+    if let Some(network) = network {
+        router = router.merge(network.router());
+    }
+    if let Some(controller) = relay {
+        router = router
+            .merge(crate::relay_http::router(controller.clone()))
+            .merge(RelayTransport::new(controller as Arc<dyn RelayHandler>).router());
+    }
+    router
 }
 
 fn read_config(path: &Path) -> Result<ServiceFileConfig, AuthError> {
@@ -396,6 +429,9 @@ fn read_root_ca(path: &Path) -> Result<Vec<u8>, AuthError> {
     Ok(bytes)
 }
 fn validate_config(c: &ServiceFileConfig) -> Result<(), AuthError> {
+    if c.relay && (c.identity.is_none() || c.network.is_none()) {
+        return Err(AuthError::Configuration);
+    }
     let issuer = Url::parse(&c.issuer).map_err(|_| AuthError::OidcConfiguration)?;
     let callback = Url::parse(&c.callback_url).map_err(|_| AuthError::OidcConfiguration)?;
     if issuer.scheme() != "https"
@@ -1001,8 +1037,10 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{body::Body, http::Request};
     use openidconnect::TokenUrl;
     use sha2::Digest;
+    use tower::ServiceExt;
 
     fn test_app() -> (Arc<App>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1060,9 +1098,91 @@ mod tests {
         (app, dir)
     }
 
+    #[tokio::test]
+    async fn production_feature_router_composes_identity_network_and_relay_without_fallback_conflict()
+     {
+        let fixture = crate::network_http::tests::Fixture::new();
+        let identity = IdentityService::open(
+            fixture.auth.clone(),
+            fixture.dir.path(),
+            &fixture.config,
+            &fixture.network,
+        )
+        .unwrap();
+        let controller = Arc::new(RelayController::new(fixture.service.clone()).unwrap());
+        let router = assemble_feature_routes(
+            Router::new(),
+            Some(identity),
+            Some(fixture.service.clone()),
+            Some(controller),
+        );
+
+        let identity_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/agent-network/jwks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(identity_response.status(), StatusCode::OK);
+        assert_eq!(
+            identity_response.headers()[header::CACHE_CONTROL],
+            "no-store"
+        );
+
+        // A protected network endpoint reaches its real owner and rejects the
+        // missing credentials, proving it was not swallowed by another router.
+        let network_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/me/network")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(network_response.status(), StatusCode::UNAUTHORIZED);
+
+        // The catalog route is registered by relay_http; wrong-method behavior
+        // remains 405, and the merged global middleware keeps it non-cacheable.
+        let method_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/devices/self/catalog")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(method_response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(method_response.headers()[header::CACHE_CONTROL], "no-store");
+
+        let missing = router
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/not-a-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+        let bytes = axum::body::to_bytes(missing.into_body(), 8 * 1024)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(error["error"]["code"], "NETWORK_ROUTE_NOT_FOUND");
+    }
+
     #[test]
     fn service_config_requires_loopback_https_fixed_callback_and_no_query() {
-        let good = ServiceFileConfig {
+        let mut good = ServiceFileConfig {
             issuer: "https://127.0.0.1:15556/dex".into(),
             client_id: "agentnet-local".into(),
             client_secret: Zeroizing::new("test-secret".into()),
@@ -1074,11 +1194,29 @@ mod tests {
             session_ttl_seconds: 3600,
             identity: None,
             network: None,
+            relay: false,
         };
         assert!(validate_config(&good).is_ok());
-        let mut bad = good;
-        bad.listen = "0.0.0.0:15558".parse().unwrap();
-        assert!(validate_config(&bad).is_err());
+        good.relay = true;
+        assert!(validate_config(&good).is_err());
+        good.relay = false;
+        good.listen = "0.0.0.0:15558".parse().unwrap();
+        assert!(validate_config(&good).is_err());
+    }
+
+    #[test]
+    fn relay_flag_defaults_off_for_existing_service_files() {
+        let value = serde_json::json!({
+            "issuer": "https://127.0.0.1:15556/dex",
+            "client_id": "agentnet-local",
+            "client_secret": "test-secret",
+            "callback_url": "https://127.0.0.1:15557/auth/callback",
+            "network_id": "11111111-1111-4111-8111-111111111111",
+            "state_dir": "/tmp/state",
+            "listen": "127.0.0.1:15558"
+        });
+        let config: ServiceFileConfig = serde_json::from_value(value).unwrap();
+        assert!(!config.relay);
     }
 
     #[tokio::test]

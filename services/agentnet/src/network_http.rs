@@ -17,6 +17,7 @@ use myagents_agentnet_admission_core::{
 use myagents_agentnet_device_core::{DeviceError, DeviceRecord, DeviceStore, SessionContext};
 use myagents_agentnet_identity_core::ServiceKeys;
 use myagents_agentnet_metadata_core::{DeviceInfo, MetadataError, MetadataProfile, MetadataStore};
+use myagents_agentnet_peer_core::{PeerProfile, PeerStore};
 use rand::TryRngCore;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -38,20 +39,21 @@ pub struct NetworkHttpConfig {
 
 #[derive(Clone)]
 pub struct NetworkService {
-    auth: Arc<AuthStore>,
-    devices: Arc<DeviceStore>,
-    metadata: Arc<MetadataStore>,
+    pub(super) auth: Arc<AuthStore>,
+    pub(super) devices: Arc<DeviceStore>,
+    pub(super) metadata: Arc<MetadataStore>,
+    pub(super) peers: Arc<PeerStore>,
     admission: AdmissionValidator,
     in_flight: Arc<Semaphore>,
-    issuer: String,
-    network_id: String,
-    service_id: String,
-    environment: String,
+    pub(super) issuer: String,
+    pub(super) network_id: String,
+    pub(super) service_id: String,
+    pub(super) environment: String,
     boot_nonce: String,
     #[cfg(test)]
     test_body_read_timeout: Option<std::time::Duration>,
     // This owner only loads existing signing authority; it never initializes keys.
-    _keys: Arc<ServiceKeys>,
+    pub(super) _keys: Arc<ServiceKeys>,
 }
 
 impl NetworkService {
@@ -87,6 +89,16 @@ impl NetworkService {
             },
         )
         .map_err(|_| AuthError::Configuration)?;
+        let peers = PeerStore::open(
+            state_dir,
+            PeerProfile {
+                issuer: identity.issuer.clone(),
+                service_id: identity.service_id.clone(),
+                environment: identity.environment.clone(),
+                network_id: network_id.into(),
+            },
+        )
+        .map_err(|_| AuthError::Configuration)?;
         let mut nonce = [0u8; 32];
         rand::rngs::OsRng
             .try_fill_bytes(&mut nonce)
@@ -95,6 +107,7 @@ impl NetworkService {
             auth,
             devices: Arc::new(devices),
             metadata: Arc::new(metadata),
+            peers: Arc::new(peers),
             admission,
             in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             issuer: identity.issuer.clone(),
@@ -194,6 +207,16 @@ impl NetworkService {
                     HttpError::unavailable()
                 }
             })
+    }
+
+    pub(super) fn admit_response(
+        &self,
+        headers: &HeaderMap,
+        method: &Method,
+        uri: &axum::http::Uri,
+    ) -> Result<ValidatedAccess, Box<Response>> {
+        self.admit(headers, method, uri)
+            .map_err(|error| Box::new(error.into_response()))
     }
 
     fn execute(
@@ -576,7 +599,7 @@ impl IntoResponse for HttpError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{AuthConfig, OidcVerifier, VerifiedSubject};
     use axum::{body::to_bytes, http::Request};
@@ -619,22 +642,22 @@ mod tests {
             .unwrap()
         }
     }
-    struct Device {
-        key: DevicePrivateKey,
-        account_token: Zeroizing<String>,
-        access: Zeroizing<String>,
-        context: SessionContext,
+    pub(crate) struct Device {
+        pub(crate) key: DevicePrivateKey,
+        pub(crate) account_token: Zeroizing<String>,
+        pub(crate) access: Zeroizing<String>,
+        pub(crate) context: SessionContext,
     }
-    struct Fixture {
-        dir: TempDir,
+    pub(crate) struct Fixture {
+        pub(crate) dir: TempDir,
         oidc: OidcFixture,
-        auth: Arc<AuthStore>,
-        config: IdentityHttpConfig,
-        network: String,
-        service: NetworkService,
+        pub(crate) auth: Arc<AuthStore>,
+        pub(crate) config: IdentityHttpConfig,
+        pub(crate) network: String,
+        pub(crate) service: NetworkService,
     }
     impl Fixture {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
             let network = Uuid::new_v4().to_string();
@@ -675,7 +698,7 @@ mod tests {
                 service,
             }
         }
-        fn device(&self, subject: &str) -> Device {
+        pub(crate) fn device(&self, subject: &str) -> Device {
             let id = Uuid::new_v4().to_string();
             let account_token = Zeroizing::new(
                 self.auth
@@ -712,11 +735,15 @@ mod tests {
                         principal_id: context.principal_id.clone(),
                         device_id: context.device_id.clone(),
                         key_generation: record.key_generation,
-                        identity_binding_id: record.identity_binding_id,
+                        identity_binding_id: record.identity_binding_id.clone(),
                         session_handle: context.session_handle.clone(),
-                        csr_pem: record.csr_pem,
+                        csr_pem: record.csr_pem.clone(),
                     },
                 )
+                .unwrap();
+            self.service
+                .peers
+                .record_issued(&context, &record, &self.service._keys, &issued)
                 .unwrap();
             Device {
                 key,
@@ -725,7 +752,13 @@ mod tests {
                 context,
             }
         }
-        fn proof(&self, device: &Device, method: &str, uri: &str, nonce: Option<&str>) -> String {
+        pub(crate) fn proof(
+            &self,
+            device: &Device,
+            method: &str,
+            uri: &str,
+            nonce: Option<&str>,
+        ) -> String {
             device
                 .key
                 .dpop(
@@ -736,7 +769,7 @@ mod tests {
                 )
                 .unwrap()
         }
-        async fn send(
+        pub(crate) async fn send(
             &self,
             service: &NetworkService,
             device: &Device,
@@ -775,7 +808,7 @@ mod tests {
             }
             (status, data, headers)
         }
-        async fn request(
+        pub(crate) async fn request(
             &self,
             device: &Device,
             method: &str,
@@ -786,7 +819,7 @@ mod tests {
             self.send(&self.service, device, method, uri, body, &proof)
                 .await
         }
-        async fn register(&self, device: &Device) {
+        pub(crate) async fn register(&self, device: &Device) {
             let (status, data, _) = self
                 .request(
                     device,

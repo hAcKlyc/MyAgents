@@ -59,7 +59,17 @@ An existing nonempty metadata database without a profile pin is rejected rather 
 
 These routes require the issued device access JWT in `Authorization: Bearer ...` and a fresh ES256 `DPoP` proof using that device's key. Proofs bind the access-token hash, method and canonical issuer/path. Missing or old nonces receive a predispatch `401` with `DPoP-Nonce`; the client may construct a new proof and retry once before any operation is dispatched. Each service start generates a new nonce. Proof replay, live-session revocation and wrong generation/key never request automatic retry. Query pagination is snapshot-based (`cursor`, `limit` 1–200), and mutation UUIDs bind the exact request: retries return the original receipt, conflicting reuse fails, and expired receipts remain tombstoned rather than allowing a mutation to run again.
 
-Success responses use `{"ok":true,"data":...}`; errors use a fixed code, `retryable:false` and request UUID. Reads and errors use `Cache-Control: no-store`. Devices remain offline with unknown Agent counts until the actual relay/catalog owner acknowledges their current catalog. Catalog upload, callable/mount mutations, relay transport, operation permits and return routes are not exposed by this stage; it does not advertise their capabilities.
+Success responses use `{"ok":true,"data":...}`; errors use a fixed code, `retryable:false` and request UUID. Reads and errors use `Cache-Control: no-store`. Devices remain offline with unknown Agent counts until the actual relay/catalog owner acknowledges their current catalog. Callable/mount mutations, operation permits and return routes are not exposed by this stage; it does not advertise their capabilities.
+
+## Optional opaque WebSocket relay
+
+Set `"relay":true` only together with both identity and network configuration. The same loopback service then mounts `GET /v1/ws` (fixed `myagents-agent-network.v1` subprotocol), `PUT /v1/devices/self/catalog` and `GET /api/agent-network/policy/self`. Configure the private HTTPS ingress to pass WebSocket upgrades; the backend must remain loopback-only.
+
+WebSocket admission requires an actual issued access JWT, fresh DPoP, live account session and current device generation. The peer owner retains only verified public certificates and signed peer bindings indexed by the exact access JTI. Hello creates a server epoch and Syncing presence. Catalog upload is bounded by the locked protocol, requires that same live socket/JTI/epoch and persists before ACK. Ready additionally checks the durable catalog sequence; failure removes the exact connection immediately. New channels require both endpoints' durable Ready projections and current epochs. Auth revocation, replacement and EOF close only the admitted connection; old EOF cannot mark a replacement Offline.
+
+The transport forwards opaque TLS-framed bytes without interpreting model credentials or management payloads. Queues, message sizes, pending handshakes, write deadlines and blocking operations are bounded. Cleanup effects are delivered on controller errors and revocation. Local tests use actual signed identities/DPoP and real loopback WebSocket clients for dual Offer/Accept, Ready, byte-preserving forwarding, both-end close and revocation/replacement cleanup. These prove local transport behavior, not a desktop-to-Linux management flow.
+
+No public instance descriptor or owned desktop/Host login adapter is included in this stage. Existing static-key selfhost enrollment remains a separate incompatible path. In particular, do not advertise the unimplemented Agent permit/return capabilities to make that client accept this service. The next client stage must use its own authenticated account owner and explicit device-management capability profile.
 
 ## Persistence, backup and rollback
 
@@ -74,7 +84,7 @@ cargo +1.92.0 test --locked --manifest-path services/agentnet/Cargo.toml
 cargo +1.92.0 clippy --locked --all-targets --manifest-path services/agentnet/Cargo.toml -- -D warnings
 cargo +1.92.0 test --locked --manifest-path services/agentnet/device-core/Cargo.toml
 cargo +1.92.0 test --locked --manifest-path services/agentnet/identity-core/Cargo.toml
-for core in admission-core metadata-core relay-core; do
+for core in admission-core metadata-core peer-core relay-core; do
   cargo +1.92.0 test --locked --manifest-path services/agentnet/$core/Cargo.toml
 done
 python3 -m unittest discover -s services/agentnet/deploy -p 'test_*.py'

@@ -68,6 +68,7 @@ pub struct ValidatedAccess {
     device_id: String,
     key_generation: u64,
     session_handle: String,
+    access_jti: String,
     jkt: String,
     public_key_fingerprint: String,
     issuer_network_id: String,
@@ -104,6 +105,11 @@ impl ValidatedAccess {
     }
     pub fn session_handle(&self) -> &str {
         &self.session_handle
+    }
+    /// Cryptographically verified issuance ID. Selects the exact public peer
+    /// snapshot; callers must not substitute the device's latest certificate.
+    pub fn access_jti(&self) -> &str {
+        &self.access_jti
     }
     pub fn jkt(&self) -> &str {
         &self.jkt
@@ -366,6 +372,7 @@ impl AdmissionValidator {
             device_id,
             key_generation: unsigned_at(&claims, "keyGeneration")?,
             session_handle: string_at(&claims, "sessionHandle")?.to_owned(),
+            access_jti: string_at(&claims, "jti")?.to_owned(),
             jkt: proof_jkt,
             public_key_fingerprint,
             issuer_network_id: self.expected.network_id.clone(),
@@ -811,6 +818,13 @@ mod tests {
         assert_eq!(access.device_id(), fixture.request.device_id);
         assert_eq!(access.key_generation(), 3);
         assert_eq!(access.session_handle(), fixture.request.session_handle);
+        let payload: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(fixture.issued.split('.').nth(1).unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(access.access_jti(), payload["jti"].as_str().unwrap());
         assert_eq!(access.service_id(), fixture.profile.service_id);
         assert_eq!(access.environment(), fixture.profile.environment);
         assert_eq!(access.issuer_origin(), fixture.profile.issuer);
