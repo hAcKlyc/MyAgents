@@ -2,7 +2,7 @@
 
 Goal: deploy an independently owned AgentNet service including browser login, device identity, zero-Agent discovery, encrypted relay, and desktop-to-Host configuration. This service does not require access to the upstream author's private server or official account credentials.
 
-Current base: fork main 1d2c806e2700cd70804a1174f27b6ec23acdca68. Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
+Current base: fork main c0b748ecd6d3612c2d3c3c2c72bb903a335f1d0e. Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
 
 ## Ownership decisions
 
@@ -21,9 +21,10 @@ Current base: fork main 1d2c806e2700cd70804a1174f27b6ec23acdca68. Service worktr
 - [x] Authentication foundation: durable account mapping; PKCE/nonce transactions with expiry/single use; bounded session records and revocation; authorization tests against wrong issuer/subject/audience/replay; local restart persistence. Independent review expiry race repaired with final-clock regression.
 - [x] HTTPS-only OIDC discovery/code exchange and loopback HTTP login/poll/cancel/session adapter implemented; local tests/clippy passed. This does not close live login acceptance below.
 - [x] Isolated real Dex HTTPS form/code-exchange acceptance: device/PKCE denials, single-use poll, durable session after restart, stable account, revoke and cancel. Tested CI source e47cdb3b/tree eeeca9f1; not a desktop browser UI or public deployment.
-- [x] Bounded device identity signer: explicit stable keys, signature-verified P-256 CSR, server-controlled SAN/chain, fixed access/bootstrap/peer tokens. This does not implement identity REST authorization or device persistence.
+- [x] Bounded device identity signer: explicit stable keys, signature-verified P-256 CSR, server-controlled SAN/chain, fixed access/bootstrap/peer tokens. Separate durable device storage and identity REST authorization are implemented below; live integration remains open.
 - [ ] Real Dex-backed browser login, delivery bound to requested device/instance, account-scoped membership and first-device enrollment.
-- [ ] Identity/CSR/PoP/DPoP/JWT endpoints and revocation/rotation parity with existing clients.
+- [x] Durable insert-only device owner and bearer-gated identity/state/challenge/current/certificate endpoints; real shared-client CSR/PoP/SPKI compatibility, one-use challenge, account isolation, restart persistence and cross-connection session revocation gate tested locally.
+- [ ] Live Dex-to-device endpoint acceptance; owned desktop/Host login adapter; rotate/recovery/device revocation and DPoP network admission parity. Local tests do not close these gates.
 - [ ] Metadata owner, CAS receipts and current zero-Agent device routing descriptor.
 - [ ] WebSocket control state machine, signed pair binding, bounded opaque TLS frames/credit/close and no uncertain write replay.
 - [ ] Desktop and Linux Host independently configured own-service login/network entry and encrypted management app codec/admission/IPC.
@@ -31,3 +32,7 @@ Current base: fork main 1d2c806e2700cd70804a1174f27b6ec23acdca68. Service worktr
 - [ ] Deterministic CI, source review, exact artifact provenance/main push, test deployment and real two-device acceptance.
 
 Sources checked for the selected authentication components: Dex local connector documentation https://dexidp.io/docs/connectors/local/ ; Dex current release v2.46.0 https://github.com/dexidp/dex/releases/tag/v2.46.0 ; Rust openidconnect 4.0.1 https://docs.rs/openidconnect/4.0.1/openidconnect/ . These are integration choices; source presence or a running identity provider is not evidence that the full service works.
+
+## Device identity acceptance boundary
+
+The parent service has 24 local tests, device-core has 8, and identity-core has 7 including actual two-device mutual TLS. The HTTP identity integration uses a genuinely signed OIDC fixture through the verifier, actual DevicePrivateKey/CSR proofs and signer JWKS. Independent review identified and repaired an SPKI versus JWK fingerprint mismatch before delivery. Service revocation gates serialize issuance against another AuthStore connection; expiry is rechecked after locks. No desktop UI, public listener or official Host identity was changed by these checks.
