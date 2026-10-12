@@ -1108,13 +1108,20 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           state: "applied",
           effectiveRevision: extension.revision,
         });
+        // The selected Runtime accepts Agent descriptors but has no role compiler;
+        // the unsupported component must not prevent supported extensions loading.
+        expect(extensionResult.components).toContainEqual({
+          key: "agent:native-reviewer",
+          state: "unsupported",
+          reason: "implementation_batch_pending",
+        });
         const extensionCatalog = await host.request("extension/catalog", {});
         expect(extensionCatalog.skills).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ name: "native-review" }),
           ]),
         );
-        expect(extensionCatalog.agents).toContain("native-reviewer");
+        expect(extensionCatalog.agents).not.toContain("native-reviewer");
         expect(extensionCatalog.tools).toContain(
           "mcp__myagents_host__native_fixture",
         );
