@@ -1,0 +1,27 @@
+[package]
+name = "myagents-agentnet-identity-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+license = "AGPL-3.0-only"
+
+[dependencies]
+base64 = "0.22"
+jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["rust_crypto"] }
+libc = "0.2.180"
+myagents-agent-network-crypto = { path = "../../../src-tauri/agent-network-crypto" }
+myagents-agent-network-protocol = { path = "../../../src-tauri/agent-network-protocol" }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem", "x509-parser"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+x509-parser = "0.18"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
