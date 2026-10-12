@@ -31,6 +31,7 @@ async function bundleFixture(contents: string, output: string, home: string, pro
 
 const fixtureEntry = `
 export * from './src/shared/appProfile';
+export { DEFAULT_CONFIG } from './src/shared/config-types';
 export { atomicModifyConfig, loadConfig, getProvidersDir } from './src/server/utils/admin-config';
 export { getCliToolsBinDir, buildLauncherSource } from './src/server/utils/cli-tools-registry';
 export { getMyAgentsNpmGlobalPrefix } from './src/server/utils/npm-prefix-env';
@@ -61,6 +62,8 @@ describe('compiled application profile isolation', () => {
     expect(isolated.getCliToolsBinDir()).toBe(resolve(home, '.moxbot', 'bin'));
     expect(isolated.getMyAgentsNpmGlobalPrefix(home, 'linux')).toBe(`${home}/.moxbot/npm-global`);
     expect(standard.APP_BUILD_PROFILE).toBe('myagents');
+    expect(standard.DEFAULT_CONFIG.globalSummonShortcut.enabled).toBe(true);
+    expect(isolated.DEFAULT_CONFIG.globalSummonShortcut.enabled).toBe(false);
     expect(isolated.APP_DISPLAY_NAME).toBe('MoX bot');
     expect(isolated.serializeAppRoute(isolated.createSpaceHomeAppRoute())).toBe('moxbot://open/v1/spaces');
     expect(isolated.parseAppRouteUrl('myagents://open/v1/spaces')).toBeNull();
