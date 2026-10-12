@@ -181,6 +181,53 @@ struct Connection {
     control_ids: HashSet<String>,
 }
 
+/// Non-secret adapter projection of one exact live relay connection.
+/// `session_handle` remains an opaque revocation lookup key and is redacted
+/// from Debug output. The relay currently does not retain the DPoP access JTI.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ConnectionProjection {
+    connection_id: String,
+    scope: DeviceScope,
+    connection_epoch: String,
+    session_handle: String,
+    expires_at: i64,
+    ready: bool,
+}
+
+impl std::fmt::Debug for ConnectionProjection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionProjection")
+            .field("connection_id", &self.connection_id)
+            .field("scope", &scope_id(&self.scope))
+            .field("connection_epoch", &self.connection_epoch)
+            .field("session_handle", &"[redacted]")
+            .field("expires_at", &self.expires_at)
+            .field("ready", &self.ready)
+            .finish()
+    }
+}
+
+impl ConnectionProjection {
+    pub fn connection_id(&self) -> &str {
+        &self.connection_id
+    }
+    pub fn scope(&self) -> &DeviceScope {
+        &self.scope
+    }
+    pub fn connection_epoch(&self) -> &str {
+        &self.connection_epoch
+    }
+    pub fn session_handle(&self) -> &str {
+        &self.session_handle
+    }
+    pub fn expires_at(&self) -> i64 {
+        self.expires_at
+    }
+    pub fn is_ready(&self) -> bool {
+        self.ready
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ChannelState {
     Offered,
@@ -353,6 +400,65 @@ impl RelayCore {
             },
         );
         Ok((connection_id, effects))
+    }
+
+    /// Read the current projection for an exact connection. Callers must
+    /// still revalidate the authoritative session/device rows before use.
+    pub fn connection_projection(
+        &self,
+        connection_id: &str,
+        now_unix: i64,
+    ) -> Result<ConnectionProjection, RelayError> {
+        let connection = self.live_connection(connection_id, now_unix)?;
+        Ok(ConnectionProjection {
+            connection_id: connection_id.to_owned(),
+            scope: connection.device.scope.clone(),
+            connection_epoch: connection.connection_epoch.clone(),
+            session_handle: connection.device.session_handle.clone(),
+            expires_at: connection.device.expires_at,
+            ready: connection.ready,
+        })
+    }
+
+    /// Remove only the named socket. A delayed EOF from a replaced socket is
+    /// an idempotent no-op and cannot remove the replacement connection.
+    pub fn disconnect(&mut self, connection_id: &str) -> Vec<Effect> {
+        if !self.connections.contains_key(connection_id) {
+            return Vec::new();
+        }
+        self.drop_connection(connection_id, "connection-disconnected")
+    }
+
+    /// Non-authorizing exact endpoint lookup for the adapter's dual-session
+    /// gate. The adapter must recheck these IDs after acquiring that gate.
+    pub fn channel_connections(
+        &self,
+        connection_id: &str,
+        channel_id: &str,
+    ) -> Result<[String; 2], RelayError> {
+        let channel = self.channels.get(channel_id).ok_or(RelayError::Channel)?;
+        if channel.initiator != connection_id && channel.responder != connection_id {
+            return Err(RelayError::Channel);
+        }
+        Ok([channel.initiator.clone(), channel.responder.clone()])
+    }
+
+    /// Close one channel after an adapter reports delivery failure. The
+    /// channel is removed once; no frames are retried and its queued-byte
+    /// accounting disappears with it. Only a current endpoint may report it.
+    pub fn fail_channel(
+        &mut self,
+        connection_id: &str,
+        channel_id: &str,
+        now_unix: i64,
+    ) -> Result<Vec<Effect>, RelayError> {
+        self.live_connection(connection_id, now_unix)?;
+        if !self.channels.get(channel_id).is_some_and(|channel| {
+            channel.initiator == connection_id || channel.responder == connection_id
+        }) {
+            return Err(RelayError::Channel);
+        }
+        Ok(self.remove_channel(channel_id, "delivery-failed"))
     }
 
     /// Mint ready evidence only after the parent catalog owner has verified
@@ -1633,6 +1739,101 @@ mod tests {
             value[key] = item.clone();
         }
         value
+    }
+
+    #[test]
+    fn exact_disconnect_of_replaced_socket_preserves_new_projection() {
+        let mut fixture = Fixture::new();
+        let first = fixture.device();
+        let device_id = Uuid::parse_str(&first.scope.device_id).unwrap();
+        let (old_id, _) = fixture.core.connect(first.authorized, fixture.now).unwrap();
+        let old_projection = fixture
+            .core
+            .connection_projection(&old_id, fixture.now)
+            .unwrap();
+        assert_eq!(old_projection.connection_id(), old_id);
+        assert_eq!(old_projection.scope().device_id, device_id.to_string());
+        assert!(!old_projection.is_ready());
+        assert!(!format!("{old_projection:?}").contains(old_projection.session_handle()));
+
+        let replacement = fixture.device_with_id(device_id);
+        let (new_id, _) = fixture
+            .core
+            .connect(replacement.authorized, fixture.now)
+            .unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(fixture.core.disconnect(&old_id), Vec::<Effect>::new());
+        let current = fixture
+            .core
+            .connection_projection(&new_id, fixture.now)
+            .unwrap();
+        assert_eq!(current.connection_id(), new_id);
+        assert_eq!(current.scope().device_id, device_id.to_string());
+        assert!(fixture
+            .core
+            .connection_projection(&old_id, fixture.now)
+            .is_err());
+
+        let effects = fixture.core.disconnect(&new_id);
+        assert!(effects.is_empty());
+        assert!(fixture
+            .core
+            .connection_projection(&new_id, fixture.now)
+            .is_err());
+    }
+
+    #[test]
+    fn delivery_failure_closes_only_owned_channel_once() {
+        let mut fixture = Fixture::new();
+        let (a, _b, _a_hello, _b_hello, failed_channel) = fixture.ready_pair(10_000);
+        let (c, _d, _c_hello, _d_hello, unrelated_channel) = fixture.ready_pair(20_000);
+        let attacker = fixture.device();
+        let (attacker_id, _) = fixture
+            .core
+            .connect(attacker.authorized, fixture.now)
+            .unwrap();
+
+        assert_eq!(
+            fixture
+                .core
+                .fail_channel(&attacker_id, &unrelated_channel, fixture.now),
+            Err(RelayError::Channel)
+        );
+        assert!(fixture.core.channels.contains_key(&unrelated_channel));
+        assert!(fixture
+            .core
+            .connection_projection(&c, fixture.now)
+            .unwrap()
+            .is_ready());
+
+        let effects = fixture
+            .core
+            .fail_channel(&a, &failed_channel, fixture.now)
+            .unwrap();
+        assert_eq!(effects.len(), 4);
+        assert_eq!(
+            effects.iter().filter(|effect| matches!(effect, Effect::Close { channel_id, reason: "delivery-failed", .. } if channel_id == &failed_channel)).count(),
+            2
+        );
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| effect
+                    .control_json()
+                    .is_some_and(|value| value["type"] == "channel.closed"
+                        && value["reason"] == "delivery-failed"))
+                .count(),
+            2
+        );
+        let affected_targets: HashSet<_> = effects.iter().filter_map(Effect::target_id).collect();
+        assert_eq!(affected_targets, HashSet::from([a.as_str(), _b.as_str()]));
+        assert!(!fixture.core.channels.contains_key(&failed_channel));
+        assert!(fixture.core.channels.contains_key(&unrelated_channel));
+        assert_eq!(
+            fixture.core.fail_channel(&a, &failed_channel, fixture.now),
+            Err(RelayError::Channel)
+        );
+        assert!(fixture.core.connection_projection(&c, fixture.now).is_ok());
     }
 
     #[allow(clippy::too_many_arguments)] // Explicit endpoints, peer control envelope and credit state.

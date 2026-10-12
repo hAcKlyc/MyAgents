@@ -8,6 +8,9 @@
 mod identity_http;
 mod network_http;
 mod oidc;
+mod relay_controller;
+mod relay_http;
+mod relay_transport;
 mod server;
 mod store;
 #[cfg(test)]

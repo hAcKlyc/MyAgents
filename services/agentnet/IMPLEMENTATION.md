@@ -2,7 +2,7 @@
 
 Goal: deploy an independently owned AgentNet service including browser login, device identity, zero-Agent discovery, encrypted relay, and desktop-to-Host configuration. This service does not require access to the upstream author's private server or official account credentials.
 
-Current base: fork main b3fa9529a5eee5b1bac3fc8ff651b01d3015e389 (identity stage, PR #9). Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
+Current base: fork main f0d630e3a3bac085c8615bdd49af728679b12c48 (MoX isolation, PR #11). Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
 
 ## Ownership decisions
 
@@ -27,8 +27,8 @@ Current base: fork main b3fa9529a5eee5b1bac3fc8ff651b01d3015e389 (identity stage
 - [x] Live Dex-to-device endpoint acceptance on CI 38252528764: initial CSR enrollment and real signatures/certificates, duplicate denial, same-account read-only access, one-use PoP and wrong-proof denials, certificate renewal, durable restart and immediate session revocation. No desktop UI or public deployment is implied.
 - [ ] Owned desktop/Host login adapter; rotate/recovery/device revocation and full DPoP network admission parity.
 - [x] Local metadata owner and HTTP adapter: authenticated account-scoped device registration/directory, membership/name CAS, durable mutation receipts and complete frozen pagination. DPoP validates the fixed service/issuer, actual method/path, key and live session/current generation; per-boot nonce rejects proofs across restart. Live metadata acceptance and zero-Agent routing descriptor remain open.
-- [x] Bounded relay state machine with real signed access/peer-binding validation, exact current epoch/catalog ACK gates, opaque framing/credit and handshake/idle limits. It is not wired into a WebSocket server yet.
-- [ ] WebSocket control state machine, signed pair binding, bounded opaque TLS frames/credit/close and no uncertain write replay.
+- [x] Bounded relay state machine with real signed access/peer-binding validation, exact current epoch/catalog ACK gates, opaque framing/credit and handshake/idle limits. It is now wired into the bounded WebSocket/controller adapter below; real desktop/Host acceptance remains open.
+- [x] WebSocket control/controller state machine and durable public peer snapshots, signed dual-device pair bindings, bounded opaque TLS frames/credit/close, exact-epoch presence cleanup and failure cleanup. Real loopback clients cover Ready, pair/forward/close, revoke and replacement; native Linux deployment and desktop/Host acceptance remain open.
 - [ ] Desktop and Linux Host independently configured own-service login/network entry and encrypted management app codec/admission/IPC.
 - [ ] Remote model configuration/credential write and real persistent Agent creation from desktop, readback, restart, denial and recovery.
 - [ ] Deterministic CI, source review, exact artifact provenance/main push, test deployment and real two-device acceptance.
@@ -48,3 +48,9 @@ The optional network HTTP adapter rechecks signed access against a live AuthStor
 The standalone relay returns bounded effects; the future WebSocket owner must deliver those effects through bounded queues, invalidate affected connections on membership/session/generation changes, and close a channel if its opaque frame cannot be enqueued. It must sample fresh time after acquiring its owner lock. No relay, permit, return-route or remote-management capability is advertised by the current service. Product acceptance still requires owned login clients, real encrypted two-device transport, a human management grant, and Host-owned secret/configuration/Agent operations.
 
 Client-source integration review found two handshake prerequisites missing from the initial standalone relay: opaque TLS must flow during Accepted before endpoint Ready, and canonical channel roles require Offers and separate Accepts on both peers. These were repaired before delivery. Eight relay tests now include actual ServiceKeys-issued device certificates, mutual TLS and bidirectional ChannelHello through Accepted opaque forwarding, both UUID open directions and dual acceptance. They do not prove a running WebSocket adapter.
+
+## Relay HTTP/WS integration — 2026-10-13
+
+The parent service composes identity, metadata, relay catalog/policy and WS through one production assembly helper. A real router smoke test caught and repaired duplicate fallbacks before deployment. Auth gates both channel endpoints in one transaction; PeerStore selects the exact signed issuance JTI; Metadata provides the current epoch and durable ACK; Runtime owns bounded connections/pairs/credits. An independent review identified a failed-Ready persistence window; controller now checks durable Ready on Open and immediately removes the exact runtime/core connection and emits cleanup on Ready persistence failure. The regression injects a real SQLite Ready-write failure.
+
+Current routes do not create a public descriptor, hand login sessions to desktop/Host owners, or dispatch management to the Host Unixsocket. Those gates remain required and cannot be substituted by the relay tests. Official Host state/services and MyAgents sessions are preserved.

@@ -436,6 +436,294 @@ fn catalog_requires_trusted_epoch_and_exact_sequence_before_ready() {
 }
 
 #[test]
+fn relay_state_and_self_policy_use_only_complete_current_durable_catalog() {
+    let dir = private_dir();
+    let store = MetadataStore::open(dir.path(), profile()).unwrap();
+    let own = context(Uuid::new_v4().to_string());
+    let identity = register(&store, &own);
+    let joined = store
+        .mutate_membership(&own, &own.device_id, true, 0, &Uuid::new_v4().to_string())
+        .unwrap();
+    assert_eq!(joined["membershipRevision"], 1);
+
+    let offline = store.read_relay_state(&own, &own.device_id).unwrap();
+    assert_eq!(offline.key_generation, 1);
+    assert_eq!(offline.identity_binding_id, identity.identity_binding_id);
+    assert_eq!(offline.key_fingerprint, identity.key_fingerprint);
+    assert!(offline.joined);
+    assert_eq!(offline.membership_revision, 1);
+    assert_eq!(offline.network_revision, 2);
+    assert_eq!(offline.connection_epoch, None);
+    assert_eq!(offline.catalog_epoch, None);
+    assert_eq!(offline.durable_ack_seq, None);
+    assert_eq!(offline.presence, Presence::Offline);
+
+    let epoch = Uuid::new_v4().to_string();
+    store
+        .set_presence(&own, 1, &epoch, Presence::Syncing, None)
+        .unwrap();
+    assert_eq!(
+        store.list_self_policy(&own, &epoch, None, 1).unwrap_err(),
+        MetadataError::CatalogStale,
+        "Syncing by itself is not a durable catalog acknowledgement"
+    );
+    assert_eq!(
+        store
+            .list_agents(&own, &own.device_id, None, 1)
+            .unwrap_err(),
+        MetadataError::CatalogStale,
+        "ordinary agent directories remain Ready-only"
+    );
+    let syncing = store.read_relay_state(&own, &own.device_id).unwrap();
+    assert_eq!(syncing.connection_epoch.as_deref(), Some(epoch.as_str()));
+    assert_eq!(syncing.durable_ack_seq, None);
+    assert_eq!(syncing.presence, Presence::Syncing);
+
+    let empty_catalog = snapshot(&epoch, 1, vec![]);
+    store
+        .upload_catalog(&own, 1, &epoch, &empty_catalog)
+        .unwrap();
+    let empty_state = store.read_relay_state(&own, &own.device_id).unwrap();
+    assert_eq!(empty_state.durable_ack_seq, Some(1));
+    let empty_policy = store.list_self_policy(&own, &epoch, None, 1).unwrap();
+    assert!(empty_policy.items.is_empty());
+    assert!(empty_policy.complete);
+
+    let full_catalog = snapshot(
+        &epoch,
+        4,
+        vec![
+            catalog_item(1, myagents_agent_network_protocol::CatalogLifecycle::Active),
+            catalog_item(2, myagents_agent_network_protocol::CatalogLifecycle::Active),
+        ],
+    );
+    store
+        .upload_catalog(&own, 1, &epoch, &full_catalog)
+        .unwrap();
+    let state = store.read_relay_state(&own, &own.device_id).unwrap();
+    assert_eq!(state.connection_epoch.as_deref(), Some(epoch.as_str()));
+    assert_eq!(state.catalog_epoch.as_deref(), Some(epoch.as_str()));
+    assert_eq!(state.catalog_seq, 4);
+    assert_eq!(state.durable_ack_seq, Some(4));
+    assert_eq!(state.presence, Presence::Syncing);
+
+    let first_page = store.list_self_policy(&own, &epoch, None, 1).unwrap();
+    validate_metadata(
+        MetadataKind::Agents,
+        &serde_json::to_value(&first_page).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(first_page.items.len(), 1);
+    assert!(!first_page.complete);
+    let old_cursor = first_page.next_cursor.unwrap();
+    let second_page = store
+        .list_self_policy(&own, &epoch, Some(&old_cursor), 1)
+        .unwrap();
+    assert_eq!(second_page.items.len(), 1);
+    assert!(second_page.complete);
+    assert_eq!(
+        store
+            .list_self_policy(&own, &Uuid::new_v4().to_string(), None, 1)
+            .unwrap_err(),
+        MetadataError::CatalogStale
+    );
+
+    let same_account_other_device = context(Uuid::new_v4().to_string());
+    let same_account_other_device = SessionContext {
+        principal_id: own.principal_id.clone(),
+        network_id: own.network_id.clone(),
+        ..same_account_other_device
+    };
+    register(&store, &same_account_other_device);
+    assert_eq!(
+        store
+            .list_self_policy(&same_account_other_device, &epoch, None, 1)
+            .unwrap_err(),
+        MetadataError::CatalogStale,
+        "a device cannot hydrate another device's relay policy"
+    );
+    assert_eq!(
+        store
+            .read_relay_state(&own, &same_account_other_device.device_id)
+            .unwrap()
+            .presence,
+        Presence::Offline,
+        "same-account relay state remains a scoped owner projection"
+    );
+    let foreign = SessionContext {
+        principal_id: Uuid::new_v4().to_string(),
+        ..own.clone()
+    };
+    assert_eq!(
+        store
+            .read_relay_state(&foreign, &own.device_id)
+            .unwrap_err(),
+        MetadataError::DeviceNotRegistered
+    );
+
+    store
+        .set_presence(&own, 1, &epoch, Presence::Ready, Some(4))
+        .unwrap();
+    assert_eq!(
+        store.list_agents(&own, &own.device_id, None, 10).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let next_epoch = Uuid::new_v4().to_string();
+    store
+        .set_presence(&own, 1, &next_epoch, Presence::Syncing, None)
+        .unwrap();
+    assert_eq!(
+        store
+            .read_relay_state(&own, &own.device_id)
+            .unwrap()
+            .durable_ack_seq,
+        None,
+        "a previous epoch's persisted catalog is not a current ACK"
+    );
+    assert_eq!(
+        store
+            .list_self_policy(&own, &epoch, Some(&old_cursor), 1)
+            .unwrap_err(),
+        MetadataError::CatalogStale
+    );
+    store
+        .upload_catalog(
+            &own,
+            1,
+            &next_epoch,
+            &snapshot(&next_epoch, 1, full_catalog.items.clone()),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .list_self_policy(&own, &next_epoch, Some(&old_cursor), 1)
+            .unwrap_err(),
+        MetadataError::InvalidCursor,
+        "self-policy cursors are bound to the current connection epoch"
+    );
+    let new_page = store.list_self_policy(&own, &next_epoch, None, 10).unwrap();
+    assert_eq!(new_page.items.len(), 2);
+    assert!(new_page.complete);
+
+    let mut expired = own.clone();
+    expired.expires_at = now_seconds().unwrap() - 1;
+    assert_eq!(
+        store
+            .read_relay_state(&expired, &own.device_id)
+            .unwrap_err(),
+        MetadataError::InvalidSession
+    );
+}
+
+#[test]
+fn lifecycle_close_connection_only_offlines_exact_current_identity_epoch() {
+    use myagents_agent_network_protocol::DeviceScope;
+
+    let dir = private_dir();
+    let metadata_profile = profile();
+    let store = MetadataStore::open(dir.path(), metadata_profile.clone()).unwrap();
+    let own = context(Uuid::new_v4().to_string());
+    let identity = register(&store, &own);
+    store
+        .mutate_membership(&own, &own.device_id, true, 0, &Uuid::new_v4().to_string())
+        .unwrap();
+    let epoch = Uuid::new_v4().to_string();
+    store
+        .set_presence(&own, 1, &epoch, Presence::Syncing, None)
+        .unwrap();
+    store
+        .upload_catalog(
+            &own,
+            1,
+            &epoch,
+            &snapshot(
+                &epoch,
+                7,
+                vec![catalog_item(
+                    3,
+                    myagents_agent_network_protocol::CatalogLifecycle::Active,
+                )],
+            ),
+        )
+        .unwrap();
+    store
+        .set_presence(&own, 1, &epoch, Presence::Ready, Some(7))
+        .unwrap();
+
+    let scope = DeviceScope {
+        service_id: metadata_profile.service_id.clone(),
+        environment: metadata_profile.environment.clone(),
+        network_id: own.network_id.clone(),
+        principal_id: own.principal_id.clone(),
+        device_id: own.device_id.clone(),
+        key_generation: identity.key_generation,
+    };
+    assert!(store
+        .close_connection(&scope, &identity.key_fingerprint, &epoch)
+        .unwrap());
+    assert!(!store
+        .close_connection(&scope, &identity.key_fingerprint, &epoch)
+        .unwrap());
+    let offline = store.read_relay_state(&own, &own.device_id).unwrap();
+    assert_eq!(offline.presence, Presence::Offline);
+    assert!(offline.joined);
+    assert_eq!(offline.membership_revision, 1);
+    assert_eq!(offline.connection_epoch.as_deref(), Some(epoch.as_str()));
+    assert_eq!(offline.catalog_epoch.as_deref(), Some(epoch.as_str()));
+    assert_eq!(offline.catalog_seq, 7);
+    assert_eq!(offline.durable_ack_seq, Some(7));
+
+    let next_epoch = Uuid::new_v4().to_string();
+    store
+        .set_presence(&own, 1, &next_epoch, Presence::Syncing, None)
+        .unwrap();
+    assert!(
+        !store
+            .close_connection(&scope, &identity.key_fingerprint, &epoch)
+            .unwrap(),
+        "old EOF must not take a replacement offline"
+    );
+    assert_eq!(
+        store
+            .read_relay_state(&own, &own.device_id)
+            .unwrap()
+            .presence,
+        Presence::Syncing
+    );
+
+    let mut wrong = scope.clone();
+    wrong.key_generation += 1;
+    assert!(!store
+        .close_connection(&wrong, &identity.key_fingerprint, &next_epoch)
+        .unwrap());
+    let wrong_fingerprint = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([8u8; 32]);
+    assert!(!store
+        .close_connection(&scope, &wrong_fingerprint, &next_epoch)
+        .unwrap());
+    let mut wrong_owner = scope.clone();
+    wrong_owner.principal_id = Uuid::new_v4().to_string();
+    assert!(!store
+        .close_connection(&wrong_owner, &identity.key_fingerprint, &next_epoch)
+        .unwrap());
+    let mut wrong_service = scope.clone();
+    wrong_service.service_id = Uuid::new_v4().to_string();
+    assert!(!store
+        .close_connection(&wrong_service, &identity.key_fingerprint, &next_epoch)
+        .unwrap());
+    assert_eq!(
+        store
+            .read_relay_state(&own, &own.device_id)
+            .unwrap()
+            .presence,
+        Presence::Syncing
+    );
+}
+
+#[test]
 fn device_directory_pages_are_frozen_complete_and_cursor_scoped() {
     let dir = private_dir();
     let store = MetadataStore::open(dir.path(), profile()).unwrap();

@@ -102,11 +102,31 @@ pub struct DeviceInfo {
     pub app_version: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Presence {
     Offline,
     Syncing,
     Ready,
+}
+
+/// Durable metadata snapshot used by the relay's WebSocket admission path.
+/// `durable_ack_seq` is populated only from an intact persisted catalog whose
+/// epoch still matches the device's current connection epoch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RelayMetadataState {
+    pub key_generation: u64,
+    pub identity_binding_id: String,
+    pub key_fingerprint: String,
+    pub joined: bool,
+    pub membership_revision: u64,
+    pub network_revision: u64,
+    pub connection_epoch: Option<String>,
+    pub catalog_epoch: Option<String>,
+    pub catalog_seq: u64,
+    pub durable_ack_seq: Option<u64>,
+    pub presence: Presence,
 }
 impl Presence {
     fn as_str(self) -> &'static str {
@@ -435,6 +455,56 @@ impl MetadataStore {
         tx.commit().map_err(|_| MetadataError::Storage)
     }
 
+    /// Lower a connection's presence after its socket/session has ended.
+    /// This lifecycle operation intentionally needs no live SessionContext:
+    /// it can only move the exact currently-bound device epoch to Offline,
+    /// and cannot alter membership, catalog, or policy state.
+    pub fn close_connection(
+        &self,
+        scope: &myagents_agent_network_protocol::DeviceScope,
+        key_fingerprint: &str,
+        expected_epoch: &str,
+    ) -> Result<bool, MetadataError> {
+        if !canonical_uuid(&scope.service_id)
+            || !canonical_uuid(&scope.network_id)
+            || !canonical_uuid(&scope.principal_id)
+            || !canonical_uuid(&scope.device_id)
+            || scope.key_generation == 0
+            || scope.key_generation > MAX_GENERATION as u64
+            || !canonical_fingerprint(key_fingerprint)
+            || !canonical_uuid(expected_epoch)
+        {
+            return Err(MetadataError::InvalidInput);
+        }
+        if scope.service_id != self.profile.service_id
+            || scope.environment != self.profile.environment
+        {
+            return Ok(false);
+        }
+        let mut connection = self.connection.lock().map_err(|_| MetadataError::Storage)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| MetadataError::Storage)?;
+        let changed = tx
+            .execute(
+                "UPDATE devices SET presence='offline'
+                 WHERE network_id=?1 AND principal_id=?2 AND device_id=?3
+                   AND key_generation=?4 AND key_fingerprint=?5
+                   AND connection_epoch=?6 AND presence!='offline'",
+                params![
+                    scope.network_id,
+                    scope.principal_id,
+                    scope.device_id,
+                    scope.key_generation as i64,
+                    key_fingerprint,
+                    expected_epoch
+                ],
+            )
+            .map_err(|_| MetadataError::Storage)?;
+        tx.commit().map_err(|_| MetadataError::Storage)?;
+        Ok(changed == 1)
+    }
+
     /// Ingests a complete, schema-valid snapshot. Epoch comes from the trusted
     /// relay session owner and must match the snapshot; this is not Ready.
     pub fn upload_catalog(
@@ -626,6 +696,117 @@ impl MetadataStore {
         self.directory_page(context, &query_key, cursor, limit, |tx| {
             Self::agent_rows(tx, context, target_device_id)
         })
+    }
+
+    /// Reads one same-account device's relay state from durable owner tables.
+    /// The caller must already have freshly authenticated the session and
+    /// checked the presented device identity; this method rechecks session
+    /// expiry while waiting for and holding the owner lock.
+    pub fn read_relay_state(
+        &self,
+        context: &SessionContext,
+        target_device_id: &str,
+    ) -> Result<RelayMetadataState, MetadataError> {
+        validate_context(context)?;
+        if !canonical_uuid(target_device_id) {
+            return Err(MetadataError::InvalidInput);
+        }
+        let mut connection = self.connection.lock().map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        ensure_registered(&tx, context)?;
+        let row = tx
+            .query_row(
+                "SELECT identity_binding_id,key_generation,key_fingerprint,joined,
+                        membership_revision,presence,connection_epoch,catalog_epoch,catalog_seq
+                 FROM devices WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+                params![context.network_id, context.principal_id, target_device_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, bool>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, i64>(8)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| MetadataError::Storage)?
+            .ok_or(MetadataError::DeviceOwnerMismatch)?;
+        let (
+            identity_binding_id,
+            key_generation,
+            key_fingerprint,
+            joined,
+            membership_revision,
+            presence,
+            connection_epoch,
+            catalog_epoch,
+            catalog_seq,
+        ) = row;
+        let network_revision = get_roster_revision(&tx, context)?;
+        let durable_ack_seq = durable_catalog_ack(
+            &tx,
+            context,
+            target_device_id,
+            connection_epoch.as_deref(),
+            catalog_epoch.as_deref(),
+            catalog_seq,
+        )?;
+        let state = RelayMetadataState {
+            key_generation: u64::try_from(key_generation).map_err(|_| MetadataError::Storage)?,
+            identity_binding_id,
+            key_fingerprint,
+            joined,
+            membership_revision: u64::try_from(membership_revision)
+                .map_err(|_| MetadataError::Storage)?,
+            network_revision: u64::try_from(network_revision)
+                .map_err(|_| MetadataError::Storage)?,
+            connection_epoch,
+            catalog_epoch,
+            catalog_seq: u64::try_from(catalog_seq).map_err(|_| MetadataError::Storage)?,
+            durable_ack_seq,
+            presence: parse_presence(&presence)?,
+        };
+        validate_context(context)?;
+        tx.commit().map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        Ok(state)
+    }
+
+    /// Returns a device's own policy catalog during trusted Syncing hydration
+    /// or after Ready. The epoch is supplied by the live relay registry, never
+    /// by the caller's session payload; each cursor read repeats the DB/epoch
+    /// gate before consuming its frozen page.
+    pub fn list_self_policy(
+        &self,
+        context: &SessionContext,
+        trusted_active_epoch: &str,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<Page<Value>, MetadataError> {
+        validate_context(context)?;
+        if !canonical_uuid(trusted_active_epoch) {
+            return Err(MetadataError::InvalidInput);
+        }
+        let query_key = format!("self-policy:{}:{trusted_active_epoch}", context.device_id);
+        let page = self.directory_page_with_gate(
+            context,
+            &query_key,
+            cursor,
+            limit,
+            |tx| validate_self_policy_epoch(tx, context, trusted_active_epoch),
+            |tx| Self::self_policy_rows(tx, context),
+        )?;
+        serde_json::from_value(page).map_err(|_| MetadataError::Storage)
     }
 
     pub fn get_network(&self, context: &SessionContext) -> Result<Value, MetadataError> {
@@ -923,6 +1104,22 @@ impl MetadataStore {
     where
         F: FnOnce(&Transaction<'_>) -> Result<Vec<Value>, MetadataError>,
     {
+        self.directory_page_with_gate(context, query_key, cursor, limit, |_| Ok(()), load)
+    }
+
+    fn directory_page_with_gate<F, G>(
+        &self,
+        context: &SessionContext,
+        query_key: &str,
+        cursor: Option<&str>,
+        limit: usize,
+        gate: G,
+        load: F,
+    ) -> Result<Value, MetadataError>
+    where
+        F: FnOnce(&Transaction<'_>) -> Result<Vec<Value>, MetadataError>,
+        G: FnOnce(&Transaction<'_>) -> Result<(), MetadataError>,
+    {
         validate_context(context)?;
         if limit == 0 || limit > budget("pageMax") {
             return Err(MetadataError::InvalidInput);
@@ -934,6 +1131,7 @@ impl MetadataStore {
             .map_err(|_| MetadataError::Storage)?;
         validate_context(context)?;
         ensure_registered(&tx, context)?;
+        gate(&tx)?;
         let now = now_seconds()?;
         tx.execute(
             "DELETE FROM directory_snapshots WHERE expires_at<=?1",
@@ -1132,6 +1330,162 @@ impl MetadataStore {
         }
         Ok(result)
     }
+
+    fn self_policy_rows(
+        connection: &Connection,
+        context: &SessionContext,
+    ) -> Result<Vec<Value>, MetadataError> {
+        let _ = get_target_device(connection, context, &context.device_id)?;
+        let mut statement = connection
+            .prepare(
+                "SELECT mount_id,local_agent_id,item_json,enabled,enable_revision,description,
+                        description_revision FROM catalog_items
+                 WHERE network_id=?1 AND principal_id=?2 AND device_id=?3 ORDER BY local_agent_id",
+            )
+            .map_err(|_| MetadataError::Storage)?;
+        let rows = statement
+            .query_map(
+                params![context.network_id, context.principal_id, context.device_id],
+                |row| {
+                    let mount_id: String = row.get(0)?;
+                    let local_agent_id: String = row.get(1)?;
+                    let item_json: String = row.get(2)?;
+                    let enabled: bool = row.get(3)?;
+                    let enable_revision: i64 = row.get(4)?;
+                    let description: Option<String> = row.get(5)?;
+                    let description_revision: i64 = row.get(6)?;
+                    let item: Value = serde_json::from_str(&item_json)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    if item["lifecycle"] != "active" {
+                        return Ok(None);
+                    }
+                    Ok(Some(json!({
+                        "mountId":mount_id,"networkId":context.network_id,
+                        "principalId":context.principal_id,"deviceId":context.device_id,
+                        "localAgentId":local_agent_id,"enabled":enabled,
+                        "enableRevision":enable_revision,"description":description,
+                        "descriptionRevision":description_revision,
+                        "localWorkspaceId":item["localWorkspaceId"],"name":item["name"],
+                        "path":item["path"],"lifecycle":"active",
+                        "catalogRevision":item["exposureRevision"],"icon":item.get("icon")
+                    })))
+                },
+            )
+            .map_err(|_| MetadataError::Storage)?;
+        let mut result = Vec::new();
+        for item in rows {
+            if let Some(item) = item.map_err(|_| MetadataError::Storage)? {
+                result.push(item);
+            }
+        }
+        Ok(result)
+    }
+}
+
+fn parse_presence(value: &str) -> Result<Presence, MetadataError> {
+    match value {
+        "offline" => Ok(Presence::Offline),
+        "syncing" => Ok(Presence::Syncing),
+        "ready" => Ok(Presence::Ready),
+        _ => Err(MetadataError::Storage),
+    }
+}
+
+fn durable_catalog_ack(
+    connection: &Connection,
+    context: &SessionContext,
+    device_id: &str,
+    connection_epoch: Option<&str>,
+    catalog_epoch: Option<&str>,
+    device_catalog_seq: i64,
+) -> Result<Option<u64>, MetadataError> {
+    let Some(current_epoch) = connection_epoch else {
+        return Ok(None);
+    };
+    if catalog_epoch != Some(current_epoch) || device_catalog_seq <= 0 {
+        return Ok(None);
+    }
+    let stored = connection
+        .query_row(
+            "SELECT connection_epoch,catalog_seq,payload_hash,payload_json FROM catalogs
+             WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+            params![context.network_id, context.principal_id, device_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| MetadataError::Storage)?;
+    let Some((stored_epoch, stored_seq, payload_hash, payload_json)) = stored else {
+        return Ok(None);
+    };
+    if stored_epoch != current_epoch || stored_seq <= 0 || stored_seq != device_catalog_seq {
+        return Ok(None);
+    }
+    if digest(payload_json.as_bytes()) != payload_hash {
+        return Ok(None);
+    }
+    let Ok(snapshot) = serde_json::from_str::<CatalogSnapshot>(&payload_json) else {
+        return Ok(None);
+    };
+    let Ok(value) = serde_json::to_value(&snapshot) else {
+        return Ok(None);
+    };
+    if validate_catalog(&value).is_err()
+        || snapshot.connection_epoch != current_epoch
+        || snapshot.catalog_seq != stored_seq as u64
+        || snapshot.catalog_seq == 0
+        || snapshot.items.len() > budget("catalogItems")
+    {
+        return Ok(None);
+    }
+    Ok(Some(stored_seq as u64))
+}
+
+fn validate_self_policy_epoch(
+    connection: &Connection,
+    context: &SessionContext,
+    trusted_active_epoch: &str,
+) -> Result<(), MetadataError> {
+    let current = connection
+        .query_row(
+            "SELECT presence,connection_epoch,catalog_epoch,catalog_seq FROM devices
+             WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+            params![context.network_id, context.principal_id, context.device_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| MetadataError::Storage)?
+        .ok_or(MetadataError::DeviceNotRegistered)?;
+    let (presence, connection_epoch, catalog_epoch, catalog_seq) = current;
+    if !matches!(presence.as_str(), "syncing" | "ready")
+        || connection_epoch.as_deref() != Some(trusted_active_epoch)
+        || catalog_epoch.as_deref() != Some(trusted_active_epoch)
+        || catalog_seq <= 0
+        || durable_catalog_ack(
+            connection,
+            context,
+            &context.device_id,
+            connection_epoch.as_deref(),
+            catalog_epoch.as_deref(),
+            catalog_seq,
+        )? != Some(catalog_seq as u64)
+    {
+        return Err(MetadataError::CatalogStale);
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

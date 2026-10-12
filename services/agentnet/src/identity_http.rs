@@ -24,6 +24,7 @@ use myagents_agentnet_device_core::{
 use myagents_agentnet_identity_core::{
     IdentityCoreError, IdentityRequest, IssuedIdentity, IssuerProfile, ServiceKeys,
 };
+use myagents_agentnet_peer_core::{PeerProfile, PeerStore};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -49,6 +50,7 @@ pub struct IdentityHttpConfig {
 pub struct IdentityService {
     auth: Arc<AuthStore>,
     devices: Arc<DeviceStore>,
+    peers: Arc<PeerStore>,
     keys: Arc<ServiceKeys>,
     profile: IssuerProfile,
 }
@@ -71,16 +73,28 @@ impl IdentityService {
         )?;
         let keys = ServiceKeys::load(&config.key_file).map_err(|_| AuthError::Configuration)?;
         let devices = DeviceStore::open(state_dir).map_err(|_| AuthError::Storage)?;
+        let profile = IssuerProfile {
+            issuer: config.issuer.clone(),
+            service_id: config.service_id.clone(),
+            environment: config.environment.clone(),
+            network_id: network_id.to_owned(),
+        };
+        let peers = PeerStore::open(
+            state_dir,
+            PeerProfile {
+                issuer: profile.issuer.clone(),
+                service_id: profile.service_id.clone(),
+                environment: profile.environment.clone(),
+                network_id: profile.network_id.clone(),
+            },
+        )
+        .map_err(|_| AuthError::Storage)?;
         Ok(Self {
             auth,
             devices: Arc::new(devices),
+            peers: Arc::new(peers),
             keys: Arc::new(keys),
-            profile: IssuerProfile {
-                issuer: config.issuer.clone(),
-                service_id: config.service_id.clone(),
-                environment: config.environment.clone(),
-                network_id: network_id.to_owned(),
-            },
+            profile,
         })
     }
 
@@ -138,7 +152,8 @@ impl IdentityService {
         // session both before and after this closure; later admission still
         // checks sessionHandle against AuthStore and never treats these tokens
         // as durable authorization after logout/revocation.
-        self.keys
+        let issued = self
+            .keys
             .issue(
                 &self.profile,
                 &IdentityRequest {
@@ -150,7 +165,12 @@ impl IdentityService {
                     csr_pem: record.csr_pem.clone(),
                 },
             )
-            .map_err(IdentityHttpError::identity)
+            .map_err(IdentityHttpError::identity)?;
+        let context = self.context(session)?;
+        self.peers
+            .record_issued(&context, record, &self.keys, &issued)
+            .map_err(|_| IdentityHttpError::internal())?;
+        Ok(issued)
     }
 }
 
@@ -453,6 +473,7 @@ async fn add_no_store(request: Request<Body>, next: Next) -> Response {
     response
 }
 
+#[derive(Debug)]
 enum IdentityHttpError {
     Auth(AuthError),
     Device(DeviceError),
@@ -727,6 +748,28 @@ mod tests {
         );
         assert_eq!(peer["binding"]["deviceId"], device_id);
         assert_eq!(peer["binding"]["principalId"], access["sub"]);
+        let context = service
+            .context(&auth.validate_session(&token).unwrap())
+            .unwrap();
+        let initial_jti = access["jti"].as_str().unwrap();
+        let initial_snapshot = service
+            .peers
+            .lookup(
+                &context,
+                initial_jti,
+                1,
+                &device_key.public_fingerprint().unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            initial_snapshot.certificate,
+            issued["certificate"].as_str().unwrap()
+        );
+        assert_eq!(
+            initial_snapshot.signed_binding,
+            issued["signedBinding"].as_str().unwrap()
+        );
 
         let (jwks_status, jwks, jwks_headers) =
             request(router.clone(), None, "GET", "/api/agent-network/jwks", None).await;
@@ -829,6 +872,31 @@ mod tests {
             )["deviceId"],
             device_id
         );
+        let current_claims = verify_signed_result(
+            &current,
+            &service,
+            "ma-network-access+jwt",
+            &service.profile.service_id,
+        );
+        let current_snapshot = service
+            .peers
+            .lookup(
+                &context,
+                current_claims["jti"].as_str().unwrap(),
+                1,
+                &fingerprint,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            current_snapshot.certificate,
+            current["certificate"].as_str().unwrap()
+        );
+        assert_eq!(
+            current_snapshot.signed_binding,
+            current["signedBinding"].as_str().unwrap()
+        );
+        assert_ne!(current_snapshot.access_jti, initial_snapshot.access_jti);
         let (status, repeat_challenge, _) = request(
             router.clone(),
             Some(&token),
@@ -896,6 +964,50 @@ mod tests {
             )["binding"]["keyGeneration"],
             1
         );
+        let renewed_claims = verify_signed_result(
+            &renewed,
+            &service,
+            "ma-network-access+jwt",
+            &service.profile.service_id,
+        );
+        let renewed_snapshot = service
+            .peers
+            .lookup(
+                &context,
+                renewed_claims["jti"].as_str().unwrap(),
+                1,
+                &fingerprint,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            renewed_snapshot.certificate,
+            renewed["certificate"].as_str().unwrap()
+        );
+        assert_eq!(
+            renewed_snapshot.signed_binding,
+            renewed["signedBinding"].as_str().unwrap()
+        );
+        assert_ne!(renewed_snapshot.access_jti, current_snapshot.access_jti);
+
+        let restarted = IdentityService::open(
+            auth.clone(),
+            dir.path(),
+            &config(
+                &service.profile.service_id,
+                dir.path().join("identity-keys.json"),
+            ),
+            &service.profile.network_id,
+        )
+        .unwrap();
+        assert_eq!(
+            restarted
+                .peers
+                .lookup(&context, &renewed_snapshot.access_jti, 1, &fingerprint,)
+                .unwrap(),
+            Some(renewed_snapshot.clone()),
+            "restart loads the exact issued public snapshot"
+        );
 
         let (status, _, _) = request(
             router.clone(),
@@ -907,6 +1019,16 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::CONFLICT);
         auth.revoke_session(&token).unwrap();
+        let (status, rejected, _) = request(
+            router.clone(),
+            Some(&token),
+            "POST",
+            "/api/agent-network/identity/current",
+            Some(current_body),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(rejected["accessToken"].is_null());
         let (status, _, _) = request(
             router,
             Some(&token),
@@ -916,5 +1038,46 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn snapshot_persistence_failure_never_returns_successful_identity() {
+        let dir = private_dir();
+        let (service, _auth, token, _other_device_token, device_id) = authenticated_service(&dir);
+        let peer_db = dir.path().join("peers.sqlite3");
+        let peer_connection = rusqlite::Connection::open(peer_db).unwrap();
+        peer_connection
+            .execute_batch(
+                "CREATE TRIGGER fail_peer_snapshot_insert BEFORE INSERT ON peer_snapshots
+                 BEGIN SELECT RAISE(ABORT,'test persistence failure'); END;",
+            )
+            .unwrap();
+
+        let key = DevicePrivateKey::generate().unwrap();
+        let (status, response, _) = request(
+            service.router(),
+            Some(&token),
+            "POST",
+            "/api/agent-network/identity",
+            Some(json!({
+                "deviceId": device_id,
+                "csr": key.csr().unwrap(),
+                "deviceInfo": {
+                    "deviceName": "test",
+                    "platform": "linux",
+                    "osVersion": "test",
+                    "appVersion": "test"
+                }
+            })),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response["error"]["code"], "IDENTITY_UNAVAILABLE");
+        assert!(response["accessToken"].is_null());
+        let rows: i64 = peer_connection
+            .query_row("SELECT COUNT(*) FROM peer_snapshots", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 }

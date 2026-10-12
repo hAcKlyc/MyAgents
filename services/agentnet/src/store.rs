@@ -252,6 +252,75 @@ impl AuthStore {
         )
     }
 
+    /// Gate both endpoints of an opaque relay operation in one IMMEDIATE
+    /// transaction. Nested single-session gates would deadlock. Handles come
+    /// only from verified device credentials/current relay connections, never
+    /// from an unauthenticated HTTP payload. The callback must be bounded and
+    /// synchronous, and must not re-enter AuthStore or perform network I/O.
+    pub fn with_valid_session_handles<T, E: From<AuthError>>(
+        &self,
+        handles: &[&str],
+        operation: impl FnOnce(Vec<SessionProjection>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        if handles.is_empty() || handles.len() > 2 {
+            return Err(AuthError::SessionRejected.into());
+        }
+        let handles = handles
+            .iter()
+            .map(|handle| canonical_uuid(handle).ok_or(AuthError::SessionRejected))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(E::from)?;
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| E::from(AuthError::Storage))?;
+        let mut projections = Vec::with_capacity(handles.len());
+        for handle in &handles {
+            let now = unix_seconds().map_err(E::from)?;
+            let projection = transaction
+                .query_row(
+                    "SELECT p.principal_id,p.network_id,s.device_id,s.expires_at,s.session_handle
+                     FROM sessions s JOIN principals p ON p.principal_id=s.principal_id
+                     WHERE s.session_handle=?1 AND s.revoked_at IS NULL AND s.expires_at>?2",
+                    params![handle, now],
+                    |row| {
+                        Ok(SessionProjection {
+                            account: AccountProjection {
+                                principal_id: row.get(0)?,
+                                network_id: row.get(1)?,
+                            },
+                            device_id: row.get(2)?,
+                            expires_at: row.get(3)?,
+                            session_handle: row.get(4)?,
+                        })
+                    },
+                )
+                .optional()
+                .map_err(|_| E::from(AuthError::Storage))?
+                .ok_or_else(|| E::from(AuthError::SessionRejected))?;
+            projections.push(projection);
+        }
+        let expiry = projections
+            .iter()
+            .map(|projection| projection.expires_at)
+            .min()
+            .ok_or_else(|| E::from(AuthError::SessionRejected))?;
+        if expiry <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
+        }
+        let result = operation(projections)?;
+        if expiry <= unix_seconds().map_err(E::from)? {
+            return Err(AuthError::SessionRejected.into());
+        }
+        transaction
+            .commit()
+            .map_err(|_| E::from(AuthError::Storage))?;
+        Ok(result)
+    }
+
     // Only the two fixed internal queries above reach this helper.
     fn with_session_query<T, E: From<AuthError>>(
         &self,
@@ -475,6 +544,179 @@ fn validate_database_file(path: &Path) -> Result<(), AuthError> {
 mod migration_tests {
     use super::*;
     use std::time::Duration;
+
+    fn pair_fixture() -> (
+        tempfile::TempDir,
+        AuthConfig,
+        std::sync::Arc<AuthStore>,
+        [String; 2],
+        [String; 2],
+    ) {
+        let state = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config = AuthConfig {
+            network_id: Uuid::new_v4().to_string(),
+            login_ttl: Duration::from_secs(300),
+            session_ttl: Duration::from_secs(3600),
+        };
+        let store = std::sync::Arc::new(AuthStore::open(state.path(), &config).unwrap());
+        let principal = Uuid::new_v4().to_string();
+        let handles = [Uuid::new_v4().to_string(), Uuid::new_v4().to_string()];
+        let bearers = [
+            URL_SAFE_NO_PAD.encode([11_u8; 32]),
+            URL_SAFE_NO_PAD.encode([12_u8; 32]),
+        ];
+        let now = unix_seconds().unwrap();
+        {
+            let connection = store.connection.lock().unwrap();
+            connection
+                .execute(
+                    "INSERT INTO principals VALUES(?1,?2,?3,?4,?5)",
+                    params![
+                        "https://pair.example.test",
+                        "subject",
+                        principal,
+                        config.network_id,
+                        now
+                    ],
+                )
+                .unwrap();
+            for (handle, bearer) in handles.iter().zip(&bearers) {
+                connection.execute("INSERT INTO sessions(token_hash,principal_id,device_id,created_at,expires_at,session_handle) VALUES(?1,?2,?3,?4,?5,?6)",
+                    params![Sha256::digest(bearer.as_bytes()).to_vec(),principal,Uuid::new_v4().to_string(),now,now+3600,handle]).unwrap();
+            }
+        }
+        (state, config, store, handles, bearers)
+    }
+
+    #[test]
+    fn pair_gate_preserves_order_and_serializes_peer_revocation() {
+        let (state, config, store, handles, bearers) = pair_fixture();
+        let other = AuthStore::open(state.path(), &config).unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_store = store.clone();
+        let worker_handles = handles.clone();
+        let operation = std::thread::spawn(move || {
+            worker_store.with_valid_session_handles::<_, AuthError>(
+                &[&worker_handles[1], &worker_handles[0]],
+                |projections| {
+                    assert_eq!(projections[0].session_handle, worker_handles[1]);
+                    assert_eq!(projections[1].session_handle, worker_handles[0]);
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                    Ok(projections)
+                },
+            )
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (revoked_tx, revoked_rx) = std::sync::mpsc::channel();
+        let peer_bearer = bearers[1].clone();
+        let revoke = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            revoked_tx.send(other.revoke_session(&peer_bearer)).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            revoked_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        );
+        release_tx.send(()).unwrap();
+        operation.join().unwrap().unwrap();
+        revoked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        revoke.join().unwrap();
+        let entered = std::sync::atomic::AtomicBool::new(false);
+        assert_eq!(
+            store.with_valid_session_handles::<_, AuthError>(&[&handles[0], &handles[1]], |_| {
+                entered.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }),
+            Err(AuthError::SessionRejected)
+        );
+        assert!(!entered.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(store.validate_session(&bearers[0]).is_ok());
+        assert!(
+            store
+                .with_valid_session_handles::<_, AuthError>(&[], |_| Ok(()))
+                .is_err()
+        );
+        assert!(
+            store
+                .with_valid_session_handles::<_, AuthError>(
+                    &[&handles[0], &handles[0], &handles[0]],
+                    |_| Ok(())
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .with_valid_session_handles::<_, AuthError>(&[&handles[0], "invalid"], |_| Ok(()))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn pair_gate_rechecks_peer_expiry_after_lock_and_callback() {
+        let (_state, _config, store, handles, _bearers) = pair_fixture();
+        // Wait behind the real owner mutex until only the second endpoint expires.
+        let connection = store.connection.lock().unwrap();
+        let expiry = unix_seconds().unwrap() + 1;
+        connection
+            .execute(
+                "UPDATE sessions SET expires_at=?1 WHERE session_handle=?2",
+                params![expiry, handles[1]],
+            )
+            .unwrap();
+        let worker_store = store.clone();
+        let worker_handles = handles.clone();
+        let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_entered = entered.clone();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            worker_store.with_valid_session_handles::<_, AuthError>(
+                &[&worker_handles[0], &worker_handles[1]],
+                |_| {
+                    worker_entered.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                },
+            )
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        while unix_seconds().unwrap() < expiry {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(connection);
+        assert_eq!(worker.join().unwrap(), Err(AuthError::SessionRejected));
+        assert!(!entered.load(std::sync::atomic::Ordering::SeqCst));
+        let expiry = unix_seconds().unwrap() + 1;
+        store
+            .connection
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE sessions SET expires_at=?1 WHERE session_handle=?2",
+                params![expiry, handles[1]],
+            )
+            .unwrap();
+        assert_eq!(
+            store.with_valid_session_handles::<_, AuthError>(&[&handles[0], &handles[1]], |_| {
+                while unix_seconds().unwrap() < expiry {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Ok(())
+            }),
+            Err(AuthError::SessionRejected)
+        );
+    }
 
     #[test]
     fn session_operation_serializes_revocation_across_service_connections() {
