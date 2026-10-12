@@ -312,12 +312,39 @@ mod tests {
     use myagents_host_management_protocol::SnapshotParams;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    fn private_test_base() -> PathBuf {
+        let uid = unsafe { libc::geteuid() };
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .expect("tests require a private HOME directory");
+        let canonical = home.canonicalize().expect("HOME must exist");
+        assert_eq!(canonical, home, "HOME must not traverse a symlink");
+        let mut current = PathBuf::from("/");
+        for component in home.components().skip(1) {
+            current.push(component);
+            let metadata = fs::symlink_metadata(&current).expect("HOME ancestor must exist");
+            assert!(metadata.is_dir() && !metadata.file_type().is_symlink());
+            assert_eq!(metadata.mode() & 0o022, 0, "unsafe HOME ancestor");
+            assert!(metadata.uid() == 0 || metadata.uid() == uid);
+        }
+        let metadata = fs::symlink_metadata(&home).expect("HOME must exist");
+        assert_eq!(metadata.uid(), uid, "HOME must belong to current user");
+        home
+    }
+
     fn test_endpoint(expected_uid: u32) -> (tempfile::TempDir, ManagementIpcConfig) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("mipc-")
+            .tempdir_in(private_test_base())
+            .unwrap();
         let parent = dir.path().canonicalize().unwrap();
-        fs::set_permissions(&parent, fs::Permissions::from_mode(0o750)).unwrap();
         let gid = unsafe { libc::getegid() };
+        let uid = unsafe { libc::geteuid() };
+        let cpath = std::ffi::CString::new(parent.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::chown(cpath.as_ptr(), uid, gid) }, 0);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o750)).unwrap();
         let path = parent.join("management.sock");
+        assert!(path.as_os_str().as_encoded_bytes().len() < 108);
         (
             dir,
             ManagementIpcConfig {
@@ -326,6 +353,28 @@ mod tests {
                 management_gid: gid,
             },
         )
+    }
+
+    #[test]
+    fn rejects_a_group_writable_ancestor_without_touching_shared_tmp() {
+        let dir = tempfile::Builder::new()
+            .prefix("mipc-unsafe-")
+            .tempdir_in(private_test_base())
+            .unwrap();
+        let public_parent = dir.path().join("public");
+        fs::create_dir(&public_parent).unwrap();
+        let gid = unsafe { libc::getegid() };
+        let uid = unsafe { libc::geteuid() };
+        let cpath = std::ffi::CString::new(public_parent.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::chown(cpath.as_ptr(), uid, gid) }, 0);
+        fs::set_permissions(&public_parent, fs::Permissions::from_mode(0o770)).unwrap();
+
+        assert_eq!(
+            validate_parent(&public_parent.join("management.sock"), gid)
+                .unwrap_err()
+                .code,
+            "HOST_MANAGEMENT_IPC_PATH_INVALID"
+        );
     }
 
     async fn read_message(stream: &mut UnixStream) -> serde_json::Value {

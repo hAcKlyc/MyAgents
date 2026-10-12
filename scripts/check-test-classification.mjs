@@ -17,6 +17,12 @@ const CHILD_PROCESS_ALLOWLIST = new Set([
   // model execution disabled and pre-warm off. They never launch the SDK.
   'src/server/host-controller.integration.test.ts',
   'src/server/host-session-worker.integration.test.ts',
+  // Runs only the real local Host with temp state/workspaces, a Unix socket,
+  // pre-warm/model execution disabled, and Linux flock. No provider is called.
+  'src/server/host-management-ipc.integration.test.ts',
+  // Creates only a FIFO in private scratch using mkfifo to prove credentials
+  // reject non-regular files. No Host, network service or model is launched.
+  'src/server/host-provider-credentials.integration.test.ts',
   // On Windows, runs process.execPath only to enumerate the sealed child's env
   // names. This catches OS-level case folding without secrets or network I/O.
   'src/server/integrated-runtimes/dsh/child-environment.unit.test.ts',
