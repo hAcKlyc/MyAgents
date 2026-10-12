@@ -849,3 +849,63 @@ test('macOS signs all staged DSH Mach-O resources before bundling', t => {
   const signAt = buildMacos.indexOf('    sign_dsh_runtime', prepareAt);
   assert.ok(signAt > prepareAt && signAt < buildMacos.indexOf('tauri:build:prepared', prepareAt));
 });
+
+test('macOS restores a coherent host Node, DSH and business bundle after cross-target builds', async t => {
+  const restoreStart = buildMacos.lastIndexOf('\nif [[ "$(uname -m)" == "arm64" ]]; then');
+  const restoreEnd = buildMacos.indexOf('\n# 检查输出', restoreStart);
+  assert.ok(restoreStart >= 0 && restoreEnd > restoreStart);
+  assert.match(buildMacos, /^set -e$/m);
+  const restore = buildMacos.slice(restoreStart, restoreEnd);
+
+  for (const scenario of [
+    { host: 'arm64', target: 'darwin-arm64', previous: 'darwin-x64' },
+    { host: 'x86_64', target: 'darwin-x64', previous: 'darwin-arm64' },
+    { host: 'arm64', target: 'darwin-arm64', previous: 'darwin-x64', failDsh: true },
+  ]) {
+    await t.test(`${scenario.host}${scenario.failDsh ? ' with failed DSH preparation' : ''}`, t => {
+      const root = mkdtempSync(join(tmpdir(), 'myagents-host-staging-'));
+      t.after(() => rmSync(root, { recursive: true, force: true }));
+      const tools = join(root, 'tools');
+      mkdirSync(tools);
+      mkdirSync(join(root, 'scripts'));
+      const executable = (path, body) => {
+        writeFileSync(path, `#!/bin/bash\nset -e\n${body}\n`);
+        chmodSync(path, 0o755);
+      };
+      executable(join(tools, 'uname'), 'printf "%s\\n" "$TEST_HOST_ARCH"');
+      executable(join(root, 'scripts/download_nodejs.sh'), `
+[[ "$1" == "--target" ]] || exit 2
+printf 'darwin-%s' "$2" > "$PROJECT_DIR/node.target"`);
+      executable(join(tools, 'node'), `
+case "$1" in
+  "$PROJECT_DIR/scripts/integrated-runtimes/prepare-dsh-runtime.mjs")
+    [[ "$2 $3 $4" == "--source release --target" ]] || exit 2
+    [[ "$TEST_FAIL_DSH" != "1" ]] || exit 23
+    printf '%s' "$5" > "$PROJECT_DIR/dsh.target"
+    ;;
+  "$PROJECT_DIR/scripts/prepare-cliproxy.mjs")
+    printf '%s' "$2" > "$PROJECT_DIR/cliproxy.target"
+    ;;
+  *) exit 2 ;;
+esac`);
+      executable(join(tools, 'npm'), `
+[[ "$*" == "run build:assets" ]] || exit 2
+[[ "$(cat "$PROJECT_DIR/node.target")" == "$(cat "$PROJECT_DIR/dsh.target")" ]] || exit 3
+cp "$PROJECT_DIR/dsh.target" "$PROJECT_DIR/assets.target"`);
+      for (const resource of ['node', 'dsh', 'assets', 'cliproxy']) {
+        writeFileSync(join(root, `${resource}.target`), scenario.previous);
+      }
+      const result = spawnSync('bash', ['-c', `set -e\n${restore}`], {
+        cwd: root, encoding: 'utf8', env: {
+          ...process.env, PATH: `${tools}:${process.env.PATH}`, PROJECT_DIR: root,
+          TEST_HOST_ARCH: scenario.host, TEST_FAIL_DSH: scenario.failDsh ? '1' : '0',
+        },
+      });
+      assert.equal(result.status, scenario.failDsh ? 23 : 0, result.stderr);
+      for (const resource of ['node', 'dsh', 'assets', 'cliproxy']) {
+        const expected = scenario.failDsh && resource !== 'node' ? scenario.previous : scenario.target;
+        assert.equal(readFileSync(join(root, `${resource}.target`), 'utf8'), expected, resource);
+      }
+    });
+  }
+});
