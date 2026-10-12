@@ -34,6 +34,10 @@ pub(crate) struct ManagementRequest {
     pub principal_id: String,
     pub network_id: String,
     pub device_id: String,
+    /// First inspection discovers the signed target. Every later read/write
+    /// stays bound to that target, including the original receipt lookup.
+    #[serde(default)]
+    pub target_scope: Option<DeviceScope>,
     pub method: ManagementMethod,
     pub params: RequestParams,
 }
@@ -47,6 +51,9 @@ impl ManagementRequest {
         )
     }
     pub(crate) fn message(&self, id: CanonicalUuid) -> Result<ManagementMessage, NetworkError> {
+        if self.method != ManagementMethod::HostSnapshot && self.target_scope.is_none() {
+            return Err(NetworkError::new("HOST_MANAGEMENT_TARGET_REQUIRED"));
+        }
         let message = ManagementMessage::Request {
             request_id: id,
             method: self.method,
@@ -63,6 +70,17 @@ impl ManagementRequest {
         .map_err(|_| NetworkError::new("HOST_MANAGEMENT_REQUEST_INVALID"))?;
         Ok(message)
     }
+}
+
+fn matches_target(request: &ManagementRequest, current: &DeviceScope) -> Result<(), NetworkError> {
+    if request
+        .target_scope
+        .as_ref()
+        .is_some_and(|expected| expected != current)
+    {
+        return Err(NetworkError::new("HOST_MANAGEMENT_TARGET_CHANGED"));
+    }
+    Ok(())
 }
 #[derive(Serialize)]
 pub(crate) struct ManagementResponse {
@@ -281,6 +299,7 @@ pub(crate) async fn execute(
         let address = transport
             .device_address(&identity.token, local, &request.device_id)
             .await?;
+        matches_target(request, &address.scope)?;
         let mut verifier = identity.verifier.clone();
         let peer = verifier.peer(&address.signed_binding).await?;
         if peer.service_id != address.scope.service_id
@@ -545,9 +564,49 @@ mod tests {
             principal_id: "p".into(),
             network_id: "n".into(),
             device_id: uuid::Uuid::new_v4().to_string(),
+            target_scope: None,
             method: ManagementMethod::HostSnapshot,
             params: RequestParams::Snapshot(myagents_host_management_protocol::SnapshotParams {}),
         }
+    }
+    #[test]
+    fn writes_require_the_inspected_target_and_reject_its_replacement() {
+        let mut r = request();
+        let id = CanonicalUuid::new(uuid::Uuid::new_v4());
+        assert!(r.message(id).is_ok()); // First inspection can discover identity.
+        r.method = ManagementMethod::ConfigSet;
+        r.params = RequestParams::ConfigSet(myagents_host_management_protocol::ConfigSetParams {
+            expected_revision: 0,
+            provider_id: "moonshot-coding".into(),
+            model: "kimi-for-coding".into(),
+            workspace: None,
+            execution_authorized: false,
+            mutation_id: id,
+        });
+        assert_eq!(
+            r.message(id).err().unwrap().code,
+            "HOST_MANAGEMENT_TARGET_REQUIRED"
+        );
+        let current = DeviceScope {
+            service_id: "s".into(),
+            environment: "e".into(),
+            network_id: r.network_id.clone(),
+            principal_id: r.principal_id.clone(),
+            device_id: r.device_id.clone(),
+            key_generation: 1,
+        };
+        r.target_scope = Some(current.clone());
+        assert!(r.message(id).is_ok());
+        assert!(matches_target(&r, &current).is_ok());
+        let mut replacement = current.clone();
+        replacement.key_generation += 1;
+        assert_eq!(
+            matches_target(&r, &replacement).err().unwrap().code,
+            "HOST_MANAGEMENT_TARGET_CHANGED"
+        );
+        replacement = current;
+        replacement.service_id = "other-service".into();
+        assert!(matches_target(&r, &replacement).is_err());
     }
     #[test]
     fn ready_is_consumed_without_another_tls_frame() {
@@ -620,6 +679,14 @@ mod tests {
         let mut r = request();
         let id = CanonicalUuid::new(uuid::Uuid::new_v4());
         r.method = ManagementMethod::CredentialSet;
+        r.target_scope = Some(DeviceScope {
+            service_id: "s".into(),
+            environment: "e".into(),
+            network_id: r.network_id.clone(),
+            principal_id: r.principal_id.clone(),
+            device_id: r.device_id.clone(),
+            key_generation: 1,
+        });
         r.params = RequestParams::CredentialSet(CredentialSetParams {
             expected_revision: 0,
             provider_id: "moonshot-coding".into(),

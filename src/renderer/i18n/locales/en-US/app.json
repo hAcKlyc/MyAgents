@@ -1602,6 +1602,34 @@
         "enabled": "Enabled",
         "disabled": "Disabled"
       }
+    },
+    "ownedHost": {
+      "title": "Remote Host management",
+      "refresh": "Refresh",
+      "offline": "The device is offline. Management becomes available when it reconnects.",
+      "loading": "Reading Host configuration…",
+      "failed": "Operation not completed ({{code}}).",
+      "unknown": "The save result is unknown. Query the original receipt before submitting again.",
+      "checkReceipt": "Check save result",
+      "saved": "Saved to persistent storage.",
+      "conflict": "Configuration changed. Review the refreshed values before submitting again.",
+      "effect": "Model changes apply to new Sessions. Credential changes apply when a Session next starts; running Sessions keep their current credential.",
+      "model": "Kimi model ID",
+      "execution": "Allow local Session execution",
+      "saveModel": "Save model configuration",
+      "activeSession": "A Session is active. End it before changing the model configuration.",
+      "credential": "Kimi API Key",
+      "credentialConfigured": "The Host has a saved credential. It cannot be displayed or read back here.",
+      "credentialMissing": "The Host has no configured credential.",
+      "saveCredential": "Save credential",
+      "workspace": "Relative workspace path for the new Agent",
+      "agentHint": "Use letters, numbers, hyphens or underscores; / creates subdirectories. The workspace name becomes the Agent name. New Agents are disabled.",
+      "createAgent": "Create Agent",
+      "agents": "Agents on the Host",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "empty": "No Agents yet",
+      "identityChanged": "The device identity changed. Re-enter the credential. Unconfirmed operations for the previous identity are retained and will not be replayed."
     }
   }
 }

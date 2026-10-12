@@ -26,7 +26,8 @@
 - [ ] 真 Linux 两个 owned 设备经服务/真实签名 TLS/Node IPC 保存配置和创建禁用 Agent，读取回执及进程重启恢复；尚无该联合验收。
 - [x] AES-256-GCM 动态模型凭据 owner、加密 CAS/回执账本、只写 `credential.set` 和无秘密的 snapshot；专用 Unix IPC 接真实 owner。初始化仅限主进程本次新建的私有目录，密文丢失或损坏拒绝重置。会话 generation 一次性握手接收所需模型凭据，主进程不向子进程环境转交 systemd master-key 目录；普通 config 仅保存引用，活动 worker 使用出生时的内存快照。
 - [x] Node installer 首次生成并保留 root 专有的 systemd 加密 `provider-key`，不会把模型密钥放入安装命令或环境；本地仅验证脚本与 dry-run，真实 Linux systemd 投影和回滚尚待验收。
-- [ ] 真实桌面表单；当前 Renderer adapter 仍 unavailable，不生成虚假环境/权限/配置成功投影。
+- [x] 自部署账号的真实 Renderer→Rust 管理入口与模型/只写密钥/Agent 表单接线；只读取 Host snapshot/回执/registry，不生成虚假环境或运行生效投影。官方与旧 key 连接仍沿不支持的 legacy adapter，Rust 会拒绝不属于 owned-account 的管理。
+- [ ] 上述表单的真实桌面→Linux Host 联调、实际渲染与键盘验收；本地 DOM 检查不能代替该门禁。
 - [ ] 一键安装包统一 Node Host 与网络 owner 的服务配置，以及真实桌面远程模型配置/Agent 创建验收。本轮 CI 会输出可信源码来源的 Linux Node Host 包，但不代表安装器已经完成统一。
 
 接线约束：owned TLS profile 只发布空 catalog，不上传本地 Agent 目录或发送 Agent RPC/permit；管理应用使用独立 codec 和固定 Controller/Host 角色。Relay 的 ChannelReady 分支必须立即 drain 排队的管理 Ready 事件，不能等待下一帧。身份/网络/账户代次变化后关闭通道及待办；发送或写后记账失败关闭受影响 pair、报告原始 failure，不自动重复写入。模型凭据继续经产品能力配置，本阶段不获取密钥或调用收费模型。
@@ -34,6 +35,10 @@
 本阶段追加验证：111 项 headless Rust、协议 11 项单测与 6 项既有 codec 集成、Node 21 项 owner/IPC/真实 Session bootstrap 检查通过；没有收费模型调用。原 CI 捕获 IPC `/tmp` 父目录权限与 subprocess 测试分类缺口，已保留生产校验修复。随后 Linux CI 捕获本地 Host 测试缺少发布 bundle 的 CJS bridge，以及嵌套工作区缺失父目录；前者已对齐真实构建，后者沿原 root directory-fd authority 逐层创建、fsync 并保留独占叶目录与原意图恢复。主审另发现 Linux 凭据目录的 `/proc/self/fd` 最终链接不能以 `O_NOFOLLOW` 重开；现直接校验并 fsync 原 pinned fd，保留写后未知结果和原回执恢复的故障回归。本地 21 项相关集成、类型检查和定向 lint 再次通过。`8fad3268` 的独立服务 Linux CI 已成功，JavaScript CI 两项故障由本轮修复；新源码完整 Linux CI 与原生联合验收仍是开放门禁。
 
 测试部署仅使用已授权服务器的回环监听、隔离配置和唯一临时 unit/container。保留原两个 Host 服务和已有公网监听；部署前记录制品源码/摘要和原状态备份。原生桌面界面、远程配置业务、真实模型执行和正式生产发布分别保持独立验收项。
+
+本轮桌面接线主审：Controller 首次 inspection 发现签名目标，所有后续写入/原回执查询必须携带完整 `targetScope`；发现目标后、发送前和 TLS Ready 后分别校验身份/地址。定向 Rust 11 项通过。独立源码审查发现目标变化保留未提交密钥、坏回执假成功和旧 scope unknown 锁住新 Host 三项，已修复并由原审查者复核：刷新完整 scope 时清空密钥；原回执按完整 scope 隔离；owner 对应回执 schema 拒绝异常状态/额外秘密字段。API/DOM 10 项回归、类型检查、定向 lint 通过，尚无真实桌面验收。
+
+`77e0377b` 已在 101.42.11.29 的 ubuntu 私有 scratch 实跑凭据 owner 的显式初始化、加密/fsync 写入、CAS/幂等、owner 重建、写后 IO 故障原回执恢复和密文丢失拒绝重置六项；没有 systemd/网络/桌面联合验收，也没有模型调用。该 head 的服务 CI 成功，完整客户端 CI 914 项集成通过、1 项旧“缺少父目录应失败”预期冲突；本轮支持 nested workspace，故该负例改为拒绝可写 intermediate，保留正向逐层创建和独占叶目录回归，等待新 Linux CI。
 
 ## 最新核查：设备通道（MAH-CLIENT-HOST-MGMT-20261012）
 

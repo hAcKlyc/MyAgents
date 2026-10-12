@@ -1601,6 +1601,34 @@
         "enabled": "已启用",
         "disabled": "已停用"
       }
+    },
+    "ownedHost": {
+      "title": "Host 远程管理",
+      "refresh": "刷新",
+      "offline": "设备离线，恢复在线后可管理。",
+      "loading": "正在读取 Host 配置…",
+      "failed": "操作未完成（{{code}}）。",
+      "unknown": "尚未确认保存结果。请查询原回执，不要重复提交。",
+      "checkReceipt": "查询保存结果",
+      "saved": "已持久化保存。",
+      "conflict": "配置已变化，请核对刷新后的内容再提交。",
+      "effect": "模型变更用于新建会话；密钥更新在下次启动会话时生效，正在运行的会话保持当前密钥。",
+      "model": "Kimi 模型 ID",
+      "execution": "允许本地会话执行",
+      "saveModel": "保存模型配置",
+      "activeSession": "Host 有活动会话，结束后可修改模型配置。",
+      "credential": "Kimi API Key",
+      "credentialConfigured": "Host 已保存密钥；这里不会显示或读回密钥。",
+      "credentialMissing": "Host 尚未配置密钥。",
+      "saveCredential": "保存密钥",
+      "workspace": "新 Agent 的工作区相对路径",
+      "agentHint": "使用英文字母、数字、短横线或下划线；可用 / 创建子目录。Agent 名称取工作区名，新 Agent 默认禁用。",
+      "createAgent": "创建 Agent",
+      "agents": "Host 上的 Agent",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "empty": "暂无 Agent",
+      "identityChanged": "设备身份已变化。请重新输入密钥；旧身份的未确认操作仍保留，且不会自动重复执行。"
     }
   }
 }

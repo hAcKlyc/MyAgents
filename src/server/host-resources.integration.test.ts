@@ -261,13 +261,15 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
       status:'persisted', revision:1, resource:{projectId:claim.id,agentId:claim.agentId,enabled:false}});
     expect(loadProjects({strict:true})).toHaveLength(1);
   });
-  it('refuses symlink escape, broad root permissions, and absent parents without external mkdir', async () => {
+  it('refuses symlink escape and writable intermediate directories without creating outside the admitted root', async () => {
     const outside = join(home, 'outside'); mkdirSync(outside, {mode:0o700});
     symlinkSync(outside, join(root, 'alias'));
     expect((await owner.mutate(body('alias/escape', 'create'))).status).toBe('unconfirmed');
     expect(() => lstatSync(join(outside, 'escape'))).toThrow();
-    expect((await owner.mutate({...body('missing/new','create'),expectedRevision:1})).status).toBe('unconfirmed');
-    expect(() => lstatSync(join(root, 'missing'))).toThrow();
+    mkdirSync(join(root, 'unsafe'), {mode:0o700});
+    chmodSync(join(root, 'unsafe'), 0o770);
+    expect((await owner.mutate({...body('unsafe/new','create'),expectedRevision:1})).status).toBe('unconfirmed');
+    expect(() => lstatSync(join(root, 'unsafe/new'))).toThrow();
     expect(loadProjects({strict:true})).toHaveLength(0);
   });
   it('reports an unknown final write outcome and reads the original durable receipt after real rename/fsync', async () => {

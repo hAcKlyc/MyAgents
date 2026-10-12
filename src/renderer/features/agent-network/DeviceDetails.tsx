@@ -14,6 +14,7 @@ import type { NetworkDevice } from "@/api/agentNetwork";
 import type { HostManagementAdapter } from "@/api/hostManagement";
 import { AgentRow } from "./AgentRow";
 import { HostManagement } from "./HostManagement";
+import { OwnedHostManagement } from "./OwnedHostManagement";
 import {
   DeviceIcon,
   DeviceMenu,
@@ -192,18 +193,32 @@ export function DeviceDetails({
                 {membershipError}
               </p>
             )}
-            <HostManagement
-              adapter={hostAdapter}
-              key={`${connectionId}:${device.principalId}:${device.networkId}:${device.deviceId}:${authGeneration}`}
-              locator={{
-                connectionId,
-                principalId: device.principalId,
-                networkId: device.networkId,
-                deviceId: device.deviceId,
-                authGeneration,
-              }}
-              online={connectionReady && device.connectionState === "ready"}
-            />
+            {connectionId !== "official" && !hostAdapter ? (
+              <OwnedHostManagement
+                key={`${connectionId}:${device.principalId}:${device.networkId}:${device.deviceId}:${authGeneration}`}
+                locator={{
+                  connectionId,
+                  principalId: device.principalId,
+                  networkId: device.networkId,
+                  deviceId: device.deviceId,
+                  authGeneration,
+                }}
+                online={connectionReady && device.connectionState === "ready"}
+              />
+            ) : (
+              <HostManagement
+                adapter={hostAdapter}
+                key={`${connectionId}:${device.principalId}:${device.networkId}:${device.deviceId}:${authGeneration}`}
+                locator={{
+                  connectionId,
+                  principalId: device.principalId,
+                  networkId: device.networkId,
+                  deviceId: device.deviceId,
+                  authGeneration,
+                }}
+                online={connectionReady && device.connectionState === "ready"}
+              />
+            )}
             <h3 className="mb-1.5 flex items-baseline gap-2 text-sm font-semibold text-[var(--ink-muted)]">
               {t("agentNetwork.agents")}
               {catalog?.status === "ready" && agents.length > 0 && (

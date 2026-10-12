@@ -94,6 +94,5 @@ pub(crate) mod calls;
 #[cfg(test)]
 #[path = "../../../src/agent_network/incoming.rs"]
 pub(crate) mod incoming;
-#[cfg(test)]
 #[path = "../../../src/agent_network/management_controller.rs"]
 pub(crate) mod management_controller;
