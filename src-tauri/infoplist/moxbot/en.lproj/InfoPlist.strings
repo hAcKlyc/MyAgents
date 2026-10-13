@@ -1,7 +1,7 @@
 /* English localization */
-CFBundleDisplayName = "MoX bot";
-CFBundleName = "MoX bot";
-NSAppleEventsUsageDescription = "MoX bot needs to control other apps so the AI can activate windows, run AppleScript, and perform desktop automation on your behalf.";
-NSMicrophoneUsageDescription = "MoX bot uses the microphone when you record a meeting and stores the recording locally.";
-NSAudioCaptureUsageDescription = "MoX bot captures system audio when you record a meeting and stores the recording locally.";
-NSScreenCaptureUsageDescription = "MoX bot uses Screen Recording permission to capture screen content when you request a screenshot, or to capture system audio with ScreenCaptureKit when you record a meeting; meeting recording doesn't save screen video.";
+CFBundleDisplayName = "MoXBots";
+CFBundleName = "MoXBots";
+NSAppleEventsUsageDescription = "MoXBots needs to control other apps so the AI can activate windows, run AppleScript, and perform desktop automation on your behalf.";
+NSMicrophoneUsageDescription = "MoXBots uses the microphone when you record a meeting and stores the recording locally.";
+NSAudioCaptureUsageDescription = "MoXBots captures system audio when you record a meeting and stores the recording locally.";
+NSScreenCaptureUsageDescription = "MoXBots uses Screen Recording permission to capture screen content when you request a screenshot, or to capture system audio with ScreenCaptureKit when you record a meeting; meeting recording doesn't save screen video.";

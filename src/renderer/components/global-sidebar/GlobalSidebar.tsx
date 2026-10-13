@@ -36,10 +36,10 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { track } from '@/analytics';
-import myAgentsLogo from '@/assets/runtime-icons/myagents.png';
+import { APP_ICON_SRC } from '@/components/brand/appBrand';
 import { updateSession, type SessionMetadata } from '@/api/sessionClient';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
-import { APP_DISPLAY_NAME } from '../../../shared/appProfile';
+import { APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import FeedbackPopover from '@/components/FeedbackPopover';
 import AccountEntry from '@/features/account/AccountEntry';
@@ -127,7 +127,6 @@ const AUTO_RAIL_QUERY = '(max-width: 1080px)';
 const EMPTY_TAGS: SessionTag[] = [];
 const SIDEBAR_TRANSITION_MS = 200;
 const WORKSPACE_BRANCH_TRANSITION_MS = 200;
-const MYAGENTS_WEBSITE_URL = 'https://myagents.io';
 const FLYOUT_FOCUS_ENTRY_SELECTOR = [
   'button:not([disabled])',
   'a[href]',
@@ -1143,7 +1142,7 @@ export default memo(function GlobalSidebar({
         >
           <button
             type="button"
-            onClick={() => { void openExternal(MYAGENTS_WEBSITE_URL); }}
+            onClick={() => { void openExternal(APP_WEBSITE_URL); }}
             aria-label={t('globalSidebar.openWebsite')}
             aria-hidden={!expanded && searchAvailable}
             inert={!expanded && searchAvailable}
@@ -1153,7 +1152,7 @@ export default memo(function GlobalSidebar({
             data-global-sidebar-brand-link
           >
             <img
-              src={myAgentsLogo}
+              src={APP_ICON_SRC}
               alt=""
               aria-hidden="true"
               className="global-sidebar-brand-icon shrink-0"

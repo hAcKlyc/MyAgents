@@ -9,7 +9,7 @@ afterEach(() => {
 describe('application profile wordmark', () => {
   it.each([
     ['myagents', 'MyAgents'],
-    ['moxbot', 'MoX bot'],
+    ['moxbot', 'MoXBots'],
   ] as const)('shows the %s brand name', async (profile, displayName) => {
     vi.stubGlobal('__MYAGENTS_BUILD_PROFILE__', profile);
     vi.resetModules();
@@ -18,7 +18,7 @@ describe('application profile wordmark', () => {
     const { container } = render(<MyAgentsLogotype title={displayName} />);
 
     if (profile === 'moxbot') {
-      expect(screen.getByText('MoX bot')).toHaveAttribute('aria-label', 'MoX bot');
+      expect(screen.getByText('MoXBots')).toHaveAttribute('aria-label', 'MoXBots');
       expect(container.querySelector('[data-myagents-logotype]')).toBeNull();
     } else {
       expect(container.querySelector('[data-myagents-logotype]')).toHaveAttribute('aria-label', 'MyAgents');

@@ -38,7 +38,7 @@ import {
   type SpaceMembersPayload,
   type SpaceSession,
 } from "@/api/spaceCloud";
-import myagentsWebLogo from "@/assets/brand/myagents-web-logo.png";
+import { APP_WEB_LOGO_SRC as myagentsWebLogo } from "@/components/brand/appBrand";
 import OverlayBackdrop from "@/components/OverlayBackdrop";
 import { useToast } from "@/components/Toast";
 import type { Project } from "@/config/types";

@@ -10,12 +10,12 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh-Hans</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>MoX bot 需要控制其他应用，以便 AI 为你激活窗口、运行 AppleScript 并完成桌面自动化任务。</string>
+	<string>MoXBots 需要控制其他应用，以便 AI 为你激活窗口、运行 AppleScript 并完成桌面自动化任务。</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MoX bot 需要使用麦克风，以便按你的操作录制会议声音并保存在本机。</string>
+	<string>MoXBots 需要使用麦克风，以便按你的操作录制会议声音并保存在本机。</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>MoX bot 需要采集系统音频，以便按你的操作完整录制会议并保存在本机。</string>
+	<string>MoXBots 需要采集系统音频，以便按你的操作完整录制会议并保存在本机。</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>MoX bot 需要屏幕录制权限，以便在你主动截图时获取屏幕内容，或在会议录音时使用 ScreenCaptureKit 采集系统声音；会议录音不会保存屏幕画面。</string>
+	<string>MoXBots 需要屏幕录制权限，以便在你主动截图时获取屏幕内容，或在会议录音时使用 ScreenCaptureKit 采集系统声音；会议录音不会保存屏幕画面。</string>
 </dict>
 </plist>
