@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/bots-admin-lifecycle-prototype -->
 <!-- git-project-sync-task:base=5ee8f86200710c50e10f1a9c1df5cb95eba27237 -->
-<!-- git-project-sync-task:status=ready-for-review -->
+<!-- git-project-sync-task:status=complete -->
 
 # Task: BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013
 
@@ -23,7 +23,7 @@
 
 ## Verification
 
-- Git fetch/push目标与用户已指定URL一致；最终原型hash4f963…独立视觉/交互/响应式与主审通过，正式1轮修复；完整lint、脚本语法、链接及差异检查通过，main交付待验。
+- Git fetch/push目标与用户已指定URL一致；最终原型hash4f963…独立视觉/交互/响应式与主审通过，正式1轮修复；完整lint、脚本语法、链接及差异检查通过，PR #18在源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI全通过后合入main `5652048579f776c5eebe9faebdbde212ce2b93c7`，远端源头祖先、合并树一致及最终HTML hash核验通过。源头推送后handoff gate已通过；关闭记录不改产品。
 
 ## Blockers and unknowns
 
@@ -32,4 +32,4 @@
 
 ## Next step
 
-推送本任务并通过handoff gate，等待当前头部CI；同步最新main后按审查流程合入并核验远端源码与原型hash，关闭本次交付记录。
+本任务已交付；后续真实生命周期/共享与客户端Bots Net更名由用户另行启动，负责人重读最新main与规划，核实执行主体和运行版本，再建立独立实现任务。

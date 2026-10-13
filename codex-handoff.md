@@ -2,12 +2,12 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
-<!-- codex-handoff:last-updated=2026-10-13T13:45:10+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-13T14:21:03+08:00 -->
 <!-- codex-handoff:latest-anchor=BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 -->
 
 ## Current Snapshot
 
-- **BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013**：当前用户追加管理员Bot新建、配置、启停、删除与所属用户/Host分配，仅规划和合成原型。分支codex/bots-admin-lifecycle-prototype，base main 5ee8f862；详细规划 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，原型LIFECYCLE-*设计/验收/记录，进度见TODO。主Agent负责规划、集成和main交付；原实现和独立UI worker复用，真实服务不开发。
+- **BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013**：当前用户追加管理员Bot新建、配置、启停、删除与所属用户/Host分配，仅规划和合成原型。分支codex/bots-admin-lifecycle-prototype，base main 5ee8f862；本轮已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7` 已核验，详细规划 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，原型LIFECYCLE-*设计/验收/记录，进度见TODO。主Agent负责规划、集成和main交付；原实现和独立UI worker复用，真实服务不开发。
 
 - **AN-SHARE-PROTOTYPE-20261013**：用户要求同步 Bots 管理与 Bots Net 两份规划、更新任务清单与接续、制作原型，真实共享服务暂不开发。当前分支 `codex/agentnets-sharing-v1`，base `848c0592473a95d7e332b258ff433b11d722a5a3`，本次已交付 main（PR #17），合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，原型独立验收通过；状态见 `services/agentnet/planning/TODO.md`。
 - **新 Git 目标**：用户明确授权将 `heavenzhang/MyAgents` 更名为 `heavenzhang/MoXBots`，GitHub ID 1414574754 保持不变。origin fetch/push 已核验为 `https://github.com/heavenzhang/MoXBots.git`，upstream 保留原项目。旧历史链接保留，后续交付使用新地址。
@@ -145,3 +145,9 @@
 - 固定HTML hash4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25，独立视觉/交互/响应式18项矩阵接受，主审实际新建/启停/运行中分配拒绝/停止后归属变更/刷新清空模型/重配/删除名称校验/回收站恢复与错误保草稿通过。
 - LB01–03经1轮正式修复关闭，准备期与选择器适配另列，证据按版本继承，不称最终头全套重跑。文件dev-docs/prototypes/agentnets-bot-sharing-v1/LIFECYCLE-{UI-REVIEW,PRIMARY-REVIEW,DELIVERY}.md与evidence/lifecycle-*。
 - 真实服务仍待开发；本地完整lint和文档/脚本/差异检查通过，current-head CI/main交付尚待完成。下一步仅Git集成。
+
+### 2026-10-13 — lifecycle main delivery verified — BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013
+
+- PR #18已合入main `5652048579f776c5eebe9faebdbde212ce2b93c7`，源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI成功（Test38355093484、Owned AgentNet38355093497）。fetch核验源头是main祖先，合并树完全一致，最终HTML hash4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25。原型、规划、TODO和证据均在主干；关闭记录不改产品。
+- 当前生命周期任务关闭，真实API/Host启停、平台鉴权、双Host迁移/持久化/生产以及客户端Bots Net显示改名仍待开发。协作与状态证据见LIFECYCLE-DELIVERY.md；用量未知，无外部模型。
+- 下一步仅在用户启动真实实现后重读主干与对应权限/生命周期规划，不以模拟状态充当真实服务上线。

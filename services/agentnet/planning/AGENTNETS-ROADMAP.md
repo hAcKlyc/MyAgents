@@ -69,3 +69,5 @@ Bots Net 服务端按多用户系统规划：同一服务实例可以承载不�
 ## 管理员生命周期补充
 
 用户于2026-10-13追加新建、配置、启停、删除和所属用户/Host分配，任务 BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013。沿用管理员控制台与个人Bots Net区分，生命周期属于独立平台管理权限。仅扩展规划和合成原型，真实服务、Host、客户端及生产不开发。详细状态、归属变更与删除恢复见[BOT-ADMIN-LIFECYCLE-V1.md](BOT-ADMIN-LIFECYCLE-V1.md)，进度见TODO与原型LIFECYCLE验收记录。
+
+生命周期规划与合成原型已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7` 已核验，独立视觉/交互/响应式与源头7项CI通过；真实生命周期实现仍待启动。

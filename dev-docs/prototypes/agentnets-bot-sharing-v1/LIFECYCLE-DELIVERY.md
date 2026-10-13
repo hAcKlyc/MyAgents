@@ -1,6 +1,6 @@
 # 管理员 Bots 生命周期原型交付记录
 
-任务 BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013。仓库 https://github.com/heavenzhang/MoXBots.git ，主干main；分支codex/bots-admin-lifecycle-prototype，base5ee8f862。当前UI已接受，Git头部CI与main交付待核验。
+任务 BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013。仓库 https://github.com/heavenzhang/MoXBots.git ，主干main；分支codex/bots-admin-lifecycle-prototype，base5ee8f862。当前规划与合成原型已交付main；无真实服务开发或生产发布。
 
 用户本轮要求新建、配置、启停、删除及所属用户/Host分配，先完善原型和规划，真实服务暂不开发。详细需求 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md；已有两份规划、TODO和接续同时更新。客户端个人网络入口仍未来称Bots Net，本次不改客户端。
 
@@ -12,7 +12,8 @@
 - 首轮冻结97790已跑主要生命周期和必要共享路径，发现LB01校验后表单导航丢草稿、LB02刷新填回迁移已清空模型引用、LB03删除后全局累计用量下降，集中回交原实现者，不能宣布已接受。
 - 最终固定HTML hash4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25；独立视觉/交互/响应式接受，18项矩阵通过，LB01–03关闭；主审关键路径通过。
 - 本地完整npm run lint通过（Node24/npm11.19）：ESLint、依赖边界0 errors/既有15 warnings、4项文档测试与62文档核对；另手工16份规划/原型文档本地链接通过。脚本ESM，未放宽规则。
-- current-head CI、Git gate与main交付待完成。
+- 源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI全通过：Test38355093484、Owned AgentNet38355093497。PR #18合入main锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7`，fetch核验源码头为远端main祖先且合并树完全一致，原型hash保持4f963…；源头与远端任务分支一致、handoff gate通过。
+- 关闭记录提交只改Markdown，包含准备期历史措辞，相关文档/差异/最终推送gate再核验。最终关闭提交SHA从main/Git获取，不写自身SHA自引用；main push自动复跑状态另从GitHub读取，不能把源码头CI当该头全套重跑。
 
 ## 协作执行
 

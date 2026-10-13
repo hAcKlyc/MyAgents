@@ -1,4 +1,4 @@
-# Bots Net 多用户 Bot 共享任务清单
+# Bots 管理与 Bots Net 规划任务清单
 
 任务：AN-SHARE-PROTOTYPE-20261013。更新：2026-10-13。仓库：https://github.com/heavenzhang/MoXBots.git ，主干 `main`。
 
@@ -36,8 +36,10 @@
 - [x] 与用户共享调用、审批预留和历史结果联动，跨Bot/Host不串用。
 - [x] 独立视觉、交互、三视口响应式和键盘验收、主审关键路径通过，正式1轮集中修复。
 - [x] 文档链接、脚本语法、完整lint与本任务差异检查通过。
-- [ ] 提交推送并通过handoff gate，当前头部CI通过后合入并核验远端main。
-- [ ] 最终任务状态和本地可打开原型导出同步。
+- [x] 提交推送并通过handoff gate，当前头部CI通过后合入并核验远端main。
+- [x] 最终任务状态和本地可打开原型导出同步。
+
+交付锚点：[PR #18](https://github.com/heavenzhang/MoXBots/pull/18) 已合入 main `5652048579f776c5eebe9faebdbde212ce2b93c7`，源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI成功，fetch核验源头祖先与合并树一致；HTML保持独立接受版4f963…，关闭记录不改产品。
 
 ## 后续开发待办
 

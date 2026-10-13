@@ -14,7 +14,7 @@
 | AN-MULTIUSER-001 多用户隔离规划 | 已整理，待实现 | `services/agentnet/planning/AGENTNETS-ROADMAP.md` |
 | AN-BOT-SHARE-001 第一版共享权限 | 已整理，待实现 | 同目录 `AGENTNETS-BOT-SHARING-V1.md` |
 | AN-SHARE-PROTOTYPE-20261013 原型与同步 | 已交付main，后续实现另开任务 | 同目录 `TODO.md`、`dev-docs/prototypes/agentnets-bot-sharing-v1/`；UI 验收与远端 main 均须核验 |
-| BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 生命周期原型 | UI已接受，待main交付 | 新建/配置/启停/归属Host分配/逻辑删除及独立验收，真实实现另开任务 |
+| BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 生命周期原型 | 已交付main，真实实现另开任务 | 新建/配置/启停/归属Host分配/逻辑删除及独立验收，真实实现另开任务 |
 | 真实共享服务 | 待另行启动 | 先明确身份/网络、Bot 映射、Host 隔离与授权撤销；再真实多账号联调 |
 
 ## 当前任务和依赖
@@ -34,7 +34,7 @@
 
 ## 下一步
 
-管理员版原型与规划已由 PR #17 交付 main；合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，源头七项CI通过，合并树一致。客户端个人网络入口后续命名为 Bots Net。当前先完成管理员生命周期原型与规划；其后由用户启动真实共享开发；负责人重读最新源码，确认执行主体、实施边界与排期，不凭原型直接发布。
+管理员版原型与规划已由 PR #17 交付 main；合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，源头七项CI通过，合并树一致。客户端个人网络入口后续命名为 Bots Net。管理员生命周期原型与规划也已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7`；其后由用户启动真实共享开发；负责人重读最新源码，确认执行主体、实施边界与排期，不凭原型直接发布。
 
 ## 管理员生命周期扩展的当前门槛
 
@@ -42,6 +42,6 @@
 - [x] 生命周期、成对部署授权与删除/归属影响规划和验收合同。
 - [x] 生命周期完整模拟、共享受保护操作和审批预留回归。
 - [x] 独立视觉/交互/三视口验收及主复核。
-- [ ] 规划/任务/接续与原型、证据同提交链保存，当前头部CI与main交付核验。
+- [x] 规划/任务/接续与原型、证据同提交链保存，当前头部CI与main交付核验。
 
 详细需求见 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，阶段状态见同目录TODO.md；本轮不启动真实服务开发。

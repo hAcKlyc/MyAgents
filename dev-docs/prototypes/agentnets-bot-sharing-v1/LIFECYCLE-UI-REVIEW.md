@@ -31,7 +31,7 @@
 
 ## 脚本与复现准备
 
-`evidence/lifecycle-review.mjs` 使用合法node ESM imports，支持PLAYWRIGHT_MODULE（目录或index.mjs入口）、CHROMIUM_EXECUTABLE、PROTOTYPE_URL，回退到本机已安装依赖与loopback服务。固定hash必须由主审提供；准备阶段不执行活动HTML，不生成通过结果。ESM脚本已按当前可见源码准备完整产品控件场景，含590宽代表页回归；实现冻结后核对最终选择器并执行，尚未运行。
+`evidence/lifecycle-review.mjs` 使用合法node ESM imports，支持PLAYWRIGHT_MODULE（目录或index.mjs入口）、CHROMIUM_EXECUTABLE、PROTOTYPE_URL，回退到本机已安装依赖与loopback服务。固定hash必须由主审提供；准备阶段不执行活动HTML，不生成通过结果。以下为准备期历史记录，当时未运行；正式执行与最终结论见下方记录。ESM脚本当时已按可见源码准备完整产品控件场景，含590宽代表页回归，等待实现冻结后核对最终选择器并执行。
 
 ## 正式首轮：97790
 
