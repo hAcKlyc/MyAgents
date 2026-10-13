@@ -234,7 +234,31 @@ Real OIDC PKCE login through the in-app browser's independent sign-in tab succee
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
 
+### 2026-10-13 — MOXBOTS-HOST-CONFIG-20261013 development checkpoint
+
+- 用户明确当前Agent实现，来源为当前MoXBots桌面主Agent，并授权与“评估 MyAgents 精简为 Linux Host”协调接口与统一安装。范围是模型配置复用、远端目录选择，不修改原凭据reader方案。
+- 分支codex/host-config-20261013，从main2a241591起；本地merge冻结Host依赖9149753c（5a9dd9b0）。远端main e9767263仍无Host管理基础，不能独自发布其未完成凭据实验。后续将本任务提交应用到原owner已验证基础。
+- 封闭扩展DTO、非秘密profile回显、不可变version ID、Provider私有key绑定、Linux fd目录选择/注册已实现；主核验unit16、Node42pass/13Linux skip、协议19、Headless125、范围lint通过。UI七项独立发现待修复冻结与主IAB验收；native/真实Host/模型路径仍开放。
+- 当前安装仍b116404e，统一安装由原凭据owner控制；主Agent不并发换包。接续清单及证据见任务记录、specs/tech_docs/host_configuration_reuse.md、dev-docs/host-config-independent-review.md。
+### 2026-10-13 — BOTS-CLOUD-EXEC-001 draft continuation
+
+Registry administrator release is accepted separately at main1cfa2f85 (recordse9767263); the explicit first-admin grant is fulfilled and must not be requested again. Finite lifecycle draft PR23 / codex/bots-cloud-execution-v1 remains default off. Contract, progress and current gate repairs are in .agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md and services/agentnet/planning/BOTS-CLOUD-EXECUTION-CONTRACT.md. Fixed9149753 Host/management/credential source is preserved, with common config/lock order repairs. No Desktop/Keychain/installer or actual Linux Host was changed.
+
+Next: latest-head Linux CI, clean artifact/backup/rollback, concrete single-Bot/Host protected opt-in, serial release and real OIDC→Host Session lifecycle/receipt verification. Synthetic UI passes and real local Session birth/stop do not close Linux/production gates. Do not reset pending/unconfirmed records or infer stopped from absent in-memory workers.
+
+### BOTS-CLOUD-EXEC-001 — accepted Host foundation integration
+
+PR24 main fb92ce9c passed seven checks and carries the existing Linux Host management/credentials/client base. The Bot continuation merges this accepted main and preserves finite execution, exact worker identity, bounded child stop and shared lock/config repairs; it does not install Desktop changes or alter Keychain. Synthetic UI/Host effects are distinguished from real Linux acceptance. Read-only production scope preflight passed; no opt-in, Bot ledger, or model refs were configured. Private single-Bot 24h lifecycle-only proposal and CI artifact preparation continue, including an owner-protected non-secret account binding pin. PR23 remains draft/default off until Linux CI, main delivery, concrete authority and real Session lifecycle acceptance pass. First administrator authorization and registry/browser release are already fulfilled.
+
 
 ### 2026-10-13 — MOXBOTS-SIDEBAR-ORG-001
 
 当前Agent在隔离 `codex/sidebar-organization-20261013` 实现本机侧栏任务/Agent拖拽与自定义分区，兼容v1偏好，不改执行身份与工作目录；记录 `dev-docs/sidebar-organization-delivery.md`、独立报告和 `.agent-sync/tasks/codex-sidebar-organization-20261013-964955f1.md`。主干CI/交付及原生安装分别追踪。用户已授权本聊天向“Bots 网络 可用”“增加任务归档功能”协调，已发送阶段锚点，统一安装仍由原Host/凭据owner负责；本聊天负责安装后的侧栏真实路径与重启保留复验。不基于旧安装状态自行并发换包。
+
+SIDEBAR-ORG主干锚点：PR25 main c21e9f43f9f8ffb629f88fd09e4c680b86de5b30，源头9d879a6e/run38415171294六项CI成功、同树/远端祖先已核验。独立23/23 renderer UI通过；旧6ac923a6包未含sidebar/未安装，原owner正在准备联合候选，原生安装与重启持久化仍未验收。
+
+SIDEBAR-ORG原生接续：已运行a8a60f1c包，Task/Agent整行拖入、分区菜单/键盘排序及正常退出重启保留通过，原合成聊天/项目保全，临时分区清理，UI已交还owner；详见dev-docs/sidebar-organization-native.md。凭据/网络恢复仍未完成，原owner独立修复；PR28补充证据CI/main待收尾，不声明统一验收已完成。
+
+### MOXBOTS-HOST-CONFIG-20261013 clean delivery freeze
+
+Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in delivery branch. Only feature commits were cherry-picked; development credential-reader merge excluded. UI/source/backend checks and primary synthetic IAB completed, independent review closed. Exact-head CI, main and unified real Host/native gates remain open. See dev-docs/host-config-primary-acceptance.md.

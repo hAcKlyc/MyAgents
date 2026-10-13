@@ -15,9 +15,21 @@
 - 单元/DOM：19项整理/偏好/导航投影，65项侧栏（含旧回归与新故障路径），16项历史搜索通过；MoXBots Web构建和8项主题检查通过；合并后的全量typecheck/lint和Web构建通过（失败恢复只改renderer，受影响DOM65及独立23项已复验）。
 - 独立实际UI：首轮22项正式renderer/合成service通过，发现的两项嵌套误命中均修复复验；收尾23项含真实浏览器Storage故障恢复全部通过，源码hash与45ad14d0一致。详见 [独立报告](sidebar-organization-review.md) 与 [证据](sidebar-organization-validation/results.json)。
 - 主审IAB：实际任务向下排序、拖入分区、reload保留、菜单入口及视觉核对。fixture仅合成数据，不能替代Tauri原生重启/已安装用户路径。
-- CI/远端main：待PR交付与最终远端包含核验。
-- 原生安装：原Host/凭据owner负责统一换包，当前客户端未由本任务替换；用户已授权协调与完整验收。不得把本地Web/CI当已安装。
+- CI/远端main：PR25已合入远端main c21e9f43f9f8ffb629f88fd09e4c680b86de5b30；源头9d879a6e的run38415171294六项全部成功，合并树与其完全相同，ls-remote/祖先核验通过。main push的run38417524959六项复跑全部成功。
+- 原生安装：原Host/凭据owner负责统一换包，当前客户端未由本任务替换；用户已授权协调与完整验收，原owner已从实际用户消息核实授权，正在保留6ac923a6凭据修复的独立联合源；其旧6ac包不含侧栏且未安装。等待联合包/具体运行确认/实际安装回执与UI窗口，不把本地Web/CI当已安装。
 
 ## 执行记录
 
 主/root负责UI、集成、主审、Git交付及安装后侧栏验收；organization_model requested gpt-6-luna/medium，独占纯数据/prefs与测试；sidebar_ui_review requested gpt-6.1-sol/medium，独立判断嵌套拖拽/混合树/焦点与窄窗口，独占合成验收支架与报告。运行时精确消耗/token/费用未暴露，不编造节省。采用ai-yaoren-local，未调用AIRouter。两项真实拖拽缺陷返修；存储失败输入保留由主审补齐并回到独立实际复验。
+
+## 联合包准备与窄窗口补验
+
+- 联合源码 `a8a60f1c923506ba97fde6ddcbedbdac6c0b2e93` 包含main c21e9f43与原owner凭据修复；五个侧栏core SHA256及中英文各16个变更键已与验收源码核对一致。PR14精确HEAD七项CI成功。
+- 联合包 `MoXBots-Trial-macos-arm64-a8a60f1c.zip`，346132107 bytes，SHA256 `d7945d31cf67ed439bc3288f4af69518438d2b31213367d6d7236e8e03f44f8c`，主Agent独立重算匹配。本地签名、未Apple公证；用户已在本聊天明确回答“允许安装该联合包并完成验收”，已转交唯一本机owner核实后执行。原owner先行6ac凭据试验的独立授权不转用a8。
+- 窄窗口900×800实际pointer追加4步均通过：整行/手柄入分区、向下/向上排序；鼠标释放后450ms浮层保留且无误导航。来源、坐标、偏好和hash见 `sidebar-organization-validation/rail-dnd-results.json`。此为合成renderer追加覆盖，原生验收仍开放。
+
+用户具体a8授权后，原owner的前置6ac凭据迁移反馈系统凭据库暂不可用，正在排查；未取得a8安装回执或UI窗口，原生验收不能勾选完成。该问题归原凭据任务处理，不并发修改凭据/退出App。
+
+## 原生侧栏完成范围
+
+a8联合包已在实际Applications客户端运行，主Agent验binary hash/签名/进程路径，Task/Agent整行拖入、菜单恢复、分区管理、键盘排序及正常重启保留通过。合成聊天/原项目和附件引用保留；两临时分区已清理。详见 [原生报告](sidebar-organization-native.md)。原生section pointer排序未确认、成对Task/Agent排序只在合成renderer验证。凭据slot保存故障仍归原owner修复，统一网络更新验收未完成。

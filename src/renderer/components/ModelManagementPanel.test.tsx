@@ -38,6 +38,7 @@ function renderPanel(overrides: Partial<{
   onRefresh: () => Promise<void>;
   discoveryAction: () => Promise<DiscoveredModel[]>;
   discoveryUnavailableMessage: string;
+  showModelParameterSettings: boolean;
 }> = {}) {
   const onUpdateCustomProvider = overrides.onUpdateCustomProvider ?? vi.fn(async () => undefined);
   const onRefresh = overrides.onRefresh ?? vi.fn(async () => undefined);
@@ -54,6 +55,7 @@ function renderPanel(overrides: Partial<{
       onRefresh={onRefresh}
       discoveryAction={overrides.discoveryAction}
       discoveryUnavailableMessage={overrides.discoveryUnavailableMessage}
+      showModelParameterSettings={overrides.showModelParameterSettings}
     />,
   );
 
@@ -107,7 +109,7 @@ describe('ModelManagementPanel custom model add flow', () => {
 
   it('persists the model only after the settings form is saved', async () => {
     const user = userEvent.setup();
-    const onUpdateCustomProvider = vi.fn(async () => undefined);
+    const onUpdateCustomProvider = vi.fn(async (_provider: Provider) => undefined);
     const onRefresh = vi.fn(async () => undefined);
     renderPanel({ onUpdateCustomProvider, onRefresh });
 
@@ -131,6 +133,21 @@ describe('ModelManagementPanel custom model add flow', () => {
         source: 'manual',
       })],
     }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds controlled models immediately when parameter settings are hidden', async () => {
+    const user = userEvent.setup();
+    const onUpdateCustomProvider = vi.fn(async (_provider: Provider) => undefined);
+    const { onRefresh } = renderPanel({ onUpdateCustomProvider, showModelParameterSettings: false });
+    const input = screen.getByPlaceholderText('Enter a model ID, press Enter to configure and add');
+    await user.type(input, 'qa-second-model');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(onUpdateCustomProvider).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Model Parameters')).not.toBeInTheDocument();
+    expect(onUpdateCustomProvider.mock.calls[0][0].models).toEqual([
+      expect.objectContaining({ model: 'qa-second-model', source: 'manual' }),
+    ]);
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 });

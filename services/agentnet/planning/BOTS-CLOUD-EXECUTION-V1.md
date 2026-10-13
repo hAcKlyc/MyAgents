@@ -1,6 +1,6 @@
-# BOTS-CLOUD-ADMIN-001 · Host 执行接入提案
+# BOTS-CLOUD-EXEC-001 · 有限 Host 委派实施规划
 
-状态：待用户确认架构后实施。当前管理登记不提供真实 Host 执行。本文是提案，不是已发布协议，不更改现有设备配对的同账号权限。
+状态：用户已确认按有限 Bot 委派实施；源码和本地联调推进中，尚未发布真实 Host 执行。已发布的管理员后台只提供登记管理。具体线协议见 BOTS-CLOUD-EXECUTION-CONTRACT.md；不更改既有设备配对的同账号权限。
 
 ## 目标与推荐范围
 
@@ -17,7 +17,7 @@
 ## 权限和身份设计
 
 - 云后台仅接收实时有效的人类平台管理员会话。实际 actor 和原操作编号进入审计及请求绑定，不能改写成 Bot 所有者身份。
-- 云执行 controller 使用独立、可撤销的机器身份；私钥留服务端受限存储，由既有系统密钥保护。浏览器只持有人类会话，不持有 controller 私钥或 Host 凭据。不持久保存用户 bearer 以充当机器授权。
+- Host 使用已有 owned device identity、JWT/DPoP 和实际连接 epoch 出站轮询；云端原 ServiceKeys 只签发受约束的 grant、intent、短 lease 和 revocation，不建立虚拟人类或整机 controller。签名密钥由原服务 owner 保管。浏览器只持有人类会话，不持有 controller 私钥或 Host 凭据。不持久保存用户 bearer 以充当机器授权。
 - Host 所有者在已有受认证客户端内明确纳管指定 Bot/允许根和 controller，授予有限 operation scope、期限、permission generation；Host 在每次读写前校验，不因为设备在线或服务端角色成功而自动授权。
 - 委派绑定 service instance、network、owner、目标 Host device/key generation、Bot ID 与 Host Agent ID。跨用户需要独立的授权路径，不能放宽现有同principal设备配对校验。
 - 拒绝未知 operation、过期或撤销 grant、旧设备身份、错误 Bot/Host/网络、越界路径；所有凭据只经现有 write-only owner 接口，不返回原文。
@@ -32,8 +32,8 @@ Host 分配变更采用停止旧绑定→确认活动执行已处理→撤销旧
 
 ## 实施顺序与验收
 
-1. 确认本提案范围；由主owner与现有Host任务约定版本化契约和文件所有权。
-2. 实现有限委派、机器身份与撤销，再接既有中继/受认证通道；原设备管理安全回归保持通过。
+1. 已确认有限范围；主 owner 与既有 Host 任务协调固定源码基线，按版本契约与互斥文件实施。
+2. 实现 Bot grant、短 lease、撤销与 Host 出站轮询，保留原 pair/relay 权限与管理路径。首阶段只启动/停止真实 Host Product Session，拒绝模型调用、IM、定时任务与共享。
 3. 受控测试身份完成真实创建/配置/启动/停止/删除恢复；确认 Host 持久化、进程/Session generation、重启与原回执。
 4. 至少两用户、两Host检查越权、身份切换、撤销、CAS、断线未知和迁移双运行防护。执行任何付费模型前沿用现有费用授权。
 5. 交付main、锁定串行云/Host发布与备份回滚，再完成真实客户端和统一后台路径验收。共享邀请/调用与用量另按既有共享V1规划验收。

@@ -3,6 +3,7 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import {
   ownedHostManagement,
+  type PortableHostProvider,
   type OwnedHostScope,
 } from "./ownedHostManagement";
 const locator = {
@@ -149,4 +150,36 @@ it("keeps malformed and secret-bearing write receipts unconfirmed", async () => 
       ownedHostManagement(locator, scope, write, new AbortController().signal),
     ).rejects.toMatchObject({ code: "HOST_MANAGEMENT_UNCONFIRMED" });
   }
+});
+
+const profile: PortableHostProvider = {
+  id: "fixture-provider", name: "Fixture Provider", apiProtocol: "openai",
+  baseUrl: "https://api.example.test/v1", authType: "api_key",
+  upstreamFormat: "responses", maxOutputTokensParamName: "max_output_tokens",
+};
+it("validates portable provider receipts without accepting secret-bearing response fields", async () => {
+  const operation = { method: "config.provider.set" as const, params: {
+    provider: profile, model: "model-a", workspace: { rootId: "workspace", relativePath: "团队/工作" },
+    executionAuthorized: false, expectedRevision: 0, mutationId: "f81d4fae-7dec-11d0-a765-00a0c91e6bf6",
+  } };
+  invoke.mockResolvedValue({ scope, result: {
+    kind: "provider-config-receipt", status: "persisted", mutationId: operation.params.mutationId,
+    revision: 1, effect: "new-session", settings: { revision: 1, providerId: profile.id, model: "model-a", workspace: operation.params.workspace, executionAuthorized: false },
+  } });
+  await ownedHostManagement(locator, scope, operation, new AbortController().signal);
+  expect(invoke).toHaveBeenCalledWith("cmd_agent_network_management", { request: { ...locator, targetScope: scope, ...operation } });
+  invoke.mockResolvedValue({ scope, result: {
+    kind: "provider-config-receipt", status: "persisted", mutationId: operation.params.mutationId,
+    revision: 1, effect: "new-session", settings: { revision: 1, providerId: profile.id, model: "model-a", workspace: operation.params.workspace, executionAuthorized: false }, credential: "leak",
+  } });
+  await expect(ownedHostManagement(locator, scope, operation, new AbortController().signal)).rejects.toMatchObject({ code: "HOST_MANAGEMENT_UNCONFIRMED" });
+});
+
+it("requires bounded relative remote directory requests and binds returned pages to the requested location", async () => {
+  const list = { method: "resources.directory.list" as const, params: { rootId: "workspace", relativePath: "团队" } };
+  invoke.mockResolvedValue({ scope, result: { kind: "directory-list", rootId: "workspace", relativePath: "团队", entries: [{ name: "资料 空间", relativePath: "团队/资料 空间" }], nextCursor: null } });
+  await ownedHostManagement(locator, scope, list, new AbortController().signal);
+  await expect(ownedHostManagement(locator, scope, { ...list, params: { ...list.params, relativePath: "../outside" } }, new AbortController().signal)).rejects.toMatchObject({ code: "HOST_MANAGEMENT_REQUEST_INVALID" });
+  invoke.mockResolvedValue({ scope, result: { kind: "directory-list", rootId: "workspace", relativePath: "elsewhere", entries: [], nextCursor: null } });
+  await expect(ownedHostManagement(locator, scope, list, new AbortController().signal)).rejects.toMatchObject({ code: "HOST_MANAGEMENT_RESPONSE_INVALID" });
 });

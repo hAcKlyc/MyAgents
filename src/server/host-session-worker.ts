@@ -1,6 +1,10 @@
+import { createServer, type Server } from 'node:http';
+import { Readable } from 'node:stream';
+import { isHostProviderId } from '../shared/hostProviderConfig';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
+import { bootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { isHostSessionRequest, type HostSessionMessage, type HostSessionRequest } from './host-session-protocol';
 import { installHostSessionCredential } from './utils/host-credentials';
 
@@ -8,11 +12,13 @@ import { installHostSessionCredential } from './utils/host-credentials';
 // Product Session binding, and never implements a second SDK or transcript store.
 let initializationStage: 'admission' | 'credential' | 'modules' | 'session' | 'route' | 'restore' = 'admission';
 async function main(): Promise<void> {
+  const bot = bootstrapFromEnvironment();
   const generation = process.env.MYAGENTS_HOST_GENERATION;
   const workspace = process.env.MYAGENTS_HOST_WORKSPACE;
   if (!generation || !workspace || !isAbsolute(workspace) || !process.send) {
     throw new Error('Host worker requires IPC, generation and an absolute workspace');
   }
+  if (bot && (resolve(bot.workspace) !== resolve(workspace) || process.env.MYAGENTS_HOST_SESSION_ID)) throw new Error('BOT_BOOTSTRAP_INVALID');
   let birthCredential: string | undefined;
   if (process.env.MYAGENTS_HOST_CREDENTIAL_SOURCE === 'supervisor-ipc') {
     initializationStage = 'credential';
@@ -24,7 +30,7 @@ async function main(): Promise<void> {
         if (value.type !== 'host-provider-snapshot') return;
         cleanup();
         if (Object.keys(value).length !== 4 || value.generation !== generation
-          || value.providerId !== 'moonshot-coding'
+          || !isHostProviderId(value.providerId) || value.providerId !== process.env.MYAGENTS_HOST_PROVIDER_ID
           || !(value.credential === null || (typeof value.credential === 'string'
             && value.credential.trim().length > 0 && Buffer.byteLength(value.credential, 'utf8') <= 16 * 1024
             && !/[\r\n\0]/.test(value.credential)))) {
@@ -39,7 +45,7 @@ async function main(): Promise<void> {
         if (error) { cleanup(); reject(new Error('Host credential initialization transport failed')); }
       });
     });
-    installHostSessionCredential(birthCredential);
+    installHostSessionCredential(birthCredential, process.env.MYAGENTS_HOST_PROVIDER_ID);
   }
   const credentials = new Set<string>([process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN, process.env.CLAUDE_CODE_OAUTH_TOKEN].filter((value): value is string => Boolean(value)));
   if (birthCredential) credentials.add(birthCredential);
@@ -81,8 +87,8 @@ async function main(): Promise<void> {
   if (engine.kind !== 'builtin') throw new Error('Host worker only supports builtin Sessions');
   if (!existing) {
     initializationStage = 'route';
-    const model = process.env.MYAGENTS_HOST_MODEL?.trim();
-    const providerId = process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
+    const model = bot?.model ?? process.env.MYAGENTS_HOST_MODEL?.trim();
+    const providerId = bot?.provider_id ?? process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
     if (!model || !providerId) throw new Error('New Host Session requires an explicit Provider/model route');
     const route = routes.createConcreteProviderRoute(providerId, model);
     const prepared = await engine.materializePendingDesktopSession({
@@ -106,16 +112,52 @@ async function main(): Promise<void> {
   // from the owning snapshot, without replacing it with supervisor defaults.
   const metadata = store.getSessionMetadata(sessionId);
   initializationStage = 'restore';
-  const restored = config.resolveWorkspaceConfig(workspace, metadata, { includeMcp: true });
+  const restored = config.resolveWorkspaceConfig(workspace, metadata, { includeMcp: !bot });
   if (restored.providerEnv?.apiKey) credentials.add(restored.providerEnv.apiKey);
-  if (existing && metadata) await agent.restoreBuiltinConfigFromOwnedMetadata(metadata);
+  if ((existing || bot) && metadata) await agent.restoreBuiltinConfigFromOwnedMetadata(metadata);
   // Restore the recorded permission mode for state inspection. A send below
   // still requires custom; a stronger recorded mode is never silently widened.
-  await engine.updateMcpServers(restored.mcpServers);
-  await engine.updateEnabledPluginIds(metadata?.enabledPluginIds ?? []);
-  await engine.updateOfficialToolIds(metadata?.enabledOfficialToolIds ?? []);
+  await engine.updateMcpServers(bot ? [] : restored.mcpServers);
+  await engine.updateEnabledPluginIds(bot ? [] : metadata?.enabledPluginIds ?? []);
+  await engine.updateOfficialToolIds(bot ? [] : metadata?.enabledOfficialToolIds ?? []);
   if (restored.reasoningEffort) await engine.updateReasoningEffort(restored.reasoningEffort);
   const send = (message: HostSessionMessage) => { if (process.connected) process.send?.(redact(message)); };
+  let loopbackBridge: Server | undefined;
+  async function ensureLoopbackBridge() {
+    if (loopbackBridge) return;
+    const [{createBridgeHandler},{lookupBridge},{registerBridgeSeedFn}]=await Promise.all([import('./openai-bridge'),import('./openai-bridge/bridge-registry'),import('./bridge-cache')]);
+    const handler=createBridgeHandler({workspacePath:workspace,logger:null,getUpstreamConfig:async request=> {
+      const token=new URL(request.url).pathname.match(/^\/bridge\/([^/]+)\/v1\/messages(?:\/count_tokens)?$/)?.[1];
+      const cfg=token ? await lookupBridge(token,request) : undefined;
+      if (!cfg) throw new Error('Host bridge token is unavailable');
+      const aliases=cfg.modelAliases;
+      const modelMapping=aliases ? (model:string)=> {
+        if (!model.startsWith('claude')) return undefined;
+        if (model.includes('fable')) return aliases.fable ?? cfg.model;
+        if (model.includes('sonnet')) return aliases.sonnet ?? cfg.model;
+        if (model.includes('opus')) return aliases.opus ?? cfg.model;
+        if (model.includes('haiku')) return aliases.haiku ?? cfg.model;
+        return cfg.model;
+      } : undefined;
+      return {...cfg,modelMapping};
+    }});
+    registerBridgeSeedFn(entries=>handler.seedThoughtSignatures(entries));
+    const server=createServer(async (incoming,outgoing)=> {
+      const abort=new AbortController();outgoing.once('close',()=>abort.abort());
+      try {
+        if (incoming.method !== 'POST' || !/^\/bridge\/[^/]+\/v1\/messages(?:\/count_tokens)?$/.test(incoming.url ?? '')) {outgoing.writeHead(404).end();return;}
+        const buffers:Buffer[]=[];let length=0;
+        for await (const chunk of incoming) {const bytes=Buffer.from(chunk);length+=bytes.length;if (length>16*1024*1024) {outgoing.writeHead(413).end();return;}buffers.push(bytes);}
+        const headers=new Headers();for (const [key,value] of Object.entries(incoming.headers)) if (value !== undefined) headers.set(key,Array.isArray(value)?value.join(','):value);
+        const request=new Request(`http://127.0.0.1${incoming.url}`,{method:'POST',headers,body:Buffer.concat(buffers),signal:abort.signal});
+        const response=await handler(request);outgoing.writeHead(response.status,Object.fromEntries(response.headers));
+        if (response.body) Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(outgoing);else outgoing.end();
+      } catch {if (!outgoing.headersSent) outgoing.writeHead(502);outgoing.end();}
+    });
+    await new Promise<void>((yes,no)=> {server.once('error',no);server.listen(0,'127.0.0.1',()=>{server.off('error',no);yes();});});
+    const address=server.address();if (!address || typeof address === 'string') {server.close();throw new Error('Host loopback bridge is unavailable');}
+    loopbackBridge=server;agent.setSidecarPort(address.port);
+  }
   let closing = false;
   let serial = Promise.resolve();
   const shutdown = async () => {
@@ -123,25 +165,28 @@ async function main(): Promise<void> {
     closing = true;
     await engine.stopTurn();
     await store.drainSessionTranscripts();
+    loopbackBridge?.closeAllConnections();
+    if (loopbackBridge) await new Promise<void>(resolveClose=>loopbackBridge!.close(()=>resolveClose()));
   };
   async function operate(request: HostSessionRequest): Promise<unknown> {
     const args = request.args ?? {};
     switch (request.operation) {
       case 'describe': return { sessionId, workspacePath: workspace, runtime: 'builtin',
         executionAuthorized: process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED === '1',
-        supportedProviderProtocols: ['anthropic'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
+        supportedProviderProtocols: ['anthropic','openai'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
         config: engine.getSessionConfigSnapshot() };
       case 'state': return { sessionId, ...engine.getLiveSessionState(),
         queueId: engine.getExecutionTurnId(), replay: engine.getStreamReplaySnapshot(), terminal: engine.getSessionCompletionTerminal() };
       case 'result': return { ...await engine.getLatestAssistantResult(), terminal: engine.getSessionCompletionTerminal() };
       case 'send': {
+        if (bot) throw new Error('Delegated Bot v1 supports lifecycle only; model invocation is not authorized');
         if (process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED !== '1') throw new Error('Model execution requires explicit Host execution authorization');
         if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 100_000) throw new Error('A bounded non-empty text is required');
         const snapshot = store.getSessionMetadata(sessionId);
         if (!routes.isConcreteProviderRoute(snapshot?.providerRoute)) throw new Error('Session Provider/model route is unavailable');
         const provider = config.materializeProviderRouteEnv(snapshot.providerRoute);
         if (provider?.apiKey) credentials.add(provider.apiKey);
-        if (provider?.apiProtocol === 'openai') throw new Error('OpenAI protocol requires a Host loopback bridge; this worker supports Anthropic protocol only');
+        if (provider?.apiProtocol === 'openai') await ensureLoopbackBridge();
         if (snapshot.providerRoute.kind === 'provider' && !provider) throw new Error('Session Provider credential is unavailable');
         const result = await engine.sendDesktopMessage({
           text: args.text, sessionId, workspacePath, scenario: { type: 'desktop' },
@@ -194,7 +239,7 @@ async function main(): Promise<void> {
         // Only this entry's fixed validation messages may cross IPC. Provider
         // and SDK errors may carry bearer material and remain server diagnostics.
         const message = error instanceof Error ? error.message : '';
-        const safe = /^(Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
+        const safe = /^(Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
         send({ type: 'reply', generation: generation!, id: value.id, ok: false, error: safe ? message : 'Host Session operation failed; inspect worker diagnostics' });
       }
     };
@@ -205,7 +250,7 @@ async function main(): Promise<void> {
   });
   for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });
   process.on('disconnect', () => { void shutdown().finally(() => process.exit(0)); });
-  send({ type: 'ready', generation, sessionId });
+  send({ type: 'ready', generation, sessionId, ...(bot ? {bot: {bot_id: bot.snapshot.bot_id, agent_id: bot.snapshot.agent_id, binding_generation: bot.snapshot.binding_generation, session_id: sessionId, run_generation: bot.run_generation, snapshot_hash: bot.snapshot.snapshot_hash, runtime: 'builtin' as const}} : {}) });
 }
 
 void main().catch(() => { process.stderr.write(`Host Session worker initialization failed (${initializationStage})\n`); process.exit(1); });

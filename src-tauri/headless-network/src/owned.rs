@@ -11,8 +11,14 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use myagents_agent_network_crypto::EncryptedIdentityStore;
 use sha2::{Digest, Sha256};
 use std::{
-    io::Read,
-    os::unix::fs::MetadataExt,
+    io::{Read, Write},
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt},
+        },
+    },
     path::Path,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
@@ -63,7 +69,143 @@ pub(crate) struct Connection {
     pub owner: Arc<Owner>,
     pub public_ca: Option<String>,
 }
+// Operator pinning aid only. This is neither admission nor an execution grant.
+#[derive(serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyContext {
+    version: u8,
+    scope: Scope,
+    principal_id: String,
+    account_binding: String,
+    account_expires_at: u64,
+    observed_at: u64,
+    producer_pid: u32,
+    instance_nonce: String,
+}
+fn context_error() -> NetworkError {
+    NetworkError::new("OWNED_POLICY_CONTEXT_UNSAFE")
+}
+fn write_context(
+    root: &Path,
+    path: &Path,
+    bytes: &[u8],
+    current: impl Fn() -> Result<(), NetworkError>,
+) -> Result<(), NetworkError> {
+    use std::{
+        ffi::CString,
+        fs::{File, OpenOptions},
+    };
+    if !root.is_absolute() || path.parent() != Some(root) || bytes.len() > 4096 {
+        return Err(context_error());
+    }
+    let name = path
+        .file_name()
+        .filter(|n| *n == "owned-policy-context.json")
+        .ok_or_else(context_error)?;
+    let name = CString::new(name.as_bytes()).map_err(|_| context_error())?;
+    let dir = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(root)
+        .map_err(|_| context_error())?;
+    let m = dir.metadata().map_err(|_| context_error())?;
+    if m.uid() != unsafe { libc::geteuid() } || m.mode() & 0o7777 != 0o700 {
+        return Err(context_error());
+    }
+    let open = || -> Result<File, NetworkError> {
+        let fd = unsafe {
+            libc::openat(
+                dir.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
+            )
+        };
+        if fd < 0 {
+            return Err(context_error());
+        }
+        let file = unsafe { File::from_raw_fd(fd) };
+        let m = file.metadata().map_err(|_| context_error())?;
+        if !m.is_file()
+            || m.uid() != unsafe { libc::geteuid() }
+            || m.mode() & 0o7777 != 0o600
+            || m.nlink() != 1
+        {
+            return Err(context_error());
+        }
+        Ok(file)
+    };
+    let before = open()?.metadata().map_err(|_| context_error())?;
+    current()?;
+    let tmp = CString::new(format!(".owned-policy-context-{}", uuid::Uuid::new_v4())).unwrap();
+    let fd = unsafe {
+        libc::openat(
+            dir.as_raw_fd(),
+            tmp.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(context_error());
+    }
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    let result = (|| {
+        if unsafe { libc::fchmod(fd, 0o600) } != 0 {
+            return Err(context_error());
+        }
+        file.write_all(bytes).map_err(|_| context_error())?;
+        file.sync_all().map_err(|_| context_error())?;
+        current()?;
+        let after = open()?.metadata().map_err(|_| context_error())?;
+        if before.ino() != after.ino() || before.dev() != after.dev() {
+            return Err(context_error());
+        }
+        if unsafe {
+            libc::renameat(
+                dir.as_raw_fd(),
+                tmp.as_ptr(),
+                dir.as_raw_fd(),
+                name.as_ptr(),
+            )
+        } != 0
+        {
+            return Err(context_error());
+        }
+        dir.sync_all().map_err(|_| context_error())
+    })();
+    if result.is_err() {
+        unsafe {
+            libc::unlinkat(dir.as_raw_fd(), tmp.as_ptr(), 0);
+        }
+    }
+    result
+}
 impl Connection {
+    pub fn write_policy_context(&self, root: &Path, path: &Path) -> Result<(), NetworkError> {
+        let (state, raw) = self.owner.read()?;
+        if raw.is_none() {
+            return Err(NetworkError::new("OWNED_REAUTH_REQUIRED"));
+        }
+        let account = state
+            .account
+            .as_ref()
+            .ok_or_else(|| NetworkError::new("OWNED_REAUTH_REQUIRED"))?;
+        self.owner.ensure_binding(&account.binding)?;
+        let context = PolicyContext {
+            version: 1,
+            scope: self.owner.scope.clone(),
+            principal_id: account.principal.clone(),
+            account_binding: account.binding.clone(),
+            account_expires_at: account.expires_at,
+            observed_at: jsonwebtoken::get_current_timestamp(),
+            producer_pid: std::process::id(),
+            instance_nonce: uuid::Uuid::new_v4().to_string(),
+        };
+        let bytes = serde_json::to_vec(&context).map_err(|_| context_error())?;
+        write_context(root, path, &bytes, || {
+            self.owner.ensure_binding(&account.binding)
+        })
+    }
     pub async fn discover(
         origin: &str,
         ca_file: Option<&Path>,
@@ -452,6 +594,66 @@ mod tests {
             .owner
             .commit(raw.as_deref().map(|v| v.as_slice()), &state)
             .unwrap();
+        let projection = root.join("owned-policy-context.json");
+        std::fs::write(&projection, b"precreated").unwrap();
+        std::fs::set_permissions(&projection, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let sealed_before: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|p| p.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "sealed"))
+            .map(|p| {
+                let bytes = std::fs::read(&p).unwrap();
+                (p, bytes)
+            })
+            .collect();
+        let before_time = jsonwebtoken::get_current_timestamp();
+        connection.write_policy_context(&root, &projection).unwrap();
+        let output = std::fs::read_to_string(&projection).unwrap();
+        let projected: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(projected["account_binding"], binding);
+        assert_eq!(
+            projected["principal_id"],
+            state.account.as_ref().unwrap().principal
+        );
+        assert_eq!(
+            projected["scope"],
+            serde_json::to_value(&connection.owner.scope).unwrap()
+        );
+        assert_eq!(projected["producer_pid"], std::process::id());
+        assert!(projected["observed_at"].as_u64().unwrap() >= before_time);
+        assert!(uuid::Uuid::parse_str(projected["instance_nonce"].as_str().unwrap()).is_ok());
+        assert_eq!(projected.as_object().unwrap().len(), 8);
+        assert!(
+            !output.contains(&"z".repeat(43))
+                && !output.contains("token")
+                && !output.contains("verifier")
+        );
+        assert_eq!(
+            std::fs::metadata(&projection).unwrap().mode() & 0o7777,
+            0o600
+        );
+        for (path, bytes) in sealed_before {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        let previous = std::fs::read(&projection).unwrap();
+        let (mut expired, raw) = connection.owner.read().unwrap();
+        expired.account.as_mut().unwrap().expires_at = now;
+        connection
+            .owner
+            .commit(raw.as_deref().map(|v| v.as_slice()), &expired)
+            .unwrap();
+        assert_eq!(
+            connection
+                .write_policy_context(&root, &projection)
+                .unwrap_err()
+                .code,
+            "ACCOUNT_SESSION_EXPIRED"
+        );
+        assert_eq!(std::fs::read(&projection).unwrap(), previous);
+        connection
+            .owner
+            .commit(Some(&serde_json::to_vec(&expired).unwrap()), &state)
+            .unwrap();
         drop(connection);
         let restarted_store = Arc::new(EncryptedIdentityStore::for_test(&root, &[31; 32]).unwrap());
         let restarted = Connection::from_pinned(&origin, None, restarted_store, &device).unwrap();
@@ -478,6 +680,60 @@ mod tests {
                 .code,
             "OWNED_INSTANCE_TRUST_CHANGED"
         );
+    }
+    #[test]
+    fn private_projection_requires_precreated_exact_private_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = root.join("owned-policy-context.json");
+        assert!(write_context(&root, &target, b"{}", || Ok(())).is_err());
+        std::fs::write(&target, b"original").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(write_context(&root, &root.join("state-secret.sealed"), b"{}", || Ok(())).is_err());
+        assert!(write_context(
+            &root,
+            &root.parent().unwrap().join("owned-policy-context.json"),
+            b"{}",
+            || Ok(())
+        )
+        .is_err());
+        assert!(write_context(&root, &target, &vec![0; 4097], || Ok(())).is_err());
+        for mode in [0o640, 0o644, 0o4600] {
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert!(write_context(&root, &target, b"{}", || Ok(())).is_err());
+        }
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let link = root.join("linked");
+        std::fs::hard_link(&target, &link).unwrap();
+        assert!(write_context(&root, &target, b"{}", || Ok(())).is_err());
+        std::fs::remove_file(&link).unwrap();
+        std::fs::rename(&target, &link).unwrap();
+        symlink(&link, &target).unwrap();
+        assert!(write_context(&root, &target, b"{}", || Ok(())).is_err());
+        assert_eq!(std::fs::read(&link).unwrap(), b"original");
+    }
+    #[test]
+    fn private_projection_rechecks_binding_before_atomic_publish() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let target = root.join("owned-policy-context.json");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let count = std::cell::Cell::new(0);
+        let error = write_context(&root, &target, b"new", || {
+            count.set(count.get() + 1);
+            if count.get() == 2 {
+                Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "ACCOUNT_BINDING_CHANGED");
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
     }
     #[test]
     fn public_ca_allows_readable_modes_but_rejects_writes_special_bits_and_links() {

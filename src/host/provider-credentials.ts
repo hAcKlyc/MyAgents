@@ -1,3 +1,4 @@
+import { HOST_PROVIDER_LIMIT, isHostProviderId } from '../shared/hostProviderConfig';
 import {
   createCipheriv,
   createDecipheriv,
@@ -44,7 +45,7 @@ export type ProviderCredentialReceipt = {
 };
 
 export type ProviderCredentialInput = {
-  providerId: typeof PROVIDER;
+  providerId: string;
   credential: string;
   expectedRevision: number;
   mutationId: string;
@@ -56,6 +57,7 @@ type StoreState = {
   revision: number;
   credential: string | null;
   receipts: ReceiptEntry[];
+  providers?: Record<string, StoreState>;
 };
 type Envelope = {
   version: 1;
@@ -88,8 +90,8 @@ function validateId(value: unknown): string {
   return value;
 }
 
-function validateProvider(value: unknown): asserts value is typeof PROVIDER {
-  if (value !== PROVIDER) fail("HOST_PROVIDER_CREDENTIAL_PROVIDER_UNSUPPORTED");
+function validateProvider(value: unknown): asserts value is string {
+  if (!isHostProviderId(value)) fail("HOST_PROVIDER_CREDENTIAL_PROVIDER_UNSUPPORTED");
 }
 
 function validateCredential(value: unknown): asserts value is string {
@@ -110,10 +112,14 @@ function emptyState(): StoreState {
   return { version: 1, revision: 0, credential: null, receipts: [] };
 }
 
+function providerState(all: StoreState, provider: string): StoreState {
+  return provider === PROVIDER ? all : Object.hasOwn(all.providers ?? {}, provider) ? all.providers![provider] : emptyState();
+}
+
 function validateState(value: unknown): StoreState {
   if (
     !plain(value) ||
-    !exactKeys(value, ["version", "revision", "credential", "receipts"]) ||
+    !exactKeys(value, ["version", "revision", "credential", "receipts", ...(value.providers === undefined ? [] : ["providers"])]) ||
     value.version !== 1 ||
     !safeRevision(value.revision) ||
     !(value.credential === null || typeof value.credential === "string") ||
@@ -164,6 +170,13 @@ function validateState(value: unknown): StoreState {
     persistedRevisions.size !== value.revision
   )
     fail("HOST_PROVIDER_CREDENTIAL_STORE_INVALID");
+  if (value.providers !== undefined) {
+    if (!plain(value.providers) || Object.keys(value.providers).length > HOST_PROVIDER_LIMIT) fail("HOST_PROVIDER_CREDENTIAL_STORE_INVALID");
+    for (const [provider, state] of Object.entries(value.providers)) {
+      if (!isHostProviderId(provider) || provider === PROVIDER || !plain(state) || state.providers !== undefined) fail("HOST_PROVIDER_CREDENTIAL_STORE_INVALID");
+      validateState(state);
+    }
+  }
   return value as unknown as StoreState;
 }
 
@@ -668,7 +681,7 @@ export function createHostProviderCredentialOwner(input: {
 
   return {
     async initialize(): Promise<{
-      providerId: typeof PROVIDER;
+      providerId: string;
       configured: boolean;
       revision: number;
     }> {
@@ -700,15 +713,17 @@ export function createHostProviderCredentialOwner(input: {
         key.fill(0);
       }
     },
-    inspect(): {
-      providerId: typeof PROVIDER;
+    inspect(provider: string = PROVIDER): {
+      providerId: string;
       configured: boolean;
       revision: number;
     } {
+      validateProvider(provider);
       return withKey((key) => {
-        const state = readWithKey(key).state;
+        const all = readWithKey(key).state;
+        const state = providerState(all, provider);
         return {
-          providerId: PROVIDER,
+          providerId: provider,
           configured: state.credential !== null,
           revision: state.revision,
         };
@@ -736,14 +751,16 @@ export function createHostProviderCredentialOwner(input: {
         fail("HOST_PROVIDER_CREDENTIAL_REQUEST_INVALID");
       const mutationId = validateId(raw.mutationId);
       const request = {
-        providerId: PROVIDER,
+        providerId: raw.providerId,
         credential: raw.credential,
         expectedRevision: raw.expectedRevision,
         mutationId,
       };
       const key = loadKey(input.loadMasterKey);
       try {
-        const current = readWithKey(key);
+        const persisted = readWithKey(key);
+        const current = { ...persisted, state: providerState(persisted.state, raw.providerId) };
+        if (raw.providerId !== PROVIDER && !Object.hasOwn(persisted.state.providers ?? {}, raw.providerId) && Object.keys(persisted.state.providers ?? {}).length >= HOST_PROVIDER_LIMIT) fail("HOST_PROVIDER_CREDENTIAL_STORE_FULL");
         const mac = requestMac(request, hostId, key);
         const prior = current.state.receipts.find(
           (entry) => entry.receipt.mutationId === mutationId,
@@ -790,7 +807,7 @@ export function createHostProviderCredentialOwner(input: {
           storePath,
           hostId,
           uid,
-          state,
+          raw.providerId === PROVIDER ? { ...state, ...(persisted.state.providers ? {providers:persisted.state.providers} : {}) } : {...persisted.state, providers:{...persisted.state.providers,[raw.providerId]:state}},
           current.identity,
           key,
         );
@@ -801,10 +818,13 @@ export function createHostProviderCredentialOwner(input: {
     },
     receipt(
       mutation: string,
+      provider: string = PROVIDER,
     ): ProviderCredentialReceipt | { mutationId: string; status: "not-found" } {
       const mutationId = validateId(mutation);
+      validateProvider(provider);
       return withKey((key) => {
-        const state = readWithKey(key).state;
+        const all = readWithKey(key).state;
+        const state = providerState(all, provider);
         const found = state.receipts.find(
           (entry) => entry.receipt.mutationId === mutationId,
         )?.receipt;
@@ -813,9 +833,12 @@ export function createHostProviderCredentialOwner(input: {
           : { mutationId, status: "not-found" as const };
       });
     },
-    readForExecution(provider: typeof PROVIDER): string | undefined {
+    readForExecution(provider: string): string | undefined {
       validateProvider(provider);
-      return withKey((key) => readWithKey(key).state.credential ?? undefined);
+      return withKey((key) => {
+        const all = readWithKey(key).state;
+        return providerState(all, provider).credential ?? undefined;
+      });
     },
   };
 }

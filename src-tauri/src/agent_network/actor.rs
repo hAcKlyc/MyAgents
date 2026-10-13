@@ -1346,7 +1346,7 @@ async fn connect(
                     let result=if owner.generation()!=generation || identity.account.ensure_current().is_err() {
                         Err(super::management_controller::lost(command.request.mutation(),command.sent.load(Ordering::Acquire)))
                     } else {result};
-                    let failed=result.is_err();
+                    let failed=result.as_ref().is_err_and(|error| !super::management_controller::isolated_unsupported_probe(&command.request,error));
                     let _=command.reply.send(result);
                     if failed { return Err(NetworkError::new("HOST_MANAGEMENT_CONNECTION_RESET")); }
                     last_server=Instant::now();last_ping=Instant::now();

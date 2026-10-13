@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {writeFile,readFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+export async function runRailDnd(page,out){
+ const state=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('myagents.globalSidebar.v1')));
+ const results=[];const repo=resolve(out,'../..');const files=['src/renderer/components/global-sidebar/GlobalSidebar.tsx','src/renderer/components/global-sidebar/SidebarOrganizationControls.tsx','src/renderer/components/SessionContextMenu.tsx','src/renderer/utils/sidebarOrganization.ts','src/renderer/utils/globalSidebarPreference.ts'];
+ const evidence={verifiedAt:new Date().toISOString(),head:execFileSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).trim(),viewport:{width:900,height:800},environment:'isolated synthetic renderer; Chromium headless',sourceSha256:Object.fromEntries(await Promise.all(files.map(async f=>[f,createHash('sha256').update(await readFile(resolve(repo,f))).digest('hex')]))),results};
+ async function drag(name,from,to,expected){const a=await from.boundingBox(),b=await to.boundingBox();assert.ok(a&&b,'drag targets visible');const eventsBefore=await page.evaluate(()=>window.auditEvents.length);await page.mouse.move(a.x+a.width/2,a.y+16);await page.mouse.down();await page.mouse.move(a.x+a.width/2,a.y+25,{steps:4});await page.mouse.move(b.x+b.width/2,b.y+b.height/2,{steps:16});await page.waitForTimeout(200);await page.mouse.up();await page.waitForTimeout(450);const prefs=await state();const headerVisible=await page.getByRole('button',{name:'窄窗口拖拽',exact:true}).isVisible();const eventsAfter=await page.evaluate(()=>window.auditEvents.length);assert.equal(headerVisible,true,'flyout stays visible after timer/animation');assert.equal(eventsAfter,eventsBefore,'drag does not navigate');expected(prefs);results.push({name,status:'pass',source:a,target:b,flyoutVisible:headerVisible,navigationCount:eventsAfter,prefs});console.log(name+' PASS')}
+ try{
+  await page.getByRole('button',{name:'工作区与会话显示选项'}).click();await page.getByText('新建分区',{exact:true}).click();await page.getByRole('textbox').fill('窄窗口拖拽');await page.getByRole('button',{name:'保存',exact:true}).click();const section=(await state()).organization.sections.find(s=>s.name==='窄窗口拖拽').id;
+  await page.setViewportSize({width:900,height:800});await page.waitForTimeout(400);await page.getByRole('button',{name:'Agent 工作区',exact:true}).click();await page.waitForTimeout(400);await page.screenshot({path:resolve(out,'rail-dnd-before.png')});
+  await drag('rail entire task row into section',page.locator('[data-sidebar-item="session:alpha-2"]').getByRole('button').first(),page.locator('[data-sidebar-section-header]'),p=>assert.equal(p.organization.placements['session:alpha-2'],section));
+  await drag('rail task handle into section',page.getByRole('button',{name:'拖动 任务一：研发 Agent Alpha',exact:true}),page.locator('[data-sidebar-section-header]'),p=>{assert.equal(p.organization.placements['session:alpha-1'],section);assert.deepEqual(p.organization.orders[section],['session:alpha-2','session:alpha-1'])});
+  await drag('rail entire row downward reorder',page.locator('[data-sidebar-item="session:alpha-2"]').getByRole('button').first(),page.locator('[data-sidebar-item="session:alpha-1"]'),p=>assert.deepEqual(p.organization.orders[section],['session:alpha-1','session:alpha-2']));
+  await drag('rail handle upward reorder',page.getByRole('button',{name:'拖动 任务二：研发 Agent Alpha',exact:true}),page.locator('[data-sidebar-item="session:alpha-1"]'),p=>assert.deepEqual(p.organization.orders[section],['session:alpha-2','session:alpha-1']));
+  await page.screenshot({path:resolve(out,'rail-dnd-after.png')});evidence.status='pass';
+ }catch(error){evidence.status='fail';evidence.error=error.message;process.exitCode=1;await page.screenshot({path:resolve(out,'rail-dnd-failure.png')});console.log(error.stack)}finally{await writeFile(resolve(out,'rail-dnd-results.json'),JSON.stringify(evidence,null,2));}
+}
