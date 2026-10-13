@@ -2,15 +2,21 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
-<!-- codex-handoff:last-updated=2026-10-13T11:53:38+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-13T13:20:33+08:00 -->
 <!-- codex-handoff:latest-anchor=MAH-CLOUD-MANAGEMENT-20261013 -->
 
 ## Current Snapshot
 
+- **AN-SHARE-PROTOTYPE-20261013**：用户要求同步 Bots 管理与 Bots Net 两份规划、更新任务清单与接续、制作原型，真实共享服务暂不开发。当前分支 `codex/agentnets-sharing-v1`，base `848c0592473a95d7e332b258ff433b11d722a5a3`，本次已交付 main（PR #17），合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，原型独立验收通过；状态见 `services/agentnet/planning/TODO.md`。
+- **新 Git 目标**：用户明确授权将 `heavenzhang/MyAgents` 更名为 `heavenzhang/MoXBots`，GitHub ID 1414574754 保持不变。origin fetch/push 已核验为 `https://github.com/heavenzhang/MoXBots.git`，upstream 保留原项目。旧历史链接保留，后续交付使用新地址。
+- **共享规划与原型**：`services/agentnet/planning/AGENTNETS-ROADMAP.md` 与 `AGENTNETS-BOT-SHARING-V1.md`；原型 `dev-docs/prototypes/agentnets-bot-sharing-v1/index.html`，默认服务端平台管理员 Bots 管理视角；个人网络入口后续称 Bots Net。服务端多用户是架构前提；共享 Bot 不授予 Host 管理权，不开放私人会话、记忆或凭据。
+- **范围与接续**：原型仅合成数据、模拟身份和浏览器专用存储，不代表真实共享已实现。主 Agent 负责集成、验证和 Git；纯 Codex 内置实现与独立 UI 验收，不调用外部模型。现有 Host 联调工作树的未提交代码和接续记录没有被本任务改写。
+
+
 - **MAH-DESKTOP-CREDENTIALS-20261013**：用户授权安装固定本地签名 `04faeb1d` 并继续联调；已安装同签名诊断修订 `7ce8a342`。两版 app / archive / resources / designated requirement 已分别核实，原 MyAgents 保持运行。未保存 Mac 系统密码、未放宽全局 ACL/系统信任，签名私钥及随机构建密码仅存在 owner 私有构建目录。
 - **当前阻断已实测定位**：新桌面自部署网络离线；native `sample` 证明初始化串行恢复旧 QA 网络时停在 `keyring` 的 legacy `SecKeychainFindGenericPassword`，后续云网络与 registry mutation 因此等待。未观察到可见系统授权窗口。UI 离线和代码/CI 成功不能当 Agent 创建验收。
 - **本次修复**：macOS 凭据读取使用相同 service/account/User keychain 的逐查询 `AuthenticationUIFail`，不使用 Skip、不更换存储 namespace、不把授权失败当条目缺失或自动生成新身份；Windows/Linux 保持既有后端。非秘密进程内 guard 保留精确 scope、expiry、替换/取消失效约束。registry 按连接保留恢复错误，界面只对对应 Owned 连接显示具体原因。此 API 禁止后台交互，但不承诺 Security IPC 硬期限；真实已有记录的兼容与无反复提示仍待安装复验。没有新增恢复授权/登录按钮，不能宣称该产品流程已闭环。
-- **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，origin 已核实；主干上次核实 `848c0592`，已并入当前管理分支。PR #14 仍 draft，未合入主干。`7ce8a342` Test CI 六作业与 Owned CI 全部通过；迟到管理 ACK 修复和 OIDC 完整 issuer-path guard 回归已在 Linux 真正运行。
+- **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，origin 已核实；主干已核实 `5ee8f862`，并发 PR #17 规划/原型成果一并保留在当前管理分支。PR #14 仍 draft，未合入主干。`7ce8a342` Test CI 六作业与 Owned CI 全部通过；迟到管理 ACK 修复和 OIDC 完整 issuer-path guard 回归已在 Linux 真正运行。
 - **真实部署**：云认证进程与入口保留，AgentNet 服务受控更新为 `04faeb1d` 对应 CI 制品（artifact commit 的 Git tree 与 source 相同）；程序摘要、运行 UID、配置/身份不变、受限一致性备份及清单摘要均核实。不新增公网端口，既有应用保全。Linux Host 重连后超过四分钟仍为 Ready、相同 epoch/catalog/PID，status 新鲜度核实；metadata last-network-seen 是 presence 转换时间，不能拿它当心跳时间。
 - **真实管理进度**：之前 `50f3722c` 的原生 Host snapshot 成功，Kimi 默认模型保存到执行节点 revision 1；没有模型密钥、没有执行授权、没有付费模型调用。保存后迟到控制回执修复已实现/CI通过，但新版桌面远程配置、创建 Agent、重启持久化尚待真实复验。
 - **交付/实例区分**：MoXBots 为独立 `com.moxbot.app` / `.moxbot` / URL scheme，可与原 MyAgents 同时运行。已安装 Linux Node Host 源 `b98294c7`，网络 connector 对应 source `710820e9`，云 source `04faeb1d`，当前已安装桌面 `7ce8a342`；这四个组件不等于同一个部署 SHA。新云第三执行节点不作为本轮必需步骤。
@@ -111,3 +117,32 @@
 - 灰色建议与 textarea value 分开，Enter 接纳→编辑→现有发送快捷键/按钮执行；Esc/输入忽略当前anchor，迟到结果按Session/回复/Runtime/provider/model隔离。首次按键不创建任务，长按不会连发。
 - Session Sidecar route 只接受owner/anchor ID；实际SessionEngine校验idle/human/completed transcript，活动Provider/model从后端读取，30秒timeout/Abort/迟到handle清理，Builtin纯文本无工具和历史写入。其它Runtime标注不可用，不能借用原生Agent loop或系统CLI。
 - 源码/模拟/真实生成/原生桌面/主干/发布分别记录；独立UI使用真实组件+hook+生产主题，apiPost合成结果，不等于真实模型或Host联调。接续按本轮交付记录核实主干SHA/CI，并用受控Builtin会话补真实生成与原生IME验收。
+
+### 2026-10-13 — AgentNets sharing planning — AN-SHARE-PROTOTYPE-20261013
+
+- Summary：同步规划与交互原型，不开发真实共享服务。仓库更名为 MoXBots，ID、分支和历史保留。
+- Changes：规划位于 `services/agentnet/planning/`，任务清单区分本次交付与未来开发；新增共享项目地图、计划及分支接续，沿用 AGENTS.md 到 CLAUDE.md 的 symlink。
+- Decision：服务端原生多用户；显式 Bot 级授权；Host 管理与执行凭据独立。只开放第一版范围，不新增匿名、公网分享或付费结算。
+- Prototype：`dev-docs/prototypes/agentnets-bot-sharing-v1/`，所有数据与账号均模拟；邀请、接受、使用、审批、撤销、用量与审计的验收另见该目录记录。
+- Verification：GitHub 新地址、稳定 ID、origin 和 main 基线已核验；原型验收与主干交付仍进行中，最终状态以任务清单和验收记录为准。
+- Next：完成独立 UI 验收和主 Agent 复验，同步远端最新 main 并交付，随后仅按用户另行启动的任务开发真实共享服务。
+
+### 2026-10-13 — administrator scope correction — AN-SHARE-PROTOTYPE-20261013
+
+- 用户明确纠正：主原型必须是服务端管理员跨用户 Bots 管理界面；个人使用和协作放在现有客户端 Agent Net，后续称 Bots Net。
+- 第一稿误用了个人 Bot 所有者视角，已保存在原型目录 archive/personal-sharing-v0.html，只作方向对照，未验收、不交付为当前方案。
+- 新版区分平台管理员、Bot所有者与共享管理员；目录跨不同所有者/Host，详情管理共享、资源上限、额度、审批、暂停和审计。平台管理员不自动获得私人会话正文、原始凭据或Host OS权。
+- 复用原实现worker重构，独立reviewer转向新版矩阵；没有模型切换或真实服务变更。验收与main交付仍按TODO记录。
+
+### 2026-10-13 — admin prototype accepted — AN-SHARE-PROTOTYPE-20261013
+
+- 管理员版视觉、交互、1440×900/768×1024/390×844响应式通过独立验收；IR-01至IR-07经两轮产品修复关闭，主审复核暂停受保护写入、邀请审批和嵌套Escape/focus。最终HTML SHA256 8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3；分版本证据继承见独立记录，不称最终头全套重跑。
+- 证据与分工：dev-docs/prototypes/agentnets-bot-sharing-v1/{INDEPENDENT-UI-REVIEW,PRIMARY-REVIEW,DELIVERY}.md 和 evidence/。三名native参与者，实现Luna/medium、独立验收Sol/medium为请求值，实际运行变体/effort及用量未知；无AIRouter、模型升级或生产操作。
+- Git交付：PR #17 当前头部CI与main合入待完成，任务清单保留开放；最终核验后另追加关闭记录。
+- 下一步：仅处理Git交付；真实多账号/Host共享与客户端Bots Net更名仍待后续用户启动。
+
+### 2026-10-13 — main delivery verified — AN-SHARE-PROTOTYPE-20261013
+
+- PR #17 已合入 main，合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`；源头 `7a977724421f6c2b6923f3b8d1640aac28809185` 七项当前头部CI全部成功（Test 38348261646、Owned AgentNet 38348261659）。fetch后核验源头是远端main祖先且合并树完全一致。最终HTML hash保持8118ea…，原型和规划已在远端主干。
+- 本次TODO关闭，后续真实共享、多账号/Host联调、客户端Bots Net更名及生产发布保持开放。本文档后续关闭提交不改产品；完整证据、CI集成修复和native分工见原型DELIVERY.md。
+- 无生产共享服务发布或安装包替换；其他owner工作树不变。本任务已交付，下一步仅由用户启动后续开发。

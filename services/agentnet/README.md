@@ -107,3 +107,9 @@ python3 -m unittest discover -s services/agentnet/deploy -p 'test_*.py'
 ```
 
 These checks validate their local scope. Native Linux QA covers authenticated relay and Host management foundations; the public-domain deployment checklist above, browser authorization on the target Host, desktop online state, real configuration/credential and resource writes, restart/readback, and failure recovery remain separate acceptance steps.
+
+## Future Bots administration and Bots Net sharing
+
+The service is planned as a multi-user system with a platform-administrator Bots console and explicit per-Bot cross-user grants. Personal network use remains in the client, with its current Agent Net entry planned to become Bots Net. Platform administrators, Bot owners, and per-Bot sharing administrators have distinct authority; private sessions and credentials are not automatically exposed. Planning documents are in [the AgentNets roadmap](planning/AGENTNETS-ROADMAP.md), [v1 requirements and permissions](planning/AGENTNETS-BOT-SHARING-V1.md), and [the delivery and future-development checklist](planning/TODO.md). The [interactive prototype](../../dev-docs/prototypes/agentnets-bot-sharing-v1/index.html) uses synthetic local data only; it is not authenticated integration or a released sharing capability. Device and Host-management isolation remains a separate boundary.
+
+Canonical owned fork: https://github.com/heavenzhang/MoXBots.git (renamed from heavenzhang/MyAgents on 2026-10-13). Historical commit and release references are retained.

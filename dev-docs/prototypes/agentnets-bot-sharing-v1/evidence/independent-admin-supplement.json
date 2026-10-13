@@ -1,0 +1,21 @@
+{
+  "initial": {
+    "client": 724,
+    "scroll": 840,
+    "left": 0
+  },
+  "after": {
+    "client": 724,
+    "scroll": 840,
+    "left": 116
+  },
+  "naming": "MoXBots\nAgentNets 服务端",
+  "pausedEditToast": "授权资料演示内容已保存并记录审计",
+  "pausedWritePersisted": true,
+  "mobile": {
+    "text": "恢复共享",
+    "width": 51.6875,
+    "height": 100
+  },
+  "demoVisible": false
+}

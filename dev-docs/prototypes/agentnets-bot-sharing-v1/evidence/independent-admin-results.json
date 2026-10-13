@@ -1,0 +1,96 @@
+{
+  "started": "2026-10-13T04:16:47.700Z",
+  "finished": "2026-10-13T04:17:05.906Z",
+  "expected": "4959f53811d1da4bef51d394e2459ac3f72693a8ebab902f910c08703a3933eb",
+  "finalHash": "4959f53811d1da4bef51d394e2459ac3f72693a8ebab902f910c08703a3933eb",
+  "results": [
+    {
+      "id": "A01-directory",
+      "status": "PASS"
+    },
+    {
+      "id": "A03-invite-validation-focus",
+      "status": "PASS"
+    },
+    {
+      "id": "A02-crossbot",
+      "status": "PASS"
+    },
+    {
+      "id": "A04-resource-upper-bound",
+      "status": "PASS"
+    },
+    {
+      "id": "A05-full-chain",
+      "status": "PASS"
+    },
+    {
+      "id": "U01-isolation",
+      "status": "PASS"
+    },
+    {
+      "id": "U02-collaborator",
+      "status": "PASS"
+    },
+    {
+      "id": "U02-share-admin",
+      "status": "PASS"
+    },
+    {
+      "id": "A06-preallocation-duplicate",
+      "status": "PASS"
+    },
+    {
+      "id": "A06-edit-invalidates",
+      "status": "PASS"
+    },
+    {
+      "id": "A07-pause-isolation",
+      "status": "PASS"
+    },
+    {
+      "id": "U03-expiry",
+      "status": "FAIL",
+      "reason": "Expiry rejection unclear"
+    },
+    {
+      "id": "U03-offline",
+      "status": "PASS"
+    },
+    {
+      "id": "R01-1440",
+      "status": "PASS"
+    },
+    {
+      "id": "R01-768",
+      "status": "PASS"
+    },
+    {
+      "id": "R01-390",
+      "status": "PASS"
+    },
+    {
+      "id": "Q01-console",
+      "status": "PASS",
+      "errors": []
+    },
+    {
+      "id": "Q01-network",
+      "status": "PASS",
+      "requests": [
+        "http://127.0.0.1:5197/",
+        "http://127.0.0.1:5197/assets/moxbots-icon.png",
+        "http://127.0.0.1:5197/",
+        "http://127.0.0.1:5197/assets/moxbots-icon.png",
+        "http://127.0.0.1:5197/",
+        "http://127.0.0.1:5197/assets/moxbots-icon.png"
+      ]
+    },
+    {
+      "id": "fixed-version",
+      "status": "PASS",
+      "expected": "4959f53811d1da4bef51d394e2459ac3f72693a8ebab902f910c08703a3933eb",
+      "actual": "4959f53811d1da4bef51d394e2459ac3f72693a8ebab902f910c08703a3933eb"
+    }
+  ]
+}
