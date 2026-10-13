@@ -26,7 +26,7 @@ User architecture approval, source/owner read-only audit and minimal polling con
 
 Integrated local verification: service89 passed/2 manual ignored; headless137/137; codec11/11; closed core5/5 and Node parity7/7. Host unit22 passed/2 Linux-only skipped; actual worker/private regression and bounded child stop6/6 integration. Typecheck/full lint, both all-targets clippy and format checks, Host+Session bundle smoke pass. UI fixture tests are synthetic and do not prove Linux Host effects. Original registry production acceptance belongs to BOTS-CLOUD-ADMIN-001; no paid model invocation.
 
-## Current outcome and limits
+## Blockers and unknowns
 
 First finite builtin lifecycle scope is released and actually accepted. Main75 contains the implementation and its seven required checks passed; real IAB/Owner/admin and Node/native effects, exact worker exit, original replay/CAS, restart persistence, soft-delete/new-grant restore and effective revocation passed. Final Bot is restored, no worker/Session remains, both grant generations are revoked and all seven receipts ACKed. Detailed trace/source/artifact/rollback evidence: `services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`.
 
