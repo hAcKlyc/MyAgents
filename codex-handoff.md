@@ -2,10 +2,14 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-12T15:47:57+08:00 -->
-<!-- codex-handoff:latest-anchor=mah-remote-management-20261012 -->
+<!-- codex-handoff:last-updated=2026-10-13T09:31:00+08:00 -->
+<!-- codex-handoff:latest-anchor=MAH-NEXT-DRAFT-20261013 -->
 
 ## Current Snapshot
+
+- **本聊天最新任务 MAH-NEXT-DRAFT-20261013**：沿用 `feat/mah-headless-identity-store`，基线 `4887cbf5`，同分支同步 fork main `e344dac8` 后为 `5dea4a8d`。新增根据当前对话生成的灰色下一步建议；首次 Enter 只接纳可编辑草稿，随后正常发送才执行。IME/composition/keyCode229、重复 Enter、草稿/附件、busy/审批及会话切换保护保持。此任务不改 Host/AgentNet 实例，下面远程管理 owner 记录保留。
+- **功能边界**：Builtin 隔离文本 utility 可生成；DSH/Claude Code/Codex 的无工具、非持久化 utility 尚未验证，因此明确不可用。模型错误/空建议静默保留普通输入。最近128个完成anchor LRU，在途请求合并；建议不写 transcript/metadata/队列。完整契约见 `specs/tech_docs/session_architecture.md`。
+- **本轮验收/交付**：140项聚焦 unit/DOM + 标题Provider mock integration 2项；完整 typecheck/lint（依赖/文档）与 Web/server build；窄屏420字预览滚动缺陷已修复，独立 UI 最终复验与 fork main CI/合入尚待完成。记录与证据位于本任务目录同级 `outputs/MAH-NEXT-DRAFT-{TODO,INDEPENDENT-REVIEW,DELIVERY}.md` 和 `work/next-draft-*`。未调用真实模型、未替换已安装桌面包，原生macOS中文输入法与真实模型生成仍未验收。
 
 - **最新核查 MAH-CLIENT-HOST-MGMT-20261012 覆盖下方旧协议阻断判断**：用户要求先核实仅改桌面与 Host 的路径；设备级 `channel.open` 没有 mount 字段，peer TLS/身份通道与 Agent permit 独立。固定本地业务 schema 不证明官方 relay 拒绝扩展；先做原固定协议的无副作用设备握手探针，不预设三个服务仓库都需要改动或权限。
 - 本地资源准备层已交付 PR #6 / main `1d2c806e2700cd70804a1174f27b6ec23acdca68`，完整 CI `38221628350` 六项通过，测试 merge 与主干 tree 相同；下方未完成 CI 和失败 checkpoint 已过期。远程配置/凭据/Agent 创建没有真实验收。
@@ -84,3 +88,9 @@
 - Collaboration: 主智能体集成与最终验收，资源实现worker请求gpt-6-luna/medium，复用独立UI验收worker先前请求gpt-6-luna/medium；运行实际model/effort、token与费用未知，未调用AIRouter。资源模块共3轮修复（主审2轮、独立UI1轮），独立复验闭环。三名参与者，文件范围互斥，无模型升级，用量/收益未知。
 - Evidence: outputs/MAH-UI-PAGES-DELIVERY.md、MAH-UI-PAGES-INDEPENDENT-REVIEW.md、ui-pages-evidence/、verification/pages-*；loopback fixture位于work/host-pages-ui，端口5189，不含真实凭据。
 - Next: 主聊天读取本轮本地提交和outputs交付记录，统一同步最新main、按CI/审查整合；接正式authority后再验真实两设备权限/持久化/MCP/审批/日志。不得将fixture结果当作真实成功。
+
+### 2026-10-13 — MAH-NEXT-DRAFT-20261013
+
+- 灰色建议与 textarea value 分开，Enter 接纳→编辑→现有发送快捷键/按钮执行；Esc/输入忽略当前anchor，迟到结果按Session/回复/Runtime/provider/model隔离。首次按键不创建任务，长按不会连发。
+- Session Sidecar route 只接受owner/anchor ID；实际SessionEngine校验idle/human/completed transcript，活动Provider/model从后端读取，30秒timeout/Abort/迟到handle清理，Builtin纯文本无工具和历史写入。其它Runtime标注不可用，不能借用原生Agent loop或系统CLI。
+- 源码/模拟/真实生成/原生桌面/主干/发布分别记录；独立UI使用真实组件+hook+生产主题，apiPost合成结果，不等于真实模型或Host联调。接续按本轮交付记录核实主干SHA/CI，并用受控Builtin会话补真实生成与原生IME验收。

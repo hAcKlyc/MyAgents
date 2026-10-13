@@ -130,6 +130,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   onSend,
   onStop,
   sendBlocked = false,
+  nextPromptSuggestion,
   isLoading,
   sessionState,
   systemStatus,
@@ -578,6 +579,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // macOS Tauri WebView with WeChat IME voice input duplicating recognized
   // text dozens of times. Resize once after compositionend via resizeBump.
   const isComposingRef = useRef(false);
+  const [isComposing, setIsComposing] = useState(false);
+  const [dismissedSuggestionKey, setDismissedSuggestionKey] = useState<string | null>(null);
   const [resizeBump, setResizeBump] = useState(0);
 
   // Bug #123: pending excessive-repetition confirmation. When non-null, a
@@ -649,9 +652,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // IME doesn't emit a follow-up input event.
   const handleCompositionStart = useCallback(() => {
     isComposingRef.current = true;
+    setIsComposing(true);
   }, []);
   const handleCompositionEnd = useCallback(() => {
     isComposingRef.current = false;
+    setIsComposing(false);
     setResizeBump((b) => b + 1);
     const textarea = textareaRef.current;
     if (textarea && showFileSearch && atPosition !== null && textarea.value[atPosition] === '@') {
@@ -864,6 +869,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
   // Handle text input change (detect @ and / and backspace)
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (nextPromptSuggestion) setDismissedSuggestionKey(nextPromptSuggestion.key);
     const newValue = e.target.value;
     const cursorPos = e.target.selectionStart;
 
@@ -943,7 +949,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     }
 
     setInputValue(newValue);
-  }, [inputValue, showFileSearch, atPosition, showSlashMenu, slashPosition]);
+  }, [inputValue, showFileSearch, atPosition, showSlashMenu, slashPosition, nextPromptSuggestion]);
 
   // Cycle permission mode — runtime-aware:
   // Builtin: auto → plan → fullAgency → auto
@@ -1105,10 +1111,34 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // eslint-disable-next-line react-hooks/exhaustive-deps -- textareaRef is a stable ref
   }, [slashPosition, inputValue, slashSearchQuery, handleSkillSelect, onSlashAction, enabledClientActionCommands, showConfigLockedReason]);
 
+  const visibleSuggestion = !isLauncherMode && active && canSendMessage && !isLoading
+    && sessionState !== 'starting' && sessionState !== 'running' && sessionState !== 'stopping' && sessionState !== 'error'
+    && !isComposing && !inputValue && !images.length && !showSlashMenu && !showFileSearch && !repetitionWarning
+    && nextPromptSuggestion?.sessionId === sessionId && nextPromptSuggestion.key !== dismissedSuggestionKey
+    ? nextPromptSuggestion.text : null;
+
   const handleKeyDown = useCallback(async (event: React.KeyboardEvent<HTMLElement>) => {
     // Candidate confirmation/navigation belongs to IME before slash/@ menus,
     // permission shortcuts, or message sending can interpret the same key.
     if (isComposingRef.current || isImeComposingEvent(event)) return;
+    // A held acceptance key must never turn the accepted draft into a send.
+    if (event.key === 'Enter' && event.repeat) { event.preventDefault(); return; }
+    if (visibleSuggestion && event.key === 'Escape') {
+      event.preventDefault();
+      setDismissedSuggestionKey(nextPromptSuggestion!.key);
+      return;
+    }
+    if (visibleSuggestion && event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      setDismissedSuggestionKey(nextPromptSuggestion!.key);
+      setInputValue(visibleSuggestion);
+      requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+        textarea?.focus();
+        textarea?.setSelectionRange(visibleSuggestion.length, visibleSuggestion.length);
+      });
+      return;
+    }
     // Shift+Tab to cycle permission mode
     if (event.key === 'Tab' && event.shiftKey) {
       event.preventDefault();
@@ -1236,7 +1266,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       // 'newline' → fall through, the browser inserts the newline.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- textareaRef is stable
-  }, [cyclePermissionMode, undoStack, fileService, showSlashMenu, filteredSlashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, mentionPicker, chooseMention, inputValue, atPosition, fileSearchQuery, images.length, handleSend, handleSkillSelect, handleSlashSelect]);
+  }, [cyclePermissionMode, undoStack, fileService, showSlashMenu, filteredSlashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, mentionPicker, chooseMention, inputValue, atPosition, fileSearchQuery, images.length, handleSend, handleSkillSelect, handleSlashSelect, visibleSuggestion, nextPromptSuggestion]);
 
   const visibleGoal = !isLauncherMode ? sessionGoal : null;
   const goalDraftFromCronConfig = cronModeEnabled
@@ -1413,6 +1443,12 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
           {/* Textarea area */}
           <div ref={textareaWrapperRef} className="relative px-4 pt-3">
+            <div className="grid">
+            {visibleSuggestion && (
+              <div aria-hidden="true" data-testid="next-prompt-ghost" onMouseDown={event => { event.preventDefault(); textareaRef.current?.focus(); }} className="pointer-events-auto relative z-[1] col-start-1 row-start-1 whitespace-pre-wrap break-words text-base leading-relaxed text-[var(--ink-muted)]" style={{ maxHeight: `${LINE_HEIGHT * MAX_LINES}px`, overflowY: 'auto', overscrollBehaviorY: 'contain' }}>
+                {visibleSuggestion}
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={inputValue}
@@ -1427,13 +1463,15 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
               onPaste={handlePaste}
               onCompositionStart={handleCompositionStart}
               onCompositionEnd={handleCompositionEnd}
-              placeholder={
+              aria-label={isLauncherMode ? t('input.launcherPlaceholder') : t('input.placeholder')}
+              aria-describedby={visibleSuggestion ? 'next-prompt-hint-' + sessionId : undefined}
+              placeholder={visibleSuggestion ? '' :
                 isLauncherMode
                   ? t('input.launcherPlaceholder')
                   : t('input.placeholder')
               }
               rows={effectiveMinLines}
-              className="block w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
+              className="col-start-1 row-start-1 block w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
               style={{
                 minHeight: `${LINE_HEIGHT * effectiveMinLines}px`,
                 maxHeight: `${LINE_HEIGHT * MAX_LINES}px`,
@@ -1450,6 +1488,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 willChange: 'height',
               }}
             />
+            </div>
+            {visibleSuggestion && <div id={'next-prompt-hint-' + sessionId} className="pt-1 text-xs text-[var(--ink-muted)]">{t('input.nextPrompt.acceptHint')}<span className="sr-only">{visibleSuggestion}</span></div>}
+            {!isLauncherMode && active && nextPromptSuggestion?.unavailable && !inputValue && !isLoading && <div className="pt-1 text-xs text-[var(--ink-muted)]" title={t('input.nextPrompt.unavailableReason')}>{t('input.nextPrompt.unavailable')}</div>}
 
             <Popover open={showFileSearch} onClose={() => setShowFileSearch(false)} anchorRef={textareaWrapperRef}
               placement="top-start" offset={8} closeOnEscape={false}
