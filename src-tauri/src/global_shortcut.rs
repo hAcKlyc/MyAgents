@@ -37,7 +37,7 @@ pub struct GlobalSummonConfig {
 impl Default for GlobalSummonConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: !crate::app_dirs::IS_MOXBOT,
             accelerator: DEFAULT_ACCELERATOR.to_string(),
         }
     }
@@ -390,4 +390,16 @@ pub async fn cmd_set_global_summon_shortcut<R: Runtime>(
         accelerator,
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    #[test]
+    fn profile_default_does_not_claim_myagents_shortcut_from_moxbot() {
+        let config = GlobalSummonConfig::default();
+        assert_eq!(config.enabled, !crate::app_dirs::IS_MOXBOT);
+        assert_eq!(config.accelerator, DEFAULT_ACCELERATOR);
+    }
 }

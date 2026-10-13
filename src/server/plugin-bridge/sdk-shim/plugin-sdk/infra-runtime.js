@@ -11,13 +11,20 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, lstatSync, rmdirSync, writeFileSync, unlinkSync } from 'node:fs';
 
+// The compiled Bridge overwrites this before plugin import; capture once.
+const appProfile = process.env.MYAGENTS_BRIDGE_APP_PROFILE ?? 'myagents';
+if (appProfile !== 'myagents' && appProfile !== 'moxbot') {
+  throw new Error('Unsupported Plugin Bridge application profile');
+}
+const appDataDirName = appProfile === 'moxbot' ? '.moxbot' : '.myagents';
+
 /**
  * Resolve the preferred OpenClaw temp directory.
  * In real OpenClaw: tries XDG_RUNTIME_DIR → ~/.openclaw/tmp → os.tmpdir(), with permission checks.
  * Our shim: uses ~/.myagents/tmp (MyAgents convention, always writable).
  */
 export function resolvePreferredOpenClawTmpDir(options) {
-  const dir = join(homedir(), '.myagents', 'tmp');
+  const dir = join(homedir(), appDataDirName, 'tmp');
   try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
   return dir;
 }

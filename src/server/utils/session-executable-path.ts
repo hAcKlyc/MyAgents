@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -31,8 +32,8 @@ export function buildSessionExecutablePath(
   // stale npm/AppData/inherited commands with the same name.
   if (home) {
     essentialPaths.push(isWindows
-      ? resolve(home, '.myagents', 'bin')
-      : `${home}/.myagents/bin`);
+      ? resolve(home, APP_DATA_DIR_NAME, 'bin')
+      : `${home}/${APP_DATA_DIR_NAME}/bin`);
   }
 
   for (const dir of getSystemNodeDirs()) {

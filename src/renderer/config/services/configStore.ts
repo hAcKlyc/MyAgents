@@ -12,6 +12,7 @@ import {
 import { homeDir, join, dirname } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import { isBrowserDevMode } from '@/utils/browserMock';
+import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import { stripBom } from '../../../shared/utils';
 
 // Re-export for convenience
@@ -93,7 +94,7 @@ export function isLockBusyError(error: unknown): boolean {
 
 // ============= Constants =============
 
-export const CONFIG_DIR_NAME = '.myagents';
+export const CONFIG_DIR_NAME = APP_DATA_DIR_NAME;
 export const CONFIG_FILE = 'config.json';
 export const PROJECTS_FILE = 'projects.json';
 export const PROVIDERS_DIR = 'providers';

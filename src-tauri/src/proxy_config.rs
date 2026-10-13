@@ -111,7 +111,9 @@ struct PartialAppConfig {
 
 fn read_proxy_settings_from_disk() -> Option<ProxySettings> {
     let home = dirs::home_dir()?;
-    let config_path = home.join(".myagents").join("config.json");
+    let config_path = home
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("config.json");
 
     // Read config file
     let content = match fs::read_to_string(&config_path) {

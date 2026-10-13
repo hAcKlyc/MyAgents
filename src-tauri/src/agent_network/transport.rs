@@ -1,6 +1,6 @@
 //! Fixed signed network origin, public TLS + device DPoP and App proxy.
 //! No user account credential ever enters this client.
-use super::crypto::{external_tls_config, DevicePrivateKey};
+use super::crypto::{external_tls_config_with_ca, DevicePrivateKey};
 use super::NetworkError;
 use crate::network_diagnostics::{
     error_category, response_request_id, safe_request_id, RequestDiagnostic,
@@ -33,6 +33,14 @@ impl NetworkTransport {
         key: Arc<DevicePrivateKey>,
         memory: super::memory::MemoryBudget,
     ) -> Result<Self, NetworkError> {
+        Self::new_with_public_ca(origin, key, memory, None)
+    }
+    pub(crate) fn new_with_public_ca(
+        origin: &str,
+        key: Arc<DevicePrivateKey>,
+        memory: super::memory::MemoryBudget,
+        public_ca: Option<&str>,
+    ) -> Result<Self, NetworkError> {
         let endpoint =
             url::Url::parse(origin).map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
         if endpoint.scheme() != "https" || endpoint.origin().ascii_serialization() != origin {
@@ -46,7 +54,7 @@ impl NetworkTransport {
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .retry(reqwest::retry::never())
-            .tls_backend_preconfigured(external_tls_config()?);
+            .tls_backend_preconfigured(external_tls_config_with_ca(public_ca)?);
         let client = crate::proxy_config::build_client_with_proxy(builder)
             .map_err(|_| NetworkError::new("NETWORK_PROXY_INVALID"))?;
         Ok(Self {
@@ -109,6 +117,46 @@ impl NetworkTransport {
             return Ok(response);
         }
         Err(NetworkError::new("NETWORK_PROOF_INVALID"))
+    }
+    /// Owned registration is not a fabricated fixed-protocol metadata variant.
+    pub(crate) async fn register_device(
+        &self,
+        token: &str,
+        device: &crate::device_identity::DeviceIdentity,
+    ) -> Result<(), NetworkError> {
+        let body = serde_json::json!({"deviceName":device.device_name.as_deref().unwrap_or(&device.device_id),
+            "platform":device.platform,"osVersion":device.os_version.as_deref().unwrap_or("unknown"),
+            "appVersion":device.app_version});
+        let bytes = serde_json::to_vec(&body)
+            .map_err(|_| NetworkError::new("DEVICE_REGISTRATION_INVALID"))?;
+        if bytes.len() > 8192 {
+            return Err(NetworkError::new("DEVICE_REGISTRATION_INVALID"));
+        }
+        let method = reqwest::Method::POST;
+        let path = "/api/agent-network/device/registration";
+        let url = self
+            .origin
+            .join(path)
+            .map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
+        let request = self
+            .client
+            .post(url.clone())
+            .header("Content-Type", "application/json")
+            .body(bytes);
+        let diagnostic = RequestDiagnostic::new("agent-network", &method, path);
+        let mut response = self
+            .authenticated(request, &method, &url, token, &diagnostic)
+            .await?;
+        let status = response.status();
+        let retry_after = super::reconnect::retry_after(&response);
+        let mut request_id = response_request_id(&response);
+        let mut allocation = self.memory.reserve(0)?;
+        let bytes = read_response_body(&mut response, &mut allocation, &diagnostic).await?;
+        let value = decode_response(status, &bytes, retry_after, &mut request_id)?;
+        if value != serde_json::json!({"registered":true,"deviceId":device.device_id}) {
+            return Err(NetworkError::new("DEVICE_REGISTRATION_INVALID"));
+        }
+        Ok(())
     }
     pub(crate) async fn json(
         &self,
@@ -380,6 +428,12 @@ pub(crate) enum NetworkRoute<'a> {
         cursor: Option<&'a str>,
         limit: usize,
     },
+    /// Device-scoped projection available before the public Agent catalog is Ready.
+    /// It deliberately has no target-device parameter and is only selected by owned policy hydration.
+    OwnedSelfPolicy {
+        cursor: Option<&'a str>,
+        limit: usize,
+    },
     Callable {
         network_id: &'a str,
         cursor: Option<&'a str>,
@@ -413,7 +467,7 @@ impl NetworkRoute<'_> {
         match self {
             Self::Network => MetadataKind::Network,
             Self::Devices { .. } => MetadataKind::Devices,
-            Self::Agents { .. } => MetadataKind::Agents,
+            Self::Agents { .. } | Self::OwnedSelfPolicy { .. } => MetadataKind::Agents,
             Self::Callable { .. } => MetadataKind::Callable,
             Self::Catalog => MetadataKind::Catalog,
             Self::Membership { .. } => MetadataKind::Membership,
@@ -441,6 +495,10 @@ impl NetworkRoute<'_> {
                     uuid(device_id)?,
                     page(*cursor, *limit)?
                 ),
+            ),
+            Self::OwnedSelfPolicy { cursor, limit } => (
+                reqwest::Method::GET,
+                format!("/api/agent-network/policy/self{}", page(*cursor, *limit)?),
             ),
             Self::Callable {
                 network_id,
@@ -494,9 +552,21 @@ impl NetworkRoute<'_> {
                 reqwest::Method::GET,
                 format!("/v1/mutations/{}", uuid(mutation_id)?),
             ),
-            Self::DeviceName { network_id, device_id, write } => (
-                if *write { reqwest::Method::PATCH } else { reqwest::Method::GET },
-                format!("/v1/networks/{}/devices/{}/name", uuid(network_id)?, uuid(device_id)?),
+            Self::DeviceName {
+                network_id,
+                device_id,
+                write,
+            } => (
+                if *write {
+                    reqwest::Method::PATCH
+                } else {
+                    reqwest::Method::GET
+                },
+                format!(
+                    "/v1/networks/{}/devices/{}/name",
+                    uuid(network_id)?,
+                    uuid(device_id)?
+                ),
             ),
         })
     }
@@ -509,12 +579,55 @@ mod tests {
     fn device_names_use_scoped_id_routes_for_both_read_and_write() {
         let network = "11111111-1111-4111-8111-111111111111";
         let device = "22222222-2222-4222-8222-222222222222";
-        for (write, method) in [(false, reqwest::Method::GET), (true, reqwest::Method::PATCH)] {
-            let (actual_method, path) = NetworkRoute::DeviceName { network_id: network, device_id: device, write }.path().unwrap();
+        for (write, method) in [
+            (false, reqwest::Method::GET),
+            (true, reqwest::Method::PATCH),
+        ] {
+            let (actual_method, path) = NetworkRoute::DeviceName {
+                network_id: network,
+                device_id: device,
+                write,
+            }
+            .path()
+            .unwrap();
             assert_eq!(actual_method, method);
-            assert_eq!(path, format!("/v1/networks/{network}/devices/{device}/name"));
+            assert_eq!(
+                path,
+                format!("/v1/networks/{network}/devices/{device}/name")
+            );
         }
-        assert!(NetworkRoute::DeviceName { network_id: network, device_id: "家里 Windows", write: true }.path().is_err());
+        assert!(NetworkRoute::DeviceName {
+            network_id: network,
+            device_id: "家里 Windows",
+            write: true
+        }
+        .path()
+        .is_err());
+    }
+    #[test]
+    fn owned_self_policy_has_fixed_scoped_route_and_agents_schema() {
+        let route = NetworkRoute::OwnedSelfPolicy {
+            cursor: Some("11111111-1111-4111-8111-111111111111"),
+            limit: 50,
+        };
+        let (method, path) = route.path().unwrap();
+        assert_eq!(method, reqwest::Method::GET);
+        assert_eq!(
+            path,
+            "/api/agent-network/policy/self?limit=50&cursor=11111111-1111-4111-8111-111111111111"
+        );
+        assert!(matches!(&route, NetworkRoute::OwnedSelfPolicy { .. }));
+        assert!(matches!(route.response_kind(), MetadataKind::Agents));
+        let valid_page = serde_json::json!({"items":[],"nextCursor":null,"complete":true});
+        assert!(validate_metadata(route.response_kind(), &valid_page).is_ok());
+        let with_unknown_field = serde_json::json!({"items":[],"nextCursor":null,"complete":true,"scope":"other-device"});
+        assert!(validate_metadata(route.response_kind(), &with_unknown_field).is_err());
+        assert!(NetworkRoute::OwnedSelfPolicy {
+            cursor: Some("not-a-canonical-uuid"),
+            limit: 50,
+        }
+        .path()
+        .is_err());
     }
     fn decode_response(
         status: reqwest::StatusCode,

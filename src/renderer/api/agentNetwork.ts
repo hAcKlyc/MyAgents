@@ -294,6 +294,28 @@ export const joinNetworkConnection = (
   url: string,
   key: string,
 ): Promise<NetworkRegistry> => invoke("cmd_agent_network_join", { url, key });
+export interface OwnedLoginAttempt {
+  attemptId: string;
+  authorizationUrl: string;
+  expiresAt: number;
+}
+export type OwnedLoginPoll =
+  | { status: "pending" }
+  | { status: "authenticated"; registry: NetworkRegistry };
+export const startOwnedNetworkLogin = (
+  issuer: string,
+  publicTlsCaFile?: string,
+): Promise<OwnedLoginAttempt> =>
+  invoke("cmd_agent_network_owned_start", {
+    issuer,
+    publicTlsCaFile: publicTlsCaFile?.trim() || null,
+  });
+export const openOwnedNetworkAuthorization = (attemptId: string): Promise<void> =>
+  invoke("cmd_agent_network_owned_open_authorization", { attemptId });
+export const pollOwnedNetworkLogin = (attemptId: string): Promise<OwnedLoginPoll> =>
+  invoke("cmd_agent_network_owned_poll", { attemptId });
+export const cancelOwnedNetworkLogin = (attemptId: string): Promise<void> =>
+  invoke("cmd_agent_network_owned_cancel", { attemptId });
 export const removeNetworkConnection = (
   connectionId: string,
 ): Promise<NetworkRegistry> =>

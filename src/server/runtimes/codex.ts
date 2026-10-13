@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { parseAsyncQuestionSet } from '../../shared/asyncUserQuestions';
 // CodexRuntime — drives the Codex CLI as a subprocess via app-server (v0.1.60)
 //
@@ -1071,7 +1072,7 @@ export function buildCodexCompletedFileChangeInput(
 // ─── Temp image directory for Codex (which requires file paths, not base64) ───
 const TEMP_IMG_DIR = join(
   process.env.HOME || process.env.USERPROFILE || '/tmp',
-  '.myagents', 'tmp', 'codex-images',
+  APP_DATA_DIR_NAME, 'tmp', 'codex-images',
 );
 
 /**

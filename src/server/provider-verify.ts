@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * Provider verification utilities
  * Verifies API key validity by sending a test request
@@ -218,7 +219,7 @@ async function verifyViaSdk(
     const cliPath = resolveClaudeCodeCli();
     // Use ~/.myagents/projects/ as cwd — a dedicated app directory with guaranteed permissions.
     // Avoids potential permission or .claude/ config issues in home directory.
-    const cwd = join(homedir(), '.myagents', 'projects');
+    const cwd = join(homedir(), APP_DATA_DIR_NAME, 'projects');
     ensureDirSync(cwd);
 
     async function* simplePrompt() {
@@ -567,7 +568,7 @@ export async function fetchSdkSupportedModels(): Promise<Array<{ value: string; 
   // is needed. `buildClaudeSessionEnv()` is now a pure function — no global
   // state pollution to clean up.
   const cliPath = resolveClaudeCodeCli();
-  const cwd = join(homedir(), '.myagents', 'projects');
+  const cwd = join(homedir(), APP_DATA_DIR_NAME, 'projects');
   ensureDirSync(cwd);
 
   const officialSubscriptionProvider: ProviderEnv = { providerId: SUBSCRIPTION_PROVIDER_ID };

@@ -7,6 +7,10 @@ import { useToastOptional } from "@/components/Toast";
 import {
   selectNetworkConnection,
   joinNetworkConnection,
+  startOwnedNetworkLogin,
+  openOwnedNetworkAuthorization,
+  pollOwnedNetworkLogin,
+  cancelOwnedNetworkLogin,
   removeNetworkConnection,
   networkConnections,
   networkErrorKey,
@@ -151,6 +155,39 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
           onConfirm={async (url, key) => {
             try {
               acceptNetworkRegistry(await joinNetworkConnection(url, key));
+            } catch (failure) {
+              throw Error(error(failure));
+            }
+          }}
+          onOwnedStart={async (issuer, publicTlsCaFile) => {
+            try {
+              return await startOwnedNetworkLogin(issuer, publicTlsCaFile);
+            } catch (failure) {
+              throw Error(error(failure));
+            }
+          }}
+          onOwnedOpen={async (attemptId) => {
+            try {
+              await openOwnedNetworkAuthorization(attemptId);
+            } catch (failure) {
+              throw Error(error(failure));
+            }
+          }}
+          onOwnedPoll={async (attemptId) => {
+            try {
+              const result = await pollOwnedNetworkLogin(attemptId);
+              if (result.status === "authenticated") {
+                acceptNetworkRegistry(result.registry);
+                return "authenticated";
+              }
+              return "pending";
+            } catch (failure) {
+              throw Error(error(failure));
+            }
+          }}
+          onOwnedCancel={async (attemptId) => {
+            try {
+              await cancelOwnedNetworkLogin(attemptId);
             } catch (failure) {
               throw Error(error(failure));
             }

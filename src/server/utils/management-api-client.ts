@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../../shared/appProfile';
 import { cancellableFetch } from './cancellation';
 import { readLoopbackJson } from './loopback-response';
 import {
@@ -33,7 +34,7 @@ export async function managementApi(
       code: 'management_unavailable',
       error: 'Management API not available (app may still be starting)',
       recoveryHint: {
-        recoveryCommand: 'myagents status',
+        recoveryCommand: `${APP_CLI_NAME} status`,
         message: 'Check whether the app backend is fully up; if not, retry in a few seconds.',
       },
     };
@@ -59,7 +60,7 @@ export async function managementApi(
       code: method === 'POST' ? 'transport_outcome_unknown' : 'management_unavailable',
       error: `Management API unreachable: ${msg}`,
       recoveryHint: {
-        recoveryCommand: 'myagents status',
+        recoveryCommand: `${APP_CLI_NAME} status`,
         message: 'Check backend health; restart the app if the problem persists.',
       },
     };

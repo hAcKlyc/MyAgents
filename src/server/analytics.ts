@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * Server-side Analytics
  *
@@ -12,7 +13,7 @@ import { homedir } from 'os';
 
 import { cancellableFetch } from './utils/cancellation';
 
-const CONFIG_PATH = join(homedir(), '.myagents', 'analytics_config.json');
+const CONFIG_PATH = join(homedir(), APP_DATA_DIR_NAME, 'analytics_config.json');
 
 interface AnalyticsConfig {
   enabled: boolean;

@@ -231,6 +231,9 @@ fn ensure_high_file_descriptor_limit() {
 }
 
 // Configuration constants
+#[cfg(myagents_moxbot)]
+const BASE_PORT: u16 = 32415;
+#[cfg(not(myagents_moxbot))]
 const BASE_PORT: u16 = 31415;
 // Health check: exponential backoff 50ms → 500ms, capped. Wall-clock ceiling ≈ 5 min.
 // Node cold start is ~2s (tsx boot + module load), so the first 5 attempts at
@@ -255,6 +258,9 @@ const PORT_RANGE: u16 = 500;
 pub const GLOBAL_SIDECAR_ID: &str = "__global__";
 // Process identification marker (used to identify our sidecar processes)
 // This marker is added to all sidecar commands for reliable process identification
+#[cfg(myagents_moxbot)]
+const SIDECAR_MARKER: &str = "--moxbot-sidecar";
+#[cfg(not(myagents_moxbot))]
 const SIDECAR_MARKER: &str = "--myagents-sidecar";
 const SESSION_DELETE_AUTHORITY_ENV: &str = "MYAGENTS_SESSION_DELETE_AUTHORITY";
 const SESSION_DELETE_AUTHORITY_HEADER: &str = "X-MyAgents-Session-Delete-Authority";

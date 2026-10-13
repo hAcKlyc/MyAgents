@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * title-generator.ts — AI-powered session title generation.
  *
@@ -232,7 +233,7 @@ async function generateTitleInner(
 
   try {
     const cliPath = resolveClaudeCodeCli();
-    const cwd = join(homedir(), '.myagents', 'projects');
+    const cwd = join(homedir(), APP_DATA_DIR_NAME, 'projects');
     ensureDirSync(cwd);
 
     // Pass `model` as the override so CLAUDE_CODE_AUTO_COMPACT_WINDOW is

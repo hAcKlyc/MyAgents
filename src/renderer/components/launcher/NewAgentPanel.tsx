@@ -45,6 +45,7 @@ import { Popover } from '@/components/ui/Popover';
 import type { Project, WorkspaceTemplate } from '@/config/types';
 import { DEFAULT_BUNDLED_WORKSPACE_TEMPLATE_ID, PRESET_TEMPLATES } from '@/config/types';
 import { ProjectAlreadyExistsError } from '@/config/services/projectService';
+import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import { addUserTemplate, loadUserTemplates, removeUserTemplate, updateUserTemplate } from '@/config/services/templateService';
 import { useCloseLayer } from '@/hooks/useCloseLayer';
 import { useConfig } from '@/hooks/useConfig';
@@ -106,7 +107,7 @@ async function findAvailablePath(dir: string, name: string): Promise<string> {
 
 async function resolveDefaultParentDir(): Promise<string> {
   try {
-    return await join(await homeDir(), '.myagents', 'projects');
+    return await join(await homeDir(), APP_DATA_DIR_NAME, 'projects');
   } catch {
     return '';
   }

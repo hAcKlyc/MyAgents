@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE, APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * MCP OAuth State Store
  *
@@ -21,7 +22,8 @@ import { ensureDirSync } from '../utils/fs-utils';
 import { withFileLock } from '../utils/file-lock';
 
 export function getOAuthConfigDir(): string {
-  return process.env.MYAGENTS_CONFIG_DIR || join(homedir(), '.myagents');
+  return (APP_BUILD_PROFILE === 'myagents' ? process.env.MYAGENTS_CONFIG_DIR : undefined)
+    || join(homedir(), APP_DATA_DIR_NAME);
 }
 
 function getStateFile(): string {

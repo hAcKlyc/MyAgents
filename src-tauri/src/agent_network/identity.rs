@@ -4,7 +4,7 @@
 use super::account::NetworkAccountSession;
 use super::crypto::{
     certificate_chain, certificate_fingerprint, CryptoError, DevicePrivateKey, IdentityStore,
-    KeyScope, OsIdentityStore, TlsIdentity,
+    KeyScope, TlsIdentity,
 };
 use super::jwt::{AccessClaims, AccountVerifier, VerifiedPeer};
 use super::NetworkError;
@@ -25,7 +25,7 @@ fn key_generation_plan(
     retired_generation: Option<u64>,
 ) -> Result<(u64, bool), NetworkError> {
     if retired_generation.is_some_and(|retired| {
-        !replacement && !(key_present && previous.is_some_and(|current| current > retired))
+        !(replacement || key_present && previous.is_some_and(|current| current > retired))
     }) {
         return Err(NetworkError::new("NETWORK_REMOVAL_UNCONFIRMED"));
     }
@@ -159,14 +159,6 @@ impl NetworkIdentity {
             Ok(_) => Err(NetworkError::new("NETWORK_REMOVAL_UNCONFIRMED")),
         }
     }
-    pub(crate) async fn initialize(
-        account: NetworkAccountSession,
-        retired_generation: Option<u64>,
-    ) -> Result<Self, NetworkError> {
-        Self::initialize_with_store(account, retired_generation, Arc::new(OsIdentityStore)).await
-    }
-
-    /// Backend selection belongs to the Rust owner; Desktop never auto-falls back.
     pub(crate) async fn initialize_with_store(
         account: NetworkAccountSession,
         retired_generation: Option<u64>,
@@ -205,7 +197,7 @@ impl NetworkIdentity {
         let mut scope = KeyScope {
             issuer: account.issuer().into(),
             environment: account.environment().into(),
-            service_id: service_id.into(),
+            service_id,
             principal_id: account.principal_id()?.into(),
             device_id: device.device_id.clone(),
             key_generation: state.key_generation.unwrap_or(1),
@@ -306,11 +298,7 @@ impl NetworkIdentity {
         {
             return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
         }
-        if let NetworkAccountSession::Selfhost(instance) = &account {
-            instance
-                .descriptor
-                .ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
-        }
+        account.ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
         let peer = validate_peer(
             &scope,
             key.clone(),
@@ -431,13 +419,7 @@ async fn validate_peer(
     }))
 }
 
-pub(crate) async fn load_key(
-    scope: &KeyScope,
-) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {
-    load_key_with_store(scope, Arc::new(OsIdentityStore)).await
-}
-
-async fn load_key_with_store(
+pub(super) async fn load_key_with_store(
     scope: &KeyScope,
     store: Arc<dyn IdentityStore>,
 ) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {

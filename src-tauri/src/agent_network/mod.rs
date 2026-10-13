@@ -1,17 +1,24 @@
 //! App-owned network identity, transport and admission adapters.
 mod account;
+pub(crate) mod account_operation;
 pub(crate) mod actor;
 mod calls;
 mod catalog;
 mod channel;
 pub(crate) mod commands;
+mod connection;
 mod crypto;
 pub(crate) mod discovery;
 mod identity;
+mod identity_desktop;
 mod incoming;
 mod jwt;
 mod local_owner;
 mod memory;
+mod owned_account_desktop;
+mod owned_admission;
+mod owned_login;
+mod owned_profile;
 mod pairs;
 mod policy;
 mod power;

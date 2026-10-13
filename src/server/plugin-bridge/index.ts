@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE } from '../../shared/appProfile';
 /**
  * OpenClaw Channel Plugin Bridge
  *
@@ -55,6 +56,10 @@ import { registerHooks, createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join as pathJoin } from 'node:path';
 import { parseArgs } from 'util';
+
+// Bind standalone shims before dynamically importing any plugin. Inherited
+// environment cannot choose a different product's private data directory.
+process.env.MYAGENTS_BRIDGE_APP_PROFILE = APP_BUILD_PROFILE;
 
 // =============================================================================
 // Plugin compat loader — runtime patch for broken community plugins

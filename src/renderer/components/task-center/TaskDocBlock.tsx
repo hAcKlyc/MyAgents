@@ -26,6 +26,7 @@ import { ChevronDownIcon, ChevronUpIcon, FolderOpenIcon } from '@/components/ico
 import Markdown from '@/components/Markdown';
 import { taskOpenDocsDir, taskReadDoc, type TaskDocName } from '@/api/taskCenter';
 import { openExternal } from '@/utils/openExternal';
+import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import type { Task } from '@/../shared/types/task';
 import { extractErrorMessage } from './errors';
 
@@ -132,7 +133,7 @@ export function TaskDocBlock({
     };
   }, [loaded, content]);
 
-  // The on-disk path is deterministic (`~/.myagents/tasks/<id>/<doc>.md`)
+  // The on-disk path is deterministic (`~/<app-data-dir>/tasks/<id>/<doc>.md`)
   // so we can surface it + an opener button above the content without
   // repeating a redundant section title. Declared before the
   // hideWhenEmpty short-circuit so the useCallback hook call order
@@ -143,7 +144,7 @@ export function TaskDocBlock({
       ? task.docs?.verifyMd
       : task.docs?.progressMd;
   const displayPath = compactTaskDocPath(
-    path ?? `~/.myagents/tasks/${task.id}/${doc}.md`,
+    path ?? `~/${APP_DATA_DIR_NAME}/tasks/${task.id}/${doc}.md`,
   );
   const handleOpenFile = useCallback(() => {
     if (!path) return;
@@ -248,8 +249,8 @@ export function TaskDocBlock({
 
 export function compactTaskDocPath(path: string): string {
   const normalized = path.replace(/\\/g, '/');
-  const myAgentsRoot = '/.myagents/';
-  const markerIndex = normalized.lastIndexOf(myAgentsRoot);
+  const appDataRoot = `/${APP_DATA_DIR_NAME}/`;
+  const markerIndex = normalized.lastIndexOf(appDataRoot);
   return markerIndex >= 0 ? `~${normalized.slice(markerIndex)}` : normalized;
 }
 

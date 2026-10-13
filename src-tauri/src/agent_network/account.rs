@@ -84,9 +84,19 @@ pub(crate) struct SelfhostAccount {
     pub active: Arc<AtomicBool>,
     pub enrollment_key: Option<Zeroizing<String>>,
 }
+pub(crate) struct OwnedAccount {
+    pub connection_id: String,
+    pub descriptor: super::owned_login::OwnedInstance,
+    pub active: Arc<AtomicBool>,
+    pub session: super::owned_login::OwnedSession,
+    pub public_tls_ca: Option<String>,
+    pub join_authorized: AtomicBool,
+    pub guard: Arc<dyn Fn() -> Result<(), NetworkError> + Send + Sync>,
+}
 #[derive(Clone)]
 pub(crate) enum NetworkAccountSession {
     Official(OfficialAccountSession),
+    Owned(Arc<OwnedAccount>),
     Selfhost(Arc<SelfhostAccount>),
 }
 impl NetworkAccountSession {
@@ -97,41 +107,77 @@ impl NetworkAccountSession {
         match self {
             Self::Official(a) => a.binding_id(),
             Self::Selfhost(a) => &a.connection_id,
+            Self::Owned(a) => &a.connection_id,
         }
     }
     pub(crate) fn issuer(&self) -> &str {
         match self {
             Self::Official(a) => a.issuer(),
             Self::Selfhost(a) => &a.descriptor.issuer,
+            Self::Owned(a) => &a.descriptor.issuer,
         }
     }
     pub(crate) fn principal_id(&self) -> Result<&str, NetworkError> {
         match self {
             Self::Official(a) => a.principal_id(),
             Self::Selfhost(a) => Ok(&a.descriptor.principal_id),
+            Self::Owned(a) => Ok(&a.session.principal_id),
         }
     }
     pub(crate) fn environment(&self) -> &str {
         match self {
             Self::Official(a) => a.environment(),
             Self::Selfhost(a) => &a.descriptor.environment,
+            Self::Owned(a) => &a.descriptor.environment,
         }
     }
     pub(crate) fn service_id(&self) -> Result<&str, NetworkError> {
         match self {
             Self::Official(a) => a.service_id(),
             Self::Selfhost(a) => Ok(&a.descriptor.service_id),
+            Self::Owned(a) => Ok(&a.descriptor.service_id),
         }
     }
     pub(crate) fn is_selfhost(&self) -> bool {
-        matches!(self, Self::Selfhost(_))
+        matches!(self, Self::Selfhost(_) | Self::Owned(_))
     }
     pub(crate) fn has_enrollment_key(&self) -> bool {
         matches!(self,Self::Selfhost(a) if a.enrollment_key.is_some())
+            || matches!(self, Self::Owned(_))
+    }
+    pub(crate) fn is_management_only(&self) -> bool {
+        matches!(self, Self::Owned(_))
+    }
+    pub(crate) fn public_tls_ca(&self) -> Option<&str> {
+        match self {
+            Self::Owned(a) => a.public_tls_ca.as_deref(),
+            _ => None,
+        }
+    }
+    pub(crate) fn deactivate(&self) {
+        match self {
+            Self::Owned(a) => a.active.store(false, Ordering::Release),
+            Self::Selfhost(a) => a.active.store(false, Ordering::Release),
+            _ => {}
+        }
+    }
+    pub(crate) fn ensure_bootstrap(&self, root: &str, url: &str) -> Result<(), NetworkError> {
+        match self {
+            Self::Selfhost(a) => a.descriptor.ensure_bootstrap(root, url),
+            Self::Owned(a) => a.descriptor.ensure_bootstrap(root, url),
+            _ => Ok(()),
+        }
     }
     pub(crate) fn ensure_current(&self) -> Result<(), NetworkError> {
         match self {
             Self::Official(a) => a.ensure_current(),
+            Self::Owned(a) => {
+                if !a.active.load(Ordering::Acquire) {
+                    return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+                }
+                a.session.validate(&a.descriptor)?;
+                (a.guard)()
+            }
             Self::Selfhost(a) => {
                 if a.active.load(Ordering::Acquire) {
                     Ok(())
@@ -149,6 +195,23 @@ impl NetworkAccountSession {
         self.ensure_current()?;
         match self {
             Self::Official(a) => a.request(operation, body).await,
+            Self::Owned(a) => {
+                let (method, path, _) = operation.request()?;
+                let (client, current) = super::owned_login::OwnedClient::discover(
+                    &a.descriptor.issuer,
+                    a.public_tls_ca.as_deref(),
+                )
+                .await?;
+                a.descriptor.ensure_same_trust(&current)?;
+                let value = client
+                    .identity_request(method, &path, body, &a.session.access_token)
+                    .await?;
+                if matches!(operation, AccountOperation::Jwks) && value != a.descriptor.jwks {
+                    return Err(NetworkError::new("NETWORK_TRUST_CHANGED"));
+                }
+                self.ensure_current()?;
+                Ok(value)
+            }
             Self::Selfhost(a) => {
                 let (method, path, _) = operation.request()?;
                 let key = if matches!(operation, AccountOperation::Identity) {
@@ -166,6 +229,16 @@ impl NetworkAccountSession {
         }
     }
     pub(crate) async fn validate_instance(&self) -> Result<(), NetworkError> {
+        if let Self::Owned(a) = self {
+            let (_, current) = super::owned_login::OwnedClient::discover(
+                &a.descriptor.issuer,
+                a.public_tls_ca.as_deref(),
+            )
+            .await?;
+            a.descriptor.ensure_same_trust(&current)?;
+            self.ensure_current()?;
+        }
+
         if let Self::Selfhost(a) = self {
             let current = descriptor(&a.descriptor.issuer).await?;
             // Presentation name may change; stable instance and pinned trust may not.

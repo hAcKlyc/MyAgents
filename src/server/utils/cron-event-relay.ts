@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../../shared/appProfile';
 import { SYSTEM_REMINDER_CLOSE, SYSTEM_REMINDER_OPEN } from '../../shared/systemReminder';
 import { neutralizeInboxStructuralTags, sanitizeInboxLabel } from '../inbox/sanitize-label';
 
@@ -72,7 +73,7 @@ function taskMetaLines(e: CronRelayEvent, now: string): string[] {
   const lines = [`Task id: ${escapeTagText(e.taskId || 'unknown')}`];
   if (e.fromSessionId) {
     const sid = escapeTagText(e.fromSessionId);
-    lines.push(`Source session id: ${sid} (use \`myagents session send ${sid} -p "..."\` to follow up)`);
+    lines.push(`Source session id: ${sid} (use \`${APP_CLI_NAME} session send ${sid} -p "..."\` to follow up)`);
   }
   lines.push(`Current time: ${escapeTagText(now)}`);
   return lines;

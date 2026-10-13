@@ -5,7 +5,7 @@ use super::*;
 /// Write the Global Sidecar port to ~/.myagents/sidecar.port so the CLI can discover it.
 pub(super) fn write_global_port_file(port: u16) {
     if let Some(home) = dirs::home_dir() {
-        let port_file = home.join(".myagents").join(PORT_FILE_NAME);
+        let port_file = home.join(crate::app_dirs::APP_DATA_DIR_NAME).join(PORT_FILE_NAME);
         if let Err(e) = std::fs::write(&port_file, port.to_string()) {
             ulog_warn!("[sidecar] Failed to write port file {:?}: {}", port_file, e);
         } else {
@@ -17,7 +17,7 @@ pub(super) fn write_global_port_file(port: u16) {
 /// Remove the port file (called on app exit / sidecar shutdown).
 pub(super) fn remove_global_port_file() {
     if let Some(home) = dirs::home_dir() {
-        let port_file = home.join(".myagents").join(PORT_FILE_NAME);
+        let port_file = home.join(crate::app_dirs::APP_DATA_DIR_NAME).join(PORT_FILE_NAME);
         let _ = std::fs::remove_file(&port_file);
     }
 }
@@ -170,7 +170,23 @@ pub fn cleanup_stale_sidecars(had_prior_instance: bool) -> bool {
         return true;
     }
 
-    let report = crate::process_cleanup::kill_stale_processes(STARTUP_CLEANUP_PATTERNS);
+    // MoX bot must never sweep the global SDK/MCP signatures used by MyAgents.
+    // Recovery authority is limited to this installation and this profile's data.
+    let report = if crate::app_dirs::IS_MOXBOT {
+        let mut roots = Vec::new();
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                roots.push(parent.join("../Resources"));
+            }
+        }
+        if let Some(data) = crate::app_dirs::myagents_data_dir() {
+            roots.push(data);
+        }
+        let roots: Vec<_> = roots.into_iter().filter_map(|p| p.canonicalize().ok()).collect();
+        crate::process_cleanup::kill_stale_processes_with_roots(&[], &roots)
+    } else {
+        crate::process_cleanup::kill_stale_processes(STARTUP_CLEANUP_PATTERNS)
+    };
     if report.total_targets() == 0 {
         ulog_info!(
             "[sidecar] Startup cleanup complete in {:?} (no stale processes found)",

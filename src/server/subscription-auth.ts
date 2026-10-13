@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -228,7 +229,7 @@ export async function startSubscriptionLogin(): Promise<SubscriptionLoginState> 
 
   try {
     const cliPath = resolveClaudeCodeCli();
-    const cwd = join(homedir(), '.myagents', 'projects');
+    const cwd = join(homedir(), APP_DATA_DIR_NAME, 'projects');
     ensureDirSync(cwd);
     const officialSubscriptionProvider: ProviderEnv = { providerId: SUBSCRIPTION_PROVIDER_ID };
     const authQuery = await createGuardedSdkQuery(cliPath, () => query({

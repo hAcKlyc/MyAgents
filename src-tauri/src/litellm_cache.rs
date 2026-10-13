@@ -70,7 +70,7 @@ fn now_secs() -> u64 {
 
 fn cache_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    Ok(home.join(".myagents").join("cache"))
+    Ok(home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("cache"))
 }
 
 /// Parse `liteLLMModelDataRefresh` out of a config.json string. PURE — testable.
@@ -93,7 +93,7 @@ fn is_enabled() -> bool {
     let Some(home) = dirs::home_dir() else {
         return true;
     };
-    let path = home.join(".myagents").join("config.json");
+    let path = home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("config.json");
     match fs::read_to_string(&path) {
         Ok(content) => parse_enabled_flag(&content).unwrap_or(true),
         Err(_) => true,

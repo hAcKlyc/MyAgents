@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Model capability lookup — read-side for CLAUDE_CODE_AUTO_COMPACT_WINDOW injection.
  *
@@ -117,7 +118,7 @@ const MAX_PLAUSIBLE_TOKENS = 20_000_000;
 // provider's /v1/models doesn't report). The Rust side fetches
 // `model_prices_and_context_window.json` (~1.5MB, ~2700 entries) to this path
 // on a 24h cadence; we read it here as the LOWEST-priority registry source.
-const LITELLM_CACHE_REL = ['.myagents', 'cache', 'litellm_model_prices.json'] as const;
+const LITELLM_CACHE_REL = [APP_DATA_DIR_NAME, 'cache', 'litellm_model_prices.json'] as const;
 // The file is ~1.5MB today; 24MB headroom guards against runaway growth while
 // still rejecting an absurd/poisoned file before we JSON.parse it.
 const MAX_LITELLM_FILE_BYTES = 24 * 1024 * 1024;
@@ -311,18 +312,18 @@ function providerListContainsModel(providers: unknown, bareModelId: string): boo
 }
 
 function loadCustomProvidersFromDisk(home: string): Array<Record<string, unknown>> {
-  const dir = resolve(home, '.myagents', 'providers');
+  const dir = resolve(home, APP_DATA_DIR_NAME, 'providers');
   if (!existsSync(dir)) return [];
   const out: Array<Record<string, unknown>> = [];
   let files: string[];
   try {
     files = readdirSync(dir).filter(f => f.endsWith('.json'));
   } catch (err) {
-    console.warn('[model-caps] readdir failed for ~/.myagents/providers/:', (err as Error)?.message ?? err);
+    console.warn(`[model-caps] readdir failed for ~/${APP_DATA_DIR_NAME}/providers/:`, (err as Error)?.message ?? err);
     return [];
   }
   if (files.length > MAX_PROVIDER_FILES) {
-    console.warn(`[model-caps] ~/.myagents/providers/ has ${files.length} files; processing first ${MAX_PROVIDER_FILES}`);
+    console.warn(`[model-caps] ~/${APP_DATA_DIR_NAME}/providers/ has ${files.length} files; processing first ${MAX_PROVIDER_FILES}`);
     files = files.slice(0, MAX_PROVIDER_FILES);
   }
   for (const f of files) {
@@ -344,7 +345,7 @@ function loadCustomProvidersFromDisk(home: string): Array<Record<string, unknown
 }
 
 function loadPresetCustomModels(home: string): Record<string, unknown> | null {
-  const configPath = resolve(home, '.myagents', 'config.json');
+  const configPath = resolve(home, APP_DATA_DIR_NAME, 'config.json');
   if (!existsSync(configPath)) return null;
   try {
     const stat = statSync(configPath);
@@ -356,7 +357,7 @@ function loadPresetCustomModels(home: string): Record<string, unknown> | null {
     const cfg = JSON.parse(stripBom(raw)) as { presetCustomModels?: Record<string, unknown> };
     return cfg.presetCustomModels ?? null;
   } catch (err) {
-    console.warn('[model-caps] failed to read ~/.myagents/config.json:', (err as Error)?.message ?? err);
+    console.warn(`[model-caps] failed to read ~/${APP_DATA_DIR_NAME}/config.json:`, (err as Error)?.message ?? err);
     return null;
   }
 }
@@ -532,8 +533,8 @@ function statMtimeMs(path: string): number {
 function buildRegistry(): Map<string, ModelCapability> {
   const home = getHomeDirOrNull();
 
-  const providersDir = home ? resolve(home, '.myagents', 'providers') : '';
-  const configPath = home ? resolve(home, '.myagents', 'config.json') : '';
+  const providersDir = home ? resolve(home, APP_DATA_DIR_NAME, 'providers') : '';
+  const configPath = home ? resolve(home, APP_DATA_DIR_NAME, 'config.json') : '';
   const litellmPath = home ? resolve(home, ...LITELLM_CACHE_REL) : '';
   const providersDirMtimeMs = providersDir ? statMtimeMs(providersDir) : -1;
   const configMtimeMs = configPath ? statMtimeMs(configPath) : -1;

@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../appProfile';
 /**
  * CLI 工具注册体系的共享类型与纯校验逻辑（PRD 0.2.36 cli_first_tool_registry）。
  *
@@ -69,7 +70,7 @@ export const CLI_TOOL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$/;
  * PATH 碰撞动态检测兜底（server 侧 findPathCollision）。
  */
 export const CLI_TOOL_RESERVED_NAMES: ReadonlySet<string> = new Set([
-  'myagents',
+  'myagents', 'moxbot',
   // 外部 Runtime 的 CLI：重名工具会被 resolveCommand 解析到（~/.myagents/bin
   // 在 fallback PATH 前列），导致 spawn 的是注册工具而不是真 runtime——必然灾难级。
   'claude', 'codex',
@@ -96,7 +97,7 @@ export function validateCliToolName(name: unknown): CliToolValidationResult {
     return {
       ok: false,
       code: 'NAME_RESERVED',
-      error: `Tool name "${name}" is reserved: ~/.myagents/bin precedes system paths on PATH, so it would silently shadow the system command in every agent session and terminal`,
+      error: `Tool name "${name}" is reserved: ~/${APP_DATA_DIR_NAME}/bin precedes system paths on PATH, so it would silently shadow the system command in every agent session and terminal`,
       recovery: 'Pick a different name with a domain prefix (e.g. "img-curl" instead of "curl").',
     };
   }

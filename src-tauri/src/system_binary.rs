@@ -75,9 +75,14 @@ pub fn augmented_path() -> std::ffi::OsString {
         if let Some(home) = dirs::home_dir() {
             push_path_part(
                 &mut parts,
-                home.join(".myagents").join("npm-global").join("bin"),
+                home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                    .join("npm-global")
+                    .join("bin"),
             );
-            push_path_part(&mut parts, home.join(".myagents").join("bin"));
+            push_path_part(
+                &mut parts,
+                home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("bin"),
+            );
             for rel in USER_RELATIVE_DIRS {
                 push_path_part(&mut parts, home.join(rel));
             }
@@ -208,8 +213,15 @@ fn push_env_dir(parts: &mut Vec<String>, key: &str, rel: &[&str]) {
 #[cfg(target_os = "windows")]
 fn append_windows_runtime_dirs(parts: &mut Vec<String>) {
     if let Some(home) = dirs::home_dir() {
-        push_path_part(parts, home.join(".myagents").join("npm-global"));
-        push_path_part(parts, home.join(".myagents").join("bin"));
+        push_path_part(
+            parts,
+            home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                .join("npm-global"),
+        );
+        push_path_part(
+            parts,
+            home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("bin"),
+        );
         push_path_part(parts, home.join(".bun").join("bin"));
         push_path_part(parts, home.join("AppData").join("Roaming").join("npm"));
     }

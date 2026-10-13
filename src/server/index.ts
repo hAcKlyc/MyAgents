@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import type { AskUserQuestionAnswers } from '../shared/types/askUserQuestion';
 import {
   appendFileSync,
@@ -244,7 +245,7 @@ async function writeSpaceSkillExportPackages(
   const exportId = randomUUID();
   const exportDir = join(
     homedir(),
-    '.myagents',
+    APP_DATA_DIR_NAME,
     'tmp',
     'skill-url-export',
     exportId,
@@ -1041,7 +1042,7 @@ interface SkillsConfig {
 
 function getSkillsConfigPath(): string {
   const homeDir = getHomeDirOrNull() || '';
-  return join(homeDir, '.myagents', 'skills-config.json');
+  return join(homeDir, APP_DATA_DIR_NAME, 'skills-config.json');
 }
 
 function readSkillsConfig(): SkillsConfig {
@@ -1203,7 +1204,7 @@ function seedBundledSkills(): void {
 
     const config = readSkillsConfig();
     const homeDir = getHomeDirOrNull() || '';
-    const userSkillsDir = join(homeDir, '.myagents', 'skills');
+    const userSkillsDir = join(homeDir, APP_DATA_DIR_NAME, 'skills');
 
     ensureDirSync(userSkillsDir);
 
@@ -1318,7 +1319,7 @@ function ensurePluginsDirs(): void {
       );
       return;
     }
-    const root = join(homeDir, '.myagents', 'plugins');
+    const root = join(homeDir, APP_DATA_DIR_NAME, 'plugins');
     const dataRoot = join(root, 'data');
     ensureDirSync(root);
     ensureDirSync(dataRoot);
@@ -2294,7 +2295,7 @@ function startupBeacon(step: string): void {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
-    const logsDir = join(homedir(), '.myagents', 'logs');
+    const logsDir = join(homedir(), APP_DATA_DIR_NAME, 'logs');
     ensureDirSync(logsDir);
     const filePath = join(logsDir, `unified-${y}-${m}-${d}.log`);
     const h = String(now.getHours()).padStart(2, '0');
@@ -4745,7 +4746,7 @@ async function main() {
 
           // Security: allow reading from workspace/myagents_files/{generated_images,temp}/ or legacy paths
           const resolvedPath = resolve(imagePath);
-          const legacyDir = join(homedir(), '.myagents', 'generated');
+          const legacyDir = join(homedir(), APP_DATA_DIR_NAME, 'generated');
           const legacyDirSep = legacyDir.endsWith(sep)
             ? legacyDir
             : legacyDir + sep;
@@ -4821,7 +4822,7 @@ async function main() {
           const resolvedPath = resolve(audioPath);
           const legacyAudioDir = join(
             homedir(),
-            '.myagents',
+            APP_DATA_DIR_NAME,
             'generated_audio',
           );
           const legacyAudioDirSep = legacyAudioDir.endsWith(sep)
@@ -4984,7 +4985,7 @@ async function main() {
           const { readdirSync, statSync } = await import('fs');
           const { join: joinPath } = await import('path');
           const { homedir } = await import('os');
-          const logsDir = joinPath(homedir(), '.myagents', 'logs');
+          const logsDir = joinPath(homedir(), APP_DATA_DIR_NAME, 'logs');
 
           // Collect last 3 days of unified-*.log files
           const now = Date.now();
@@ -6623,8 +6624,8 @@ async function main() {
 
       // Cross-platform home directory for user skills/commands
       const homeDir = getHomeDirOrNull() || '';
-      const userSkillsBaseDir = join(homeDir, '.myagents', 'skills');
-      const userCommandsBaseDir = join(homeDir, '.myagents', 'commands');
+      const userSkillsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'skills');
+      const userCommandsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'commands');
 
       // Helper: Get project base directories (supports explicit agentDir parameter)
       // Security: validates agentDir to prevent path traversal attacks
@@ -9232,7 +9233,7 @@ async function main() {
 
       // ============= SUB-AGENTS API =============
 
-      const userAgentsBaseDir = join(homeDir, '.myagents', 'agents');
+      const userAgentsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'agents');
 
       // Helper: Get project agents directory (supports explicit agentDir parameter)
       const getProjectAgentsDir = (queryAgentDir: string | null) => {

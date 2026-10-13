@@ -28,6 +28,21 @@ pub fn external_tls_config() -> Result<ClientConfig, CryptoError> {
     Ok(config)
 }
 
+/// Explicit per-instance outer HTTPS trust. Device CA never enters this store
+/// unless the user separately selected it as public ingress trust.
+pub fn external_tls_config_with_ca(pem: Option<&str>) -> Result<ClientConfig, CryptoError> {
+    let Some(pem) = pem else { return external_tls_config(); };
+    if pem.is_empty() || pem.len() > 65_536 { return Err(CryptoError::InvalidCertificate); }
+    let roots = private_roots(pem)?;
+    let mut config = ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|_| CryptoError::TlsFailure)?
+        .with_root_certificates(roots).with_no_client_auth();
+    config.enable_early_data = false;
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(config)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoError {
     UnsupportedPlatform,

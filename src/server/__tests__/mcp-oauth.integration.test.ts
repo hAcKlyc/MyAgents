@@ -656,13 +656,39 @@ describe('mcp oauth', () => {
       finishRequest = resolve;
     })) as typeof fetch;
 
+    const fakeSetTimeout = globalThis.setTimeout;
+    const fakeClearTimeout = globalThis.clearTimeout;
+    const setTimeoutDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'setTimeout')!;
+    const clearTimeoutDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'clearTimeout')!;
+    const schedulerHandles: ReturnType<typeof setTimeout>[] = [];
+    // A spyOn created under fake timers can reinstall its captured fake timer
+    // when Vitest restores registered spies again at the file boundary, after
+    // afterEach has restored the real clock. These call-recording functions do
+    // not register restoration of the global timer properties.
+    const timeoutSpy = vi.fn((...args: Parameters<typeof setTimeout>) => {
+      const handle = fakeSetTimeout(...args);
+      // Attribute the handle at creation to the real scheduler owner, rather
+      // than counting every timer/job on Vitest's shared fake clock.
+      if (new Error().stack?.includes('scheduleNextRefreshCycle')) {
+        schedulerHandles.push(handle);
+      }
+      return handle;
+    });
+    const clearTimeoutSpy = vi.fn((...args: Parameters<typeof clearTimeout>) => fakeClearTimeout(...args));
+    Object.defineProperty(globalThis, 'setTimeout', { ...setTimeoutDescriptor, value: timeoutSpy });
+    Object.defineProperty(globalThis, 'clearTimeout', { ...clearTimeoutDescriptor, value: clearTimeoutSpy });
+    let unrelatedHandle: ReturnType<typeof setTimeout> | undefined;
+
     try {
       startTokenRefreshScheduler();
       await vi.advanceTimersByTimeAsync(0);
       stopTokenRefreshScheduler();
       startTokenRefreshScheduler();
       await vi.advanceTimersByTimeAsync(0);
-      const timersBeforeRefreshSettlement = vi.getTimerCount();
+      expect(schedulerHandles).toHaveLength(0);
+      // An unrelated owner can publish during this same settlement window.
+      // Its timer must not change the scheduler ownership assertion.
+      unrelatedHandle = setTimeout(() => {}, 60_000);
 
       finishRequest(new Response(JSON.stringify({
         access_token: 'fresh-access',
@@ -671,12 +697,21 @@ describe('mcp oauth', () => {
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
       await vi.advanceTimersByTimeAsync(0);
 
-      // Integration tests intentionally share one serial fork. Other owners
-      // may already have timers, so the scheduler contract is the delta: only
-      // the restarted generation may publish one newly tracked timer after
-      // the shared in-flight refresh settles.
-      expect(vi.getTimerCount()).toBe(timersBeforeRefreshSettlement + 1);
+      // Both generations awaited the same real refresh. Exactly one timer
+      // proves only the restarted generation published after it settled.
+      expect(schedulerHandles).toHaveLength(1);
+      const restartedHandle = schedulerHandles[0];
+      expect(clearTimeoutSpy).not.toHaveBeenCalledWith(restartedHandle);
+      stopTokenRefreshScheduler();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(restartedHandle);
+      expect(clearTimeoutSpy.mock.calls.filter(([handle]) => handle === restartedHandle))
+        .toHaveLength(1);
+      expect(schedulerHandles).toHaveLength(1);
     } finally {
+      stopTokenRefreshScheduler();
+      if (unrelatedHandle !== undefined) clearTimeout(unrelatedHandle);
+      Object.defineProperty(globalThis, 'clearTimeout', clearTimeoutDescriptor);
+      Object.defineProperty(globalThis, 'setTimeout', setTimeoutDescriptor);
       abortTimeoutSpy.mockRestore();
     }
   });

@@ -1,10 +1,14 @@
 //! One App-owned device connector. Every async job belongs to this connection
 //! future: dropping it at an auth/exit boundary cancels HTTP, keys, channels and
 //! private bodies together. Neither a Tab nor a Session owns its lifetime.
+#[path = "catalog_ack.rs"]
+mod catalog_ack;
+
 use super::account::NetworkAccountSession;
 use super::calls::{CallableAgent, Calls};
 use super::catalog::read_local_catalog;
 use super::commands::MetadataRequest;
+use super::connection::{initial_hello, send, send_control};
 use super::identity::NetworkIdentity;
 use super::incoming::{error_outcome, Admission, Incoming};
 use super::local_owner;
@@ -12,15 +16,14 @@ use super::memory::{measure, Allocation, MemoryBudget};
 use super::pairs::{Offer, Pairs, VerifiedOffer};
 use super::policy::{hydrate, LocalPolicy};
 use super::returns::{Callback, ReturnAdmission, ReturnIntent, SourceReturns, TargetReturns};
-use super::transport::{NetworkRoute, NetworkSocket, NetworkTransport};
+use super::transport::{NetworkRoute, NetworkTransport};
 use super::NetworkError;
 use crate::sidecar::ManagedSidecarManager;
 use crate::ulog_warn;
 use futures_util::{future::BoxFuture, stream::FuturesUnordered, FutureExt, SinkExt, StreamExt};
 use myagents_agent_network_protocol::{
-    budget, BusinessObject, CatalogSnapshot, ClientEnvelope, ClientMessage, ConnectionScope,
-    DeviceScope, Outcome, PreviousConnection, ServerEnvelope, ServerMessage, SourceRequest,
-    VerifiedCaller,
+    budget, BusinessObject, CatalogSnapshot, ClientMessage, ConnectionScope, Outcome,
+    PreviousConnection, ServerEnvelope, ServerMessage, SourceRequest, VerifiedCaller,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -226,8 +229,8 @@ impl AgentNetwork {
         let _ = app.emit("agent-network:changed", snapshot);
     }
     pub(crate) fn deactivate(&self) {
-        if let Some(NetworkAccountSession::Selfhost(account)) = &self.account {
-            account.active.store(false, Ordering::Release);
+        if let Some(account) = &self.account {
+            account.deactivate();
         }
         self.stop();
     }
@@ -565,79 +568,6 @@ pub(crate) fn start(
         }
     });
 }
-async fn send(socket: &mut NetworkSocket, message: ClientMessage) -> Result<String, NetworkError> {
-    let control_id = uuid::Uuid::new_v4().to_string();
-    send_control(socket, control_id.clone(), message).await?;
-    Ok(control_id)
-}
-async fn send_control(
-    socket: &mut NetworkSocket,
-    control_id: String,
-    message: ClientMessage,
-) -> Result<(), NetworkError> {
-    let bytes = ClientEnvelope {
-        version: 1,
-        control_id: control_id.clone(),
-        message,
-    }
-    .encode()
-    .map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
-    let text = String::from_utf8(bytes).map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
-    tokio::time::timeout(
-        Duration::from_millis(budget("backpressureMs") as u64),
-        socket.send(Message::Text(text)),
-    )
-    .await
-    .map_err(|_| NetworkError::new("NETWORK_BACKPRESSURE"))?
-    .map_err(|_| NetworkError::new("NETWORK_CONNECTION_CLOSED"))?;
-    Ok(())
-}
-async fn initial_hello(
-    socket: &mut NetworkSocket,
-    identity: &NetworkIdentity,
-) -> Result<(ConnectionScope, DeviceScope, PreviousConnection), NetworkError> {
-    let read = async {
-        loop {
-            match socket.next().await {
-                Some(Ok(Message::Ping(bytes))) => socket
-                    .send(Message::Pong(bytes))
-                    .await
-                    .map_err(|_| NetworkError::new("NETWORK_CONNECTION_CLOSED"))?,
-                Some(Ok(Message::Text(text))) => {
-                    let envelope = ServerEnvelope::parse(text.as_bytes())
-                        .map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
-                    return match envelope.message {
-                        ServerMessage::Hello {
-                            scope,
-                            identity: local,
-                            connector_nonce,
-                            ..
-                        } if scope.service_id == identity.scope.service_id
-                            && local.service_id == scope.service_id
-                            && local.network_id == scope.network_id
-                            && local.environment == identity.scope.environment
-                            && local.principal_id == identity.scope.principal_id
-                            && local.device_id == identity.scope.device_id
-                            && local.key_generation == identity.scope.key_generation =>
-                        {
-                            let previous = PreviousConnection {
-                                connection_epoch: scope.connection_epoch.clone(),
-                                connector_nonce,
-                            };
-                            Ok((scope, local, previous))
-                        }
-                        ServerMessage::Error { code, .. } => Err(NetworkError::cloud(&code, 400)),
-                        _ => Err(NetworkError::new("CONTROL_SCOPE_MISMATCH")),
-                    };
-                }
-                _ => return Err(NetworkError::new("NETWORK_CONNECTION_CLOSED")),
-            }
-        }
-    };
-    tokio::time::timeout(Duration::from_millis(budget("helloMs") as u64), read)
-        .await
-        .map_err(|_| NetworkError::new("NETWORK_HELLO_TIMEOUT"))?
-}
 /// A connection-scoped fence for original owner jobs that have crossed the
 /// final handoff. They finish their ACK, then release remote watch resources
 /// if this connection disappeared while registration was in flight.
@@ -716,24 +646,34 @@ async fn connect(
         }
         _ => NetworkIdentity::initialize(account, None).await?,
     };
-    let transport = Arc::new(NetworkTransport::new(
+    let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
         identity.device_key(),
         owner.memory.clone(),
+        identity.account.public_tls_ca(),
     )?);
+    if let NetworkAccountSession::Owned(account) = &identity.account {
+        let join = account.join_authorized.swap(false, Ordering::AcqRel);
+        super::owned_admission::enroll(&identity, &transport, join).await?;
+    }
     let mut socket = transport.websocket(&identity.token).await?;
     send(
         &mut socket,
         ClientMessage::Hello {
             client_version: env!("CARGO_PKG_VERSION").into(),
-            capabilities: ["tls13-mtls", "typed-rpc", "permit-v1", "return-v1"]
-                .map(str::to_owned)
-                .to_vec(),
+            capabilities: if identity.account.is_management_only() {
+                vec!["tls13-mtls".into()]
+            } else {
+                ["tls13-mtls", "typed-rpc", "permit-v1", "return-v1"]
+                    .map(str::to_owned)
+                    .to_vec()
+            },
             previous_connection: previous,
         },
     )
     .await?;
     let (scope, local, resume) = initial_hello(&mut socket, &identity).await?;
+    let management_only = identity.account.is_management_only();
     *previous_out = Some((identity.account.binding_id().to_owned(), resume));
     let connection_lifetime = ConnectionLifetime(Arc::new(AtomicBool::new(true)));
     let mut work: FuturesUnordered<BoxFuture<'static, Work>> = FuturesUnordered::new();
@@ -766,6 +706,7 @@ async fn connect(
         identity.token.clone(),
         scope.clone(),
         catalog_seq,
+        management_only,
     ));
     loop {
         identity.account.ensure_current()?;
@@ -780,6 +721,7 @@ async fn connect(
                         if text=="ma-network-pong" {continue;}
                         let envelope = ServerEnvelope::parse(text.as_bytes()).map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
                         if envelope.message.scope().is_some_and(|current| current != &scope) { return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH")); }
+                        if management_only { super::owned_profile::control(&envelope.message)?; }
                         match envelope.message {
                             ServerMessage::Ready { catalog_seq: accepted, .. } if ready_requested && accepted == catalog_seq && local_policy.is_some() => {
                                 hydrated = true;
@@ -802,6 +744,10 @@ async fn connect(
                             }
                             ServerMessage::ChannelOffer { channel_id, initiator, responder, initiator_connection_epoch,
                                 responder_connection_epoch, initiator_binding, responder_binding, .. } => {
+                                if management_only {
+                                    send(&mut socket, ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
+                                    continue;
+                                }
                                 if work.len() >= budget("pending") { return Err(NetworkError::new("NETWORK_REQUEST_CAPACITY")); }
                                 if let Err(error) = pairs.reserve(&channel_id) {
                                     send(&mut socket, ClientMessage::Close { scope: scope.clone(), channel_id, reason: error.code }).await?;
@@ -1101,6 +1047,14 @@ async fn connect(
                 }
             }
             Some(command) = commands.recv() => {
+                if management_only {
+                    match &command {
+                        Command::Metadata(metadata) => {
+                            if let Err(error) = super::owned_profile::metadata(&metadata.request.route()) {command.reject(error);continue;}
+                        }
+                        _ => {command.reject(NetworkError::new("OWNED_PROFILE_UNSUPPORTED"));continue;}
+                    }
+                }
                 if let Command::Watches(command)=command {
                     if command.generation!=generation { let _=command.reply.send(Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"))); continue; }
                     let (result,routes)=source_returns.watches(&command.source_session,command.cancel.as_deref(),command.all);
@@ -1152,12 +1106,12 @@ async fn connect(
                     Work::Metadata { allocation, reply: command.reply, result }
                 }.boxed());
             }
-            _ = owner.catalog_changed.notified(), if !catalog_busy => {
+            _ = owner.catalog_changed.notified(), if !catalog_busy && !management_only => {
                 catalog_seq = catalog_seq.checked_add(1).filter(|value| *value <= 9_007_199_254_740_991)
                     .ok_or_else(|| NetworkError::new("CATALOG_SEQUENCE_EXHAUSTED"))?;
                 catalog_busy = true; ready_requested = false;
                 local_policy = None;
-                work.push(catalog_work(manager.clone(), transport.clone(), identity.token.clone(), scope.clone(), catalog_seq));
+                work.push(catalog_work(manager.clone(), transport.clone(), identity.token.clone(), scope.clone(), catalog_seq, management_only));
             }
             _ = tick.tick() => {
                 source_returns.expire();
@@ -1231,7 +1185,11 @@ async fn connect(
                 async move {
                     Work::Hydrate {
                         catalog_seq,
-                        result: hydrate(&transport, &token, &local).await,
+                        result: if management_only {
+                            super::policy::hydrate_owned(&transport, &token, &local).await
+                        } else {
+                            hydrate(&transport, &token, &local).await
+                        },
                     }
                 }
                 .boxed(),
@@ -1288,13 +1246,20 @@ fn catalog_work(
     token: zeroize::Zeroizing<String>,
     scope: ConnectionScope,
     catalog_seq: u64,
+    management_only: bool,
 ) -> BoxFuture<'static, Work> {
     async move {
         let result = async {
-            let items = read_local_catalog(&manager).await?;
+            // This profile has no Agent invocation authority. Its explicit
+            // empty catalog is not a fallback after failing to read local data.
+            let items = if management_only {
+                Vec::new()
+            } else {
+                read_local_catalog(&manager).await?
+            };
             let snapshot = CatalogSnapshot {
                 version: 1,
-                connection_epoch: scope.connection_epoch,
+                connection_epoch: scope.connection_epoch.clone(),
                 catalog_seq,
                 items,
             };
@@ -1305,9 +1270,14 @@ fn catalog_work(
             let uploaded = transport
                 .json(NetworkRoute::Catalog, &token, Some(value))
                 .await?;
-            uploaded["catalogSeq"]
-                .as_u64()
-                .ok_or_else(|| NetworkError::new("CATALOG_INVALID"))
+            catalog_ack::validate_catalog_ack(&uploaded, &scope.connection_epoch, catalog_seq)
+                .map_err(|error| {
+                    NetworkError::new(match error {
+                        catalog_ack::CatalogAckError::Invalid => "CATALOG_INVALID",
+                        catalog_ack::CatalogAckError::NotCurrent => "CATALOG_NOT_CURRENT",
+                    })
+                })?;
+            Ok(catalog_seq)
         }
         .await;
         Work::Catalog(result)

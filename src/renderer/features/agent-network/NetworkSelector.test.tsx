@@ -4,6 +4,10 @@ import type { NetworkRegistry } from "@/api/agentNetwork";
 const calls = vi.hoisted(() => ({
   select: vi.fn(),
   join: vi.fn(),
+  ownedStart: vi.fn(),
+  ownedOpen: vi.fn(),
+  ownedPoll: vi.fn(),
+  ownedCancel: vi.fn(),
   remove: vi.fn(),
   accept: vi.fn(),
 }));
@@ -11,6 +15,10 @@ vi.mock("@/api/agentNetwork", async (original) => ({
   ...(await original<typeof import("@/api/agentNetwork")>()),
   selectNetworkConnection: calls.select,
   joinNetworkConnection: calls.join,
+  startOwnedNetworkLogin: calls.ownedStart,
+  openOwnedNetworkAuthorization: calls.ownedOpen,
+  pollOwnedNetworkLogin: calls.ownedPoll,
+  cancelOwnedNetworkLogin: calls.ownedCancel,
   removeNetworkConnection: calls.remove,
 }));
 vi.mock("./store", () => ({ acceptNetworkRegistry: calls.accept }));
@@ -40,6 +48,14 @@ beforeEach(() => {
   vi.resetAllMocks();
   calls.select.mockResolvedValue({ ...registry, selected: "self-a" });
   calls.join.mockRejectedValue({ code: "ENROLLMENT_KEY_EXPIRED" });
+  calls.ownedStart.mockResolvedValue({
+    attemptId: "attempt-1",
+    authorizationUrl: "https://login.example.test/authorize?state=opaque",
+    expiresAt: 1_900_000_000,
+  });
+  calls.ownedOpen.mockResolvedValue(undefined);
+  calls.ownedPoll.mockResolvedValue({ status: "pending" });
+  calls.ownedCancel.mockResolvedValue(undefined);
 });
 it("defaults to the original official heading without network controls", () => {
   render(<NetworkSelector registry={{ ...registry, selfhostEnabled: undefined }} />);
@@ -50,6 +66,7 @@ it("disabling the gate unmounts an open join dialog and reopening starts clean",
   const view = render(<NetworkSelector registry={registry} />);
   fireEvent.click(screen.getByRole("button", {name: "选择网络"}));
   fireEvent.click(await screen.findByRole("menuitem", {name: "加入自部署网络"}));
+  fireEvent.click(screen.getByRole("tab", { name: "设备 key（旧方式）" }));
   expect(screen.getByLabelText("设备 key")).toBeInTheDocument();
   view.rerender(<NetworkSelector registry={{...registry, selfhostEnabled: false}} />);
   expect(screen.queryByLabelText("设备 key")).not.toBeInTheDocument();
@@ -77,6 +94,7 @@ it("retains the URL but clears enrollment material after a refused join", async 
   fireEvent.click(
     await screen.findByRole("menuitem", { name: "加入自部署网络" }),
   );
+  fireEvent.click(screen.getByRole("tab", { name: /设备 key/ }));
   const url = screen.getByLabelText("服务 URL");
   const key = screen.getByLabelText("设备 key");
   fireEvent.change(url, { target: { value: "https://hub.example.test" } });
@@ -90,4 +108,41 @@ it("retains the URL but clears enrollment material after a refused join", async 
     "ephemeral-test-key",
   );
   expect(calls.accept).not.toHaveBeenCalled();
+});
+
+it("uses browser account sign-in by default and polls without exposing a token", async () => {
+  calls.ownedPoll.mockResolvedValue({ status: "authenticated", registry });
+  render(<NetworkSelector registry={registry} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "加入自部署网络" }));
+  fireEvent.change(screen.getByLabelText("服务 URL"), {
+    target: { value: "https://hub.example.test" },
+  });
+  fireEvent.click(screen.getByText("高级连接选项"));
+  fireEvent.change(screen.getByLabelText("公共 HTTPS CA 证书文件（可选）"), {
+    target: { value: "/tmp/agentnet-test-ca.pem" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  expect(await screen.findByText("等待浏览器登录")).toBeInTheDocument();
+  expect(calls.ownedStart).toHaveBeenCalledWith("https://hub.example.test", "/tmp/agentnet-test-ca.pem");
+  expect(screen.getByText(/authorize\?state=opaque/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "打开浏览器" }));
+  await waitFor(() => expect(calls.ownedOpen).toHaveBeenCalledWith("attempt-1"));
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  await waitFor(() => expect(calls.ownedPoll).toHaveBeenCalledWith("attempt-1"));
+  expect(calls.accept).toHaveBeenCalledWith(registry);
+  expect(screen.queryByLabelText("设备 key")).not.toBeInTheDocument();
+});
+
+it("cancels a pending owned attempt when the dialog is closed", async () => {
+  render(<NetworkSelector registry={registry} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "加入自部署网络" }));
+  fireEvent.change(screen.getByLabelText("服务 URL"), {
+    target: { value: "https://hub.example.test" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "取消登录" }));
+  await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
 });

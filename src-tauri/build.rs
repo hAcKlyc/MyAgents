@@ -23,7 +23,18 @@ const MANAGED_BROWSER_RUNTIME_LOCK_PATH: &str = "../src/shared/managed-browser-r
 const DSH_RELEASE_LOCK_PATH: &str = "../src/shared/integrated-runtimes/dsh-lock.json";
 const DSH_BUILD_SELECTION_PATH: &str = "resources/integrated-runtimes/dsh-build-selection-v1.json";
 
+fn expose_app_build_profile() {
+    println!("cargo:rerun-if-env-changed=MYAGENTS_BUILD_PROFILE");
+    println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
+    match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("myagents") => {},
+        Ok("moxbot") => println!("cargo:rustc-cfg=myagents_moxbot"),
+        _ => panic!("MYAGENTS_BUILD_PROFILE must be myagents or moxbot"),
+    }
+}
+
 fn main() {
+    expose_app_build_profile();
     // Build-script executables can outlive their compilation checkout. Cargo's
     // invocation environment owns the inputs for the build running now.
     let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")

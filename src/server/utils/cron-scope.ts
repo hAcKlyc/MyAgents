@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../../shared/appProfile';
 // Pure scope-descriptor + Agent-facing note for workspace-scoped cron reads
 // (`cron list` / `cron status`). Extracted as a Functional Core so the exact
 // note text — which steers the MA helper Agent's behavior — is unit-pinned.
@@ -37,8 +38,8 @@ export function buildCronScope(workspacePath: string, explicit: boolean): CronSc
   const ws = workspacePath || '(无活动工作区)';
   const base = `本结果仅含工作区「${ws}」内的定时任务，其他工作区的任务未包含。`;
   const broaden = workspacePath
-    ? `如需查看其他工作区，请用 myagents cron list --workspace <该工作区路径>。`
-    : `请用 myagents cron list --workspace <路径> 指定工作区查看。`;
+    ? `如需查看其他工作区，请用 ${APP_CLI_NAME} cron list --workspace <该工作区路径>。`
+    : `请用 ${APP_CLI_NAME} cron list --workspace <路径> 指定工作区查看。`;
   return {
     scope: { workspacePath, source, visibility: 'single-workspace' },
     hint: source === 'default' ? base + broaden : base,

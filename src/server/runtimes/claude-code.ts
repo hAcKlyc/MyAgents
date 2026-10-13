@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 // ClaudeCodeRuntime — drives the Claude Code CLI as a subprocess (v0.1.59)
 //
 // Communication: NDJSON bidirectional via stdin/stdout
@@ -48,14 +49,14 @@ function buildMessageContent(text: string, images?: ResolvedImagePayload[]): str
 
 const HOOK_DIR = join(
   process.env.HOME || process.env.USERPROFILE || '/tmp',
-  '.myagents', 'tmp', 'cc-hooks',
+  APP_DATA_DIR_NAME, 'tmp', 'cc-hooks',
 );
 
 // System prompt tmp dir — separate from cc-hooks so the two concerns can be
 // cleaned independently.
 const SYSTEM_PROMPT_DIR = join(
   process.env.HOME || process.env.USERPROFILE || '/tmp',
-  '.myagents', 'tmp', 'cc-system-prompt',
+  APP_DATA_DIR_NAME, 'tmp', 'cc-system-prompt',
 );
 
 /**
