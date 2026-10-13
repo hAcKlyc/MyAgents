@@ -14,9 +14,9 @@
 - [x] 独立复核 Actor 接线与打包 / publisher pin / 不重签策略；真实 root 默认及 MoXBots fixed release check --tests 均通过，裸 macOS MoX 无 feature 实际 Cargo fail closed。
 - [x] 固定组件 v1 实际 build / sign、publisher / 架构 / SHA / cdhash / 输入 provenance；两个实际 prepare 的复制字节一致，源闭包与受信制品双 pin 实际通过，不读取真实凭据；18 项相关 Node 回归通过。
 - [x] 首个完整 4fc9a2b1 App、签名及实际 ZIP 解压 strict seal 通过，reader 与不可变制品完全一致。
-- [ ] 第二次不同桌面构建的 reader 字节和 cdhash 完全一致。
+- [x] 第二个 07e226a9 完整 App / ZIP / 实际解压 strict seal 通过；与 4fc9a2b1 的 reader 字节、SHA 和 cdhash 完全一致，未安装第二包冒充免提示验收。
 - [x] 用户授权首次迁移，两项记录读取及身份校验成功，原云账号恢复、Linux-Host 在线；远程读到 kimi-for-coding 和既有禁用 Agent。
-- [ ] 同一 4fc9a2b1 安装冷启动仍返回 AUTHORIZATION_REQUIRED，后台停止且 root 未再次发授权。持久授权是否保存正在核实，不能宣称免提示修复完成。
+- [ ] 同一 4fc9a2b1 安装冷启动仍返回 AUTHORIZATION_REQUIRED，后台停止且 root 未再次发授权。用户确认两项均选“总是允许”；exact session metadata-only 检查确认 User keychain 已解锁、reader partition 已保存、stored reader requirement 匹配 reader 且不匹配 parent。未读 secret、未改 ACL、UI 禁止；该诊断使用 Apple read-only SPI，不能替代 native 读取验收。不能宣称免提示修复完成。
 - [ ] 同组件桌面更新后自动在线，不再出现日常授权循环。
 - [ ] 当前最终头 CI / 审查、同步最新 main、合入远端并验证祖先与树、安装包和运行版本对应。
 
@@ -36,4 +36,6 @@ reader 与 parent 使用不同 identifier，匹配同一发布者叶证书，且
 
 本轮主 Agent 负责诊断、Actor 接线、集成、实际版本对照和最终交付；原 crypto worker 实施 / 复核组件及缓存；packaging worker 独占隔离工作树的构建资源。三名 native 参与者，未调用外部模型；实际模型变体、effort、token 和费用未由运行时提供，不作推算。复盘：固定证书被误当成完整更新授权条件导致一次更新验收失败；今后先验证 OS partition 与冷启动 / 跨构建行为，再承诺免提示。
 
-下一步：本机安装与窗口 owner 已归还 root；当前真实安装为 4fc9a2b1，首次迁移在线而同构建冷启动失败，原 MyAgents 保全。先区分用户选择的一次允许与持久授权、核对 OS 非交互读取路径，不自动重发授权。已同步 main 的管理后台源码但不部署其新增模块；免提示关键门禁通过后再完成第二桌面构建、当前 CI 和 PR14 主干交付。
+下一步：本机安装与窗口 owner 已归还 root；4fc9a2b1 首次迁移在线而同构建冷启动失败；root 已精确恢复 b116404e 并真实验证两设备 / Linux-Host 自动在线、模型 / 既有 Agent 可读，未再发授权，原 MyAgents 保全。失败试用包及两个新包的签名制品已保留。已反证“未选择总是允许”“钥匙串当前锁定”“helper ACL 错捕获 parent requirement”这三种解释；继续核对非交互读取路径，不自动重发授权。已同步 main 的管理后台源码但不部署其新增模块；免提示关键门禁通过后再完成第二桌面构建、当前 CI 和 PR14 主干交付。
+
+CI 修复：07e226a9 的 DOM 用例只等 adapter promise 而未等父组件提交，改为等待实际异常标题和撤权提示；不放宽权限断言。完整 DOM 261 文件、2213 项通过，修复提交 0fb5f31f。该头的远端 CI 另行等待；此前其余平台及独立云服务检查成功。
