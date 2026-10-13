@@ -52,6 +52,7 @@ import TabActivityIndicator from '@/components/TabActivityIndicator';
 import Tip from '@/components/Tip';
 import {
   ArchiveIcon,
+  ArchiveRestoreIcon,
   BellIcon,
   CapabilitiesIcon,
   ChevronRightIcon,
@@ -567,10 +568,10 @@ export default memo(function GlobalSidebar({
   );
   const expandedWorkspacePaths = useMemo(() => {
     const expandedKeys = new Set(preference.expandedWorkspaceKeys);
-    return activeProjects
+    return (preference.sessionView === 'archived' ? sortedProjects : activeProjects)
       .filter((project) => expandedKeys.has(normalizeWorkspacePathIdentity(project.path)))
       .map((project) => project.path);
-  }, [activeProjects, preference.expandedWorkspaceKeys]);
+  }, [activeProjects, sortedProjects, preference.expandedWorkspaceKeys, preference.sessionView]);
   const taskCenterData = useGlobalSidebarTaskCenterData(expandedWorkspacePaths, searchOpen);
 
   useEffect(() => {
@@ -581,9 +582,9 @@ export default memo(function GlobalSidebar({
         config.defaultWorkspacePath,
         activeProjects.map((project) => project.path),
       );
-      return pruneRemovedWorkspaceKeys(seeded, activeProjects.map((project) => project.path));
+      return pruneRemovedWorkspaceKeys(seeded, sortedProjects.map((project) => project.path));
     });
-  }, [activeProjects, config.defaultWorkspacePath, projectsLoading, updatePreference]);
+  }, [activeProjects, sortedProjects, config.defaultWorkspacePath, projectsLoading, updatePreference]);
 
   const effectiveMode = resolveGlobalSidebarMode(preference.preferredMode, forceRail);
   const expanded = effectiveMode === 'expanded';
@@ -1856,7 +1857,7 @@ function WorkspaceTree({
           </div>
         ) : (
           <div data-global-sidebar-workspace-list>
-            {projects.map((project, index) => {
+            {(sessionView === 'archived' ? [...projects, ...archivedProjects] : projects).map((project, index) => {
               const key = normalizeWorkspacePathIdentity(project.path);
               const sessions = sessionsByWorkspace.get(key) ?? [];
               const limit = sessionLimits[key] ?? SESSION_PAGE_SIZE;
@@ -1880,7 +1881,7 @@ function WorkspaceTree({
                     onOpenWorkspace={() => onOpenWorkspace(project)}
                     onTogglePin={() => onTogglePin(project)}
                     onAgentSettings={(origin) => onAgentSettings(project, origin)}
-                    onArchive={() => onArchive(project)}
+                    onArchive={() => isProjectArchived(project) ? onUnarchive(project) : onArchive(project)}
                     onOpenFolder={() => onOpenFolder(project)}
                     onRemove={(origin) => onRemove(project, origin)}
                     onMenuOpenChange={(open) => onNestedInteractionChange(`workspace:${project.id}`, open)}
@@ -1932,6 +1933,7 @@ function WorkspaceTree({
                               onToggleFavorite={() => onToggleFavorite(session)}
                               onTogglePin={() => onToggleSessionPin(session)}
                               onArchiveChanged={() => viewMenuRef.current?.focus()}
+                              onRefreshSessions={taskCenterData.actions.refreshSessions}
                               onRenameSession={onRenameSession}
                               onCopySessionId={() => onCopySessionId(session)}
                               onShowStats={(origin) => onShowStats(session, origin)}
@@ -1959,7 +1961,7 @@ function WorkspaceTree({
               );
             })}
 
-            {archivedProjects.length > 0 && (
+            {sessionView !== 'archived' && archivedProjects.length > 0 && (
               <div className="pt-2">
                 <button
                   type="button"
@@ -2096,7 +2098,7 @@ function WorkspaceRow({
             <MoreIcon className="h-3.5 w-3.5" />
           </button>
         </Tip>
-        <Tip label={t('globalSidebar.newChat')} position={actionTipPosition} align="end">
+        {!isProjectArchived(project) && <Tip label={t('globalSidebar.newChat')} position={actionTipPosition} align="end">
           <button
             type="button"
             onClick={onOpenWorkspace}
@@ -2105,7 +2107,7 @@ function WorkspaceRow({
           >
             <ComposeIcon className="h-3.5 w-3.5" />
           </button>
-        </Tip>
+        </Tip>}
       </div>
       <Popover
         open={menuOpen}
@@ -2124,7 +2126,7 @@ function WorkspaceRow({
           label={project.pinnedAt ? tLauncher('workspaceCard.unpin') : tLauncher('workspaceCard.pin')}
           onClick={() => { setMenu(false); onTogglePin(); }}
         />
-        <MenuItem icon={<ArchiveIcon className="h-3.5 w-3.5" />} label={tLauncher('workspaceCard.archive')} onClick={() => { setMenu(false); onArchive(); }} />
+        <MenuItem icon={isProjectArchived(project) ? <ArchiveRestoreIcon className="h-3.5 w-3.5" /> : <ArchiveIcon className="h-3.5 w-3.5" />} label={tLauncher(isProjectArchived(project) ? 'workspaceCard.unarchive' : 'workspaceCard.archive')} onClick={() => { setMenu(false); onArchive(); }} />
         <MenuItem icon={<TrashIcon className="h-3.5 w-3.5" />} label={tLauncher('workspaceCard.remove')} tone="danger" onClick={() => { setMenu(false); onRemove(menuRef.current); }} />
       </Popover>
     </div>
@@ -2143,6 +2145,7 @@ interface SessionRowProps {
   onToggleFavorite: () => void;
   onTogglePin: () => void;
   onArchiveChanged: () => void;
+  onRefreshSessions: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<SessionMetadata | null>;
   onCopySessionId: () => void;
   onShowStats: (origin?: HTMLElement | null) => void;
@@ -2164,6 +2167,7 @@ function SessionRow({
   onToggleFavorite,
   onTogglePin,
   onArchiveChanged,
+  onRefreshSessions,
   onRenameSession,
   onCopySessionId,
   onShowStats,
@@ -2278,6 +2282,7 @@ function SessionRow({
         onToggleFavorite={onToggleFavorite}
         onTogglePin={onTogglePin}
         onArchiveChanged={onArchiveChanged}
+        onRefreshSessions={onRefreshSessions}
         onRenameSession={onRenameSession}
         onShowStats={onShowStats}
         onDelete={onDelete}

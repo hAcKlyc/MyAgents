@@ -36,6 +36,7 @@ interface SessionContextMenuProps {
     onSessionUpdated?: (session: SessionMetadata, mutationSequence: number) => boolean;
     onGlobalTagChange?: (change: GlobalUserTagChange) => void;
     onArchiveChanged?: () => void;
+    onRefreshSessions: () => void;
 }
 
 /**
@@ -60,6 +61,7 @@ export default function SessionContextMenu({
     onSessionUpdated,
     onGlobalTagChange,
     onArchiveChanged,
+    onRefreshSessions,
 }: SessionContextMenuProps) {
     const { t } = useTranslation('launcher');
     const toast = useToast();
@@ -77,10 +79,15 @@ export default function SessionContextMenu({
         try {
             const updated = await updateSession(session.id, { archived });
             if (!updated) throw new Error('Session no longer exists.');
-            onSessionUpdated?.(updated, sequence);
+            const applied = onSessionUpdated?.(updated, sequence);
             onClose();
             onArchiveChanged?.();
-            toast.success(t(archived ? 'rightRail.archivedSuccess' : 'rightRail.restoredSuccess'));
+            if (applied === false) {
+                onRefreshSessions();
+                toast.info(t('rightRail.archiveStateRefreshing'));
+            } else {
+                toast.success(t(archived ? 'rightRail.archivedSuccess' : 'rightRail.restoredSuccess'));
+            }
         } catch (error) {
             console.error('[SessionContextMenu] Failed to update archive state:', error);
             toast.error(t('rightRail.archiveFailedRetry'));

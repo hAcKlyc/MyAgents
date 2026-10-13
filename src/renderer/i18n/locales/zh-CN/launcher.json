@@ -61,6 +61,7 @@
     "restore": "恢复对话",
     "archivedSuccess": "对话已归档",
     "restoredSuccess": "对话已恢复",
+    "archiveStateRefreshing": "对话状态已变更，正在刷新最新列表",
     "archiveFailedRetry": "归档状态保存失败，请重试",
     "emptyArchived": "该工作区暂无已归档对话",
     "filterAll": "全部",

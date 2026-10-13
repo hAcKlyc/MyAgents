@@ -832,6 +832,7 @@ export default memo(function HistorySearchOverlayContent({
                         if (applied) search.updateSession(updated);
                         return applied;
                     }}
+                    onRefreshSessions={() => { actions.refreshSessions(); search.refresh(); }}
                     onGlobalTagChange={handleGlobalTagChange}
                 />
             )}

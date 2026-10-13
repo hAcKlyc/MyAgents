@@ -894,6 +894,44 @@ describe('GlobalSidebar rail flyout', () => {
     expect(action).toBeEnabled();
   });
 
+  it('loads and restores archived chats in an archived workspace without restoring that workspace', async () => {
+    mocks.forcedRail = false;
+    mocks.projects.push({ id: 'archived-project', name: 'Archived workspace', path: '/work/archived', archivedAt: '2026-07-20T00:00:00Z' });
+    const current = { id: 'archived-both', agentDir: '/work/archived', title: 'Archived in archived workspace', archived: true, lastActiveAt: '2026-07-20T00:00:00Z' };
+    mocks.taskData.sessions.push(current);
+    mocks.updateSession.mockResolvedValueOnce({ ...current, archived: undefined });
+    window.localStorage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify({
+      version: 1, preferredMode: 'expanded', expandedWorkspaceKeys: ['/work/archived'],
+      hasSeededDefaultExpansion: true, showAutomationSessions: false, sessionView: 'archived',
+    }));
+    renderSidebar();
+    expect(screen.getByText(current.title)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: String(i18n.t('app:globalSidebar.newChatHere')) })).not.toBeInTheDocument();
+    fireEvent.contextMenu(screen.getByText(current.title).closest<HTMLElement>('[data-global-sidebar-session-row]')!);
+    fireEvent.click(screen.getByRole('button', { name: String(i18n.t('launcher:rightRail.restore')) }));
+    await vi.waitFor(() => expect(mocks.updateSession).toHaveBeenCalledWith(current.id, { archived: false }));
+    expect(mocks.patchProject).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: String(i18n.t('app:globalSidebar.workspaceViewOptions')) })).toHaveFocus();
+  });
+
+  it('refreshes canonical metadata when a concurrent mutation rejects an archive response', async () => {
+    mocks.taskData.actions.applySessionMetadata.mockReturnValueOnce(false);
+    mocks.updateSession.mockResolvedValueOnce({ id: 'stale-archive', agentDir: '/work/project-one', title: 'Concurrent archive', archived: true });
+    mocks.projects.push({ id: 'project-1', name: 'Project one', path: '/work/project-one' });
+    mocks.taskData.sessions.push({ id: 'stale-archive', agentDir: '/work/project-one', title: 'Concurrent archive', lastActiveAt: '2026-07-20T00:00:00Z' });
+    window.localStorage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify({
+      version: 1, preferredMode: 'rail', expandedWorkspaceKeys: ['/work/project-one'],
+      hasSeededDefaultExpansion: true, showAutomationSessions: true, sessionView: 'all',
+    }));
+    renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: 'Agent 工作区' }));
+    fireEvent.contextMenu(screen.getByText('Concurrent archive').closest<HTMLElement>('[data-global-sidebar-session-row]')!);
+    fireEvent.click(screen.getByRole('button', { name: String(i18n.t('launcher:rightRail.archive')) }));
+    await vi.waitFor(() => expect(mocks.taskData.actions.refreshSessions).toHaveBeenCalled());
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+    expect(mocks.toast.info).toHaveBeenCalledWith(String(i18n.t('launcher:rightRail.archiveStateRefreshing')));
+  });
+
   it('shows a truncated Session title only after a one-second hover', () => {
     const title = 'A very long historical conversation title that cannot fit in the sidebar';
     mocks.projects.push({ id: 'project-1', name: 'Project one', path: '/work/project-one' });

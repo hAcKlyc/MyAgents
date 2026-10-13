@@ -61,6 +61,7 @@
     "restore": "Restore chat",
     "archivedSuccess": "Chat archived",
     "restoredSuccess": "Chat restored",
+    "archiveStateRefreshing": "Chat state changed. Refreshing the latest list.",
     "archiveFailedRetry": "Failed to save archive state. Please try again.",
     "emptyArchived": "No archived chats in this workspace",
     "filterAll": "All",
