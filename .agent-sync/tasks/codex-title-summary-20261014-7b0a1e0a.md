@@ -5,11 +5,11 @@
 
 # TITLE-001 — 概括任务内容生成简短标题
 
-## 目标与范围
+## Objective
 
 用户于2026-10-14确认修改MoXBots，由当前Agent执行。权威仓库 https://github.com/heavenzhang/MoXBots.git，main。修改已有后端自动命名链路；不批量重命名已自动命名/手动命名的历史任务，不更改凭据或其他任务工作区。
 
-## To Do / 完成标准
+## Acceptance criteria
 
 - [x] 核实仓库、分支、既有改动、主干和安装owner；隔离工作树，从43994b75开始，已同步cf741f41。
 - [x] 首个成功人类问答触发异步概括，保留必要对象和动作，中文通常8–16字，硬上限30字。
@@ -21,19 +21,23 @@
 - [ ] 当前源CI、主干合入与远端祖先核验。
 - [ ] 已安装MoXBots包含本次成果、真实模型生成和侧栏更新复验。
 
-## 验证
+## Completed
+
+代码、单元测试、V2持久化回归、SDK请求隔离及renderer显示/导航验证已提交；main与原生验收尚开放。
+
+## Verification
 
 69项unit通过；72项TabProvider/GlobalSidebar DOM通过；真实V2持久化与重载1项、Provider SDK隔离2项通过；既有V2 store23项通过。合入cf741f41后69项unit、3项integration、完整typecheck和MoXBots server build通过。合入前完整lint/依赖边界/docs通过；CI检查合并后全量树。
 
 本机原始证据 `/Users/zhangshaohua/Documents/Codex/2026-10-14/title-001-evidence/`；自动测试日志 `/tmp/title-001-*.log`。凭据与真实业务资料不进入Git。模块规范见 `specs/tech_docs/session_architecture.md#30-自动任务标题`。
 
-## 真实生成与发布边界
+## Blockers and unknowns
 
 当前已安装App的server bundle来源506be6de，不能当成本次代码。另一个活动聊天“Bots 网络 可用”正在拥有凭据修复与统一换包；本任务未退出、替换或启动新App，也未向该聊天发消息。工具要求用户明确授权跨聊天消息；授权后提供本次冻结源/摘要，纳入统一包并回验。
 
 真实SDK探测使用合成需求。认证状态查询返回loggedIn，但实际utility调用返回Not logged in · Please run /login；这不证明有效模型登录。此错误曾被旧cleanTitle截成标题，已新增拒绝与失败终态检查。修复后的真实探测返回null，没有生成有效概要，不冒充通过；不切换账号、不触发系统密码。Model/provider runtime真实路径验收仍开放。
 
-## 下一步
+## Next step
 
 提交/推送并通过当前源CI合入main。取得跨聊天消息授权后，由唯一本机安装owner纳入标题修改；用受控合成会话验证真实模型、持久化和侧栏标题同步。
 

@@ -13,5 +13,10 @@
       "navigation": true
     }
   ],
-  "pageErrors": []
+  "pageErrors": [],
+  "rendererBase": "cf741f411620a6176d190a68575a6cd879bdefee",
+  "sourceSha256": {
+    "src/renderer/components/global-sidebar/GlobalSidebar.tsx": "84ece44db385d8722c3bb2fc30897f5b0bd03be0cb5cfec890afbe4ed287cccd",
+    "src/renderer/utils/sessionDisplay.ts": "7318721c15adcff19352785f70728819a48a5cc3357c9ef7e6846920a51e3da0"
+  }
 }
