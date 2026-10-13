@@ -321,7 +321,15 @@ test('root build script contains the fail-closed macOS Mox feature guard', () =>
       },
     },
   });
-  assert.match(cargo, /moxbot-credential-reader\s*=\s*\["myagents-agent-network-crypto\/fixed-macos-reader"\]/);
+  const feature = cargo.match(/moxbot-credential-reader\s*=\s*(\[[^\]]+\])/);
+  assert.ok(feature, 'MoX reader feature must exist');
+  const enabled = JSON.parse(feature[1]);
+  assert.ok(enabled.includes('myagents-agent-network-crypto/fixed-macos-reader'));
+  assert.ok(enabled.includes('dep:myagents-agent-network-crypto-parent'));
+  assert.ok(enabled.includes('myagents-agent-network-crypto-parent/fixed-macos-reader'));
+  const parentCargo = readFileSync(new URL('../src-tauri/agent-network-crypto-parent/Cargo.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(parentCargo, /\[\[bin\]\]/, 'parent policy must not rebuild the pinned reader');
+  assert.match(cargo, /default\s*=\s*\[\]/, 'default builds must not opt into parent policy');
   assert.match(build, /target_os == "macos" && profile == "moxbot" && !reader_enabled/);
   assert.match(build, /CARGO_FEATURE_MOXBOT_CREDENTIAL_READER/);
   assert.match(wrapper, /prepareMoxbotCredentialReader/);

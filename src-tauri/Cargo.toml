@@ -23,7 +23,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = []
 # Only the macOS MoXBots packaging entry enables the immutable credential
 # reader. The build script rejects bypassing that entry for this profile.
-moxbot-credential-reader = ["myagents-agent-network-crypto/fixed-macos-reader"]
+moxbot-credential-reader = ["myagents-agent-network-crypto/fixed-macos-reader", "dep:myagents-agent-network-crypto-parent", "myagents-agent-network-crypto-parent/fixed-macos-reader"]
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
@@ -42,6 +42,7 @@ log = "0.4"
 myagents-media-worker-protocol = { path = "media-worker-protocol" }
 myagents-agent-network-protocol = { path = "agent-network-protocol" }
 myagents-agent-network-crypto = { path = "agent-network-crypto", features = ["os-store"] }
+myagents-agent-network-crypto-parent = { path = "agent-network-crypto-parent", features = ["os-store"], optional = true }
 myagents-host-management-protocol = { path = "host-management-protocol" }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2.2"
@@ -230,4 +231,8 @@ incremental = true
 
 [dev-dependencies.myagents-agent-network-crypto]
 path = "agent-network-crypto"
+features = ["os-store", "test-support"]
+
+[dev-dependencies.myagents-agent-network-crypto-parent]
+path = "agent-network-crypto-parent"
 features = ["os-store", "test-support"]

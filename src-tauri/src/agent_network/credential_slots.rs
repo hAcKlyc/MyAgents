@@ -689,16 +689,34 @@ fn promote(
     if cancelled.load(Ordering::Acquire) {
         return Err(unavailable());
     }
-    ledger.persist_after(&id, |already_committed| {
+    let result = ledger.persist_after(&id, |already_committed| {
         if cancelled.load(Ordering::Acquire) {
             return Err(unavailable());
         }
         // A committed deletion barrier cannot recreate a key from a cached
         // legacy value. Existing current key must still confirm the fingerprint.
         if !already_committed {
-            backend.save_pending(&mapped, key)?;
+            let saved = backend.save_pending(&mapped, key);
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            crate::ulog_info!(
+                "[credential-migration] stage=identity-save outcome={}",
+                saved
+                    .as_ref()
+                    .map(|_| String::from("ok"))
+                    .unwrap_or_else(|error| error.to_string())
+            );
+            saved?;
         }
-        let confirmed = backend.load(&mapped)?;
+        let loaded = backend.load(&mapped);
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        crate::ulog_info!(
+            "[credential-migration] stage=identity-confirm outcome={}",
+            loaded
+                .as_ref()
+                .map(|_| String::from("ok"))
+                .unwrap_or_else(|error| error.to_string())
+        );
+        let confirmed = loaded?;
         if confirmed.public_fingerprint()? != key.public_fingerprint()? {
             return Err(CryptoError::CredentialConflict);
         }
@@ -706,7 +724,17 @@ fn promote(
             return Err(unavailable());
         }
         Ok(())
-    })
+    });
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    crate::ulog_info!(
+        "[credential-migration] stage=identity-route outcome={} cancelled={}",
+        result
+            .as_ref()
+            .map(|_| String::from("ok"))
+            .unwrap_or_else(|error| error.to_string()),
+        cancelled.load(Ordering::Acquire)
+    );
+    result
 }
 /// Pin the selected physical route under ORIGINAL protocol scope. The existing
 /// crypto cache owns key cloning/zeroization; no DER API or second key cache.

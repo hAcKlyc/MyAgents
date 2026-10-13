@@ -461,7 +461,7 @@ fn write_unlocked(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkErr
             .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?,
     );
     #[cfg(all(target_os = "macos", not(test)))]
-    let result = myagents_agent_network_crypto::write_secret_noninteractive(entry, json.as_bytes());
+    let result = super::crypto::write_secret_noninteractive(entry, json.as_bytes());
     #[cfg(any(not(target_os = "macos"), test))]
     let result = entry.set_password(&json);
     result.map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))
@@ -492,14 +492,14 @@ fn read_unlocked(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     #[cfg(test)]
     KEYRING_READS.with(|reads| reads.set(reads.get().saturating_add(1)));
     #[cfg(all(target_os = "macos", not(test)))]
-    let result = myagents_agent_network_crypto::read_secret_noninteractive(entry);
+    let result = super::crypto::read_secret_noninteractive(entry);
     #[cfg(any(not(target_os = "macos"), test))]
     let result = entry.get_secret();
     let value = match result {
         Ok(value) => value,
         Err(keyring::Error::NoEntry) => return Ok(None),
         #[cfg(all(target_os = "macos", not(test)))]
-        Err(error) if myagents_agent_network_crypto::credential_authorization_required(&error) => {
+        Err(error) if super::crypto::credential_authorization_required(&error) => {
             return Err(NetworkError::new(
                 "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
             ));
@@ -516,7 +516,7 @@ fn read_authorized_unlocked(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     #[cfg(target_os = "macos")]
-    let result = myagents_agent_network_crypto::read_secret_authorized(entry, cancelled);
+    let result = super::crypto::read_secret_authorized(entry, cancelled);
     #[cfg(not(target_os = "macos"))]
     let result: keyring::Result<Vec<u8>> = Err(keyring::Error::PlatformFailure(Box::new(
         std::io::Error::other("authorized credential read unsupported"),
@@ -534,7 +534,7 @@ fn read_authorized_unlocked(
             if cancelled.load(Ordering::Acquire) {
                 return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
             }
-            if myagents_agent_network_crypto::credential_authorization_required(&error) {
+            if super::crypto::credential_authorization_required(&error) {
                 return Err(NetworkError::new(
                     "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
                 ));
@@ -556,7 +556,7 @@ fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
 }
 fn delete_unlocked(entry: &Entry) -> Result<(), NetworkError> {
     #[cfg(all(target_os = "macos", not(test)))]
-    let result = myagents_agent_network_crypto::delete_secret_noninteractive(entry);
+    let result = super::crypto::delete_secret_noninteractive(entry);
     #[cfg(any(not(target_os = "macos"), test))]
     let result = entry.delete_credential();
     match result {

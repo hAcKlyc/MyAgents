@@ -261,6 +261,15 @@ fn app_context() -> tauri::Context<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        feature = "moxbot-credential-reader"
+    ))]
+    let _ = myagents_agent_network_crypto_parent::set_parent_diagnostic_sink(|event| {
+        ulog_info!("[credential-transport] stage={} outcome={} mode={} operation={} elapsed_ms={} budget_ms={}",
+            event.stage, event.outcome, event.mode, event.operation, event.elapsed_ms, event.budget_ms);
+    });
     // ── DIAGNOSTIC PANIC HOOK (April 2026 crash investigation) ─────────────
     // Install BEFORE any other init so we capture every panic, including
     // setup-time / did_finish_launching ones that don't reach the unified
