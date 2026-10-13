@@ -26,10 +26,21 @@ const DSH_BUILD_SELECTION_PATH: &str = "resources/integrated-runtimes/dsh-build-
 fn expose_app_build_profile() {
     println!("cargo:rerun-if-env-changed=MYAGENTS_BUILD_PROFILE");
     println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
-    match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
-        Err(env::VarError::NotPresent) | Ok("myagents") => {},
-        Ok("moxbot") => println!("cargo:rustc-cfg=myagents_moxbot"),
+    let profile = match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("myagents") => "myagents",
+        Ok("moxbot") => {
+            println!("cargo:rustc-cfg=myagents_moxbot");
+            "moxbot"
+        }
         _ => panic!("MYAGENTS_BUILD_PROFILE must be myagents or moxbot"),
+    };
+    let target_os =
+        env::var("CARGO_CFG_TARGET_OS").expect("Cargo must provide CARGO_CFG_TARGET_OS");
+    let reader_enabled = env::var_os("CARGO_FEATURE_MOXBOT_CREDENTIAL_READER").is_some();
+    if target_os == "macos" && profile == "moxbot" && !reader_enabled {
+        panic!(
+            "macOS MoXBots builds require the moxbot-credential-reader feature; use scripts/build-moxbot.mjs with the verified reader artifact"
+        );
     }
 }
 

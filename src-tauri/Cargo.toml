@@ -19,6 +19,12 @@ rust-version = "1.88"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# Only the macOS MoXBots packaging entry enables the immutable credential
+# reader. The build script rejects bypassing that entry for this profile.
+moxbot-credential-reader = ["myagents-agent-network-crypto/fixed-macos-reader"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 url = "2"
