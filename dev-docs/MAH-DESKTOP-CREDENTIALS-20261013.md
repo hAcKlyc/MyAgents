@@ -13,8 +13,11 @@
 - [x] 普通 Actor 完整 KeyScope 单项缓存与 binding / generation 接线；断线仍查服务器，不直接复用过期网络身份。
 - [x] 独立复核 Actor 接线与打包 / publisher pin / 不重签策略；真实 root 默认及 MoXBots fixed release check --tests 均通过，裸 macOS MoX 无 feature 实际 Cargo fail closed。
 - [x] 固定组件 v1 实际 build / sign、publisher / 架构 / SHA / cdhash / 输入 provenance；两个实际 prepare 的复制字节一致，源闭包与受信制品双 pin 实际通过，不读取真实凭据；18 项相关 Node 回归通过。
-- [ ] 最终 App 与解压后 strict seal；两次真实桌面构建的 reader 字节和 cdhash 完全一致。
-- [ ] 新组件首次迁移、冷启动 / 同组件桌面更新后自动在线，不再出现日常授权循环。
+- [x] 首个完整 4fc9a2b1 App、签名及实际 ZIP 解压 strict seal 通过，reader 与不可变制品完全一致。
+- [ ] 第二次不同桌面构建的 reader 字节和 cdhash 完全一致。
+- [x] 用户授权首次迁移，两项记录读取及身份校验成功，原云账号恢复、Linux-Host 在线；远程读到 kimi-for-coding 和既有禁用 Agent。
+- [ ] 同一 4fc9a2b1 安装冷启动仍返回 AUTHORIZATION_REQUIRED，后台停止且 root 未再次发授权。持久授权是否保存正在核实，不能宣称免提示修复完成。
+- [ ] 同组件桌面更新后自动在线，不再出现日常授权循环。
 - [ ] 当前最终头 CI / 审查、同步最新 main、合入远端并验证祖先与树、安装包和运行版本对应。
 
 模型密钥目前未配置，执行关闭、Agent 无 channels，真实付费调用为 0。真实模型推理由用户后续在产品内配置凭据并明确费用授权，不是本轮配置 / 创建持久化验收的必需项。
@@ -33,4 +36,4 @@ reader 与 parent 使用不同 identifier，匹配同一发布者叶证书，且
 
 本轮主 Agent 负责诊断、Actor 接线、集成、实际版本对照和最终交付；原 crypto worker 实施 / 复核组件及缓存；packaging worker 独占隔离工作树的构建资源。三名 native 参与者，未调用外部模型；实际模型变体、effort、token 和费用未由运行时提供，不作推算。复盘：固定证书被误当成完整更新授权条件导致一次更新验收失败；今后先验证 OS partition 与冷启动 / 跨构建行为，再承诺免提示。
 
-下一步：阶段源码已提交至原 PR14，reader v1 已一次签名并验证两次复制；完整 App / archive 与真实升级仍开放。root 最后验证的 b116 可用；归档 owner 后续报告已安装33992eb0且AUTH_REQUIRED，未发新系统授权，尚待用户版本选择。本机窗口和安装操作由归档任务串行接管，root 暂停这些操作，收到释放后先核实实际版本再继续，不以反复输入密码替代根因修复。
+下一步：本机安装与窗口 owner 已归还 root；当前真实安装为 4fc9a2b1，首次迁移在线而同构建冷启动失败，原 MyAgents 保全。先区分用户选择的一次允许与持久授权、核对 OS 非交互读取路径，不自动重发授权。已同步 main 的管理后台源码但不部署其新增模块；免提示关键门禁通过后再完成第二桌面构建、当前 CI 和 PR14 主干交付。
