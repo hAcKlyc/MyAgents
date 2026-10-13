@@ -13,6 +13,8 @@ This checkpoint supersedes the incomplete-client and relay statements in the his
 - [ ] Fixed credential reader first migration survives cold startup and a different desktop build without repeated authorization. First reads succeeded; same-build cold startup still returned authorization required, with no automatic retry.
 - [ ] Required CI, main delivery and deployment correspondence for the accepted final artifacts.
 
+The two desktop builds preserve the same signed reader bytes. Synthetic cold-process queries also pass with hardened runtime and an App-contained helper, but do not reproduce the legacy-record rejection. Real credential reads and authorization retries remain stopped while investigating; the verified b116 desktop has been restored. Required CI passed at d30235b3; the final native/update gate is still open.
+
 Real model calls remain zero. Product-supplied credentials and any required paid-call authorization are a separate execution gate; they must not be requested through chat.
 
 ## Administrator control plane and deployed service compatibility
