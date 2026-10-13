@@ -7,6 +7,10 @@
 
 ## Current Snapshot
 
+- **MAH-DESKTOP-CREDENTIALS-20261013 最新接续**：当前安装仍为在线 b116；用户确认 session/key 两项“总是允许”，没有再次触发系统窗口。新 credential_slots 本地版本化映射/非秘密 route 台账与 caller 接线未提交、未安装；旧记录不改，固定 v1 SHA/source pin 不变。迁移必须拒绝覆盖新的 binding、拒绝 barrier 后缺失条目复活。当前仍需代码检查/独立审阅、同包冷启动和另一个真实桌面构建验收。
+- **Host 基础独立交付**：PR #24 `feat/mah-host-base-20261013` / 2fbda663，b116 + main e9767263；排除 post-b116 固定 reader，新记录迁移继续 PR14。相关 Host/DOM/typecheck 已通过，完整 CI/main 仍待确认；无新安装或服务器更新。旧 synthetic cold 子进程曾 Unlock 自己临时钥匙串，不能把成功视作排除真实 ACL/缓存原因；无 Unlock 拒绝对照仍待运行。
+
+
 - **BOTS-CLOUD-ADMIN-001**：用户已启动真实统一后台实现，当前隔离分支codex/bots-cloud-admin，base2796b13e；本地真实AuthStore/AdminStore与UI已验收，待CI/main和现网串行升级。源码services/agentnet/admin-web及admin_http/admin_store；规划BOTS-CLOUD-ADMIN-IMPLEMENTATION.md、执行接入提案BOTS-CLOUD-EXECUTION-V1.md，证据validation/。原型历史保持。现网04fa的四个服务模块修复原样保留，避免旧main覆盖运行修复；不修改其他Host/桌面任务。用户已授权向Host owner聊天同步；真实机器访问/账号/备份指针仅保留原owner私有协作记录。
 - **当前验收边界**：管理登记/配置/归属Host分配/逻辑删除恢复可持久化；start拒绝未连接执行端，stop只关准入。实际Host执行和跨用户共享未实现，首位平台管理员尚未授予，不能把fixture称作生产验收。组合service73项、metadata20项与clippy/fmt/lint、独立UI三gate通过。后台正式2轮、UI2轮修复，模型运行值和token/费用未知；纯Codex内置模式。
 

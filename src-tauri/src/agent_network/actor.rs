@@ -525,7 +525,7 @@ fn connection_identity_store(
         .get_or_insert_with(|| ConnectionKeyCache {
             binding_id: binding_id.to_owned(),
             generation,
-            store: super::crypto::OsIdentityStore::connection_cache(),
+            store: super::identity_desktop::connection_cache(),
         })
         .store
         .clone()
@@ -904,7 +904,7 @@ async fn connect(
             account.ensure_current()?;
             identity
         }
-        _ => NetworkIdentity::initialize_with_store(account, None, identity_store).await?,
+        _ => super::identity_desktop::initialize_selected(account, None, identity_store).await?,
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,

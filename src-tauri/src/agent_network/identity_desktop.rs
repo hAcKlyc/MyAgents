@@ -10,18 +10,112 @@ use myagents_agent_network_protocol::{validate_identity_state, IdentityState};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+/// The versioned route is a local credential lookup only; protocol Scope is unchanged.
+pub(crate) fn selected_store() -> Arc<dyn IdentityStore> {
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        super::credential_slots::desktop_store()
+    }
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    {
+        Arc::new(OsIdentityStore)
+    }
+}
+pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        super::credential_slots::connection_cache()
+    }
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    {
+        OsIdentityStore::connection_cache()
+    }
+}
+
+#[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
+struct ReadOnlyScopeStore {
+    scope: KeyScope,
+    inner: Arc<dyn IdentityStore>,
+}
+#[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
+impl IdentityStore for ReadOnlyScopeStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        if self.scope.issuer != scope.issuer
+            || self.scope.environment != scope.environment
+            || self.scope.service_id != scope.service_id
+            || self.scope.principal_id != scope.principal_id
+            || self.scope.device_id != scope.device_id
+            || self.scope.key_generation != scope.key_generation
+        {
+            return Err(super::crypto::CryptoError::CredentialConflict);
+        }
+        self.inner.load(scope)
+    }
+    fn save_pending(
+        &self,
+        _: &KeyScope,
+        _: &DevicePrivateKey,
+    ) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+    fn delete(&self, _: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+}
+
 impl NetworkIdentity {
     pub(crate) async fn initialize(
         account: NetworkAccountSession,
         retired_generation: Option<u64>,
     ) -> Result<Self, NetworkError> {
-        Self::initialize_with_store(account, retired_generation, Arc::new(OsIdentityStore)).await
+        initialize_selected(account, retired_generation, selected_store()).await
     }
 }
+/// Keep storage migration after the issuer has verified the original key.
+pub(crate) async fn initialize_selected(
+    account: NetworkAccountSession,
+    retired_generation: Option<u64>,
+    store: Arc<dyn IdentityStore>,
+) -> Result<NetworkIdentity, NetworkError> {
+    let identity =
+        NetworkIdentity::initialize_with_store(account, retired_generation, store).await?;
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        identity.account.ensure_current()?;
+        if !super::credential_slots::route(&super::credential_slots::identity_route_id(
+            &identity.scope,
+        )?)? {
+            let scope = identity.scope.clone();
+            let key = identity.device_key();
+            tokio::task::spawn_blocking(move || {
+                super::credential_slots::promote_key(&scope, &key, &AtomicBool::new(false))
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            identity.account.ensure_current()?;
+        }
+        if let NetworkAccountSession::Owned(owned) = &identity.account {
+            let owned = owned.clone();
+            let device = identity.scope.device_id.clone();
+            tokio::task::spawn_blocking(move || {
+                super::owned_account_desktop::promote_current_account(
+                    &owned,
+                    &device,
+                    &AtomicBool::new(false),
+                )
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            identity.account.ensure_current()?;
+        }
+    }
+    Ok(identity)
+}
+
 pub(crate) async fn load_key(
     scope: &KeyScope,
 ) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {
-    load_key_with_store(scope, Arc::new(OsIdentityStore)).await
+    load_key_with_store(scope, selected_store()).await
 }
 
 fn authorized_scope_from_state(
@@ -61,8 +155,10 @@ fn authorized_scope_from_state(
     ))
 }
 
-/// Explicitly authorize reading an already-enrolled device key. This path is
-/// read-only: it never initializes, rotates, enrolls, or deletes an identity.
+/// Explicitly authorize reading an already-enrolled device key.
+/// It never initializes, rotates, enrolls, or deletes an identity. Fixed-reader
+/// migration copies the verified key into a local slot before returning a
+/// read-only seed bound to exactly the authorized protocol Scope.
 pub(crate) async fn authorize_owned_identity(
     account: Arc<OwnedAccount>,
     expected_device: &str,
@@ -96,6 +192,14 @@ pub(crate) async fn authorize_owned_identity(
     let authorization_cancelled = cancelled.clone();
     crate::ulog_info!("[agent-network] credential recovery stage=device-key-read");
     let authorization_scope = scope.clone();
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    let authorization_scope =
+        if super::credential_slots::route(&super::credential_slots::identity_route_id(&scope)?)? {
+            super::credential_slots::local_scope(&scope)?
+        } else {
+            authorization_scope
+        };
+    let stored_scope = authorization_scope.clone();
     let authorization = tokio::task::spawn_blocking(move || {
         OsIdentityStore::authorize_existing(&authorization_scope, &authorization_cancelled)
     })
@@ -114,7 +218,7 @@ pub(crate) async fn authorize_owned_identity(
         }
         Err(error) => return Err(error.into()),
     };
-    let key = store.load(&scope)?;
+    let key = store.load(&stored_scope)?;
     if key.public_fingerprint()? != expected_fingerprint {
         return Err(NetworkError::new("IDENTITY_KEY_MISMATCH"));
     }
@@ -123,6 +227,25 @@ pub(crate) async fn authorize_owned_identity(
     }
     account_session.ensure_current()?;
     crate::ulog_info!("[agent-network] credential recovery stage=device-key-validated");
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        let migration_scope = scope.clone();
+        let migration_cancelled = cancelled.clone();
+        tokio::task::spawn_blocking(move || {
+            super::credential_slots::promote_key(&migration_scope, &key, &migration_cancelled)
+        })
+        .await
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+        }
+        account_session.ensure_current()?;
+        return Ok(Arc::new(ReadOnlyScopeStore {
+            scope,
+            inner: connection_cache(),
+        }));
+    }
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
     Ok(store)
 }
 
@@ -169,6 +292,63 @@ mod authorization_tests {
             "keyGeneration": 2,
             "keyFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
+    }
+
+    #[test]
+    fn restored_seed_remains_read_only_and_bound_to_all_original_scope_fields() {
+        use std::sync::atomic::AtomicUsize;
+        struct Counting(AtomicUsize);
+        impl IdentityStore for Counting {
+            fn load(
+                &self,
+                _: &KeyScope,
+            ) -> Result<DevicePrivateKey, super::super::crypto::CryptoError> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                DevicePrivateKey::generate()
+            }
+            fn save_pending(
+                &self,
+                _: &KeyScope,
+                _: &DevicePrivateKey,
+            ) -> Result<(), super::super::crypto::CryptoError> {
+                panic!("readonly seed must never delegate writes")
+            }
+            fn delete(&self, _: &KeyScope) -> Result<(), super::super::crypto::CryptoError> {
+                panic!("readonly seed must never delegate deletion")
+            }
+        }
+        let scope = KeyScope {
+            issuer: "https://owned.example".into(),
+            environment: "development".into(),
+            service_id: "00000000-0000-4000-8000-000000000001".into(),
+            principal_id: "owner".into(),
+            device_id: "00000000-0000-4000-8000-000000000004".into(),
+            key_generation: 2,
+        };
+        let backend = Arc::new(Counting(AtomicUsize::new(0)));
+        let store = ReadOnlyScopeStore {
+            scope: scope.clone(),
+            inner: backend.clone(),
+        };
+        let key = store.load(&scope).unwrap();
+        for field in 0..6 {
+            let mut other = scope.clone();
+            match field {
+                0 => other.issuer = "https://other.example".into(),
+                1 => other.environment = "production".into(),
+                2 => other.service_id = "00000000-0000-4000-8000-000000000009".into(),
+                3 => other.principal_id = "other".into(),
+                4 => other.device_id = "00000000-0000-4000-8000-000000000009".into(),
+                _ => other.key_generation = 3,
+            }
+            assert!(matches!(
+                store.load(&other),
+                Err(super::super::crypto::CryptoError::CredentialConflict)
+            ));
+        }
+        assert!(store.save_pending(&scope, &key).is_err());
+        assert!(store.delete(&scope).is_err());
+        assert_eq!(backend.0.load(Ordering::Relaxed), 1);
     }
 
     #[test]

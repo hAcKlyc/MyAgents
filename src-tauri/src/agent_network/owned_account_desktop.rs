@@ -350,10 +350,11 @@ fn pending_entry(
     device_id: &str,
     public_tls_ca: Option<&str>,
 ) -> Result<Entry, NetworkError> {
-    Ok(entry(&format!(
-        "pending:{}",
-        key(instance, device_id, "pending", public_tls_ca)
-    ))?)
+    let hash = key(instance, device_id, "pending", public_tls_ca);
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    let hash = super::credential_slots::session_hash(&hash)?;
+    // Pending transactions are newly created by this process, never migrated.
+    entry(&format!("pending:{hash}"))
 }
 fn session_entry(
     instance: &OwnedInstance,
@@ -361,10 +362,98 @@ fn session_entry(
     principal: &str,
     public_tls_ca: Option<&str>,
 ) -> Result<Entry, NetworkError> {
-    entry(&format!(
-        "session:{}",
-        key(instance, device_id, principal, public_tls_ca)
-    ))
+    let hash = key(instance, device_id, principal, public_tls_ca);
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    let hash = if super::credential_slots::route(&format!("session:{hash}"))? {
+        super::credential_slots::session_hash(&hash)?
+    } else {
+        hash
+    };
+    // A committed route never falls back when its current item is missing.
+    entry(&format!("session:{hash}"))
+}
+fn write_session_unlocked(
+    instance: &OwnedInstance,
+    device_id: &str,
+    principal: &str,
+    public_tls_ca: Option<&str>,
+    secret: &SecretRecord,
+    _preserve_existing: bool,
+    before_commit: impl Fn() -> Result<(), NetworkError>,
+) -> Result<(), NetworkError> {
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        let legacy = key(instance, device_id, principal, public_tls_ca);
+        super::credential_slots::with_committed_route(
+            &format!("session:{legacy}"),
+            |already_committed| {
+                let destination = entry(&format!(
+                    "session:{}",
+                    super::credential_slots::session_hash(&legacy)?
+                ))?;
+                before_commit()?;
+                let expected = serialized_secret(secret)?;
+                let existing = if _preserve_existing {
+                    read_unlocked(&destination)?
+                } else {
+                    None
+                };
+                let actual = existing.as_ref().map(serialized_secret).transpose()?;
+                if session_write_required(
+                    already_committed,
+                    _preserve_existing,
+                    actual.as_deref().map(Vec::as_slice),
+                    expected.as_slice(),
+                )? {
+                    write_unlocked(&destination, secret)?;
+                }
+                // The pinned writer also verifies bytes. Confirm the caller's typed
+                // record before making the route authoritative for a cold process.
+                let persisted = read_unlocked(&destination)?
+                    .ok_or_else(|| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
+                let actual = serialized_secret(&persisted)?;
+                if actual.as_slice() != expected.as_slice() {
+                    return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"));
+                }
+                before_commit()?;
+                Ok(())
+            },
+        )
+    }
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    {
+        before_commit()?;
+        write_unlocked(
+            &session_entry(instance, device_id, principal, public_tls_ca)?,
+            secret,
+        )
+    }
+}
+#[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
+fn session_write_required(
+    already_committed: bool,
+    preserve_existing: bool,
+    existing: Option<&[u8]>,
+    expected: &[u8],
+) -> Result<bool, NetworkError> {
+    if !preserve_existing {
+        return Ok(true);
+    }
+    match existing {
+        Some(actual) if actual == expected => Ok(false),
+        Some(_) => Err(NetworkError::new("ACCOUNT_BINDING_CHANGED")),
+        None if already_committed => {
+            // A committed missing/deleted slot cannot revive a legacy login.
+            Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))
+        }
+        None => Ok(true),
+    }
+}
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+fn serialized_secret(secret: &SecretRecord) -> Result<Zeroizing<Vec<u8>>, NetworkError> {
+    serde_json::to_vec(secret)
+        .map(Zeroizing::new)
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"))
 }
 fn write_unlocked(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
     let json = Zeroizing::new(
@@ -769,12 +858,6 @@ impl OwnedLoginManager {
                     let _ = client.logout(&session.access_token).await;
                     return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
                 }
-                let account_entry = session_entry(
-                    &instance,
-                    &device_id,
-                    &session.principal_id,
-                    public_tls_ca.as_deref(),
-                )?;
                 let secret = SecretRecord::Session {
                     version: VERSION,
                     instance: instance.clone(),
@@ -797,7 +880,15 @@ impl OwnedLoginManager {
                 )?;
                 let _storage = storage_transaction_lock();
                 session_guard_cache().ensure_capacity(&slot)?;
-                write_unlocked(&account_entry, &secret)?;
+                write_session_unlocked(
+                    &instance,
+                    &device_id,
+                    &session.principal_id,
+                    public_tls_ca.as_deref(),
+                    &secret,
+                    false,
+                    || Ok(()),
+                )?;
                 let guard = session_guard_cache().authorize(
                     slot,
                     &binding_id,
@@ -958,20 +1049,47 @@ pub(crate) fn delete_account_if_binding(
     public_tls_ca: Option<&str>,
     expected_binding: &str,
 ) -> Result<bool, NetworkError> {
-    let entry = session_entry(instance, device, principal, public_tls_ca)?;
     let _storage = storage_transaction_lock();
-    let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&entry)? else {
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    {
+        let legacy = key(instance, device, principal, public_tls_ca);
+        let removed = super::credential_slots::with_deleted_route(
+            &format!("session:{legacy}"),
+            |versioned| {
+                let physical = if versioned {
+                    super::credential_slots::session_hash(&legacy)?
+                } else {
+                    legacy.clone()
+                };
+                let selected = entry(&format!("session:{physical}"))?;
+                let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&selected)?
+                else {
+                    return Ok::<_, NetworkError>(None);
+                };
+                Ok((binding_id == expected_binding).then_some(selected))
+            },
+            |selected| delete_unlocked(&selected),
+        )?;
         let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
         session_guard_cache().invalidate_binding(&slot, expected_binding);
-        return Ok(false);
-    };
-    if binding_id != expected_binding {
-        return Ok(false);
+        return Ok(removed);
     }
-    delete_unlocked(&entry)?;
-    let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
-    session_guard_cache().invalidate_binding(&slot, expected_binding);
-    Ok(true)
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    {
+        let entry = session_entry(instance, device, principal, public_tls_ca)?;
+        let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&entry)? else {
+            let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
+            session_guard_cache().invalidate_binding(&slot, expected_binding);
+            return Ok(false);
+        };
+        if binding_id != expected_binding {
+            return Ok(false);
+        }
+        delete_unlocked(&entry)?;
+        let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
+        session_guard_cache().invalidate_binding(&slot, expected_binding);
+        Ok(true)
+    }
 }
 
 pub(crate) fn restore_account(
@@ -1029,6 +1147,94 @@ pub(crate) fn restore_account_authorized(
         record,
     )?;
     restore_if_not_cancelled(restored, cancelled)
+}
+
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+fn current_account_binding(account: &OwnedAccount, device: &str) -> Result<String, NetworkError> {
+    (account.guard)()?;
+    let slot = SessionSlot::new(
+        &account.descriptor,
+        device,
+        &account.session.principal_id,
+        account.public_tls_ca.as_deref(),
+    )?;
+    let state = SessionGuardCache::lock(&session_guard_cache().state);
+    let current = state
+        .entries
+        .get(&slot)
+        .ok_or_else(|| NetworkError::new("ACCOUNT_BINDING_CHANGED"))?;
+    current.check()?;
+    if current.connection_id != account.connection_id
+        || current.expires_at != account.session.expires_at
+    {
+        return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+    }
+    Ok(current.binding_id.clone())
+}
+
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+pub(crate) fn promote_current_account(
+    account: &OwnedAccount,
+    device: &str,
+    cancelled: &AtomicBool,
+) -> Result<(), NetworkError> {
+    let binding = current_account_binding(account, device)?;
+    promote_account(account, device, &binding, cancelled)
+}
+
+/// Persist only a session already validated by the account/identity owners.
+/// Legacy encrypted records remain unchanged for rollback. The durable route
+/// prevents a later missing/deleted current item from reviving a legacy token.
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+pub(crate) fn promote_account(
+    account: &OwnedAccount,
+    device: &str,
+    binding: &str,
+    cancelled: &AtomicBool,
+) -> Result<(), NetworkError> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    (account.guard)()?;
+    if current_account_binding(account, device)? != binding {
+        return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+    }
+    let _storage = storage_transaction_lock();
+    let record = SecretRecord::Session {
+        version: VERSION,
+        instance: account.descriptor.clone(),
+        public_tls_ca: account.public_tls_ca.clone(),
+        device_id: device.to_owned(),
+        principal_id: account.session.principal_id.clone(),
+        network_id: account.session.network_id.clone(),
+        session: account.session.clone(),
+        connection_id: account.connection_id.clone(),
+        binding_id: binding.to_owned(),
+    };
+    account.session.validate(&account.descriptor)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    (account.guard)()?;
+    write_session_unlocked(
+        &account.descriptor,
+        device,
+        &account.session.principal_id,
+        account.public_tls_ca.as_deref(),
+        &record,
+        true,
+        || {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+            }
+            (account.guard)()
+        },
+    )?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    (account.guard)()?;
+    Ok(())
 }
 
 /// Shared post-read validation. The caller holds the session storage transaction
@@ -1172,6 +1378,29 @@ mod tests {
 
     fn slot(network_id: &str, ca: Option<&str>) -> SessionSlot {
         SessionSlot::new(&instance(network_id), "device-1", "principal-1", ca).unwrap()
+    }
+
+    #[test]
+    fn migration_cannot_overwrite_a_new_binding_or_revive_a_deleted_slot() {
+        assert!(super::session_write_required(false, true, None, b"old").unwrap());
+        assert!(!super::session_write_required(true, true, Some(b"old"), b"old").unwrap());
+        for committed in [false, true] {
+            assert_eq!(
+                super::session_write_required(committed, true, Some(b"new"), b"old")
+                    .unwrap_err()
+                    .code,
+                "ACCOUNT_BINDING_CHANGED"
+            );
+        }
+        assert_eq!(
+            super::session_write_required(true, true, None, b"old")
+                .unwrap_err()
+                .code,
+            "NETWORK_CREDENTIAL_STORE_UNAVAILABLE"
+        );
+        // An explicit, freshly completed login is allowed to replace/recreate.
+        assert!(super::session_write_required(true, false, Some(b"old"), b"new").unwrap());
+        assert!(super::session_write_required(true, false, None, b"new").unwrap());
     }
 
     #[test]

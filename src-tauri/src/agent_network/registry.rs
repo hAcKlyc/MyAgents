@@ -383,7 +383,8 @@ impl NetworkRegistry {
             .unwrap_or_else(|e| e.into_inner())
             .cancel(operation_id)
     }
-    /// Restore only the saved session and existing device key. No config writes,
+    /// Restore only the saved session and existing device key. Reader migration
+    /// may create verified local credential copies; no membership/config edits,
     /// new login, identity replacement, or membership grant occur in this path.
     pub(crate) async fn owned_restore_credentials(
         self: &Arc<Self>,
@@ -486,6 +487,26 @@ impl NetworkRegistry {
             return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
         }
         (account.guard)()?;
+        // Copy only the validated session to the reader-owned slot. No old item
+        // or membership is changed; cancellation stays available during IPC.
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        {
+            let migration_account = account.clone();
+            let migration_record = record.clone();
+            let migration_cancelled = cancelled.clone();
+            tokio::task::spawn_blocking(move || {
+                super::owned_account_desktop::promote_account(
+                    &migration_account,
+                    &migration_record.device_id,
+                    &migration_record.binding_id,
+                    &migration_cancelled,
+                )
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            self.check_restore_boundary(expected_revision, &cancelled)?;
+            (account.guard)()?;
+        }
         // This mutex linearizes cancellation against publication. It never spans
         // OS or network reads, and an earlier Cancel always fences late results.
         let mut operations = self
@@ -820,9 +841,11 @@ impl NetworkRegistry {
         )
         .await?;
         if let Some(scope) = stored.revoked_scope.clone() {
-            tokio::task::spawn_blocking(move || super::crypto::OsIdentityStore::delete(&scope))
-                .await
-                .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            tokio::task::spawn_blocking(move || {
+                super::identity_desktop::selected_store().delete(&scope)
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
         }
         stored.removing = false;
         stored.reenrolling = false;
@@ -1106,7 +1129,7 @@ impl NetworkRegistry {
                     if let Some(previous) =
                         previous_scope.filter(|old| old.key_generation != scope.key_generation)
                     {
-                        super::crypto::OsIdentityStore::delete(&previous)?;
+                        super::identity_desktop::selected_store().delete(&previous)?;
                     }
                     if !already_confirmed {
                         persist(checkpoint.clone(), checkpoint_selected)?;
@@ -1114,7 +1137,11 @@ impl NetworkRegistry {
                     }
                     Ok(())
                 },
-                || super::crypto::OsIdentityStore::delete(&scope).map_err(NetworkError::from),
+                || {
+                    super::identity_desktop::selected_store()
+                        .delete(&scope)
+                        .map_err(NetworkError::from)
+                },
                 || {
                     persist(next.clone(), selected.clone())?;
                     *owner.stored.lock().unwrap_or_else(|e| e.into_inner()) = next;

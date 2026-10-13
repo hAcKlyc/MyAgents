@@ -39,3 +39,18 @@ reader 与 parent 使用不同 identifier，匹配同一发布者叶证书，且
 下一步：本机安装与窗口 owner 已归还 root；4fc9a2b1 首次迁移在线而同构建冷启动失败；root 已精确恢复 b116404e 并真实验证两设备 / Linux-Host 自动在线、模型 / 既有 Agent 可读，未再发授权，原 MyAgents 保全。失败试用包及两个新包的签名制品已保留。已反证“未选择总是允许”“钥匙串当前锁定”“helper ACL 错捕获 parent requirement”这三种解释；继续核对非交互读取路径，不自动重发授权。已同步 main 的管理后台源码但不部署其新增模块；免提示关键门禁通过后再完成第二桌面构建、当前 CI 和 PR14 主干交付。
 
 CI 修复：07e226a9 的 DOM 用例只等 adapter promise 而未等父组件提交，改为等待实际异常标题和撤权提示；不放宽权限断言。完整 DOM 261 文件、2213 项通过，修复提交 0fb5f31f。该头的远端 CI 另行等待；此前其余平台及独立云服务检查成功。
+
+
+## 新记录迁移修复（实施中）
+
+- [x] 用户再次确认两项均选择“总是允许”；停止重复真实授权与旧记录读取，当前桌面保留已在线 b116。
+- [x] 独立 Host 基础拆为 PR #24：精确 b116 与最新 main 组合，不包含固定 reader / 新记录迁移；源码检查及相关 Node/DOM 通过，完整 CI、main 交付仍等待。
+- [x] 固定 reader v1 的源闭包与签名字节 SHA 再核验一致；不重签、不更换发行者、不更改旧 ACL。
+- [x] 新本地 slot：完整原协议 scope 仅映射为本地 OS 条目，原协议身份/CSR/服务器绑定不变；非秘密路由台账原子提交，删除后不回落旧条目。旧记录保留回滚。
+- [x] 已验证 session/key 的本地复制、同锁 write/readback/route 提交、不同新绑定拒绝覆盖、删除屏障与只读 seed 接线；独立审阅关闭已确认 P2。主 Agent MoX production release check 通过，实际源 portable harness 19 passed / 1 subprocess helper ignored（含真实进程锁测试），worker Clippy 通过，reader prepare 13 项通过。完整 App 单元验证仍在编译；真实 OS 读取/冷启动尚未验收。
+- [ ] 新候选真实首次迁移、同包冷启动、另一个桌面构建更新后自动恢复；未安装新代码，不能称免提示已解决。
+
+此前临时钥匙串 cold 测试的子进程在查询前调用过仅针对自己随机密码的 Unlock。因此成功不能排除解锁凭据缓存影响，不能单独排除真实 ACL 路径差异。正在准备不向 cold 子进程提供密码、不调用 Unlock，且包含不同签名 identifier 的拒绝对照；这仍是隔离 OS 诊断，不是产品验收。
+
+
+隔离拒绝对照已实际运行：同一 hardened-runtime C 源分别签为 A/B 不同 identifier、同一发行者；cold 子进程不接收密码或 Unlock。仅 A 受信的随机临时条目，A 读取成功，B 返回 -25293；临时 keychain 经 API 删除，默认项/搜索列表保全、私有目录删除均通过。证据仅证明本机这种新建条目的 ACL 可区分两个进程，不证明用户旧记录或真实 MoXBots 冷启动已修复。受限原文为 SYNTHETIC-KEYCHAIN-NO-UNLOCK-PROOF.json，不入 Git。
