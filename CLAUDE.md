@@ -140,3 +140,7 @@ verify it matches the config and checkout fetch/push URLs before saving work.
 Read `.agent-sync/project-map.md`, `.agent-sync/plan.md`, and the current
 branch record in `.agent-sync/tasks/` before continuing another agent's work.
 <!-- git-project-sync:end -->
+
+### Git 协作结构接入期
+
+`.agent-sync.json` 的 `codex/` 前缀和分支任务记录适用于新建的绑定任务。接入前已经进行中的 `feat/` 任务继续保留其原分支、已提交历史和 `codex-handoff.md` 记录，不要求中途更名、重置或重写历史。原 owner 完成后按原审查与 CI 流程集成；后续新任务再从已交付主干采用绑定流程。接入期例外不代表旧任务已通过新 gate，不得伪报工具结果。

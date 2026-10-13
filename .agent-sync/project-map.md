@@ -2,7 +2,7 @@
 
 ## 项目身份
 
-MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、Linux Host 和 owned AgentNet 服务。AgentNets 是后续多用户网络与 Bot 共享的产品称谓；源码及协议中的 AgentNet namespace 不随仓库更名全局替换。
+MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、Linux Host 和 owned AgentNet 服务。Bots Net 是后续多用户网络与 Bot 共享的产品称谓；源码及协议中的 AgentNet namespace 不随仓库更名全局替换。
 
 权威仓库：https://github.com/heavenzhang/MoXBots.git ，主干 `main`，策略见根 `.agent-sync.json`。上游 https://github.com/hAcKlyc/MyAgents.git 仅为 upstream，不是本项目交付目标。用户于 2026-10-13 授权仓库更名；仓库 ID 和历史保留。
 
