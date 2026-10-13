@@ -58,3 +58,11 @@ MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/sidebar-organization-validation/run.
 新增用例只在独立 browser context 中令 Storage.prototype.setItem 对 `myagents.globalSidebar.v1` 抛合成 QuotaExceededError，不改产品源码。实际 click 保存后验证：dialog count=1、输入“存储故障后可重试”不变、保存重新 enabled、写入故障确实触发、旧 localStorage organization 不变；截图 `storage-failure-input-retained.png`。finally 恢复原 Storage 实现后点击同一保存，localStorage 成功新增该分区且 dialog 关闭。此前22项全部重跑通过，归档用例额外验证创建入口 disabled。mock toast 仅记录警告而没有真实 Toast 渲染，因此不将截图当作错误 toast 可见性证据。
 
 源码归档核对：本次23项实际验收的7份产品文件SHA256与功能提交45ad14d0完全相同；该条为提交映射核实，不声称重新执行UI。执行日志以同名 .txt 版本随Git保存，原 .log 保留在本地。
+
+## 900×800 rail flyout 嵌套拖拽补验（2026-10-13T15:27:40.222Z）
+
+此轮仅追加窄窗口真实 pointer 路径，不重复或修改此前23项证据日期与结果来源。任务分支 HEAD `f8894e763f7019a3ebfb1195a5df724912d72d35`；主 Agent 告知产品已由 PR25 合 main c21，本 worker 不以该告知替代远端交付核验。五个 core 产品 SHA256 与当轮来源见 `rail-dnd-results.json`。
+
+在正式 flyout 的合成 Alpha 两条任务上依次实际执行：整行将任务二移入“窄窗口拖拽”；手柄将任务一移入同分区；整行把任务二向下排序；手柄把任务二向上排序。四步均通过；每步在 mouseup 后等待450ms覆盖hover关闭计时及动画，确认分区header仍visible、导航callback数量保持0、placements与orders符合预期。最终分区内顺序为alpha-2、alpha-1。截图 `rail-dnd-before.png` / `rail-dnd-after.png` 与鼠标坐标、每步prefs快照位于 `rail-dnd-results.json`；原始运行结果随Git保存为 `rail-dnd.txt`（原 .log 保留本地）。截图独立检视无重叠或横向溢出。
+
+复现：`MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/sidebar-organization-validation/run.mjs --rail-check`。新窄路径脚本及runner eslint通过。范围仍为独立Chromium合成renderer；未操作真实App、联合签名构建、安装owner或生产。

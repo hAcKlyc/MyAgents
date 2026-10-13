@@ -95,3 +95,7 @@ Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution c
 ## MOXBOTS-SIDEBAR-ORG-001
 
 用户明确由当前Agent为桌面端实现任务/Agent拖拽与Codex风格自定义分区。范围为本机侧栏偏好、排序与展示归属，不改变Session执行身份或真实工作目录。任务记录 `.agent-sync/tasks/codex-sidebar-organization-20261013-964955f1.md`，要求数据回归、实际嵌套拖拽/菜单/导航/刷新/rail及独立审阅、CI和远端main。原生安装与当前Host/凭据统一更新owner协调，独立追踪，不能把fixture验收当生产验收。
+
+SIDEBAR-ORG阶段更新：PR25已交付远端main c21e9f43，源头9d879a6e六项CI与独立23项实际UI通过；原生安装仍开放。用户已授权跨聊天协调，唯一本机安装owner“Bots 网络 可用”已确认旧6ac包不含sidebar，正准备联合候选；以实际制品/签名/运行回执和原生重启验收关闭。
+
+SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agent实际App拖Task/Agent进分区、菜单恢复、分区管理和正常重启保留完成，详见dev-docs/sidebar-organization-native.md的覆盖限制。临时分区已清理；凭据slot保存仍失败，由原owner修复，统一更新未全部验收。
