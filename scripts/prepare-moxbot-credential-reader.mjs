@@ -19,7 +19,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
-const RELEASE_LOCK = path.join(REPO_ROOT, 'scripts/moxbot-credential-reader-release.json');
+const RELEASE_FILES = Object.freeze({
+  'legacy-local-v1': 'moxbot-credential-reader-release.json',
+  'developer-id-v2': 'moxbot-credential-reader-developer-id-v2.json',
+});
+function validateRelease(release) {
+  if (typeof release !== 'string' || !Object.hasOwn(RELEASE_FILES, release)) {
+    fail('unknown credential reader release');
+  }
+  return release;
+}
+export function readMoxbotCredentialReaderRelease({
+  release = 'legacy-local-v1', repositoryRoot = REPO_ROOT,
+} = {}) {
+  validateRelease(release);
+  return readReleaseLock(path.join(repositoryRoot, 'scripts', RELEASE_FILES[release]));
+}
 export const READER_FILENAME = 'moxbots-credential-reader';
 export const READER_DESTINATION = `Contents/Helpers/${READER_FILENAME}`;
 export const MANIFEST_DESTINATION = 'Contents/Resources/credential-reader-manifest.json';
@@ -87,7 +102,7 @@ function validateReleaseLock(lock) {
   return lock;
 }
 
-function readReleaseLock(lockPath = RELEASE_LOCK) {
+function readReleaseLock(lockPath) {
   const bytes = readSafeFile(lockPath, 4096, 'release lock');
   let lock;
   try {
@@ -302,10 +317,14 @@ export function verifyPackagedCredentialReader({
   appBundle,
   expectedManifest,
   repositoryRoot = REPO_ROOT,
+  release = 'legacy-local-v1',
+  lock = readMoxbotCredentialReaderRelease({ release, repositoryRoot }),
   inspectSignature = inspectMacSignature,
   inspectArchitecture = inspectMacArchitecture,
 }) {
-  const lock = readReleaseLock(path.join(repositoryRoot, 'scripts/moxbot-credential-reader-release.json'));
+  validateRelease(release);
+  validateReleaseLock(lock);
+  parseManifest(Buffer.from(`${JSON.stringify(expectedManifest)}\n`), lock);
   if (expectedManifest.executable !== READER_DESTINATION) fail('packaged reader destination is invalid');
   const sourceInputSha256 = computeSourceInputSha256(repositoryRoot);
   if (sourceInputSha256 !== lock.sourceInputSha256) {
@@ -433,11 +452,13 @@ export function prepareMoxbotCredentialReader({
   targetArch,
   repositoryRoot = REPO_ROOT,
   platform = process.platform,
-  lock = readReleaseLock(path.join(repositoryRoot, 'scripts/moxbot-credential-reader-release.json')),
+  release = 'legacy-local-v1',
+  lock = readMoxbotCredentialReaderRelease({ release, repositoryRoot }),
   inspectSignature = inspectMacSignature,
   inspectArchitecture = inspectMacArchitecture,
   stageParent = realpathSync(tmpdir()),
 }) {
+  validateRelease(release);
   if (platform !== 'darwin') fail('reader injection is only supported on macOS builds');
   if (!bundleDirectory) fail('MOXBOTS_CREDENTIAL_READER_BUNDLE is required for every MoXBots macOS build');
   validateArch(targetArch);

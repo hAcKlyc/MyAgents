@@ -24,6 +24,7 @@ import {
   inspectMacSignature,
   prepareMoxbotCredentialReader,
   resolveMacTargetArch,
+  readMoxbotCredentialReaderRelease,
   verifyPackagedCredentialReader,
 } from './prepare-moxbot-credential-reader.mjs';
 
@@ -352,4 +353,52 @@ test('real local macOS signed app path and signature metadata are inspectable', 
 
 test('default module repository root is normalized before source verification', () => {
   assert.match(computeSourceInputSha256(), /^[0-9a-f]{64}$/);
+});
+
+test('release selection is closed, fixed-path and defaults to legacy for low-level callers', (t) => {
+  const f = fixture(t);
+  const legacyBytes = readFileSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-release.json'));
+  const v2 = { ...f.lock, signingCertificateSha256: 'cc'.repeat(32) };
+  writeFileSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-developer-id-v2.json'), JSON.stringify(v2));
+  assert.deepEqual(readMoxbotCredentialReaderRelease({ repositoryRoot: f.sourceRoot }), f.lock);
+  assert.deepEqual(readMoxbotCredentialReaderRelease({ repositoryRoot: f.sourceRoot, release: 'developer-id-v2' }), v2);
+  for (const release of ['../other', '/tmp/lock.json', '__proto__', '', null]) {
+    assert.throws(() => readMoxbotCredentialReaderRelease({ repositoryRoot: f.sourceRoot, release }), /unknown credential reader release/);
+    assert.throws(() => prepareDirect(f, { release }), /unknown credential reader release/);
+    assert.throws(() => verifyPackagedCredentialReader({ release, lock: f.lock }), /unknown credential reader release/);
+  }
+  assert.deepEqual(readFileSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-release.json')), legacyBytes);
+});
+
+test('v2 prepare and packaged verification bind the same chosen publisher without legacy fallback', (t) => {
+  const v2Manifest = { ...manifest, signingCertificateSha256: 'cc'.repeat(32) };
+  const f = fixture(t, { manifestValue: v2Manifest });
+  const v2 = { ...f.lock, signingCertificateSha256: v2Manifest.signingCertificateSha256 };
+  writeFileSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-developer-id-v2.json'), JSON.stringify(v2));
+  const v2Signature = { ...signature, signingCertificateSha256: v2Manifest.signingCertificateSha256 };
+  const prepared = prepareMoxbotCredentialReader({
+    release: 'developer-id-v2', repositoryRoot: f.sourceRoot, platform: 'darwin',
+    bundleDirectory: f.bundleDirectory, targetArch: 'arm64', stageParent: f.root,
+    inspectSignature: () => v2Signature, inspectArchitecture: () => ['arm64'],
+  });
+  t.after(() => prepared.cleanup());
+  assert.throws(() => prepareDirect(f), /pinned release contract/);
+  const appBundle = path.join(f.root, 'MoXBots.app');
+  for (const directory of ['Helpers', 'Resources']) mkdirSync(path.join(appBundle, 'Contents', directory), { recursive: true });
+  copyFileSync(path.join(prepared.stagingDirectory, 'moxbots-credential-reader'), path.join(appBundle, 'Contents/Helpers/moxbots-credential-reader'));
+  copyFileSync(path.join(prepared.stagingDirectory, 'credential-reader-manifest.json'), path.join(appBundle, 'Contents/Resources/credential-reader-manifest.json'));
+  const options = { appBundle, expectedManifest: prepared.manifest, repositoryRoot: f.sourceRoot,
+    inspectSignature: () => v2Signature, inspectArchitecture: () => ['arm64'] };
+  assert.equal(verifyPackagedCredentialReader({ ...options, release: 'developer-id-v2' }), true);
+  assert.throws(() => verifyPackagedCredentialReader(options), /pinned release contract/);
+  rmSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-developer-id-v2.json'));
+  assert.throws(() => readMoxbotCredentialReaderRelease({ repositoryRoot: f.sourceRoot, release: 'developer-id-v2' }));
+});
+
+test('MoX wrapper defaults to Developer ID and passes one chosen lock to prepare and verify', () => {
+  const wrapper = readFileSync(new URL('./build-moxbot.mjs', import.meta.url), 'utf8');
+  assert.match(wrapper, /MOXBOTS_CREDENTIAL_READER_RELEASE \?\? 'developer-id-v2'/);
+  assert.equal((wrapper.match(/lock: readerLock/g) ?? []).length, 2);
+  assert.equal((wrapper.match(/release: readerRelease/g) ?? []).length, 3);
+  assert.match(wrapper, /\['legacy-local-v1', 'developer-id-v2'\]\.includes\(readerRelease\)/);
 });

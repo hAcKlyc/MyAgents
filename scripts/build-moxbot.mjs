@@ -7,6 +7,7 @@ import {
   prepareMoxbotCredentialReader,
   resolveMacTargetArch,
   resolveMacTargetTriple,
+  readMoxbotCredentialReaderRelease,
   verifyPackagedCredentialReader,
 } from './prepare-moxbot-credential-reader.mjs';
 
@@ -14,6 +15,8 @@ import {
 // The override also owns the bundle ID, OS deep link and filesystem permission.
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const userArgs = process.argv.slice(2);
+const readerRelease = process.env.MOXBOTS_CREDENTIAL_READER_RELEASE ?? 'developer-id-v2';
+let readerLock;
 let reader;
 let expectedAppBundle;
 let cliArgs = [
@@ -21,10 +24,16 @@ let cliArgs = [
   ...userArgs,
 ];
 try {
+  if (!['legacy-local-v1', 'developer-id-v2'].includes(readerRelease)) {
+    throw new Error('Unknown credential reader release');
+  }
   if (process.platform === 'darwin') {
     const targetArch = resolveMacTargetArch(userArgs);
     const targetTriple = resolveMacTargetTriple(userArgs);
-    reader = prepareMoxbotCredentialReader({ targetArch, repositoryRoot: root });
+    readerLock = readMoxbotCredentialReaderRelease({ release: readerRelease, repositoryRoot: root });
+    reader = prepareMoxbotCredentialReader({
+      targetArch, repositoryRoot: root, release: readerRelease, lock: readerLock,
+    });
     cliArgs = addMoxbotReaderBuildOptions(cliArgs, reader.overlay);
     const targetRoot = process.env.CARGO_TARGET_DIR
       ? path.resolve(root, process.env.CARGO_TARGET_DIR)
@@ -50,6 +59,9 @@ try {
     verifyPackagedCredentialReader({
       appBundle: expectedAppBundle,
       expectedManifest: reader.manifest,
+      repositoryRoot: root,
+      release: readerRelease,
+      lock: readerLock,
     });
   }
 } finally {
