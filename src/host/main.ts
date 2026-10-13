@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
-import { configureHost, readConfigReceipt, type HostConfig } from './management';
+import { configureHost, configureProviderHost, readProviderConfigReceipt, extendedHostSettings, selectedHostProviderProfile, legacyHostRepresentable, HostManagementUpgradeRequired, readConfigReceipt, type HostConfig } from './management';
 import { readNetworkStatus } from './network-status';
 import { createHostResourceOwner, HostResourceError, type HostResourceRequest } from './resources';
 import { connectHostManagementIpc } from './management-ipc';
@@ -145,10 +145,18 @@ async function serve(): Promise<void> {
     }
     const generation = randomUUID();
     const childEnvironment = { ...process.env };
-    const hasDynamicCredential = config.providerApiKeys?.['moonshot-coding'] === HOST_PROVIDER_REFERENCE;
-    let credential = hasDynamicCredential ? credentialOwner?.readForExecution('moonshot-coding') : undefined;
+    let sessionProviderId=settings.providerId;
+    if (sessionId) {
+      const rows=await jsonFile<Array<{id:string;providerId?:string;providerRoute?:{kind:string;providerId:string}}>>(join(home,'.myagents','sessions.json'),[]);
+      const meta=rows.find(row=>row.id===sessionId);
+      if (meta?.providerRoute?.kind === 'provider') sessionProviderId=meta.providerRoute.providerId;
+      else if (meta?.providerId) sessionProviderId=meta.providerId;
+      else throw new Error('Session Provider identity is unavailable');
+    }
+    const hasDynamicCredential = config.providerApiKeys?.[sessionProviderId] === `host-provider-credential:${sessionProviderId}`;
+    let credential = hasDynamicCredential ? credentialOwner?.readForExecution(sessionProviderId) : undefined;
     if (hasDynamicCredential && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
-    if (!hasDynamicCredential && process.env.CREDENTIALS_DIRECTORY) {
+    if (!hasDynamicCredential && sessionProviderId === 'moonshot-coding' && process.env.CREDENTIALS_DIRECTORY) {
       try { credential = resolveHostProviderCredential('systemd-credential:kimi'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
@@ -158,7 +166,7 @@ async function serve(): Promise<void> {
       cwd: dirname(workerPath),
       env: { ...childEnvironment, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
         MYAGENTS_HOST_CREDENTIAL_SOURCE: 'supervisor-ipc',
-        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: settings.providerId,
+        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: sessionProviderId,
         MYAGENTS_HOST_MODEL: settings.model, MYAGENTS_HOST_GENERATION: generation,
         MYAGENTS_HOST_EXECUTION_AUTHORIZED: settings.executionAuthorized ? '1' : '0' },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
@@ -180,7 +188,7 @@ async function serve(): Promise<void> {
         }
         credentialDelivered = true;
         child.send({ type: 'host-provider-snapshot', generation,
-          providerId: 'moonshot-coding', credential: credential ?? null }, error => {
+          providerId: sessionProviderId, credential: credential ?? null }, error => {
           if (error) child.kill('SIGTERM');
         });
         credential = undefined;
@@ -259,22 +267,40 @@ async function serve(): Promise<void> {
     if (shuttingDown) throw new Error('Host is stopping');
     return exclusive(async () => {
       if (shuttingDown) throw new Error('Host is stopping');
-      if (method === 'host.snapshot') {
+      if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['host.snapshot','config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
+      if (method === 'resources.directory.list') return resourceOwner.listDirectory(params as {rootId:string;relativePath:string;cursor?:string});
+      if (method === 'config.provider.set') return configureProviderHost({
+        hostId:identity!.hostId,defaultWorkspace:join(workspaceRoot,'default'),readConfig:()=>jsonFile<HostConfig>(configPath,{}),writeConfig:config=>atomicJson(configPath,config),workspacePath,busy:()=>Boolean(active)||shuttingDown,selectWorkspace:selection=>resourceOwner.selectWorkspace(selection),
+      },params);
+      if (method === 'credential.provider.set') {
+        if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+        return {kind:'provider-credential-receipt',...await credentialOwner.write(params as unknown as ProviderCredentialInput)};
+      }
+      if (method === 'receipt.provider.get') {
+        const id=params.mutationId as string;const provider=params.providerId as string;
+        const receipt=params.owner === 'config' ? readProviderConfigReceipt(await jsonFile<HostConfig>(configPath,{}),identity!.hostId,provider,id) : credentialOwner?.receipt(id,provider);
+        if (!receipt && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+        return !receipt || receipt.status === 'not-found' ? {kind:'receipt-not-found',mutationId:id,owner:params.owner} : params.owner === 'config' ? receipt : {kind:'provider-credential-receipt',...receipt};
+      }
+      if (method === 'host.snapshot' || method === 'host.inspect') {
+        const config=await jsonFile<HostConfig>(configPath,{});
+        if (method === 'host.snapshot' && !legacyHostRepresentable(config)) throw new HostManagementUpgradeRequired();
         const value = (await dispatch('/host/status', {})) as Record<string, unknown>;
         return {
-          kind: 'snapshot',
+          kind: method === 'host.inspect' ? 'extended-snapshot' : 'snapshot',
           version: 1,
           hostId: value.hostId,
           configured: value.configured,
-          settings: value.settings,
+          settings: method === 'host.inspect' ? extendedHostSettings(config,{workspaces:workspaceRoot}) : value.settings,
+          ...(method === 'host.inspect' ? {provider:selectedHostProviderProfile(config)} : {}),
           activeSession: value.activeSession,
           stopping: value.stopping,
           capabilities: value.capabilities,
           agentNet: value.agentNet,
           runtime: value.runtime,
           credentials: credentialOwner
-            ? { ...credentialOwner.inspect(), writeAvailable: true }
-            : { providerId: 'moonshot-coding', configured: false, revision: 0, writeAvailable: false },
+            ? { ...credentialOwner.inspect(method === 'host.inspect' ? config.hostSettings?.providerId ?? 'moonshot-coding' : 'moonshot-coding'), writeAvailable: true }
+            : { providerId: method === 'host.inspect' ? config.hostSettings?.providerId ?? 'moonshot-coding' : 'moonshot-coding', configured: false, revision: 0, writeAvailable: false },
           resources: await resourceOwner.inspect(),
         };
       }
@@ -309,9 +335,9 @@ async function serve(): Promise<void> {
           effect: receipt.effect,
         };
       }
-      if (method === 'resources.create') {
+      if (method === 'resources.create' || method === 'resources.register') {
         if (params.rootId !== 'workspaces') throw new HostResourceError('RESOURCE_ROOT_UNKNOWN');
-        const result = await resourceOwner.mutate(params as unknown as HostResourceRequest);
+        const result = await resourceOwner.mutate((method === 'resources.register' ? {...params,operation:'register'} : params) as unknown as HostResourceRequest);
         if (result.status === 'unconfirmed') return { kind: 'error', code: 'RESOURCE_UNCONFIRMED' };
         return { kind: 'resource-receipt', ...result };
       }

@@ -822,6 +822,54 @@ pub(crate) mod tests {
         b.feed_management(decode_tls_frame(&frame).unwrap().1, sequences_b)
     }
 
+    #[allow(dead_code)]
+    mod legacy_codec {
+        include!("../../host-management-protocol/tests/fixtures/legacy_v1.rs");
+    }
+    #[test]
+    fn old_codec_rejects_capability_probe_only_after_complete_tls_ready() {
+        let (mut controller, mut host, mut sc, mut sh) = management_pair();
+        establish_management_outer_ready(&mut controller, &mut host, &mut sc, &mut sh);
+        complete_management_handshake(&mut controller, &mut host, &mut sc, &mut sh);
+        assert!(controller.ready() && host.ready());
+        controller
+            .send_management(ManagementMessage::Request {
+                request_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+                method: myagents_host_management_protocol::ManagementMethod::HostCapabilities,
+                params: RequestParams::Snapshot(
+                    myagents_host_management_protocol::SnapshotParams {},
+                ),
+            })
+            .unwrap();
+        let mut old = legacy_codec::FrameDecoder::default();
+        let mut rejected = false;
+        while let Some(frame) = controller.drain_frame().unwrap() {
+            // Actual authenticated TLS plaintext is handed to the frozen old codec.
+            let plaintext = host.tls.feed(decode_tls_frame(&frame).unwrap().1).unwrap();
+            if old.push(&plaintext).is_err() {
+                rejected = true;
+            }
+        }
+        assert!(rejected);
+        assert!(
+            controller.ready(),
+            "peer rejection concerns this management channel, not TLS/account identity"
+        );
+        // Old closed codec still accepts the fallback snapshot shape.
+        let snapshot = legacy_codec::Frame {
+            namespace: legacy_codec::NAMESPACE.into(),
+            version: 1,
+            sender_sequence: 1,
+            channel_id: legacy_codec::CanonicalUuid::new(uuid::Uuid::new_v4()),
+            message: legacy_codec::ManagementMessage::Request {
+                request_id: legacy_codec::CanonicalUuid::new(uuid::Uuid::new_v4()),
+                method: legacy_codec::ManagementMethod::HostSnapshot,
+                params: legacy_codec::RequestParams::Snapshot(legacy_codec::SnapshotParams {}),
+            },
+        };
+        assert!(legacy_codec::encode_frame(&snapshot).is_ok());
+    }
+
     #[test]
     fn management_tls_channel_negotiates_then_routes_only_typed_management() {
         let (mut controller, mut host, mut sc, mut sh) = management_pair();

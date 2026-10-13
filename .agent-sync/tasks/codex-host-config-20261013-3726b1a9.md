@@ -27,12 +27,16 @@
 
 ## Verification
 
-尚无本任务产品改动或验收。源码图谱、实际运行与试用分支需区分；旧归档/问答回归不充当本次验证。
+已实现封闭扩展方法、Provider 元数据回显、不可变版本配置、按 Provider 绑定的既有加密凭据 owner、受限目录浏览/选择与注册。共享 Settings 连接字段和模型组件已接线，独立源码审查发现的七项 UI 问题正在修复，尚未冻结。
+
+主Agent本轮核验：来源/registry/shared unit 16项通过；Node六文件42项通过、13项Linux目录测试因macOS跳过；协议19项和Headless125项通过；后端与来源文件lint通过。实际 bundled supervisor IPC、真实SessionStore birth/resume与未授权执行拒绝属于隔离联调，未调用模型。完整native构建此前被本机Swift PackageDescription缺符号阻断；本轮协议format check另发现依赖原有codec.rs导入排序，不将其报为通过。
+
+隔离 UI harness 在 ignored playground/host-config-qa，仅127.0.0.1:5187，真实组件与样式、合成transport/source；主AgentIAB可用，独立reviewer环境仅有未授权真实浏览器，无法做独立IAB视觉验收。实际 UI 验收待修复冻结后执行，报告 dev-docs/host-config-independent-review.md。
 
 ## Blockers and unknowns
 
-main尚无OwnedHostManagement/Host管理IPC；开发需本地引入远端冻结9149753c作为明确依赖，不能独自把未验收凭据方案发布或宣称基础已交main。最终Git集成与统一客户端依赖原owner交付。
+截至远端main e9767263仍无OwnedHostManagement/Host管理IPC。本地merge 5a9dd9b0引入冻结9149753c仅为开发依赖，不能独自把未验收凭据方案发布。原owner正在拆分Host基础与修复新凭据迁移Linux CI；最终Git集成与统一客户端依赖其验证后交付。当前安装原在线b116404e，本任务不并发换包或重启。
 
 ## Next step
 
-在冻结Host依赖上确定兼容能力、Provider和目录读取契约，划分互斥实现范围并完成共享UI与Host owner实现。
+完成七项UI修复与独立源码复验，主Agent实际IAB检查交互/响应式；保存阶段提交并推送工作分支，Linux CI补齐跳过用例。等待原owner已验证基础锚点后集成最新main，统一安装与真实Host/旧Host兼容及模型执行另行按门槛验收。

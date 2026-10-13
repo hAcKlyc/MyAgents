@@ -209,3 +209,10 @@ The user explicitly authorized the existing integration test account as this ins
 Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
+
+### 2026-10-13 — MOXBOTS-HOST-CONFIG-20261013 development checkpoint
+
+- 用户明确当前Agent实现，来源为当前MoXBots桌面主Agent，并授权与“评估 MyAgents 精简为 Linux Host”协调接口与统一安装。范围是模型配置复用、远端目录选择，不修改原凭据reader方案。
+- 分支codex/host-config-20261013，从main2a241591起；本地merge冻结Host依赖9149753c（5a9dd9b0）。远端main e9767263仍无Host管理基础，不能独自发布其未完成凭据实验。后续将本任务提交应用到原owner已验证基础。
+- 封闭扩展DTO、非秘密profile回显、不可变version ID、Provider私有key绑定、Linux fd目录选择/注册已实现；主核验unit16、Node42pass/13Linux skip、协议19、Headless125、范围lint通过。UI七项独立发现待修复冻结与主IAB验收；native/真实Host/模型路径仍开放。
+- 当前安装仍b116404e，统一安装由原凭据owner控制；主Agent不并发换包。接续清单及证据见任务记录、specs/tech_docs/host_configuration_reuse.md、dev-docs/host-config-independent-review.md。

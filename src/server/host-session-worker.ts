@@ -1,3 +1,6 @@
+import { createServer, type Server } from 'node:http';
+import { Readable } from 'node:stream';
+import { isHostProviderId } from '../shared/hostProviderConfig';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
@@ -24,7 +27,7 @@ async function main(): Promise<void> {
         if (value.type !== 'host-provider-snapshot') return;
         cleanup();
         if (Object.keys(value).length !== 4 || value.generation !== generation
-          || value.providerId !== 'moonshot-coding'
+          || !isHostProviderId(value.providerId) || value.providerId !== process.env.MYAGENTS_HOST_PROVIDER_ID
           || !(value.credential === null || (typeof value.credential === 'string'
             && value.credential.trim().length > 0 && Buffer.byteLength(value.credential, 'utf8') <= 16 * 1024
             && !/[\r\n\0]/.test(value.credential)))) {
@@ -39,7 +42,7 @@ async function main(): Promise<void> {
         if (error) { cleanup(); reject(new Error('Host credential initialization transport failed')); }
       });
     });
-    installHostSessionCredential(birthCredential);
+    installHostSessionCredential(birthCredential, process.env.MYAGENTS_HOST_PROVIDER_ID);
   }
   const credentials = new Set<string>([process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN, process.env.CLAUDE_CODE_OAUTH_TOKEN].filter((value): value is string => Boolean(value)));
   if (birthCredential) credentials.add(birthCredential);
@@ -116,6 +119,42 @@ async function main(): Promise<void> {
   await engine.updateOfficialToolIds(metadata?.enabledOfficialToolIds ?? []);
   if (restored.reasoningEffort) await engine.updateReasoningEffort(restored.reasoningEffort);
   const send = (message: HostSessionMessage) => { if (process.connected) process.send?.(redact(message)); };
+  let loopbackBridge: Server | undefined;
+  async function ensureLoopbackBridge() {
+    if (loopbackBridge) return;
+    const [{createBridgeHandler},{lookupBridge},{registerBridgeSeedFn}]=await Promise.all([import('./openai-bridge'),import('./openai-bridge/bridge-registry'),import('./bridge-cache')]);
+    const handler=createBridgeHandler({workspacePath:workspace,logger:null,getUpstreamConfig:async request=> {
+      const token=new URL(request.url).pathname.match(/^\/bridge\/([^/]+)\/v1\/messages(?:\/count_tokens)?$/)?.[1];
+      const cfg=token ? await lookupBridge(token,request) : undefined;
+      if (!cfg) throw new Error('Host bridge token is unavailable');
+      const aliases=cfg.modelAliases;
+      const modelMapping=aliases ? (model:string)=> {
+        if (!model.startsWith('claude')) return undefined;
+        if (model.includes('fable')) return aliases.fable ?? cfg.model;
+        if (model.includes('sonnet')) return aliases.sonnet ?? cfg.model;
+        if (model.includes('opus')) return aliases.opus ?? cfg.model;
+        if (model.includes('haiku')) return aliases.haiku ?? cfg.model;
+        return cfg.model;
+      } : undefined;
+      return {...cfg,modelMapping};
+    }});
+    registerBridgeSeedFn(entries=>handler.seedThoughtSignatures(entries));
+    const server=createServer(async (incoming,outgoing)=> {
+      const abort=new AbortController();outgoing.once('close',()=>abort.abort());
+      try {
+        if (incoming.method !== 'POST' || !/^\/bridge\/[^/]+\/v1\/messages(?:\/count_tokens)?$/.test(incoming.url ?? '')) {outgoing.writeHead(404).end();return;}
+        const buffers:Buffer[]=[];let length=0;
+        for await (const chunk of incoming) {const bytes=Buffer.from(chunk);length+=bytes.length;if (length>16*1024*1024) {outgoing.writeHead(413).end();return;}buffers.push(bytes);}
+        const headers=new Headers();for (const [key,value] of Object.entries(incoming.headers)) if (value !== undefined) headers.set(key,Array.isArray(value)?value.join(','):value);
+        const request=new Request(`http://127.0.0.1${incoming.url}`,{method:'POST',headers,body:Buffer.concat(buffers),signal:abort.signal});
+        const response=await handler(request);outgoing.writeHead(response.status,Object.fromEntries(response.headers));
+        if (response.body) Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(outgoing);else outgoing.end();
+      } catch {if (!outgoing.headersSent) outgoing.writeHead(502);outgoing.end();}
+    });
+    await new Promise<void>((yes,no)=> {server.once('error',no);server.listen(0,'127.0.0.1',()=>{server.off('error',no);yes();});});
+    const address=server.address();if (!address || typeof address === 'string') {server.close();throw new Error('Host loopback bridge is unavailable');}
+    loopbackBridge=server;agent.setSidecarPort(address.port);
+  }
   let closing = false;
   let serial = Promise.resolve();
   const shutdown = async () => {
@@ -123,13 +162,15 @@ async function main(): Promise<void> {
     closing = true;
     await engine.stopTurn();
     await store.drainSessionTranscripts();
+    loopbackBridge?.closeAllConnections();
+    if (loopbackBridge) await new Promise<void>(resolveClose=>loopbackBridge!.close(()=>resolveClose()));
   };
   async function operate(request: HostSessionRequest): Promise<unknown> {
     const args = request.args ?? {};
     switch (request.operation) {
       case 'describe': return { sessionId, workspacePath: workspace, runtime: 'builtin',
         executionAuthorized: process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED === '1',
-        supportedProviderProtocols: ['anthropic'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
+        supportedProviderProtocols: ['anthropic','openai'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
         config: engine.getSessionConfigSnapshot() };
       case 'state': return { sessionId, ...engine.getLiveSessionState(),
         queueId: engine.getExecutionTurnId(), replay: engine.getStreamReplaySnapshot(), terminal: engine.getSessionCompletionTerminal() };
@@ -141,7 +182,7 @@ async function main(): Promise<void> {
         if (!routes.isConcreteProviderRoute(snapshot?.providerRoute)) throw new Error('Session Provider/model route is unavailable');
         const provider = config.materializeProviderRouteEnv(snapshot.providerRoute);
         if (provider?.apiKey) credentials.add(provider.apiKey);
-        if (provider?.apiProtocol === 'openai') throw new Error('OpenAI protocol requires a Host loopback bridge; this worker supports Anthropic protocol only');
+        if (provider?.apiProtocol === 'openai') await ensureLoopbackBridge();
         if (snapshot.providerRoute.kind === 'provider' && !provider) throw new Error('Session Provider credential is unavailable');
         const result = await engine.sendDesktopMessage({
           text: args.text, sessionId, workspacePath, scenario: { type: 'desktop' },
