@@ -15,8 +15,8 @@
 - 单元/DOM：19项整理/偏好/导航投影，65项侧栏（含旧回归与新故障路径），16项历史搜索通过；MoXBots Web构建和8项主题检查通过；合并后的全量typecheck/lint和Web构建通过（失败恢复只改renderer，受影响DOM65及独立23项已复验）。
 - 独立实际UI：首轮22项正式renderer/合成service通过，发现的两项嵌套误命中均修复复验；收尾23项含真实浏览器Storage故障恢复全部通过，源码hash与45ad14d0一致。详见 [独立报告](sidebar-organization-review.md) 与 [证据](sidebar-organization-validation/results.json)。
 - 主审IAB：实际任务向下排序、拖入分区、reload保留、菜单入口及视觉核对。fixture仅合成数据，不能替代Tauri原生重启/已安装用户路径。
-- CI/远端main：待PR交付与最终远端包含核验。
-- 原生安装：原Host/凭据owner负责统一换包，当前客户端未由本任务替换；用户已授权协调与完整验收。不得把本地Web/CI当已安装。
+- CI/远端main：PR25已合入远端main c21e9f43f9f8ffb629f88fd09e4c680b86de5b30；源头9d879a6e的run38415171294六项全部成功，合并树与其完全相同，ls-remote/祖先核验通过。main push的重复CI另行追踪，不把源头CI说成重复跑已完成。
+- 原生安装：原Host/凭据owner负责统一换包，当前客户端未由本任务替换；用户已授权协调与完整验收，原owner已从实际用户消息核实授权，正在保留6ac923a6凭据修复的独立联合源；其旧6ac包不含侧栏且未安装。等待联合包/具体运行确认/实际安装回执与UI窗口，不把本地Web/CI当已安装。
 
 ## 执行记录
 
