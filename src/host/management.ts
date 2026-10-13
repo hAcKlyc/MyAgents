@@ -20,7 +20,7 @@ export type ConfigReceipt =
   | { mutationId: string; status: 'conflict'; revision: number; effect: 'none' };
 type ReceiptEntry = { requestHash: string; receipt: ConfigReceipt };
 type Ledger = { schemaVersion: 1; hostId: string; entries: ReceiptEntry[] };
-type Owner = {
+export type HostConfigOwner = {
   hostId: string;
   defaultWorkspace: string;
   readConfig(): Promise<HostConfig>;
@@ -29,6 +29,10 @@ type Owner = {
   busy(): boolean;
   credentialReference?: string;
 };
+export interface HostConfigMutationOwnerInput extends Omit<HostConfigOwner, 'readConfig' | 'writeConfig'> {
+  readConfig(): Promise<HostConfig>;
+  atomicModifyConfig(modify: (current: HostConfig) => HostConfig): Promise<void>;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export class HostConfigError extends Error {
   readonly code = 'HOST_MANAGEMENT_UNCONFIRMED' as const;
@@ -93,9 +97,91 @@ export function readConfigReceipt(config: HostConfig, hostId: string, body: Reco
     ?? { mutationId: id, status: 'not-found' };
 }
 
+function sameField(left: HostConfig, right: HostConfig, key: string): boolean {
+  return Object.hasOwn(left, key) === Object.hasOwn(right, key)
+    && JSON.stringify(left[key]) === JSON.stringify(right[key]);
+}
+
+/**
+ * Merge the Host configuration owner's changed fields into the latest shared
+ * config under atomicModifyConfig. Other owners may have updated their
+ * projections since the Host read; those fields must never be overwritten.
+ */
+export function mergeHostConfigMutation(current: HostConfig, observed: HostConfig, next: HostConfig): HostConfig {
+  for (const field of ['hostSettings', 'hostConfigReceipts'] as const) {
+    if (!sameField(current, observed, field)) throw new HostConfigError();
+  }
+  const currentKeys = current.providerApiKeys;
+  const observedKeys = observed.providerApiKeys;
+  const nextKeys = next.providerApiKeys;
+  const currentHasKey = object(currentKeys) && Object.hasOwn(currentKeys, 'moonshot-coding');
+  const observedHasKey = object(observedKeys) && Object.hasOwn(observedKeys, 'moonshot-coding');
+  const nextHasKey = object(nextKeys) && Object.hasOwn(nextKeys, 'moonshot-coding');
+  const currentKey = object(currentKeys) ? currentKeys['moonshot-coding'] : undefined;
+  const observedKey = object(observedKeys) ? observedKeys['moonshot-coding'] : undefined;
+  const nextKey = object(nextKeys) ? nextKeys['moonshot-coding'] : undefined;
+  if (currentHasKey !== observedHasKey || currentKey !== observedKey) throw new HostConfigError();
+
+  const merged: HostConfig = { ...current };
+  if (!sameField(observed, next, 'hostSettings')) {
+    if (Object.hasOwn(next, 'hostSettings')) merged.hostSettings = next.hostSettings;
+    else delete merged.hostSettings;
+  }
+  if (!sameField(observed, next, 'hostConfigReceipts')) {
+    if (Object.hasOwn(next, 'hostConfigReceipts')) merged.hostConfigReceipts = next.hostConfigReceipts;
+    else delete merged.hostConfigReceipts;
+  }
+  if (currentHasKey !== nextHasKey || currentKey !== nextKey) {
+    const providerApiKeys = object(currentKeys) ? { ...currentKeys } : {};
+    if (nextHasKey) providerApiKeys['moonshot-coding'] = nextKey as string;
+    else delete providerApiKeys['moonshot-coding'];
+    merged.providerApiKeys = providerApiKeys;
+  }
+  return merged;
+}
+
+/** Builds the Host config owner over the shared config.json atomic modifier. */
+export function createHostConfigMutationOwner(input: HostConfigMutationOwnerInput): HostConfigOwner {
+  let observed: HostConfig | undefined;
+  return {
+    hostId: input.hostId,
+    defaultWorkspace: input.defaultWorkspace,
+    workspacePath: input.workspacePath,
+    busy: input.busy,
+    credentialReference: input.credentialReference,
+    async readConfig() {
+      observed = await input.readConfig();
+      return observed;
+    },
+    async writeConfig(next) {
+      if (!observed) throw new Error('Host configuration read is required before write');
+      await input.atomicModifyConfig(current => mergeHostConfigMutation(current, observed!, next));
+    },
+  };
+}
+
+/** Enforces registration-intent -> supervisor order for Host config writes. */
+export function withHostConfigurationLocks<T>(
+  withRegistrationIntent: (operation: () => Promise<T>) => Promise<T>,
+  withSupervisor: (operation: () => Promise<T>) => Promise<T>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withRegistrationIntent(() => withSupervisor(operation));
+}
+
+/** Read registration-owned data before acquiring the supervisor lock. */
+export async function withHostSnapshotLocks<R, T>(
+  readResources: () => Promise<R>,
+  withSupervisor: (operation: () => Promise<T>) => Promise<T>,
+  readSupervisor: (resources: R) => Promise<T>,
+): Promise<T> {
+  const resources = await readResources();
+  return withSupervisor(() => readSupervisor(resources));
+}
+
 // The supervisor must call this under its existing lifecycle/configuration lock.
 // Config and receipt are one atomic config.json commit, never two stores.
-export async function configureHost(owner: Owner, body: Record<string, unknown>): Promise<ConfigReceipt | { persisted: true; revision: number; effect: 'new-session'; settings: HostSettings }> {
+export async function configureHost(owner: HostConfigOwner, body: Record<string, unknown>): Promise<ConfigReceipt | { persisted: true; revision: number; effect: 'new-session'; settings: HostSettings }> {
   if (!keys(body, ['expectedRevision', 'providerId', 'model', 'workspace', 'executionAuthorized', 'mutationId'])) throw new Error('Unsupported configuration field');
   if (!revision(body.expectedRevision) || body.expectedRevision === Number.MAX_SAFE_INTEGER
     || body.providerId !== 'moonshot-coding' || typeof body.model !== 'string' || !MODEL.test(body.model)

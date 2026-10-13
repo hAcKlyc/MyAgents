@@ -1391,6 +1391,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-agentnet-execution-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "myagents-host-management-protocol"
 version = "0.1.0"
 dependencies = [
@@ -1410,6 +1423,7 @@ dependencies = [
  "libc",
  "myagents-agent-network-crypto",
  "myagents-agent-network-protocol",
+ "myagents-agentnet-execution-core",
  "myagents-host-management-protocol",
  "p256",
  "rcgen",
@@ -2274,9 +2288,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -2764,9 +2778,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
 dependencies = [
  "form_urlencoded",
  "idna",
@@ -2788,13 +2802,13 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "uuid"
-version = "1.23.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
+checksum = "2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2"
 dependencies = [
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "js-sys",
- "serde_core",
+ "serde",
  "wasm-bindgen",
 ]
 

@@ -6,11 +6,13 @@ use myagents_agent_network_protocol::{budget, DeviceScope};
 use serde_json::Value;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub(crate) struct MountPolicy {
     pub agent_id: String,
     pub enabled: bool,
     pub enable_revision: u64,
 }
+#[derive(Clone)]
 pub(crate) struct LocalPolicy {
     pub device_name: String,
     pub joined: bool,

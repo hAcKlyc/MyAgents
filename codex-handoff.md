@@ -210,6 +210,16 @@ Real OIDC PKCE login through the in-app browser's independent sign-in tab succee
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
 
+### 2026-10-13 — BOTS-CLOUD-EXEC-001 draft continuation
+
+Registry administrator release is accepted separately at main1cfa2f85 (recordse9767263); the explicit first-admin grant is fulfilled and must not be requested again. Finite lifecycle draft PR23 / codex/bots-cloud-execution-v1 remains default off. Contract, progress and current gate repairs are in .agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md and services/agentnet/planning/BOTS-CLOUD-EXECUTION-CONTRACT.md. Fixed9149753 Host/management/credential source is preserved, with common config/lock order repairs. No Desktop/Keychain/installer or actual Linux Host was changed.
+
+Next: latest-head Linux CI, clean artifact/backup/rollback, concrete single-Bot/Host protected opt-in, serial release and real OIDC→Host Session lifecycle/receipt verification. Synthetic UI passes and real local Session birth/stop do not close Linux/production gates. Do not reset pending/unconfirmed records or infer stopped from absent in-memory workers.
+
+### BOTS-CLOUD-EXEC-001 — accepted Host foundation integration
+
+PR24 main fb92ce9c passed seven checks and carries the existing Linux Host management/credentials/client base. The Bot continuation merges this accepted main and preserves finite execution, exact worker identity, bounded child stop and shared lock/config repairs; it does not install Desktop changes or alter Keychain. Synthetic UI/Host effects are distinguished from real Linux acceptance. Read-only production scope preflight passed; no opt-in, Bot ledger, or model refs were configured. Private single-Bot 24h lifecycle-only proposal and CI artifact preparation continue, including an owner-protected non-secret account binding pin. PR23 remains draft/default off until Linux CI, main delivery, concrete authority and real Session lifecycle acceptance pass. First administrator authorization and registry/browser release are already fulfilled.
+
 
 ### 2026-10-13 — MOXBOTS-SIDEBAR-ORG-001
 

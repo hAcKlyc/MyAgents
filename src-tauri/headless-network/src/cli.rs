@@ -27,6 +27,11 @@ async fn execute() -> Result<(), NetworkError> {
             "--target-device-id",
             "--request-file",
             "--owned-instance",
+            "--owned-policy-context-file",
+            "--bot-execution-policy",
+            "--bot-execution-socket",
+            "--bot-node-uid",
+            "--bot-ipc-gid",
             "--public-tls-ca-file",
             "--management-socket",
             "--management-host-uid",
@@ -49,6 +54,7 @@ async fn execute() -> Result<(), NetworkError> {
             .cloned()
             .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))
     };
+    validate_context_option(&command, &options)?;
     if command == "status" {
         if options.keys().any(|key| key.starts_with("--management-")) {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
@@ -87,6 +93,9 @@ async fn execute() -> Result<(), NetworkError> {
         .contains(&command.as_str())
             || options.contains_key("--join") && command != "run"
         {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
+        if command != "run" && options.keys().any(|key| key.starts_with("--bot-")) {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
         }
         let management_keys = [
@@ -164,6 +173,45 @@ async fn execute() -> Result<(), NetworkError> {
             }
             "run" => {
                 let _lock = status::run_lock(&root)?;
+                if let Some(file) = options.get("--owned-policy-context-file") {
+                    connection.write_policy_context(&root, &PathBuf::from(file))?;
+                }
+                let fields = [
+                    "--bot-execution-policy",
+                    "--bot-execution-socket",
+                    "--bot-node-uid",
+                    "--bot-ipc-gid",
+                ];
+                let count = fields
+                    .iter()
+                    .filter(|key| options.contains_key(**key))
+                    .count();
+                let execution = if count == 0 {
+                    None
+                } else {
+                    if count != fields.len() {
+                        return Err(NetworkError::new("CLI_USAGE_INVALID"));
+                    }
+                    let policy = crate::bot_execution::FinitePolicy::load(&PathBuf::from(
+                        required("--bot-execution-policy")?,
+                    ))?;
+                    let node_uid = required("--bot-node-uid")?
+                        .parse::<u32>()
+                        .map_err(|_| NetworkError::new("CLI_USAGE_INVALID"))?;
+                    let ipc_gid = required("--bot-ipc-gid")?
+                        .parse::<u32>()
+                        .map_err(|_| NetworkError::new("CLI_USAGE_INVALID"))?;
+                    let ipc = Arc::new(crate::bot_execution_ipc::BotExecutionIpc::bind(
+                        &crate::bot_execution_ipc::BotExecutionIpcConfig {
+                            socket: PathBuf::from(required("--bot-execution-socket")?),
+                            node_uid,
+                            ipc_gid,
+                        },
+                    )?);
+                    Some(Arc::new(crate::bot_execution::BotExecution::new(
+                        ipc, policy,
+                    )?))
+                };
                 connector::run_owned(
                     Arc::new(Owner {
                         store,
@@ -172,6 +220,7 @@ async fn execute() -> Result<(), NetworkError> {
                     &connection,
                     path.as_deref(),
                     options.contains_key("--join"),
+                    execution,
                     management.as_ref(),
                 )
                 .await?;
@@ -180,7 +229,8 @@ async fn execute() -> Result<(), NetworkError> {
         }
         return Ok(());
     }
-    if options.contains_key("--request-file")
+    if options.keys().any(|key| key.starts_with("--bot-"))
+        || options.contains_key("--request-file")
         || options.contains_key("--public-tls-ca-file")
         || options.contains_key("--management-socket")
         || options.contains_key("--management-host-uid")
@@ -239,4 +289,40 @@ async fn execute() -> Result<(), NetworkError> {
         _ => return Err(NetworkError::new("CLI_USAGE_INVALID")),
     }
     Ok(())
+}
+fn validate_context_option(
+    command: &str,
+    options: &HashMap<String, String>,
+) -> Result<(), NetworkError> {
+    if options.contains_key("--owned-policy-context-file")
+        && (command != "run" || !options.contains_key("--owned-instance"))
+    {
+        return Err(NetworkError::new("CLI_USAGE_INVALID"));
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+    #[test]
+    fn projection_only_belongs_to_owned_run() {
+        let mut opts = HashMap::from([(
+            "--owned-policy-context-file".into(),
+            "/private/owned-policy-context.json".into(),
+        )]);
+        assert!(validate_context_option("run", &opts).is_err());
+        opts.insert("--owned-instance".into(), "https://owned.invalid".into());
+        assert!(validate_context_option("run", &opts).is_ok());
+        for command in [
+            "status",
+            "owned-auth-start",
+            "owned-auth-wait",
+            "owned-auth-cancel",
+            "owned-auth-logout",
+            "owned-manage",
+            "owned-policy-context",
+        ] {
+            assert!(validate_context_option(command, &opts).is_err());
+        }
+    }
 }

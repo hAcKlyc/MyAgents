@@ -1,5 +1,5 @@
 use myagents_host_management_protocol::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use uuid::Uuid;
 
 fn id() -> CanonicalUuid {
