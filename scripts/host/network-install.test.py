@@ -11,7 +11,9 @@ import stat
 import tempfile
 import argparse
 import fcntl
+import subprocess
 import unittest
+from contextlib import ExitStack
 from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).with_name("network-install.py")
@@ -109,9 +111,12 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(str(installer.PREFIX), "/opt/moxbot-host-network-test")
         self.assertEqual(str(installer.IDENTITY), "/var/lib/moxbot-host-test/host-identity.json")
         self.assertEqual(str(installer.CREDENTIAL), "/etc/moxbot-host-network-test/identity-kek.cred")
+        self.assertEqual(str(installer.OWNED_CA_DIR), "/etc/moxbot-host-network-test-public")
+        self.assertEqual(str(installer.OWNED_CA), "/etc/moxbot-host-network-test-public/owned-instance-ca.pem")
         self.assertEqual(installer.UNIT_NAME, "moxbot-host-network-test.service")
         self.assertEqual(str(control.HOST_UNIT), "/etc/systemd/system/moxbot-host-test.service")
         self.assertEqual(str(control.STATUS_FILE), "/run/moxbot-host-network-test/status.json")
+        self.assertEqual(str(control.OWNED_CA), str(installer.OWNED_CA))
         with self.assertRaises(installer.InstallError):
             installer.select_profile("/var/lib/arbitrary")
         with self.assertRaises(ValueError):
@@ -474,6 +479,246 @@ class ControlTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             control.run_control("exec")
         run.assert_not_called()
+
+
+class PublicCaTests(unittest.TestCase):
+    def test_fixed_public_ca_path_is_used_by_config_and_unit(self) -> None:
+        cert = b"-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n"
+        with mock.patch.object(installer, "read_ca_source", return_value=cert):
+            args = argparse.Namespace(owned_instance="https://owned.example:15557",
+                                      public_tls_ca_file="/fixture/root.pem",
+                                      management_socket=None, management_host_uid=None)
+            value = json.loads(installer.owned_config_text(args, 1000, 1001))
+        self.assertEqual(value["caFile"], str(installer.OWNED_CA))
+        self.assertNotEqual(value["caFile"], str(installer.LEGACY_OWNED_CA))
+        unit = installer._unit_text("11111111-2222-4333-8444-555555555555", value)
+        self.assertIn("--public-tls-ca-file " + str(installer.OWNED_CA), unit)
+
+    def test_public_ca_file_requires_traversable_root_directory_and_safe_leaf(self) -> None:
+        uid, gid = os.getuid(), os.getgid()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            directory = root / "public-ca"
+            directory.mkdir(mode=0o755)
+            os.chmod(directory, 0o755)
+            ca = directory / "owned-instance-ca.pem"
+            ca.write_bytes(b"public certificate\n")
+            os.chmod(ca, 0o644)
+            self.assertEqual(installer._verify_root_public_file(ca, owner=uid, group=gid), b"public certificate\n")
+            os.chmod(directory, 0o700)
+            with self.assertRaises(installer.InstallError):
+                installer._verify_root_public_file(ca, owner=uid, group=gid)
+            os.chmod(directory, 0o755)
+            os.chmod(ca, 0o664)
+            with self.assertRaises(installer.InstallError):
+                installer._verify_root_public_file(ca, owner=uid, group=gid)
+            os.chmod(ca, 0o644)
+            hardlink = directory / "hardlink.pem"
+            os.link(ca, hardlink)
+            with self.assertRaises(installer.InstallError):
+                installer._verify_root_public_file(ca, owner=uid, group=gid)
+            hardlink.unlink()
+            ca.unlink()
+            target = directory / "target.pem"
+            target.write_bytes(b"public certificate\n")
+            os.chmod(target, 0o644)
+            ca.symlink_to(target)
+            with self.assertRaises(installer.InstallError):
+                installer._verify_root_public_file(ca, owner=uid, group=gid)
+
+    def test_legacy_migration_preserves_identity_state_pin_and_old_ca(self) -> None:
+        uid, gid = os.getuid(), os.getgid()
+        cert = b"-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            etc = root / "etc-private"
+            etc.mkdir(mode=0o700)
+            os.chmod(etc, 0o700)
+            prefix = root / "opt" / "network"
+            (prefix / "releases").mkdir(parents=True, mode=0o755)
+            current = prefix / "current"
+            commit = "a" * 40
+            current.symlink_to("releases/" + commit)
+            public_dir = root / "etc-public"
+            legacy_ca = etc / "owned-instance-ca.pem"
+            legacy_ca.write_bytes(cert)
+            os.chmod(legacy_ca, 0o644)
+            config = etc / "owned-instance.json"
+            unit = root / "network.service"
+            sentinels = [root / name for name in ("host-identity.json", "state.db", "device-pin.json", "identity-kek.cred")]
+            for path in sentinels:
+                path.write_bytes(b"preserve:" + path.name.encode())
+
+            patches = {
+                "ETC": etc, "OWNED_CONFIG": config, "LEGACY_OWNED_CA": legacy_ca,
+                "OWNED_CA_DIR": public_dir, "OWNED_CA": public_dir / "owned-instance-ca.pem",
+                "PREFIX": prefix, "CURRENT": current, "UNIT_PATH": unit,
+                "UNIT_NAME": "network.service",
+            }
+            with ExitStack() as stack:
+                for name, value in patches.items():
+                    stack.enter_context(mock.patch.object(installer, name, value))
+                stack.enter_context(mock.patch.object(installer, "read_ca_source", return_value=cert))
+                stack.enter_context(mock.patch.object(installer, "_service_is_stopped", return_value=True))
+                stack.enter_context(mock.patch.object(installer, "_run", return_value=subprocess.CompletedProcess([], 0)))
+                args = argparse.Namespace(owned_instance="https://owned.example:15557",
+                                          public_tls_ca_file="/fixture/ca.pem",
+                                          management_socket=None, management_host_uid=None)
+                legacy_text = installer.owned_config_text(args, 1000, 1001, ca_path=legacy_ca)
+                legacy_value = json.loads(legacy_text)
+                config.write_text(legacy_text, encoding="utf-8")
+                os.chmod(config, 0o600)
+                unit.write_text(installer._unit_text("11111111-2222-4333-8444-555555555555", legacy_value), encoding="utf-8")
+                os.chmod(unit, 0o644)
+                with mock.patch.object(installer, "_service_is_stopped", return_value=False):
+                    with self.assertRaises(installer.InstallError):
+                        installer._migrate_legacy_public_ca(
+                            "11111111-2222-4333-8444-555555555555", commit, args, 1000, 1001,
+                            ca_bytes=cert, root_uid=uid, root_gid=gid)
+                self.assertEqual(config.read_text(encoding="utf-8"), legacy_text)
+                self.assertFalse(public_dir.exists())
+                self.assertTrue(installer._migrate_legacy_public_ca(
+                    "11111111-2222-4333-8444-555555555555", commit, args, 1000, 1001,
+                    ca_bytes=cert, root_uid=uid, root_gid=gid))
+                migrated = json.loads(config.read_text(encoding="utf-8"))
+                self.assertEqual(migrated["caFile"], str(public_dir / "owned-instance-ca.pem"))
+                self.assertEqual((public_dir / "owned-instance-ca.pem").read_bytes(), cert)
+                self.assertEqual(legacy_ca.read_bytes(), cert)
+                self.assertEqual(os.readlink(current), "releases/" + commit)
+                for path in sentinels:
+                    self.assertEqual(path.read_bytes(), b"preserve:" + path.name.encode())
+
+    def test_legacy_migration_without_explicit_ca_or_inactive_unit_writes_nothing(self) -> None:
+        uid, gid = os.getuid(), os.getgid()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            etc = root / "private"
+            etc.mkdir(mode=0o700)
+            os.chmod(etc, 0o700)
+            prefix = root / "opt" / "net"
+            (prefix / "releases").mkdir(parents=True)
+            current = prefix / "current"
+            commit = "b" * 40
+            current.symlink_to("releases/" + commit)
+            legacy_ca = etc / "old.pem"
+            cert = b"legacy-ca"
+            legacy_ca.write_bytes(cert)
+            os.chmod(legacy_ca, 0o644)
+            config = etc / "owned-instance.json"
+            unit = root / "unit.service"
+            patches = {"ETC": etc, "OWNED_CONFIG": config, "LEGACY_OWNED_CA": legacy_ca,
+                       "OWNED_CA_DIR": root / "public", "OWNED_CA": root / "public" / "ca.pem",
+                       "PREFIX": prefix, "CURRENT": current, "UNIT_PATH": unit,
+                       "UNIT_NAME": "unit.service"}
+            with ExitStack() as stack:
+                for name, value in patches.items():
+                    stack.enter_context(mock.patch.object(installer, name, value))
+                stack.enter_context(mock.patch.object(installer, "read_ca_source", return_value=cert))
+                args = argparse.Namespace(owned_instance="https://owned.example",
+                                          public_tls_ca_file="/fixture/ca.pem",
+                                          management_socket=None, management_host_uid=None)
+                legacy_text = installer.owned_config_text(args, 1000, 1001, ca_path=legacy_ca)
+                config.write_text(legacy_text, encoding="utf-8")
+                os.chmod(config, 0o600)
+                old_unit = installer._unit_text("11111111-2222-4333-8444-555555555555",
+                                                json.loads(legacy_text))
+                unit.write_text(old_unit, encoding="utf-8")
+                os.chmod(unit, 0o644)
+                with self.assertRaises(installer.InstallError):
+                    installer._migrate_legacy_public_ca("11111111-2222-4333-8444-555555555555",
+                        commit, args, 1000, 1001, ca_bytes=None, root_uid=uid, root_gid=gid)
+                self.assertEqual(config.read_text(encoding="utf-8"), legacy_text)
+                self.assertEqual(unit.read_text(encoding="utf-8"), old_unit)
+                self.assertFalse((root / "public").exists())
+                with mock.patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        stdout="ActiveState=deactivating\nMainPID=0\n", stderr="")):
+                    self.assertFalse(installer._service_is_stopped("unit.service"))
+                with mock.patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="systemctl failed")):
+                    self.assertFalse(installer._service_is_stopped("unit.service"))
+                with mock.patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        stdout="ActiveState=inactive\nMainPID=0\n", stderr="")):
+                    self.assertTrue(installer._service_is_stopped("unit.service"))
+                for status in ("activating", "deactivating", "active", "failed"):
+                    with self.subTest(status=status), mock.patch.object(installer.subprocess, "run",
+                        return_value=subprocess.CompletedProcess([], 0,
+                            stdout=f"ActiveState={status}\nMainPID=0\n", stderr="")):
+                        self.assertFalse(installer._service_is_stopped("unit.service"))
+                with mock.patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        stdout="ActiveState=inactive\n", stderr="")):
+                    self.assertFalse(installer._service_is_stopped("unit.service"))
+                with mock.patch.object(installer.subprocess, "run",
+                    return_value=subprocess.CompletedProcess([], 0,
+                        stdout="ActiveState=inactive\nActiveState=inactive\nMainPID=0\n", stderr="")):
+                    self.assertFalse(installer._service_is_stopped("unit.service"))
+
+    def test_daemon_reload_failure_restores_config_and_unit_and_removes_only_new_ca(self) -> None:
+        uid, gid = os.getuid(), os.getgid()
+        cert = b"-----BEGIN CERTIFICATE-----\nrollback-fixture\n-----END CERTIFICATE-----\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            etc = root / "etc-private"
+            etc.mkdir(mode=0o700)
+            os.chmod(etc, 0o700)
+            prefix = root / "opt" / "network"
+            (prefix / "releases").mkdir(parents=True, mode=0o755)
+            current = prefix / "current"
+            commit = "c" * 40
+            current.symlink_to("releases/" + commit)
+            legacy_ca = etc / "owned-instance-ca.pem"
+            legacy_ca.write_bytes(cert)
+            os.chmod(legacy_ca, 0o644)
+            config = etc / "owned-instance.json"
+            unit = root / "network.service"
+            sentinels = [root / name for name in ("host-identity.json", "state.db", "device-pin.json", "identity-kek.cred")]
+            for path in sentinels:
+                path.write_bytes(b"preserve:" + path.name.encode())
+            public_dir = root / "etc-public"
+            public_ca = public_dir / "owned-instance-ca.pem"
+            patches = {"ETC": etc, "OWNED_CONFIG": config, "LEGACY_OWNED_CA": legacy_ca,
+                       "OWNED_CA_DIR": public_dir, "OWNED_CA": public_ca,
+                       "PREFIX": prefix, "CURRENT": current, "UNIT_PATH": unit,
+                       "UNIT_NAME": "network.service"}
+            with ExitStack() as stack:
+                for name, value in patches.items():
+                    stack.enter_context(mock.patch.object(installer, name, value))
+                stack.enter_context(mock.patch.object(installer, "read_ca_source", return_value=cert))
+                stack.enter_context(mock.patch.object(installer, "_service_is_stopped", return_value=True))
+                reloads = 0
+
+                def fail_first_reload(argv, *, input_bytes=None, check=True, stdout=None):
+                    nonlocal reloads
+                    if argv == ["systemctl", "daemon-reload"]:
+                        reloads += 1
+                        if reloads == 1:
+                            raise subprocess.CalledProcessError(1, argv)
+                    return subprocess.CompletedProcess(argv, 0)
+
+                stack.enter_context(mock.patch.object(installer, "_run", side_effect=fail_first_reload))
+                args = argparse.Namespace(owned_instance="https://owned.example:15557",
+                                          public_tls_ca_file="/fixture/ca.pem",
+                                          management_socket=None, management_host_uid=None)
+                legacy_text = installer.owned_config_text(args, 1000, 1001, ca_path=legacy_ca)
+                legacy_unit = installer._unit_text("11111111-2222-4333-8444-555555555555",
+                                                   json.loads(legacy_text))
+                config.write_text(legacy_text, encoding="utf-8")
+                os.chmod(config, 0o600)
+                unit.write_text(legacy_unit, encoding="utf-8")
+                os.chmod(unit, 0o644)
+                with self.assertRaises(subprocess.CalledProcessError):
+                    installer._migrate_legacy_public_ca("11111111-2222-4333-8444-555555555555",
+                        commit, args, 1000, 1001, ca_bytes=cert, root_uid=uid, root_gid=gid)
+                self.assertEqual(config.read_text(encoding="utf-8"), legacy_text)
+                self.assertEqual(unit.read_text(encoding="utf-8"), legacy_unit)
+                self.assertEqual(legacy_ca.read_bytes(), cert)
+                self.assertFalse(public_ca.exists())
+                self.assertFalse(public_dir.exists())
+                self.assertEqual(os.readlink(current), "releases/" + commit)
+                for path in sentinels:
+                    self.assertEqual(path.read_bytes(), b"preserve:" + path.name.encode())
 
 
 if __name__ == "__main__":

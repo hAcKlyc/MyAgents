@@ -7,9 +7,11 @@
 
 ## Current Snapshot
 
-- **当前 MAH-DESKTOP-MANAGEMENT-20261013 覆盖下方旧锁屏和服务源码阻断**：工作分支 `feat/mah-management-device-pairs`，PR #14 draft；`1525dc37` 七项 CI 全成功。交付桌面包源 `50f3722c`，真实并行启动与原 MyAgents 保全已核验。
-- 实际设置启用“AgentNet 多网络（实验性）”后，桌面账号登录请求创建成功；通过本机 SSH 隧道连接隔离独立服务。浏览器拒绝私有测试 CA，用户必须接管证书警告，未绕过或增加全局信任。私有测试账号与证据仅留本机任务 QA，不进 Git。
-- 下一步：用户完成测试登录后检查状态，明确加入网络、接入已安装 Linux MoX Host，真实表单保存配置/只写凭据/禁用 Agent，并检查重启持久化。真实模型调用仍需产品内凭据和费用授权。当前未认证、未接受完整管理 UI、未合入或发布 PR #14。
+- **当前 MAH-DESKTOP-MANAGEMENT-20261013 覆盖下方旧登录/锁屏阻断**：工作分支 `feat/mah-management-device-pairs`，PR #14 draft；`f2b0266c` 七项 CI 全成功。桌面包源 `50f3722c`，与原 MyAgents 并行运行和数据保全已核验。
+- 用户亲自完成独立测试账号登录；真实桌面 poll 接纳认证，MoX bot 重启后保留账号并自动恢复独立网络在线。未安装全局 CA、未增加公网监听；账号、访问链接、截图和日志只在私有 QA 目录。
+- 已安装 Linux 连接器暴露 CA 安装缺陷：公开证书原在 root-only 私密目录。修复安装器采用 profile 固定 public 目录（root0755/证书0644），私密目录仍0700；安全同版本迁移与故障回滚回归 30/30、独立审阅通过。真机迁移已完成，非 root 读取成功，旧 CA/加密凭据、Node PID、原 MyAgents 和公网监听保全。
+- 真机授权重试仍报 `PUBLIC_TLS_CA_UNSAFE`：Rust 连接器 leaf 权限检查误把公开 CA 按私密文件处理，拒绝 group/other read。下一步修复公开 CA 校验，仅保留禁止不可信写入、symlink、hardlink、非可信 owner 等边界，再用新 Linux 制品重试。不能将 CA 可读或桌面在线当作已安装 Host 入网成功。
+- 完整桌面→Linux 模型/只写凭据/Agent 创建持久化尚未验收；真实模型调用仍为0，需产品内真实凭据与费用授权。PR #14 未合入主干或发布。
 
 - **最新核查 MAH-CLIENT-HOST-MGMT-20261012 覆盖下方旧协议阻断判断**：用户要求先核实仅改桌面与 Host 的路径；设备级 `channel.open` 没有 mount 字段，peer TLS/身份通道与 Agent permit 独立。固定本地业务 schema 不证明官方 relay 拒绝扩展；先做原固定协议的无副作用设备握手探针，不预设三个服务仓库都需要改动或权限。
 - 本地资源准备层已交付 PR #6 / main `1d2c806e2700cd70804a1174f27b6ec23acdca68`，完整 CI `38221628350` 六项通过，测试 merge 与主干 tree 相同；下方未完成 CI 和失败 checkpoint 已过期。远程配置/凭据/Agent 创建没有真实验收。

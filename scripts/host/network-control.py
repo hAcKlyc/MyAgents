@@ -28,7 +28,8 @@ BIN = pathlib.Path("/opt/myagents-host-network-test/current/myagents-host-networ
 PIN_PATH = pathlib.Path("/opt/myagents-host-network-test/device-id.json")
 STATUS_FILE = pathlib.Path("/run/myagents-host-network-test/status.json")
 OWNED_CONFIG = pathlib.Path("/etc/myagents-host-network-test/owned-instance.json")
-OWNED_CA = pathlib.Path("/etc/myagents-host-network-test/owned-instance-ca.pem")
+OWNED_CA_DIR = pathlib.Path("/etc/myagents-host-network-test-public")
+OWNED_CA = OWNED_CA_DIR / "owned-instance-ca.pem"
 HOST_UNIT = pathlib.Path("/etc/systemd/system/myagents-host-test.service")
 HOST_DROPIN_DIR = pathlib.Path("/etc/systemd/system/myagents-host-test.service.d")
 HOST_DROPIN = HOST_DROPIN_DIR / "owned-management.conf"
@@ -37,7 +38,7 @@ PROFILE = "myagents-test"
 
 def select_profile(profile: str) -> None:
     global PROFILE, USER, GROUP, NODE_USER, NODE_IDENTITY, STATE, CREDENTIAL, DAEMON_UNIT, AUTH_UNIT, BIN, PIN_PATH, STATUS_FILE
-    global OWNED_CONFIG, OWNED_CA, HOST_UNIT, HOST_DROPIN_DIR, HOST_DROPIN, MANAGEMENT_SOCKET, DAEMON_DROPIN_DIR, JOIN_DROPIN
+    global OWNED_CONFIG, OWNED_CA, OWNED_CA_DIR, HOST_UNIT, HOST_DROPIN_DIR, HOST_DROPIN, MANAGEMENT_SOCKET, DAEMON_DROPIN_DIR, JOIN_DROPIN
     profiles = {"myagents-test": ("myagents-host-network-test", "myagents-host-test"),
                 "moxbot-test": ("moxbot-host-network-test", "moxbot-host-test")}
     if profile not in profiles:
@@ -55,7 +56,8 @@ def select_profile(profile: str) -> None:
     PIN_PATH = pathlib.Path("/opt") / network / "device-id.json"
     STATUS_FILE = pathlib.Path("/run") / network / "status.json"
     OWNED_CONFIG = pathlib.Path("/etc") / network / "owned-instance.json"
-    OWNED_CA = pathlib.Path("/etc") / network / "owned-instance-ca.pem"
+    OWNED_CA_DIR = pathlib.Path("/etc") / (network + "-public")
+    OWNED_CA = OWNED_CA_DIR / "owned-instance-ca.pem"
     HOST_UNIT = pathlib.Path("/etc/systemd/system") / (host + ".service")
     HOST_DROPIN_DIR = pathlib.Path("/etc/systemd/system") / (host + ".service.d")
     HOST_DROPIN = HOST_DROPIN_DIR / "owned-management.conf"
@@ -227,9 +229,7 @@ def owned_config() -> dict | None:
                                               pwd.getpwnam(USER).pw_gid):
         raise ValueError("owned network IPC identity is invalid")
     if value["caFile"]:
-        ca = OWNED_CA.lstat()
-        if not stat.S_ISREG(ca.st_mode) or ca.st_uid != 0 or ca.st_gid != 0 or ca.st_nlink != 1 or stat.S_IMODE(ca.st_mode) != 0o644:
-            raise ValueError("owned network CA file is unsafe")
+        _verify_public_ca()
     credential = CREDENTIAL.lstat()
     if not stat.S_ISREG(credential.st_mode) or credential.st_uid != 0 or credential.st_gid != 0 or credential.st_nlink != 1 or stat.S_IMODE(credential.st_mode) != 0o600:
         raise ValueError("owned network encrypted credential is unsafe")
@@ -278,6 +278,38 @@ def _assert_no_symlink(path: pathlib.Path) -> None:
         info = current.lstat()
         if stat.S_ISLNK(info.st_mode):
             raise ValueError("protected configuration path contains a symlink")
+
+
+def _verify_public_ca() -> None:
+    _assert_no_symlink(OWNED_CA)
+    parent_fd = os.open(OWNED_CA_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        parent = os.fstat(parent_fd)
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_gid != 0
+                or stat.S_IMODE(parent.st_mode) != 0o755):
+            raise ValueError("public CA directory is unsafe")
+        fd = os.open(OWNED_CA.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                     dir_fd=parent_fd)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o644
+                    or info.st_size <= 0 or info.st_size > 1024 * 1024):
+                raise ValueError("public CA file is unsafe")
+            data = bytearray()
+            while len(data) <= 1024 * 1024:
+                chunk = os.read(fd, min(65536, 1024 * 1024 + 1 - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            after = os.fstat(fd)
+            if (len(data) != info.st_size or after.st_dev != info.st_dev
+                    or after.st_ino != info.st_ino or after.st_size != info.st_size):
+                raise ValueError("public CA file changed while being read")
+        finally:
+            os.close(fd)
+    finally:
+        os.close(parent_fd)
 
 
 def _ensure_root_dropin_dir(path: pathlib.Path) -> None:

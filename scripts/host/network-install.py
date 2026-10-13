@@ -38,14 +38,16 @@ MAX_BINARY = 128 * 1024 * 1024
 INSTALL_LOCK = pathlib.Path("/run/myagents-host-unified-install.lock")
 TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d/myagents-host-network-test.conf")
 OWNED_CONFIG = ETC / "owned-instance.json"
-OWNED_CA = ETC / "owned-instance-ca.pem"
+OWNED_CA_DIR = pathlib.Path("/etc/myagents-host-network-test-public")
+OWNED_CA = OWNED_CA_DIR / "owned-instance-ca.pem"
+LEGACY_OWNED_CA = ETC / "owned-instance-ca.pem"
 MANAGEMENT_SOCKET = pathlib.Path("/run/myagents-host-network-test/management.sock")
 PROFILE = "myagents-test"
 RUN_DIR = pathlib.Path("/run/myagents-host-network-test")
 
 def select_profile(profile: str) -> None:
     global PROFILE, USER, NODE_USER, PREFIX, RELEASES, CURRENT, STATE, ETC, CREDENTIAL
-    global UNIT_NAME, UNIT_PATH, MARKER, DEVICE_PIN, IDENTITY, TMPFILES_PATH, OWNED_CONFIG, OWNED_CA, MANAGEMENT_SOCKET, RUN_DIR
+    global UNIT_NAME, UNIT_PATH, MARKER, DEVICE_PIN, IDENTITY, TMPFILES_PATH, OWNED_CONFIG, OWNED_CA, OWNED_CA_DIR, LEGACY_OWNED_CA, MANAGEMENT_SOCKET, RUN_DIR
     profiles = {"myagents-test": ("myagents-host-network-test", "myagents-host-test"),
                 "moxbot-test": ("moxbot-host-network-test", "moxbot-host-test")}
     if profile not in profiles:
@@ -64,7 +66,10 @@ def select_profile(profile: str) -> None:
     MARKER, DEVICE_PIN = PREFIX / "fixture.json", PREFIX / "device-id.json"
     IDENTITY = pathlib.Path("/var/lib") / host / "host-identity.json"
     TMPFILES_PATH = pathlib.Path("/etc/tmpfiles.d") / (network + ".conf")
-    OWNED_CONFIG, OWNED_CA = ETC / "owned-instance.json", ETC / "owned-instance-ca.pem"
+    OWNED_CONFIG = ETC / "owned-instance.json"
+    OWNED_CA_DIR = pathlib.Path("/etc") / (network + "-public")
+    OWNED_CA = OWNED_CA_DIR / "owned-instance-ca.pem"
+    LEGACY_OWNED_CA = ETC / "owned-instance-ca.pem"
     MANAGEMENT_SOCKET = pathlib.Path("/run") / network / "management.sock"
     RUN_DIR = pathlib.Path("/run") / network
 
@@ -205,11 +210,11 @@ def validate_marker(marker: pathlib.Path, expected_owner: int = 0, expected_grou
 
 
 def _check_fixture() -> bool:
-    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, OWNED_CONFIG, OWNED_CA, RUN_DIR):
+    for path in (PREFIX, STATE, ETC, OWNED_CA_DIR, UNIT_PATH, TMPFILES_PATH, DEVICE_PIN, INSTALL_LOCK, OWNED_CONFIG, OWNED_CA, LEGACY_OWNED_CA, RUN_DIR):
         _assert_plain_root_path(path)
     if validate_marker(MARKER):
         return True
-    for path in (PREFIX, STATE, ETC, UNIT_PATH, TMPFILES_PATH):
+    for path in (PREFIX, STATE, ETC, OWNED_CA_DIR, UNIT_PATH, TMPFILES_PATH):
         if path.exists() or path.is_symlink():
             raise InstallError(f"unmarked existing path is preserved: {path}")
     try:
@@ -411,7 +416,7 @@ def validate_owned_origin(value: str) -> str:
     return canonical
 
 
-def read_ca_source(path_text: str) -> bytes:
+def read_ca_source(path_text: str, *, owner: int = 0, group: int = 0) -> bytes:
     path = pathlib.Path(path_text)
     if not path.is_absolute() or path.resolve(strict=True) != path:
         raise InstallError("public TLS CA path must be absolute and canonical")
@@ -419,7 +424,7 @@ def read_ca_source(path_text: str) -> bytes:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
         info = os.fstat(fd)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_gid != group or info.st_nlink != 1
                 or stat.S_IMODE(info.st_mode) not in (0o644, 0o640) or info.st_size <= 0 or info.st_size > 1024 * 1024):
             raise InstallError("public TLS CA file must be a bounded root-owned regular file")
         data = bytearray()
@@ -437,7 +442,8 @@ def read_ca_source(path_text: str) -> bytes:
         os.close(fd)
 
 
-def owned_config_text(args: argparse.Namespace, host_uid: int, network_gid: int) -> str | None:
+def owned_config_text(args: argparse.Namespace, host_uid: int, network_gid: int,
+                      *, ca_path: pathlib.Path | None = None) -> str | None:
     if not args.owned_instance:
         if args.public_tls_ca_file or args.management_socket or args.management_host_uid:
             raise InstallError("owned TLS and management IPC options require --owned-instance")
@@ -454,11 +460,134 @@ def owned_config_text(args: argparse.Namespace, host_uid: int, network_gid: int)
     return json.dumps({
         "schemaVersion": 1,
         "ownedInstance": origin,
-        "caFile": str(OWNED_CA) if args.public_tls_ca_file else None,
+        "caFile": str(ca_path or OWNED_CA) if args.public_tls_ca_file or ca_path else None,
         "managementSocket": str(MANAGEMENT_SOCKET) if args.management_socket else None,
         "managementHostUid": host_uid if args.management_socket else None,
         "managementGid": network_gid if args.management_socket else None,
     }, separators=(",", ":")) + "\n"
+
+
+def _verify_root_public_file(path: pathlib.Path, *, mode: int = 0o644,
+                            owner: int = 0, group: int = 0) -> bytes:
+    _assert_plain_root_path(path)
+    parent = path.parent.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != owner or parent.st_gid != group
+            or stat.S_IMODE(parent.st_mode) != 0o755):
+        raise InstallError("public TLS CA directory is unsafe")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner or info.st_gid != group
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != mode
+                or info.st_size <= 0 or info.st_size > 1024 * 1024):
+            raise InstallError("public TLS CA file is unsafe")
+        data = bytearray()
+        while len(data) <= 1024 * 1024:
+            chunk = os.read(fd, min(65536, 1024 * 1024 + 1 - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        after = os.fstat(fd)
+        if (len(data) != info.st_size or after.st_dev != info.st_dev or after.st_ino != info.st_ino
+                or after.st_size != info.st_size):
+            raise InstallError("public TLS CA changed while being read")
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def _service_is_stopped(unit: str) -> bool:
+    try:
+        result = subprocess.run(["systemctl", "show", unit, "--property=ActiveState", "--property=MainPID", "--no-pager"],
+                                check=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if result.returncode != 0:
+        return False
+    values: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "=" not in line:
+            return False
+        key, value = line.split("=", 1)
+        if key not in {"ActiveState", "MainPID"} or key in values:
+            return False
+        values[key] = value
+    return values == {"ActiveState": "inactive", "MainPID": "0"}
+
+
+def _migrate_legacy_public_ca(host_id: str, source_commit: str, args: argparse.Namespace,
+                              node_uid: int, network_gid: int, *, ca_bytes: bytes | None,
+                              root_uid: int = 0, root_gid: int = 0) -> bool:
+    """Migrate only the exact legacy installation, while its service is stopped."""
+    if not args.public_tls_ca_file or ca_bytes is None:
+        raise InstallError("legacy CA migration requires an explicitly supplied CA file")
+    if not (OWNED_CONFIG.exists() and not OWNED_CONFIG.is_symlink()):
+        return False
+    try:
+        legacy_args = argparse.Namespace(**vars(args))
+        legacy_args.public_tls_ca_file = str(LEGACY_OWNED_CA)
+        legacy_text = owned_config_text(legacy_args, node_uid, network_gid, ca_path=LEGACY_OWNED_CA)
+        current_text = OWNED_CONFIG.read_text(encoding="utf-8")
+    except (OSError, UnicodeError, InstallError):
+        return False
+    config_st = OWNED_CONFIG.lstat()
+    if (not stat.S_ISREG(config_st.st_mode) or config_st.st_uid != root_uid or config_st.st_gid != root_gid
+            or config_st.st_nlink != 1 or stat.S_IMODE(config_st.st_mode) != 0o600
+            or current_text != legacy_text):
+        return False
+    legacy_bytes = read_ca_source(str(LEGACY_OWNED_CA), owner=root_uid, group=root_gid)
+    if legacy_bytes != ca_bytes:
+        raise InstallError("legacy CA differs from the supplied certificate; preserve it for operator review")
+    current = CURRENT.lstat() if CURRENT.exists() or CURRENT.is_symlink() else None
+    if (current is None or not stat.S_ISLNK(current.st_mode)
+            or os.readlink(CURRENT) != f"releases/{source_commit}"):
+        return False
+    unit_text = _unit_text(host_id, json.loads(legacy_text))
+    unit_st = UNIT_PATH.lstat() if UNIT_PATH.exists() or UNIT_PATH.is_symlink() else None
+    if (unit_st is None or not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != root_uid
+            or unit_st.st_gid != root_gid or unit_st.st_nlink != 1
+            or stat.S_IMODE(unit_st.st_mode) != 0o644
+            or UNIT_PATH.read_text(encoding="utf-8") != unit_text):
+        raise InstallError("legacy CA migration requires the exact installer-owned service unit")
+    if not _service_is_stopped(UNIT_NAME):
+        raise InstallError("owned network service must be confirmed inactive before CA migration")
+
+    public_dir_created = False
+    ca_created = False
+    migrated_args = argparse.Namespace(**vars(args))
+    migrated_args.public_tls_ca_file = str(LEGACY_OWNED_CA)
+    expected_text = owned_config_text(migrated_args, node_uid, network_gid, ca_path=OWNED_CA)
+    new_unit = _unit_text(host_id, json.loads(expected_text))
+    try:
+        if not OWNED_CA_DIR.exists():
+            os.mkdir(OWNED_CA_DIR, 0o755)
+            os.chown(OWNED_CA_DIR, root_uid, root_gid)
+            os.chmod(OWNED_CA_DIR, 0o755)
+            public_dir_created = True
+        _verify_dir(OWNED_CA_DIR, root_uid, root_gid, 0o755)
+        if OWNED_CA.exists() or OWNED_CA.is_symlink():
+            if _verify_root_public_file(OWNED_CA, owner=root_uid, group=root_gid) != legacy_bytes:
+                raise InstallError("public CA destination has different bytes; preserve it for review")
+        else:
+            _write_atomic(OWNED_CA, legacy_bytes.decode("ascii"), 0o644, root_uid, root_gid)
+            ca_created = True
+        _write_atomic(OWNED_CONFIG, expected_text, 0o600, root_uid, root_gid)
+        _write_atomic(UNIT_PATH, new_unit, 0o644, root_uid, root_gid)
+        _run(["systemctl", "daemon-reload"])
+    except BaseException:
+        _write_atomic(OWNED_CONFIG, legacy_text, 0o600, root_uid, root_gid)
+        _write_atomic(UNIT_PATH, unit_text, 0o644, root_uid, root_gid)
+        _run(["systemctl", "daemon-reload"], check=False)
+        if ca_created:
+            OWNED_CA.unlink(missing_ok=True)
+        if public_dir_created:
+            try:
+                OWNED_CA_DIR.rmdir()
+            except OSError:
+                pass
+        raise
+    return True
 
 
 def _unit_text(host_id: str, owned: dict | None = None) -> str:
@@ -559,20 +688,27 @@ def install(args: argparse.Namespace) -> None:
             account = _validate_existing_user()
             expected_owned_text = owned_config_text(args, node_account.pw_uid, account.pw_gid)
             owned_value = json.loads(expected_owned_text) if expected_owned_text else None
+            legacy_expected = None
+            legacy_migration = False
             if expected_owned_text is None:
                 if OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
                     raise InstallError("existing owned-instance configuration cannot be removed implicitly")
             elif OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
                 cfg_st = OWNED_CONFIG.lstat()
+                existing_config = OWNED_CONFIG.read_text(encoding="utf-8")
+                if args.owned_instance and args.public_tls_ca_file:
+                    legacy_args = argparse.Namespace(**vars(args))
+                    legacy_args.public_tls_ca_file = str(LEGACY_OWNED_CA)
+                    legacy_expected = owned_config_text(legacy_args, node_account.pw_uid,
+                                                        pwd.getpwnam(USER).pw_gid,
+                                                        ca_path=LEGACY_OWNED_CA)
+                    legacy_migration = existing_config == legacy_expected
                 if (not stat.S_ISREG(cfg_st.st_mode) or cfg_st.st_uid != 0 or cfg_st.st_gid != 0
                         or cfg_st.st_nlink != 1 or stat.S_IMODE(cfg_st.st_mode) != 0o600
-                        or OWNED_CONFIG.read_text(encoding="utf-8") != expected_owned_text):
+                        or (existing_config != expected_owned_text and existing_config != legacy_expected)):
                     raise InstallError("existing owned-instance configuration differs or is unsafe")
             if ca_bytes is not None and (OWNED_CA.exists() or OWNED_CA.is_symlink()):
-                ca_st = OWNED_CA.lstat()
-                if (not stat.S_ISREG(ca_st.st_mode) or ca_st.st_uid != 0 or ca_st.st_gid != 0
-                        or ca_st.st_nlink != 1 or stat.S_IMODE(ca_st.st_mode) != 0o644
-                        or OWNED_CA.read_bytes() != ca_bytes):
+                if _verify_root_public_file(OWNED_CA) != ca_bytes:
                     raise InstallError("existing owned-instance CA differs; preserve it for operator review")
 
             for path, parent_mode in ((PREFIX, 0o755), (RELEASES, 0o755), (STATE, 0o700), (ETC, 0o700)):
@@ -626,15 +762,26 @@ def install(args: argparse.Namespace) -> None:
                 if expected_owned_text is None:
                     if OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
                         raise InstallError("existing owned-instance configuration differs; refusing to clear it")
-                elif not OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink() or OWNED_CONFIG.read_text(encoding="utf-8") != expected_owned_text:
+                elif not OWNED_CONFIG.exists() or OWNED_CONFIG.is_symlink():
                     raise InstallError("same release owned-instance configuration differs")
+                else:
+                    config_text = OWNED_CONFIG.read_text(encoding="utf-8")
+                    if config_text != expected_owned_text and not (legacy_migration and config_text == legacy_expected):
+                        raise InstallError("same release owned-instance configuration differs")
                 credential_st = CREDENTIAL.lstat() if CREDENTIAL.exists() or CREDENTIAL.is_symlink() else None
                 if credential_st is None or not stat.S_ISREG(credential_st.st_mode) or credential_st.st_uid != 0 or credential_st.st_gid != 0 or credential_st.st_nlink != 1 or stat.S_IMODE(credential_st.st_mode) != 0o600:
                     raise InstallError("existing identity credential is unsafe")
                 if not UNIT_PATH.exists() or UNIT_PATH.is_symlink():
                     raise InstallError("same release is missing its managed service unit")
                 unit_st = UNIT_PATH.lstat()
-                if not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_gid != 0 or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644 or UNIT_PATH.read_text(encoding="utf-8") != _unit_text(host_id, owned_value):
+                current_unit_text = UNIT_PATH.read_text(encoding="utf-8")
+                legacy_unit_value = json.loads(legacy_expected) if legacy_migration else None
+                acceptable_units = {_unit_text(host_id, owned_value)}
+                if legacy_migration:
+                    acceptable_units.add(_unit_text(host_id, legacy_unit_value))
+                if (not stat.S_ISREG(unit_st.st_mode) or unit_st.st_uid != 0 or unit_st.st_gid != 0
+                        or unit_st.st_nlink != 1 or stat.S_IMODE(unit_st.st_mode) != 0o644
+                        or current_unit_text not in acceptable_units):
                     raise InstallError("same release service unit has changed")
                 node_account = pwd.getpwnam(NODE_USER)
                 expected_tmpfiles = _tmpfiles_text(account, node_account, owned_value)
@@ -644,6 +791,12 @@ def install(args: argparse.Namespace) -> None:
                 tmpfiles_st = tmpfiles_path.lstat()
                 if not stat.S_ISREG(tmpfiles_st.st_mode) or tmpfiles_st.st_uid != 0 or tmpfiles_st.st_gid != 0 or tmpfiles_st.st_nlink != 1 or stat.S_IMODE(tmpfiles_st.st_mode) != 0o644 or tmpfiles_path.read_text(encoding="utf-8") != expected_tmpfiles:
                     raise InstallError("same release tmpfiles rule has changed")
+                if legacy_migration:
+                    if ca_bytes is None:
+                        raise InstallError("legacy CA migration requires an explicitly supplied CA file")
+                    if not _migrate_legacy_public_ca(host_id, args.source_commit, args, node_account.pw_uid,
+                                                     account.pw_gid, ca_bytes=ca_bytes):
+                        raise InstallError("legacy CA migration did not complete; no success is reported")
                 print(json.dumps({"status": "ok", "result": "same-release-verified", "sourceCommit": args.source_commit}))
                 return
 
@@ -711,11 +864,18 @@ def install(args: argparse.Namespace) -> None:
             _write_atomic(UNIT_PATH, unit_text, 0o644)
             previous_owned_config = OWNED_CONFIG.read_text(encoding="utf-8") if OWNED_CONFIG.exists() else None
             ca_created = False
+            ca_dir_created = False
 
             try:
                 if expected_owned_text is not None and previous_owned_config is None:
                     _write_atomic(OWNED_CONFIG, expected_owned_text, 0o600)
                 if ca_bytes is not None and not OWNED_CA.exists():
+                    if not OWNED_CA_DIR.exists():
+                        os.mkdir(OWNED_CA_DIR, 0o755)
+                        os.chown(OWNED_CA_DIR, 0, 0)
+                        os.chmod(OWNED_CA_DIR, 0o755)
+                        ca_dir_created = True
+                    _verify_dir(OWNED_CA_DIR, 0, 0, 0o755)
                     try:
                         ca_text = ca_bytes.decode("ascii")
                     except UnicodeDecodeError as exc:
@@ -748,6 +908,11 @@ def install(args: argparse.Namespace) -> None:
                     _write_atomic(OWNED_CONFIG, previous_owned_config, 0o600)
                 if ca_created:
                     OWNED_CA.unlink(missing_ok=True)
+                if ca_dir_created:
+                    try:
+                        OWNED_CA_DIR.rmdir()
+                    except OSError:
+                        pass
                 _run(["systemctl", "daemon-reload"], check=False)
                 raise
             print(json.dumps({"status": "ok", "result": "installed", "sourceCommit": args.source_commit,
