@@ -1,7 +1,8 @@
+import { isHostProviderId, isHostModelId, isHostProviderProfile, isHostRelativePath, isHostWorkspaceSelection } from '../shared/hostProviderConfig';
 import { createConnection, type Socket } from "node:net";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { HostConfigError } from "./management";
+import { HostConfigError, HostManagementUpgradeRequired } from "./management";
 import { HostProviderCredentialError } from "./provider-credentials";
 
 const MAX_FRAME = 64 * 1024;
@@ -18,6 +19,7 @@ const METHODS = new Set([
   "resources.create",
   "credential.set",
   "receipt.get",
+  "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register",
 ]);
 type Request = {
   kind: "request";
@@ -51,11 +53,16 @@ function plain(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 function validParams(method: string, params: Record<string, unknown>): boolean {
+  if (method === 'host.capabilities' || method === 'host.inspect') return exactKeys(params, []);
+  if (method === 'config.provider.set') return exactKeys(params,['provider','model','workspace','executionAuthorized','expectedRevision','mutationId']) && isHostProviderProfile(params.provider) && isHostModelId(params.model) && isHostWorkspaceSelection(params.workspace) && typeof params.executionAuthorized === 'boolean' && Number.isSafeInteger(params.expectedRevision) && Number(params.expectedRevision) >= 0 && typeof params.mutationId === 'string' && UUID.test(params.mutationId);
+  if (method === 'receipt.provider.get') return exactKeys(params,['owner','providerId','mutationId']) && ['config','credentials'].includes(params.owner as string) && isHostProviderId(params.providerId) && typeof params.mutationId === 'string' && UUID.test(params.mutationId);
+  if (method === 'resources.directory.list') return exactKeys(params,['rootId','relativePath',...(params.cursor === undefined ? [] : ['cursor'])]) && isHostWorkspaceSelection({rootId:params.rootId,relativePath:params.relativePath}) && (params.cursor === undefined || (typeof params.cursor === 'string' && params.cursor.length <= 1024));
+  if (method === 'resources.register') return exactKeys(params,['rootId','relativePath','expectedRevision','mutationId']) && isHostWorkspaceSelection({rootId:params.rootId,relativePath:params.relativePath}) && isHostRelativePath(params.relativePath,false) && Number.isSafeInteger(params.expectedRevision) && Number(params.expectedRevision) >= 0 && typeof params.mutationId === 'string' && UUID.test(params.mutationId);
   if (method === "host.snapshot") return exactKeys(params, []);
-  if (method === "credential.set") return (
+  if (method === "credential.set" || method === "credential.provider.set") return (
     exactKeys(params, ['expectedRevision', 'providerId', 'credential', 'mutationId'])
     && Number.isSafeInteger(params.expectedRevision) && Number(params.expectedRevision) >= 0
-    && params.providerId === 'moonshot-coding'
+    && (method === 'credential.set' ? params.providerId === 'moonshot-coding' : isHostProviderId(params.providerId))
     && typeof params.credential === 'string' && params.credential.trim().length > 0
     && Buffer.byteLength(params.credential, 'utf8') <= 16 * 1024 && !/[\r\n\0]/.test(params.credential)
     && typeof params.mutationId === 'string' && UUID.test(params.mutationId)
@@ -488,7 +495,7 @@ export async function connectHostManagementIpc(options: {
               }
             } catch (error) {
               const code =
-                error instanceof HostConfigError || error instanceof HostProviderCredentialError
+                error instanceof HostConfigError || error instanceof HostManagementUpgradeRequired || error instanceof HostProviderCredentialError
                   ? error.code
                   : "OWNER_OPERATION_FAILED";
               if (

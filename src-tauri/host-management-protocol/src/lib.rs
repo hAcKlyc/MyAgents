@@ -102,6 +102,20 @@ pub enum ManagementMethod {
     ResourcesCreate,
     #[serde(rename = "receipt.get")]
     ReceiptGet,
+    #[serde(rename = "host.capabilities")]
+    HostCapabilities,
+    #[serde(rename = "host.inspect")]
+    HostInspect,
+    #[serde(rename = "config.provider.set")]
+    ConfigProviderSet,
+    #[serde(rename = "credential.provider.set")]
+    CredentialProviderSet,
+    #[serde(rename = "receipt.provider.get")]
+    ReceiptProviderGet,
+    #[serde(rename = "resources.directory.list")]
+    ResourcesDirectoryList,
+    #[serde(rename = "resources.register")]
+    ResourcesRegister,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -150,6 +164,11 @@ pub enum RequestParams {
     CredentialSet(CredentialSetParams),
     ResourcesCreate(ResourcesCreateParams),
     ReceiptGet(ReceiptGetParams),
+    ConfigProviderSet(Box<ConfigProviderSetParams>),
+    // Same shape as credential.set; method distinguishes provider validation.
+    ReceiptProviderGet(ReceiptProviderGetParams),
+    ResourcesDirectoryList(DirectoryListParams),
+    ResourcesRegister(ResourcesRegisterParams),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -216,10 +235,195 @@ pub struct ReceiptGetParams {
     pub owner: Owner,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ApiProtocol {
+    Anthropic,
+    Openai,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthType {
+    AuthToken,
+    ApiKey,
+    Both,
+    AuthTokenClearApiKey,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamFormat {
+    ChatCompletions,
+    Responses,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaxOutputTokensParamName {
+    MaxTokens,
+    MaxCompletionTokens,
+    MaxOutputTokens,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelAliases {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sonnet: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opus: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub haiku: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderProfile {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_provider_id: Option<String>,
+    pub name: String,
+    pub api_protocol: ApiProtocol,
+    pub base_url: String,
+    pub auth_type: AuthType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upstream_format: Option<UpstreamFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens_param_name: Option<MaxOutputTokensParamName>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_aliases: Option<ModelAliases>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceSelection {
+    pub root_id: String,
+    pub relative_path: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ConfigProviderSetParams {
+    pub provider: ProviderProfile,
+    pub model: String,
+    pub workspace: WorkspaceSelection,
+    pub execution_authorized: bool,
+    pub expected_revision: u64,
+    pub mutation_id: CanonicalUuid,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReceiptProviderGetParams {
+    pub owner: Owner,
+    pub provider_id: String,
+    pub mutation_id: CanonicalUuid,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DirectoryListParams {
+    pub root_id: String,
+    pub relative_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResourcesRegisterParams {
+    pub root_id: String,
+    pub relative_path: String,
+    pub expected_revision: u64,
+    pub mutation_id: CanonicalUuid,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CapabilityLimits {
+    pub directory_entries: u16,
+    pub path_bytes: u16,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Capabilities {
+    pub version: u8,
+    pub methods: Vec<ManagementMethod>,
+    pub provider_kinds: Vec<ApiProtocol>,
+    pub limits: CapabilityLimits,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub relative_path: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DirectoryList {
+    pub root_id: String,
+    pub relative_path: String,
+    pub entries: Vec<DirectoryEntry>,
+    pub next_cursor: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GenericHostSettings {
+    pub revision: u64,
+    pub provider_id: String,
+    pub model: String,
+    pub workspace: WorkspaceSelection,
+    pub execution_authorized: bool,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ProviderConfigReceipt {
+    Persisted {
+        #[serde(rename = "mutationId")]
+        mutation_id: CanonicalUuid,
+        revision: u64,
+        effect: ConfigEffect,
+        settings: GenericHostSettings,
+    },
+    Conflict {
+        #[serde(rename = "mutationId")]
+        mutation_id: CanonicalUuid,
+        revision: u64,
+        effect: ConfigEffect,
+    },
+    NotFound {
+        #[serde(rename = "mutationId")]
+        mutation_id: CanonicalUuid,
+    },
+}
+/// Same fields as v1 snapshot, with independently validated generic settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExtendedSnapshot {
+    pub version: u8,
+    pub host_id: CanonicalUuid,
+    pub configured: bool,
+    #[serde(deserialize_with = "deserialize_required_provider")]
+    pub provider: Option<ProviderProfile>,
+    pub settings: Option<GenericHostSettings>,
+    pub active_session: Option<ActiveSession>,
+    pub stopping: bool,
+    pub capabilities: Vec<HostCapability>,
+    pub agent_net: AgentNetStatus,
+    pub runtime: RuntimeStatus,
+    pub credentials: CredentialsStatus,
+    pub resources: ResourcesSnapshot,
+}
+
+fn deserialize_required_provider<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ProviderProfile>, D::Error> {
+    Option::<ProviderProfile>::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ResponseResult {
     Snapshot(Box<HostSnapshot>),
+    Capabilities(Capabilities),
+    ExtendedSnapshot(Box<ExtendedSnapshot>),
+    ProviderConfigReceipt(ProviderConfigReceipt),
+    ProviderCredentialReceipt(CredentialReceipt),
+    DirectoryList(DirectoryList),
     ConfigReceipt(ConfigReceipt),
     CredentialReceipt(CredentialReceipt),
     ResourceReceipt(ResourceReceipt),
@@ -430,8 +634,12 @@ impl Frame {
             ManagementMessage::Request { method, params, .. } => {
                 let valid = matches!(
                     (method, params),
-                    (ManagementMethod::HostSnapshot, RequestParams::Snapshot(_))
-                        | (ManagementMethod::ConfigSet, RequestParams::ConfigSet(_))
+                    (
+                        ManagementMethod::HostSnapshot
+                            | ManagementMethod::HostCapabilities
+                            | ManagementMethod::HostInspect,
+                        RequestParams::Snapshot(_)
+                    ) | (ManagementMethod::ConfigSet, RequestParams::ConfigSet(_))
                         | (
                             ManagementMethod::CredentialSet,
                             RequestParams::CredentialSet(_)
@@ -441,11 +649,39 @@ impl Frame {
                             RequestParams::ResourcesCreate(_)
                         )
                         | (ManagementMethod::ReceiptGet, RequestParams::ReceiptGet(_))
+                        | (
+                            ManagementMethod::ConfigProviderSet,
+                            RequestParams::ConfigProviderSet(_)
+                        )
+                        | (
+                            ManagementMethod::CredentialProviderSet,
+                            RequestParams::CredentialSet(_)
+                        )
+                        | (
+                            ManagementMethod::ReceiptProviderGet,
+                            RequestParams::ReceiptProviderGet(_)
+                        )
+                        | (
+                            ManagementMethod::ResourcesDirectoryList,
+                            RequestParams::ResourcesDirectoryList(_)
+                        )
+                        | (
+                            ManagementMethod::ResourcesRegister,
+                            RequestParams::ResourcesRegister(_)
+                        )
                 );
                 if !valid {
                     return Err(CodecError::InvalidFrame);
                 }
-                validate_params(params)?;
+                if *method == ManagementMethod::CredentialProviderSet {
+                    if let RequestParams::CredentialSet(p) = params
+                        && (!valid_provider_id(&p.provider_id) || !valid_credential(p))
+                    {
+                        return Err(CodecError::InvalidFrame);
+                    }
+                } else {
+                    validate_params(params)?;
+                }
             }
             ManagementMessage::Response { result, .. } => validate_result(result)?,
         }
@@ -479,6 +715,41 @@ fn validate_params(params: &RequestParams) -> Result<(), CodecError> {
             }
             Ok(())
         }
+        RequestParams::ConfigProviderSet(p) => {
+            if !safe_revision(p.expected_revision)
+                || !valid_provider(&p.provider)
+                || !valid_generic_model(&p.model)
+                || !valid_root_id(&p.workspace.root_id)
+                || !valid_directory_path(&p.workspace.relative_path, true)
+            {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
+        RequestParams::ReceiptProviderGet(p) => {
+            if !valid_provider_id(&p.provider_id) || p.owner == Owner::Resources {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
+        RequestParams::ResourcesDirectoryList(p) => {
+            if !valid_root_id(&p.root_id)
+                || !valid_directory_path(&p.relative_path, true)
+                || p.cursor.as_ref().is_some_and(|s| !valid_cursor(s))
+            {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
+        RequestParams::ResourcesRegister(p) => {
+            if !safe_revision(p.expected_revision)
+                || !valid_root_id(&p.root_id)
+                || !valid_directory_path(&p.relative_path, false)
+            {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
         RequestParams::ResourcesCreate(p) => {
             if !safe_revision(p.expected_revision)
                 || !valid_root_id(&p.root_id)
@@ -494,12 +765,238 @@ fn validate_result(result: &ResponseResult) -> Result<(), CodecError> {
     match result {
         ResponseResult::Error { code } if !valid_error_code(code) => Err(CodecError::InvalidFrame),
         ResponseResult::Snapshot(snapshot) => validate_snapshot(snapshot),
+        ResponseResult::Capabilities(c) => {
+            let mut methods = std::collections::HashSet::new();
+            let mut kinds = std::collections::HashSet::new();
+            if c.version != 1
+                || c.methods.len() > 12
+                || c.provider_kinds.len() > 2
+                || c.methods
+                    .iter()
+                    .any(|m| !methods.insert(serde_json::to_string(m).unwrap_or_default()))
+                || c.provider_kinds
+                    .iter()
+                    .any(|m| !kinds.insert(serde_json::to_string(m).unwrap_or_default()))
+                || c.limits.directory_entries != 128
+                || c.limits.path_bytes != 4096
+            {
+                return Err(CodecError::InvalidFrame);
+            }
+            Ok(())
+        }
+        ResponseResult::ExtendedSnapshot(s) => validate_extended_snapshot(s),
+        ResponseResult::ProviderConfigReceipt(r) => validate_provider_config_receipt(r),
+        ResponseResult::ProviderCredentialReceipt(r) => validate_credential_receipt(r),
+        ResponseResult::DirectoryList(d) => validate_directory_list(d),
         ResponseResult::ConfigReceipt(receipt) => validate_config_receipt(receipt),
         ResponseResult::CredentialReceipt(receipt) => validate_credential_receipt(receipt),
         ResponseResult::ResourceReceipt(receipt) => validate_resource_receipt(receipt),
         _ => Ok(()),
     }
 }
+fn valid_provider_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+fn valid_generic_model(s: &str) -> bool {
+    !s.is_empty() && s.chars().count() <= 160 && !s.chars().any(char::is_control)
+}
+fn valid_credential(p: &CredentialSetParams) -> bool {
+    safe_revision(p.expected_revision)
+        && !p.credential.trim().is_empty()
+        && p.credential.len() <= 16 * 1024
+        && !p.credential.bytes().any(|b| matches!(b, 0 | b'\r' | b'\n'))
+}
+fn valid_cursor(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control)
+}
+fn valid_directory_path(s: &str, root: bool) -> bool {
+    (root && s.is_empty())
+        || (!s.is_empty()
+            && s.len() <= 4096
+            && !s.starts_with('/')
+            && !s.chars().any(char::is_control)
+            && !s.contains('\\')
+            && s.split('/')
+                .all(|c| !c.is_empty() && c != "." && c != ".." && c.len() <= 255))
+}
+fn valid_provider(p: &ProviderProfile) -> bool {
+    valid_provider_id(&p.id)
+        && p.source_provider_id
+            .as_ref()
+            .is_none_or(|id| valid_provider_id(id))
+        && !p.name.is_empty()
+        && p.name.chars().count() <= 256
+        && !p.name.chars().any(char::is_control)
+        && valid_endpoint(&p.base_url)
+        && p.max_output_tokens
+            .is_none_or(|n| n > 0 && safe_revision(n))
+        && p.model_aliases.as_ref().is_none_or(|a| {
+            [&a.fable, &a.sonnet, &a.opus, &a.haiku]
+                .into_iter()
+                .all(|v| v.as_ref().is_none_or(|s| valid_generic_model(s)))
+        })
+}
+fn valid_endpoint(s: &str) -> bool {
+    // Parse only the bounded HTTPS subset; no implicit URL normalization.
+    if s.len() > 4096
+        || s.chars().any(|c| c.is_control() || c.is_whitespace())
+        || s.contains(['?', '#', '@', '\\'])
+    {
+        return false;
+    }
+    let Some(rest) = s.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    let (host, port) = if let Some(tail) = authority.strip_prefix('[') {
+        let Some((host, suffix)) = tail.split_once(']') else {
+            return false;
+        };
+        if host.parse::<std::net::Ipv6Addr>().is_err() {
+            return false;
+        }
+        (
+            host,
+            suffix
+                .strip_prefix(':')
+                .or_else(|| suffix.is_empty().then_some("")),
+        )
+    } else {
+        let mut parts = authority.split(':');
+        let host = parts.next().unwrap_or_default();
+        let port = parts.next().unwrap_or("");
+        if parts.next().is_some()
+            || host.is_empty()
+            || !host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+        {
+            return false;
+        }
+        (host, Some(port))
+    };
+    let Some(port) = port else {
+        return false;
+    };
+    if !port.is_empty() && !port.parse::<u16>().is_ok_and(|n| n > 0) {
+        return false;
+    }
+    // WHATWG URL consumers treat shortened/numeric IPv4 forms as loopback too.
+    // Only accept canonical dotted IPv4; DNS final labels cannot be numeric.
+    if !host.contains(':') && host.parse::<std::net::Ipv4Addr>().is_err() {
+        let dns = host.trim_end_matches('.');
+        if dns.split('.').any(|label| {
+            label.is_empty() || label.len() > 63 || label.starts_with('-') || label.ends_with('-')
+        }) {
+            return false;
+        }
+        let final_label = dns.rsplit('.').next().unwrap_or_default();
+        if final_label.bytes().all(|b| b.is_ascii_digit())
+            || final_label.to_ascii_lowercase().starts_with("0x")
+        {
+            return false;
+        }
+    }
+    let lower = host.trim_end_matches('.').to_ascii_lowercase();
+    if lower == "localhost" || lower.ends_with(".localhost") {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>()
+        && (ip.is_loopback()
+            || ip.is_unspecified()
+            || matches!(ip, std::net::IpAddr::V6(v) if v.to_ipv4_mapped().is_some_and(|x| x.is_loopback() || x.is_unspecified())))
+    {
+        return false;
+    }
+    true
+}
+fn validate_generic_settings(s: &GenericHostSettings) -> Result<(), CodecError> {
+    if s.revision == 0
+        || !safe_revision(s.revision)
+        || !valid_provider_id(&s.provider_id)
+        || !valid_generic_model(&s.model)
+        || !valid_root_id(&s.workspace.root_id)
+        || !valid_directory_path(&s.workspace.relative_path, true)
+    {
+        return Err(CodecError::InvalidFrame);
+    }
+    Ok(())
+}
+fn validate_extended_snapshot(s: &ExtendedSnapshot) -> Result<(), CodecError> {
+    if s.version != 1
+        || s.configured != s.provider.is_some()
+        || s.provider.as_ref().is_some_and(|p| !valid_provider(p))
+        || s.settings.as_ref().is_some_and(|settings| {
+            s.provider
+                .as_ref()
+                .is_none_or(|p| p.id != settings.provider_id)
+        })
+        || !valid_provider_id(&s.credentials.provider_id)
+        || !safe_revision(s.credentials.revision)
+        || (s.credentials.configured && s.credentials.revision == 0)
+        || validate_resources_snapshot(&s.resources).is_err()
+        || s.capabilities.len() > 16
+        || s.settings
+            .as_ref()
+            .is_some_and(|v| validate_generic_settings(v).is_err())
+        || s.configured != s.settings.is_some()
+        || !valid_semver(&s.runtime.node)
+        || s.agent_net.reason.as_ref().is_some_and(|v| v.len() > 64)
+        || s.settings
+            .as_ref()
+            .is_some_and(|v| v.provider_id != s.credentials.provider_id)
+    {
+        return Err(CodecError::InvalidFrame);
+    }
+    Ok(())
+}
+fn validate_provider_config_receipt(r: &ProviderConfigReceipt) -> Result<(), CodecError> {
+    match r {
+        ProviderConfigReceipt::Persisted {
+            revision,
+            effect,
+            settings,
+            ..
+        } => {
+            if *revision != settings.revision || *effect != ConfigEffect::NewSession {
+                return Err(CodecError::InvalidFrame);
+            }
+            validate_generic_settings(settings)
+        }
+        ProviderConfigReceipt::Conflict {
+            revision, effect, ..
+        } if safe_revision(*revision) && *effect == ConfigEffect::None => Ok(()),
+        ProviderConfigReceipt::NotFound { .. } => Ok(()),
+        _ => Err(CodecError::InvalidFrame),
+    }
+}
+fn validate_directory_list(d: &DirectoryList) -> Result<(), CodecError> {
+    let mut names = std::collections::HashSet::new();
+    if !valid_root_id(&d.root_id)
+        || !valid_directory_path(&d.relative_path, true)
+        || d.entries.len() > 128
+        || d.next_cursor.as_ref().is_some_and(|s| !valid_cursor(s))
+        || d.entries.iter().any(|e| {
+            let expected = if d.relative_path.is_empty() {
+                e.name.clone()
+            } else {
+                format!("{}/{}", d.relative_path, e.name)
+            };
+            e.name.contains('/')
+                || !valid_directory_path(&e.name, false)
+                || !valid_directory_path(&e.relative_path, false)
+                || e.relative_path != expected
+                || !names.insert(e.name.as_str())
+        })
+    {
+        return Err(CodecError::InvalidFrame);
+    }
+    Ok(())
+}
+
 fn validate_snapshot(s: &HostSnapshot) -> Result<(), CodecError> {
     if s.version != 1
         || s.credentials.provider_id != "moonshot-coding"

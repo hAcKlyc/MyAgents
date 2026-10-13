@@ -27,6 +27,7 @@ import { getHomeDirOrNull } from './platform';
 import { resolveHostProviderCredential } from './host-credentials';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
+import { HOST_PROVIDER_LIMIT, isHostModelId, isHostProviderProfile, portableProfileToProvider } from '../../shared/hostProviderConfig';
 import { workspacePathsEqual } from '../../shared/workspacePath';
 import { promoteAgentMcpJsonToGlobal } from '../../shared/mcpConfig';
 import type { AppConfig, ManagedProviderCredential, ManagedProviderEndpoint, McpServerDefinition, PermissionMode, Provider, ProviderVerifyStatus, SubscriptionAuthPolicy } from '../../shared/config-types';
@@ -1106,6 +1107,48 @@ function hasProviderId(
   return typeof provider.id === 'string' && provider.id.length > 0;
 }
 
+/** Host-only metadata projection; ordinary desktop catalogs keep their owners. */
+export function projectHostProviderCatalog(
+  config: AdminAppConfig,
+  catalog: readonly ProviderRecord[],
+  hostMode = process.env.MYAGENTS_HOST_MODE === '1',
+): ProviderRecord[] {
+  if (!hostMode || config.hostProviderProfiles === undefined) return [...catalog];
+  const record = (value: unknown): value is Record<string, unknown> => Boolean(value)
+    && typeof value === 'object' && !Array.isArray(value);
+  const profiles = config.hostProviderProfiles;
+  if (!record(profiles) || Object.keys(profiles).length > HOST_PROVIDER_LIMIT) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+  const current = record(config.hostSettings) ? config.hostSettings : undefined;
+  const ledger = config.hostProviderConfigReceipts;
+  if (ledger !== undefined && (!record(ledger) || !Array.isArray(ledger.entries) || ledger.entries.length > 256)) {
+    throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+  }
+  const receipts = record(ledger) && Array.isArray(ledger.entries) ? ledger.entries : [];
+  const imported: ProviderRecord[] = [];
+  for (const [id, profile] of Object.entries(profiles)) {
+    if (!isHostProviderProfile(profile) || profile.id !== id) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+    const models = new Set<string>();
+    if (current?.providerId === id && isHostModelId(current.model)) models.add(current.model);
+    // Prior Sessions can still resolve the original model after changing the
+    // Host default. Receipt metadata is bounded and never contains keys.
+    for (const entry of receipts) {
+      if (!record(entry) || !record(entry.receipt)) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+      const receipt = entry.receipt;
+      if (receipt.status === 'persisted' && entry.providerId === id) {
+        if (!record(receipt.settings) || receipt.settings.providerId !== id || !isHostModelId(receipt.settings.model)) {
+          throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+        }
+        models.add(receipt.settings.model);
+      }
+    }
+    for (const alias of Object.values(profile.modelAliases ?? {})) if (alias) models.add(alias);
+    if (models.size === 0) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+    imported.push(portableProfileToProvider(profile, [...models]));
+  }
+  const replacedIds = new Set(imported.map(provider => provider.id));
+  return [...catalog.filter(provider => !replacedIds.has(provider.id)), ...imported];
+}
+
 export function getAllEffectiveProviders(
   config?: AdminAppConfig,
   runtimeModels?: readonly import('../../shared/types/runtime').RuntimeModelInfo[],
@@ -1122,7 +1165,7 @@ export function getAllEffectiveProviders(
   // the in-app picker accepts it.
   const providerConfig = c as unknown as AppConfig;
   const providersWithManagedCodex = withManagedCodexProviderCatalog(
-    [...presetProviders, ...customProviders] as unknown as Provider[],
+    projectHostProviderCatalog(c, [...presetProviders, ...customProviders]) as unknown as Provider[],
     providerConfig,
     runtimeModels,
   );

@@ -1,5 +1,15 @@
 # Development Plan
 
+## MOXBOTS-HOST-CONFIG-20261013
+
+当前Agent按用户明确授权实现Host管理复用Settings模型配置、一键应用当前桌面主Agent来源、远端受限目录选择。交付记录 `.agent-sync/tasks/codex-host-config-delivery-20261013-5d88db02.md`（开发阶段旧记录保留），合同 `specs/tech_docs/host_configuration_reuse.md`。Node/Rust/来源及共享UI已实现，独立审查与合成IAB通过；af725700六项CI及Linux目录用例通过，已同步会话恢复main20e89b6f，组合源CI/main待核验。Host基础已由PR24交main fb92ce9c，交付分支已从其独立创建；开发冻结依赖9149753c及Mac凭据实验不进入交付；原凭据聊天负责基础拆分和统一安装，用户已授权协调。本任务未操作安装包，当前运行版本按统一安装owner回执另行核验。
+
+- [x] 实际仓库/主干/原Host分支核验和隔离任务记录。
+- [x] Provider元数据封闭合同、独立版本、凭据绑定与目录owner实现及本地相称回归。
+- [x] 共享Settings UI/独立审查修复、合成IAB关键交互验收（真实Host待统一包）。
+- [ ] Linux目录/完整CI、验证后的Host基础集成、远端main包含成果。
+- [ ] 统一候选安装、真实Host和旧Host兼容、真实主Agent来源应用及用户路径复验。
+
 ## 当前目标和范围
 
 用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，PR20已交付main be48a22b并发布现网，真实OIDC/admin API路径通过。独立标签页登录修复BOTS-ADMIN-LOGIN-002已由PR22交付main并发布，真实IAB登录及管理路径通过；真实有限Host执行BOTS-CLOUD-EXEC-001在独立工作树进行。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。

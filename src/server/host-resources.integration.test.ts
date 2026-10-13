@@ -326,3 +326,40 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
     expect(readFileSync(projects,'utf8')).toBe('{'); writeFileSync(projects,disk);
   });
 });
+
+it.skipIf(process.platform !== 'linux')('browses only safe directories with Unicode, bounded pages and location-bound refresh cursors', async () => {
+  mkdirSync(join(root,'客户 文件夹'),{mode:0o700});
+  for(let i=0;i<140;i++)mkdirSync(join(root,`目录 ${i}`),{mode:0o700});
+  symlinkSync(home,join(root,'outside-link'));writeFileSync(join(root,'file.txt'),'not a directory');
+  const first=await owner.listDirectory({rootId:'local',relativePath:''});expect(first.entries).toHaveLength(128);expect(first.nextCursor).not.toBeNull();
+  expect(first.entries.some(e=>e.name==='outside-link')).toBe(false);expect(first.entries.some(e=>e.name==='file.txt')).toBe(false);
+  const second=await owner.listDirectory({rootId:'local',relativePath:'',cursor:first.nextCursor!});expect(second.nextCursor).toBeNull();
+  expect(new Set([...first.entries,...second.entries].map(e=>e.name)).size).toBe(141);
+  expect([...first.entries,...second.entries].some(e=>e.name==='客户 文件夹')).toBe(true);
+  await expect(owner.listDirectory({rootId:'local',relativePath:'客户 文件夹',cursor:first.nextCursor!})).rejects.toThrow('RESOURCE_DIRECTORY_CHANGED');
+  mkdirSync(join(root,'new directory'),{mode:0o700});
+  await expect(owner.listDirectory({rootId:'local',relativePath:'',cursor:first.nextCursor!})).rejects.toThrow('RESOURCE_DIRECTORY_CHANGED');
+  await expect(owner.listDirectory({rootId:'local',relativePath:'outside-link'})).rejects.toThrow('RESOURCE_PATH_UNAVAILABLE');
+});
+it.skipIf(process.platform !== 'linux')('registers an existing Unicode child disabled and recovers the same ledger receipt',async()=> {
+  mkdirSync(join(root,'客户 项目'),{mode:0o700});const request=body('客户 项目');const result=await owner.mutate(request);
+  expect(result).toMatchObject({status:'persisted',effect:'registered-disabled-agent',resource:{enabled:false,workspacePath:join(root,'客户 项目')}});
+  expect(await createHostResourceOwner({hostId,roots:{local:root}}).mutate(request)).toEqual(result);
+  expect(await owner.receipt(request.mutationId)).toEqual(result);
+});
+it('directory extension refuses unsafe requests and unsupported non-Linux path authority',async()=> {
+  await expect(owner.listDirectory({rootId:'local',relativePath:'../escape'})).rejects.toThrow('RESOURCE_REQUEST_INVALID');
+  await expect(owner.listDirectory({rootId:'unknown',relativePath:''})).rejects.toThrow('RESOURCE_ROOT_UNKNOWN');
+  if(process.platform !== 'linux')await expect(owner.listDirectory({rootId:'local',relativePath:''})).rejects.toThrow('RESOURCE_PLATFORM_UNSUPPORTED');
+});
+it.skipIf(process.platform !== 'linux')('refuses a directory replacement during an fd-anchored browse',async()=> {
+  mkdirSync(join(root,'original child'),{mode:0o700});const outside=join(home,'outside');mkdirSync(outside,{mode:0o700});mkdirSync(join(outside,'escaped child'),{mode:0o700});
+  const original=fs.lstatSync;let replaced=false;
+  vi.spyOn(fs,'lstatSync').mockImplementation(((...args:Parameters<typeof fs.lstatSync>)=> {
+    if(!replaced && String(args[0]).startsWith('/proc/self/fd/') && String(args[0]).endsWith('/original child')) {
+      replaced=true;renameSync(root,join(home,'old workspaces'));symlinkSync(outside,root);
+    }
+    return original(...args);
+  }) as typeof fs.lstatSync);syncBuiltinESMExports();
+  await expect(owner.listDirectory({rootId:'local',relativePath:''})).rejects.toThrow('RESOURCE_PATH_CHANGED');expect(replaced).toBe(true);
+});

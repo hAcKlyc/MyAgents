@@ -48,10 +48,17 @@ impl ManagementRequest {
             ManagementMethod::ConfigSet
                 | ManagementMethod::CredentialSet
                 | ManagementMethod::ResourcesCreate
+                | ManagementMethod::ConfigProviderSet
+                | ManagementMethod::CredentialProviderSet
+                | ManagementMethod::ResourcesRegister
         )
     }
     pub(crate) fn message(&self, id: CanonicalUuid) -> Result<ManagementMessage, NetworkError> {
-        if self.method != ManagementMethod::HostSnapshot && self.target_scope.is_none() {
+        if !matches!(
+            self.method,
+            ManagementMethod::HostSnapshot | ManagementMethod::HostCapabilities
+        ) && self.target_scope.is_none()
+        {
             return Err(NetworkError::new("HOST_MANAGEMENT_TARGET_REQUIRED"));
         }
         let message = ManagementMessage::Request {
@@ -125,7 +132,107 @@ fn matches_offer(
     }
     Ok(())
 }
+fn mutation_matches(value: &impl serde::Serialize, id: CanonicalUuid) -> bool {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| v.get("mutationId").cloned())
+        == serde_json::to_value(id).ok()
+}
+/// This code is emitted only after a READY, single read-only probe is retired.
+pub(crate) fn isolated_unsupported_probe(
+    request: &ManagementRequest,
+    error: &NetworkError,
+) -> bool {
+    request.method == ManagementMethod::HostCapabilities
+        && error.code == "HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE"
+}
 fn response_matches(request: &ManagementRequest, result: &ResponseResult) -> bool {
+    use myagents_host_management_protocol::{Owner, ProviderConfigReceipt, ResourceReceipt};
+    match (request.method, &request.params, result) {
+        (
+            ManagementMethod::HostCapabilities,
+            RequestParams::Snapshot(_),
+            ResponseResult::Capabilities(_),
+        ) => return true,
+        (
+            ManagementMethod::HostInspect,
+            RequestParams::Snapshot(_),
+            ResponseResult::ExtendedSnapshot(s),
+        ) => return s.host_id.as_uuid().to_string() == request.device_id,
+        (
+            ManagementMethod::ResourcesDirectoryList,
+            RequestParams::ResourcesDirectoryList(p),
+            ResponseResult::DirectoryList(d),
+        ) => return p.root_id == d.root_id && p.relative_path == d.relative_path,
+        (
+            ManagementMethod::ConfigProviderSet,
+            RequestParams::ConfigProviderSet(p),
+            ResponseResult::ProviderConfigReceipt(r),
+        ) => {
+            return match r {
+                ProviderConfigReceipt::Persisted {
+                    mutation_id,
+                    settings,
+                    ..
+                } => *mutation_id == p.mutation_id && settings.provider_id == p.provider.id,
+                ProviderConfigReceipt::Conflict { mutation_id, .. } => {
+                    *mutation_id == p.mutation_id
+                }
+                ProviderConfigReceipt::NotFound { .. } => false,
+            }
+        }
+        (
+            ManagementMethod::CredentialProviderSet,
+            RequestParams::CredentialSet(p),
+            ResponseResult::ProviderCredentialReceipt(r),
+        ) => return mutation_matches(r, p.mutation_id),
+        (
+            ManagementMethod::ReceiptProviderGet,
+            RequestParams::ReceiptProviderGet(p),
+            ResponseResult::ProviderCredentialReceipt(r),
+        ) if p.owner == Owner::Credentials => return mutation_matches(r, p.mutation_id),
+        (
+            ManagementMethod::ReceiptProviderGet,
+            RequestParams::ReceiptProviderGet(p),
+            ResponseResult::ProviderConfigReceipt(r),
+        ) if p.owner == Owner::Config => {
+            return match r {
+                ProviderConfigReceipt::Persisted {
+                    mutation_id,
+                    settings,
+                    ..
+                } => *mutation_id == p.mutation_id && settings.provider_id == p.provider_id,
+                ProviderConfigReceipt::Conflict { mutation_id, .. }
+                | ProviderConfigReceipt::NotFound { mutation_id } => *mutation_id == p.mutation_id,
+            }
+        }
+        (
+            ManagementMethod::ReceiptProviderGet,
+            RequestParams::ReceiptProviderGet(p),
+            ResponseResult::ReceiptNotFound { mutation_id, owner },
+        ) => return p.mutation_id == *mutation_id && p.owner == *owner,
+        (
+            ManagementMethod::ResourcesRegister,
+            RequestParams::ResourcesRegister(p),
+            ResponseResult::ResourceReceipt(r),
+        ) => {
+            return !matches!(r, ResourceReceipt::NotFound { .. })
+                && mutation_matches(r, p.mutation_id)
+        }
+        (_, _, ResponseResult::Error { .. }) => return true,
+        (
+            ManagementMethod::HostCapabilities
+            | ManagementMethod::HostInspect
+            | ManagementMethod::ConfigProviderSet
+            | ManagementMethod::CredentialProviderSet
+            | ManagementMethod::ReceiptProviderGet
+            | ManagementMethod::ResourcesDirectoryList
+            | ManagementMethod::ResourcesRegister,
+            _,
+            _,
+        ) => return false,
+        _ => {}
+    }
     match (&request.params, result) {
         (_, ResponseResult::Error { .. }) => true,
         (RequestParams::Snapshot(_), ResponseResult::Snapshot(snapshot)) => {
@@ -295,6 +402,8 @@ pub(crate) async fn execute(
     let message = request.message(request_id)?;
     pairs.reserve_management_retirement(&channel, scope, local)?;
     let mut known_to_peer = false;
+    let mut unsupported_close = false;
+    let mut peer_closed = false;
     let operation = async {
         identity.account.ensure_current()?;
         let identity = identity.clone().ensure_peer().await?;
@@ -495,9 +604,14 @@ pub(crate) async fn execute(
                         } if channel_id == channel => {
                             pairs.credit(&channel, sequence, received_bytes)?
                         }
-                        ServerMessage::ChannelClosed { channel_id, .. }
-                            if channel_id == channel =>
-                        {
+                        ServerMessage::ChannelClosed {
+                            channel_id, reason, ..
+                        } if channel_id == channel => {
+                            peer_closed = true;
+                            unsupported_close = request.method
+                                == ManagementMethod::HostCapabilities
+                                && sent.load(Ordering::Acquire)
+                                && reason == "peer-closed";
                             pairs.note_management_closed(&channel);
                             return Err(NetworkError::new("HOST_MANAGEMENT_CHANNEL_CLOSED"));
                         }
@@ -541,18 +655,32 @@ pub(crate) async fn execute(
     pairs.retire_management(&channel, known_to_peer);
     let _ = pairs.take_failures();
     // Cleanup is bounded and best effort. A failed Close cannot change a receipt.
-    let _ = tokio::time::timeout(
-        Duration::from_secs(1),
-        send(
-            socket,
-            ClientMessage::Close {
-                scope: scope.clone(),
-                channel_id: channel,
-                reason: "READ_COMPLETED".into(),
-            },
-        ),
-    )
-    .await;
+    let cleanup_confirmed = peer_closed
+        || matches!(
+            tokio::time::timeout(
+                Duration::from_secs(1),
+                send(
+                    socket,
+                    ClientMessage::Close {
+                        scope: scope.clone(),
+                        channel_id: channel.clone(),
+                        reason: "READ_COMPLETED".into(),
+                    },
+                ),
+            )
+            .await,
+            Ok(Ok(_))
+        );
+    let unsupported_result = matches!(&result, Ok(ManagementResponse { result: ResponseResult::Error { code }, .. }) if matches!(code.as_str(), "INVALID_REQUEST" | "METHOD_UNSUPPORTED"));
+    if request.method == ManagementMethod::HostCapabilities
+        && sent.load(Ordering::Acquire)
+        && (unsupported_close || unsupported_result)
+        && cleanup_confirmed
+        && pairs.management_retired_ready(&channel)
+        && identity.account.ensure_current().is_ok()
+    {
+        return Err(NetworkError::new("HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE"));
+    }
     result.map_err(|error| {
         if request.mutation() && sent.load(Ordering::Acquire) {
             lost(true, true)
@@ -761,6 +889,36 @@ mod tests {
         });
         assert!(!response_matches(&r, &valid));
     }
+    #[test]
+    fn actor_recovery_is_exclusive_to_the_retired_capability_probe_signal() {
+        let mut r = request();
+        r.method = ManagementMethod::HostCapabilities;
+        assert!(isolated_unsupported_probe(
+            &r,
+            &NetworkError::new("HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE")
+        ));
+        for code in [
+            "ACCOUNT_BINDING_CHANGED",
+            "HOST_MANAGEMENT_TIMEOUT",
+            "HOST_MANAGEMENT_CHANNEL_CLOSED",
+            "CONTROL_SCOPE_MISMATCH",
+            "HOST_MANAGEMENT_RESPONSE_INVALID",
+        ] {
+            assert!(!isolated_unsupported_probe(&r, &NetworkError::new(code)));
+        }
+        r.method = ManagementMethod::HostSnapshot;
+        assert!(!isolated_unsupported_probe(
+            &r,
+            &NetworkError::new("HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE")
+        ));
+        r.method = ManagementMethod::ConfigProviderSet;
+        assert!(r.mutation());
+        assert!(!isolated_unsupported_probe(
+            &r,
+            &NetworkError::new("HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE")
+        ));
+    }
+
     #[test]
     fn request_method_and_params_remain_closed() {
         let mut r = request();
