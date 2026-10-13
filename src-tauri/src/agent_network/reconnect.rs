@@ -42,6 +42,7 @@ fn parse_retry_after(value: &str, now: i64) -> Option<Duration> {
 pub(super) struct ReconnectBackoff {
     failures: u32,
     first_failure: Option<Instant>,
+    diagnostic_code: Option<&'static str>,
 }
 impl ReconnectBackoff {
     pub(super) fn reset(&mut self) {
@@ -71,12 +72,25 @@ impl ReconnectBackoff {
         let delay = delay.max(retry_after.unwrap_or_default());
         let started = self.first_failure.get_or_insert_with(Instant::now);
         crate::ulog_warn!(
-            "[agent-network] reconnect aggregate failures={} streakMs={} nextDelayMs={}",
+            "[agent-network] reconnect aggregate failures={} streakMs={} nextDelayMs={} code={}",
             self.failures,
             started.elapsed().as_millis(),
-            delay.as_millis()
+            delay.as_millis(),
+            self.diagnostic_code.take().unwrap_or("UNSPECIFIED")
         );
         delay
+    }
+
+    /// The caller supplies a closed, normalized diagnostic category.
+    #[allow(dead_code)] // Desktop supplies a code; the shared headless caller still uses next.
+    pub(super) fn next_with_code(
+        &mut self,
+        jitter: u16,
+        retry_after: Option<Duration>,
+        code: &'static str,
+    ) -> Duration {
+        self.diagnostic_code = Some(code);
+        self.next(jitter, retry_after)
     }
 }
 

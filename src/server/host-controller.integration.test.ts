@@ -22,7 +22,11 @@ it('persists Host identity and config CAS over a private Unix socket without mod
   scratch = await mkdtemp(join(tmpdir(), 'mah-host-'));
   const socket = join(scratch, 'control.sock');
   const entry = join(scratch, 'host-main.mjs');
-  await build({ entryPoints: [resolve('src/host/main.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' });
+  await build({ entryPoints: [resolve('src/host/main.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
+    // Match the shipped ESM bundle's CJS dependency bridge, required by the
+    // actual registry owner now imported by Host main.
+    banner: { js: 'import { createRequire as __myAgentsCreateRequire } from "module"; const require = __myAgentsCreateRequire(import.meta.url);' },
+  });
   const call = (path: string, body: unknown = {}) => new Promise<{ ok: boolean; data: { hostId?: string; settings?: Record<string, unknown>; revision?: number; status?: string }; error?: string }>((resolveCall, reject) => {
     const req = request({ socketPath: socket, path, method: 'POST' }, res => {
       let text = ''; res.on('data', chunk => { text += chunk; });

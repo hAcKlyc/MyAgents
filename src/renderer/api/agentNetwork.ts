@@ -249,6 +249,13 @@ export function networkErrorKey(
     return "keyInvalid";
   if (code === "NETWORK_TRUST_CHANGED") return "trustChanged";
   if (code === "NETWORK_REMOVAL_UNCONFIRMED") return "removalPending";
+  if (code === "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
+    return "credentialStoreAuthorizationRequired";
+  if (code === "NETWORK_CREDENTIAL_STORE_UNAVAILABLE")
+    return "credentialStoreUnavailable";
+  if (code === "NETWORK_CREDENTIAL_STORE_INVALID")
+    return "credentialStoreInvalid";
+  if (code === "OWNED_SESSION_RECORD_MISSING") return "ownedSessionMissing";
   if (code === "NETWORK_PRIVATE_KEY_MISSING" || code === "DEVICE_REVOKED")
     return "privateKeyMissing";
   if (
@@ -310,9 +317,13 @@ export const startOwnedNetworkLogin = (
     issuer,
     publicTlsCaFile: publicTlsCaFile?.trim() || null,
   });
-export const openOwnedNetworkAuthorization = (attemptId: string): Promise<void> =>
+export const openOwnedNetworkAuthorization = (
+  attemptId: string,
+): Promise<void> =>
   invoke("cmd_agent_network_owned_open_authorization", { attemptId });
-export const pollOwnedNetworkLogin = (attemptId: string): Promise<OwnedLoginPoll> =>
+export const pollOwnedNetworkLogin = (
+  attemptId: string,
+): Promise<OwnedLoginPoll> =>
   invoke("cmd_agent_network_owned_poll", { attemptId });
 export const cancelOwnedNetworkLogin = (attemptId: string): Promise<void> =>
   invoke("cmd_agent_network_owned_cancel", { attemptId });
@@ -320,3 +331,13 @@ export const removeNetworkConnection = (
   connectionId: string,
 ): Promise<NetworkRegistry> =>
   invoke("cmd_agent_network_remove", { connectionId });
+export const restoreOwnedCredentials = (input: {
+  connectionId: string;
+  expectedRegistryRevision: number;
+  operationId: string;
+}): Promise<NetworkRegistry> =>
+  invoke("cmd_agent_network_owned_restore_credentials", input);
+export const cancelOwnedCredentialRestore = (
+  operationId: string,
+): Promise<void> =>
+  invoke("cmd_agent_network_owned_restore_cancel", { operationId });

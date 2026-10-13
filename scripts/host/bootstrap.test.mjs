@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -132,4 +133,24 @@ test('GitHub API pinned bootstrap validates metadata and both downloads before i
       await rm(outcome.dir, { recursive: true, force: true });
     });
   }
+});
+
+test('bootstrap pins the moxbot archive, release tag and installer profile as one closed choice', () => {
+  const moxTag = `host-test-moxbot-${releaseId}`;
+  const moxArchive = `moxbot-host-test-${releaseId}.tar.gz`;
+  const rendered = renderBootstrap({
+    sourceCommit, releaseTag: moxTag, archiveName: moxArchive, profile: 'moxbot-test',
+    archiveSha256: 'a'.repeat(64), installerSha256: createHash('sha256').update('installer').digest('hex'),
+    installerBase64: Buffer.from('installer').toString('base64'),
+  });
+  assert.match(rendered, /readonly PROFILE='moxbot-test'/);
+  assert.match(rendered, /--profile "\$PROFILE"/);
+  assert.throws(() => renderBootstrap({
+    sourceCommit, releaseTag: moxTag, archiveName: moxArchive, profile: 'myagents-test',
+    archiveSha256: 'a'.repeat(64), installerSha256: 'b'.repeat(64), installerBase64: 'aGVsbG8=',
+  }), /mismatched test release/);
+  assert.throws(() => renderBootstrap({
+    sourceCommit, releaseTag: moxTag, archiveName: moxArchive, profile: 'other',
+    archiveSha256: 'a'.repeat(64), installerSha256: 'b'.repeat(64), installerBase64: 'aGVsbG8=',
+  }), /Invalid Host profile/);
 });

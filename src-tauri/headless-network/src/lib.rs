@@ -4,6 +4,9 @@
 // Shared Desktop modules include operations deliberately absent from a zero-Agent host.
 pub(crate) mod agent_network;
 mod auth;
+mod management_admission;
+mod management_ipc;
+mod native_management;
 mod owned;
 mod owned_state;
 mod probe;

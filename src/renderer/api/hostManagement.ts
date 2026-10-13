@@ -1,6 +1,6 @@
-/** UI-side v0 seam, NOT an AgentNet wire contract. Replace this adapter only
- * after Agenthub publishes a fixed protocol artifact and Rust verifies the
- * device-level service, target generation and human management grants. */
+/** Legacy UI-side projection, NOT an AgentNet wire contract. Official and
+ * legacy-key networks remain unsupported here. Owned-account management uses
+ * ownedHostManagement.ts and its actual signed Rust channel/Host owner. */
 export interface HostLocator {
   connectionId: string;
   principalId: string;

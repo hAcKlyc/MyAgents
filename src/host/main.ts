@@ -8,6 +8,10 @@ import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
 import { configureHost, readConfigReceipt, type HostConfig } from './management';
 import { readNetworkStatus } from './network-status';
+import { createHostResourceOwner, HostResourceError, type HostResourceRequest } from './resources';
+import { connectHostManagementIpc } from './management-ipc';
+import { createHostProviderCredentialOwner, HostProviderCredentialError, type ProviderCredentialInput } from './provider-credentials';
+import { HOST_PROVIDER_REFERENCE, readHostSystemdCredential, resolveHostProviderCredential } from '../server/utils/host-credentials';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -72,6 +76,32 @@ async function serve(): Promise<void> {
   if (identity.schemaVersion !== 1 || !uuidPattern.test(identity.hostId)) throw new Error('Unsupported Host identity');
   let active: Active | null = null;
   let shuttingDown = false;
+  let managementIpc: { close(): Promise<void> } | undefined;
+  const resourceOwner = createHostResourceOwner({
+    hostId: identity.hostId,
+    roots: { workspaces: workspaceRoot },
+  });
+  let credentialOwner: ReturnType<typeof createHostProviderCredentialOwner> | undefined;
+  if (process.env.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL !== undefined) {
+    if (process.env.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL !== 'provider-key')
+      throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_INVALID');
+    const storePath = join(stateDir, 'provider-credentials');
+    let created = false;
+    try { await mkdir(storePath, { mode: 0o700 }); created = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    credentialOwner = createHostProviderCredentialOwner({
+      hostId: identity.hostId, storePath,
+      loadMasterKey: () => readHostSystemdCredential('provider-key', 32),
+    });
+    if (created) {
+      // Initialization is allowed only for this just-created directory; losing
+      // an established encrypted store is an error, never a revision reset.
+      await credentialOwner.initialize();
+      const parent = await open(stateDir, 'r');
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
+    credentialOwner.inspect();
+  }
   let mutationTail: Promise<unknown> = Promise.resolve();
   const pending = new Map<string, { active: Active; resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'host-session-worker.mjs');
@@ -114,15 +144,27 @@ async function serve(): Promise<void> {
       workspace = await workspacePath(row.agentDir);
     }
     const generation = randomUUID();
+    const childEnvironment = { ...process.env };
+    const hasDynamicCredential = config.providerApiKeys?.['moonshot-coding'] === HOST_PROVIDER_REFERENCE;
+    let credential = hasDynamicCredential ? credentialOwner?.readForExecution('moonshot-coding') : undefined;
+    if (hasDynamicCredential && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+    if (!hasDynamicCredential && process.env.CREDENTIALS_DIRECTORY) {
+      try { credential = resolveHostProviderCredential('systemd-credential:kimi'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    delete childEnvironment.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL;
+    delete childEnvironment.CREDENTIALS_DIRECTORY;
     const child = fork(workerPath, [], {
       cwd: dirname(workerPath),
-      env: { ...process.env, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+      env: { ...childEnvironment, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+        MYAGENTS_HOST_CREDENTIAL_SOURCE: 'supervisor-ipc',
         MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: settings.providerId,
         MYAGENTS_HOST_MODEL: settings.model, MYAGENTS_HOST_GENERATION: generation,
         MYAGENTS_HOST_EXECUTION_AUTHORIZED: settings.executionAuthorized ? '1' : '0' },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
     const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false };
+    let credentialDelivered = false;
     active = target;
     child.on('exit', () => {
       if (active === target) active = null;
@@ -132,6 +174,18 @@ async function serve(): Promise<void> {
     });
     child.on('message', raw => {
       const reply = raw as HostSessionMessage;
+      if (reply?.type === 'credential-needed') {
+        if (credentialDelivered || reply.generation !== generation || Object.keys(reply).length !== 2) {
+          child.kill('SIGTERM'); return;
+        }
+        credentialDelivered = true;
+        child.send({ type: 'host-provider-snapshot', generation,
+          providerId: 'moonshot-coding', credential: credential ?? null }, error => {
+          if (error) child.kill('SIGTERM');
+        });
+        credential = undefined;
+        return;
+      }
       if (!reply || reply.generation !== generation || reply.type !== 'reply') return;
       const entry = pending.get(reply.id);
       if (!entry || entry.active !== target) return;
@@ -177,6 +231,7 @@ async function serve(): Promise<void> {
       hostId: identity!.hostId, defaultWorkspace: join(workspaceRoot, 'default'),
       readConfig: () => jsonFile<HostConfig>(configPath, {}), writeConfig: config => atomicJson(configPath, config),
       workspacePath, busy: () => Boolean(active) || shuttingDown,
+      credentialReference: credentialOwner ? HOST_PROVIDER_REFERENCE : undefined,
     }, body));
     if (path === '/host/receipt') return exclusive(async () => readConfigReceipt(await jsonFile<HostConfig>(configPath, {}), identity!.hostId, body));
     if (path === '/session/create') return exclusive(async () => {
@@ -198,6 +253,117 @@ async function serve(): Promise<void> {
     // and Stop must not wait behind a send's dispatch acknowledgement.
     const target = await exclusive(() => ensureSession(match[1]));
     return workerCall(target, match[2] as HostSessionOperation, body);
+  }
+
+  async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (shuttingDown) throw new Error('Host is stopping');
+    return exclusive(async () => {
+      if (shuttingDown) throw new Error('Host is stopping');
+      if (method === 'host.snapshot') {
+        const value = (await dispatch('/host/status', {})) as Record<string, unknown>;
+        return {
+          kind: 'snapshot',
+          version: 1,
+          hostId: value.hostId,
+          configured: value.configured,
+          settings: value.settings,
+          activeSession: value.activeSession,
+          stopping: value.stopping,
+          capabilities: value.capabilities,
+          agentNet: value.agentNet,
+          runtime: value.runtime,
+          credentials: credentialOwner
+            ? { ...credentialOwner.inspect(), writeAvailable: true }
+            : { providerId: 'moonshot-coding', configured: false, revision: 0, writeAvailable: false },
+          resources: await resourceOwner.inspect(),
+        };
+      }
+      if (method === 'config.set') {
+        const receipt = await configureHost(
+          {
+            hostId: identity!.hostId,
+            defaultWorkspace: join(workspaceRoot, 'default'),
+            readConfig: () => jsonFile<HostConfig>(configPath, {}),
+            writeConfig: config => atomicJson(configPath, config),
+            workspacePath,
+            busy: () => Boolean(active) || shuttingDown,
+            credentialReference: credentialOwner ? HOST_PROVIDER_REFERENCE : undefined,
+          },
+          params,
+        );
+        if (!('status' in receipt)) throw new Error('Untracked configuration result');
+        if (receipt.status === 'persisted')
+          return {
+            kind: 'config-receipt',
+            status: 'persisted',
+            mutationId: receipt.mutationId,
+            revision: receipt.revision,
+            effect: receipt.effect,
+            settings: receipt.settings,
+          };
+        return {
+          kind: 'config-receipt',
+          status: 'conflict',
+          mutationId: receipt.mutationId,
+          revision: receipt.revision,
+          effect: receipt.effect,
+        };
+      }
+      if (method === 'resources.create') {
+        if (params.rootId !== 'workspaces') throw new HostResourceError('RESOURCE_ROOT_UNKNOWN');
+        const result = await resourceOwner.mutate(params as unknown as HostResourceRequest);
+        if (result.status === 'unconfirmed') return { kind: 'error', code: 'RESOURCE_UNCONFIRMED' };
+        return { kind: 'resource-receipt', ...result };
+      }
+      if (method === 'credential.set') {
+        if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+        return { kind: 'credential-receipt', ...await credentialOwner.write(params as unknown as ProviderCredentialInput) };
+      }
+      if (method === 'receipt.get') {
+        const id = params.mutationId as string;
+        if (params.owner === 'credentials') {
+          if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+          const receipt = credentialOwner.receipt(id);
+          return receipt.status === 'not-found'
+            ? { kind: 'receipt-not-found', mutationId: id, owner: 'credentials' }
+            : { kind: 'credential-receipt', ...receipt };
+        }
+        if (params.owner === 'config') {
+          const receipt = await readConfigReceipt(await jsonFile<HostConfig>(configPath, {}), identity!.hostId, { mutationId: id });
+          if (!receipt)
+            return {
+              kind: 'config-receipt',
+              status: 'not-found',
+              mutationId: id,
+            };
+          if (receipt.status === 'not-found')
+            return {
+              kind: 'config-receipt',
+              status: 'not-found',
+              mutationId: id,
+            };
+          return receipt.status === 'persisted'
+            ? {
+                kind: 'config-receipt',
+                status: receipt.status,
+                mutationId: receipt.mutationId,
+                revision: receipt.revision,
+                effect: receipt.effect,
+                settings: receipt.settings,
+              }
+            : {
+                kind: 'config-receipt',
+                status: receipt.status,
+                mutationId: receipt.mutationId,
+                revision: receipt.revision,
+                effect: receipt.effect,
+              };
+        }
+        const receipt = await resourceOwner.receipt(id);
+        return receipt ? { kind: 'resource-receipt', ...receipt } : { kind: 'receipt-not-found', mutationId: id, owner: 'resources' };
+      }
+      throw new Error('Unsupported management request');
+    });
   }
 
   const server = createServer(async (incoming, outgoing) => {
@@ -230,10 +396,33 @@ async function serve(): Promise<void> {
   }
   await new Promise<void>((resolveListen, reject) => { server.once('error', reject); server.listen(socket, () => resolveListen()); });
   await chmod(socket, 0o600);
-  console.log('MyAgents Host ready (local Unix socket, AgentNet not integrated)');
+  const managementPath = process.env.MYAGENTS_HOST_MANAGEMENT_IPC;
+  const managementUid = process.env.MYAGENTS_HOST_MANAGEMENT_NETWORK_UID;
+  const managementGid = process.env.MYAGENTS_HOST_MANAGEMENT_GID;
+  if (managementPath !== undefined || managementUid !== undefined || managementGid !== undefined) {
+    try {
+      if (managementPath === undefined || !managementUid || !managementGid || !/^[1-9][0-9]{0,9}$/.test(managementUid) || !/^[1-9][0-9]{0,9}$/.test(managementGid)) {
+        throw new Error('Incomplete Host management IPC configuration');
+      }
+      managementIpc = await connectHostManagementIpc({
+        socketPath: managementPath,
+        expectedUid: Number(managementUid),
+        expectedGid: Number(managementGid),
+        dispatch: dispatchManagement,
+        isShuttingDown: () => shuttingDown,
+        onFailure: code => console.error(`Host management IPC stopped: ${code}`),
+      });
+    } catch (error) {
+      server.close();
+      await unlink(socket).catch(() => {});
+      throw error;
+    }
+  }
+  console.log(`MyAgents Host ready (local Unix socket${managementIpc ? ', management IPC connected' : ''})`);
   const stop = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await managementIpc?.close();
     server.close();
     try { await exclusive(async () => { if (active) await release(active); }); }
     catch { process.exitCode = 1; }

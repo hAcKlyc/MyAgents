@@ -1383,6 +1383,10 @@
       "keyInvalid": "The device key is invalid, expired, revoked, or bound to another device.",
       "trustChanged": "The instance identity or trust at this address changed. Verify the deployment first.",
       "removalPending": "Server revocation is unconfirmed. The connection is stopped; retry removal later.",
+      "credentialStoreAuthorizationRequired": "System credentials need one authorization. Background restore has stopped and will not repeatedly request your password.",
+      "credentialStoreUnavailable": "The system credential store is unavailable. Background restore has stopped; check the system credential store.",
+      "credentialStoreInvalid": "The saved local session could not be validated. The connection is stopped to protect your identity; the record was not overwritten.",
+      "ownedSessionMissing": "No local login session was found for this connection. It is stopped and requires an explicit sign-in to recover.",
       "privateKeyMissing": "The device private key is unavailable. Ask the administrator to revoke this device, then join with a new key.",
       "protocolUnsupported": "This service does not support the current AgentNet protocol.",
       "featureDisabled": "Enable AgentNet multiple networks in developer settings first."
@@ -1390,6 +1394,18 @@
     "chooseNetwork": "Choose network",
     "officialNetwork": "MyAgents official network",
     "joinSelfhost": "Join a self-hosted network",
+    "ownedCredentialRestore": {
+      "open": "Authorize and restore",
+      "title": "Authorize and restore this connection",
+      "target": "Connection: {{name}} ({{issuer}})",
+      "explanation": "This reads only the existing sign-in session and device signing key for this connection, then verifies the existing device identity. It does not sign in again, rejoin the network, or replace the device identity.",
+      "systemPrompt": "If the system shows a credential access prompt, enter your system password only in that system window. If it offers “Always Allow,” you may choose it for future restores. The app does not collect or save your system password.",
+      "working": "Authorizing and restoring…",
+      "timeout": "System credential authorization timed out. The connection and identity were not changed; you can start a new authorization when ready.",
+      "confirm": "Continue and authorize",
+      "cancel": "Cancel restore",
+      "close": "Close"
+    },
     "ownedLogin": {
       "mode": "Account sign-in",
       "hint": "Sign in through your browser. The session is stored in the operating system credential store; tokens are not shown here.",
@@ -1603,6 +1619,34 @@
         "enabled": "Enabled",
         "disabled": "Disabled"
       }
+    },
+    "ownedHost": {
+      "title": "Remote Host management",
+      "refresh": "Refresh",
+      "offline": "The device is offline. Management becomes available when it reconnects.",
+      "loading": "Reading Host configuration…",
+      "failed": "Operation not completed ({{code}}).",
+      "unknown": "The save result is unknown. Query the original receipt before submitting again.",
+      "checkReceipt": "Check save result",
+      "saved": "Saved to persistent storage.",
+      "conflict": "Configuration changed. Review the refreshed values before submitting again.",
+      "effect": "Model changes apply to new Sessions. Credential changes apply when a Session next starts; running Sessions keep their current credential.",
+      "model": "Kimi model ID",
+      "execution": "Allow local Session execution",
+      "saveModel": "Save model configuration",
+      "activeSession": "A Session is active. End it before changing the model configuration.",
+      "credential": "Kimi API Key",
+      "credentialConfigured": "The Host has a saved credential. It cannot be displayed or read back here.",
+      "credentialMissing": "The Host has no configured credential.",
+      "saveCredential": "Save credential",
+      "workspace": "Relative workspace path for the new Agent",
+      "agentHint": "Use letters, numbers, hyphens or underscores; / creates subdirectories. The workspace name becomes the Agent name. New Agents are disabled.",
+      "createAgent": "Create Agent",
+      "agents": "Agents on the Host",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "empty": "No Agents yet",
+      "identityChanged": "The device identity changed. Re-enter the credential. Unconfirmed operations for the previous identity are retained and will not be replayed."
     }
   }
 }
