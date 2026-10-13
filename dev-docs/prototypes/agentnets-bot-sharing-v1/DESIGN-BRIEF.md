@@ -52,3 +52,7 @@ Bot 所有者保持原所有权并声明可共享能力/资源上限；平台管
 实现worker只编辑index.html（必要时app.js/styles.css），主Agent持有其他文档及Git，独立reviewer持有INDEPENDENT-UI-REVIEW.md和independent-*证据。不得操作其他任务工作树或生产，不再派子agent。
 
 先验代表页：管理员全局Bots目录+详情；冻结后验管理员主路径，再验次级用户共享结果。视觉、交互、响应式分别判定，主Agent独立复核。真实服务认证、权限、Host隔离和生产发布仍待开发。
+
+## 2026-10-13 生命周期扩展
+
+当前任务 BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013，详细合同见[LIFECYCLE-DESIGN-BRIEF.md](LIFECYCLE-DESIGN-BRIEF.md)。新增新建、配置、Bot启停、纳管归属/Host分配、逻辑删除/恢复；不改变本文件的管理员主入口、视觉和私人上下文边界。后续验收记录使用LIFECYCLE-UI-REVIEW.md，不覆盖前版独立证据。
