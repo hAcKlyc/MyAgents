@@ -129,3 +129,14 @@ Builtin SDK、Integrated DSH 与 Claude Code / Codex 等外部 Runtime 的 sessi
 - 不在 `main` 直接提交。合并、发布、打 tag 或其它外部动作需要用户明确授权。
 - Commit 必须同时有 Conventional Commits subject 和解释“为什么 / 关键取舍”的非空 body，例如 `git commit -m "<subject>" -m "<reason>"`。
 - Rust 工具链版本以根目录 `rust-toolchain.toml` 为唯一权威；不要用浮动工具链制造无关格式化 diff。
+
+<!-- git-project-sync:start -->
+For any task that changes this repository or resumes another agent's work, first read
+`.agents/skills/git-project-sync/SKILL.md` and use `.agent-sync.json` as the
+repository coordination config. Remote refs and commit SHAs define code state;
+handoff prose and generated artifacts are supporting evidence only.
+Require a user-supplied Git URL via `--remote` for every project-sync command;
+verify it matches the config and checkout fetch/push URLs before saving work.
+Read `.agent-sync/project-map.md`, `.agent-sync/plan.md`, and the current
+branch record in `.agent-sync/tasks/` before continuing another agent's work.
+<!-- git-project-sync:end -->

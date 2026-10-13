@@ -49,6 +49,12 @@ npm-debug.log*
 # Codex CLI
 .context/
 .agents/
+# Version only the repository's Git coordination skill; keep other local skills private.
+!.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/git-project-sync/
 
 # Tauri / Rust
 src-tauri/target/

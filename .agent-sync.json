@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "remote": "https://github.com/heavenzhang/MoXBots.git",
+  "remoteName": "origin",
+  "canonicalBranch": "main",
+  "branchPrefix": "codex/",
+  "taskStateDir": ".agent-sync/tasks",
+  "structureVersion": 1
+}
