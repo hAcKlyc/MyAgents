@@ -14,7 +14,7 @@ import {
 } from '@/components/icons';
 
 import type { SpaceInfo, SpaceListItem, SpaceSession } from "@/api/spaceCloud";
-import myagentsWebLogo from "@/assets/brand/myagents-web-logo.png";
+import { APP_WEB_LOGO_SRC as myagentsWebLogo } from "@/components/brand/appBrand";
 import { SpaceIcon } from "./SpaceAvatar";
 import { PAPER_GRID_STYLE } from "./spaceUi";
 

@@ -449,7 +449,9 @@ html[data-color-scheme='dark'] {
 }
 
 .app-profile-wordmark {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
   width: max-content;
   font-family: var(--font-display);
   font-size: 0.64em;
@@ -457,6 +459,17 @@ html[data-color-scheme='dark'] {
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
+}
+
+.app-profile-mark {
+  width: 1.8em;
+  height: 1.8em;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.launcher-hero-logotype.app-profile-wordmark {
+  height: auto;
 }
 
 .global-sidebar-brand-logotype.app-profile-wordmark {
