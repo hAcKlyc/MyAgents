@@ -10,7 +10,9 @@ import {
   type OwnedHostOwner,
   type OwnedHostResponse,
   type OwnedHostScope,
+  type OwnedHostCapabilities,
 } from "@/api/ownedHostManagement";
+import { OwnedHostProviderConfiguration } from "./OwnedHostProviderConfiguration";
 
 type Pending = {
   locatorKey: string;
@@ -52,6 +54,7 @@ export function OwnedHostManagement({
     key: string;
     value: OwnedHostResponse;
   } | null>(null);
+  const [capabilityState, setCapabilityState] = useState<{ key: string; value: OwnedHostCapabilities | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -66,6 +69,7 @@ export function OwnedHostManagement({
   const alive = useRef(false);
   const value = response?.key === key ? response.value : null;
   const snapshot = value?.result.kind === "snapshot" ? value.result : null;
+  const extendedSnapshot = value?.result.kind === "extended-snapshot" ? value.result : null;
   const disabled =
     !online || !snapshot || snapshot.stopping || busy || !!pending;
   useEffect(() => {
@@ -74,13 +78,22 @@ export function OwnedHostManagement({
     const generation = lifetime.current;
     const abort = new AbortController();
     if (online) {
-      void ownedHostManagement(
-        { connectionId, principalId, networkId, deviceId, authGeneration },
-        null,
-        { method: "host.snapshot", params: {} },
-        abort.signal,
-      ).then(
-        (result) => {
+      void (async () => {
+        const target = { connectionId, principalId, networkId, deviceId, authGeneration };
+        let result: OwnedHostResponse;
+        let capabilities: OwnedHostCapabilities | null = null;
+        try {
+          const caps = await ownedHostManagement(target, null, { method: "host.capabilities", params: {} }, abort.signal);
+          if (caps.result.kind !== "capabilities" || !caps.result.methods.includes("host.inspect")) throw { code: "HOST_MANAGEMENT_CAPABILITIES_INVALID" };
+          capabilities = caps.result;
+          result = await ownedHostManagement(target, caps.scope, { method: "host.inspect", params: {} }, abort.signal);
+        } catch (error) {
+          if (ownedHostErrorCode(error) !== "HOST_MANAGEMENT_EXTENSIONS_UNAVAILABLE") throw error;
+          result = await ownedHostManagement(target, null, { method: "host.snapshot", params: {} }, abort.signal);
+        }
+        return { result, capabilities };
+      })().then(
+        ({ result, capabilities }) => {
           if (abort.signal.aborted || lifetime.current !== generation) return;
           const changed =
             lastScope.current &&
@@ -96,14 +109,19 @@ export function OwnedHostManagement({
           setCredential("");
           setPending(pendingReceipts.get(receiptKey(key, result.scope)));
           setResponse({ key, value: result });
+          setCapabilityState({ key, value: capabilities });
           if (result.result.kind === "snapshot") {
             setModel(result.result.settings?.model ?? "kimi-for-coding");
+            setExecution(result.result.settings?.executionAuthorized ?? false);
+          } else if (result.result.kind === "extended-snapshot") {
+            setModel(result.result.settings?.model ?? "");
             setExecution(result.result.settings?.executionAuthorized ?? false);
           }
         },
         (error) => {
           if (abort.signal.aborted || lifetime.current !== generation) return;
           setResponse(null);
+          setCapabilityState({ key, value: null });
           setNotice(
             t("agentNetwork.ownedHost.failed", {
               code: ownedHostErrorCode(error),
@@ -252,12 +270,12 @@ export function OwnedHostManagement({
           {t("agentNetwork.ownedHost.refresh")}
         </button>
       </div>
-      {!online && (
+        {!online && (
         <p role="status" className="text-sm text-[var(--ink-muted)]">
           {t("agentNetwork.ownedHost.offline")}
         </p>
       )}
-      {online && !snapshot && !notice && (
+      {online && !snapshot && !extendedSnapshot && !notice && (
         <p role="status" className="text-sm text-[var(--ink-muted)]">
           {t("agentNetwork.ownedHost.loading")}
         </p>
@@ -292,8 +310,20 @@ export function OwnedHostManagement({
           {t("agentNetwork.ownedHost.checkReceipt")}
         </button>
       )}
+      {extendedSnapshot && value && (
+        <OwnedHostProviderConfiguration
+          key={receiptKey(key, value.scope)}
+          locator={{ connectionId, principalId, networkId, deviceId, authGeneration }}
+          scope={value.scope}
+          snapshot={extendedSnapshot}
+          capabilities={capabilityState?.key === key ? capabilityState.value : null}
+          online={online && !extendedSnapshot.stopping}
+          onRefresh={() => setRefresh((count) => count + 1)}
+        />
+      )}
       {snapshot && (
         <>
+          <p role="note" className="rounded-lg bg-[var(--warning-bg)] px-3 py-2 text-xs text-[var(--ink-secondary)]">{t("agentNetwork.ownedHost.upgradeRequired")}</p>
           <p className="text-xs text-[var(--ink-muted)]">
             {t("agentNetwork.ownedHost.effect")}
           </p>

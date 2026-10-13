@@ -1,6 +1,12 @@
 # Codex Handoff
 
-## 当前管理员云后台交付（2026-10-13）
+## 当前统一云后台（2026-10-14）
+
+BOTS-CLOUD-ADMIN-001、登录辅助及BOTS-CLOUD-EXEC-001已交付。有限生命周期运行source75bb0269已由真实IAB/Owner/admin和Linux Host完成六方法、原请求/CAS、精确退出、重启及有效撤销验收；最终恢复的控制Bot没有活动Session、两代授权已关闭，模型调用保持禁止。源码/CI/制品、独立与生产验收、备份及限制见 services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md。
+
+用户要求只保留一个MoXBots云管理后台：用户、Hosts、Bots、权限、审计及后续账号/登录策略都在此平台。原认证组件为内部依赖，客户端普通用户登录界面未替换；个人产品入口后续Bots Net，不新建其他后台。并发Host/客户端改动在main保留，按其owner发布记录继续，不宣称本次75运行制品包含所有后续main代码。具体有限权限不得隐式续期，重生成native unit注意保留原finite/context flags。
+
+## 先前管理员云后台交付（2026-10-13，历史）
 
 BOTS-CLOUD-ADMIN-001：PR20 / main be48a22b，exact-head 7项CI通过，已在既有云服务发布。运行CI source2dec7655与main完整tree一致，binary SHA2563a04ab08e02a21f4dd908239c6714d2e0e5d2d6befeecc7e55855936b3b5a8db核验；首位现有测试管理员获用户明确授权。云端一致性私有备份/回滚准备并核验，Dex/Mori保持active。实际OIDC/admin API停止态CRUD、原操作幂等、配置持久化、可恢复软删/恢复、logout后401通过，没有模型调用。具体账号与凭据仅在原私有operator配置。
 
@@ -210,6 +216,12 @@ Real OIDC PKCE login through the in-app browser's independent sign-in tab succee
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
 
+### 2026-10-13 — MOXBOTS-HOST-CONFIG-20261013 development checkpoint
+
+- 用户明确当前Agent实现，来源为当前MoXBots桌面主Agent，并授权与“评估 MyAgents 精简为 Linux Host”协调接口与统一安装。范围是模型配置复用、远端目录选择，不修改原凭据reader方案。
+- 分支codex/host-config-20261013，从main2a241591起；本地merge冻结Host依赖9149753c（5a9dd9b0）。远端main e9767263仍无Host管理基础，不能独自发布其未完成凭据实验。后续将本任务提交应用到原owner已验证基础。
+- 封闭扩展DTO、非秘密profile回显、不可变version ID、Provider私有key绑定、Linux fd目录选择/注册已实现；主核验unit16、Node42pass/13Linux skip、协议19、Headless125、范围lint通过。UI七项独立发现待修复冻结与主IAB验收；native/真实Host/模型路径仍开放。
+- 当前安装仍b116404e，统一安装由原凭据owner控制；主Agent不并发换包。接续清单及证据见任务记录、specs/tech_docs/host_configuration_reuse.md、dev-docs/host-config-independent-review.md。
 ### 2026-10-13 — BOTS-CLOUD-EXEC-001 draft continuation
 
 Registry administrator release is accepted separately at main1cfa2f85 (recordse9767263); the explicit first-admin grant is fulfilled and must not be requested again. Finite lifecycle draft PR23 / codex/bots-cloud-execution-v1 remains default off. Contract, progress and current gate repairs are in .agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md and services/agentnet/planning/BOTS-CLOUD-EXECUTION-CONTRACT.md. Fixed9149753 Host/management/credential source is preserved, with common config/lock order repairs. No Desktop/Keychain/installer or actual Linux Host was changed.
@@ -228,3 +240,7 @@ PR24 main fb92ce9c passed seven checks and carries the existing Linux Host manag
 SIDEBAR-ORG主干锚点：PR25 main c21e9f43f9f8ffb629f88fd09e4c680b86de5b30，源头9d879a6e/run38415171294六项CI成功、同树/远端祖先已核验。独立23/23 renderer UI通过；旧6ac923a6包未含sidebar/未安装，原owner正在准备联合候选，原生安装与重启持久化仍未验收。
 
 SIDEBAR-ORG原生接续：已运行a8a60f1c包，Task/Agent整行拖入、分区菜单/键盘排序及正常退出重启保留通过，原合成聊天/项目保全，临时分区清理，UI已交还owner；详见dev-docs/sidebar-organization-native.md。凭据/网络恢复仍未完成，原owner独立修复；PR28补充证据CI/main待收尾，不声明统一验收已完成。
+
+### MOXBOTS-HOST-CONFIG-20261013 clean delivery freeze
+
+Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in delivery branch. Only feature commits were cherry-picked; development credential-reader merge excluded. UI/source/backend checks and primary synthetic IAB completed, independent review closed. Exact-head CI, main and unified real Host/native gates remain open. See dev-docs/host-config-primary-acceptance.md.

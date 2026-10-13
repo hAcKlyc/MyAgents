@@ -23,6 +23,7 @@ const ERROR_TITLE_PATTERNS: readonly RegExp[] = [
   /^\[Error\]:/i,                          // openai-bridge stream-responses.ts:195
   /^Claude Code returned an error/i,       // CC native CLI surface seen in title outputs
   /^No message found with message\.uuid/i, // SDK rewind/fork no-such-message error
+  /^Not logged in\s*[·:—-]?\s*Please run\s+\/login/i, // CLI OAuth surface observed in TITLE-001 real utility smoke
 ];
 
 export function isLikelyErrorTitle(text: string): boolean {

@@ -124,11 +124,18 @@
             "config.set",
             "resources.create",
             "receipt.get",
-            "credential.set"
+            "credential.set",
+            "host.capabilities",
+            "host.inspect",
+            "config.provider.set",
+            "credential.provider.set",
+            "receipt.provider.get",
+            "resources.directory.list",
+            "resources.register"
           ]
         },
         "params": {
-          "oneOf": [
+          "anyOf": [
             {
               "$ref": "#/$defs/snapshotParams"
             },
@@ -143,6 +150,21 @@
             },
             {
               "$ref": "#/$defs/credentialSet"
+            },
+            {
+              "$ref": "#/$defs/configProviderSet"
+            },
+            {
+              "$ref": "#/$defs/credentialProviderSet"
+            },
+            {
+              "$ref": "#/$defs/receiptProviderGet"
+            },
+            {
+              "$ref": "#/$defs/directoryListParams"
+            },
+            {
+              "$ref": "#/$defs/resourcesRegister"
             }
           ]
         }
@@ -224,6 +246,118 @@
             "properties": {
               "params": {
                 "$ref": "#/$defs/credentialSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.capabilities"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.inspect"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "config.provider.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/configProviderSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "credential.provider.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/credentialProviderSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "receipt.provider.get"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/receiptProviderGet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.directory.list"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/directoryListParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.register"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/resourcesRegister"
               }
             }
           }
@@ -362,6 +496,21 @@
             },
             {
               "$ref": "#/$defs/credentialReceipt"
+            },
+            {
+              "$ref": "#/$defs/capabilities"
+            },
+            {
+              "$ref": "#/$defs/extendedSnapshot"
+            },
+            {
+              "$ref": "#/$defs/providerConfigReceipt"
+            },
+            {
+              "$ref": "#/$defs/providerCredentialReceipt"
+            },
+            {
+              "$ref": "#/$defs/directoryList"
             }
           ]
         }
@@ -922,6 +1071,712 @@
           }
         }
       ]
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "genericModel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "directoryPath": {
+      "type": "string",
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f-\\u009f])(?:(?!\\.\\.?(/|$))[^/]+(?:/(?!\\.\\.?(/|$))[^/]+)*)?$"
+    },
+    "rootId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "providerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "apiProtocol",
+        "baseUrl",
+        "authType"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/providerId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "apiProtocol": {
+          "enum": [
+            "anthropic",
+            "openai"
+          ]
+        },
+        "baseUrl": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https://[^@?#\\s\\\\]+$"
+        },
+        "authType": {
+          "enum": [
+            "auth_token",
+            "api_key",
+            "both",
+            "auth_token_clear_api_key"
+          ]
+        },
+        "upstreamFormat": {
+          "enum": [
+            "chat_completions",
+            "responses"
+          ]
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxOutputTokensParamName": {
+          "enum": [
+            "max_tokens",
+            "max_completion_tokens",
+            "max_output_tokens"
+          ]
+        },
+        "modelAliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "sonnet": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "opus": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "haiku": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "fable": {
+              "$ref": "#/$defs/genericModel"
+            }
+          }
+        },
+        "sourceProviderId": {
+          "$ref": "#/$defs/providerId"
+        }
+      }
+    },
+    "workspaceSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        }
+      }
+    },
+    "configProviderSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "workspace",
+        "executionAuthorized",
+        "expectedRevision",
+        "mutationId"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/providerProfile"
+        },
+        "model": {
+          "$ref": "#/$defs/genericModel"
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspaceSelection"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "credentialProviderSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "credential",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[^\\r\\n\\u0000]+$",
+          "writeOnly": true,
+          "description": "Non-whitespace, at most 16384 UTF-8 bytes; validated again by the codec and owner."
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "receiptProviderGet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "providerId",
+        "mutationId"
+      ],
+      "properties": {
+        "owner": {
+          "enum": [
+            "config",
+            "credentials"
+          ]
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "directoryListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        },
+        "cursor": {
+          "$ref": "#/$defs/cursor"
+        }
+      }
+    },
+    "resourcesRegister": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath",
+        "expectedRevision",
+        "mutationId"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1
+            }
+          ]
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "genericSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "providerId",
+        "model",
+        "workspace",
+        "executionAuthorized"
+      ],
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "model": {
+          "$ref": "#/$defs/genericModel"
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspaceSelection"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        }
+      }
+    },
+    "genericCredentialsStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "configured",
+        "revision",
+        "writeAvailable"
+      ],
+      "properties": {
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "writeAvailable": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "configured": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "extendedSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "hostId",
+        "configured",
+        "settings",
+        "activeSession",
+        "stopping",
+        "capabilities",
+        "agentNet",
+        "runtime",
+        "credentials",
+        "resources",
+        "provider"
+      ],
+      "properties": {
+        "kind": {
+          "const": "extended-snapshot"
+        },
+        "version": {
+          "const": 1
+        },
+        "hostId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "settings": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/genericSettings"
+            }
+          ]
+        },
+        "activeSession": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "generation",
+                "closing"
+              ],
+              "properties": {
+                "sessionId": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "generation": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "closing": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "stopping": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "enum": [
+              "local-session",
+              "permission",
+              "stop",
+              "persistent-history",
+              "local-config-receipt"
+            ]
+          }
+        },
+        "agentNet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "node",
+            "sdkBinaryPresent"
+          ],
+          "properties": {
+            "node": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "sdkBinaryPresent": {
+              "type": "boolean"
+            }
+          }
+        },
+        "credentials": {
+          "$ref": "#/$defs/genericCredentialsStatus"
+        },
+        "resources": {
+          "$ref": "#/$defs/resourcesSnapshot"
+        },
+        "provider": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/providerProfile"
+            }
+          ]
+        }
+      }
+    },
+    "providerConfigReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "provider-config-receipt"
+        },
+        "status": {
+          "enum": [
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "new-session",
+            "none"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/genericSettings"
+        }
+      }
+    },
+    "providerCredentialReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "provider-credential-receipt"
+            },
+            "status": {
+              "const": "persisted"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "effect": {
+              "const": "new-session"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "provider-credential-receipt"
+            },
+            "status": {
+              "const": "conflict"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            },
+            "effect": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "methods",
+        "providerKinds",
+        "limits"
+      ],
+      "properties": {
+        "kind": {
+          "const": "capabilities"
+        },
+        "version": {
+          "const": 1
+        },
+        "methods": {
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "host.snapshot",
+              "config.set",
+              "resources.create",
+              "receipt.get",
+              "credential.set",
+              "host.capabilities",
+              "host.inspect",
+              "config.provider.set",
+              "credential.provider.set",
+              "receipt.provider.get",
+              "resources.directory.list",
+              "resources.register"
+            ]
+          }
+        },
+        "providerKinds": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ]
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "directoryEntries",
+            "pathBytes"
+          ],
+          "properties": {
+            "directoryEntries": {
+              "const": 128
+            },
+            "pathBytes": {
+              "const": 4096
+            }
+          }
+        }
+      }
+    },
+    "directoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "relativePath"
+      ],
+      "properties": {
+        "name": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[^/]+$"
+            }
+          ]
+        },
+        "relativePath": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1
+            }
+          ]
+        }
+      }
+    },
+    "directoryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "rootId",
+        "relativePath",
+        "entries",
+        "nextCursor"
+      ],
+      "properties": {
+        "kind": {
+          "const": "directory-list"
+        },
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/directoryEntry"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/cursor"
+            }
+          ]
+        }
+      }
     }
   }
 }

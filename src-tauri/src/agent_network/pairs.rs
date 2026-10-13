@@ -694,6 +694,18 @@ impl Pairs {
             .expect("pair retirement releases buffers");
     }
 
+    /// A bounded tombstone must own cleanup before a probe can preserve its actor.
+    pub(crate) fn management_retired_ready(&self, channel_id: &str) -> bool {
+        !self.channels.contains_key(channel_id)
+            && !self.pending.contains_key(channel_id)
+            && self.retired_management.iter().any(|entry| {
+                entry.channel_id == channel_id
+                    && entry.known_to_peer
+                    && entry.installed
+                    && entry.ready_seen
+            })
+    }
+
     pub(crate) fn note_management_closed(&mut self, channel_id: &str) {
         if let Some(entry) = self
             .retired_management
@@ -1595,6 +1607,93 @@ pub(crate) mod tests {
             pairs.accepted("offer").err().unwrap().code,
             "CHANNEL_NOT_FOUND"
         );
+    }
+
+    #[test]
+    fn unsupported_ready_probe_retirement_preserves_connection_scope_and_recycles_cleanup() {
+        let (remote, local) = management_scopes();
+        let channel = "00000000-0000-0000-0000-000000000096".to_owned();
+        let (remote_offer, local_offer) =
+            verified_management_offers(Fixture::new(), &channel, &remote, &local);
+        let mut host = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Host,
+        );
+        let mut controller = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Controller,
+        );
+        let scope = ConnectionScope {
+            service_id: local.service_id.clone(),
+            network_id: local.network_id.clone(),
+            boot_epoch: "00000000-0000-0000-0000-000000000010".into(),
+            connection_epoch: "00000000-0000-0000-0000-000000000008".into(),
+        };
+        let saved_scope = scope.clone();
+        controller
+            .reserve_management_retirement(&channel, &scope, &local)
+            .unwrap();
+        host.reserve(&channel).unwrap();
+        controller.reserve(&channel).unwrap();
+        host.accepted(&channel).unwrap();
+        controller.accepted(&channel).unwrap();
+        host.install(
+            remote_offer,
+            &remote,
+            "00000000-0000-0000-0000-000000000007",
+        )
+        .unwrap();
+        controller
+            .install(local_offer, &local, &scope.connection_epoch)
+            .unwrap();
+        assert!(!controller.management_retired_ready(&channel));
+        exchange_management(&mut host, &mut controller, &channel);
+        controller
+            .send_management(
+                &channel,
+                ManagementMessage::Request {
+                    request_id: CanonicalUuid::new(uuid::Uuid::new_v4()),
+                    method: ManagementMethod::HostCapabilities,
+                    params: RequestParams::Snapshot(SnapshotParams {}),
+                },
+            )
+            .unwrap();
+        assert!(controller.next_frame().unwrap().is_some());
+        controller.note_management_closed(&channel);
+        controller.retire_management(&channel, true);
+        assert!(controller.management_retired_ready(&channel));
+        assert!(!controller.has_channel(&channel));
+        assert!(scope == saved_scope);
+        // Late scoped credit remains validated by the tombstone rather than resetting the actor.
+        let credit = controller
+            .retired_management
+            .iter()
+            .find(|r| r.channel_id == channel)
+            .unwrap()
+            .credits
+            .as_ref()
+            .unwrap();
+        assert!(credit.sent > credit.returned);
+        let late_credit = ServerMessage::Credit {
+            scope: scope.clone(),
+            channel_id: channel.clone(),
+            sequence: credit.return_sequence + 1,
+            received_bytes: credit.sent,
+        };
+        assert!(controller
+            .consume_retired_management(&late_credit, &scope, &local, &scope.connection_epoch)
+            .unwrap());
+        assert!(controller
+            .consume_retired_management(&late_credit, &scope, &local, &scope.connection_epoch)
+            .is_err());
+        let unexpected = ServerMessage::ChannelClosed {
+            scope: scope.clone(),
+            channel_id: uuid::Uuid::new_v4().to_string(),
+            reason: "peer-closed".into(),
+        };
+        assert!(!controller
+            .consume_retired_management(&unexpected, &scope, &local, &scope.connection_epoch)
+            .unwrap());
     }
 
     #[test]

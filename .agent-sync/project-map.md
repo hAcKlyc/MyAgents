@@ -17,10 +17,10 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | 综合接续 | `codex-handoff.md` | 多个任务的接续；新增条目不改写其他 owner 事实 |
 | 桌面与 Host 源码 | `src/renderer/`、`src/server/`、`src/shared/`、`src-tauri/`、`scripts/host/` | 桌面、Sidecar、Rust 身份和 Linux Host |
 | owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata、relay及可选管理员登记控制面；部署与桌面验收另行核实 |
-| 统一管理员后台 | `services/agentnet/admin-web/`、`src/admin_http.rs`、`src/admin_store.rs`（相对服务目录） | 同源页面、实时账号校验、私有Bot登记/配置/归属与审计；Host执行委派尚未接线，运维见ADMINISTRATION.md |
+| 统一管理员后台 | `services/agentnet/admin-web/`、`src/admin_http.rs`、`src/admin_store.rs`（相对服务目录） | 同源页面、实时账号校验、私有Bot登记/配置/归属与审计；可选有限Host生命周期已接线，运维见ADMINISTRATION.md |
 | 架构与设计规范 | `specs/ARCHITECTURE.md`、`specs/DESIGN.md`、`specs/tech_docs/` | 当前 owner、边界和交互规范 |
-| 有限 Bot 执行（默认关闭） | `services/agentnet/src/execution_*`、`execution-core/`、`src/host/bot-*`、`src-tauri/headless-network/src/bot_execution*` | 真实身份/原操作账本、有限 proof/lease、Host 本地策略和独立IPC；PR23候选，真实Linux发布/验收分开追踪 |
-| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理控制面已本地实现，执行/共享待接线 |
+| 有限 Bot 执行（默认关闭） | `services/agentnet/src/execution_*`、`execution-core/`、`src/host/bot-*`、`src-tauri/headless-network/src/bot_execution*` | 真实身份/原操作账本、有限 proof/lease、Host 本地策略和独立IPC；PR23/main75已发布并完成单Bot真实Linux验收；模型/共享仍关闭 |
+| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理及有限执行控制面已发布；共享和扩展IAM仍待实现 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 项目看板 | `src/renderer/features/project-board/`、`pages/ProjectBoard.tsx`，`dev-docs/project-board.md` | 按真实Task/Session展示工作区执行概况；API、原生、生产验收分开追踪 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |
@@ -36,3 +36,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 2. 用用户明确指定的 Git URL 检查 fetch/push、分支、base 与远端主干；保留其他工作树修改。
 3. 原型实际点击、视觉和 1440×900、768×1024、390×844 响应式验证，结果见原型验收记录。
 4. 服务开发启动后另行确认执行主体和运行版本；模拟不能替代真实多账号、Host 权限或生产路径验收。
+
+## 唯一后台入口（2026-10-14）
+
+`services/agentnet/admin-web/` 是唯一云管理后台，覆盖/扩展用户、Hosts、Bots、权限和审计。同一服务的AuthStore及现有OIDC组件承接普通用户与管理员认证；内部运行服务不新增管理门户。客户端用户登录入口保留，个人网络产品名后续Bots Net；账号写管理与登录策略未来也在本后台扩展。历史HTML原型仅为设计证据，不是第二套可操作生产后台。

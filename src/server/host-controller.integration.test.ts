@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { configureHost, createHostConfigMutationOwner, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type HostConfig, type HostConfigOwner } from '../host/management';
+import { configureHost, configureProviderHost, createHostConfigMutationOwner, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type HostConfig, type HostConfigOwner } from '../host/management';
 
 let child: ChildProcess | undefined;
 let scratch: string | undefined;
@@ -67,6 +67,32 @@ it('preserves concurrent Bot/resource config projections during a Host configura
     providerApiKeys: { 'other-provider': 'rotated-other-secret', 'moonshot-coding': 'host-provider-credential:moonshot-coding' },
     hostSettings: { revision: 1, model: 'k3' },
   });
+});
+
+it('atomically preserves Bot/resource owners while committing generic version profiles, workspace, references and receipts',async()=> {
+  let shared:HostConfig={providerApiKeys:{'other-provider':'old-other-key'},hostBotDelegationsV1:{revision:4},hostResourceIntents:{revision:7}};
+  const owner={...createHostConfigMutationOwner({hostId:randomUUID(),defaultWorkspace:tmpdir(),
+    readConfig:async()=>structuredClone(shared),atomicModifyConfig:async modify=>{shared=modify(shared);},workspacePath:async value=>value,busy:()=>false,
+  }),selectWorkspace:async()=> {
+    shared={...shared,hostBotDelegationsV1:{revision:5},hostResourceIntents:{revision:8},providerApiKeys:{...shared.providerApiKeys,'other-provider':'rotated-other-key'}};
+    return {path:tmpdir(),verify:()=>{},close:()=>{}};
+  }};
+  const body={provider:{id:'portable-v-1',sourceProviderId:'portable-source',name:'Portable fixture',apiProtocol:'openai',baseUrl:'https://api.example.test/v1',authType:'auth_token_clear_api_key'},model:'vendor/model',workspace:{rootId:'workspaces',relativePath:''},executionAuthorized:false,expectedRevision:0,mutationId:randomUUID()};
+  const receipt=await configureProviderHost(owner,body);
+  expect(receipt).toMatchObject({status:'persisted',revision:1});
+  expect(shared).toMatchObject({hostBotDelegationsV1:{revision:5},hostResourceIntents:{revision:8},
+    hostSettings:{providerId:'portable-v-1',model:'vendor/model'},hostProviderWorkspace:body.workspace,
+    hostProviderProfiles:{'portable-v-1':{...body.provider,modelAliases:{fable:body.model,sonnet:body.model,opus:body.model,haiku:body.model}}},
+    hostProviderConfigReceipts:{entries:[{providerId:'portable-v-1',receipt}]},
+    providerApiKeys:{'other-provider':'rotated-other-key','portable-v-1':'host-provider-credential:portable-v-1'},
+  });
+  const prior=structuredClone(shared);
+  const racedOwner={...createHostConfigMutationOwner({hostId:owner.hostId,defaultWorkspace:tmpdir(),readConfig:async()=>structuredClone(shared),
+    atomicModifyConfig:async modify=>{shared=modify(shared);},workspacePath:async value=>value,busy:()=>false,
+  }),selectWorkspace:async()=>{shared={...shared,hostSettings:{...shared.hostSettings!,revision:2}};return {path:tmpdir(),verify:()=>{},close:()=>{}};}};
+  await expect(configureProviderHost(racedOwner,{...body,expectedRevision:1,mutationId:randomUUID()})).rejects.toMatchObject({code:'HOST_MANAGEMENT_UNCONFIRMED'});
+  expect(shared.hostProviderProfiles).toEqual(prior.hostProviderProfiles);expect(shared.hostProviderConfigReceipts).toEqual(prior.hostProviderConfigReceipts);
+  expect(shared.hostSettings?.revision).toBe(2);
 });
 
 it('uses registration-before-supervisor ordering for Bot runtime and Host snapshot inspection', async () => {

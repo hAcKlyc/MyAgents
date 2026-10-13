@@ -12,7 +12,7 @@ import fs, {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   createHostProviderCredentialOwner,
   HostProviderCredentialError,
@@ -25,6 +25,7 @@ let scratch: string | undefined;
 let store: string | undefined;
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   if (scratch)
     await (
       await import("node:fs/promises")
@@ -355,4 +356,33 @@ it("zeroes each supplied master-key buffer and refuses a preplanted temporary sy
   });
   expect(owner.receipt(id)).toEqual({ mutationId: id, status: "not-found" });
   expect(supplied.every((key) => key.every((byte) => byte === 0))).toBe(true);
+});
+
+it('encrypts provider-bound independent credentials and preserves original Kimi receipts across owner restart', async () => {
+  const {owner,store}=await setup();
+  const kimi=await owner.write(writeInput('00000000-0000-4000-8000-000000000111'));
+  const input={...writeInput('00000000-0000-4000-8000-000000000112'),providerId:'portable/provider'.replace('/','-'),credential:'portable-test-key'};
+  const portable=await owner.write(input);
+  expect(owner.inspect(input.providerId)).toEqual({providerId:input.providerId,configured:true,revision:1});
+  expect(owner.readForExecution('moonshot-coding')).toBe(SECRET);expect(owner.readForExecution(input.providerId)).toBe(input.credential);
+  expect(owner.inspect('constructor')).toEqual({providerId:'constructor',configured:false,revision:0});
+  expect(owner.inspect('unconfigured')).toEqual({providerId:'unconfigured',configured:false,revision:0});
+  expect(owner.receipt(input.mutationId,'other')).toMatchObject({status:'not-found'});
+  const disk=fs.readFileSync(join(store,'credentials.enc'),'utf8');expect(disk).not.toContain(input.credential);expect(disk).not.toContain(SECRET);
+  const restarted=createHostProviderCredentialOwner({hostId:HOST_ID,storePath:store,loadMasterKey:()=>Buffer.from(KEY)});
+  expect(restarted.receipt(kimi.mutationId)).toEqual(kimi);expect(restarted.receipt(input.mutationId,input.providerId)).toEqual(portable);
+  expect(await restarted.write(input)).toEqual(portable);
+  await expect(restarted.write({...input,credential:'different'})).rejects.toMatchObject({code:'HOST_PROVIDER_CREDENTIAL_MUTATION_MISMATCH'});
+  const conflict=await restarted.write({...input,mutationId:'00000000-0000-4000-8000-000000000113'});expect(conflict.status).toBe('conflict');
+  expect(restarted.readForExecution(input.providerId)).toBe(input.credential);
+  await restarted.write(writeInput('00000000-0000-4000-8000-000000000114',1,'new-kimi-test-key'));
+  expect(restarted.readForExecution(input.providerId)).toBe(input.credential);
+  vi.stubEnv('MYAGENTS_HOST_MODE','1');
+  const {installHostSessionCredential}=await import('./utils/host-credentials');
+  const {materializeProviderRouteEnv}=await import('./utils/admin-config');
+  const {createConcreteProviderRoute}=await import('../shared/providerRoute');
+  installHostSessionCredential(restarted.readForExecution(input.providerId),input.providerId);
+  const profile={id:input.providerId,name:'Portable fixture',apiProtocol:'openai',baseUrl:'https://api.example.test/v1',authType:'auth_token_clear_api_key'};
+  const config={hostProviderProfiles:{[input.providerId]:profile},hostSettings:{providerId:input.providerId,model:'vendor/model'},providerApiKeys:{[input.providerId]:`host-provider-credential:${input.providerId}`}};
+  expect(materializeProviderRouteEnv(createConcreteProviderRoute(input.providerId,'vendor/model'),config)).toMatchObject({providerId:input.providerId,baseUrl:profile.baseUrl,apiProtocol:'openai',apiKey:input.credential,authType:'auth_token_clear_api_key'});
 });
