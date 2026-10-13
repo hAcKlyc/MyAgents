@@ -167,3 +167,17 @@
 - PR #18已合入main `5652048579f776c5eebe9faebdbde212ce2b93c7`，源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI成功（Test38355093484、Owned AgentNet38355093497）。fetch核验源头是main祖先，合并树完全一致，最终HTML hash4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25。原型、规划、TODO和证据均在主干；关闭记录不改产品。
 - 当前生命周期任务关闭，真实API/Host启停、平台鉴权、双Host迁移/持久化/生产以及客户端Bots Net显示改名仍待开发。协作与状态证据见LIFECYCLE-DELIVERY.md；用量未知，无外部模型。
 - 下一步仅在用户启动真实实现后重读主干与对应权限/生命周期规划，不以模拟状态充当真实服务上线。
+
+### 2026-10-13 — archive main and native feature accepted — MOXBOTS-CHAT-ARCHIVE-20261013
+
+- PR #19 main bd567cd6，源头59037d91；156项回归、六项CI、类型/lint/Web+server+bridge+CLI构建通过。已归档工作区与过期响应两项审阅修复关闭。
+- 独立原生归档/恢复/窄窗与主审正常退出重启保全通过，仅合成聊天、无模型执行；两消息、附件85字节/hash、收藏置顶均保留。
+- 试用包33992eb0保留实际接受的b116404e，不把Host/凭据改造合main；本机可逆安装、strict签名/摘要对应及备份完成，未Apple公证。包与私密资料留本机，不进Git。
+- 新包AgentNet系统凭据自动恢复停止，旧包此前两设备在线；没有点授权或再索取密码。等待用户保留/回退选择，整包发布验收未完成。已获授权协调原安装任务暂缓，最终状态确认后应释放；后续构建同步main保留归档。证据见dev-docs/chat-task-archive-delivery.md与chat-task-archive-review.md。
+
+### 2026-10-13 — user-selected rollback verified — MOXBOTS-CHAT-ARCHIVE-20261013
+
+- 用户明确回退原在线b116404e、待凭据修复后与归档一起更新。正常退出、零进程验证后恢复原始隐藏应用；原二进制cd5e602fe41c…、严格签名与唯一运行进程均核验，原生AgentNet确认两设备在线，未请求系统密码/修改凭据。
+- 当前/Applications/MoXBots.app为b116404e，不含归档入口；候选33992eb0保留在/Applications/.MoXBots.chat-archive-trial-54dca77c5912.app及本地ZIP。归档PR #19和局部原生/重启验收保留在main，不回退源码。
+- Documents旧备份副本出现File Provider FinderInfo/resource-fork，严格签名失败；实际回滚使用原始Applications隐藏包，前后验证成功。不要直接采用Documents副本而忽略重新校验。
+- 回滚/网络恢复复验完成；安装权交回“评估 MyAgents 精简为 Linux Host”原凭据修复任务，联合更新延期。后续须同步origin/main保留归档，重新验运行版本、归档/恢复/重启和网络自动恢复。详细状态及本机证据位置见dev-docs/chat-task-archive-delivery.md。
