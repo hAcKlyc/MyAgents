@@ -1898,7 +1898,7 @@ describe('GlobalSidebar rail flyout', () => {
     return { project, session };
   }
 
-  it('moves a Session into a section, persists across remount and opens its original Agent', () => {
+  it('moves a Session into a section, persists across remount and opens its original Agent', async () => {
     const { project, session } = seedOrganization();
     const onOpenSession = vi.fn(async () => true);
     const view = renderSidebar({ onOpenSession });
@@ -1908,7 +1908,7 @@ describe('GlobalSidebar rail flyout', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: session.title }));
     fireEvent.click(screen.getAllByRole('button', { name: '执行中' }).find((button) => !button.hasAttribute('aria-expanded'))!);
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '保存' })); });
     const item = screen.getByText(session.title).closest('[data-sidebar-item]')!;
     expect(item.closest('[data-sidebar-container="section:work"]')).not.toBeNull();
     expect(screen.getAllByText(session.title)).toHaveLength(1);
@@ -1924,7 +1924,7 @@ describe('GlobalSidebar rail flyout', () => {
     expect(session.agentDir).toBe('/work/agent');
   });
 
-  it('creates, renames and deletes sections while retaining the original workspace and Session', () => {
+  it('creates, renames and deletes sections while retaining the original workspace and Session', async () => {
     const { session } = seedOrganization();
     renderSidebar();
     fireEvent.click(screen.getByRole('button', { name: '工作区与会话显示选项' }));
@@ -1933,12 +1933,12 @@ describe('GlobalSidebar rail flyout', () => {
     const input = within(dialog).getByRole('textbox', { name: '分区名称' });
     expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: '待验证' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '保存' })); });
     expect(screen.getByRole('button', { name: '待验证' })).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '分区“待验证”的操作' }));
     fireEvent.click(screen.getByRole('button', { name: '重命名分区' }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '已验证' } });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
     fireEvent.click(screen.getByRole('button', { name: '已验证' }));
     expect(screen.getByRole('button', { name: '已验证' })).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(screen.getByRole('button', { name: '分区“已验证”的操作' }));
@@ -1947,6 +1947,24 @@ describe('GlobalSidebar rail flyout', () => {
     expect(screen.getByText(session.title)).toBeInTheDocument();
     expect(mocks.removeProject).not.toHaveBeenCalled();
     expect(mocks.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('retains the section name for retry when saving fails', async () => {
+    seedOrganization();
+    renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: '工作区与会话显示选项' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建分区' }));
+    const input = screen.getByRole('textbox', { name: '分区名称' });
+    fireEvent.change(input, { target: { value: '保留输入' } });
+    const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('disk quota'); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+    expect(input).toHaveValue('保留输入');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+    failure.mockRestore();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保留输入' })).toBeInTheDocument();
   });
 
   it('keeps visible organization unchanged and reports storage failure', () => {

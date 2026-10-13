@@ -230,7 +230,7 @@ export function SidebarOrganizationDialog({
   state: OrganizationDialogState;
   sections: readonly SidebarSection[];
   onClose: () => void;
-  onSubmit: (value: string) => void;
+  onSubmit: (value: string) => Promise<boolean>;
 }) {
   const { t } = useTranslation('app');
   const [value, setValue] = useState(
@@ -239,9 +239,10 @@ export function SidebarOrganizationDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const [saving, setSaving] = useState(false);
   const normalized = value.trim();
   useCloseLayer(() => {
-    onClose();
+    if (!saving) onClose();
     return true;
   }, 100);
   useEffect(() => {
@@ -256,7 +257,7 @@ export function SidebarOrganizationDialog({
         : 'globalSidebar.moveToSection',
   );
   return (
-    <OverlayBackdrop portal className="z-[210] px-4" onClose={onClose}>
+    <OverlayBackdrop portal className="z-[210] px-4" onClose={saving ? undefined : onClose}>
       <div
         ref={dialogRef}
         role="dialog"
@@ -268,7 +269,7 @@ export function SidebarOrganizationDialog({
           if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
-            onClose();
+            if (!saving) onClose();
           }
           if (event.key === 'Tab') {
             const nodes = Array.from(
@@ -297,7 +298,9 @@ export function SidebarOrganizationDialog({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (normalized) onSubmit(normalized);
+            if (!normalized || saving) return;
+            setSaving(true);
+            void onSubmit(normalized).then((saved) => { if (!saved) setSaving(false); });
           }}
         >
           <label
@@ -309,7 +312,7 @@ export function SidebarOrganizationDialog({
               : t('globalSidebar.sectionName')}
           </label>
           {state.kind === 'move' ? (
-            <CustomSelect value={value} onChange={setValue} size="md" ariaLabel={state.name}
+            <CustomSelect value={value} onChange={setValue} disabled={saving} size="md" ariaLabel={state.name}
               options={[{ value: state.defaultContainer, label: t(state.itemId.startsWith('session:') ? 'globalSidebar.originalAgent' : 'globalSidebar.unsectioned') }, ...sections.map((section) => ({ value: section.id, label: section.name }))]} />
           ) : (
             <input
@@ -317,6 +320,7 @@ export function SidebarOrganizationDialog({
               id="sidebar-organization-value"
               value={value}
               onChange={(event) => setValue(event.target.value)}
+              disabled={saving}
               maxLength={80}
               className="h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 text-sm text-[var(--ink)]"
             />
@@ -329,6 +333,7 @@ export function SidebarOrganizationDialog({
           <div className="mt-5 flex justify-end gap-2">
             <button
               type="button"
+              disabled={saving}
               onClick={onClose}
               className="h-9 rounded-lg px-3 text-sm text-[var(--ink-muted)] hover:bg-[var(--hover-bg)]"
             >
@@ -336,7 +341,7 @@ export function SidebarOrganizationDialog({
             </button>
             <button
               type="submit"
-              disabled={!normalized}
+              disabled={!normalized || saving}
               className="h-9 rounded-lg bg-[var(--button-primary-bg)] px-3 text-sm text-[var(--button-primary-text)] disabled:opacity-50"
             >
               {t('globalSidebar.save')}

@@ -12,19 +12,19 @@
 
 ## Acceptance criteria
 
-- [ ] 实现任务/Agent/分区排序、跨分区移动与菜单替代，删除分区保留真实条目。
-- [ ] 偏好v1兼容、异常输入、隐藏条目排序、存储失败及导航回归。
+- [x] 实现任务/Agent/分区排序、跨分区移动与菜单替代，删除分区保留真实条目。
+- [x] 偏好v1兼容、异常输入、隐藏条目排序、存储失败及导航回归。
 - [ ] 真实浏览器 pointer/keyboard、1280/900窗口与rail、刷新保留、独立审阅。
 - [ ] CI、远端main包含交付源码。
 - [ ] 安装版本/原生重启真实路径：与现有本机Host/凭据安装owner协调后验收。
 
 ## Completed
 
-- base/start gate通过；侧栏与纯规则已实现，准备阶段提交。主/root负责UI、集成与交付；organization_model (Luna/medium) 负责纯规则/prefs；sidebar_ui_review (Sol/medium，嵌套拖拽与混合分区交互)独立验收。
+- base/start gate通过；阶段功能fbc6abbb已提交，合并最新main；收尾新增存储失败输入保留与可重试。主/root负责UI、集成与交付；organization_model (Luna/medium) 负责纯规则/prefs；sidebar_ui_review (Sol/medium，嵌套拖拽与混合分区交互)独立验收。
 
 ## Verification
 
-- 数据13项/含projection共19项通过；全量tsc通过；侧栏DOM64项及历史搜索16项通过；moxbot web构建和theme8项通过。首轮DOM55通过/6失败，5项为新增拖拽手柄名称与既有模糊查询冲突、1项菜单新增项断言，已更新查询保持语义。独立fixture将实际加载正式组件、使用合成服务数据，不能替代原生发布验收。
+- 数据13项/含projection共19项通过；全量tsc通过；侧栏DOM65项及历史搜索16项通过；moxbot web构建和theme8项通过。首轮DOM55通过/6失败，5项为新增拖拽手柄名称与既有模糊查询冲突、1项菜单新增项断言，已更新查询保持语义。独立fixture将实际加载正式组件、使用合成服务数据，不能替代原生发布验收。
 
 ## Blockers and unknowns
 

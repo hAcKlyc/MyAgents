@@ -578,14 +578,16 @@ export default memo(function GlobalSidebar({
   childLayerOpenRef.current = childLayerOpen;
   const previousChildLayerOpenRef = useRef(childLayerOpen);
 
-  const updatePreference = useCallback((update: (current: GlobalSidebarPreferenceV1) => GlobalSidebarPreferenceV1) => {
+  const updatePreference = useCallback((update: (current: GlobalSidebarPreferenceV1) => GlobalSidebarPreferenceV1, onSaved?: (saved: boolean) => void) => {
     setPreference((current) => {
       const next = update(current);
-      if (next === current) return current;
+      if (next === current) { onSaved?.(true); return current; }
       if (typeof window !== 'undefined' && !saveGlobalSidebarPreference(window.localStorage, next)) {
         toastRef.current.warning(t('globalSidebar.saveOrganizationFailed'));
+        onSaved?.(false);
         return current;
       }
+      onSaved?.(true);
       return next;
     });
   }, [t]);
@@ -1086,7 +1088,7 @@ export default memo(function GlobalSidebar({
   const tree = (
     <WorkspaceTree
       organization={preference.organization}
-      onUpdateOrganization={(update) => updatePreference((current) => ({ ...current, organization: update(current.organization) }))}
+      onUpdateOrganization={(update) => new Promise<boolean>((resolve) => updatePreference((current) => ({ ...current, organization: update(current.organization) }), resolve))}
       fadeBottom={expanded}
       projects={activeProjects}
       archivedProjects={archivedProjects}
@@ -1576,7 +1578,7 @@ export default memo(function GlobalSidebar({
 
 interface WorkspaceTreeProps {
   organization: SidebarOrganization;
-  onUpdateOrganization: (update: (current: SidebarOrganization) => SidebarOrganization) => void;
+  onUpdateOrganization: (update: (current: SidebarOrganization) => SidebarOrganization) => Promise<boolean>;
   fadeBottom: boolean;
   projects: Project[];
   archivedProjects: Project[];
@@ -2074,7 +2076,7 @@ function WorkspaceTree({
     return sectionEntries(container).map((entry) => entry.id);
   };
   const moveItem = (itemId: string, container: string, beforeId?: string) => {
-    onUpdateOrganization((current) =>
+    return onUpdateOrganization((current) =>
       moveSidebarItem(
         current,
         itemId,
@@ -2211,7 +2213,7 @@ function WorkspaceTree({
           <MenuItem
             icon={<PlusIcon className="h-3.5 w-3.5" />}
             label={t('globalSidebar.createSection')}
-            disabled={organization.sections.length >= 50}
+            disabled={!organizing || organization.sections.length >= 50}
             onClick={() => {
               setViewMenu(false);
               setOrganizationDialog({
@@ -2498,22 +2500,17 @@ function WorkspaceTree({
           state={organizationDialog}
           sections={organization.sections}
           onClose={closeOrganizationDialog}
-          onSubmit={(value) => {
+          onSubmit={async (value) => {
             const state = organizationDialog;
-            if (state.kind === 'move') moveItem(state.itemId, value);
-            else if (state.kind === 'rename' && state.sectionId)
-              onUpdateOrganization((current) =>
-                renameSidebarSection(current, state.sectionId!, value),
-              );
-            else
-              onUpdateOrganization((current) =>
-                createSidebarSection(
-                  current,
-                  value,
-                  `section:${crypto.randomUUID()}`,
-                ),
-              );
-            closeOrganizationDialog();
+            let saved: boolean;
+            if (state.kind === 'move') saved = await moveItem(state.itemId, value);
+            else if (state.kind === 'rename' && state.sectionId) saved = await onUpdateOrganization((current) => renameSidebarSection(current, state.sectionId!, value));
+            else {
+              const id = `section:${crypto.randomUUID()}`;
+              saved = await onUpdateOrganization((current) => createSidebarSection(current, value, id));
+            }
+            if (saved) closeOrganizationDialog();
+            return saved;
           }}
         />
       )}
