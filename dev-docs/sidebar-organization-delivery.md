@@ -29,3 +29,7 @@
 - 窄窗口900×800实际pointer追加4步均通过：整行/手柄入分区、向下/向上排序；鼠标释放后450ms浮层保留且无误导航。来源、坐标、偏好和hash见 `sidebar-organization-validation/rail-dnd-results.json`。此为合成renderer追加覆盖，原生验收仍开放。
 
 用户具体a8授权后，原owner的前置6ac凭据迁移反馈系统凭据库暂不可用，正在排查；未取得a8安装回执或UI窗口，原生验收不能勾选完成。该问题归原凭据任务处理，不并发修改凭据/退出App。
+
+## 原生侧栏完成范围
+
+a8联合包已在实际Applications客户端运行，主Agent验binary hash/签名/进程路径，Task/Agent整行拖入、菜单恢复、分区管理、键盘排序及正常重启保留通过。合成聊天/原项目和附件引用保留；两临时分区已清理。详见 [原生报告](sidebar-organization-native.md)。原生section pointer排序未确认、成对Task/Agent排序只在合成renderer验证。凭据slot保存故障仍归原owner修复，统一网络更新验收未完成。
