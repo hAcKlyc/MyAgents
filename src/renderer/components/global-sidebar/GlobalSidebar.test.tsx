@@ -524,7 +524,7 @@ describe('GlobalSidebar rail flyout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Agent 工作区' }));
     const region = screen.getByRole('region', { name: 'Agent 工作区' });
     const flyout = region.closest('[data-global-sidebar-flyout]')!;
-    const session = screen.getByRole('button', { name: /Focused session/ });
+    const session = screen.getByRole('button', { name: (name) => name.includes('Focused session') && !name.startsWith('拖动 ') });
     const workspaceToggle = screen.getByText('Project one').closest('[data-global-sidebar-workspace-row]')!
       .querySelector('button')!;
     const branch = screen.getByText('Focused session').closest('[data-global-sidebar-workspace-branch]')!;
@@ -536,13 +536,13 @@ describe('GlobalSidebar rail flyout', () => {
 
     expect(branch).toHaveAttribute('data-state', 'closed');
     expect(branch).toHaveAttribute('aria-hidden', 'true');
-    expect(screen.getByRole('button', { name: /Focused session/, hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: (name) => name.includes('Focused session') && !name.startsWith('拖动 '), hidden: true })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(199));
-    expect(screen.getByRole('button', { name: /Focused session/, hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: (name) => name.includes('Focused session') && !name.startsWith('拖动 '), hidden: true })).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(1));
 
     expect(screen.getByRole('region', { name: 'Agent 工作区' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Focused session/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: (name) => name.includes('Focused session') && !name.startsWith('拖动 ') })).not.toBeInTheDocument();
   });
 
   it('uses the shared App Shell surface and invisible fixed-height placeholders in the rail flyout', () => {
@@ -671,6 +671,7 @@ describe('GlobalSidebar rail flyout', () => {
       String(i18n.t('launcher:workspaceCard.agentSettings')),
       String(i18n.t('launcher:workspaceCard.openFolder')),
       String(i18n.t('launcher:workspaceCard.pin')),
+      String(i18n.t('app:globalSidebar.moveToSection')),
       String(i18n.t('launcher:workspaceCard.archive')),
       String(i18n.t('launcher:workspaceCard.remove')),
     ]);
@@ -1135,7 +1136,7 @@ describe('GlobalSidebar rail flyout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Agent 工作区' }));
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Rejected session/ }));
+      fireEvent.click(screen.getByRole('button', { name: (name) => name.includes('Rejected session') && !name.startsWith('拖动 ') }));
     });
 
     expect(onOpenSession).toHaveBeenCalledTimes(1);
@@ -1167,7 +1168,7 @@ describe('GlobalSidebar rail flyout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Agent 工作区' }));
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Failed session/ }));
+      fireEvent.click(screen.getByRole('button', { name: (name) => name.includes('Failed session') && !name.startsWith('拖动 ') }));
     });
 
     expect(onOpenSession).toHaveBeenCalledTimes(1);
@@ -1225,7 +1226,7 @@ describe('GlobalSidebar rail flyout', () => {
     }));
     const view = renderSidebar({ onOpenSession });
     fireEvent.click(screen.getByRole('button', { name: 'Agent 工作区' }));
-    fireEvent.click(screen.getByRole('button', { name: /Slow session/ }));
+    fireEvent.click(screen.getByRole('button', { name: (name) => name.includes('Slow session') && !name.startsWith('拖动 ') }));
 
     const activeSessionTab: Tab = {
       id: 'slow-session-tab',
@@ -1736,7 +1737,7 @@ describe('GlobalSidebar rail flyout', () => {
     expect(workspaceRow).toHaveAttribute('aria-current', 'page');
     expect(workspaceRow).not.toHaveClass('bg-[var(--paper-elevated)]', 'shadow-sm');
     expect(workspaceRow?.querySelector('[data-global-sidebar-workspace-actions]')).toHaveClass('global-sidebar-workspace-actions');
-    const firstSession = screen.getByRole('button', { name: /Session 1/ });
+    const firstSession = screen.getByRole('button', { name: (name) => name.includes('Session 1') && !name.startsWith('拖动 ') });
     expect(firstSession.className).toContain('focus-visible:ring-2');
     expect(firstSession.firstElementChild?.textContent).toBe('Session 1');
     expect(firstSession).toHaveTextContent('Telegram');
@@ -1884,6 +1885,96 @@ describe('GlobalSidebar rail flyout', () => {
     expect(screen.getByText('A failed')).toBeInTheDocument();
     expect(screen.getByText('Healthy session')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: String(i18n.t('launcher:rightRail.retry')) })).toHaveLength(1);
+  });
+
+
+  function seedOrganization() {
+    mocks.forcedRail = false;
+    const project = { id: 'project-1', name: '原 Agent', path: '/work/agent' };
+    mocks.projects.push(project);
+    const session = { id: 'organized-session', agentDir: project.path, title: '独立整理任务', createdAt: '2026-10-13T00:00:00Z', lastActiveAt: '2026-10-13T00:00:00Z' };
+    mocks.taskData.sessions.push(session);
+    window.localStorage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify({ version: 1, preferredMode: 'expanded', expandedWorkspaceKeys: [project.path], hasSeededDefaultExpansion: true, showAutomationSessions: true, sessionView: 'all', organization: { sections: [{ id: 'section:work', name: '执行中', collapsed: false }], placements: {}, orders: {} } }));
+    return { project, session };
+  }
+
+  it('moves a Session into a section, persists across remount and opens its original Agent', async () => {
+    const { project, session } = seedOrganization();
+    const onOpenSession = vi.fn(async () => true);
+    const view = renderSidebar({ onOpenSession });
+    const row = screen.getByText(session.title).closest<HTMLElement>('[data-global-sidebar-session-row]')!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole('button', { name: '移动到分区' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: session.title }));
+    fireEvent.click(screen.getAllByRole('button', { name: '执行中' }).find((button) => !button.hasAttribute('aria-expanded'))!);
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '保存' })); });
+    const item = screen.getByText(session.title).closest('[data-sidebar-item]')!;
+    expect(item.closest('[data-sidebar-container="section:work"]')).not.toBeNull();
+    expect(screen.getAllByText(session.title)).toHaveLength(1);
+    expect(mocks.patchProject).not.toHaveBeenCalled();
+    expect(mocks.updateSession).not.toHaveBeenCalled();
+    fireEvent.click(within(item as HTMLElement).getByRole('button', { name: (name) => name.includes(session.title) && !name.startsWith('拖动 ') }));
+    expect(onOpenSession).toHaveBeenCalledWith(session, project);
+    const saved = JSON.parse(window.localStorage.getItem(GLOBAL_SIDEBAR_PREFERENCE_KEY)!);
+    expect(saved.organization.placements['session:organized-session']).toBe('section:work');
+    view.unmount();
+    renderSidebar({ onOpenSession });
+    expect(screen.getByText(session.title).closest('[data-sidebar-container="section:work"]')).not.toBeNull();
+    expect(session.agentDir).toBe('/work/agent');
+  });
+
+  it('creates, renames and deletes sections while retaining the original workspace and Session', async () => {
+    const { session } = seedOrganization();
+    renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: '工作区与会话显示选项' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建分区' }));
+    const dialog = screen.getByRole('dialog');
+    const input = within(dialog).getByRole('textbox', { name: '分区名称' });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: '待验证' } });
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '保存' })); });
+    expect(screen.getByRole('button', { name: '待验证' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '分区“待验证”的操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '重命名分区' }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '已验证' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+    fireEvent.click(screen.getByRole('button', { name: '已验证' }));
+    expect(screen.getByRole('button', { name: '已验证' })).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '分区“已验证”的操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除分区' }));
+    expect(screen.queryByRole('button', { name: '已验证' })).not.toBeInTheDocument();
+    expect(screen.getByText(session.title)).toBeInTheDocument();
+    expect(mocks.removeProject).not.toHaveBeenCalled();
+    expect(mocks.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('retains the section name for retry when saving fails', async () => {
+    seedOrganization();
+    renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: '工作区与会话显示选项' }));
+    fireEvent.click(screen.getByRole('button', { name: '新建分区' }));
+    const input = screen.getByRole('textbox', { name: '分区名称' });
+    fireEvent.change(input, { target: { value: '保留输入' } });
+    const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('disk quota'); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+    expect(input).toHaveValue('保留输入');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+    failure.mockRestore();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保留输入' })).toBeInTheDocument();
+  });
+
+  it('keeps visible organization unchanged and reports storage failure', () => {
+    seedOrganization();
+    renderSidebar();
+    const failure = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('disk quota'); });
+    fireEvent.click(screen.getByRole('button', { name: '执行中' }));
+    expect(screen.getByRole('button', { name: '执行中' })).toHaveAttribute('aria-expanded', 'true');
+    expect(mocks.toast.warning).toHaveBeenCalledWith('无法保存侧栏设置，请重试。');
+    failure.mockRestore();
   });
 
   it('shows config loading failures with an explicit retry action', () => {

@@ -9,7 +9,7 @@ import {
   StarIcon,
   TrashIcon,
 } from '@/components/icons';
-import { useRef, useState, type RefObject } from 'react';
+import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { updateSession, type SessionMetadata } from '@/api/sessionClient';
@@ -20,6 +20,7 @@ import SessionTagMenuItem, { type GlobalUserTagChange } from '@/components/sessi
 import SessionRenameDialog from '@/components/SessionRenameDialog';
 
 interface SessionContextMenuProps {
+    additionalItems?: ReactNode;
     open: boolean;
     onClose: () => void;
     anchorRef: RefObject<HTMLElement | null>;
@@ -45,6 +46,7 @@ interface SessionContextMenuProps {
  * so the two entry points cannot drift.
  */
 export default function SessionContextMenu({
+    additionalItems,
     open,
     onClose,
     anchorRef,
@@ -170,6 +172,7 @@ export default function SessionContextMenu({
                     disabled={archiving}
                     onClick={() => { void toggleArchive(); }}
                 />
+                {additionalItems}
                 <MenuItem
                     icon={<TrashIcon className="h-3.5 w-3.5" />}
                     label={t('rightRail.delete')}
