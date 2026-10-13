@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
+const REPO_ROOT = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const RELEASE_LOCK = path.join(REPO_ROOT, 'scripts/moxbot-credential-reader-release.json');
 export const READER_FILENAME = 'moxbots-credential-reader';
 export const READER_DESTINATION = `Contents/Helpers/${READER_FILENAME}`;
@@ -98,7 +98,7 @@ function readReleaseLock(lockPath = RELEASE_LOCK) {
   return validateReleaseLock(lock);
 }
 
-export function computeSourceInputSha256(repositoryRoot) {
+export function computeSourceInputSha256(repositoryRoot = REPO_ROOT) {
   if (!path.isAbsolute(repositoryRoot) || path.resolve(repositoryRoot) !== repositoryRoot) {
     fail('source root must be an absolute normalized path');
   }

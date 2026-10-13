@@ -12,7 +12,7 @@ import {
 
 // Fix all three product profiles (Vite, esbuild, Cargo) in the same invocation.
 // The override also owns the bundle ID, OS deep link and filesystem permission.
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const userArgs = process.argv.slice(2);
 let reader;
 let expectedAppBundle;

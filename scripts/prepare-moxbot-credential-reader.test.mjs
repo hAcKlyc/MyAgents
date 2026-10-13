@@ -340,3 +340,8 @@ test('real local macOS signed app path and signature metadata are inspectable', 
   assert.match(metadata.cdhash, /^[0-9a-f]{40}$/);
   assert.match(metadata.signingCertificateSha256, /^[0-9a-f]{64}$/);
 });
+
+
+test('default module repository root is normalized before source verification', () => {
+  assert.match(computeSourceInputSha256(), /^[0-9a-f]{64}$/);
+});

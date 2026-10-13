@@ -12,7 +12,7 @@
 - [x] 固定 reader v1 的闭集角色、manifest、匿名管道、范围、读写删结果与取消 / 期限代码；固定 38、legacy 33、portable 13 项聚焦验证通过，真实 Keychain 用例仍 ignored。
 - [x] 普通 Actor 完整 KeyScope 单项缓存与 binding / generation 接线；断线仍查服务器，不直接复用过期网络身份。
 - [x] 独立复核 Actor 接线与打包 / publisher pin / 不重签策略；真实 root 默认及 MoXBots fixed release check --tests 均通过，裸 macOS MoX 无 feature 实际 Cargo fail closed。
-- [x] 固定组件 v1 实际 build / sign、publisher / 架构 / SHA / cdhash / 输入 provenance；两个实际 prepare 的复制字节一致，不读取真实凭据。
+- [x] 固定组件 v1 实际 build / sign、publisher / 架构 / SHA / cdhash / 输入 provenance；两个实际 prepare 的复制字节一致，源闭包与受信制品双 pin 实际通过，不读取真实凭据；18 项相关 Node 回归通过。
 - [ ] 最终 App 与解压后 strict seal；两次真实桌面构建的 reader 字节和 cdhash 完全一致。
 - [ ] 新组件首次迁移、冷启动 / 同组件桌面更新后自动在线，不再出现日常授权循环。
 - [ ] 当前最终头 CI / 审查、同步最新 main、合入远端并验证祖先与树、安装包和运行版本对应。
@@ -33,4 +33,4 @@ reader 与 parent 使用不同 identifier，匹配同一发布者叶证书，且
 
 本轮主 Agent 负责诊断、Actor 接线、集成、实际版本对照和最终交付；原 crypto worker 实施 / 复核组件及缓存；packaging worker 独占隔离工作树的构建资源。三名 native 参与者，未调用外部模型；实际模型变体、effort、token 和费用未由运行时提供，不作推算。复盘：固定证书被误当成完整更新授权条件导致一次更新验收失败；今后先验证 OS partition 与冷启动 / 跨构建行为，再承诺免提示。
 
-下一步：阶段源码已提交至原 PR14，reader v1 已一次签名并验证两次复制；完整 App / archive 与真实升级仍开放。当前 b116 已恢复可用，暂停新系统授权；本机窗口和安装操作由归档任务串行接管，root 暂停这些操作，收到释放后先核实实际版本再继续，不以反复输入密码替代根因修复。
+下一步：阶段源码已提交至原 PR14，reader v1 已一次签名并验证两次复制；完整 App / archive 与真实升级仍开放。root 最后验证的 b116 可用；归档 owner 后续报告已安装33992eb0且AUTH_REQUIRED，未发新系统授权，尚待用户版本选择。本机窗口和安装操作由归档任务串行接管，root 暂停这些操作，收到释放后先核实实际版本再继续，不以反复输入密码替代根因修复。
