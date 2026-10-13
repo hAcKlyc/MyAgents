@@ -846,9 +846,12 @@ pub fn run() {
             agent_network::commands::cmd_agent_network_owned_open_authorization,
             agent_network::commands::cmd_agent_network_owned_poll,
             agent_network::commands::cmd_agent_network_owned_cancel,
+            agent_network::commands::cmd_agent_network_owned_restore_credentials,
+            agent_network::commands::cmd_agent_network_owned_restore_cancel,
             agent_network::commands::cmd_agent_network_remove,
             agent_network::commands::cmd_agent_discovery,
             agent_network::commands::cmd_agent_network_request,
+            agent_network::commands::cmd_agent_network_management,
             // MyAgents Cloud Space
             space_cloud::cmd_space_get_capability,
             space_cloud::cmd_space_get_session,

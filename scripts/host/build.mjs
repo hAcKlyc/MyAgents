@@ -11,6 +11,13 @@ import { dshBuildDefines } from '../integrated-runtimes/dsh-build-selection.mjs'
 import { renderBootstrap, sha256File } from './bootstrap.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const profile = process.env.MYAGENTS_HOST_PROFILE ?? 'myagents-test';
+const profiles = {
+  'myagents-test': { root: 'myagents-host-test', archive: 'myagents-host-test', tagPrefix: 'host-test-', cli: 'myagents-host', socket: '/run/myagents-host-test/control.sock' },
+  'moxbot-test': { root: 'moxbot-host-test', archive: 'moxbot-host-test', tagPrefix: 'host-test-moxbot-', cli: 'moxbot-host', socket: '/run/moxbot-host-test/control.sock' },
+};
+if (!Object.hasOwn(profiles, profile)) throw new Error('MYAGENTS_HOST_PROFILE must be myagents-test or moxbot-test');
+const selectedProfile = profiles[profile];
 const output = resolve(root, process.env.MYAGENTS_HOST_OUTPUT ?? 'output/host');
 const nodeVersion = JSON.parse(readFileSync(join(root, 'scripts/node-runtime.json'), 'utf8')).node;
 const sdkVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).dependencies['@anthropic-ai/claude-agent-sdk'];
@@ -54,14 +61,14 @@ const esbuildBanner = 'import { createRequire as __myAgentsCreateRequire } from 
 mkdirSync(output, { recursive: true });
 const temp = mkdtempSync(join(output, '.build-'));
 const releaseId = `${new Date().toISOString().replaceAll(/[-:.TZ]/g, '').slice(0, 14)}-${commit.slice(0, 12)}`;
-const archive = join(output, `myagents-host-test-${releaseId}.tar.gz`);
+const archive = join(output, `${selectedProfile.archive}-${releaseId}.tar.gz`);
 const archiveSidecar = `${archive}.sha256`;
-const bootstrapPath = join(output, `install-${releaseId}.sh`);
+const bootstrapPath = join(output, `${profile === 'myagents-test' ? 'install' : 'install-moxbot'}-${releaseId}.sh`);
 // A repeated build in the same timestamp second shares its releaseId; clear stale outputs first.
 rmSync(archive, { force: true });
 rmSync(archiveSidecar, { force: true });
 rmSync(bootstrapPath, { force: true });
-const releaseRoot = join(temp, 'myagents-host-test', 'releases', releaseId);
+const releaseRoot = join(temp, selectedProfile.root, 'releases', releaseId);
 const resources = join(releaseRoot, 'resources');
 mkdirSync(resources, { recursive: true });
 try {
@@ -127,9 +134,10 @@ try {
   copyFileSync(sdkSource, sdkDestination);
   chmodSync(sdkDestination, statSync(sdkSource).mode & 0o755);
 
-  const cli = join(releaseRoot, 'bin/myagents-host');
+  const cli = join(releaseRoot, `bin/${selectedProfile.cli}`);
   mkdirSync(dirname(cli), { recursive: true });
-  writeFileSync(cli, '#!/bin/sh\nset -eu\nexport MYAGENTS_HOST_SOCKET=/run/myagents-host-test/control.sock\nexec /opt/myagents-host-test/current/resources/nodejs/bin/node /opt/myagents-host-test/current/resources/host-main.mjs "$@"\n', { mode: 0o755 });
+  const prefix = `/opt/${selectedProfile.root}`;
+  writeFileSync(cli, `#!/bin/sh\nset -eu\nexport MYAGENTS_HOST_SOCKET=${selectedProfile.socket}\nexec ${prefix}/current/resources/nodejs/bin/node ${prefix}/current/resources/host-main.mjs "$@"\n`, { mode: 0o755 });
   const files = [];
   async function walk(dir) {
     for (const name of readdirSync(dir).sort()) {
@@ -144,7 +152,7 @@ try {
   }
   await walk(releaseRoot);
   const manifest = {
-    schemaVersion: 1, releaseId, target: 'linux-x64-glibc', sourceCommit: commit, sourceDirty: dirty,
+    schemaVersion: 1, profile, releaseId, target: 'linux-x64-glibc', sourceCommit: commit, sourceDirty: dirty,
     versions: { node: nodeVersion, claudeAgentSdk: sdkVersion, app: packageJson.version },
     pinnedResources: { nodeArchiveSha256, claudeSdkPackageIntegrity: lockedSdk.integrity },
     files,
@@ -154,7 +162,7 @@ try {
   let bootstrap;
   try {
     assertCleanBuildSnapshot('before archive');
-    execFileSync('tar', ['-czf', archive, '-C', temp, 'myagents-host-test']);
+    execFileSync('tar', ['-czf', archive, '-C', temp, selectedProfile.root]);
     assertCleanBuildSnapshot('after archive');
   } catch (error) {
     rmSync(archive, { force: true });
@@ -163,7 +171,7 @@ try {
   }
   const archiveHash = await sha256(archive);
   writeFileSync(archiveSidecar, `${archiveHash}  ${archive.split('/').at(-1)}\n`);
-  const releaseTag = `host-test-${releaseId}`;
+  const releaseTag = `${selectedProfile.tagPrefix}${releaseId}`;
   if (!dirty) {
     try {
       assertCleanBuildSnapshot('before bootstrap');
@@ -174,7 +182,7 @@ try {
       assertCleanBuildSnapshot('after bootstrap inputs');
       bootstrap = bootstrapPath;
       writeFileSync(bootstrap, renderBootstrap({
-        sourceCommit: commit, releaseTag, archiveName: archive.split('/').at(-1),
+        sourceCommit: commit, releaseTag, archiveName: archive.split('/').at(-1), profile,
         archiveSha256: archiveHash, installerSha256: installerHash, installerBase64: committedInstaller.toString('base64'),
       }), { mode: 0o755 });
       assertCleanBuildSnapshot('after bootstrap');

@@ -359,7 +359,10 @@ fn read_ca(path: &Path) -> Result<String, NetworkError> {
     if !opened_file
         || !meta.is_file()
         || meta.nlink() != 1
-        || meta.mode() & 0o7077 != 0
+        // The CA is public trust material: group/other read is required for
+        // the dedicated service UID to open it. Keep write access private and
+        // reject special bits, but allow 0644/0444.
+        || meta.mode() & 0o7022 != 0
         || meta.len() == 0
         || meta.len() > 65536
     {
@@ -477,18 +480,26 @@ mod tests {
         );
     }
     #[test]
-    fn public_ca_is_explicit_private_bounded_and_never_follows_links() {
+    fn public_ca_allows_readable_modes_but_rejects_writes_special_bits_and_links() {
         let dir = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
         let ca = root.join("ca.pem");
         std::fs::write(&ca, "fixture-public-ca").unwrap();
-        std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(read_ca(&ca).unwrap(), "fixture-public-ca");
+        std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(0o444)).unwrap();
+        assert_eq!(read_ca(&ca).unwrap(), "fixture-public-ca");
+        for mode in [0o662, 0o646, 0o4644] {
+            std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(read_ca(&ca).unwrap_err().code, "PUBLIC_TLS_CA_UNSAFE");
+        }
+        std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(0o644)).unwrap();
         let link = root.join("link");
         symlink(&ca, &link).unwrap();
         assert!(read_ca(&link).is_err());
-        std::fs::set_permissions(&ca, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(read_ca(&ca).is_err());
+        let hardlink = root.join("hardlink.pem");
+        std::fs::hard_link(&ca, &hardlink).unwrap();
+        assert_eq!(read_ca(&ca).unwrap_err().code, "PUBLIC_TLS_CA_UNSAFE");
         assert!(read_ca(Path::new("ca.pem")).is_err());
     }
 }

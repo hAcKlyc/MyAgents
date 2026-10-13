@@ -9,6 +9,7 @@ export type HostSessionRequest = {
 };
 export type HostSessionReply = { type: 'reply'; id: string; generation: string; ok: boolean; data?: unknown; error?: string };
 export type HostSessionMessage =
+  | { type: 'credential-needed'; generation: string }
   | { type: 'ready'; generation: string; sessionId: string }
   | HostSessionReply
   | { type: 'terminal'; generation: string; sessionId: string; outcome: TurnTerminalOutcome };

@@ -4,33 +4,924 @@
   "title": "MyAgents Host Management v1 envelope",
   "type": "object",
   "additionalProperties": false,
-  "required": ["namespace", "version", "senderSequence", "channelId", "message"],
+  "required": [
+    "namespace",
+    "version",
+    "senderSequence",
+    "channelId",
+    "message"
+  ],
   "properties": {
-    "namespace": { "const": "host.management" },
-    "version": { "const": 1 },
-    "senderSequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-    "channelId": { "$ref": "#/$defs/uuid" },
-    "message": { "oneOf": [
-      { "$ref": "#/$defs/hello" }, { "$ref": "#/$defs/helloAck" },
-      { "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }
-    ] }
+    "namespace": {
+      "const": "host.management"
+    },
+    "version": {
+      "const": 1
+    },
+    "senderSequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "channelId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "message": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hello"
+        },
+        {
+          "$ref": "#/$defs/helloAck"
+        },
+        {
+          "$ref": "#/$defs/request"
+        },
+        {
+          "$ref": "#/$defs/response"
+        }
+      ]
+    }
   },
   "$defs": {
-    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
-    "hello": { "type": "object", "additionalProperties": false, "required": ["kind", "protocol", "role", "nonce"], "properties": { "kind": { "const": "hello" }, "protocol": { "const": "host-management/v1" }, "role": { "enum": ["controller", "host"] }, "nonce": { "$ref": "#/$defs/uuid" } } },
-    "helloAck": { "type": "object", "additionalProperties": false, "required": ["kind", "protocol", "role", "nonce"], "properties": { "kind": { "const": "hello-ack" }, "protocol": { "const": "host-management/v1" }, "role": { "enum": ["controller", "host"] }, "nonce": { "$ref": "#/$defs/uuid" } } },
-    "request": { "type": "object", "additionalProperties": false, "required": ["kind", "requestId", "method", "params"], "properties": { "kind": { "const": "request" }, "requestId": { "$ref": "#/$defs/uuid" }, "method": { "enum": ["host.snapshot", "config.set", "resources.create", "receipt.get"] }, "params": { "oneOf": [{ "$ref": "#/$defs/snapshotParams" }, { "$ref": "#/$defs/configSet" }, { "$ref": "#/$defs/resourcesCreate" }, { "$ref": "#/$defs/receiptGet" }] } } },
-    "snapshotParams": { "type": "object", "additionalProperties": false },
-    "configSet": { "type": "object", "additionalProperties": false, "required": ["expectedRevision", "providerId", "model", "executionAuthorized", "mutationId"], "properties": { "expectedRevision": { "$ref": "#/$defs/revision" }, "providerId": { "const": "moonshot-coding" }, "model": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._-]+$" }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/" }, "executionAuthorized": { "type": "boolean" }, "mutationId": { "$ref": "#/$defs/uuid" } } },
-    "resourcesCreate": { "type": "object", "additionalProperties": false, "required": ["rootId", "relativePath", "expectedRevision", "mutationId", "operation"], "properties": { "rootId": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_-]+$" }, "relativePath": { "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$" }, "expectedRevision": { "$ref": "#/$defs/revision" }, "mutationId": { "$ref": "#/$defs/uuid" }, "operation": { "enum": ["register", "create"] } } },
-    "receiptGet": { "type": "object", "additionalProperties": false, "required": ["mutationId", "owner"], "properties": { "mutationId": { "$ref": "#/$defs/uuid" }, "owner": { "enum": ["config", "resources"] } } },
-    "response": { "type": "object", "additionalProperties": false, "required": ["kind", "requestId", "result"], "properties": { "kind": { "const": "response" }, "requestId": { "$ref": "#/$defs/uuid" }, "result": { "oneOf": [{ "$ref": "#/$defs/snapshot" }, { "$ref": "#/$defs/configReceipt" }, { "$ref": "#/$defs/resourceReceipt" }, { "$ref": "#/$defs/receiptNotFound" }, { "$ref": "#/$defs/error" }] } } },
-    "snapshot": { "type": "object", "additionalProperties": false, "required": ["kind", "version", "hostId", "configured", "settings", "activeSession", "stopping", "capabilities", "agentNet", "runtime"], "properties": { "kind": { "const": "snapshot" }, "version": { "const": 1 }, "hostId": { "$ref": "#/$defs/uuid" }, "configured": { "type": "boolean" }, "settings": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/settings" }] }, "activeSession": { "oneOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["sessionId", "generation", "closing"], "properties": { "sessionId": { "$ref": "#/$defs/uuid" }, "generation": { "$ref": "#/$defs/uuid" }, "closing": { "type": "boolean" } } }] }, "stopping": { "type": "boolean" }, "capabilities": { "type": "array", "maxItems": 16, "items": { "enum": ["local-session", "permission", "stop", "persistent-history", "local-config-receipt"] } }, "agentNet": { "type": "object", "additionalProperties": false, "required": ["available", "reason"], "properties": { "available": { "type": "boolean" }, "reason": { "type": ["string", "null"], "maxLength": 64 } } }, "runtime": { "type": "object", "additionalProperties": false, "required": ["node", "sdkBinaryPresent"], "properties": { "node": { "type": "string", "maxLength": 32 }, "sdkBinaryPresent": { "type": "boolean" } } } } },
-    "settings": { "type": "object", "additionalProperties": false, "required": ["revision", "providerId", "model", "workspace", "executionAuthorized"], "properties": { "revision": { "$ref": "#/$defs/revision" }, "providerId": { "const": "moonshot-coding" }, "model": { "type": "string", "minLength": 1, "maxLength": 128 }, "workspace": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/" }, "executionAuthorized": { "type": "boolean" } } },
-    "revision": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
-    "receiptNotFound": { "type": "object", "additionalProperties": false, "required": ["kind", "mutationId", "owner"], "properties": { "kind": { "const": "receipt-not-found" }, "mutationId": { "$ref": "#/$defs/uuid" }, "owner": { "enum": ["config", "resources"] } } },
-    "error": { "type": "object", "additionalProperties": false, "required": ["kind", "code"], "properties": { "kind": { "const": "error" }, "code": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Z][A-Z0-9_]*$" } } },
-    "configReceipt": { "type": "object", "additionalProperties": false, "required": ["kind", "status", "mutationId"], "properties": { "kind": { "const": "config-receipt" }, "status": { "enum": ["persisted", "conflict", "not-found"] }, "mutationId": { "$ref": "#/$defs/uuid" }, "revision": { "$ref": "#/$defs/revision" }, "effect": { "enum": ["new-session", "none"] }, "settings": { "$ref": "#/$defs/settings" } } },
-    "resourceReceipt": { "type": "object", "additionalProperties": false, "required": ["kind", "status", "mutationId"], "properties": { "kind": { "const": "resource-receipt" }, "status": { "enum": ["pending", "persisted", "conflict", "not-found"] }, "mutationId": { "$ref": "#/$defs/uuid" }, "revision": { "$ref": "#/$defs/revision" }, "effect": { "enum": ["none", "registered-disabled-agent", "existing-agent"] }, "resource": { "type": "object", "additionalProperties": false, "required": ["created", "agentId", "projectId", "name", "workspacePath", "enabled", "archived"], "properties": { "created": { "type": "boolean" }, "agentId": { "type": "string", "minLength": 1, "maxLength": 256 }, "projectId": { "type": "string", "minLength": 1, "maxLength": 256 }, "name": { "type": "string", "maxLength": 512 }, "workspacePath": { "type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/" }, "enabled": { "type": "boolean" }, "archived": { "type": "boolean" } } } } }
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "protocol",
+        "role",
+        "nonce"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hello"
+        },
+        "protocol": {
+          "const": "host-management/v1"
+        },
+        "role": {
+          "enum": [
+            "controller",
+            "host"
+          ]
+        },
+        "nonce": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "helloAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "protocol",
+        "role",
+        "nonce"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hello-ack"
+        },
+        "protocol": {
+          "const": "host-management/v1"
+        },
+        "role": {
+          "enum": [
+            "controller",
+            "host"
+          ]
+        },
+        "nonce": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requestId",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "kind": {
+          "const": "request"
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "method": {
+          "enum": [
+            "host.snapshot",
+            "config.set",
+            "resources.create",
+            "receipt.get",
+            "credential.set"
+          ]
+        },
+        "params": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/snapshotParams"
+            },
+            {
+              "$ref": "#/$defs/configSet"
+            },
+            {
+              "$ref": "#/$defs/resourcesCreate"
+            },
+            {
+              "$ref": "#/$defs/receiptGet"
+            },
+            {
+              "$ref": "#/$defs/credentialSet"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.snapshot"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "config.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/configSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.create"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/resourcesCreate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "receipt.get"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/receiptGet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "credential.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/credentialSet"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "snapshotParams": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "configSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "model",
+        "executionAuthorized",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "resourcesCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath",
+        "expectedRevision",
+        "mutationId",
+        "operation"
+      ],
+      "properties": {
+        "rootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "operation": {
+          "enum": [
+            "register",
+            "create"
+          ]
+        }
+      }
+    },
+    "receiptGet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutationId",
+        "owner"
+      ],
+      "properties": {
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "enum": [
+            "config",
+            "resources",
+            "credentials"
+          ]
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requestId",
+        "result"
+      ],
+      "properties": {
+        "kind": {
+          "const": "response"
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/snapshot"
+            },
+            {
+              "$ref": "#/$defs/configReceipt"
+            },
+            {
+              "$ref": "#/$defs/resourceReceipt"
+            },
+            {
+              "$ref": "#/$defs/receiptNotFound"
+            },
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "$ref": "#/$defs/credentialReceipt"
+            }
+          ]
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "hostId",
+        "configured",
+        "settings",
+        "activeSession",
+        "stopping",
+        "capabilities",
+        "agentNet",
+        "runtime",
+        "credentials",
+        "resources"
+      ],
+      "properties": {
+        "kind": {
+          "const": "snapshot"
+        },
+        "version": {
+          "const": 1
+        },
+        "hostId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "settings": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/settings"
+            }
+          ]
+        },
+        "activeSession": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "generation",
+                "closing"
+              ],
+              "properties": {
+                "sessionId": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "generation": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "closing": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "stopping": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "enum": [
+              "local-session",
+              "permission",
+              "stop",
+              "persistent-history",
+              "local-config-receipt"
+            ]
+          }
+        },
+        "agentNet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "node",
+            "sdkBinaryPresent"
+          ],
+          "properties": {
+            "node": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "sdkBinaryPresent": {
+              "type": "boolean"
+            }
+          }
+        },
+        "credentials": {
+          "$ref": "#/$defs/credentialsStatus"
+        },
+        "resources": {
+          "$ref": "#/$defs/resourcesSnapshot"
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "providerId",
+        "model",
+        "workspace",
+        "executionAuthorized"
+      ],
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        }
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "receiptNotFound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "mutationId",
+        "owner"
+      ],
+      "properties": {
+        "kind": {
+          "const": "receipt-not-found"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "enum": [
+            "config",
+            "resources",
+            "credentials"
+          ]
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "code"
+      ],
+      "properties": {
+        "kind": {
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      }
+    },
+    "configReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "config-receipt"
+        },
+        "status": {
+          "enum": [
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "new-session",
+            "none"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      }
+    },
+    "resourceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "resource-receipt"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "none",
+            "registered-disabled-agent",
+            "existing-agent"
+          ]
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "created",
+            "agentId",
+            "projectId",
+            "name",
+            "workspacePath",
+            "enabled",
+            "archived"
+          ],
+          "properties": {
+            "created": {
+              "type": "boolean"
+            },
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "workspacePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "archived": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "credentialSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "credential",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[^\\r\\n\\u0000]+$",
+          "writeOnly": true,
+          "description": "Non-whitespace, at most 16384 UTF-8 bytes; validated again by the codec and owner."
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "credentialsStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "configured",
+        "revision",
+        "writeAvailable"
+      ],
+      "properties": {
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "writeAvailable": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "configured": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "resourceRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "workspacePath"
+      ],
+      "properties": {
+        "rootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "workspacePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
+    },
+    "resourceAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentId",
+        "projectId",
+        "name",
+        "workspacePath",
+        "enabled",
+        "archived"
+      ],
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "workspacePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resourcesSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "revision",
+        "roots",
+        "agents"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "roots": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceRoot"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceAgent"
+          }
+        }
+      },
+      "description": "Codec also rejects duplicate rootId/agentId and enforces the 64 KiB frame budget."
+    },
+    "credentialReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "credential-receipt"
+            },
+            "status": {
+              "const": "persisted"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "effect": {
+              "const": "new-session"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "credential-receipt"
+            },
+            "status": {
+              "const": "conflict"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            },
+            "effect": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    }
   }
 }
