@@ -396,14 +396,15 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       const signRevocation=()=>jwt('moxbot-execution-revocation+jwt',{iss:scope.issuer,aud:'moxbot-host-bots/v1',
         namespace:'moxbot.bot.execution/v1',iat:now,nbf:now,exp:now+10,jti:randomUUID(),scope,grant_id:grantId,
         revoked_generation:1,bot_id:botId,host_context:context} satisfies RevocationClaims);
-      let stopStatus:'stopped'|'unknown'='unknown'; let startStatus:'running'|'unknown'='running'; let changeContextOnInspect=false;
+      let stopStatus:'stopped'|'unknown'='unknown'; let startStatus:'running'|'unknown'='running';
+      let inspectionStatus:'running'|'stopped'|'unknown'='running'; let changeContextOnInspect=false;
       const runtimeAdapter:BotRuntimeAdapter={runtime:'builtin',
         prepare:async frozen=>({id:'prepared-entry',runtime:'builtin',snapshot_hash:frozen.snapshot_hash,
           session_id:'80000000-0000-4000-8000-000000000001',run_generation:'80000000-0000-4000-8000-000000000002'}),
-        start:async request=>startStatus==='running'?{status:'running',identity:request.identity}:{status:'unknown'},
-        stop:async request=>stopStatus==='stopped'?{status:'stopped',identity:request.identity}:{status:'unknown'},
+        start:async request=>{inspectionStatus=startStatus;return startStatus==='running'?{status:'running',identity:request.identity}:{status:'unknown'};},
+        stop:async request=>{inspectionStatus=stopStatus;return stopStatus==='stopped'?{status:'stopped',identity:request.identity}:{status:'unknown'};},
         inspect:async input=>{if(changeContextOnInspect) currentHostContext={...context,challenge_nonce:'20000000-0000-4000-8000-000000000099'};
-          return {status:'running',identity:input.identity};}};
+          return {status:inspectionStatus,identity:input.identity};}};
       manager=createHostBotManager({...options,runtimeAdapter} as HostBotManagerOptions);
       const enableCommand:Command={...createCommand,mutation_id:randomUUID(),expected_host_revision:1,operation:{method:'enable',params:{}}};
       const enableProof=signCommand(enableCommand);
@@ -424,14 +425,28 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       expect(await restartedWhileRunning.receipt(enableCommand.mutation_id,enableCommand.actor_principal_id,enableCommand.actor_session_handle))
         .toMatchObject({status:'persisted',snapshot:{activity:'running',admission:'open',runnable:true}});
 
-      const disableCommand:Command={...createCommand,mutation_id:randomUUID(),expected_host_revision:2,operation:{method:'disable',params:{policy:'cancel'}}};
+      // The adapter-less manager reports the active process as unknown and closes admission.
+      // Reconcile again through the original manager before issuing a new CAS-bound mutation.
+      const originalManagerObservation=await manager.status();
+      expect(originalManagerObservation).toMatchObject({snapshots:[{bot_id:botId,activity:'running',admission:'closed',runnable:true}]});
+      const staleDisable:Command={...createCommand,mutation_id:randomUUID(),expected_host_revision:observation.host_revision,
+        operation:{method:'disable',params:{policy:'cancel'}}};
+      const staleDisableProof=signCommand(staleDisable);
+      expect(await manager.mutate(staleDisableProof.intent,staleDisableProof.lease))
+        .toMatchObject({status:'conflict',code:'HOST_REVISION_CONFLICT'});
+      expect(await manager.receipt(enableCommand.mutation_id,enableCommand.actor_principal_id,enableCommand.actor_session_handle))
+        .toMatchObject({status:'persisted',snapshot:{activity:'running',admission:'open',runnable:true}});
+      const disableCommand:Command={...createCommand,mutation_id:randomUUID(),expected_host_revision:originalManagerObservation.host_revision,
+        operation:{method:'disable',params:{policy:'cancel'}}};
       const disableProof=signCommand(disableCommand);
       const uncertainStop=await manager.mutate(disableProof.intent,disableProof.lease);
       expect(uncertainStop).toMatchObject({status:'unconfirmed',code:'BOT_RUN_OUTCOME_UNKNOWN'});
       expect(await manager.snapshot(botId)).toMatchObject({activity:'unknown',admission:'closed',runnable:false,active_run:{session_id:expect.any(String)}});
 
       stopStatus='stopped';
-      const confirmStop:Command={...disableCommand,mutation_id:randomUUID(),expected_host_revision:3};
+      const beforeConfirmStop=await manager.status();
+      expect(beforeConfirmStop).toMatchObject({snapshots:[{bot_id:botId,activity:'unknown',admission:'closed',runnable:false}]});
+      const confirmStop:Command={...disableCommand,mutation_id:randomUUID(),expected_host_revision:beforeConfirmStop.host_revision};
       const stoppedProof=signCommand(confirmStop);
       expect(await manager.mutate(stoppedProof.intent,stoppedProof.lease)).toMatchObject({status:'persisted',snapshot:{activity:'stopped',admission:'closed',active_run:null}});
 
@@ -439,13 +454,16 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
         start:async request=>({status:'running',identity:request.identity}),stop:async request=>({status:'stopped',identity:request.identity}),
         inspect:async input=>({status:'running',identity:input.identity})};
       const busyManager=createHostBotManager({...options,runtimeAdapter:busyAdapter} as HostBotManagerOptions);
-      const busyCommand:Command={...enableCommand,mutation_id:randomUUID(),expected_host_revision:4};
+      const busyObservation=await busyManager.status();
+      expect(busyObservation).toMatchObject({snapshots:[{bot_id:botId,activity:'stopped',admission:'closed',active_run:null}]});
+      const busyCommand:Command={...enableCommand,mutation_id:randomUUID(),expected_host_revision:busyObservation.host_revision};
       const busyProof=signCommand(busyCommand);
       expect(await busyManager.mutate(busyProof.intent,busyProof.lease)).toMatchObject({status:'failed',code:'HOST_BUSY'});
       expect(await busyManager.snapshot(botId)).toMatchObject({activity:'stopped',admission:'closed',active_run:null});
 
       startStatus='unknown';
-      const interrupted:Command={...enableCommand,mutation_id:randomUUID(),expected_host_revision:4};
+      const beforeInterrupted=await manager.status();
+      const interrupted:Command={...enableCommand,mutation_id:randomUUID(),expected_host_revision:beforeInterrupted.host_revision};
       const interruptedProof=signCommand(interrupted);
       const unknownStart=await manager.mutate(interruptedProof.intent,interruptedProof.lease);
       expect(unknownStart).toMatchObject({status:'unconfirmed',code:'BOT_RUN_OUTCOME_UNKNOWN'});
@@ -462,6 +480,7 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       // Reconnect the exact runtime adapter and reconcile before testing revoke retries.
       manager=createHostBotManager({...options,runtimeAdapter} as HostBotManagerOptions);
       await manager.snapshot(botId);
+      stopStatus='unknown';
       const firstRevocation=await manager.revoke(signRevocation(),{grant_id:grantId,bot_id:botId,revoked_generation:1});
       expect(firstRevocation).toMatchObject({activity:'unknown',admission:'closed',runnable:false,
         active_run:{session_id:'80000000-0000-4000-8000-000000000001'}});
@@ -472,14 +491,17 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       const nextGrant:Grant={...grantValue,id:'30000000-0000-4000-8000-000000000019',generation:2};
       const nextGrantToken=jwt('moxbot-execution-grant+jwt',{...common,jti:randomUUID(),grant:nextGrant});
       await manager.acceptGrant(nextGrantToken);
+      const beforeRestore=await manager.status();
+      expect(beforeRestore).toMatchObject({snapshots:[{bot_id:botId,activity:'stopped',admission:'closed',active_run:null}]});
       const restoredCommand:Command={...createCommand,mutation_id:randomUUID(),grant_id:nextGrant.id,grant_generation:2,
-        binding_generation:2,expected_host_revision:5,operation:{method:'restore',params:{}}};
+        binding_generation:2,expected_host_revision:beforeRestore.host_revision,operation:{method:'restore',params:{}}};
       const restoredProof=signCommand(restoredCommand,nextGrant);
       const restored=await manager.mutate(restoredProof.intent,restoredProof.lease);
       expect(restored).toMatchObject({status:'persisted',snapshot:{deleted:false,binding_generation:2,activity:'idle',admission:'closed',runnable:false}});
       expect(await manager.revoke(signRevocation(),{grant_id:grantId,bot_id:botId,revoked_generation:1})).toEqual(restored.snapshot);
 
       const currentLedger=loadConfig({strict:true}).hostBotDelegationsV1 as {revision:number};
+      startStatus='running';
       const expiryEnable:Command={...enableCommand,mutation_id:randomUUID(),grant_id:nextGrant.id,grant_generation:nextGrant.generation,
         binding_generation:2,expected_host_revision:currentLedger.revision};
       const expiryProof=signCommand(expiryEnable,nextGrant);

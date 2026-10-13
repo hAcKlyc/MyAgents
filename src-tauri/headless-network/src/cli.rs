@@ -27,6 +27,7 @@ async fn execute() -> Result<(), NetworkError> {
             "--target-device-id",
             "--request-file",
             "--owned-instance",
+            "--owned-policy-context-file",
             "--bot-execution-policy",
             "--bot-execution-socket",
             "--bot-node-uid",
@@ -53,6 +54,7 @@ async fn execute() -> Result<(), NetworkError> {
             .cloned()
             .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))
     };
+    validate_context_option(&command, &options)?;
     if command == "status" {
         if options.keys().any(|key| key.starts_with("--management-")) {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
@@ -171,6 +173,9 @@ async fn execute() -> Result<(), NetworkError> {
             }
             "run" => {
                 let _lock = status::run_lock(&root)?;
+                if let Some(file) = options.get("--owned-policy-context-file") {
+                    connection.write_policy_context(&root, &PathBuf::from(file))?;
+                }
                 let fields = [
                     "--bot-execution-policy",
                     "--bot-execution-socket",
@@ -284,4 +289,40 @@ async fn execute() -> Result<(), NetworkError> {
         _ => return Err(NetworkError::new("CLI_USAGE_INVALID")),
     }
     Ok(())
+}
+fn validate_context_option(
+    command: &str,
+    options: &HashMap<String, String>,
+) -> Result<(), NetworkError> {
+    if options.contains_key("--owned-policy-context-file")
+        && (command != "run" || !options.contains_key("--owned-instance"))
+    {
+        return Err(NetworkError::new("CLI_USAGE_INVALID"));
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod context_tests {
+    use super::*;
+    #[test]
+    fn projection_only_belongs_to_owned_run() {
+        let mut opts = HashMap::from([(
+            "--owned-policy-context-file".into(),
+            "/private/owned-policy-context.json".into(),
+        )]);
+        assert!(validate_context_option("run", &opts).is_err());
+        opts.insert("--owned-instance".into(), "https://owned.invalid".into());
+        assert!(validate_context_option("run", &opts).is_ok());
+        for command in [
+            "status",
+            "owned-auth-start",
+            "owned-auth-wait",
+            "owned-auth-cancel",
+            "owned-auth-logout",
+            "owned-manage",
+            "owned-policy-context",
+        ] {
+            assert!(validate_context_option(command, &opts).is_err());
+        }
+    }
 }

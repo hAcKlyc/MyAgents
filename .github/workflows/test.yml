@@ -119,6 +119,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Validate Linux Bot policy and receipt recovery before broad gates
+        run: npx vitest run --project unit src/server/host-bot-delegation.unit.test.ts src/server/host-bot-runtime.unit.test.ts
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:classification

@@ -49,3 +49,9 @@ PR24 passed seven exact-head checks and merged to main fb92ce9c. The integration
 Linux fixture repair rounds: private intermediate path and grant expiry preconditions; controlled expired-read clock; and the immutable receipt ACK expected schema now checks the policy fingerprint. These are test corrections, not relaxations of production authority. All exact-head release gates remain required.
 
 Post-PR24 integration local verification: typecheck, full lint, actual Host controller/private worker6/6 and focused Bot unit22 pass/2 Linux-only skipped. Extended build-script run247 passed/14 skipped/2 failed: Media Worker startup timeout passed on focused rerun; existing Darwin xattr fixture still expects permission denial where current OS returned success. That unchanged macOS-only test remains recorded as a local failure; required Linux CI is not waived or substituted.
+
+## Protected binding pin and Linux recovery repair
+
+The native run-only private account-context projection is implemented;140 tests/clippy/fmt passed. It emits only eight closed non-secret fields to a fixed, precreated600 file under the existing native0700 state directory, and preserves sealed account state. The operator matches actual PID/UID/source/freshness before using its account-binding UUID; this aid never enables execution. Actual running Node SupplementaryGroups already include the existing network IPC group; no group expansion is needed.
+
+A stopped administrator registry candidate was created through real authorized OIDC/API to make the single-Bot opt-in reviewable. Its real IDs and receipt stay private; no Host grant/policy/effect or model invocation occurred. The large Linux lifecycle fixture is repaired around explicit current observations and CAS after restart recovery; fake adapter inspection now tracks unknown/stopped outcomes. The focused Linux policy/receipt gate runs before broad JS validation. Final Linux execution and production acceptance remain open.
