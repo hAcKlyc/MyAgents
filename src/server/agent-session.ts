@@ -13489,7 +13489,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           continue;
         }
         const handling = await builtinTurnLifecycle.handleSdkResult(resultMessage, recoverRejectedReloadAnchor);
-        if (handling !== 'retrying' && nativeResumeBoundaryRecoveryMessage(
+        if (resultMessage.subtype === 'error_during_execution' && handling !== 'retrying' && nativeResumeBoundaryRecoveryMessage(
           [resultMessage.result, ...(resultMessage.errors ?? [])].filter(Boolean).join('\n'),
         )) rejectedNativeResumeBoundary = true;
         if (rewindInputGate && handling !== 'retrying') {
@@ -13806,7 +13806,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     // They are cleared when the Sidecar Owner is fully released (IM Bot stops).
     resolveTermination!();
 
-    if (rejectedNativeResumeBoundary) {
+    if (rejectedNativeResumeBoundary && !lifecycleState.abortRequested && sessionId === queryProductSessionId) {
       // An exact saved boundary is deterministic: retrying the unchanged UUID
       // cannot heal it. Keep its metadata and all Product history for recovery.
       clearPreWarmTimer();

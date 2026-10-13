@@ -1027,6 +1027,33 @@ it('retains an exact rewind boundary across rejection and cold reopen', async ()
   expect(state.query.mock.calls.at(-1)?.[0].options.resume).toBe(meta.id);
 });
 
+it('does not treat a successful answer quoting a resume diagnostic as a native refusal', async () => {
+  const workspace = join(state.home, 'quoted-diagnostic');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  const lifecycle = await import('../builtin-session/lifecycle');
+  lifecycle.setPreWarmDisabled(false);
+  state.query.mockImplementationOnce((args: Parameters<typeof fakeQuery>[0]) => {
+    const query = fakeQuery(args);
+    let completed = false;
+    return { ...query, async next() {
+      if (completed) return { done: true, value: undefined };
+      const frame = await query.next();
+      if (!frame.done && (frame.value as { type?: string }).type === 'result') {
+        completed = true;
+        return { done: false, value: { ...(frame.value as object), result: 'Example: No message found with message.uuid of: example-uuid' } };
+      }
+      return frame;
+    } };
+  });
+  await agent.enqueueUserMessage('explain a diagnostic', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(state.query.mock.calls.length).toBe(2), { timeout: 2500 });
+  expect(state.events.some(([name]) => name === 'chat:agent-error')).toBe(false);
+});
+
 it('recovers in an independent retained-prefix fork without reviving the discarded native tail', async () => {
   const workspace = join(state.home, 'boundary-fork');
   await mkdir(workspace);

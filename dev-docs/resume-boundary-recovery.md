@@ -8,7 +8,7 @@
 
 ## 验证
 
-- `src/server/session-transcript/builtin.integration.test.ts`：94 项通过，覆盖 result/throw 拒绝不自动重试、旧边界冷恢复、推导边界的已有安全重试、独立 prefix 恢复和未成功发送输入只出现一次。
+- `src/server/session-transcript/builtin.integration.test.ts`：95 项通过，覆盖 result/throw 拒绝不自动重试、旧边界冷恢复、推导边界的已有安全重试、独立 prefix 恢复和未成功发送输入只出现一次。
 - `src/server/utils/fork-remap.unit.test.ts`：20 项通过，覆盖精确匹配、重复内容、附件/混合内容、跨边界/仍存在 UUID 和重复占用的拒绝。
 - `src/renderer/context/TabProvider.activity.test.tsx`：103 项通过，持久错误保留，多次事件不创建重复 toast。
 - `src/renderer/components/NativeResumeRecoveryAction.test.tsx`：5 项通过，正确 retained assistant、禁用状态和 unavailable 行为。

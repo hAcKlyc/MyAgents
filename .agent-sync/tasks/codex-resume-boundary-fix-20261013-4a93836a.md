@@ -20,7 +20,7 @@
 - [x] 停止同一个显式边界自动 pre-warm，保留 Product 历史和边界，结算队列后允许恢复操作。
 - [x] 持久错误栏替代重复 toast；原错误的重新发送改为现有分支确认入口。
 - [x] 在新分支修正 legacy 用户消息的失配 UUID：仅唯一完整纯文本原生用户条目，拒绝重复、附件、未知 assistant 和跨边界匹配；源会话不改。
-- [x] 94 项 builtin 集成、103 项 Tab 事件 DOM、5 项恢复动作 DOM、20 项 remap 单元测试通过；新增测试覆盖自动重试、冷恢复、原边界保留和独立 prefix 恢复。
+- [x] 95 项 builtin 集成、103 项 Tab 事件 DOM、5 项恢复动作 DOM、20 项 remap 单元测试通过；新增测试覆盖自动重试、冷恢复、原边界保留和独立 prefix 恢复。
 - [x] 本机恢复分支已通过 SessionStore birth/publish 创建；实际现有客户端 API 读到完整四条保留历史，正文深比较一致，源 Product/native 文件字节未变化。没有模型发送。
 - [x] TypeScript、改动文件 ESLint、分类检查、合并最新主干、web/server 构建通过。
 - [ ] PR #26 CI/main 核验。
@@ -29,7 +29,7 @@
 
 ## Verification
 
-94 项集成、128 项 unit/DOM；候选 IAB fixture；实际本机恢复分支加载成功。首次发送已实际进入 native/model 执行，无同恢复点拒绝；该发送不是本 Agent 代发，原业务任务结果不属于本修复验收。
+95 项集成、128 项 unit/DOM；候选 IAB fixture；实际本机恢复分支加载成功。首次发送已实际进入 native/model 执行，无同恢复点拒绝；该发送不是本 Agent 代发，原业务任务结果不属于本修复验收。
 
 ## Blockers and unknowns
 
