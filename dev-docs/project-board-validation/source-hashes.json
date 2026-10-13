@@ -1,0 +1,27 @@
+{
+  "validatedSourceCommit": "ac95ff082c3ec58020f8cff59364010d3d282c7c",
+  "buildProfile": "moxbot",
+  "environment": "isolated production renderer; synthetic APIs; native/backends unverified",
+  "sha256": {
+    "src/renderer/features/project-board/ProjectBoardDetail.tsx": "e667ef1dc5500e479d8a4c72acd63cb95557a91f178113e23b651d02f00ca389",
+    "src/renderer/features/project-board/activity.ts": "6e4ab8c109875e69402fa39998e432b956dbb397e5fa7c55e0e65bb50c643754",
+    "src/renderer/features/project-board/projection.ts": "7089c738b77986ab05afba02cbf256ca2cb38504163555a06b6e717b36871a34",
+    "src/renderer/features/project-board/tabContract.ts": "84525a2872e1e2c7bb4bf881d55dd7144471cf83d1b02b5d17364a26eeface4f",
+    "src/renderer/features/project-board/tabModule.tsx": "594ba3f15c499f55a9bfa78956f5b70388622e2b753ef67932bbb89d9e5a4261",
+    "src/renderer/features/project-board/useBoardOverlay.ts": "cfa4522e899799bacc37d1b3eebfe4ee65735f47c90f8b17ebc5b842a0cff44b",
+    "src/renderer/features/project-board/useProjectBoardData.ts": "6bb03e82dfd6bd09cc7d96dbfb09b7136a65569b119dc23634a6288d90526b39",
+    "src/renderer/App.tsx": "fe6bce0a00972a4a7060a980cc335229ac2a88394cd6a4ad834a02390c778fce",
+    "src/renderer/components/global-sidebar/GlobalSidebar.tsx": "7135459903f6104259ec97d1b18db2764ca8ab0aedc96f1c243f8b7c7e46ec28",
+    "src/renderer/i18n/locales/en-US/task.json": "2a1916f12319c3b1a2613c599b421f747d7046b1afef3e08a3a59b1677913e4b",
+    "src/renderer/i18n/locales/zh-CN/task.json": "24d36f36ccc7600627ae756e86c450e5a28120fa46d6a00d60f206868213a018",
+    "src/renderer/pages/ProjectBoard.css": "d019d07563437040eae3cae311a2c51c629ec8b5e32b11ec4563840750732b00",
+    "src/renderer/pages/ProjectBoard.tsx": "90449890988fffa9894e0f8e48323b0aea55a3ffd2eb7ffe0294a5981b20d732",
+    "src/renderer/tab-workspace/builtinComposition.ts": "217236fe3a74af7d0ea5d8604088b0a207fba9208f0a944bd21d4beda39b75f1",
+    "src/renderer/types/tab.ts": "159651251e1d197c44b968fedbde81304714d65b3605ee15b240b50b59ed0863",
+    "src/renderer/utils/globalSidebarProjection.ts": "2baffef0597e06d45ada38b5442f3f4f08b11e872bf8c248dd20201dfbe2d81d"
+  },
+  "builtAssets": {
+    "dist/assets/ProjectBoard-BezPTWxy.js": "b36a02b2b357b4d5617b48c821ae22e249d407ee0505288a08ac86025ee01df3",
+    "dist/assets/ProjectBoard-CePojUbF.css": "a937f7b72e61f698094e3d5336c5397b7551bc9c1fb1d9e4d5872e33a87e571b"
+  }
+}

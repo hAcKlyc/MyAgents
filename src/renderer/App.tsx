@@ -3608,6 +3608,13 @@ export default function App() {
     };
   }, [handleOpenCapabilities, handleOpenSettings]);
 
+  const handleOpenProjectBoard = useCallback((project: Project) => {
+    tabWorkspaceController.open('projectboard', {
+      workspacePath: project.path,
+      title: t('task:projectBoard.tabTitle', { name: project.displayName || project.name }),
+    });
+  }, [tabWorkspaceController, t]);
+
   // Open TaskCenter as a singleton tab. Reopen intents live on that exact tab,
   // so repeated search/route requests cannot leak into a later instance.
   const handleOpenTaskCenter = useCallback(
@@ -4908,6 +4915,7 @@ export default function App() {
       taskcenter: taskCenterBinding,
       space: spaceBinding,
       agentnetwork: null,
+      projectboard: null,
       record: recordBinding,
     }),
     [
@@ -4942,6 +4950,7 @@ export default function App() {
             onOpenCapabilities={handleOpenCapabilities}
             onOpenSettings={handleOpenGeneralSettings}
             onOpenBugReport={handleOpenBugReport}
+            onOpenProjectBoard={handleOpenProjectBoard}
             onOpenWorkspace={handleOpenWorkspaceFromSidebar}
             onOpenSession={handleOpenSidebarSession}
             onRenameSession={renamePersistedSession}

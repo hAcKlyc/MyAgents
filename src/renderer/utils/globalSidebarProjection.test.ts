@@ -20,6 +20,9 @@ const chat = (agentDir: string): ChatTab => ({
 });
 
 describe('resolveGlobalSidebarWorkspace', () => {
+  it('projects the scoped board workspace without inheriting a Chat', () => {
+    expect(resolveGlobalSidebarWorkspace({id:'board',view:'projectboard',title:'Board',workspacePath:'/work/p'})).toBe('/work/p');
+  });
   it('projects the workspace selected by the active Launcher', () => {
     expect(resolveGlobalSidebarWorkspace(launcher('/work/mino'))).toBe('/work/mino');
   });

@@ -226,6 +226,7 @@ interface GlobalSidebarProps {
     initialMessage?: InitialMessage,
     entryIntent?: 'open_workspace' | 'workspace_init',
   ) => Promise<boolean>;
+  onOpenProjectBoard?: (project: Project) => void;
   onOpenSession: (session: SessionMetadata, project: Project) => Promise<boolean>;
   onRenameSession: (sessionId: string, title: string) => Promise<SessionMetadata | null>;
   historyTagIntent?: { id: number; tag: string } | null;
@@ -507,6 +508,7 @@ export default memo(function GlobalSidebar({
   onOpenSettings,
   onOpenBugReport,
   onOpenWorkspace,
+  onOpenProjectBoard,
   onOpenSession,
   onRenameSession,
   historyTagIntent,
@@ -1116,6 +1118,7 @@ export default memo(function GlobalSidebar({
       onCreateAgent={handleOpenNewAgentPanel}
       recentlyCreatedWorkspaceKey={recentlyCreatedWorkspaceKey}
       onOpenWorkspace={handleOpenWorkspace}
+      onOpenProjectBoard={onOpenProjectBoard ? (project) => { onOpenProjectBoard(project); closeFlyout(); } : undefined}
       onOpenSession={handleOpenSession}
       onTogglePin={handleTogglePin}
       onAgentSettings={(project, origin) => {
@@ -1603,6 +1606,7 @@ interface WorkspaceTreeProps {
   onCreateAgent: (origin?: HTMLElement | null) => void;
   recentlyCreatedWorkspaceKey: string | null;
   onOpenWorkspace: (project: Project) => void;
+  onOpenProjectBoard?: (project: Project) => void;
   onOpenSession: (session: SessionMetadata, project: Project) => void;
   onTogglePin: (project: Project) => void;
   onAgentSettings: (project: Project, origin?: HTMLElement | null) => void;
@@ -1714,6 +1718,7 @@ function WorkspaceTree({
   onCreateAgent,
   recentlyCreatedWorkspaceKey,
   onOpenWorkspace,
+  onOpenProjectBoard,
   onOpenSession,
   onTogglePin,
   onAgentSettings,
@@ -1940,6 +1945,7 @@ function WorkspaceTree({
             recentlyCreated={recentlyCreatedWorkspaceKey === key}
             actionTipPosition={index === 0 ? 'bottom' : 'top'}
             onToggle={() => onToggleWorkspace(project)}
+            onOpenProjectBoard={onOpenProjectBoard ? () => onOpenProjectBoard(project) : undefined}
             onOpenWorkspace={() => onOpenWorkspace(project)}
             onTogglePin={() => onTogglePin(project)}
             onAgentSettings={(origin) => onAgentSettings(project, origin)}
@@ -2526,6 +2532,7 @@ interface WorkspaceRowProps {
   recentlyCreated: boolean;
   actionTipPosition: 'top' | 'bottom';
   onToggle: () => void;
+  onOpenProjectBoard?: () => void;
   onOpenWorkspace: () => void;
   onTogglePin: () => void;
   onAgentSettings: (origin?: HTMLElement | null) => void;
@@ -2544,6 +2551,7 @@ function WorkspaceRow({
   actionTipPosition,
   onToggle,
   onOpenWorkspace,
+  onOpenProjectBoard,
   onTogglePin,
   onAgentSettings,
   onArchive,
@@ -2608,6 +2616,12 @@ function WorkspaceRow({
         className={`global-sidebar-workspace-actions pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1 pl-6 transition-opacity ${menuOpen ? 'opacity-100' : 'opacity-0 group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100'}`}
         data-global-sidebar-workspace-actions
       >
+        {onOpenProjectBoard && !isProjectArchived(project) && <Tip label={t('task:projectBoard.title')} position={actionTipPosition} align="end">
+          <button type="button" onClick={onOpenProjectBoard} aria-label={t('task:projectBoard.openFor', { name: displayName })}
+            className={`global-sidebar-action-button flex items-center justify-center rounded-md text-[var(--ink-muted)] hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] ${menuOpen ? 'pointer-events-auto' : 'pointer-events-none group-hover/workspace:pointer-events-auto group-focus-within/workspace:pointer-events-auto'}`}>
+            <GridIcon className="h-3.5 w-3.5" />
+          </button>
+        </Tip>}
         <Tip label={tLauncher('workspaceCard.more')} position={actionTipPosition} align="end" disabled={menuOpen}>
           <button
             ref={menuRef}
@@ -2640,6 +2654,7 @@ function WorkspaceRow({
         placement="bottom-end"
         className="global-sidebar-nested-layer w-44 py-1"
       >
+        {onOpenProjectBoard && !isProjectArchived(project) && <MenuItem icon={<GridIcon className="h-3.5 w-3.5" />} label={t('task:projectBoard.title')} onClick={() => { setMenu(false); onOpenProjectBoard(); }} />}
         <MenuItem icon={<SlidersIcon className="h-3.5 w-3.5" />} label={tLauncher('workspaceCard.agentSettings')} onClick={() => { setMenu(false); onAgentSettings(menuRef.current); }} />
         <MenuItem icon={<FolderOpenIcon className="h-3.5 w-3.5" />} label={tLauncher('workspaceCard.openFolder')} onClick={() => { setMenu(false); onOpenFolder(); }} />
         <MenuItem

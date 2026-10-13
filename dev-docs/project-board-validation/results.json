@@ -1,0 +1,53 @@
+{
+  "environment": "isolated Chromium, actual production React components; synthetic API fixtures; no native/backend acceptance",
+  "results": [
+    {
+      "name": "actual rows, deduplication, exact states",
+      "passed": true
+    },
+    {
+      "name": "search and original conversation round trip preserve filters, selection and draft",
+      "passed": true
+    },
+    {
+      "name": "failed acceptance keeps input and state; confirmed backend changes completed status",
+      "passed": true
+    },
+    {
+      "name": "Escape closes panel and restores row focus",
+      "passed": true
+    },
+    {
+      "name": "original session event carries correct workspace/session",
+      "passed": true
+    },
+    {
+      "name": "list mode, task read failure retains data and recovery",
+      "passed": true
+    },
+    {
+      "name": "responsive 1440",
+      "passed": true
+    },
+    {
+      "name": "responsive 1024",
+      "passed": true
+    },
+    {
+      "name": "responsive 768",
+      "passed": true
+    },
+    {
+      "name": "responsive 540",
+      "passed": true
+    },
+    {
+      "name": "narrow detail, submit failure, grouped columns",
+      "passed": true
+    },
+    {
+      "name": "light theme renders",
+      "passed": true
+    }
+  ]
+}

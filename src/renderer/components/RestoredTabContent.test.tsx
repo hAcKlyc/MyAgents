@@ -122,6 +122,7 @@ function bindings(overrides: Partial<BuiltinTabBindings> = {}): BuiltinTabBindin
     },
     space: { onRouteConsumed: vi.fn() },
     agentnetwork: null,
+    projectboard: null,
     record: {
       onRecordingSnapshotChange: vi.fn(),
       onTitleChange: vi.fn(),
