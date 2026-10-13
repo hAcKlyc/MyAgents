@@ -197,3 +197,13 @@ BOTS-CLOUD-EXEC-001：用户已确认Host所有者有限指定Bot委派方案，
 - MOXBOTS-ASK-QUESTION-FIX-20261013：PR #21源fc4e664c、6项current-head CI成功，main `d9749998f743707074d6d42dc5344bcb724d55a8` verified；422项相称用例、原生SDK+loopback provider普通/bypass模式均收到tool_result。源树与merge tree一致。
 - SDK会先补multiSelect，所以截图缺字段不直接证明原事故根因；本次修复防输入边界错误与FIFO覆盖。
 - 当前客户端仍由Host/钥匙串owner统一合包；已获用户跨聊天授权并发送冻结源。Mac锁定，待用户手动解锁和统一包回执，完成原生表单/真实caller及配置回归后才能关闭任务。主代理不得假报已安装或触发系统授权绕过。
+
+### 2026-10-13 — administrator release and real browser acceptance
+
+PR20 plus PR22 are in remote main. Login source `60e3a52c08bf79d3985e1453449719269a35fb1a` passed seven exact-head checks; PR22 merge `1cfa2f85dc6c936c02b86f1f40945961665608a7` passed Owned AgentNet run38396057654. Its CI artifact11812672883 has verified API archive digest5198fa3f… and binary SHA256 `9b9320f57685a938cee53492eec412567df8076a273e7ef72a12a461ca5f06bc`; complete source tree matches that accepted main commit. Subsequent main documentation changes do not alter the deployed service.
+
+The user explicitly authorized the existing integration test account as this instance's first platform administrator. The binary-only release preserved exact existing role/config and ingress hashes, stopped only the dedicated network service, created consistent private SQLite/state backups and retained the previous binary and rollback. Dex, Mori and Linux Host were not restarted. Runtime executable/source/hash and health were independently verified.
+
+Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
+
+BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
