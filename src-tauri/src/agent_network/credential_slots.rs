@@ -1256,7 +1256,7 @@ mod tests {
         let mut ids = Vec::new();
         for i in 0..4 {
             let id = format!("session:{}", hash43(format!("process-{i}").as_bytes()));
-            let child = std::process::Command::new(std::env::current_exe().unwrap())
+            let child = crate::process_cmd::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
                     "agent_network::credential_slots::tests::process_commit_helper",

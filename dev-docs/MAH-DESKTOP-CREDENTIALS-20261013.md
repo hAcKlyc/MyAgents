@@ -54,3 +54,6 @@ CI 修复：07e226a9 的 DOM 用例只等 adapter promise 而未等父组件提�
 
 
 隔离拒绝对照已实际运行：同一 hardened-runtime C 源分别签为 A/B 不同 identifier、同一发行者；cold 子进程不接收密码或 Unlock。仅 A 受信的随机临时条目，A 读取成功，B 返回 -25293；临时 keychain 经 API 删除，默认项/搜索列表保全、私有目录删除均通过。证据仅证明本机这种新建条目的 ACL 可区分两个进程，不证明用户旧记录或真实 MoXBots 冷启动已修复。受限原文为 SYNTHETIC-KEYCHAIN-NO-UNLOCK-PROOF.json，不入 Git。
+
+
+编译/CI 接续：主 Agent 真实 release App 构建 0b9c2cf9 成功，来源与 clean tree 过程一致；尚未签名/安装，不视为免提示完成。本机 AgentNet 单元 146 passed / 1 helper ignored，caller 针对性 3 项通过。该头 Linux 完整测试通过，但 Clippy 拒绝测试中的直接 Command::new；已改用项目 process_cmd 封装，独立实际 process_cmd/process_cleanup harness 的 12 项及项目 redline/strict Clippy 通过，不放宽规则。下一包基于本 test-only 修复重新冻结构建，当前头 CI 仍需等待。
