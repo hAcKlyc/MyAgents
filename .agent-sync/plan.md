@@ -23,12 +23,12 @@
 
 ## 当前实现和依赖
 
-当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。首位现网测试管理员已由用户明确授权并配置；实际OIDC/admin API通过，Browser fallback发布门槛仍待完成。
+当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。首位现网测试管理员已由用户明确授权并配置；实际OIDC/admin API及Browser fallback发布、登录UI均通过。
 
 - [x] 本地管理权限、登记API、SQLite/CAS/幂等审计、同源UI与独立验收。
 - [x] PR20 exact-head CI/main与远端包含成果核验。
 - [x] 现网权限确认、备份回滚、串行升级、真实OIDC/admin API验收。
-- [ ] BOTS-ADMIN-LOGIN-002浏览器fallback CI/main/发布/真实登录UI复验。
+- [x] BOTS-ADMIN-LOGIN-002浏览器fallback CI/main/发布/真实登录UI复验（main1cfa2f85；下方实际发布记录）。
 - [ ] 有限Host委派与真实启停、共享执行及多账号验收。
 
 ### 前轮原型任务和依赖
@@ -83,3 +83,7 @@ The user explicitly authorized the existing integration test account as this ins
 Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
+
+### BOTS-CLOUD-EXEC-001 integration update
+
+Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution continuation, preserving existing owner results. Synthetic UI and local Host/native regression gates passed; Linux exact-head CI and three-artifact provenance remain required. Production Host read-only scope preflight passed; a private single-Bot 24-hour lifecycle-only opt-in proposal is prepared but neither authorized nor installed. Protected account-binding UUID pin, exact opt-in authority, serial backup/rollback, real Session birth/exit and original receipt recovery remain open. No inference or model fees are claimed.

@@ -37,15 +37,16 @@ jobs:
             exit 1
           fi
           python3 scripts/host/network-install.test.py
+          python3 scripts/host/unified-install.test.py
       - name: Record Linux artifact provenance
         env:
           SOURCE_COMMIT: ${{ github.sha }}
         run: |
           mkdir -p output/headless-network
           cp src-tauri/headless-network/target/release/myagents-host-network output/headless-network/
-          cp scripts/host/network-install.py scripts/host/network-control.py output/headless-network/
+          cp scripts/host/network-install.py scripts/host/network-control.py scripts/host/unified-install.py scripts/host/install.sh output/headless-network/
           cd output/headless-network
-          sha256sum myagents-host-network network-install.py network-control.py > SHA256SUMS
+          sha256sum myagents-host-network network-install.py network-control.py unified-install.py install.sh > SHA256SUMS
           cat SHA256SUMS
           printf '%s\n' "$SOURCE_COMMIT" > source-commit.txt
           ldd myagents-host-network > native-dependencies.txt
@@ -138,6 +139,64 @@ jobs:
         run: npm run build:assets
         env:
           MYAGENTS_BUILD_PROFILE: moxbot
+      - name: Cache integrity-pinned Host build resources
+        uses: actions/cache@v4
+        with:
+          path: output/host-ci/cache
+          key: host-linux-resources-${{ hashFiles('scripts/node-runtime.json', 'package-lock.json') }}
+      - name: Build Linux Host test artifact
+        run: |
+          npm run build:host
+          MYAGENTS_HOST_PROFILE=moxbot-test npm run build:host
+          printf '%s\n' "$SOURCE_COMMIT" > output/host-ci/source-commit.txt
+          python3 - <<'PY'
+          import json, os, tarfile
+          from pathlib import Path
+          root = Path('output/host-ci')
+          expected = {'myagents-host-test-*.tar.gz': 'myagents-test',
+                      'moxbot-host-test-*.tar.gz': 'moxbot-test'}
+          archives = []
+          for pattern, profile in expected.items():
+              matches = list(root.glob(pattern))
+              if len(matches) != 1:
+                  raise SystemExit(f'Expected exactly one {profile} Host archive')
+              archives.append((matches[0], profile))
+          if len(list(root.glob('install-*.sh'))) != 2:
+              raise SystemExit('Expected one pinned bootstrap for each Host profile')
+          expected_bootstraps = set()
+          for archive_path, profile in archives:
+              with tarfile.open(archive_path, 'r:gz') as archive:
+                  manifests = [m for m in archive.getmembers() if m.name.endswith('/manifest.json')]
+                  if len(manifests) != 1:
+                      raise SystemExit(f'{profile} Host artifact manifest missing or ambiguous')
+                  manifest = json.load(archive.extractfile(manifests[0]))
+              if manifest['profile'] != profile:
+                  raise SystemExit(f'{profile} Host artifact profile mismatch')
+              if manifest['sourceDirty'] or manifest['sourceCommit'] != os.environ['SOURCE_COMMIT']:
+                  raise SystemExit(f'{profile} Host artifact source provenance mismatch')
+              release_id = manifest['releaseId']
+              bootstrap_name = ('install-' if profile == 'myagents-test' else 'install-moxbot-') + release_id + '.sh'
+              expected_bootstraps.add(bootstrap_name)
+              bootstrap = (root / bootstrap_name).read_text()
+              if f"readonly PROFILE='{profile}'" not in bootstrap:
+                  raise SystemExit(f'{profile} Host bootstrap profile mismatch')
+          if {path.name for path in root.glob('install-*.sh')} != expected_bootstraps:
+              raise SystemExit('Host bootstrap names do not match their profile/release IDs')
+          PY
+        env:
+          MYAGENTS_HOST_OUTPUT: output/host-ci
+          SOURCE_COMMIT: ${{ github.sha }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: headless-host-linux
+          path: |
+            output/host-ci/myagents-host-test-*.tar.gz
+            output/host-ci/myagents-host-test-*.tar.gz.sha256
+            output/host-ci/moxbot-host-test-*.tar.gz
+            output/host-ci/moxbot-host-test-*.tar.gz.sha256
+            output/host-ci/install-*.sh
+            output/host-ci/source-commit.txt
+          if-no-files-found: error
 
   # Rust gate: cargo test plus project redline Clippy rules. We only deny
   # disallowed_methods/macros here; ordinary Clippy warnings stay non-fatal
@@ -325,3 +384,7 @@ jobs:
         run: |
           host=$(rustc -vV | sed -n 's/^host: //p')
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib 'cliproxy::' --config "target.$host.runner = ['env', 'DYLD_FALLBACK_LIBRARY_PATH=/usr/lib/swift']"
+      - name: Test bounded credential transport without accessing Keychain
+        run: |
+          cargo test --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store
+          cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store --all-targets -- -D warnings

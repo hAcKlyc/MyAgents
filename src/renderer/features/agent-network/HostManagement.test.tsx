@@ -397,12 +397,20 @@ describe("Host management UI v0 seam (isolated fixtures only)", () => {
     const adapter = fixture();
     await mount(adapter, true, true);
     adapter.read.mockResolvedValue(host({ initialization: "error" }));
-    fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
+      await adapter.read.mock.results.at(-1)?.value;
+    });
     expect(adapter.read).toHaveBeenCalledOnce();
-    await screen.findByRole("button", { name: /Host 管理\s*异常/ });
+    expect(
+      await screen.findByRole("button", { name: /Host 管理\s*异常/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "读取最新状态" })).toBeEnabled();
     adapter.read.mockResolvedValue(host({ permissions: [] }));
-    fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "读取最新状态" }));
+      await adapter.read.mock.results.at(-1)?.value;
+    });
     expect(
       await screen.findByText(/当前身份没有设备管理读取权限/),
     ).toBeInTheDocument();

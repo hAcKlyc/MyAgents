@@ -1,11 +1,11 @@
-import { generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  commandHash, intentHash, type Command, type ExecutionScope, type Grant,
+  canonicalBytes, commandHash, intentHash, type Command, type ExecutionScope, type Grant,
   type BotSnapshot, type HostContext, type IntentClaims, type LeaseClaims, type RevocationClaims, type Receipt,
   MAX_JWT_BYTES,
 } from '../../services/agentnet/execution-core/js/index.mjs';
@@ -233,7 +233,8 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       expect(await manager.ackReceipt('50000000-0000-4000-8000-000000000011',queuedMutation.command.mutation_id,queuedMutation.command.request_hash))
         .toEqual({lease_id:'50000000-0000-4000-8000-000000000011'});
       expect(await manager.pendingReceipts()).toEqual([]);
-      const stored=loadConfig({strict:true}).hostBotDelegationsV1 as {mutations:Array<{command:Command;lease_acks:Array<{lease_id:string;acknowledged:boolean}>}>};
+      const stored=loadConfig({strict:true}).hostBotDelegationsV1 as {mutations:Array<{command:Command;
+        lease_acks:Array<{lease_id:string;acknowledged:boolean;policy_fingerprint?:string}>}>};
       expect(stored.mutations.find(item=>item.command.mutation_id===oldMutation.command.mutation_id)?.lease_acks)
         .toEqual([{lease_id:'50000000-0000-4000-8000-000000000010',acknowledged:false}]);
       expect(stored.mutations.find(item=>item.command.mutation_id===uncertainMutation.command.mutation_id)?.lease_acks)
@@ -320,6 +321,8 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       const localPolicy={host_id:hostId,owner_principal_id:principal,scope,allowed_bot_ids:[botId],allowed_root_ids:['bots'],
         allowed_runtimes:['builtin'],allowed_model_refs:[modelRef],allowed_operations:['create','configure','enable','disable','delete','restore'],
         max_daily_tokens:1000,expires_at:now+2_000};
+      const expectedAuthorityFingerprint=createHash('sha256').update(canonicalBytes({host_id:hostId,scope,
+        roots:{bots:realpathSync(root)},jwks,local_policy:localPolicy})).digest('hex');
       let currentHostContext:HostContext|undefined=context;
       const options={hostId,roots:{bots:root},jwks,scope,currentHostContext:()=>currentHostContext,now:()=>nowSeconds,localPolicy};
       const grantValue:Grant={...grant(),bot_id:botId,allowed_model_refs:[modelRef]};
@@ -372,9 +375,14 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       } finally {
         dateNowSpy.mockRestore();
       }
-      const savedAfterAcks=loadConfig({strict:true}).hostBotDelegationsV1 as {mutations:Array<{receipt:Receipt;lease_acks:Array<{lease_id:string;acknowledged:boolean}>}>};
-      expect(savedAfterAcks.mutations.find(item=>item.receipt.mutation_id===createCommand.mutation_id)?.lease_acks)
-        .toEqual([{lease_id:lease.lease_id,acknowledged:true},{lease_id:secondLease.lease_id,acknowledged:true}]);
+      const savedAfterAcks=loadConfig({strict:true}).hostBotDelegationsV1 as {mutations:Array<{receipt:Receipt;
+        lease_acks:Array<{lease_id:string;acknowledged:boolean;policy_fingerprint:string}>}>};
+      const acknowledgedLeaseAcks=savedAfterAcks.mutations.find(item=>item.receipt.mutation_id===createCommand.mutation_id)?.lease_acks;
+      expect(acknowledgedLeaseAcks).toEqual([
+        {lease_id:lease.lease_id,acknowledged:true,policy_fingerprint:expectedAuthorityFingerprint},
+        {lease_id:secondLease.lease_id,acknowledged:true,policy_fingerprint:expectedAuthorityFingerprint},
+      ]);
+      expect(new Set(acknowledgedLeaseAcks?.map(item=>item.policy_fingerprint)).size).toBe(1);
 
       const signCommand=(value:Command, commandGrant:Grant=grantValue)=>{
         value.request_hash=commandHash(value);
