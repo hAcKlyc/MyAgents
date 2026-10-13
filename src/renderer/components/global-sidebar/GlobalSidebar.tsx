@@ -1,3 +1,38 @@
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  pointerWithin,
+  type CollisionDetection,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import {
+  createSidebarSection,
+  renameSidebarSection,
+  toggleSidebarSection,
+  removeSidebarSection,
+  reorderSidebarSections,
+  moveSidebarItem,
+  orderSidebarItems,
+  type SidebarOrganization,
+} from '@/utils/sidebarOrganization';
+import {
+  SidebarContainer,
+  SortableSidebarRow,
+  SidebarSectionHeader,
+  SidebarOrganizationDialog,
+  SidebarMoveMenuItem,
+  type OrganizationDialogState,
+} from './SidebarOrganizationControls';
 import { selectUsableAgentWorkspaceRecords } from '../../../shared/agentWorkspaceIdentity';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import {
@@ -543,14 +578,19 @@ export default memo(function GlobalSidebar({
   childLayerOpenRef.current = childLayerOpen;
   const previousChildLayerOpenRef = useRef(childLayerOpen);
 
-  const updatePreference = useCallback((update: (current: GlobalSidebarPreferenceV1) => GlobalSidebarPreferenceV1) => {
+  const updatePreference = useCallback((update: (current: GlobalSidebarPreferenceV1) => GlobalSidebarPreferenceV1, onSaved?: (saved: boolean) => void) => {
     setPreference((current) => {
       const next = update(current);
-      if (next === current) return current;
-      if (typeof window !== 'undefined') saveGlobalSidebarPreference(window.localStorage, next);
+      if (next === current) { onSaved?.(true); return current; }
+      if (typeof window !== 'undefined' && !saveGlobalSidebarPreference(window.localStorage, next)) {
+        toastRef.current.warning(t('globalSidebar.saveOrganizationFailed'));
+        onSaved?.(false);
+        return current;
+      }
+      onSaved?.(true);
       return next;
     });
-  }, []);
+  }, [t]);
 
   const sortedProjects = useMemo(
     () => sortLauncherProjects(selectUsableAgentWorkspaceRecords(projects, []).projects.filter(isProjectVisibleToUser)),
@@ -568,10 +608,12 @@ export default memo(function GlobalSidebar({
   );
   const expandedWorkspacePaths = useMemo(() => {
     const expandedKeys = new Set(preference.expandedWorkspaceKeys);
+    // Section Sessions remain discoverable even when their original Agent is collapsed.
+    const hasSectionSessions = Object.keys(preference.organization.placements).some((id) => id.startsWith('session:'));
     return (preference.sessionView === 'archived' ? sortedProjects : activeProjects)
-      .filter((project) => expandedKeys.has(normalizeWorkspacePathIdentity(project.path)))
+      .filter((project) => hasSectionSessions || expandedKeys.has(normalizeWorkspacePathIdentity(project.path)))
       .map((project) => project.path);
-  }, [activeProjects, sortedProjects, preference.expandedWorkspaceKeys, preference.sessionView]);
+  }, [activeProjects, sortedProjects, preference.expandedWorkspaceKeys, preference.sessionView, preference.organization]);
   const taskCenterData = useGlobalSidebarTaskCenterData(expandedWorkspacePaths, searchOpen);
 
   useEffect(() => {
@@ -1045,6 +1087,8 @@ export default memo(function GlobalSidebar({
     && navigator.platform.toLowerCase().includes('win');
   const tree = (
     <WorkspaceTree
+      organization={preference.organization}
+      onUpdateOrganization={(update) => new Promise<boolean>((resolve) => updatePreference((current) => ({ ...current, organization: update(current.organization) }), resolve))}
       fadeBottom={expanded}
       projects={activeProjects}
       archivedProjects={archivedProjects}
@@ -1533,6 +1577,8 @@ export default memo(function GlobalSidebar({
 });
 
 interface WorkspaceTreeProps {
+  organization: SidebarOrganization;
+  onUpdateOrganization: (update: (current: SidebarOrganization) => SidebarOrganization) => Promise<boolean>;
   fadeBottom: boolean;
   projects: Project[];
   archivedProjects: Project[];
@@ -1642,6 +1688,8 @@ function WorkspaceSessionBranch({
 }
 
 function WorkspaceTree({
+  organization,
+  onUpdateOrganization,
   fadeBottom,
   projects,
   archivedProjects,
@@ -1683,10 +1731,32 @@ function WorkspaceTree({
 }: WorkspaceTreeProps) {
   const { t } = useTranslation('app');
   const { t: tLauncher } = useTranslation('launcher');
-  const expandedSet = useMemo(() => new Set(expandedWorkspaceKeys), [expandedWorkspaceKeys]);
+  const expandedSet = useMemo(
+    () => new Set(expandedWorkspaceKeys),
+    [expandedWorkspaceKeys],
+  );
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLButtonElement | null>(null);
   const workspaceRefs = useRef(new Map<string, HTMLDivElement>());
+  const [organizationDialog, setOrganizationDialog] =
+    useState<OrganizationDialogState | null>(null);
+  const [dragLabel, setDragLabel] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const organizing = sessionView !== 'archived';
+  useEffect(() => {
+    onNestedInteractionChange(
+      'organization-dialog',
+      organizationDialog !== null,
+    );
+  }, [organizationDialog, onNestedInteractionChange]);
+  useNestedInteractionCleanup((open) =>
+    onNestedInteractionChange('organization-dialog', open),
+  );
 
   const sessionsByWorkspace = useMemo(() => {
     const map = new Map<string, SessionMetadata[]>();
@@ -1721,7 +1791,8 @@ function WorkspaceTree({
   const activeWorkspaceKey = activeWorkspacePath
     ? normalizeWorkspacePathIdentity(activeWorkspacePath)
     : null;
-  const activeSessionId = activeTab?.view === 'chat' ? activeTab.sessionId : null;
+  const activeSessionId =
+    activeTab?.view === 'chat' ? activeTab.sessionId : null;
 
   useEffect(() => {
     if (!activeWorkspaceKey) return;
@@ -1733,23 +1804,393 @@ function WorkspaceTree({
 
   useEffect(() => {
     if (!recentlyCreatedWorkspaceKey) return;
-    const workspaceNode = workspaceRefs.current.get(recentlyCreatedWorkspaceKey);
+    const workspaceNode = workspaceRefs.current.get(
+      recentlyCreatedWorkspaceKey,
+    );
     if (typeof workspaceNode?.scrollIntoView === 'function') {
       workspaceNode.scrollIntoView({ block: 'nearest' });
     }
   }, [recentlyCreatedWorkspaceKey]);
 
-  const setViewMenu = useCallback((open: boolean) => {
+  const setViewMenu = useCallback(
+    (open: boolean) => {
     setViewMenuOpen(open);
     onNestedInteractionChange('view-options', open);
-  }, [onNestedInteractionChange]);
-  useNestedInteractionCleanup((open) => onNestedInteractionChange('view-options', open));
+  },
+    [onNestedInteractionChange],
+  );
+  useNestedInteractionCleanup((open) =>
+    onNestedInteractionChange('view-options', open),
+  );
 
+  const renderSession = (
+    session: SessionMetadata,
+    project: Project,
+    container: string,
+  ) => (
+    <SortableSidebarRow
+      key={session.id}
+      id={`session:${session.id}`}
+      container={container}
+      label={getSessionDisplayText(session)}
+      disabled={!organizing}
+    >
+      <SessionRow
+        organizationMenu={
+          organizing ? (
+            <SidebarMoveMenuItem
+              onClick={() => {
+                setOrganizationDialog({
+                  kind: 'move',
+                  itemId: `session:${session.id}`,
+                  name: getSessionDisplayText(session),
+                  container,
+                  defaultContainer: `workspace:${project.id}`,
+                  origin:
+                    document.activeElement instanceof HTMLElement
+                      ? document.activeElement
+                      : null,
+                });
+              }}
+            />
+          ) : undefined
+        }
+        session={session}
+        project={project}
+        tab={tabBySession.get(session.id)}
+        active={
+          activeTab?.view === 'chat' && activeTab.sessionId === session.id
+        }
+        tags={taskCenterData.sessionTagsMap.get(session.id) ?? EMPTY_TAGS}
+        unreadNotificationCount={
+          sessionNotificationBadgeCounts?.get(session.id) ?? 0
+        }
+        deleteProtected={taskCenterData.deleteProtectedSessionIds.has(
+          session.id,
+        )}
+        onOpen={() => onOpenSession(session, project)}
+        onToggleFavorite={() => onToggleFavorite(session)}
+        onTogglePin={() => onToggleSessionPin(session)}
+        onArchiveChanged={() => viewMenuRef.current?.focus()}
+        onRefreshSessions={taskCenterData.actions.refreshSessions}
+        onRenameSession={onRenameSession}
+        onCopySessionId={() => onCopySessionId(session)}
+        onShowStats={(origin) => onShowStats(session, origin)}
+        onDelete={(origin) => onDeleteSession(session, origin)}
+        onSessionMutationStart={
+          taskCenterData.actions.beginSessionMetadataMutation
+        }
+        onSessionUpdated={taskCenterData.actions.applySessionMetadata}
+        onGlobalTagChange={taskCenterData.actions.refreshSessions}
+        onMenuOpenChange={(open) =>
+          onNestedInteractionChange(`session:${session.id}`, open)
+        }
+      />
+    </SortableSidebarRow>
+  );
+  const renderWorkspace = (
+    project: Project,
+    index: number,
+    container: string,
+  ) => {
+    const key = normalizeWorkspacePathIdentity(project.path);
+    const sessions = orderSidebarItems(
+      (sessionsByWorkspace.get(key) ?? []).filter(
+        (session) =>
+          !organizing || !organization.placements[`session:${session.id}`],
+      ),
+      (session) => `session:${session.id}`,
+      organizing ? organization.orders[`workspace:${project.id}`] : undefined,
+    );
+    const limit = sessionLimits[key] ?? SESSION_PAGE_SIZE;
+    const workspaceSessionState =
+      taskCenterData.workspaceSessionStates.get(key);
+    const isActiveWorkspaceContext = activeWorkspaceKey === key;
+    return (
+      <SortableSidebarRow
+        key={project.id}
+        id={`workspace:${project.id}`}
+        container={container}
+        label={project.displayName || project.name}
+        disabled={!organizing}
+      >
+        <div
+          ref={(node) => {
+                    if (node) workspaceRefs.current.set(key, node);
+                    else workspaceRefs.current.delete(key);
+                  }}
+        >
+          <WorkspaceRow
+            onMove={
+              organizing
+                ? (origin) =>
+                    setOrganizationDialog({
+                      kind: 'move',
+                      itemId: `workspace:${project.id}`,
+                      name: project.displayName || project.name,
+                      container,
+                      defaultContainer: 'root',
+                      origin,
+                    })
+                : undefined
+            }
+            project={project}
+            expanded={expandedSet.has(key)}
+            active={isActiveWorkspaceContext && !activeSessionId}
+            recentlyCreated={recentlyCreatedWorkspaceKey === key}
+            actionTipPosition={index === 0 ? 'bottom' : 'top'}
+            onToggle={() => onToggleWorkspace(project)}
+            onOpenWorkspace={() => onOpenWorkspace(project)}
+            onTogglePin={() => onTogglePin(project)}
+            onAgentSettings={(origin) => onAgentSettings(project, origin)}
+            onArchive={() => isProjectArchived(project) ? onUnarchive(project) : onArchive(project)}
+            onOpenFolder={() => onOpenFolder(project)}
+            onRemove={(origin) => onRemove(project, origin)}
+            onMenuOpenChange={(open) =>
+              onNestedInteractionChange(`workspace:${project.id}`, open)
+            }
+          />
+          <WorkspaceSessionBranch expanded={expandedSet.has(key)}>
+            <SidebarContainer id={`workspace:${project.id}`}>
+              <SortableContext
+                items={sessions.map((session) => `session:${session.id}`)}
+                strategy={verticalListSortingStrategy}
+              >
+                {workspaceSessionState?.isLoading && sessions.length === 0 ? (
+                        <div className="space-y-1 py-1" data-global-sidebar-session-placeholder>
+                          {[0, 1, 2].map((item) => (
+                            <div key={item} className="h-8" aria-hidden="true" />
+                          ))}
+                        </div>
+                      ) : (
+                  <>
+                    {workspaceSessionState?.error && (
+                            <div className="my-1 rounded-lg border border-dashed border-[var(--line)] px-3 py-2">
+                              <div className="flex items-center gap-2 text-xs text-[var(--warning)]">
+                                <AlertIcon className="h-3.5 w-3.5" />
+                                <span className="min-w-0 flex-1 truncate">{workspaceSessionState.error}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => ensureWorkspaceSessions([project.path], true)}
+                                  className="rounded-md p-1 hover:bg-[var(--paper-inset)]"
+                                  aria-label={tLauncher('rightRail.retry')}
+                                >
+                                  <RefreshIcon className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                    {sessions.length === 0 && !workspaceSessionState?.error ? (
+                            <p className="px-3 py-2 text-xs text-[var(--ink-muted)]/70">
+                              {sessionView === 'favorites'
+                                ? tLauncher('rightRail.emptyFavorites')
+                                : sessionView === 'archived'
+                                  ? tLauncher('rightRail.emptyArchived')
+                                  : t('globalSidebar.emptyWorkspaceSessions')}
+                            </p>
+                          ) : (
+                      sessions
+                        .slice(0, limit)
+                        .map((session) =>
+                          renderSession(
+                            session,
+                            project,
+                            `workspace:${project.id}`,
+                          ),
+                        )
+                    )}
+                    {limit < sessions.length && (
+                            <button
+                              type="button"
+                              onClick={() => onLoadMore(project, sessions.length)}
+                              className="flex h-8 w-full items-center gap-2 rounded-lg pl-3 pr-3 text-xs font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)]"
+                            >
+                              <ChevronDownIcon className="h-3.5 w-3.5" />
+                              {t('globalSidebar.loadMore')}
+                            </button>
+                          )}
+                  </>
+                )}
+              </SortableContext>
+            </SidebarContainer>
+          </WorkspaceSessionBranch>
+        </div>
+      </SortableSidebarRow>
+    );
+  };
+  const displayedProjects =
+    sessionView === 'archived' ? [...projects, ...archivedProjects] : projects;
+  const rootProjects = orderSidebarItems(
+    displayedProjects.filter(
+      (project) =>
+        !organizing || !organization.placements[`workspace:${project.id}`],
+    ),
+    (project) => `workspace:${project.id}`,
+    organizing ? organization.orders.root : undefined,
+  );
+  type SectionEntry = {
+    id: string;
+    project: Project;
+    session?: SessionMetadata;
+  };
+  const sectionEntries = (sectionId: string): SectionEntry[] => {
+    const entries: SectionEntry[] = [];
+    for (const project of projects) {
+      const workspaceId = `workspace:${project.id}`;
+      if (organization.placements[workspaceId] === sectionId)
+        entries.push({ id: workspaceId, project });
+      for (const session of sessionsByWorkspace.get(
+        normalizeWorkspacePathIdentity(project.path),
+      ) ?? []) {
+        const id = `session:${session.id}`;
+        if (organization.placements[id] === sectionId)
+          entries.push({ id, project, session });
+      }
+    }
+    return orderSidebarItems(
+      entries,
+      (entry) => entry.id,
+      organization.orders[sectionId],
+    );
+  };
+  const containerItems = (container: string): string[] => {
+    if (container === 'root')
+      return rootProjects.map((project) => `workspace:${project.id}`);
+    if (container.startsWith('workspace:')) {
+      const project = projects.find(
+        (candidate) => `workspace:${candidate.id}` === container,
+      );
+      if (!project) return [];
+      return orderSidebarItems(
+        (
+          sessionsByWorkspace.get(
+            normalizeWorkspacePathIdentity(project.path),
+          ) ?? []
+        ).filter(
+          (session) => !organization.placements[`session:${session.id}`],
+        ),
+        (session) => `session:${session.id}`,
+        organization.orders[container],
+      ).map((session) => `session:${session.id}`);
+    }
+    return sectionEntries(container).map((entry) => entry.id);
+  };
+  const moveItem = (itemId: string, container: string, beforeId?: string) => {
+    return onUpdateOrganization((current) =>
+      moveSidebarItem(
+        current,
+        itemId,
+        container,
+        containerItems(container),
+        beforeId,
+      ),
+    );
+  };
+  // Nested branches have larger rectangles than their resource rows. Hit-test
+  // workspace headers at row height, then prefer the smallest row under the
+  // pointer over enclosing root/section containers. Never snap an outside drop.
+  const sidebarCollision: CollisionDetection = (args) => {
+    const draggingSection = args.active.data.current?.kind === 'section';
+    const itemId = String(args.active.id);
+    const session = itemId.startsWith('session:') ? taskCenterData.sessions.find((candidate) => `session:${candidate.id}` === itemId) : undefined;
+    const homeProject = session ? projects.find((candidate) => workspacePathsEqual(candidate.path, session.agentDir)) : undefined;
+    const homeContainer = homeProject ? `workspace:${homeProject.id}` : undefined;
+    if (session && args.pointerCoordinates) {
+      const point = args.pointerCoordinates;
+      const foreignHeader = args.droppableContainers.some((candidate) => {
+        if (!String(candidate.id).startsWith('workspace:') || candidate.id === homeContainer) return false;
+        const rect = args.droppableRects.get(candidate.id);
+        return rect && point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.top + 32;
+      });
+      if (foreignHeader) return [];
+    }
+    const containers = args.droppableContainers.filter((candidate) => {
+      if (candidate.id === args.active.id) return false;
+      const data = candidate.data.current;
+      if (draggingSection) return data?.kind === 'section';
+      if (typeof data?.container !== 'string') return false;
+      if (data.container.startsWith('workspace:')) return homeContainer === data.container;
+      if (session && String(candidate.id).startsWith('workspace:')) return candidate.id === homeContainer;
+      return true;
+    });
+    const rects = new Map(args.droppableRects);
+    for (const candidate of containers) {
+      const rect = rects.get(candidate.id);
+      if (rect && String(candidate.id).startsWith('workspace:')) rects.set(candidate.id, { ...rect, height: 32, bottom: rect.top + 32 });
+    }
+    const input = { ...args, droppableContainers: containers, droppableRects: rects };
+    if (!args.pointerCoordinates) {
+      const rows = containers.filter((candidate) => candidate.data.current?.kind !== 'container');
+      return closestCenter({ ...input, droppableContainers: rows.length ? rows : containers });
+    }
+    return pointerWithin(input).sort((a, b) => {
+      const aKind = containers.find((candidate) => candidate.id === a.id)?.data.current?.kind;
+      const bKind = containers.find((candidate) => candidate.id === b.id)?.data.current?.kind;
+      if ((aKind === 'container') !== (bKind === 'container')) return aKind === 'container' ? 1 : -1;
+      const aRect = rects.get(a.id), bRect = rects.get(b.id);
+      return (aRect ? aRect.width * aRect.height : Infinity) - (bRect ? bRect.width * bRect.height : Infinity);
+    });
+  };
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragLabel(null);
+    if (!over || !organizing || active.id === over.id) return;
+    if (active.data.current?.kind === 'section') {
+      const target = over.data.current?.container;
+      if (typeof target === 'string')
+        onUpdateOrganization((current) =>
+          reorderSidebarSections(
+            current,
+            String(active.data.current?.container),
+            target,
+          ),
+        );
+      return;
+    }
+    const itemId = String(active.id);
+    let container = over.data.current?.container;
+    if (typeof container !== 'string') return;
+    let beforeId =
+      over.data.current?.kind === 'item' ? String(over.id) : undefined;
+    if (itemId.startsWith('session:')) {
+      const session = taskCenterData.sessions.find(
+        (candidate) => `session:${candidate.id}` === itemId,
+      );
+      const project =
+        session &&
+        projects.find((candidate) =>
+          workspacePathsEqual(candidate.path, session.agentDir),
+        );
+      if (!project) return;
+      const ownContainer = `workspace:${project.id}`;
+      if (over.id === ownContainer || container === 'root') {
+        container = ownContainer;
+        beforeId = undefined;
+      }
+      if (container.startsWith('workspace:') && container !== ownContainer)
+        return;
+    } else if (container.startsWith('workspace:')) return;
+    if (beforeId && active.data.current?.container === container) {
+      const ids = containerItems(container);
+      const from = ids.indexOf(itemId), to = ids.indexOf(beforeId);
+      if (from >= 0 && to > from) beforeId = ids[to + 1];
+    }
+    moveItem(itemId, container, beforeId);
+  };
+  const closeOrganizationDialog = () => {
+    const origin = organizationDialog?.origin;
+    setOrganizationDialog(null);
+    requestAnimationFrame(() => {
+      if (origin?.isConnected) origin.focus();
+      else viewMenuRef.current?.focus();
+    });
+  };
   return (
     <section className="relative flex h-full min-h-0 flex-col" aria-label={t('globalSidebar.workspaces')}>
       <div className="flex h-8 shrink-0 items-center gap-1 pl-6 pr-[var(--global-sidebar-action-inset)]">
         <h2 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
-          {t(sessionView === 'archived' ? 'globalSidebar.archivedSessions' : 'globalSidebar.workspaceSection')}
+          {t(
+            sessionView === 'archived' ? 'globalSidebar.archivedSessions' : 'globalSidebar.workspaceSection',
+          )}
         </h2>
         <Tip label={tLauncher('workspaceCard.more')} position="bottom" align="end" disabled={viewMenuOpen}>
           <button
@@ -1770,29 +2211,78 @@ function WorkspaceTree({
           className="global-sidebar-nested-layer w-56 py-1"
         >
           <MenuItem
-            icon={sessionView === 'all' ? <CheckIcon className="h-3.5 w-3.5" /> : <GridIcon className="h-3.5 w-3.5" />}
+            icon={<PlusIcon className="h-3.5 w-3.5" />}
+            label={t('globalSidebar.createSection')}
+            disabled={!organizing || organization.sections.length >= 50}
+            onClick={() => {
+              setViewMenu(false);
+              setOrganizationDialog({
+                kind: 'create',
+                name: '',
+                origin: viewMenuRef.current,
+              });
+            }}
+          />
+          <MenuItem
+            icon={
+              sessionView === 'all' ? (
+                <CheckIcon className="h-3.5 w-3.5" />
+              ) : (
+                <GridIcon className="h-3.5 w-3.5" />
+              )
+            }
             label={t('globalSidebar.allSessions')}
             active={sessionView === 'all'}
-            onClick={() => { onSetSessionView('all'); setViewMenu(false); }}
+            onClick={() => {
+              onSetSessionView('all');
+              setViewMenu(false);
+            }}
           />
           <MenuItem
-            icon={sessionView === 'favorites' ? <CheckIcon className="h-3.5 w-3.5" /> : <StarIcon className="h-3.5 w-3.5" />}
+            icon={
+              sessionView === 'favorites' ? (
+                <CheckIcon className="h-3.5 w-3.5" />
+              ) : (
+                <StarIcon className="h-3.5 w-3.5" />
+              )
+            }
             label={t('globalSidebar.favoriteSessions')}
             active={sessionView === 'favorites'}
-            onClick={() => { onSetSessionView('favorites'); setViewMenu(false); }}
+            onClick={() => {
+              onSetSessionView('favorites');
+              setViewMenu(false);
+            }}
           />
           <MenuItem
-            icon={sessionView === 'archived' ? <CheckIcon className="h-3.5 w-3.5" /> : <ArchiveIcon className="h-3.5 w-3.5" />}
+            icon={
+              sessionView === 'archived' ? (
+                <CheckIcon className="h-3.5 w-3.5" />
+              ) : (
+                <ArchiveIcon className="h-3.5 w-3.5" />
+              )
+            }
             label={t('globalSidebar.archivedSessions')}
             active={sessionView === 'archived'}
-            onClick={() => { onSetSessionView('archived'); setViewMenu(false); }}
+            onClick={() => {
+              onSetSessionView('archived');
+              setViewMenu(false);
+            }}
           />
           <MenuItem
-            icon={showAutomationSessions ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeOffIcon className="h-3.5 w-3.5" />}
+            icon={
+              showAutomationSessions ? (
+                <EyeIcon className="h-3.5 w-3.5" />
+              ) : (
+                <EyeOffIcon className="h-3.5 w-3.5" />
+              )
+            }
             label={showAutomationSessions
               ? t('globalSidebar.hideAutomationHistory')
               : t('globalSidebar.showAutomationHistory')}
-            onClick={() => { onToggleAutomation(); setViewMenu(false); }}
+            onClick={() => {
+              onToggleAutomation();
+              setViewMenu(false);
+            }}
           />
         </Popover>
         <Tip label={tLauncher('newAgentPanel.title')} position="bottom" align="end">
@@ -1842,7 +2332,7 @@ function WorkspaceTree({
               </button>
             </div>
           </div>
-        ) : projects.length === 0 && archivedProjects.length === 0 ? (
+        ) : projects.length === 0 && archivedProjects.length === 0 && (!organizing || organization.sections.length === 0) ? (
           <div className="px-3 py-8 text-center">
             <p className="text-sm font-medium text-[var(--ink)]">{tLauncher('rightRail.emptyWorkspaceTitle')}</p>
             <p className="mt-1 text-xs text-[var(--ink-muted)]">{tLauncher('rightRail.emptyWorkspaceDescription')}</p>
@@ -1857,109 +2347,111 @@ function WorkspaceTree({
           </div>
         ) : (
           <div data-global-sidebar-workspace-list>
-            {(sessionView === 'archived' ? [...projects, ...archivedProjects] : projects).map((project, index) => {
-              const key = normalizeWorkspacePathIdentity(project.path);
-              const sessions = sessionsByWorkspace.get(key) ?? [];
-              const limit = sessionLimits[key] ?? SESSION_PAGE_SIZE;
-              const workspaceSessionState = taskCenterData.workspaceSessionStates.get(key);
-              const isActiveWorkspaceContext = activeWorkspaceKey === key;
-              return (
-                <div
-                  key={project.id}
-                  ref={(node) => {
-                    if (node) workspaceRefs.current.set(key, node);
-                    else workspaceRefs.current.delete(key);
-                  }}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={sidebarCollision}
+              onDragStart={({ active }) =>
+                setDragLabel(String(active.data.current?.label ?? ''))
+              }
+              onDragCancel={() => setDragLabel(null)}
+              onDragEnd={handleDragEnd}
+            >
+              <SidebarContainer id="root">
+                {organizing && organization.sections.length > 0 && (
+                  <p className="px-4 py-1 text-xs text-[var(--ink-muted)]">
+                    {t('globalSidebar.unsectioned')}
+                  </p>
+                )}
+                <SortableContext
+                  items={rootProjects.map(
+                    (project) => `workspace:${project.id}`,
+                  )}
+                  strategy={verticalListSortingStrategy}
                 >
-                  <WorkspaceRow
-                    project={project}
-                    expanded={expandedSet.has(key)}
-                    active={isActiveWorkspaceContext && !activeSessionId}
-                    recentlyCreated={recentlyCreatedWorkspaceKey === key}
-                    actionTipPosition={index === 0 ? 'bottom' : 'top'}
-                    onToggle={() => onToggleWorkspace(project)}
-                    onOpenWorkspace={() => onOpenWorkspace(project)}
-                    onTogglePin={() => onTogglePin(project)}
-                    onAgentSettings={(origin) => onAgentSettings(project, origin)}
-                    onArchive={() => isProjectArchived(project) ? onUnarchive(project) : onArchive(project)}
-                    onOpenFolder={() => onOpenFolder(project)}
-                    onRemove={(origin) => onRemove(project, origin)}
-                    onMenuOpenChange={(open) => onNestedInteractionChange(`workspace:${project.id}`, open)}
-                  />
-                  <WorkspaceSessionBranch expanded={expandedSet.has(key)}>
-                      {workspaceSessionState?.isLoading && sessions.length === 0 ? (
-                        <div className="space-y-1 py-1" data-global-sidebar-session-placeholder>
-                          {[0, 1, 2].map((item) => (
-                            <div key={item} className="h-8" aria-hidden="true" />
-                          ))}
-                        </div>
-                      ) : (
-                        <>
-                          {workspaceSessionState?.error && (
-                            <div className="my-1 rounded-lg border border-dashed border-[var(--line)] px-3 py-2">
-                              <div className="flex items-center gap-2 text-xs text-[var(--warning)]">
-                                <AlertIcon className="h-3.5 w-3.5" />
-                                <span className="min-w-0 flex-1 truncate">{workspaceSessionState.error}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => ensureWorkspaceSessions([project.path], true)}
-                                  className="rounded-md p-1 hover:bg-[var(--paper-inset)]"
-                                  aria-label={tLauncher('rightRail.retry')}
-                                >
-                                  <RefreshIcon className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          {sessions.length === 0 && !workspaceSessionState?.error ? (
-                            <p className="px-3 py-2 text-xs text-[var(--ink-muted)]/70">
-                              {sessionView === 'favorites'
-                                ? tLauncher('rightRail.emptyFavorites')
-                                : sessionView === 'archived'
-                                  ? tLauncher('rightRail.emptyArchived')
-                                  : t('globalSidebar.emptyWorkspaceSessions')}
-                            </p>
-                          ) : sessions.slice(0, limit).map((session) => (
-                            <SessionRow
-                              key={session.id}
-                              session={session}
-                              project={project}
-                              tab={tabBySession.get(session.id)}
-                              active={activeTab?.view === 'chat' && activeTab.sessionId === session.id}
-                              tags={taskCenterData.sessionTagsMap.get(session.id) ?? EMPTY_TAGS}
-                              unreadNotificationCount={sessionNotificationBadgeCounts?.get(session.id) ?? 0}
-                              deleteProtected={taskCenterData.deleteProtectedSessionIds.has(session.id)}
-                              onOpen={() => onOpenSession(session, project)}
-                              onToggleFavorite={() => onToggleFavorite(session)}
-                              onTogglePin={() => onToggleSessionPin(session)}
-                              onArchiveChanged={() => viewMenuRef.current?.focus()}
-                              onRefreshSessions={taskCenterData.actions.refreshSessions}
-                              onRenameSession={onRenameSession}
-                              onCopySessionId={() => onCopySessionId(session)}
-                              onShowStats={(origin) => onShowStats(session, origin)}
-                              onDelete={(origin) => onDeleteSession(session, origin)}
-                              onSessionMutationStart={taskCenterData.actions.beginSessionMetadataMutation}
-                              onSessionUpdated={taskCenterData.actions.applySessionMetadata}
-                              onGlobalTagChange={taskCenterData.actions.refreshSessions}
-                              onMenuOpenChange={(open) => onNestedInteractionChange(`session:${session.id}`, open)}
-                            />
-                          ))}
-                          {limit < sessions.length && (
-                            <button
-                              type="button"
-                              onClick={() => onLoadMore(project, sessions.length)}
-                              className="flex h-8 w-full items-center gap-2 rounded-lg pl-3 pr-3 text-xs font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)]"
+                  {rootProjects.map((project, index) =>
+                    renderWorkspace(project, index, 'root'),
+                  )}
+                </SortableContext>
+              </SidebarContainer>
+              {organizing && (
+                <SortableContext
+                  items={organization.sections.map(
+                    (section) => `section-drag:${section.id}`,
+                  )}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {organization.sections.map((section) => {
+                    const entries = sectionEntries(section.id);
+                    return (
+                      <SidebarContainer key={section.id} id={section.id}>
+                        <div className="pt-2">
+                          <SidebarSectionHeader
+                            section={section}
+                            onToggle={() =>
+                              onUpdateOrganization((current) =>
+                                toggleSidebarSection(current, section.id),
+                              )
+                            }
+                            onRename={(origin) =>
+                              setOrganizationDialog({
+                                kind: 'rename',
+                                sectionId: section.id,
+                                name: section.name,
+                                origin,
+                              })
+                            }
+                            onDelete={() =>
+                              onUpdateOrganization((current) =>
+                                removeSidebarSection(current, section.id),
+                              )
+                            }
+                            onMenuChange={(open) =>
+                              onNestedInteractionChange(
+                                `section:${section.id}`,
+                                open,
+                              )
+                            }
+                          />
+                          {!section.collapsed && (
+                            <SortableContext
+                              items={entries.map((entry) => entry.id)}
+                              strategy={verticalListSortingStrategy}
                             >
-                              <ChevronDownIcon className="h-3.5 w-3.5" />
-                              {t('globalSidebar.loadMore')}
-                            </button>
+                              {entries.length === 0 ? (
+                                <p className="px-5 py-2 text-xs text-[var(--ink-muted)]">
+                                  {t('globalSidebar.emptySection')}
+                                </p>
+                              ) : (
+                                entries.map((entry, index) =>
+                                  entry.session
+                                    ? renderSession(
+                                        entry.session,
+                                        entry.project,
+                                        section.id,
+                                      )
+                                    : renderWorkspace(
+                                        entry.project,
+                                        index,
+                                        section.id,
+                                      ),
+                                )
+                              )}
+                            </SortableContext>
                           )}
-                        </>
-                      )}
-                  </WorkspaceSessionBranch>
-                </div>
-              );
-            })}
+                        </div>
+                      </SidebarContainer>
+                    );
+                  })}
+                </SortableContext>
+              )}
+              <DragOverlay>
+                {dragLabel !== null && (
+                  <div className="max-w-64 truncate rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-4 py-2 text-sm text-[var(--ink)] shadow-lg">
+                    {dragLabel}
+                  </div>
+                )}
+              </DragOverlay>
+            </DndContext>
 
             {sessionView !== 'archived' && archivedProjects.length > 0 && (
               <div className="pt-2">
@@ -1983,10 +2475,17 @@ function WorkspaceTree({
                         key={project.id}
                         project={project}
                         onUnarchive={() => onUnarchive(project)}
-                        onAgentSettings={(origin) => onAgentSettings(project, origin)}
+                        onAgentSettings={(origin) =>
+                          onAgentSettings(project, origin)
+                        }
                         onOpenFolder={() => onOpenFolder(project)}
                         onRemove={(origin) => onRemove(project, origin)}
-                        onMenuOpenChange={(open) => onNestedInteractionChange(`archived:${project.id}`, open)}
+                        onMenuOpenChange={(open) =>
+                          onNestedInteractionChange(
+                            `archived:${project.id}`,
+                            open,
+                          )
+                        }
                       />
                     ))}
                   </div>
@@ -1996,11 +2495,31 @@ function WorkspaceTree({
           </div>
         )}
       </div>
+      {organizationDialog && (
+        <SidebarOrganizationDialog
+          state={organizationDialog}
+          sections={organization.sections}
+          onClose={closeOrganizationDialog}
+          onSubmit={async (value) => {
+            const state = organizationDialog;
+            let saved: boolean;
+            if (state.kind === 'move') saved = await moveItem(state.itemId, value);
+            else if (state.kind === 'rename' && state.sectionId) saved = await onUpdateOrganization((current) => renameSidebarSection(current, state.sectionId!, value));
+            else {
+              const id = `section:${crypto.randomUUID()}`;
+              saved = await onUpdateOrganization((current) => createSidebarSection(current, value, id));
+            }
+            if (saved) closeOrganizationDialog();
+            return saved;
+          }}
+        />
+      )}
     </section>
   );
 }
 
 interface WorkspaceRowProps {
+  onMove?: (origin: HTMLElement | null) => void;
   project: Project;
   expanded: boolean;
   active: boolean;
@@ -2017,6 +2536,7 @@ interface WorkspaceRowProps {
 }
 
 function WorkspaceRow({
+  onMove,
   project,
   expanded,
   active,
@@ -2064,6 +2584,7 @@ function WorkspaceRow({
       }}
     >
       <button
+        data-sidebar-drag-surface
         type="button"
         onClick={onToggle}
         className="group/disclosure flex h-full min-w-0 flex-1 items-center gap-3 pl-4 pr-2 text-left text-sm text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
@@ -2126,6 +2647,7 @@ function WorkspaceRow({
           label={project.pinnedAt ? tLauncher('workspaceCard.unpin') : tLauncher('workspaceCard.pin')}
           onClick={() => { setMenu(false); onTogglePin(); }}
         />
+        {onMove && <SidebarMoveMenuItem onClick={() => { setMenu(false); onMove(menuRef.current); }} />}
         <MenuItem icon={isProjectArchived(project) ? <ArchiveRestoreIcon className="h-3.5 w-3.5" /> : <ArchiveIcon className="h-3.5 w-3.5" />} label={tLauncher(isProjectArchived(project) ? 'workspaceCard.unarchive' : 'workspaceCard.archive')} onClick={() => { setMenu(false); onArchive(); }} />
         <MenuItem icon={<TrashIcon className="h-3.5 w-3.5" />} label={tLauncher('workspaceCard.remove')} tone="danger" onClick={() => { setMenu(false); onRemove(menuRef.current); }} />
       </Popover>
@@ -2134,6 +2656,7 @@ function WorkspaceRow({
 }
 
 interface SessionRowProps {
+  organizationMenu?: ReactNode;
   session: SessionMetadata;
   project: Project;
   tab: Tab | undefined;
@@ -2157,6 +2680,7 @@ interface SessionRowProps {
 }
 
 function SessionRow({
+  organizationMenu,
   session,
   tab,
   active,
@@ -2210,6 +2734,7 @@ function SessionRow({
       }}
     >
       <button
+        data-sidebar-drag-surface
         type="button"
         onClick={onOpen}
         className="flex h-full w-full min-w-0 items-center gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]"
@@ -2270,6 +2795,7 @@ function SessionRow({
         </Tip>
       </div>
       <SessionContextMenu
+        additionalItems={organizationMenu}
         open={menuOpen}
         onClose={() => {
           setMenu(false);

@@ -219,3 +219,8 @@ Next: latest-head Linux CI, clean artifact/backup/rollback, concrete single-Bot/
 ### BOTS-CLOUD-EXEC-001 — accepted Host foundation integration
 
 PR24 main fb92ce9c passed seven checks and carries the existing Linux Host management/credentials/client base. The Bot continuation merges this accepted main and preserves finite execution, exact worker identity, bounded child stop and shared lock/config repairs; it does not install Desktop changes or alter Keychain. Synthetic UI/Host effects are distinguished from real Linux acceptance. Read-only production scope preflight passed; no opt-in, Bot ledger, or model refs were configured. Private single-Bot 24h lifecycle-only proposal and CI artifact preparation continue, including an owner-protected non-secret account binding pin. PR23 remains draft/default off until Linux CI, main delivery, concrete authority and real Session lifecycle acceptance pass. First administrator authorization and registry/browser release are already fulfilled.
+
+
+### 2026-10-13 — MOXBOTS-SIDEBAR-ORG-001
+
+当前Agent在隔离 `codex/sidebar-organization-20261013` 实现本机侧栏任务/Agent拖拽与自定义分区，兼容v1偏好，不改执行身份与工作目录；记录 `dev-docs/sidebar-organization-delivery.md`、独立报告和 `.agent-sync/tasks/codex-sidebar-organization-20261013-964955f1.md`。主干CI/交付及原生安装分别追踪。用户已授权本聊天向“Bots 网络 可用”“增加任务归档功能”协调，已发送阶段锚点，统一安装仍由原Host/凭据owner负责；本聊天负责安装后的侧栏真实路径与重启保留复验。不基于旧安装状态自行并发换包。
