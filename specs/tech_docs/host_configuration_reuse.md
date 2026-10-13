@@ -9,7 +9,7 @@ Current Agent implements the user's desktop-main-Agent configuration reuse and r
 - Keep the original v1 five methods and DTOs unchanged. Add closed extension methods/results. A fully handshaken read-only `host.capabilities` probe uses its own management subchannel. An unsupported probe must retire its subchannel and leave the main AgentNet connection/epoch intact before a fresh legacy snapshot. Do not generalize this recovery to writes, identity failures or other protocol errors.
 - New Host continues serving old controllers while its configuration is representable by v1. For an API profile that cannot be represented, legacy snapshot/config receipt returns the existing legal error `HOST_MANAGEMENT_UPGRADE_REQUIRED`; do not fake an empty configuration.
 - API-key Providers using Anthropic/OpenAI protocols are portable. OAuth subscriptions, SDK-native/runtime-managed credentials, local desktop proxies and arbitrary ProviderEnv are not copied. Credentials are write-only, encrypted by the existing Host credential owner and excluded from snapshot, UI receipts, logs and task records.
-- Applying source configuration preserves the Host's existing execution authorization; it does not enable execution or expose Agents. Existing Session birth settings remain unchanged. Config and credential persistence are separate, and partial application is reported accurately.
+- Manual authenticated owner configuration retains an explicit execution-authorized checkbox, with the existing revision and active-session gates. Applying source configuration preserves the Host's existing execution authorization; it does not enable execution or expose Agents. Existing Session birth settings remain unchanged. Config and credential persistence are separate, and partial application is reported accurately.
 
 ## Closed extension contract
 
@@ -36,6 +36,12 @@ Directory paths are relative to Host-declared roots; empty string denotes root f
 Every desktop generic application derives a SHA-256 profile version ID from the portable non-secret definition and chosen model, with complete fable/sonnet/opus/haiku aliases frozen. Optional sourceProviderId preserves the original source identity when reading a versioned profile back, so unchanged re-application yields the same ID. Host rejects changing metadata under an existing ID. Changing endpoint/protocol/aliases/model uses a new profile identity, preserving prior concrete Session route endpoint, model, aliases and provider-bound key references. Capped profile capacity is explicit. No plaintext ProviderEnv snapshot or second birth authority is introduced.
 
 Version identity normalizes the default OpenAI format and ignores unused output-token parameter names, so displaying and saving default form values does not create a different profile. Host model selection reuses Settings' controlled panel; unsupported model-parameter editing is hidden, and desktop local registry writes remain unreachable.
+
+## Release and rollback data gate
+
+Wire compatibility does not mean an older Host binary can read newly written generic profiles. After generic writes, the selected provider/config ledger and the encrypted credential state's additional provider records require the new owner. Before a controlled Linux Host upgrade, its release owner must verify no active Session, stop only the dedicated test service and create a private, consistent backup of its state directory, including `home/.myagents` configuration/projects/session state and `provider-credentials`. Preserve the existing host identity, grants, master key and ownership; never regenerate credentials as recovery.
+
+Rollback to the legacy Host must use the matching backed-up configuration/credential state along with the old artifact. First retain the complete post-upgrade state privately, including new Session and workspace data; do not delete new workspace content. Generic Sessions cannot be promised executable by the older binary. Record artifact/source/hash, backup identity, restored online/legacy configuration and the preserved newer-state location separately. No Host data migration, upgrade, backup or rollback has been executed by this task yet; unified installation remains owned by the original credential task.
 
 ## UI flow and gates
 
