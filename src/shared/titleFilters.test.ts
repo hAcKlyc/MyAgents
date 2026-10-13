@@ -18,6 +18,11 @@ describe('isLikelyErrorTitle — #245 backstop', () => {
     expect(isLikelyErrorTitle('No message found with message.uuid of: abc')).toBe(true);
   });
 
+  it('rejects the observed login surface but keeps tasks about login failures', () => {
+    expect(isLikelyErrorTitle('Not logged in · Please run /login')).toBe(true);
+    expect(isLikelyErrorTitle('修复 Not logged in 登录错误')).toBe(false);
+  });
+
   it('tolerates leading/trailing whitespace', () => {
     expect(isLikelyErrorTitle('  API Error: 400 timeout  ')).toBe(true);
     expect(isLikelyErrorTitle('\n\tAPI Error: 401\n')).toBe(true);
