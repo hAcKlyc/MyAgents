@@ -1,5 +1,6 @@
 //! A per-query UI policy, preserving the legacy keyring service/account/domain.
 //! This does not impose a hard deadline on the Security framework IPC.
+use super::macos_helper::ReadMode;
 use core_foundation::{
     array::CFArray,
     base::TCFType,
@@ -11,12 +12,14 @@ use security_framework::{
     passwords::{generic_password, PasswordOptions},
 };
 use security_framework_sys::item::{kSecMatchLimit, kSecMatchSearchList, kSecUseAuthenticationUI};
+use std::sync::atomic::AtomicBool;
 
 // These public Security constants are present in the SDK but not exposed by
 // security-framework-sys 2.17.0. They are immutable framework-owned CFStrings.
 #[link(name = "Security", kind = "framework")]
 extern "C" {
     static kSecUseAuthenticationUIFail: CFStringRef;
+    static kSecUseAuthenticationUIAllow: CFStringRef;
     static kSecMatchLimitOne: CFStringRef;
 }
 
@@ -30,7 +33,12 @@ fn domain(credential: &MacCredential) -> SecPreferencesDomain {
 }
 
 #[allow(deprecated)] // The pinned API has no setters for search-list or UIFail.
-fn query(service: &str, account: &str, keychains: CFArray<SecKeychain>) -> PasswordOptions {
+fn query(
+    service: &str,
+    account: &str,
+    keychains: CFArray<SecKeychain>,
+    mode: ReadMode,
+) -> PasswordOptions {
     let mut options = PasswordOptions::new_generic_password(service, account);
     // SAFETY: all constants are immutable CFStrings supplied by Security;
     // wrap_under_get_rule retains them, and every query value is owned.
@@ -45,7 +53,11 @@ fn query(service: &str, account: &str, keychains: CFArray<SecKeychain>) -> Passw
         ));
         options.query.push((
             CFString::wrap_under_get_rule(kSecUseAuthenticationUI),
-            CFString::wrap_under_get_rule(kSecUseAuthenticationUIFail).into_CFType(),
+            CFString::wrap_under_get_rule(match mode {
+                ReadMode::Background => kSecUseAuthenticationUIFail,
+                ReadMode::Authorize => kSecUseAuthenticationUIAllow,
+            })
+            .into_CFType(),
         ));
     }
     options
@@ -64,13 +76,33 @@ pub fn read_secret_noninteractive(entry: &keyring::Entry) -> keyring::Result<Vec
     super::macos_helper::read(credential)
 }
 
-pub(super) fn read_direct(credential: &MacCredential) -> keyring::Result<Vec<u8>> {
+pub fn read_secret_authorized(
+    entry: &keyring::Entry,
+    cancelled: &AtomicBool,
+) -> keyring::Result<Vec<u8>> {
+    let Some(credential) = entry.get_credential().downcast_ref::<MacCredential>() else {
+        #[cfg(test)]
+        return if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            Err(super::macos_helper::unavailable())
+        } else {
+            entry.get_secret()
+        };
+        #[cfg(not(test))]
+        return Err(keyring::Error::PlatformFailure(Box::new(
+            std::io::Error::other("unsupported credential backend"),
+        )));
+    };
+    super::macos_helper::read_authorized(credential, cancelled)
+}
+
+pub(super) fn read_direct(credential: &MacCredential, mode: ReadMode) -> keyring::Result<Vec<u8>> {
     let keychain = SecKeychain::default_for_domain(domain(credential))
         .map_err(keyring::macos::decode_error)?;
     generic_password(query(
         &credential.service,
         &credential.account,
         CFArray::from_CFTypes(&[keychain]),
+        mode,
     ))
     .map_err(keyring::macos::decode_error)
 }
@@ -104,6 +136,7 @@ mod tests {
             "isolated-service",
             "isolated-account",
             CFArray::from_CFTypes(&[]),
+            ReadMode::Background,
         );
         unsafe {
             assert_eq!(
@@ -166,6 +199,39 @@ mod tests {
             .unwrap();
             assert_eq!(domain(&credential), expected);
         }
+    }
+    #[test]
+    fn authorization_query_changes_only_the_ui_policy() {
+        let background = query(
+            "isolated-service",
+            "isolated-account",
+            CFArray::from_CFTypes(&[]),
+            ReadMode::Background,
+        );
+        let authorized = query(
+            "isolated-service",
+            "isolated-account",
+            CFArray::from_CFTypes(&[]),
+            ReadMode::Authorize,
+        );
+        unsafe {
+            assert_eq!(
+                string_value(&authorized, kSecUseAuthenticationUI),
+                Some(CFString::wrap_under_get_rule(kSecUseAuthenticationUIAllow).to_string())
+            );
+            for key in [
+                security_framework_sys::item::kSecClass,
+                security_framework_sys::item::kSecAttrService,
+                security_framework_sys::item::kSecAttrAccount,
+                kSecMatchLimit,
+            ] {
+                assert_eq!(
+                    string_value(&background, key),
+                    string_value(&authorized, key)
+                );
+            }
+        }
+        assert_eq!(authorized.query.len(), background.query.len());
     }
     #[test]
     fn only_real_item_not_found_maps_to_missing() {

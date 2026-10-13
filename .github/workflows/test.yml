@@ -384,3 +384,7 @@ jobs:
         run: |
           host=$(rustc -vV | sed -n 's/^host: //p')
           cargo test --manifest-path src-tauri/Cargo.toml --locked --lib 'cliproxy::' --config "target.$host.runner = ['env', 'DYLD_FALLBACK_LIBRARY_PATH=/usr/lib/swift']"
+      - name: Test bounded credential transport without accessing Keychain
+        run: |
+          cargo test --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store
+          cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store --all-targets -- -D warnings

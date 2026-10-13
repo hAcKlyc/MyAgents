@@ -1393,6 +1393,18 @@
     "chooseNetwork": "Choose network",
     "officialNetwork": "MyAgents official network",
     "joinSelfhost": "Join a self-hosted network",
+    "ownedCredentialRestore": {
+      "open": "Authorize and restore",
+      "title": "Authorize and restore this connection",
+      "target": "Connection: {{name}} ({{issuer}})",
+      "explanation": "This reads only the existing sign-in session and device signing key for this connection, then verifies the existing device identity. It does not sign in again, rejoin the network, or replace the device identity.",
+      "systemPrompt": "If the system shows a credential access prompt, enter your system password only in that system window. If it offers “Always Allow,” you may choose it for future restores. The app does not collect or save your system password.",
+      "working": "Authorizing and restoring…",
+      "timeout": "System credential authorization timed out. The connection and identity were not changed; you can start a new authorization when ready.",
+      "confirm": "Continue and authorize",
+      "cancel": "Cancel restore",
+      "close": "Close"
+    },
     "ownedLogin": {
       "mode": "Account sign-in",
       "hint": "Sign in through your browser. The session is stored in the operating system credential store; tokens are not shown here.",

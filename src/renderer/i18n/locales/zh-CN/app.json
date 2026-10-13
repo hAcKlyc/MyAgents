@@ -1392,6 +1392,18 @@
     "chooseNetwork": "选择网络",
     "officialNetwork": "MyAgents 官方网络",
     "joinSelfhost": "加入自部署网络",
+    "ownedCredentialRestore": {
+      "open": "授权并恢复",
+      "title": "授权并恢复已有连接",
+      "target": "连接：{{name}}（{{issuer}}）",
+      "explanation": "此操作只读取该连接已保存的登录会话和设备签名钥，并验证现有设备身份；不会重新登录、重新加入网络或更换设备身份。",
+      "systemPrompt": "如果系统显示凭据访问提示，请只在系统窗口中输入系统密码。若系统提供“总是允许”，可自行选择以支持后续恢复。应用不会收集或保存系统密码。",
+      "working": "正在授权并恢复…",
+      "timeout": "等待系统凭据授权超时。原连接和身份未更改；可在准备好后重新发起一次授权。",
+      "confirm": "继续并授权",
+      "cancel": "取消恢复",
+      "close": "关闭"
+    },
     "ownedLogin": {
       "mode": "账号登录",
       "hint": "通过浏览器完成登录。会话保存在操作系统凭据库中，令牌不会显示在这里。",

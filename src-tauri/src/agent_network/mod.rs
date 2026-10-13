@@ -7,6 +7,7 @@ mod catalog;
 mod channel;
 pub(crate) mod commands;
 mod connection;
+mod credential_restore;
 mod crypto;
 pub(crate) mod discovery;
 mod identity;

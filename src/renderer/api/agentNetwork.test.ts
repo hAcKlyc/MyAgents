@@ -4,6 +4,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import {
   networkErrorKey,
   networkRequest,
+  restoreOwnedCredentials,
+  cancelOwnedCredentialRestore,
   setNetworkReadScope,
   type NetworkRequest,
 } from "./agentNetwork";
@@ -12,6 +14,29 @@ beforeEach(() => {
   setNetworkReadScope(null);
 });
 describe("network read and settings outcome", () => {
+  it("uses the explicit owned-credential restore and cancellation commands", async () => {
+    invoke.mockResolvedValueOnce({ revision: 8 }).mockResolvedValueOnce(undefined);
+    await expect(
+      restoreOwnedCredentials({
+        connectionId: "owned-1",
+        expectedRegistryRevision: 7,
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).resolves.toEqual({ revision: 8 });
+    await cancelOwnedCredentialRestore(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(invoke.mock.calls).toEqual([
+      ["cmd_agent_network_owned_restore_credentials", {
+        connectionId: "owned-1",
+        expectedRegistryRevision: 7,
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }],
+      ["cmd_agent_network_owned_restore_cancel", {
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }],
+    ]);
+  });
   it("post-save refresh does not join a read started while the save was pending", async () => {
     let finishWrite!: (value: unknown) => void,
       finishRead!: (value: unknown) => void;

@@ -47,6 +47,7 @@ pub fn external_tls_config_with_ca(pem: Option<&str>) -> Result<ClientConfig, Cr
 pub enum CryptoError {
     UnsupportedPlatform,
     CredentialUnavailable,
+    CredentialAuthorizationRequired,
     CredentialMissing,
     CredentialConflict,
     CredentialCorrupt,
@@ -63,6 +64,7 @@ impl std::fmt::Display for CryptoError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::UnsupportedPlatform => "NETWORK_CREDENTIAL_BACKEND_UNSUPPORTED",
+            Self::CredentialAuthorizationRequired => "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
             Self::CredentialUnavailable => "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
             Self::CredentialMissing => "NETWORK_CREDENTIAL_KEY_MISSING",
             Self::CredentialConflict => "NETWORK_CREDENTIAL_GENERATION_CONFLICT",
@@ -539,7 +541,9 @@ mod macos_helper;
 #[cfg(all(feature = "os-store", target_os = "macos"))]
 pub use macos_helper::run_private_credential_helper;
 #[cfg(all(feature = "os-store", target_os = "macos"))]
-pub use macos_credential::{read_secret_noninteractive, credential_authorization_required};
+pub use macos_credential::{
+    credential_authorization_required, read_secret_authorized, read_secret_noninteractive,
+};
 #[cfg(unix)]
 mod encrypted_store;
 #[cfg(unix)]

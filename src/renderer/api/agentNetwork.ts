@@ -331,3 +331,13 @@ export const removeNetworkConnection = (
   connectionId: string,
 ): Promise<NetworkRegistry> =>
   invoke("cmd_agent_network_remove", { connectionId });
+export const restoreOwnedCredentials = (input: {
+  connectionId: string;
+  expectedRegistryRevision: number;
+  operationId: string;
+}): Promise<NetworkRegistry> =>
+  invoke("cmd_agent_network_owned_restore_credentials", input);
+export const cancelOwnedCredentialRestore = (
+  operationId: string,
+): Promise<void> =>
+  invoke("cmd_agent_network_owned_restore_cancel", { operationId });

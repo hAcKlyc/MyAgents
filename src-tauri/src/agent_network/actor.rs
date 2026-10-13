@@ -118,6 +118,7 @@ struct Boundary {
 pub(crate) struct AgentNetwork {
     pub(crate) connection_id: String,
     account: Option<NetworkAccountSession>,
+    authorized_identity_store: Option<Arc<dyn super::crypto::IdentityStore>>,
     memory: MemoryBudget,
     snapshot: Mutex<NetworkSnapshot>,
     boundary: watch::Sender<Boundary>,
@@ -142,6 +143,15 @@ impl AgentNetwork {
         memory: MemoryBudget,
         seed: u64,
     ) -> ManagedConnection {
+        Self::with_authorized_store(connection_id, account, memory, seed, None)
+    }
+    pub(crate) fn with_authorized_store(
+        connection_id: String,
+        account: Option<NetworkAccountSession>,
+        memory: MemoryBudget,
+        seed: u64,
+        authorized_identity_store: Option<Arc<dyn super::crypto::IdentityStore>>,
+    ) -> ManagedConnection {
         let (boundary, _) = watch::channel(Boundary {
             generation: seed,
             auth_generation: seed,
@@ -152,6 +162,7 @@ impl AgentNetwork {
         Arc::new(Self {
             connection_id,
             account,
+            authorized_identity_store,
             memory,
             snapshot: Mutex::new(NetworkSnapshot {
                 state: "signedOut",
@@ -603,6 +614,14 @@ pub(crate) fn start(
                             connection_id: String::new(),
                         },
                     );
+                    if owner.snapshot().error.as_ref().is_some_and(|error| {
+                        error.code == "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+                    }) {
+                        // Only explicit recovery may request OS authorization.
+                        // Keep the diagnostic stable instead of retrying reads.
+                        let _ = boundary.changed().await;
+                        continue;
+                    }
                 }
                 Err(error) => {
                     retry_after = error.retry_after;
@@ -634,7 +653,11 @@ pub(crate) fn start(
             let random = uuid::Uuid::new_v4();
             let jitter = u16::from_le_bytes([random.as_bytes()[0], random.as_bytes()[1]]);
             let snapshot = owner.snapshot();
-            let code = snapshot.error.as_ref().map(diagnostic_code).unwrap_or("OTHER_NETWORK_FAILURE");
+            let code = snapshot
+                .error
+                .as_ref()
+                .map(diagnostic_code)
+                .unwrap_or("OTHER_NETWORK_FAILURE");
             let delay = reconnect.next_with_code(jitter, retry_after, code);
             tokio::select! {
                 _=tokio::time::sleep(delay)=>{},
@@ -833,7 +856,12 @@ async fn connect(
             account.ensure_current()?;
             identity
         }
-        _ => NetworkIdentity::initialize(account, None).await?,
+        _ => match &owner.authorized_identity_store {
+            Some(store) => {
+                NetworkIdentity::initialize_with_store(account, None, store.clone()).await?
+            }
+            None => NetworkIdentity::initialize(account, None).await?,
+        },
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
@@ -1540,7 +1568,12 @@ mod metadata_response_tests {
         assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
         error.code = "unexpected\nlog payload".into();
         assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
-        assert_eq!(super::diagnostic_code(&super::NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID")), "NETWORK_CREDENTIAL_STORE_INVALID");
+        assert_eq!(
+            super::diagnostic_code(&super::NetworkError::new(
+                "NETWORK_CREDENTIAL_STORE_INVALID"
+            )),
+            "NETWORK_CREDENTIAL_STORE_INVALID"
+        );
     }
 
     #[test]

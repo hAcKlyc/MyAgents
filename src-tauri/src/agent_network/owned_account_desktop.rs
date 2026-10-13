@@ -379,6 +379,20 @@ fn write(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
     let _transaction = storage_transaction_lock();
     write_unlocked(entry, secret)
 }
+fn decode_secret_record(value: Zeroizing<Vec<u8>>) -> Result<Option<SecretRecord>, NetworkError> {
+    serde_json::from_slice(&value)
+        .map(Some)
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"))
+}
+fn restore_if_not_cancelled<T>(
+    restored: Option<T>,
+    cancelled: &AtomicBool,
+) -> Result<Option<T>, NetworkError> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    Ok(restored)
+}
 #[cfg(test)]
 thread_local! {
     static KEYRING_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -391,17 +405,59 @@ fn read_unlocked(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     #[cfg(any(not(target_os = "macos"), test))]
     let result = entry.get_secret();
     let value = match result {
-        Ok(value) => Zeroizing::new(value),
+        Ok(value) => value,
         Err(keyring::Error::NoEntry) => return Ok(None),
         #[cfg(all(target_os = "macos", not(test)))]
         Err(error) if myagents_agent_network_crypto::credential_authorization_required(&error) => {
-            return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"));
+            return Err(NetworkError::new(
+                "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+            ));
         }
         Err(_) => return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
     };
-    serde_json::from_slice(&value)
-        .map(Some)
-        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"))
+    decode_secret_record(Zeroizing::new(value))
+}
+fn read_authorized_unlocked(
+    entry: &Entry,
+    cancelled: &AtomicBool,
+) -> Result<Option<SecretRecord>, NetworkError> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    #[cfg(target_os = "macos")]
+    let result = myagents_agent_network_crypto::read_secret_authorized(entry, cancelled);
+    #[cfg(not(target_os = "macos"))]
+    let result: keyring::Result<Vec<u8>> = Err(keyring::Error::PlatformFailure(Box::new(
+        std::io::Error::other("authorized credential read unsupported"),
+    )));
+    let value = match result {
+        Ok(value) => value,
+        Err(keyring::Error::NoEntry) => {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+            }
+            return Ok(None);
+        }
+        #[cfg(target_os = "macos")]
+        Err(error) => {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+            }
+            if myagents_agent_network_crypto::credential_authorization_required(&error) {
+                return Err(NetworkError::new(
+                    "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+                ));
+            }
+            return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+        }
+        #[cfg(not(target_os = "macos"))]
+        Err(_) => return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
+    };
+    let value = Zeroizing::new(value);
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    decode_secret_record(value)
 }
 fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     let _transaction = storage_transaction_lock();
@@ -922,6 +978,65 @@ pub(crate) fn restore_account(
     join_authorized: bool,
 ) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
     let _storage = storage_transaction_lock();
+    let record = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?;
+    restore_account_from_record(
+        instance,
+        device,
+        principal,
+        connection_id,
+        binding_id,
+        public_tls_ca,
+        join_authorized,
+        record,
+    )
+}
+
+pub(crate) fn restore_account_authorized(
+    instance: &OwnedInstance,
+    device: &str,
+    principal: &str,
+    connection_id: &str,
+    binding_id: &str,
+    public_tls_ca: Option<&str>,
+    join_authorized: bool,
+    cancelled: &AtomicBool,
+) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    let _storage = storage_transaction_lock();
+    let record = read_authorized_unlocked(
+        &session_entry(instance, device, principal, public_tls_ca)?,
+        cancelled,
+    )?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    let restored = restore_account_from_record(
+        instance,
+        device,
+        principal,
+        connection_id,
+        binding_id,
+        public_tls_ca,
+        join_authorized,
+        record,
+    )?;
+    restore_if_not_cancelled(restored, cancelled)
+}
+
+/// Shared post-read validation. The caller holds the session storage transaction
+/// lock across credential read and guard publication.
+fn restore_account_from_record(
+    instance: &OwnedInstance,
+    device: &str,
+    principal: &str,
+    connection_id: &str,
+    binding_id: &str,
+    public_tls_ca: Option<&str>,
+    join_authorized: bool,
+    record: Option<SecretRecord>,
+) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
     let Some(SecretRecord::Session {
         version,
         instance: saved,
@@ -932,7 +1047,7 @@ pub(crate) fn restore_account(
         session,
         connection_id: saved_connection,
         binding_id: saved_binding,
-    }) = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?
+    }) = record
     else {
         return Ok(None);
     };
@@ -1106,6 +1221,23 @@ mod tests {
             .unwrap();
         assert_eq!(current.check().unwrap_err().code, "ACCOUNT_BINDING_CHANGED");
         replacement.check().unwrap();
+    }
+
+    #[test]
+    fn cancelled_restore_does_not_invalidate_an_existing_shared_guard() {
+        let cache = SessionGuardCache::default();
+        let slot = slot("network-cancelled-restore", None);
+        let guard = cache
+            .authorize(slot, "binding-current", "connection-current", now() + 3600)
+            .unwrap();
+        let cancelled = AtomicBool::new(true);
+        assert_eq!(
+            super::restore_if_not_cancelled(Some(()), &cancelled)
+                .unwrap_err()
+                .code,
+            "OWNED_LOGIN_CANCELLED"
+        );
+        guard.check().unwrap();
     }
 
     #[test]

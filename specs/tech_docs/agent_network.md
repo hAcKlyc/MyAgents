@@ -76,6 +76,10 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 内部 MoXBots 试用包更新应复用固定代码签名证书。ad-hoc 签名把代码 hash 作为身份，每次新构建可能再次触发 Keychain 确认；固定 bundle identifier 和证书 designated requirement 可保留后续版本身份。签名私钥、专用构建钥匙串和随机构建密码只在本机私有目录，不进入 Git 或试用归档，不保存 Mac 登录密码、不修改全局凭据 ACL 或系统信任。旧 ad-hoc 包创建的凭据首次迁移仍可能需要一次用户系统确认；本地试用证书不等于 Developer ID 或 Apple 公证。
 
+后台读取以同签名二进制的认证子进程执行，闭集 service/account/User-domain、匿名管道、有界结果及 5 秒期限，不请求系统 UI。真实授权错误保留固定码并停止普通重试，不把它当作条目不存在或自动生成新钥。显式“授权并恢复”仅针对已保存的 Owned 连接，整体最多 180 秒，可取消；验证会话全 scope 和服务器现有 key generation/fingerprint 后，在 registry revision、saved record、Actor generation 门禁内发布。它不执行登录、入网、密钥替换或配置写入。
+
+恢复所得私钥仅由对应 Actor 的完整 scope 只读 store 持有；重连可再次加载它，store 拒绝写入与删除。关闭、取消、超时、账号/registry/generation 边界会阻止迟到结果发布，并保留持久记录。系统窗口仍可能要求用户处理旧签名 ACL；选择“允许一次”只能说明该次读取成功，不能承诺跨重启或更新免提示。只有真实重启/同签名更新复验才能关闭这项产品验收。
+
 ### 端到端通道与消息路径
 
 端到端加密（E2EE）的端点是两台设备的 Rust App。内层由 `rustls` 的 `ring` provider 实现标准 TLS 1.3 双向证书认证，验证证书链、有效期及双方当前网络签发的 signed binding、SAN 与 fingerprint；禁用 0-RTT 和会话恢复。

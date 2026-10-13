@@ -28,6 +28,8 @@ const SESSION_LIMIT: usize = 256 * 1024;
 const KEY_LIMIT: usize = 4096;
 const HEADER: usize = 9;
 const DEADLINE: Duration = Duration::from_secs(5);
+const AUTHORIZATION_DEADLINE: Duration = Duration::from_secs(180);
+static NOT_CANCELLED: AtomicBool = AtomicBool::new(false);
 const CONCURRENT: usize = 4;
 static READERS: AtomicUsize = AtomicUsize::new(0);
 static HELPER_MODE: AtomicBool = AtomicBool::new(false);
@@ -47,10 +49,26 @@ extern "C" {
     fn csops(pid: libc::pid_t, ops: u32, useraddr: *mut libc::c_void, usersize: usize) -> i32;
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum ReadMode {
+    Background,
+    Authorize,
+}
+impl ReadMode {
+    fn deadline(self) -> Duration {
+        match self {
+            Self::Background => DEADLINE,
+            Self::Authorize => AUTHORIZATION_DEADLINE,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
     version: u8,
+    mode: ReadMode,
     service: String,
     account: String,
     domain: String,
@@ -76,7 +94,7 @@ impl Request {
     }
 }
 
-fn unavailable() -> keyring::Error {
+pub(super) fn unavailable() -> keyring::Error {
     keyring::macos::decode_error(security_framework::base::Error::from(-25291))
 }
 struct ReaderSlot;
@@ -103,11 +121,31 @@ impl Drop for ReaderSlot {
 
 #[allow(clippy::disallowed_methods)] // macOS-only neutral crate; no Windows console or desktop process_cmd dependency.
 pub(super) fn read(credential: &MacCredential) -> keyring::Result<Vec<u8>> {
-    if HELPER_MODE.load(Ordering::Acquire) || credential.domain != MacKeychainDomain::User {
+    read_with_mode(credential, ReadMode::Background, &NOT_CANCELLED)
+}
+
+pub(super) fn read_authorized(
+    credential: &MacCredential,
+    cancelled: &AtomicBool,
+) -> keyring::Result<Vec<u8>> {
+    read_with_mode(credential, ReadMode::Authorize, cancelled)
+}
+
+#[allow(clippy::disallowed_methods)] // Same authenticated macOS-only child transport.
+fn read_with_mode(
+    credential: &MacCredential,
+    mode: ReadMode,
+    cancelled: &AtomicBool,
+) -> keyring::Result<Vec<u8>> {
+    if cancelled.load(Ordering::Acquire)
+        || HELPER_MODE.load(Ordering::Acquire)
+        || credential.domain != MacKeychainDomain::User
+    {
         return Err(unavailable());
     }
     let request = Request {
         version: 1,
+        mode,
         service: credential.service.clone(),
         account: credential.account.clone(),
         domain: "User".into(),
@@ -120,7 +158,7 @@ pub(super) fn read(credential: &MacCredential) -> keyring::Result<Vec<u8>> {
     }
     let mut input = Zeroizing::new((bytes.len() as u32).to_be_bytes().to_vec());
     input.extend_from_slice(&bytes);
-    let deadline = Instant::now() + DEADLINE;
+    let deadline = Instant::now() + mode.deadline();
     let executable = std::env::current_exe().map_err(|_| unavailable())?;
     let child = Command::new(executable)
         .arg(FLAG)
@@ -130,11 +168,12 @@ pub(super) fn read(credential: &MacCredential) -> keyring::Result<Vec<u8>> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| unavailable())?;
-    exchange(
+    exchange_cancellable(
         child,
         &input,
         limit,
         deadline.saturating_duration_since(Instant::now()),
+        cancelled,
     )
 }
 
@@ -147,11 +186,22 @@ fn nonblocking(fd: RawFd) -> std::io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn exchange(
+    child: Child,
+    input: &[u8],
+    limit: usize,
+    timeout: Duration,
+) -> keyring::Result<Vec<u8>> {
+    exchange_cancellable(child, input, limit, timeout, &NOT_CANCELLED)
+}
+
+fn exchange_cancellable(
     mut child: Child,
     input: &[u8],
     limit: usize,
     timeout: Duration,
+    cancelled: &AtomicBool,
 ) -> keyring::Result<Vec<u8>> {
     let outcome = (|| {
         let mut stdin = Some(child.stdin.take().ok_or_else(unavailable)?);
@@ -163,7 +213,7 @@ fn exchange(
         let mut eof = false;
         let mut output = Zeroizing::new(Vec::new());
         loop {
-            if Instant::now() >= deadline {
+            if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
                 return Err(unavailable());
             }
             if let Some(pipe) = stdin.as_mut() {
@@ -200,7 +250,7 @@ fn exchange(
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
                     Err(_) => return Err(unavailable()),
                 }
-                if Instant::now() >= deadline {
+                if cancelled.load(Ordering::Acquire) || Instant::now() >= deadline {
                     return Err(unavailable());
                 }
             }
@@ -224,7 +274,8 @@ fn exchange(
                 return Err(unavailable());
             }
         }
-    })();
+    })()
+    .map(Zeroizing::new);
     // Never block on wait(): a rare unconfirmed SIGKILL retains ownership and
     // consumes capacity, while the caller receives a fixed unavailable error.
     if child.try_wait().ok().flatten().is_none() {
@@ -233,7 +284,10 @@ fn exchange(
     let cleanup_deadline = Instant::now() + Duration::from_secs(1);
     loop {
         if child.try_wait().ok().flatten().is_some() {
-            return outcome;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(unavailable());
+            }
+            return outcome.map(|mut secret| std::mem::take(&mut *secret));
         }
         if Instant::now() >= cleanup_deadline {
             QUARANTINED
@@ -500,14 +554,18 @@ pub fn run_private_credential_helper(args: &[String]) -> Option<i32> {
         let limit = request.validate()?;
         // The global switch is confined to this private child and never restored
         // into a main-process state. All child paths terminate immediately.
-        if unsafe { security_framework_sys::keychain::SecKeychainSetUserInteractionAllowed(0) } != 0
+        if unsafe {
+            security_framework_sys::keychain::SecKeychainSetUserInteractionAllowed(u8::from(
+                request.mode == ReadMode::Authorize,
+            ))
+        } != 0
         {
             return None;
         }
         let credential =
             MacCredential::new_with_target(Some("User"), &request.service, &request.account)
                 .ok()?;
-        let result = super::macos_credential::read_direct(&credential);
+        let result = super::macos_credential::read_direct(&credential, request.mode);
         let (status, secret) = match result {
             Ok(secret) => {
                 let secret = Zeroizing::new(secret);
@@ -570,9 +628,44 @@ mod tests {
             Some(std::env::current_exe().unwrap().canonicalize().unwrap())
         );
     }
+    #[test]
+    fn explicit_authorization_is_closed_and_cancel_kills_owned_child() {
+        let mut value = serde_json::to_value(request()).unwrap();
+        value["mode"] = serde_json::json!("authorize");
+        assert!(serde_json::from_value::<Request>(value.clone()).is_ok());
+        value["mode"] = serde_json::json!("allowAll");
+        assert!(serde_json::from_value::<Request>(value).is_err());
+        assert_eq!(ReadMode::Background.deadline(), Duration::from_secs(5));
+        assert_eq!(ReadMode::Authorize.deadline(), Duration::from_secs(180));
+        let cancelled = AtomicBool::new(false);
+        let process = child("/bin/sleep", &["10"]);
+        let pid = process.id() as libc::pid_t;
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(60));
+                cancelled.store(true, Ordering::Release);
+            });
+            assert!(exchange_cancellable(
+                process,
+                b"input",
+                32,
+                Duration::from_secs(180),
+                &cancelled
+            )
+            .is_err());
+        });
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+    }
     fn request() -> Request {
         Request {
             version: 1,
+            mode: ReadMode::Background,
             service: "com.myagents.owned-agentnet.v1".into(),
             account: format!("session:{}", URL_SAFE_NO_PAD.encode([1_u8; 32])),
             domain: "User".into(),
