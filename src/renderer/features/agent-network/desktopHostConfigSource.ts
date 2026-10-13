@@ -11,6 +11,7 @@ import {
   type AppConfig,
   type Project,
   type Provider,
+  type ModelEntity,
 } from '@/config/types';
 import { workspacePathsEqual } from '../../../shared/workspacePath';
 import { assertQueryModelRoutesCompatible, resolveProviderForModel } from '../../../shared/provider-model-routing';
@@ -24,6 +25,8 @@ export interface DesktopHostConfigSource {
   localWorkspacePath: string;
   provider: PortableApiProvider;
   model: string;
+  /** Local selection candidates only; no remote catalog writes or credentials. */
+  models?: ModelEntity[];
   /** Transient write input only. Do not place it in drafts, notices or receipts. */
   credential?: string;
 }
@@ -73,7 +76,12 @@ export async function versionPortableHostProfile(profile: PortableApiProvider, m
   if (!isHostProviderProfile(profile) || !isHostModelId(model)) return unavailable('HOST_SOURCE_PROVIDER_UNSUPPORTED');
   const aliases = completeModelAliases(profile.modelAliases, model);
   const sourceProviderId = profile.sourceProviderId ?? profile.id;
-  const normalized: PortableApiProvider = { ...profile, sourceProviderId, ...(aliases ? { modelAliases: aliases } : {}) };
+  const upstreamFormat = profile.apiProtocol === 'openai' ? profile.upstreamFormat ?? 'chat_completions' : undefined;
+  const normalized: PortableApiProvider = { ...profile, sourceProviderId, upstreamFormat,
+    maxOutputTokens: profile.apiProtocol === 'openai' ? profile.maxOutputTokens : undefined,
+    maxOutputTokensParamName: profile.apiProtocol === 'openai' && profile.maxOutputTokens !== undefined
+      ? profile.maxOutputTokensParamName ?? (upstreamFormat === 'responses' ? 'max_output_tokens' : 'max_tokens') : undefined,
+    ...(aliases ? { modelAliases: aliases } : {}) };
   const identity = JSON.stringify([
     'moxbots-host-api-profile-v1', sourceProviderId, normalized.name, normalized.apiProtocol,
     normalized.baseUrl, normalized.authType, normalized.upstreamFormat ?? null,
@@ -118,6 +126,18 @@ export function resolveDesktopHostConfigSource(config: AppConfig, projects: read
   const model = agent?.model ?? project?.model ?? getEffectivePrimaryModel(provider, config.providerPrimaryModels);
   if (!isHostModelId(model)) return unavailable('HOST_SOURCE_MODEL_MISSING');
   const profile = portableApiProviderForModel(provider, model, config);
+  const models: ModelEntity[] = [];
+  for (const item of provider.models ?? []) {
+    if (models.length >= 127) break; // Reserve a slot for an explicit Agent model.
+    if (!isHostModelId(item.model) || models.some(candidate => candidate.model === item.model)) continue;
+    try {
+      const candidate = portableApiProviderForModel(provider, item.model, config);
+      if (candidate.apiProtocol !== profile.apiProtocol || candidate.baseUrl !== profile.baseUrl
+        || candidate.upstreamFormat !== profile.upstreamFormat || candidate.authType !== profile.authType) continue;
+      models.push({ model: item.model, modelName: typeof item.modelName === 'string' && item.modelName.length <= 256 && !/[\r\n\0]/.test(item.modelName) ? item.modelName : item.model, modelSeries: 'custom' });
+    } catch { /* A different execution route cannot use this flattened profile. */ }
+  }
+  if (!models.some(item => item.model === model)) models.unshift({ model, modelName: model, modelSeries: 'custom' });
   const credential = sourceKey(provider.id);
   if (credential && (/^(?:systemd-credential|host-provider-credential|managed):/.test(credential)
     || /[\r\n\0]/.test(credential) || new TextEncoder().encode(credential).length > 16 * 1024)) {
@@ -128,6 +148,7 @@ export function resolveDesktopHostConfigSource(config: AppConfig, projects: read
     localWorkspacePath,
     provider: profile,
     model,
+    models,
     ...(credential?.trim() ? { credential } : {}),
   };
 }

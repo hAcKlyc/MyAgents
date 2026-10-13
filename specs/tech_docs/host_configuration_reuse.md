@@ -4,7 +4,7 @@ Current Agent implements the user's desktop-main-Agent configuration reuse and r
 
 ## Owners and compatibility
 
-- Existing desktop ConfigProvider/config services own source Provider/Agent settings. Source means the Agent attached to `config.defaultWorkspacePath`, with its explicit provider/model taking precedence over general defaults. An explicit missing/unsupported source is an error, never a silently substituted model.
+- Existing desktop ConfigProvider/config services own source Provider/Agent settings. Source means the Agent attached to `config.defaultWorkspacePath`; persisted selections follow Agent → legacy Project → general defaults, matching Agent settings. An explicit missing/unsupported source is an error, never a silently substituted model. Model/key/catalog projection uses one freshly loaded config. Up to 128 safe, same-transport model candidates can be read for local selection; only the chosen model and supported profile fields are written remotely.
 - Host config, resource and encrypted-provider-credential owners remain authoritative. The existing encrypted management channel and private Unix IPC carry bounded typed operations. No arbitrary remote file read, command, environment or new public listener.
 - Keep the original v1 five methods and DTOs unchanged. Add closed extension methods/results. A fully handshaken read-only `host.capabilities` probe uses its own management subchannel. An unsupported probe must retire its subchannel and leave the main AgentNet connection/epoch intact before a fresh legacy snapshot. Do not generalize this recovery to writes, identity failures or other protocol errors.
 - New Host continues serving old controllers while its configuration is representable by v1. For an API profile that cannot be represented, legacy snapshot/config receipt returns the existing legal error `HOST_MANAGEMENT_UPGRADE_REQUIRED`; do not fake an empty configuration.
@@ -34,6 +34,8 @@ Directory paths are relative to Host-declared roots; empty string denotes root f
 ## Immutable profile identities
 
 Every desktop generic application derives a SHA-256 profile version ID from the portable non-secret definition and chosen model, with complete fable/sonnet/opus/haiku aliases frozen. Optional sourceProviderId preserves the original source identity when reading a versioned profile back, so unchanged re-application yields the same ID. Host rejects changing metadata under an existing ID. Changing endpoint/protocol/aliases/model uses a new profile identity, preserving prior concrete Session route endpoint, model, aliases and provider-bound key references. Capped profile capacity is explicit. No plaintext ProviderEnv snapshot or second birth authority is introduced.
+
+Version identity normalizes the default OpenAI format and ignores unused output-token parameter names, so displaying and saving default form values does not create a different profile. Host model selection reuses Settings' controlled panel; unsupported model-parameter editing is hidden, and desktop local registry writes remain unreachable.
 
 ## UI flow and gates
 

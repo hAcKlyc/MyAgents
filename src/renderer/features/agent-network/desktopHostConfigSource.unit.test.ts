@@ -27,6 +27,8 @@ describe('desktop main Agent configuration source', () => {
     expect(source).toMatchObject({ agentName: 'Main Agent', model: 'provider/model-agent', localWorkspacePath: project.path, credential: 'synthetic-local-key', provider: { id: 'api-example', authType: 'both' } });
     expect(source.provider).not.toHaveProperty('apiKey');
     expect(source.provider).not.toHaveProperty('executionAuthorized');
+    expect(source.models?.map(item => item.model)).toEqual(['provider/model-default', 'provider/model-agent']);
+    expect(source.models?.every(item => !('config' in item) && !('credential' in item))).toBe(true);
   });
   it('honors the current Provider primary-model override when the Agent has no model', () => {
     expect(resolveDesktopHostConfigSource(config({ providerPrimaryModels: { 'api-example': 'provider/model-agent' } }), [], [provider()]).model).toBe('provider/model-agent');
@@ -83,6 +85,8 @@ describe('desktop main Agent configuration source', () => {
     expect((await versionPortableHostProfile(plain, 'provider/model-agent')).id).not.toBe(version.id);
     expect(Object.keys(version.modelAliases ?? {}).sort()).toEqual(['fable','haiku','opus','sonnet']);
     expect(version).not.toHaveProperty('credential');
+    const openai = { ...plain, apiProtocol: 'openai' as const };
+    expect(await versionPortableHostProfile(openai, 'provider/model-default')).toEqual(await versionPortableHostProfile({ ...openai, upstreamFormat: 'chat_completions', maxOutputTokensParamName: 'max_tokens' }, 'provider/model-default'));
   });
   it('preserves token auth that clears the SDK API-key variable', () => {
     expect(portableApiProviderForModel({ ...provider(), authType: 'auth_token_clear_api_key' }, 'provider/model-default').authType).toBe('auth_token_clear_api_key');
