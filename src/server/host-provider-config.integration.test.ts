@@ -24,10 +24,9 @@ it('persists profile, provider-bound reference and restart receipts without impl
  const conflict=await configureProviderHost(owner,{...body,mutationId:randomUUID()});expect(conflict).toMatchObject({status:'conflict',revision:1});
  expect(readProviderConfigReceipt(await owner.readConfig(),owner.hostId,'custom-host',conflict.mutationId)).toEqual(conflict);
 });
-it('preserves original Kimi receipt and rejects implicit execution grants',async()=> {
+it('preserves original Kimi receipt and accepts explicit owner execution choices',async()=> {
  const {owner,body}=await setup();
  await expect(configureProviderHost(owner,{...body,provider:{...body.provider,id:'xai-sub'}})).rejects.toThrow('Invalid portable');
- await expect(configureProviderHost(owner,{...body,executionAuthorized:true})).rejects.toThrow('cannot authorize');expect(await owner.readConfig()).toEqual({});
  const legacy=await configureHost(owner,{providerId:'moonshot-coding',model:'k3',executionAuthorized:false,expectedRevision:0,mutationId:randomUUID()});
  expect(extendedHostSettings(await owner.readConfig(),{workspaces:owner.defaultWorkspace})).toMatchObject({workspace:{rootId:'workspaces',relativePath:''}});
  await configureProviderHost(owner,{...body,expectedRevision:1});expect(readConfigReceipt(await owner.readConfig(),owner.hostId,{mutationId:'mutationId' in legacy?legacy.mutationId:''})).toEqual(legacy);
@@ -83,4 +82,12 @@ it('hydrates legacy Kimi from known preset facts and selected-model alias defaul
  const config=await owner.readConfig();const before=JSON.stringify(config);const profile=selectedHostProviderProfile({...config,providerApiKeys:{'moonshot-coding':'synthetic-legacy-key'}});
  expect(profile).toMatchObject({id:'moonshot-coding',sourceProviderId:'moonshot-coding',name:'Kimi Code',baseUrl:'https://api.kimi.com/coding/',apiProtocol:'anthropic',authType:'api_key',modelAliases:{fable:'k3',sonnet:'k3',opus:'k3',haiku:'k3'}});
  expect(JSON.stringify(profile)).not.toContain('synthetic-legacy-key');expect(JSON.stringify(config)).toBe(before);expect(legacyHostRepresentable(config)).toBe(true);
+});
+
+it('persists explicit authenticated owner execution grant and revocation',async()=> {
+ const {owner,body}=await setup();
+ expect(await configureProviderHost(owner,{...body,executionAuthorized:true})).toMatchObject({status:'persisted',settings:{executionAuthorized:true}});
+ expect((await owner.readConfig()).hostSettings?.executionAuthorized).toBe(true);
+ expect(await configureProviderHost(owner,{...body,executionAuthorized:false,expectedRevision:1,mutationId:randomUUID()})).toMatchObject({status:'persisted',settings:{executionAuthorized:false}});
+ expect((await owner.readConfig()).hostSettings?.executionAuthorized).toBe(false);
 });

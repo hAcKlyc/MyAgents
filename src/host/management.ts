@@ -243,8 +243,8 @@ export async function configureProviderHost(owner: Owner & {selectWorkspace(sele
     const receipt: GenericConfigReceipt = {kind:'provider-config-receipt',mutationId:id,status:'conflict',revision:currentRevision,effect:'none'};
     await persist({...config,hostProviderConfigReceipts:append(receipt)}); return receipt;
   }
-  // Source application may revoke, but never grants Host execution implicitly.
-  if (body.executionAuthorized && !config.hostSettings?.executionAuthorized) throw new Error('Source reuse cannot authorize Host execution');
+  // The authenticated owner may explicitly grant or revoke execution, as in
+  // config.set. Desktop source reuse preserves the target's existing flag.
   const profiles = object(config.hostProviderProfiles) ? config.hostProviderProfiles : {};
   if (Object.keys(profiles).some(k => !isHostProviderProfile(profiles[k]) || (profiles[k] as HostProviderProfile).id !== k) || Object.keys(profiles).length > HOST_PROVIDER_LIMIT) throw new Error('Invalid Host profile registry');
   if (Object.hasOwn(profiles,profile.id) && JSON.stringify(canonical(profiles[profile.id] as HostProviderProfile)) !== JSON.stringify(canonical(profile))) throw new Error('Host provider profile is immutable; select a new versioned Provider ID');
