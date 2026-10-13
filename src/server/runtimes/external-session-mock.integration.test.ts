@@ -1317,6 +1317,49 @@ function runInjectedTurn(harness: Harness, request: TestInjectedTurnRequest) {
 }
 
 describe('external SessionEngine with fake runtime', () => {
+  it('renders a missing-multiSelect question and returns the selected answer to the runtime caller', async () => {
+    const harness = await createHarness([], { runtimeType: 'dsh' });
+    const sessionId = 'session-ask-normalization';
+    const workspacePath = join(harness.home, 'workspace');
+    await restorePersistedDshSession(harness, sessionId, workspacePath);
+    await harness.externalSession.prewarmExternalSession({ sessionId, workspacePath, scenario: { type: 'desktop' } });
+    const response = vi.spyOn(harness.runtime, 'respondPermission').mockResolvedValue(undefined);
+    const input = { questions: [{ question: 'Which execution channel?', header: 'Execution',
+      options: [{ label: 'Current agent', description: 'Implement locally' }, { label: 'Mori', description: 'Delegate' }] }] };
+    harness.runtime.emitForTest({ kind: 'permission_request', requestId: 'ask-normalize',
+      toolName: 'AskUserQuestion', toolUseId: 'ask-tool', input });
+    await waitFor(() => broadcastEvents.some(e => e.event === 'ask-user-question:request'), 'structured question delivery');
+    expect(broadcastEvents.some(e => e.event === 'permission:request')).toBe(false);
+    expect(broadcastEvents).toContainEqual({ event: 'ask-user-question:request', data: expect.objectContaining({
+      requestId: 'ask-normalize', questions: [{ ...input.questions[0], multiSelect: false }],
+    }) });
+    expect(harness.engine.getStreamReplaySnapshot().pendingInteractiveRequests).toContainEqual({
+      type: 'ask-user-question:request', data: expect.objectContaining({ requestId: 'ask-normalize' }),
+    });
+    await expect(harness.externalSession.respondExternalAskUserQuestion('ask-normalize', { '0': { selected: ['Current agent'] } })).resolves.toBe(true);
+    const delivered = response.mock.calls[0] as unknown[];
+    expect(delivered[2]).toBe('allow_once');
+    expect(delivered[5]).toEqual({ questions: [{ ...input.questions[0], multiSelect: false }],
+      answers: { '0': 'Current agent', 'Which execution channel?': 'Current agent' } });
+    expect(harness.externalSession.hasPendingExternalAskUserQuestion('ask-normalize')).toBe(false);
+  });
+  it('returns an actionable malformed-option error to the caller without a permission card or cancellation', async () => {
+    const harness = await createHarness([], { runtimeType: 'dsh' });
+    const sessionId = 'session-ask-invalid';
+    const workspacePath = join(harness.home, 'workspace');
+    await restorePersistedDshSession(harness, sessionId, workspacePath);
+    await harness.externalSession.prewarmExternalSession({ sessionId, workspacePath, scenario: { type: 'desktop' } });
+    const response = vi.spyOn(harness.runtime, 'respondPermission').mockResolvedValue(undefined);
+    harness.runtime.emitForTest({ kind: 'permission_request', requestId: 'ask-invalid',
+      toolName: 'AskUserQuestion', toolUseId: 'ask-tool', input: { questions: [{
+        question: 'Choose?', header: 'Choice', multiSelect: false, options: [null],
+      }] } });
+    await waitFor(() => response.mock.calls.length === 1, 'input error delivery');
+    expect(response.mock.calls[0]).toEqual([expect.anything(), 'ask-invalid', 'deny', expect.stringContaining('options[0]')]);
+    expect(broadcastEvents.some(e => e.event === 'ask-user-question:request' || e.event === 'permission:request')).toBe(false);
+    expect(harness.externalSession.hasPendingExternalAskUserQuestion('ask-invalid')).toBe(false);
+  });
+
 
   const externalIdentities = [
     { runtimeType: 'claude-code', runtimeSource: 'system-cli' },

@@ -191,3 +191,16 @@
 - 当前/Applications/MoXBots.app为b116404e，不含归档入口；候选33992eb0保留在/Applications/.MoXBots.chat-archive-trial-54dca77c5912.app及本地ZIP。归档PR #19和局部原生/重启验收保留在main，不回退源码。
 - Documents旧备份副本出现File Provider FinderInfo/resource-fork，严格签名失败；实际回滚使用原始Applications隐藏包，前后验证成功。不要直接采用Documents副本而忽略重新校验。
 - 回滚/网络恢复复验完成；安装权交回“评估 MyAgents 精简为 Linux Host”原凭据修复任务，联合更新延期。后续须同步origin/main保留归档，重新验运行版本、归档/恢复/重启和网络自动恢复。详细状态及本机证据位置见dev-docs/chat-task-archive-delivery.md。
+
+
+### 2026-10-13 — structured question repair — MOXBOTS-ASK-QUESTION-FIX-20261013
+
+- 用户明确当前Agent修复3项问答问题并main/当前客户端交付。共享输入校验、缺失multiSelect默认单选、字段错误不当取消/权限卡、FIFO去重及逐项结算；既有Runtime与答案键合约保留。
+- 回归与状态见dev-docs/ask-user-question-repair.md及当前.agent-sync任务记录；源码、模拟caller、CI/main、统一包、原生/真实caller验收分开追踪。
+- 用户明确授权与现有Host/钥匙串安装owner跨聊天协调、统一包。本任务不并发安装/退出/重启；后续核对安装源包含本次main后再在可控会话验提问与回传。主代理拥有最终问答验收责任。
+
+### 2026-10-13 — question repair main verified; native pending
+
+- MOXBOTS-ASK-QUESTION-FIX-20261013：PR #21源fc4e664c、6项current-head CI成功，main `d9749998f743707074d6d42dc5344bcb724d55a8` verified；422项相称用例、原生SDK+loopback provider普通/bypass模式均收到tool_result。源树与merge tree一致。
+- SDK会先补multiSelect，所以截图缺字段不直接证明原事故根因；本次修复防输入边界错误与FIFO覆盖。
+- 当前客户端仍由Host/钥匙串owner统一合包；已获用户跨聊天授权并发送冻结源。Mac锁定，待用户手动解锁和统一包回执，完成原生表单/真实caller及配置回归后才能关闭任务。主代理不得假报已安装或触发系统授权绕过。
