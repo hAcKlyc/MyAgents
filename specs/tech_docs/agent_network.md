@@ -68,6 +68,14 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 外层是设备到云端的 HTTPS/WSS，接入以稳定设备公钥绑定的 DPoP 证明持有凭据对应的私钥。官方接入凭据不超过原 Space 登录剩余有效期与 30 天；自部署凭据由固定实例签发，客户端按协议最大有效期验证，不依赖 Space 登录。设备 leaf 有效 7 天，在到期前 48 小时窗口按需续签。活跃回程使用一项带 jitter 的约 6 小时检查，空闲不轮询凭据或证书。暂时签发不可用且现有 leaf 尚有效时保留当前关联，真实撤销与过期不能忽略。
 
+### 独立账号的桌面凭据访问
+
+`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期；浏览器登录完成后先写入 OS 凭据库，再发放进程内会话 guard。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
+
+同一持久槽位的新登录提交会失效旧 guard；取消尚未完成的新登录不撤销此前仍有效的登录。精确 binding 删除、账号 active 失效、会话过期和服务器拒绝仍停止旧权限。恢复、登录写入及精确删除由模块内同步存储锁串行化，锁不跨网络 await。正常路径不轮询 Keychain，用户在应用外手工编辑凭据的检测边界是下次恢复；这不代替服务器的过期或撤销检查。
+
+内部 MoXBots 试用包更新应复用固定代码签名证书。ad-hoc 签名把代码 hash 作为身份，每次新构建可能再次触发 Keychain 确认；固定 bundle identifier 和证书 designated requirement 可保留后续版本身份。签名私钥、专用构建钥匙串和随机构建密码只在本机私有目录，不进入 Git 或试用归档，不保存 Mac 登录密码、不修改全局凭据 ACL 或系统信任。旧 ad-hoc 包创建的凭据首次迁移仍可能需要一次用户系统确认；本地试用证书不等于 Developer ID 或 Apple 公证。
+
 ### 端到端通道与消息路径
 
 端到端加密（E2EE）的端点是两台设备的 Rust App。内层由 `rustls` 的 `ring` provider 实现标准 TLS 1.3 双向证书认证，验证证书链、有效期及双方当前网络签发的 signed binding、SAN 与 fingerprint；禁用 0-RTT 和会话恢复。

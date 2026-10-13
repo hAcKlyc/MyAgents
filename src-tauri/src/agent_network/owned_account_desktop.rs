@@ -12,12 +12,16 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     io::Read,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, MutexGuard, OnceLock,
+    },
 };
 use zeroize::Zeroizing;
 
 const SERVICE: &str = "com.myagents.owned-agentnet.v1";
 const VERSION: u8 = 1;
+const SESSION_GUARD_LIMIT: usize = 128;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
@@ -69,6 +73,7 @@ pub(crate) struct CompletedLogin {
     pub public_tls_ca: Option<String>,
     pub device_id: String,
     pub session: OwnedSession,
+    guard: Arc<AuthorizedSessionGuard>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,6 +130,162 @@ impl State {
 #[derive(Default)]
 pub(crate) struct OwnedLoginManager {
     state: tokio::sync::Mutex<State>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct SessionSlot {
+    app_profile: String,
+    profile: String,
+    issuer: String,
+    login_origin: String,
+    service_id: String,
+    environment: String,
+    network_id: String,
+    device_id: String,
+    principal_id: String,
+    ca_hash: String,
+}
+
+impl SessionSlot {
+    fn new(
+        instance: &OwnedInstance,
+        device_id: &str,
+        principal_id: &str,
+        public_tls_ca: Option<&str>,
+    ) -> Result<Self, NetworkError> {
+        let ca_hash = public_tls_ca
+            .map(|pem| URL_SAFE_NO_PAD.encode(Sha256::digest(pem.as_bytes())))
+            .unwrap_or_else(|| "platform".to_owned());
+        Ok(Self {
+            app_profile: crate::app_dirs::APP_DATA_DIR_NAME.to_owned(),
+            profile: instance.profile.clone(),
+            issuer: instance.issuer.clone(),
+            login_origin: super::account::origin(&instance.login_issuer)?,
+            service_id: instance.service_id.clone(),
+            environment: instance.environment.clone(),
+            network_id: instance.network_id.clone(),
+            device_id: device_id.to_owned(),
+            principal_id: principal_id.to_owned(),
+            ca_hash,
+        })
+    }
+}
+
+struct AuthorizedSessionGuard {
+    binding_id: String,
+    connection_id: String,
+    generation: u64,
+    expires_at: u64,
+    valid: AtomicBool,
+}
+
+impl AuthorizedSessionGuard {
+    fn check(&self) -> Result<(), NetworkError> {
+        if self.generation == 0 || !self.valid.load(Ordering::Acquire) || self.expires_at <= now() {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct SessionGuardCacheState {
+    entries: HashMap<SessionSlot, Arc<AuthorizedSessionGuard>>,
+    next_generation: u64,
+}
+
+#[derive(Default)]
+struct SessionGuardCache {
+    state: Mutex<SessionGuardCacheState>,
+}
+
+impl SessionGuardCache {
+    fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+        mutex.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn prune(state: &mut SessionGuardCacheState) {
+        state.entries.retain(|_, guard| {
+            let live = guard.valid.load(Ordering::Acquire) && guard.expires_at > now();
+            if !live {
+                guard.valid.store(false, Ordering::Release);
+            }
+            live
+        });
+    }
+
+    fn ensure_capacity(&self, slot: &SessionSlot) -> Result<(), NetworkError> {
+        let mut state = Self::lock(&self.state);
+        Self::prune(&mut state);
+        if !state.entries.contains_key(slot) && state.entries.len() >= SESSION_GUARD_LIMIT {
+            return Err(NetworkError::new("NETWORK_REQUEST_CAPACITY"));
+        }
+        Ok(())
+    }
+
+    fn authorize(
+        &self,
+        slot: SessionSlot,
+        binding_id: &str,
+        connection_id: &str,
+        expires_at: u64,
+    ) -> Result<Arc<AuthorizedSessionGuard>, NetworkError> {
+        if expires_at <= now() {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        let mut state = Self::lock(&self.state);
+        Self::prune(&mut state);
+        if let Some(existing) = state.entries.get(&slot) {
+            if existing.binding_id == binding_id
+                && existing.connection_id == connection_id
+                && existing.expires_at == expires_at
+            {
+                return Ok(existing.clone());
+            }
+        }
+        if !state.entries.contains_key(&slot) && state.entries.len() >= SESSION_GUARD_LIMIT {
+            return Err(NetworkError::new("NETWORK_REQUEST_CAPACITY"));
+        }
+        if let Some(previous) = state.entries.remove(&slot) {
+            previous.valid.store(false, Ordering::Release);
+        }
+        state.next_generation = state.next_generation.saturating_add(1);
+        let generation = state.next_generation;
+        let guard = Arc::new(AuthorizedSessionGuard {
+            binding_id: binding_id.to_owned(),
+            connection_id: connection_id.to_owned(),
+            generation,
+            expires_at,
+            valid: AtomicBool::new(true),
+        });
+        state.entries.insert(slot, guard.clone());
+        Ok(guard)
+    }
+
+    fn invalidate_binding(&self, slot: &SessionSlot, binding_id: &str) {
+        let mut state = Self::lock(&self.state);
+        if state
+            .entries
+            .get(slot)
+            .is_some_and(|guard| guard.binding_id == binding_id)
+        {
+            if let Some(guard) = state.entries.remove(slot) {
+                guard.valid.store(false, Ordering::Release);
+            }
+        }
+    }
+}
+
+fn session_guard_cache() -> &'static SessionGuardCache {
+    static CACHE: OnceLock<SessionGuardCache> = OnceLock::new();
+    CACHE.get_or_init(SessionGuardCache::default)
+}
+
+fn storage_transaction_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
 }
 
 fn entry(user: &str) -> Result<Entry, NetworkError> {
@@ -203,7 +364,7 @@ fn session_entry(
         key(instance, device_id, principal, public_tls_ca)
     ))
 }
-fn write(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
+fn write_unlocked(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
     let json = Zeroizing::new(
         serde_json::to_string(secret)
             .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?,
@@ -212,7 +373,17 @@ fn write(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
         .set_password(&json)
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))
 }
-fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
+fn write(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
+    let _transaction = storage_transaction_lock();
+    write_unlocked(entry, secret)
+}
+#[cfg(test)]
+thread_local! {
+    static KEYRING_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+fn read_unlocked(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
+    #[cfg(test)]
+    KEYRING_READS.with(|reads| reads.set(reads.get().saturating_add(1)));
     let value = match entry.get_password() {
         Ok(value) => Zeroizing::new(value),
         Err(keyring::Error::NoEntry) => return Ok(None),
@@ -222,11 +393,19 @@ fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
         .map(Some)
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"))
 }
-fn delete(entry: &Entry) -> Result<(), NetworkError> {
+fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
+    let _transaction = storage_transaction_lock();
+    read_unlocked(entry)
+}
+fn delete_unlocked(entry: &Entry) -> Result<(), NetworkError> {
     match entry.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(_) => Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
     }
+}
+fn delete(entry: &Entry) -> Result<(), NetworkError> {
+    let _transaction = storage_transaction_lock();
+    delete_unlocked(entry)
 }
 fn read_public_ca_file(path: Option<&str>) -> Result<Option<String>, NetworkError> {
     let Some(path) = path else {
@@ -537,7 +716,22 @@ impl OwnedLoginManager {
                 };
                 // The consumed transaction is durably marked before the request. If
                 // saving the returned session fails, no subsequent poll can replay it.
-                write(&account_entry, &secret)?;
+                session.validate(&instance)?;
+                let slot = SessionSlot::new(
+                    &instance,
+                    &device_id,
+                    &session.principal_id,
+                    public_tls_ca.as_deref(),
+                )?;
+                let _storage = storage_transaction_lock();
+                session_guard_cache().ensure_capacity(&slot)?;
+                write_unlocked(&account_entry, &secret)?;
+                let guard = session_guard_cache().authorize(
+                    slot,
+                    &binding_id,
+                    &connection_id,
+                    session.expires_at,
+                )?;
                 let completed = CompletedLogin {
                     attempt_id: attempt_id.to_owned(),
                     connection_id,
@@ -546,9 +740,10 @@ impl OwnedLoginManager {
                     public_tls_ca: public_tls_ca.clone(),
                     device_id: device_id.clone(),
                     session,
+                    guard,
                 };
                 attempt.completed = Some(completed.clone());
-                delete(&secret_entry)?;
+                delete_unlocked(&secret_entry)?;
                 Ok(Some(completed))
             }
             Err(error) => Err(error),
@@ -578,12 +773,14 @@ impl OwnedLoginManager {
                 attempt.public_tls_ca.as_deref(),
             )?)?;
             if let Some(done) = &attempt.completed {
-                delete(&session_entry(
+                done.guard.valid.store(false, Ordering::Release);
+                delete_account_if_binding(
                     &done.instance,
                     &done.device_id,
                     &done.session.principal_id,
                     done.public_tls_ca.as_deref(),
-                )?)?;
+                    &done.binding_id,
+                )?;
             }
             attempt
         };
@@ -665,41 +862,10 @@ pub(crate) fn account_from_login(
     login: &CompletedLogin,
     join_authorized: bool,
 ) -> Arc<OwnedAccount> {
-    let expected_binding = login.binding_id.clone();
-    let expected_device = login.device_id.clone();
-    let expected_principal = login.session.principal_id.clone();
-    let expected_network = login.session.network_id.clone();
-    let guard_entry = session_entry(
-        &login.instance,
-        &login.device_id,
-        &login.session.principal_id,
-        login.public_tls_ca.as_deref(),
-    )
-    .expect("login identity was validated before keyring persistence");
-    let guard = Arc::new(move || {
-        let Some(SecretRecord::Session {
-            version,
-            binding_id,
-            device_id,
-            principal_id,
-            network_id,
-            session,
-            ..
-        }) = read(&guard_entry)?
-        else {
-            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
-        };
-        if version != VERSION
-            || binding_id != expected_binding
-            || device_id != expected_device
-            || principal_id != expected_principal
-            || network_id != expected_network
-            || session.expires_at <= now()
-        {
-            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
-        }
-        Ok(())
-    });
+    // Only poll-after-persist or validated restore can mint this private grant.
+    // Per-operation guards remain process-local and never re-read Keychain.
+    let authorized = login.guard.clone();
+    let guard = Arc::new(move || authorized.check());
     Arc::new(OwnedAccount {
         connection_id: login.connection_id.clone(),
         descriptor: login.instance.clone(),
@@ -721,13 +887,18 @@ pub(crate) fn delete_account_if_binding(
     expected_binding: &str,
 ) -> Result<bool, NetworkError> {
     let entry = session_entry(instance, device, principal, public_tls_ca)?;
-    let Some(SecretRecord::Session { binding_id, .. }) = read(&entry)? else {
+    let _storage = storage_transaction_lock();
+    let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&entry)? else {
+        let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
+        session_guard_cache().invalidate_binding(&slot, expected_binding);
         return Ok(false);
     };
     if binding_id != expected_binding {
         return Ok(false);
     }
-    delete(&entry)?;
+    delete_unlocked(&entry)?;
+    let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
+    session_guard_cache().invalidate_binding(&slot, expected_binding);
     Ok(true)
 }
 
@@ -740,6 +911,7 @@ pub(crate) fn restore_account(
     public_tls_ca: Option<&str>,
     join_authorized: bool,
 ) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
+    let _storage = storage_transaction_lock();
     let Some(SecretRecord::Session {
         version,
         instance: saved,
@@ -750,7 +922,7 @@ pub(crate) fn restore_account(
         session,
         connection_id: saved_connection,
         binding_id: saved_binding,
-    }) = read(&session_entry(instance, device, principal, public_tls_ca)?)?
+    }) = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?
     else {
         return Ok(None);
     };
@@ -766,6 +938,14 @@ pub(crate) fn restore_account(
     }
     instance.ensure_same_trust(&saved)?;
     session.validate(instance)?;
+    let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
+    session_guard_cache().ensure_capacity(&slot)?;
+    let guard = session_guard_cache().authorize(
+        slot,
+        &saved_binding,
+        &saved_connection,
+        session.expires_at,
+    )?;
     let completed = CompletedLogin {
         attempt_id: String::new(),
         connection_id: saved_connection,
@@ -773,6 +953,7 @@ pub(crate) fn restore_account(
         instance: saved,
         public_tls_ca: saved_ca,
         device_id,
+        guard,
         session,
     };
     Ok(Some(account_from_login(&completed, join_authorized)))
@@ -786,6 +967,7 @@ pub(crate) fn load_session_for_removal(
     binding_id: &str,
     public_tls_ca: Option<&str>,
 ) -> Result<Option<OwnedSession>, NetworkError> {
+    let _storage = storage_transaction_lock();
     let Some(SecretRecord::Session {
         version,
         instance: saved,
@@ -796,7 +978,7 @@ pub(crate) fn load_session_for_removal(
         session,
         connection_id: saved_connection,
         binding_id: saved_binding,
-    }) = read(&session_entry(instance, device, principal, public_tls_ca)?)?
+    }) = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?
     else {
         return Ok(None);
     };
@@ -834,7 +1016,193 @@ pub(crate) fn load_session_for_removal(
 
 #[cfg(test)]
 mod tests {
-    use super::State;
+    use super::{
+        account_from_login, now, storage_transaction_lock, AuthorizedSessionGuard, CompletedLogin,
+        OwnedInstance, SessionGuardCache, SessionSlot, State, KEYRING_READS,
+    };
+    use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex};
+
+    fn instance(network_id: &str) -> OwnedInstance {
+        OwnedInstance {
+            version: 1,
+            profile: "owned-device-relay-v1".into(),
+            service_id: "00000000-0000-0000-0000-000000000001".into(),
+            environment: "development".into(),
+            network_id: network_id.into(),
+            name: "test service".into(),
+            issuer: format!("https://{network_id}.example"),
+            login_issuer: "https://login.example/dex".into(),
+            protocol: 1,
+            capabilities: vec!["tls13-mtls".into()],
+            root_certificate: "test root".into(),
+            jwks: serde_json::json!({}),
+        }
+    }
+
+    fn slot(network_id: &str, ca: Option<&str>) -> SessionSlot {
+        SessionSlot::new(&instance(network_id), "device-1", "principal-1", ca).unwrap()
+    }
+
+    #[test]
+    fn guard_cache_replaces_exact_binding_and_isolates_full_scope() {
+        let cache = SessionGuardCache::default();
+        let first_slot = slot("network-1", Some("ca-one"));
+        let other_slot = slot("network-2", Some("ca-one"));
+        let expires = now() + 3600;
+        let old = cache
+            .authorize(first_slot.clone(), "binding-old", "connection-old", expires)
+            .unwrap();
+        let isolated = cache
+            .authorize(
+                other_slot.clone(),
+                "binding-other",
+                "connection-other",
+                expires,
+            )
+            .unwrap();
+        old.check().unwrap();
+
+        let current = cache
+            .authorize(first_slot.clone(), "binding-new", "connection-new", expires)
+            .unwrap();
+        assert_eq!(old.check().unwrap_err().code, "ACCOUNT_BINDING_CHANGED");
+        cache.invalidate_binding(&first_slot, "binding-old");
+        current.check().unwrap();
+        isolated.check().unwrap();
+
+        // Starting a replacement login does not revoke a still-durable session.
+        // Its guard is replaced only after a new session has been persisted.
+        current.check().unwrap();
+        isolated.check().unwrap();
+        let replacement = cache
+            .authorize(first_slot, "binding-final", "connection-final", expires)
+            .unwrap();
+        assert_eq!(current.check().unwrap_err().code, "ACCOUNT_BINDING_CHANGED");
+        replacement.check().unwrap();
+    }
+
+    #[test]
+    fn repeated_account_validation_uses_cached_guard_without_keyring_reads() {
+        let instance = instance("network-check");
+        let session = super::super::owned_login::OwnedSession {
+            access_token: "a".repeat(43),
+            expires_at: now() + 3600,
+            principal_id: "00000000-0000-0000-0000-000000000002".into(),
+            network_id: instance.network_id.clone(),
+        };
+        let guard = Arc::new(AuthorizedSessionGuard {
+            binding_id: "binding".into(),
+            connection_id: "connection".into(),
+            generation: 1,
+            expires_at: session.expires_at,
+            valid: AtomicBool::new(true),
+        });
+        let login = CompletedLogin {
+            attempt_id: "attempt".into(),
+            connection_id: "connection".into(),
+            binding_id: "binding".into(),
+            instance,
+            public_tls_ca: None,
+            device_id: "device-1".into(),
+            session,
+            guard,
+        };
+        let account = account_from_login(&login, true);
+        let account = super::super::account::NetworkAccountSession::Owned(account);
+        let reads_before = KEYRING_READS.with(|reads| reads.get());
+        for _ in 0..8 {
+            account.ensure_current().unwrap();
+        }
+        let reads_after = KEYRING_READS.with(|reads| reads.get());
+        assert_eq!(reads_after, reads_before);
+    }
+
+    #[test]
+    fn guard_expiry_and_capacity_fail_closed_without_evicting_live_sessions() {
+        let cache = SessionGuardCache::default();
+        let expired_slot = slot("network-expired", None);
+        assert_eq!(
+            cache
+                .authorize(
+                    expired_slot,
+                    "binding",
+                    "connection",
+                    now().saturating_sub(1),
+                )
+                .err()
+                .unwrap()
+                .code,
+            "ACCOUNT_BINDING_CHANGED"
+        );
+
+        let expiry = now() + 3600;
+        let mut first = None;
+        for index in 0..super::SESSION_GUARD_LIMIT {
+            let network_id = format!("network-{index}");
+            let grant = cache
+                .authorize(
+                    slot(&network_id, None),
+                    &format!("binding-{index}"),
+                    &format!("connection-{index}"),
+                    expiry,
+                )
+                .unwrap();
+            if index == 0 {
+                first = Some(grant);
+            }
+        }
+        let overflow = cache.ensure_capacity(&slot("network-overflow", None));
+        assert_eq!(overflow.unwrap_err().code, "NETWORK_REQUEST_CAPACITY");
+        first.unwrap().check().unwrap();
+    }
+
+    #[test]
+    fn serialized_restore_cannot_republish_old_guard_after_new_poll_commit() {
+        let cache = Arc::new(SessionGuardCache::default());
+        let session_slot = slot("network-race", None);
+        let persisted = Arc::new(Mutex::new((
+            "binding-old".to_owned(),
+            "connection-old".to_owned(),
+        )));
+        let (read_tx, read_rx) = mpsc::channel();
+        let (continue_tx, continue_rx) = mpsc::channel();
+        let restore_cache = cache.clone();
+        let restore_slot = session_slot.clone();
+        let restore_persisted = persisted.clone();
+        let restore = std::thread::spawn(move || {
+            let _transaction = storage_transaction_lock();
+            let snapshot = restore_persisted.lock().unwrap().clone();
+            read_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+            restore_cache
+                .authorize(restore_slot, &snapshot.0, &snapshot.1, now() + 3600)
+                .unwrap()
+        });
+        read_rx.recv().unwrap();
+
+        let poll_cache = cache.clone();
+        let poll_slot = session_slot.clone();
+        let poll_persisted = persisted.clone();
+        let (poll_started_tx, poll_started_rx) = mpsc::channel();
+        let poll = std::thread::spawn(move || {
+            poll_started_tx.send(()).unwrap();
+            let _transaction = storage_transaction_lock();
+            *poll_persisted.lock().unwrap() =
+                ("binding-new".to_owned(), "connection-new".to_owned());
+            poll_cache
+                .authorize(poll_slot, "binding-new", "connection-new", now() + 3600)
+                .unwrap()
+        });
+        poll_started_rx.recv().unwrap();
+        continue_tx.send(()).unwrap();
+        let restored_guard = restore.join().unwrap();
+        let polled_guard = poll.join().unwrap();
+        assert_eq!(
+            restored_guard.check().unwrap_err().code,
+            "ACCOUNT_BINDING_CHANGED"
+        );
+        polled_guard.check().unwrap();
+    }
 
     #[test]
     fn cancel_invalidates_late_poll_completion() {

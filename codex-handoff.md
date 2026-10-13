@@ -1,12 +1,14 @@
 # Codex Handoff
 
 <!-- codex-handoff:version=1 -->
-<!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-13T11:19:35+08:00 -->
+<!-- codex-handoff:project=MoXBots -->
+<!-- codex-handoff:last-updated=2026-10-13T11:53:38+08:00 -->
 <!-- codex-handoff:latest-anchor=MAH-CLOUD-MANAGEMENT-20261013 -->
 
 ## Current Snapshot
 
+- **MAH-DESKTOP-CREDENTIALS-20261013**：用户要求避免反复输入钥匙串密码。已核实后台 `ensure_current` 每次读取 OS 凭据和 ad-hoc 新包 hash 身份变化两个来源；修复仅缓存已验证的进程内非秘密 guard，首次 restore 仍读 OS 库，精确删除/替换/active/expiry 仍失效。取消新登录不撤销现有登录，存储同步锁不跨 await。凭据、Mac 密码不写 Git，不新增明文后端、不放宽全局 ACL；独立本地试用签名身份与私有构建密码只在 owner 私有目录，签名副本 strict 校验和固定证书 DR 已通过，旧凭据首次迁移可能仍需一次系统确认，真实不反复弹窗尚待验收。
+- **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，同一 GitHub repository ID，origin 已核查更新。主干 `848c0592` 合并 MoXBots 品牌 PR #16；管理分支已整合品牌源 `40c90d13`。PR #14 管理成果尚未合入。迟到控制消息修复 `3a294c78` 已完成源码独立审查，整合 `b359893b` Test CI 六作业通过；Owned CI 首次并发 metadata 初始化双失败，`16658390` 增加私有有界初始化锁，20 tests/clippy 与并发重复通过，原 Linux 失败未在 Mac 精确复现，待修复后 Linux CI。新桌面管理包原生构建成功，但不能当真实 Agent 创建验收。
 - **MAH-CLOUD-MANAGEMENT-20261013**：主 owner 沿用 `feat/mah-management-device-pairs`。源码 `02e55746` 的 Test CI 七作业和 Owned 服务构建通过；PR #14 仍待真实管理验收与主干交付。用户继续授权 goal 模式和桌面联调；模型密钥后续由产品界面配置，本轮没有付费模型调用。
 - **当前真实部署**：独立认证与云 AgentNet 已在用户授权的新云主机部署，受信 IP-SAN HTTPS 可用，不必要求域名；后端仅 loopback，既有应用和入口保全。心跳修复 `7cdfe315` 已用有来源与摘要的 CI 制品发布；桌面和已安装 Linux Host 完成真实同账号浏览器授权、入网，并跨 51 秒保持相同连接 epoch 的 Ready。身份、凭据、数据库和旧服务均保留；恢复必须用当前阶段一致性备份，不能覆盖为登录前数据库。
 - **真实管理进度与当前缺陷**：桌面原生 Host snapshot 成功，Kimi 默认模型配置保存到 Linux Host revision 1；密钥未配置、执行未授权、Agent 创建尚未验收。保存后的自动刷新遇旧请求迟到 `channel.closed`，原保存回执仍有效。正在补有界、严格 scope 的退役通道收尾，并同时覆盖 actor idle 与下一 RPC 接收；未知通道仍拒绝。通过修复回归后，整合 MoXBots 品牌分支并重新构建试用包，再完成 Agent 创建和重启持久化的真实桌面路径。
