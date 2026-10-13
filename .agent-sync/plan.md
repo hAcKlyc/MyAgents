@@ -45,3 +45,7 @@
 - [x] 规划/任务/接续与原型、证据同提交链保存，当前头部CI与main交付核验。
 
 详细需求见 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，阶段状态见同目录TODO.md；本轮不启动真实服务开发。
+
+## MOXBOTS-CHAT-ARCHIVE-20261013
+
+当前Agent开发左侧聊天任务归档/列表/恢复（用户2026-10-13已明确），本条不启动真实Bot共享服务。Task record见 .agent-sync/tasks/codex-chat-task-archive-delivery-20261013-6fc6d567.md。目标为持久化/UI回归、原生可控聊天验收、远端main和保留既有Host试用能力的本机安装，当前实现完成、验收交付待完成。
