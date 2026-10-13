@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TranscriptBlock, TranscriptObject } from '../../shared/sessionTranscript';
-import { CLIENT_MESSAGE_INLINE_MAX_BYTES, shrinkReplayContentForClient } from '../utils/session-message-preview';
+import { CLIENT_HISTORY_AUXILIARY_MAX_BYTES, shrinkReplayContentForClient } from '../utils/session-message-preview';
 import { toClientTranscriptOperation } from './client';
 
 describe('V2 transcript display transport', () => {
@@ -21,13 +21,21 @@ describe('V2 transcript display transport', () => {
     expect(toClientTranscriptOperation({ kind: 'block-update', messageId: 'a', blockId: 'b', target: 'tool', details: { result: large, inputComplete: true } })).toBeNull();
   });
 
+  it('preserves full body through V2 message creation and content confirmation', () => {
+    const content = [{ id: 'body', type: 'text' as const, text: '正文😀'.repeat(100_000) }];
+    expect(toClientTranscriptOperation({ kind: 'message-create', message: {
+      id: 'message', role: 'assistant', timestamp: '2026-10-14T00:00:00Z', content,
+    } })).toMatchObject({ message: { content } });
+    expect(toClientTranscriptOperation({ kind: 'content-confirm', messageId: 'message', content })).toMatchObject({ content });
+  });
+
   it('preserves stable IDs for blocks retained in an extreme REST preview', () => {
     const blocks: TranscriptBlock[] = Array.from({ length: 1800 }, (_, index) => ({
       id: `block-${index}`, type: 'tool_use', tool: { id: `tool-${index}`, name: 'Read', result: 'x'.repeat(2048) },
     }));
     const projected = shrinkReplayContentForClient(blocks) as TranscriptObject[];
     expect(Array.isArray(projected)).toBe(true);
-    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(CLIENT_MESSAGE_INLINE_MAX_BYTES);
+    expect(Buffer.byteLength(JSON.stringify(projected))).toBeLessThanOrEqual(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
     const tools = projected.filter(block => block.type === 'tool_use');
     expect(tools.length).toBeGreaterThan(0);
     expect(tools.length).toBeLessThan(blocks.length);

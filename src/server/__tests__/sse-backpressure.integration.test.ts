@@ -208,16 +208,16 @@ describe('SSE backpressure — hard cap eviction (fix #6)', () => {
 
     // Saturate with critical events — without the hard cap they'd grow the
     // queue forever. With the fix, we expect the client to be evicted (its
-    // close() runs once the hard cap fires, draining what's queued and
-    // signalling the consumer through onClose).
+    // transport fails closed and releases its queue; reconnect restores
+    // a consistent snapshot instead of applying a partial tail).
     //
     // 12_000 events comfortably exceeds the 10_000 hard cap.
     for (let i = 0; i < 12_000; i++) {
       client.send('chat:status', { state: `s-${i}` });
     }
 
-    // Drain the reader so the test cleans up (close → controller.close()).
-    await drain(reader);
+    // No unbounded force-flush when queued entries require asynchronous IO.
+    await expect(drain(reader)).rejects.toThrow('SSE client queue limit exceeded');
 
     expect(onCloseCalled).toBe(true);
   }, 10_000);
