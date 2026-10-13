@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +13,8 @@ const lockHelper = source.split('# BEGIN_SHARED_TRANSACTION_LOCK\n')[1]?.split('
 assert.ok(lockHelper, 'shared transaction lock helper markers exist');
 const releaseVerifier = source.split('# BEGIN_RELEASE_VERIFIER\n')[1]?.split('# END_RELEASE_VERIFIER')[0];
 assert.ok(releaseVerifier, 'release verifier markers exist');
+const rollbackHelpers = source.split('# BEGIN_ROLLBACK_HELPERS\n')[1]?.split('# END_ROLLBACK_HELPERS')[0];
+assert.ok(rollbackHelpers, 'rollback helper markers exist');
 function packageFixture(t, mode = 'valid', profile = 'myagents-test') {
   const root = mkdtempSync(join(tmpdir(), 'myagents-host-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -181,3 +183,123 @@ test('release verifier rejects changed modes, symlink entries, and unexpected ow
   const wrongOwner = installedReleaseFixture(t);
   assert.notEqual(wrongOwner.verify(Number(wrongOwner.uid) + 1, wrongOwner.gid).status, 0);
 });
+
+function rollbackFixture(t, { stopExit = 0, showExit = 0, showOutput = 'ActiveState=inactive\nMainPID=0\n', previousUnit = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'myagents-host-rollback-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const prefix = join(root, 'prefix');
+  const release = join(prefix, 'releases/test-1');
+  const previousRelease = join(prefix, 'releases/test-previous');
+  const unit = join(root, 'service/myagents-host-test.service');
+  const stage = join(root, 'stage');
+  const bin = join(root, 'bin');
+  mkdirSync(release, { recursive: true });
+  if (previousUnit) mkdirSync(previousRelease, { recursive: true });
+  mkdirSync(join(root, 'service'), { recursive: true });
+  mkdirSync(stage, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(release, 'artifact'), 'new release');
+  if (previousUnit) writeFileSync(join(previousRelease, 'artifact'), 'previous release');
+  writeFileSync(unit, 'new unit');
+  writeFileSync(join(stage, 'recovery-note'), 'private recovery data');
+  symlinkSync('releases/test-1', join(prefix, 'current'));
+  const backupLink = join(stage, 'previous-link');
+  if (previousUnit) {
+    writeFileSync(join(stage, 'previous-unit'), 'previous unit');
+    symlinkSync('releases/test-previous', backupLink);
+  }
+  writeFileSync(join(bin, 'systemctl'), [
+    '#!/bin/sh',
+    'printf \'%s\\n\' "$*" >> "$COMMAND_LOG"',
+    'case "$1" in',
+    '  stop) exit "$STOP_EXIT" ;;',
+    '  show) printf \'%s\' "$SHOW_OUTPUT"; exit "$SHOW_EXIT" ;;',
+    '  *) exit 0 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  chmodSync(join(bin, 'systemctl'), 0o755);
+  writeFileSync(join(bin, 'install'), '#!/bin/sh\ncp "$7" "$8"\nchmod 0644 "$8"\n');
+  chmodSync(join(bin, 'install'), 0o755);
+  writeFileSync(join(bin, 'timeout'), '#!/bin/sh\nshift 3\nexec "$@"\n');
+  chmodSync(join(bin, 'timeout'), 0o755);
+  writeFileSync(join(bin, 'mv'), '#!/usr/bin/python3\nimport os,sys\na=sys.argv[1:]\nif a[0]=="-Tf": a=a[1:]\nos.replace(a[0],a[1])\n');
+  chmodSync(join(bin, 'mv'), 0o755);
+  writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(bin, 'sleep'), 0o755);
+  const script = `set -euo pipefail\n${rollbackHelpers}\n` +
+    'SERVICE=myagents-host-test.service\nUNIT="$UNIT_PATH"\nPREFIX="$PREFIX_PATH"\nSTAGE="$STAGE_PATH"\n' +
+    'BACKUP_LINK="$BACKUP_PATH"\nLINK_CHANGED=1\nCREATED_RELEASE="$RELEASE_PATH"\nUNIT_CHANGED=1\n' +
+    'PREVIOUS_ENABLED="$WAS_ENABLED"\nPREVIOUS_ACTIVE=0\nROLLBACK_CONFIRMED=0\nPRESERVE_STAGE=0\n' +
+    'if rollback_failed_install 1; then printf "confirmed=%s\\npreserve=%s\\n" "$ROLLBACK_CONFIRMED" "$PRESERVE_STAGE"; ' +
+    'else printf "confirmed=%s\\npreserve=%s\\n" "$ROLLBACK_CONFIRMED" "$PRESERVE_STAGE"; exit 9; fi';
+  const run = spawnSync('/bin/bash', ['-c', script], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${bin}:/usr/bin:/bin`,
+      COMMAND_LOG: join(root, 'commands.log'),
+      STOP_EXIT: String(stopExit),
+      SHOW_EXIT: String(showExit),
+      SHOW_OUTPUT: showOutput,
+      UNIT_PATH: unit,
+      PREFIX_PATH: prefix,
+      STAGE_PATH: stage,
+      RELEASE_PATH: release,
+      BACKUP_PATH: previousUnit ? backupLink : '',
+      WAS_ENABLED: previousUnit ? '1' : '0',
+    },
+  });
+  return { root, prefix, release, unit, stage, run, commands: () => readFileSync(join(root, 'commands.log'), 'utf8') };
+}
+
+test('fresh-install rollback removes its unit and release only after stop and inactive confirmation', t => {
+  const fixture = rollbackFixture(t);
+  assert.equal(fixture.run.status, 0, fixture.run.stdout + fixture.run.stderr);
+  assert.match(fixture.run.stdout, /confirmed=1/);
+  assert.match(fixture.run.stdout, /preserve=0/);
+  assert.equal(require('node:fs').existsSync(join(fixture.prefix, 'current')), false);
+  assert.equal(require('node:fs').existsSync(fixture.unit), false);
+  assert.equal(require('node:fs').existsSync(fixture.release), false);
+  assert.deepEqual(fixture.commands().trim().split('\n'), [
+    'disable myagents-host-test.service',
+    'stop myagents-host-test.service',
+    'show myagents-host-test.service --property=ActiveState --property=MainPID --no-pager',
+    'daemon-reload',
+  ]);
+});
+
+test('rollback restores the prior unit, link, and enabled-but-inactive service state', t => {
+  const fixture = rollbackFixture(t, { previousUnit: true });
+  assert.equal(fixture.run.status, 0, fixture.run.stdout + fixture.run.stderr);
+  assert.match(fixture.run.stdout, /confirmed=1/);
+  assert.equal(require('node:fs').readlinkSync(join(fixture.prefix, 'current')), 'releases/test-previous');
+  assert.equal(readFileSync(fixture.unit, 'utf8'), 'previous unit');
+  assert.equal(require('node:fs').existsSync(fixture.release), false);
+  assert.match(fixture.commands(), /enable myagents-host-test\.service/);
+  assert.doesNotMatch(fixture.commands(), /start myagents-host-test\.service/);
+});
+
+for (const [label, options] of [
+  ['stop failure', { stopExit: 1, previousUnit: true }],
+  ['stop timeout', { stopExit: 124 }],
+  ['non-inactive status', { showOutput: 'ActiveState=failed\nMainPID=0\n' }],
+  ['duplicate status field', { showOutput: 'ActiveState=inactive\nActiveState=inactive\nMainPID=0\n' }],
+]) {
+  test(`rollback preserves fresh install files and diagnostics on ${label}`, t => {
+    const fixture = rollbackFixture(t, options);
+    assert.notEqual(fixture.run.status, 0);
+    assert.match(fixture.run.stdout, /confirmed=0/);
+    assert.match(fixture.run.stdout, /preserve=1/);
+    assert.match(fixture.run.stderr, /Rollback unconfirmed/);
+    assert.equal(require('node:fs').readlinkSync(join(fixture.prefix, 'current')), 'releases/test-1');
+    assert.equal(readFileSync(fixture.unit, 'utf8'), 'new unit');
+    assert.equal(readFileSync(join(fixture.release, 'artifact'), 'utf8'), 'new release');
+    assert.equal(readFileSync(join(fixture.stage, 'recovery-note'), 'utf8'), 'private recovery data');
+    const calls = fixture.commands();
+    assert.match(calls, /disable myagents-host-test\.service/);
+    assert.match(calls, /stop myagents-host-test\.service/);
+    if (options.previousUnit) assert.match(calls, /enable myagents-host-test\.service/);
+    assert.doesNotMatch(calls, /daemon-reload/);
+  });
+}

@@ -33,32 +33,114 @@ BACKUP_LINK=
 LINK_CHANGED=0
 CREATED_RELEASE=
 PROVIDER_CREDENTIAL_TMP=
-RESTORE_OLD_SERVICE=0
 UNIT_CHANGED=0
 PREVIOUS_ENABLED=0
+PREVIOUS_ACTIVE=0
+ROLLBACK_CONFIRMED=0
+PRESERVE_STAGE=0
+# BEGIN_ROLLBACK_HELPERS
+systemd_service_state_is() {
+  local service=$1 expected_state=$2 output line active='' pid='' active_count=0 pid_count=0
+  output=$(systemctl show "$service" --property=ActiveState --property=MainPID --no-pager 2>/dev/null) || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      ActiveState=*) ((active_count += 1)); active=${line#ActiveState=} ;;
+      MainPID=*) ((pid_count += 1)); pid=${line#MainPID=} ;;
+      '') ;;
+      *) return 1 ;;
+    esac
+  done <<< "$output"
+  ((active_count == 1 && pid_count == 1)) || return 1
+  if [[ "$expected_state" == inactive ]]; then
+    [[ "$active" == inactive && "$pid" == 0 ]]
+  else
+    [[ "$active" == active && "$pid" =~ ^[1-9][0-9]*$ ]]
+  fi
+}
+
+rollback_install_state() {
+  local have_previous_unit=0
+  [[ -f "$STAGE/previous-unit" && ! -L "$STAGE/previous-unit" ]] && have_previous_unit=1
+
+  if [[ -f "$UNIT" || "$UNIT_CHANGED" == 1 ]]; then
+    [[ -f "$UNIT" && ! -L "$UNIT" ]] || return 1
+    if ! systemctl disable "$SERVICE" >/dev/null 2>&1; then
+      if ((PREVIOUS_ENABLED)); then systemctl enable "$SERVICE" >/dev/null 2>&1 || true; fi
+      return 1
+    fi
+    if ! timeout --signal=TERM --kill-after=5s 30s systemctl stop "$SERVICE" >/dev/null 2>&1; then
+      if ((PREVIOUS_ENABLED)); then systemctl enable "$SERVICE" >/dev/null 2>&1 || true; fi
+      return 1
+    fi
+    local stopped=0
+    for _ in $(seq 1 10); do
+      if systemd_service_state_is "$SERVICE" inactive; then stopped=1; break; fi
+      sleep 1
+    done
+    if ((stopped != 1)); then
+      if ((PREVIOUS_ENABLED)); then systemctl enable "$SERVICE" >/dev/null 2>&1 || true; fi
+      return 1
+    fi
+  fi
+
+  if [[ -n "$BACKUP_LINK" && -L "$BACKUP_LINK" ]]; then
+    ln -sfn "$(readlink "$BACKUP_LINK")" "$PREFIX/current.rollback" || return 1
+    mv -Tf "$PREFIX/current.rollback" "$PREFIX/current" || return 1
+  else
+    rm -f -- "$PREFIX/current" || return 1
+  fi
+
+  if ((UNIT_CHANGED)); then
+    if ((have_previous_unit)); then
+      install -o root -g root -m 0644 "$STAGE/previous-unit" "$UNIT" || return 1
+    else
+      rm -f -- "$UNIT" || return 1
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || return 1
+    if ((have_previous_unit)); then systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || return 1; fi
+  fi
+
+  if ((PREVIOUS_ENABLED)); then
+    systemctl enable "$SERVICE" >/dev/null 2>&1 || return 1
+  elif ((have_previous_unit)); then
+    systemctl disable "$SERVICE" >/dev/null 2>&1 || return 1
+  fi
+  if ((PREVIOUS_ACTIVE)); then
+    systemctl start "$SERVICE" >/dev/null 2>&1 || return 1
+    systemd_service_state_is "$SERVICE" active || return 1
+  fi
+  return 0
+}
+
+rollback_failed_install() {
+  local result=$1
+  ROLLBACK_CONFIRMED=0
+  PRESERVE_STAGE=0
+  if ((LINK_CHANGED)); then
+    if rollback_install_state; then
+      ROLLBACK_CONFIRMED=1
+    else
+      PRESERVE_STAGE=1
+      echo 'Rollback unconfirmed; preserving the current link, unit, and release for recovery.' >&2
+      echo "Recovery snapshot retained at $STAGE" >&2
+    fi
+  else
+    ROLLBACK_CONFIRMED=1
+  fi
+  if ((result != 0)) && [[ -n "$CREATED_RELEASE" && -d "$CREATED_RELEASE" ]] \
+    && ((ROLLBACK_CONFIRMED)); then
+    rm -rf -- "$CREATED_RELEASE"
+  fi
+  ((ROLLBACK_CONFIRMED))
+}
+# END_ROLLBACK_HELPERS
 cleanup() {
   local result=$?
-  if ((result != 0 && LINK_CHANGED)); then
-    if [[ -n "$BACKUP_LINK" && -L "$BACKUP_LINK" ]]; then
-      ln -sfn "$(readlink "$BACKUP_LINK")" "$PREFIX/current.rollback"
-      mv -Tf "$PREFIX/current.rollback" "$PREFIX/current"
-    else
-      rm -f "$PREFIX/current"
-    fi
-      systemctl stop "$SERVICE" >/dev/null 2>&1 || true
-      if ((UNIT_CHANGED)); then
-      if [[ -f "$STAGE/previous-unit" ]]; then install -o root -g root -m 0644 "$STAGE/previous-unit" "$UNIT"; else rm -f "$UNIT"; fi
-      systemctl daemon-reload >/dev/null 2>&1 || true
-      if ((PREVIOUS_ENABLED)); then systemctl enable "$SERVICE" >/dev/null 2>&1 || true; else systemctl disable "$SERVICE" >/dev/null 2>&1 || true; fi
-    fi
-    systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
-    if ((RESTORE_OLD_SERVICE && PREVIOUS_ENABLED)); then systemctl start "$SERVICE" >/dev/null 2>&1 || true; fi
-  fi
-  if ((result != 0)) && [[ -n "$CREATED_RELEASE" && -d "$CREATED_RELEASE" ]]; then rm -rf -- "$CREATED_RELEASE"; fi
+  if ((result != 0)); then rollback_failed_install "$result" || true; fi
   if [[ -n "$PROVIDER_CREDENTIAL_TMP" && -f "$PROVIDER_CREDENTIAL_TMP" && ! -L "$PROVIDER_CREDENTIAL_TMP" ]]; then
     rm -f -- "$PROVIDER_CREDENTIAL_TMP"
   fi
-  rm -rf -- "$STAGE"
+  if ((PRESERVE_STAGE == 0)); then rm -rf -- "$STAGE"; fi
   exit "$result"
 }
 trap cleanup EXIT
@@ -229,6 +311,7 @@ PY
 if ((DRY_RUN)); then printf 'Verified unsigned test package %s (%s)\n' "$RELEASE_ID" "$ACTUAL_SHA"; exit 0; fi
 ((EUID == 0)) || { echo 'Install requires root; --dry-run does not' >&2; exit 1; }
 command -v systemctl >/dev/null || { echo 'systemd is required' >&2; exit 1; }
+command -v timeout >/dev/null || { echo 'coreutils timeout is required for bounded service rollback' >&2; exit 1; }
 readonly INSTALL_LOCK=/run/myagents-host-unified-install.lock
 # BEGIN_SHARED_TRANSACTION_LOCK
 acquire_install_transaction_lock() {
@@ -306,7 +389,7 @@ if [[ -L "$PREFIX/current" && "$(readlink "$PREFIX/current")" == "releases/$RELE
   printf 'Already installed and verified release %s; no changes made.\n' "$RELEASE_ID"
   exit 0
 fi
-if systemctl is-active --quiet "$SERVICE"; then echo 'Refusing update while service is active; stop and inspect it first' >&2; exit 1; fi
+if systemctl is-active --quiet "$SERVICE"; then PREVIOUS_ACTIVE=1; echo 'Refusing update while service is active; stop and inspect it first' >&2; exit 1; fi
 if [[ -e "$STATE/host.lock" ]] && ! flock -n "$STATE/host.lock" -c true; then
   echo 'Refusing update while another Host process holds the runtime lock' >&2
   exit 1
@@ -403,7 +486,6 @@ if systemctl is-enabled --quiet "$SERVICE" 2>/dev/null; then PREVIOUS_ENABLED=1;
 if [[ -L "$PREFIX/current" ]]; then
   BACKUP_LINK="$STAGE/previous-link"
   cp -P "$PREFIX/current" "$BACKUP_LINK"
-  RESTORE_OLD_SERVICE=1
 fi
 ln -s "releases/$RELEASE_ID" "$PREFIX/current.next"
 mv -Tf "$PREFIX/current.next" "$PREFIX/current"
@@ -482,5 +564,4 @@ if ((READY == 0)); then
   cat "$STAGE/doctor.err" >&2 2>/dev/null || true
   exit 1
 fi
-RESTORE_OLD_SERVICE=0
 printf 'Installed unsigned test release %s; service started. Identity data remains under %s.\n' "$RELEASE_ID" "$STATE"
