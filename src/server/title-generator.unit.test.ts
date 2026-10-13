@@ -10,10 +10,58 @@ vi.mock('./utils/managed-proxy-binding', () => ({ getPreparedSdkSystemPrompt: (_
 import {
   BUILTIN_TITLE_TIMEOUT_MS,
   generateUtilityText,
+  generateTitle,
   generateTitleExternal,
   buildExternalTitleSessionOptions,
   extractTitleTextFromSdkMessage,
 } from './title-generator';
+
+describe('task summary title context', () => {
+  afterEach(() => { vi.clearAllMocks(); });
+
+  it('asks for a summary and sends the requirement beyond the former 200-character cut to builtin', async () => {
+    utilityMocks.query.mockReturnValue(Object.assign((async function* () {
+      yield { type: 'result', subtype: 'success', result: '费用包校验与毛利展示优化' };
+    })(), { close: utilityMocks.close }));
+    const user = '背景说明'.repeat(70) + '请调整费用包保存校验和毛利展示';
+    expect(await generateTitle([{ user, assistant: '准备实施' }], 'model')).toBe('费用包校验与毛利展示优化');
+    const call = utilityMocks.query.mock.calls.at(-1)![0];
+    const messages = [];
+    for await (const message of call.prompt) messages.push(message);
+    expect(messages[0].message.content).toContain(user);
+    expect(call.options.systemPrompt).toContain('concise task summary');
+    expect(call.options.systemPrompt).toContain('NEVER just copy or truncate');
+  });
+
+  it('sends the tail request through external generation without cutting it again', async () => {
+    utilityMocks.start.mockImplementation(async (_options: unknown, emit: (event: unknown) => void) => {
+      emit({ kind: 'text_delta', text: '公司目标承接界面完善' });
+      emit({ kind: 'session_complete', subtype: 'success' });
+      return { id: 'title-child' };
+    });
+    const user = '项目背景\n' + '资料'.repeat(2000) + '\n请完善公司目标承接界面';
+    expect(await generateTitleExternal([{ user, assistant: '准备实施' }], 'codex', 'model', '/workspace')).toBe('公司目标承接界面完善');
+    const options = utilityMocks.start.mock.calls.at(-1)![0];
+    expect(options.initialTurn.message).toContain('请完善公司目标承接界面');
+    expect(options.initialTurn.message).toContain('项目背景');
+    expect(options.systemPromptAppend).toContain('concise task summary');
+  });
+
+  it('rejects the observed login error before it can become a truncated title', async () => {
+    utilityMocks.query.mockReturnValue(Object.assign((async function* () {
+      yield { type: 'result', subtype: 'success', result: 'Not logged in · Please run /login' };
+    })(), { close: utilityMocks.close }));
+    expect(await generateTitle([{ user: '优化费用包毛利展示', assistant: '方案已整理' }], 'model')).toBeNull();
+  });
+
+  it('rejects partial summary text when the builtin terminal fails', async () => {
+    utilityMocks.query.mockReturnValue(Object.assign((async function* () {
+      yield { type: 'assistant', message: { content: [{ type: 'text', text: '费用包毛利优化' }] } };
+      yield { type: 'result', subtype: 'error_during_execution' };
+    })(), { close: utilityMocks.close }));
+    expect(await generateTitle([{ user: '优化费用包毛利展示', assistant: '方案已整理' }], 'model')).toBeNull();
+  });
+});
 
 describe('extractTitleTextFromSdkMessage', () => {
   it('reads text even when a thinking block precedes it', () => {

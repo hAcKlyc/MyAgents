@@ -1,0 +1,17 @@
+{
+  "revision": "TITLE-001 working tree",
+  "environment": "synthetic production GlobalSidebar",
+  "results": [
+    {
+      "width": 1280,
+      "summaryVisible": true,
+      "navigation": true
+    },
+    {
+      "width": 900,
+      "summaryVisible": true,
+      "navigation": true
+    }
+  ],
+  "pageErrors": []
+}

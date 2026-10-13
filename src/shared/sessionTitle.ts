@@ -102,7 +102,7 @@ export function deriveSessionTitle(rawMessage: string | null | undefined, maxLen
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Minimum number of completed, titleable QA rounds before auto-title fires. */
-export const AUTO_TITLE_MIN_ROUNDS = 2;
+export const AUTO_TITLE_MIN_ROUNDS = 1;
 
 /**
  * Upper bound on a session's user-message count past which we stop *attempting*
@@ -133,8 +133,17 @@ export interface TitleRoundMessage {
   content: string;
 }
 
-/** Per-side context cap when building rounds (keeps the title-gen prompt small). */
-const PER_SIDE_ROUND_CHARS = 200;
+/** Keep enough of a long requirement to summarize its task, including a request
+ * at the end of pasted context. Both reconstruction and generation use this
+ * same bound so the generator cannot silently reduce it to a short prefix. */
+export function boundTitleContext(text: string, maxChars = 2000): string {
+  const chars = [...text];
+  if (chars.length <= maxChars) return text;
+  const marker = '\n[…]\n';
+  const available = maxChars - marker.length;
+  const head = Math.floor(available * 0.75);
+  return chars.slice(0, head).join('') + marker + chars.slice(-(available - head)).join('');
+}
 
 /**
  * Extract the plain text of a persisted message. Disk assistant content may be a
@@ -208,8 +217,8 @@ export function buildTitleRoundsFromMessages(
       continue;
     }
     rounds.push({
-      user: userText.slice(0, PER_SIDE_ROUND_CHARS),
-      assistant: assistantText.slice(0, PER_SIDE_ROUND_CHARS),
+      user: boundTitleContext(userText),
+      assistant: boundTitleContext(assistantText, 500),
     });
     i++; // skip the assistant message we just paired
   }
