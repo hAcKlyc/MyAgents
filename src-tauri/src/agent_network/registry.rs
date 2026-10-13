@@ -1034,7 +1034,14 @@ impl NetworkRegistry {
                 false,
             ) {
                 Ok(Some(account)) => account,
-                _ => continue,
+                Ok(None) => {
+                    crate::ulog_warn!("[agent-network] owned restore skipped code=OWNED_SESSION_RECORD_MISSING");
+                    continue;
+                }
+                Err(error) => {
+                    crate::ulog_warn!("[agent-network] owned restore failed code={}", super::actor::diagnostic_code(&error));
+                    continue;
+                }
             };
             let actor = AgentNetwork::with_generation(
                 record.id.clone(),

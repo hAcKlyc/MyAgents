@@ -633,13 +633,128 @@ pub(crate) fn start(
             }
             let random = uuid::Uuid::new_v4();
             let jitter = u16::from_le_bytes([random.as_bytes()[0], random.as_bytes()[1]]);
-            let delay = reconnect.next(jitter, retry_after);
+            let snapshot = owner.snapshot();
+            let code = snapshot.error.as_ref().map(diagnostic_code).unwrap_or("OTHER_NETWORK_FAILURE");
+            let delay = reconnect.next_with_code(jitter, retry_after, code);
             tokio::select! {
                 _=tokio::time::sleep(delay)=>{},
                 _=boundary.changed()=>{previous=None;renewed=None;reconnect.reset();},
             }
         }
     });
+}
+/// Only closed, known codes enter diagnostics; even schema-safe upstream text
+/// must not become a log payload. Never include error details or account scope.
+pub(super) fn diagnostic_code(error: &NetworkError) -> &'static str {
+    const CODES: &[&str] = &[
+        "ACCOUNT_BINDING_CHANGED",
+        "ADMISSION_UNCONFIRMED",
+        "BUSINESS_CONTEXT_NOT_FOUND",
+        "CATALOG_INVALID",
+        "CATALOG_NOT_CURRENT",
+        "CATALOG_SEQUENCE_EXHAUSTED",
+        "CHANNEL_OFFER_MISSING",
+        "CONNECTOR_CAPACITY",
+        "CONNECTOR_NOT_READY",
+        "CONTROL_INVALID",
+        "CONTROL_SCOPE_MISMATCH",
+        "CONTROL_UNEXPECTED",
+        "DEVICE_ID_UNAVAILABLE",
+        "DEVICE_REGISTRATION_INVALID",
+        "DEVICE_REVOKED",
+        "ENROLLMENT_KEY_INVALID",
+        "EXTERNAL_CLI_CAPABILITY_NOT_OPEN",
+        "HOST_ADDRESS_INVALID",
+        "HOST_MANAGEMENT_BUSY",
+        "HOST_MANAGEMENT_CONNECTION_RESET",
+        "IDENTITY_CERTIFICATE_INVALID",
+        "IDENTITY_KEY_MISMATCH",
+        "IDENTITY_REQUEST_INVALID",
+        "IDENTITY_RESPONSE_INVALID",
+        "IDENTITY_SCOPE_MISMATCH",
+        "IDENTITY_STATE_INVALID",
+        "INVALID_REFERENCE",
+        "KEY_GENERATION_EXHAUSTED",
+        "MESSAGE_TOO_LARGE",
+        "NETWORK_ACCOUNT_RESPONSE_INVALID",
+        "NETWORK_ACCOUNT_UNAVAILABLE",
+        "NETWORK_BACKPRESSURE",
+        "NETWORK_BUFFER_LIMIT",
+        "NETWORK_CERTIFICATE_INVALID",
+        "NETWORK_CONFIG_INVALID",
+        "NETWORK_CONFIG_UNAVAILABLE",
+        "NETWORK_CONFIG_WRITE_FAILED",
+        "NETWORK_CONNECTION_CLOSED",
+        "NETWORK_CONNECTION_NOT_FOUND",
+        "NETWORK_CONNECTION_TIMEOUT",
+        "NETWORK_CREDENTIAL_BACKEND_UNSUPPORTED",
+        "NETWORK_CREDENTIAL_CORRUPT",
+        "NETWORK_CREDENTIAL_GENERATION_CONFLICT",
+        "NETWORK_CREDENTIAL_KEY_MISSING",
+        "NETWORK_CREDENTIAL_PATH_UNSAFE",
+        "NETWORK_CREDENTIAL_PERSISTENCE_UNCONFIRMED",
+        "NETWORK_CREDENTIAL_STORE_INVALID",
+        "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
+        "NETWORK_DESCRIPTOR_INVALID",
+        "NETWORK_ENDPOINT_INVALID",
+        "NETWORK_FEATURE_DISABLED",
+        "NETWORK_KEY_INVALID",
+        "NETWORK_METADATA_INVALID",
+        "NETWORK_PEER_BINDING_MISMATCH",
+        "NETWORK_POWER_BOUNDARY",
+        "NETWORK_PRIVATE_KEY_MISSING",
+        "NETWORK_PROOF_INVALID",
+        "NETWORK_PROTOCOL_UNSUPPORTED",
+        "NETWORK_PROXY_INVALID",
+        "NETWORK_QUERY_FAILED",
+        "NETWORK_REFERENCE_INVALID",
+        "NETWORK_REMOVAL_UNCONFIRMED",
+        "NETWORK_REQUEST_CAPACITY",
+        "NETWORK_REQUEST_INVALID",
+        "NETWORK_REQUEST_NOT_SENT",
+        "NETWORK_REQUEST_UNCONFIRMED",
+        "NETWORK_RESPONSE_INVALID",
+        "NETWORK_SCOPE_MISMATCH",
+        "NETWORK_TLS_FAILED",
+        "NETWORK_TOKEN_EXPIRED",
+        "NETWORK_TOKEN_INVALID",
+        "NETWORK_TRANSPORT_FAILED",
+        "NETWORK_TRUST_CHANGED",
+        "NETWORK_UPGRADE_REJECTED",
+        "NETWORK_URL_INVALID",
+        "OFFICIAL_NETWORK_CANNOT_REMOVE",
+        "OWNED_BROWSER_UNAVAILABLE",
+        "OWNED_CA_FILE_INVALID",
+        "OWNED_JOIN_REQUIRED",
+        "OWNED_JOIN_UNCONFIRMED",
+        "OWNED_LOGIN_CANCELLED",
+        "OWNED_LOGIN_EXPIRED",
+        "OWNED_LOGIN_INVALID",
+        "OWNED_LOGIN_NOT_FOUND",
+        "OWNED_LOGIN_RESULT_UNAVAILABLE",
+        "OWNED_LOGIN_SUPERSEDED",
+        "OWNED_PROFILE_UNSUPPORTED",
+        "OWNED_REQUEST_INVALID",
+        "OWNED_RESPONSE_INVALID",
+        "OWNED_RESPONSE_TOO_LARGE",
+        "OWNED_SESSION_INVALID",
+        "PAGE_LIMIT_INVALID",
+        "PERMIT_INVALID",
+        "PROOF_REJECTED",
+        "PROTOCOL_INVALID",
+        "SESSION_EXPIRED",
+        "SOURCE_CATALOG_INVALID",
+        "SOURCE_CATALOG_NOT_EMPTY",
+        "SPACE_REAUTH_REQUIRED",
+        "TARGET_PREPARATION_MISSING",
+        "TLS_FRAME_INVALID",
+        "UNAUTHORIZED",
+    ];
+    CODES
+        .iter()
+        .copied()
+        .find(|code| *code == error.code)
+        .unwrap_or("OTHER_NETWORK_FAILURE")
 }
 /// A connection-scoped fence for original owner jobs that have crossed the
 /// final handoff. They finish their ACK, then release remote watch resources
@@ -1416,6 +1531,16 @@ fn metadata_response_lost(mutation: bool, auth_changed: bool) -> NetworkError {
 #[cfg(test)]
 mod metadata_response_tests {
     use super::metadata_response_lost;
+
+    #[test]
+    fn diagnostic_code_never_echoes_unknown_upstream_payload_or_details() {
+        let mut error = super::NetworkError::cloud("ACCESS_CAPABILITY_NOT_A_KNOWN_CODE", 401);
+        error.details = Some(serde_json::json!({"secret":"private-fixture-value"}));
+        assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
+        error.code = "unexpected\nlog payload".into();
+        assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
+        assert_eq!(super::diagnostic_code(&super::NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID")), "NETWORK_CREDENTIAL_STORE_INVALID");
+    }
 
     #[test]
     fn lost_read_response_is_not_an_uncertain_save() {
