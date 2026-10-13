@@ -567,6 +567,7 @@ pub(crate) fn start(
                 .unwrap_or_else(NetworkAccountSession::capture)
             {
                 Ok(account) => {
+                    let account_guard = account.clone();
                     let principal = account.principal_id().ok().map(str::to_owned);
                     let binding = account.binding_id().to_owned();
                     let identity_store =
@@ -630,6 +631,11 @@ pub(crate) fn start(
                             continue;
                         }
                         Err(error) => {
+                            // Expiry/revocation can invalidate a guard without
+                            // emitting a separate lifecycle boundary first.
+                            if account_guard.ensure_current().is_err() {
+                                connection_key_cache = None;
+                            }
                             // A ready connection is a successful recovery, even
                             // if its eventual disconnect returned an error.
                             if owner.snapshot().state == "ready" {
