@@ -28,7 +28,7 @@
 
 - 新 URL 的 GitHub API、gh repo view 和 git ls-remote 成功。
 - 管理员版独立视觉、交互和1440/768/390响应式接受；两轮产品修复，IR-01至IR-07关闭；主审关键路径通过。证据与交付见 dev-docs/prototypes/agentnets-bot-sharing-v1/。
-- 接续 gate 与主干交付待最终提交后核验，不能以本记录代表已同步。
+- 61c0be04 推送后 handoff gate 通过、远端任务分支一致；其 CI 因新增验收脚本 CommonJS 导入失败，迁移 ESM 后本地完整 lint 通过，需要新头部 gate/CI，不以旧版本通过代替。
 
 ## Blockers and unknowns
 

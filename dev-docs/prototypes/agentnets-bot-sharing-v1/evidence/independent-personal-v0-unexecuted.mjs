@@ -1,11 +1,21 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'/Users/zhangshaohua/Documents/Codex/2026-10-12/myagents-selfhost-service/node_modules/playwright');
-const fs=require('fs'),path=require('path'),crypto=require('crypto');
-const dir=__dirname,html=path.join(dir,'../index.html'),expected=process.argv[2];
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const playwrightLocation = process.env.PLAYWRIGHT_MODULE || '/Users/zhangshaohua/Documents/Codex/2026-10-12/myagents-selfhost-service/node_modules/playwright';
+const playwrightEntry = playwrightLocation.endsWith('.mjs') ? playwrightLocation : path.join(playwrightLocation, 'index.mjs');
+const { chromium } = await import(pathToFileURL(playwrightEntry).href);
+
+
+
+const dir=scriptDir,html=path.join(dir,'../index.html'),expected=process.argv[2];
 const digest=()=>crypto.createHash('sha256').update(fs.readFileSync(html)).digest('hex');
 if(!expected||digest()!==expected)throw Error('Fixed HTML hash mismatch');
 const results=[],errors=[],started=new Date();
 (async()=>{
- const browser=await chromium.launch({headless:true});
+ const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE||'/Users/zhangshaohua/Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell'});
  const context=await browser.newContext({viewport:{width:1440,height:900}});
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
  page.setDefaultTimeout(4000);

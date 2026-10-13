@@ -1,0 +1,31 @@
+{
+  "started": "2026-10-13T04:46:01.185Z",
+  "finished": "2026-10-13T04:46:03.004Z",
+  "expected": "8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3",
+  "results": [
+    {
+      "id": "IR07-nested-tab",
+      "status": "PASS"
+    },
+    {
+      "id": "IR07-nested-escape-focus",
+      "status": "PASS"
+    },
+    {
+      "id": "IR07-outer-escape-exit",
+      "status": "PASS"
+    },
+    {
+      "id": "console",
+      "status": "PASS",
+      "errors": []
+    },
+    {
+      "id": "fixed-hash",
+      "status": "PASS",
+      "expected": "8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3",
+      "actual": "8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3"
+    }
+  ],
+  "purpose": "ESM格式迁移复核：确认动态Playwright导入与既有nested脚本运行；不新增产品修复轮次或扩大验收"
+}

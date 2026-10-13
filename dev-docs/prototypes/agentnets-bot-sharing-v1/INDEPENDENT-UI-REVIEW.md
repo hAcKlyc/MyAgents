@@ -23,7 +23,7 @@
 | R01 | 响应式 | 1440×900、768×1024、390×844无页面横溢，表格局部滚动、抽屉滚动、手机导航折叠，核心控件可用 | 通过 · 4959几何/点击；8216控件/标识修复 |
 | Q01 | 控制台 | 无页面异常或外部网络调用，仅本地合成模拟 | 通过 · 4959网络；8216/8118console |
 
-旧个人方向矩阵与脚本未执行、不计 pass。旧脚本保留为 `evidence/independent-personal-v0-unexecuted.cjs`，只作方向对照，不能用于本版本验收。
+旧个人方向矩阵与脚本未执行、不计 pass。旧脚本保留为 `evidence/independent-personal-v0-unexecuted.mjs`，只作方向对照，不能用于本版本验收。
 
 新版正式执行将使用独立 headless context，通过可见 DOM 与产品控件建状态，不改 localStorage 造 passing state；开始/结束核对固定 SHA256。视觉、交互、响应式各自评定，截图不替代点击验收。
 
@@ -52,10 +52,10 @@
 
 ### 首轮原始证据
 
-- `evidence/independent-admin-review.cjs`：产品DOM驱动验收，不写localStorage。
+- `evidence/independent-admin-review.mjs`：产品DOM驱动验收，不写localStorage。
 - `evidence/independent-admin-results.json`：逐项结果、时间、hash、请求及console。
-- `evidence/independent-admin-supplement.cjs` / `.json`：横滚、暂停写入与移动控件。
-- `evidence/independent-admin-focus.cjs` / `.json`：用户视图后台焦点复现。
+- `evidence/independent-admin-supplement.mjs` / `.json`：横滚、暂停写入与移动控件。
+- `evidence/independent-admin-focus.mjs` / `.json`：用户视图后台焦点复现。
 - `evidence/independent-admin-*.png`：全部为合成数据；截图辅助定位，不替代点击。
 
 真实服务认证、多用户鉴权、Host隔离、后端持久化与生产发布均未测试，仍不在本任务范围。
@@ -72,7 +72,7 @@ IR-01离线资料写入边界：现有离线Bot无可维护资料fixture，未�
 
 复现：体验用户视角→许知→打开客户研究Bot→“管理此Bot的低级成员”→Tab到模态按钮→Escape。期望只关闭低级成员dialog、保留用户视角并恢复按钮焦点；实际dialog保持打开。源码 `document keydown` 在 `s.usersim` 且 `#modal [role=dialog]` 存在时直接return，未处理Escape。主Agent已收到；等待最小固定修复版后仅复验此项和退出路径。
 
-证据：`independent-admin-recheck-results.json`（9项通过）；`independent-admin-recheck.cjs`；`independent-admin-invitation-focus-related.cjs`（相关重复邀请通过，嵌套Escape断言失败，未写pass结果）。最终视觉/交互结论暂待IR-07关闭，其他既有通过证据沿用。
+证据：`independent-admin-recheck-results.json`（9项通过）；`independent-admin-recheck.mjs`；`independent-admin-invitation-focus-related.mjs`（相关重复邀请通过，嵌套Escape断言失败，未写pass结果）。最终视觉/交互结论暂待IR-07关闭，其他既有通过证据沿用。
 
 ## 最终接受结论与证据继承
 
@@ -96,9 +96,17 @@ IR-01离线资料写入边界：现有离线Bot无可维护资料fixture，未�
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright \
 CHROMIUM_EXECUTABLE=/absolute/path/to/headless-chromium \
 PROTOTYPE_URL=http://127.0.0.1:5197/ \
-node evidence/independent-ir07-recheck.cjs 8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3
+node evidence/independent-ir07-recheck.mjs 8118ea5a0715abcdfa0b3e39fca462a900c1182e5b6a2421524f7f7ada2ec3a3
 ```
 
 工作目录为本原型目录。完整首轮脚本只接受其指定固定版本，旧版本脚本不能不加说明宣称为最终头全套结果；若需在未来改动后全套重验，应先核对新需求和选择器、冻结新hash并生成单独证据。
 
 独立reviewer没有修改实现、Git提交/推送或部署，没有真实账号/接口/模型/生产调用。实际token用量、精确模型变体与effort未知；主自动化运行时长为实测，准备/等待总时长未单独计量。真实多用户授权、Host隔离与业务后端验收不在本任务范围。
+
+## CI脚本格式迁移复核
+
+CI的 `npm lint` 因验收脚本CommonJS `require` 触发 `no-require-imports`，属于新增证据脚本格式问题，HTML与产品行为没有变化。实际目录7个脚本（含旧个人版未执行脚本）全部迁移为ESM `.mjs`，使用 `node:fs` / `node:path` / `node:crypto` / `node:url` imports、动态导入Playwright `index.mjs`、`fileURLToPath(import.meta.url)` 定位。保留三个环境变量、现有路径回退和原检查逻辑；未禁用规则或改全局配置。
+
+7个脚本 `node --check` 均通过。最终nested脚本以ESM实际执行于12:46:01–12:46:03，动态Playwright依赖导入成功，原5项检查通过，HTML hash前后保持8118ea。此为格式迁移复核，证据单独保存 `evidence/independent-esm-migration-recheck-results.json`；原12:37产品验收结果文件保留，不计为新产品修复轮次，也不宣称全套重跑。完整lint由主Agent负责核验。
+
+`PLAYWRIGHT_MODULE` 应为Playwright模块目录（脚本追加 `index.mjs`）或该ESM入口绝对路径；其他电脑按本机已有安装设置。正文复现命令与脚本引用已同步为 `.mjs`。
