@@ -10,7 +10,8 @@ Current Agent owns integration. Settings connection fields and ModelManagementPa
 - [x] Final TypeScript and targeted ESLint passed.
 - [x] Primary IAB real components with synthetic IPC: 1280/900 layout; directory Unicode/space, parent/root, pagination, retry, focus/Escape; source reread, explicit target before write, partial key failure, original receipt recovery, capability gates; manual model add/select/reopen/Host save; two unchanged saves retained identical profile ID (qa-api-v-b1e13a124a5617805abd7a0f) while revision advanced1→2→3.
 - [x] Independent source and primary screenshot review: dev-docs/host-config-independent-review.md. Reviewer could not access the isolated IAB; independent live interaction is not claimed.
-- [ ] Exact delivery-head CI/Linux filesystem/native checks.
+- [x] Prior delivery-head af725700: six CI checks passed in run38422008186, including Linux integration and native checks.
+- [ ] Combined head with current main20e89b6f resume-boundary fix CI.
 - [ ] Remote main integration verification.
 - [ ] Unified native candidate and actual Host/main Agent configuration acceptance.
 

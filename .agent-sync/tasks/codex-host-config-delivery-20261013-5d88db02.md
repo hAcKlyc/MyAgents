@@ -44,3 +44,7 @@ PR #24 Host基础已交远端main fb92ce9c43962f56acaf894e72f1a64003f59cc7。交
 ## Final implementation freeze
 
 Development UI source d829d8d3 cherry-picked only after independent review, 37 final targeted tests, source/schema/headless checks and primary IAB. Source execution flag is preserved; explicit manual owner checkbox retained. Linux skipped cases and real native/Host acceptance remain open. Latest main c21e9f43 sidebar delivery will be merged without replacing concurrent work. Evidence: dev-docs/host-config-primary-acceptance.md and host-config-independent-review.md.
+
+## CI and concurrent resume integration
+
+PR27 source af72570059a0185446b1e76d00f975112bdc90a5 passed all six Test checks (run38422008186), including Linux integration and native Rust/Windows/macOS. Current main subsequently advanced to PR26 resume-boundary fix20e89b6f2ac4de297205d168f0bb72614486e899; clean merge preserved it without conflicts. The final combined head requires CI again; previous source evidence is inherited only for unchanged areas. Local full lint, Web/Server/Bridge/CLI builds passed. Unified installation/real Host acceptance remains open; this task has not replaced the app.

@@ -965,6 +965,7 @@
       "retry": "Try again"
     },
     "agentError": {
+      "resumeInFork": "Continue in a history branch",
       "title": "AI call failed: ",
       "imageTooLargePrefix": "The tool screenshot exceeds the model limit. ",
       "rewindAction": "Rewind to before this turn",

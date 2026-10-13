@@ -2,7 +2,7 @@
 
 ## MOXBOTS-HOST-CONFIG-20261013
 
-当前Agent按用户明确授权实现Host管理复用Settings模型配置、一键应用当前桌面主Agent来源、远端受限目录选择。交付记录 `.agent-sync/tasks/codex-host-config-delivery-20261013-5d88db02.md`（开发阶段旧记录保留），合同 `specs/tech_docs/host_configuration_reuse.md`。Node/Rust/来源unit已实现并局部核验；共享UI在独立审查后修复，实际IAB及Linux特定目录用例仍开放。Host基础已由PR24交main fb92ce9c，交付分支已从其独立创建；开发冻结依赖9149753c及Mac凭据实验不进入交付；原凭据聊天负责基础拆分和统一安装，用户已授权协调。本任务不操作当前原在线b116404e安装包。
+当前Agent按用户明确授权实现Host管理复用Settings模型配置、一键应用当前桌面主Agent来源、远端受限目录选择。交付记录 `.agent-sync/tasks/codex-host-config-delivery-20261013-5d88db02.md`（开发阶段旧记录保留），合同 `specs/tech_docs/host_configuration_reuse.md`。Node/Rust/来源及共享UI已实现，独立审查与合成IAB通过；af725700六项CI及Linux目录用例通过，已同步会话恢复main20e89b6f，组合源CI/main待核验。Host基础已由PR24交main fb92ce9c，交付分支已从其独立创建；开发冻结依赖9149753c及Mac凭据实验不进入交付；原凭据聊天负责基础拆分和统一安装，用户已授权协调。本任务未操作安装包，当前运行版本按统一安装owner回执另行核验。
 
 - [x] 实际仓库/主干/原Host分支核验和隔离任务记录。
 - [x] Provider元数据封闭合同、独立版本、凭据绑定与目录owner实现及本地相称回归。
@@ -94,6 +94,9 @@ Real OIDC PKCE login through the in-app browser's independent sign-in tab succee
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
 
+## RESUME-BOUNDARY-20261013
+
+用户确认当前 Agent 在 MoXBots 仓库修复实际 MyAgents 的 native resume 拒绝/重复提示。代码保持原边界和历史，阻断确定性自动重试，使用现有独立 native prefix Fork 恢复；旧 user stamp 只在唯一完整纯文本证据下修正新分支。任务/验收见 `.agent-sync/tasks/codex-resume-boundary-fix-20261013-4a93836a.md`、`dev-docs/resume-boundary-recovery.md`。本机恢复分支已由实际客户端 API 和零发送的隔离 native 启动核对，原文件未改。代码 main/CI 和客户端安装分别追踪；原签名团队不在本机且其它任务活跃，永久安装尚未完成；恢复分支的首次真实输入已进入 native/model 执行，原业务任务结果不在本修复范围，不代替 Host 或其它发布任务。
 ### BOTS-CLOUD-EXEC-001 integration update
 
 Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution continuation, preserving existing owner results. Synthetic UI and local Host/native regression gates passed; Linux exact-head CI and three-artifact provenance remain required. Production Host read-only scope preflight passed; a private single-Bot 24-hour lifecycle-only opt-in proposal is prepared but neither authorized nor installed. Protected account-binding UUID pin, exact opt-in authority, serial backup/rollback, real Session birth/exit and original receipt recovery remain open. No inference or model fees are claimed.
