@@ -2,12 +2,12 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
-<!-- codex-handoff:last-updated=2026-10-13T12:38:33+08:00 -->
+<!-- codex-handoff:last-updated=2026-10-13T13:03:58+08:00 -->
 <!-- codex-handoff:latest-anchor=AN-SHARE-PROTOTYPE-20261013 -->
 
 ## Current Snapshot
 
-- **AN-SHARE-PROTOTYPE-20261013**：用户要求同步 Bots 管理与 Bots Net 两份规划、更新任务清单与接续、制作原型，真实共享服务暂不开发。当前分支 `codex/agentnets-sharing-v1`，base `848c0592473a95d7e332b258ff433b11d722a5a3`，状态见 `services/agentnet/planning/TODO.md`。
+- **AN-SHARE-PROTOTYPE-20261013**：用户要求同步 Bots 管理与 Bots Net 两份规划、更新任务清单与接续、制作原型，真实共享服务暂不开发。当前分支 `codex/agentnets-sharing-v1`，base `848c0592473a95d7e332b258ff433b11d722a5a3`，本次已交付 main（PR #17），合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，原型独立验收通过；状态见 `services/agentnet/planning/TODO.md`。
 - **新 Git 目标**：用户明确授权将 `heavenzhang/MyAgents` 更名为 `heavenzhang/MoXBots`，GitHub ID 1414574754 保持不变。origin fetch/push 已核验为 `https://github.com/heavenzhang/MoXBots.git`，upstream 保留原项目。旧历史链接保留，后续交付使用新地址。
 - **共享规划与原型**：`services/agentnet/planning/AGENTNETS-ROADMAP.md` 与 `AGENTNETS-BOT-SHARING-V1.md`；原型 `dev-docs/prototypes/agentnets-bot-sharing-v1/index.html`，默认服务端平台管理员 Bots 管理视角；个人网络入口后续称 Bots Net。服务端多用户是架构前提；共享 Bot 不授予 Host 管理权，不开放私人会话、记忆或凭据。
 - **范围与接续**：原型仅合成数据、模拟身份和浏览器专用存储，不代表真实共享已实现。主 Agent 负责集成、验证和 Git；纯 Codex 内置实现与独立 UI 验收，不调用外部模型。现有 Host 联调工作树的未提交代码和接续记录没有被本任务改写。
@@ -124,3 +124,9 @@
 - 证据与分工：dev-docs/prototypes/agentnets-bot-sharing-v1/{INDEPENDENT-UI-REVIEW,PRIMARY-REVIEW,DELIVERY}.md 和 evidence/。三名native参与者，实现Luna/medium、独立验收Sol/medium为请求值，实际运行变体/effort及用量未知；无AIRouter、模型升级或生产操作。
 - Git交付：PR #17 当前头部CI与main合入待完成，任务清单保留开放；最终核验后另追加关闭记录。
 - 下一步：仅处理Git交付；真实多账号/Host共享与客户端Bots Net更名仍待后续用户启动。
+
+### 2026-10-13 — main delivery verified — AN-SHARE-PROTOTYPE-20261013
+
+- PR #17 已合入 main，合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`；源头 `7a977724421f6c2b6923f3b8d1640aac28809185` 七项当前头部CI全部成功（Test 38348261646、Owned AgentNet 38348261659）。fetch后核验源头是远端main祖先且合并树完全一致。最终HTML hash保持8118ea…，原型和规划已在远端主干。
+- 本次TODO关闭，后续真实共享、多账号/Host联调、客户端Bots Net更名及生产发布保持开放。本文档后续关闭提交不改产品；完整证据、CI集成修复和native分工见原型DELIVERY.md。
+- 无生产共享服务发布或安装包替换；其他owner工作树不变。本任务已交付，下一步仅由用户启动后续开发。

@@ -14,7 +14,7 @@
 
 视觉、交互、响应式分别见 INDEPENDENT-UI-REVIEW.md，主审见 PRIMARY-REVIEW.md。文档链接与 HTML 语法通过，离线导出与权威 HTML 字节一致。
 
-最终修复版 UI 已接受，IR-01至IR-07关闭，主 Agent 复核通过。Git 交付待当前头部 CI 与 main 核验，以 TODO 与 PR 当前状态核验。主干合入必须在当前头部 CI 全部通过后执行；不以阶段规划提交的七项成功替代最终头部检查。无生产发布，真实共享、客户端更名和 Host 联调不在本任务验收内。
+最终修复版 UI 已接受，IR-01至IR-07关闭，主 Agent 复核通过。Git 交付已核验：PR #17 在源码头 `7a977724421f6c2b6923f3b8d1640aac28809185` 的七项 CI 全部成功后合入，main 合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`。fetch 后确认源头为远端 main 祖先，合并树与已审查头完全一致；最终 HTML hash 不变。关闭记录仅改文档，不改变已验收产品。无生产发布，真实共享、客户端更名和 Host 联调不在本任务验收内。
 
 ## 本地协作执行记录
 
@@ -30,4 +30,6 @@
 
 ## CI 集成修复
 
-首次原型提交 61c0be0430998e22cbf46132dcf963c0b5aee5ac 的 Test run 38347540952 在 npm lint 失败：新增验收 CJS 脚本触发 25 个 @typescript-eslint/no-require-imports 错误（job 115132320922）。此失败属于本任务新增检查脚本，不归为偶发或既有问题。将脚本迁移为 ESM，保持逻辑和环境变量接口，未禁用规则或修改全局 lint 配置。属于交付脚本修复，不增加 HTML 产品修复轮次；最终 UI hash 不变。完整日志保留在主审本机临时记录，公开失败可从该 run/job 复现。修复后本地完整 npm run lint 通过（Node 24 / npm 11.19）；包含 ESLint、依赖边界和 Agent docs 验证。依赖边界为既有15条 warning、0 errors；文档链接4项检查与62文档核对通过。新头部 CI 仍待核验。
+首次原型提交 61c0be0430998e22cbf46132dcf963c0b5aee5ac 的 Test run 38347540952 在 npm lint 失败：新增验收 CJS 脚本触发 25 个 @typescript-eslint/no-require-imports 错误（job 115132320922）。此失败属于本任务新增检查脚本，不归为偶发或既有问题。将脚本迁移为 ESM，保持逻辑和环境变量接口，未禁用规则或修改全局 lint 配置。属于交付脚本修复，不增加 HTML 产品修复轮次；最终 UI hash 不变。完整日志保留在主审本机临时记录，公开失败可从该 run/job 复现。修复后本地完整 npm run lint 通过（Node 24 / npm 11.19）；包含 ESLint、依赖边界和 Agent docs 验证。依赖边界为既有15条 warning、0 errors；文档链接4项检查与62文档核对通过。新源码头七项CI全部成功：Test 38348261646、Owned AgentNet 38348261659；随后合入main并核验。
+
+关闭记录验证：文档链接核对、差异检查和推送后 handoff gate；最终提交 SHA 可从当前 main 与任务分支获取，避免记录自身 SHA 导致自引用。main push 的自动检查不替代上述已完成源头 CI 与合并树核验。

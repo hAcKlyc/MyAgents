@@ -57,7 +57,7 @@ Bots Net 服务端按多用户系统规划：同一服务实例可以承载不�
 - 本次交付清单：[TODO.md](TODO.md)。后续开发清单单独保留，原型通过不勾选真实共享服务验收。
 - 原型源码：[管理员 Bots 管理原型](../../../dev-docs/prototypes/agentnets-bot-sharing-v1/index.html)；交互与视觉约定见该目录 `DESIGN-BRIEF.md`。
 - 跨任务入口：根 `codex-handoff.md`、`.agent-sync/project-map.md`、`.agent-sync/plan.md` 及本任务分支记录。
-- 当前状态：文档同步与原型制作中；主干交付和原型验收结果以 TODO 与验收记录为准，不以本节表示已完成。
+- 当前状态：规划与管理员原型已由 PR #17 交付 main，合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c` 已核验；独立视觉/交互/响应式接受，真实共享服务仍待开发。详见 TODO 和原型验收记录。
 
 本次原型仅使用合成数据和独立浏览器存储，不调用真实模型、业务接口或认证服务，不替换已安装客户端、官网及生产服务。
 
