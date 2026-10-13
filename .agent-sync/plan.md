@@ -80,3 +80,8 @@ The user explicitly authorized the existing integration test account as this ins
 Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
+
+
+## MOXBOTS-SIDEBAR-ORG-001
+
+用户明确由当前Agent为桌面端实现任务/Agent拖拽与Codex风格自定义分区。范围为本机侧栏偏好、排序与展示归属，不改变Session执行身份或真实工作目录。任务记录 `.agent-sync/tasks/codex-sidebar-organization-20261013-964955f1.md`，要求数据回归、实际嵌套拖拽/菜单/导航/刷新/rail及独立审阅、CI和远端main。原生安装与当前Host/凭据统一更新owner协调，独立追踪，不能把fixture验收当生产验收。
