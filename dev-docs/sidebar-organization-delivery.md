@@ -25,5 +25,7 @@
 ## 联合包准备与窄窗口补验
 
 - 联合源码 `a8a60f1c923506ba97fde6ddcbedbdac6c0b2e93` 包含main c21e9f43与原owner凭据修复；五个侧栏core SHA256及中英文各16个变更键已与验收源码核对一致。PR14精确HEAD七项CI成功。
-- 联合包 `MoXBots-Trial-macos-arm64-a8a60f1c.zip`，346132107 bytes，SHA256 `d7945d31cf67ed439bc3288f4af69518438d2b31213367d6d7236e8e03f44f8c`，主Agent独立重算匹配。本地签名、未Apple公证；具体运行确认已在用户聊天请求，未收到答复前不安装。原owner先行6ac凭据试验的独立授权不转用a8。
+- 联合包 `MoXBots-Trial-macos-arm64-a8a60f1c.zip`，346132107 bytes，SHA256 `d7945d31cf67ed439bc3288f4af69518438d2b31213367d6d7236e8e03f44f8c`，主Agent独立重算匹配。本地签名、未Apple公证；用户已在本聊天明确回答“允许安装该联合包并完成验收”，已转交唯一本机owner核实后执行。原owner先行6ac凭据试验的独立授权不转用a8。
 - 窄窗口900×800实际pointer追加4步均通过：整行/手柄入分区、向下/向上排序；鼠标释放后450ms浮层保留且无误导航。来源、坐标、偏好和hash见 `sidebar-organization-validation/rail-dnd-results.json`。此为合成renderer追加覆盖，原生验收仍开放。
+
+用户具体a8授权后，原owner的前置6ac凭据迁移反馈系统凭据库暂不可用，正在排查；未取得a8安装回执或UI窗口，原生验收不能勾选完成。该问题归原凭据任务处理，不并发修改凭据/退出App。
