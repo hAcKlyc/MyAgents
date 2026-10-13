@@ -503,10 +503,11 @@ async fn serve_socket(
                             send_close(&mut socket, WS_CLOSE_SIZE, "message too large").await;
                             break;
                         }
+                        if text.as_str() == "ma-network-ping" {
+                            if write_message(&mut socket, Message::Text("ma-network-pong".into())).await.is_err() { break; }
+                            continue;
+                        }
                         match serde_json::from_str::<Value>(&text) {
-                            Ok(Value::String(ref value)) if value == "ma-network-ping" => {
-                                if write_message(&mut socket, Message::Text("\"ma-network-pong\"".into())).await.is_err() { break; }
-                            }
                             Ok(value) if validate_control(&value).is_ok()
                                 && value.get("type").and_then(Value::as_str) != Some("hello") => {
                                 let handler = transport.handler.clone();
@@ -1104,7 +1105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hello_control_binary_and_json_heartbeat_follow_bounded_transport() {
+    async fn hello_control_binary_and_raw_heartbeat_follow_bounded_transport() {
         let server = TestServer::start().await;
         let mut socket = server.connect(&[]).await.unwrap();
         socket
@@ -1141,16 +1142,36 @@ mod tests {
         .await
         .unwrap();
 
+        for _ in 0..3 {
+            socket
+                .send(ClientMessage::Text("ma-network-ping".into()))
+                .await
+                .unwrap();
+            let pong = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(pong.to_text().unwrap(), "ma-network-pong");
+        }
+
+        let mut second_ready = ready.clone();
+        second_ready["controlId"] = json!(Uuid::new_v4().to_string());
         socket
-            .send(ClientMessage::Text("\"ma-network-ping\"".into()))
+            .send(ClientMessage::Text(second_ready.to_string().into()))
             .await
             .unwrap();
-        let pong = tokio::time::timeout(Duration::from_secs(2), socket.next())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert_eq!(pong.to_text().unwrap(), "\"ma-network-pong\"");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while server.handler.controls.lock().unwrap().len() < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            server.handler.controls.lock().unwrap().as_slice(),
+            &["ready", "ready"]
+        );
 
         let frame = encode_tls_frame(&Uuid::new_v4().to_string(), &[1, 2, 3, 4]).unwrap();
         socket
@@ -1168,6 +1189,47 @@ mod tests {
         socket.close(None).await.unwrap();
         wait_for_disconnect(&server.handler).await;
         assert_eq!(server.handler.disconnects.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn malformed_nearby_raw_heartbeats_are_rejected() {
+        for malformed in [
+            " ma-network-ping",
+            "\"ma-network-ping\"",
+            "ma-network-ping ",
+            "ma-network-ping-suffix",
+        ] {
+            let server = TestServer::start().await;
+            let mut socket = server.connect(&[]).await.unwrap();
+            socket
+                .send(ClientMessage::Text(hello().into()))
+                .await
+                .unwrap();
+            let hello_result: Value = serde_json::from_str(
+                tokio::time::timeout(Duration::from_secs(2), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap()
+                    .to_text()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(hello_result["type"], "hello.result");
+
+            socket
+                .send(ClientMessage::Text(malformed.into()))
+                .await
+                .unwrap();
+            let rejected = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert!(matches!(rejected, ClientMessage::Close(_)), "{malformed:?}");
+            assert!(server.handler.controls.lock().unwrap().is_empty());
+            wait_for_disconnect(&server.handler).await;
+        }
     }
 
     #[tokio::test]

@@ -1,3 +1,5 @@
+use crate::admin_http::AdminService;
+use crate::admin_store::AdminConfig;
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
 use crate::network_http::{NetworkHttpConfig, NetworkService};
 use crate::relay_controller::RelayController;
@@ -64,6 +66,8 @@ pub struct ServiceFileConfig {
     pub network: Option<NetworkHttpConfig>,
     #[serde(default)]
     pub relay: bool,
+    #[serde(default)]
+    pub administration: Option<AdminConfig>,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -272,6 +276,22 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         session_ttl: Duration::from_secs(config.session_ttl_seconds),
     };
     let store = Arc::new(AuthStore::open(&config.state_dir, &auth)?);
+    let administration = config
+        .administration
+        .clone()
+        .map(|settings| {
+            let callback =
+                Url::parse(&config.callback_url).map_err(|_| AuthError::Configuration)?;
+            let origin = callback.origin().ascii_serialization();
+            AdminService::open(
+                store.clone(),
+                &config.state_dir,
+                settings,
+                origin,
+                &config.network_id,
+            )
+        })
+        .transpose()?;
     let identity = config
         .identity
         .as_ref()
@@ -326,6 +346,11 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .route("/health", get(health))
         .with_state(app);
     let router = assemble_feature_routes(router, identity, network, relay, &config.issuer);
+    let router = if let Some(admin) = administration {
+        router.merge(admin.router())
+    } else {
+        router
+    };
     let router = router
         .layer(axum::extract::DefaultBodyLimit::max(MAX_HTTP_BODY))
         .layer(axum::middleware::map_response(no_store));
@@ -1128,6 +1153,44 @@ mod tests {
             Some(controller),
             "https://dex.example.test",
         );
+        let administration = AdminService::open(
+            fixture.auth.clone(),
+            fixture.dir.path(),
+            AdminConfig {
+                admin_principal_ids: vec![Uuid::new_v4().to_string()],
+                hosts: vec![],
+                model_refs: vec![],
+                max_daily_tokens: 1000,
+            },
+            "https://agent.example.test".into(),
+            &fixture.network,
+        )
+        .unwrap();
+        let router = router.merge(administration.router());
+        let page = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/admin")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.status(), StatusCode::OK);
+        assert_eq!(page.headers()[header::CACHE_CONTROL], "no-store");
+        assert!(page.headers().contains_key(header::CONTENT_SECURITY_POLICY));
+        let anonymous = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/bootstrap")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
 
         let instance_response = router
             .clone()
@@ -1374,6 +1437,7 @@ mod tests {
             identity: None,
             network: None,
             relay: false,
+            administration: None,
         };
         assert!(validate_config(&good).is_ok());
         good.relay = true;

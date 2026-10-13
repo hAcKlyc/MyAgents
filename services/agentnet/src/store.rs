@@ -77,6 +77,24 @@ pub struct AuthStore {
 }
 
 impl AuthStore {
+    /// Minimal registered-account inventory for authenticated administration.
+    /// Never exposes the issuer subject, email, or any credential material.
+    pub fn registered_principals(&self) -> Result<Vec<AccountProjection>, AuthError> {
+        let connection = self.connection.lock().map_err(|_| AuthError::Storage)?;
+        let mut statement = connection
+            .prepare("SELECT principal_id,network_id FROM principals ORDER BY created_at")
+            .map_err(|_| AuthError::Storage)?;
+        statement
+            .query_map([], |row| {
+                Ok(AccountProjection {
+                    principal_id: row.get(0)?,
+                    network_id: row.get(1)?,
+                })
+            })
+            .map_err(|_| AuthError::Storage)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| AuthError::Storage)
+    }
     pub fn open(state_dir: impl AsRef<Path>, config: &AuthConfig) -> Result<Self, AuthError> {
         let network_id = canonical_uuid(&config.network_id).ok_or(AuthError::Configuration)?;
         let ttl = i64::try_from(config.session_ttl.as_secs())

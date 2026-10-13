@@ -2,6 +2,10 @@
 
 ## 当前目标和范围
 
+用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，正在交付远端CI/main和准备现网串行升级。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
+
+### 已完成的规划/原型阶段（历史范围）
+
 将 Bots Net 多用户架构前提与 Bot 共享第一版规划保存到 MoXBots 源码仓库，附平台管理员 Bots 管理可交互原型、任务清单和接续记录；当前扩展Bot新建、配置、启停、归属/Host分配与逻辑删除。真实共享服务暂不开发；不改账号、业务数据、Host 配置、安装包或生产服务。
 
 本共享计划于 2026-10-13 随 Git 协作结构首次接入，仅纳入本次任务；既有远程管理、身份、客户端和品牌工作继续由 `codex-handoff.md` 及其原 owner 负责，不在此推断完成状态。
@@ -17,7 +21,16 @@
 | BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 生命周期原型 | 已交付main，真实实现另开任务 | 新建/配置/启停/归属Host分配/逻辑删除及独立验收，真实实现另开任务 |
 | 真实共享服务 | 待另行启动 | 先明确身份/网络、Bot 映射、Host 隔离与授权撤销；再真实多账号联调 |
 
-## 当前任务和依赖
+## 当前实现和依赖
+
+当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。第一位现网平台管理员尚未授予。
+
+- [x] 本地管理权限、登记API、SQLite/CAS/幂等审计、同源UI与独立验收。
+- [ ] 最新main集成、远端CI、主干包含成果核验。
+- [ ] 现网权限确认、备份回滚、串行升级、真实登录及管理路径验收。
+- [ ] 有限Host委派与真实启停、共享执行及多账号验收。
+
+### 前轮原型任务和依赖
 
 当前任务分支 `codex/bots-admin-lifecycle-prototype`，base main `5ee8f862`；前次 `codex/agentnets-sharing-v1` 已完成。当前主 Agent 负责文档、接续、集成和 Git 交付。原型 worker 只写本原型 HTML；独立 reviewer 只做 UI 验收并写自己的记录。文件所有权互斥，不操作其他工作树。
 
@@ -34,7 +47,7 @@
 
 ## 下一步
 
-管理员版原型与规划已由 PR #17 交付 main；合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，源头七项CI通过，合并树一致。客户端个人网络入口后续命名为 Bots Net。管理员生命周期原型与规划也已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7`；其后由用户启动真实共享开发；负责人重读最新源码，确认执行主体、实施边界与排期，不凭原型直接发布。
+管理员版原型与规划已由 PR #17 交付 main；合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，源头七项CI通过，合并树一致。客户端个人网络入口后续命名为 Bots Net。管理员生命周期原型与规划也已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7`；其后由用户启动真实统一后台实现；当前以BOTS-CLOUD-ADMIN-001接续，不凭原型直接发布。
 
 ## 管理员生命周期扩展的当前门槛
 
@@ -44,4 +57,4 @@
 - [x] 独立视觉/交互/三视口验收及主复核。
 - [x] 规划/任务/接续与原型、证据同提交链保存，当前头部CI与main交付核验。
 
-详细需求见 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，阶段状态见同目录TODO.md；本轮不启动真实服务开发。
+详细需求见 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，阶段状态见同目录TODO.md；该历史轮次未启动真实服务开发；当前实现以本文件开头新任务为准。

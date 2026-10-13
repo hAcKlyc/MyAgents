@@ -16,9 +16,10 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | 分支接续 | `.agent-sync/tasks/` | 目标、base、进度、证据及下一步 |
 | 综合接续 | `codex-handoff.md` | 多个任务的接续；新增条目不改写其他 owner 事实 |
 | 桌面与 Host 源码 | `src/renderer/`、`src/server/`、`src/shared/`、`src-tauri/`、`scripts/host/` | 桌面、Sidecar、Rust 身份和 Linux Host |
-| owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata 和 relay；部署与桌面验收另行核实 |
+| owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata、relay及可选管理员登记控制面；部署与桌面验收另行核实 |
+| 统一管理员后台 | `services/agentnet/admin-web/`、`src/admin_http.rs`、`src/admin_store.rs`（相对服务目录） | 同源页面、实时账号校验、私有Bot登记/配置/归属与审计；Host执行委派尚未接线，运维见ADMINISTRATION.md |
 | 架构与设计规范 | `specs/ARCHITECTURE.md`、`specs/DESIGN.md`、`specs/tech_docs/` | 当前 owner、边界和交互规范 |
-| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；真实实现待开发 |
+| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理控制面已本地实现，执行/共享待接线 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |
 | 运维与发布 | `services/agentnet/README.md`、`specs/guides/`、`dev-docs/moxbot-trial.md` | 非秘密说明；真实账号、备份和钥匙留在原 owner 私有目录 |

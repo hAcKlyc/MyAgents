@@ -8,7 +8,7 @@ use crate::{relay_controller::RelayController, relay_transport::RelayFailure};
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
-    extract::{OriginalUri, Request, State},
+    extract::{OriginalUri, Path, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -41,8 +41,85 @@ pub fn router(controller: Arc<RelayController>) -> Router<()> {
             axum::routing::put(upload_catalog),
         )
         .route("/api/agent-network/policy/self", get(self_policy))
+        .route(
+            "/api/agent-network/catalog/self-preservation",
+            get(self_catalog_preservation),
+        )
+        .route(
+            "/api/agent-network/devices/{device}/address",
+            get(device_address),
+        )
         .layer(middleware::from_fn(no_store))
         .with_state(state)
+}
+
+async fn self_catalog_preservation(
+    State(state): State<Arc<HttpState>>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    if uri.query().is_some() || !bounded_headers(&headers) {
+        return fixed_error(StatusCode::BAD_REQUEST, "INVALID_REQUEST");
+    }
+    let controller = state.controller.clone();
+    let auth_headers = headers.clone();
+    let auth_uri = uri.clone();
+    let access = match run_blocking(state.clone(), move || {
+        controller.admit_http(&auth_headers, &Method::GET, &auth_uri)
+    })
+    .await
+    {
+        Ok(Ok(access)) => access,
+        Ok(Err(response)) => return *response,
+        Err(status) => return fixed_error(status, "RELAY_UNAVAILABLE"),
+    };
+    let controller = state.controller.clone();
+    match run_blocking(state, move || controller.self_catalog_preservation(&access)).await {
+        Ok(Ok(empty)) => (
+            StatusCode::OK,
+            Json(json!({"ok":true,"data":{"empty":empty}})),
+        )
+            .into_response(),
+        Ok(Err(error)) => relay_error(error),
+        Err(status) => fixed_error(status, "RELAY_UNAVAILABLE"),
+    }
+}
+
+async fn device_address(
+    State(state): State<Arc<HttpState>>,
+    OriginalUri(uri): OriginalUri,
+    Path(device): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if uri.query().is_some()
+        || !bounded_headers(&headers)
+        || uuid::Uuid::parse_str(&device)
+            .map(|id| id.to_string())
+            .as_deref()
+            != Ok(device.as_str())
+    {
+        return fixed_error(StatusCode::BAD_REQUEST, "INVALID_REQUEST");
+    }
+    let controller = state.controller.clone();
+    let headers_for_auth = headers.clone();
+    let uri_for_auth = uri.clone();
+    let access = match run_blocking(state.clone(), move || {
+        controller.admit_http(&headers_for_auth, &Method::GET, &uri_for_auth)
+    })
+    .await
+    {
+        Ok(Ok(access)) => access,
+        Ok(Err(response)) => return *response,
+        Err(status) => return fixed_error(status, "RELAY_UNAVAILABLE"),
+    };
+    let controller = state.controller.clone();
+    match run_blocking(state, move || controller.device_address(&access, &device)).await {
+        Ok(Ok(address)) => {
+            (StatusCode::OK, Json(json!({"ok":true,"data":address}))).into_response()
+        }
+        Ok(Err(error)) => relay_error(error),
+        Err(status) => fixed_error(status, "RELAY_UNAVAILABLE"),
+    }
 }
 
 async fn upload_catalog(
@@ -359,6 +436,119 @@ pub(crate) mod tests {
         (controller, epoch, result)
     }
 
+    pub(crate) fn finish_ready(
+        controller: &RelayController,
+        fixture: &Fixture,
+        device: &Device,
+        epoch: &str,
+        hello: &Value,
+    ) {
+        let access = controller_access(
+            controller,
+            fixture,
+            device,
+            "PUT",
+            "/v1/devices/self/catalog",
+        );
+        let snapshot: CatalogSnapshot = serde_json::from_value(json!({
+            "version":1,"connectionEpoch":epoch,"catalogSeq":1,"items":[]
+        }))
+        .unwrap();
+        controller.upload_catalog(&access, &snapshot).unwrap();
+        let connection_id = controller.connection_id_for_test(&access);
+        controller.control(&connection_id, json!({
+            "version":1,"controlId":uuid::Uuid::new_v4().to_string(),"type":"ready","catalogSeq":1,
+            "serviceId":hello["serviceId"],"networkId":hello["networkId"],
+            "bootEpoch":hello["bootEpoch"],"connectionEpoch":hello["connectionEpoch"]
+        })).unwrap();
+    }
+
+    pub(crate) async fn join_on_controller(
+        controller: &RelayController,
+        fixture: &Fixture,
+        device: &Device,
+    ) -> (String, Value) {
+        fixture.register(device).await;
+        let join_uri = format!(
+            "/v1/networks/{}/devices/{}/join",
+            fixture.network, device.context.device_id
+        );
+        assert_eq!(fixture.request(device,"POST",&join_uri,
+            &json!({"mutationId":uuid::Uuid::new_v4().to_string(),"expectedMembershipRevision":0}).to_string()
+        ).await.0,StatusCode::OK);
+        let access = controller_access(controller, fixture, device, "GET", "/v1/ws");
+        let (_, effects) = controller
+            .hello(
+                access,
+                json!({
+                    "version":1,"controlId":uuid::Uuid::new_v4().to_string(),"type":"hello",
+                    "clientVersion":"device-address-test","capabilities":["tls13-mtls"]
+                }),
+            )
+            .unwrap();
+        let hello = effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::Control { json, .. } if json["type"] == "hello.result" => Some(json),
+                _ => None,
+            })
+            .unwrap();
+        (hello["connectionEpoch"].as_str().unwrap().to_owned(), hello)
+    }
+
+    #[tokio::test]
+    async fn device_address_http_requires_current_two_ready_sessions_and_exact_proof() {
+        let fixture = Fixture::new();
+        let source = fixture.device("address-same-owner");
+        let target = fixture.device("address-same-owner");
+        let (controller, source_epoch, source_hello) =
+            joined_syncing_controller(&fixture, &source).await;
+        let (target_epoch, target_hello) = join_on_controller(&controller, &fixture, &target).await;
+        let uri = format!(
+            "/api/agent-network/devices/{}/address",
+            target.context.device_id
+        );
+        let routes = Router::new()
+            .merge(fixture.service.router())
+            .merge(router(controller.clone()));
+        let headers = signed_headers(&routes, &fixture, &source, "GET", &uri, false).await;
+        let syncing = response(routes.clone(), Method::GET, &uri, headers, "").await;
+        assert_eq!(syncing.status(), StatusCode::FORBIDDEN);
+        finish_ready(&controller, &fixture, &source, &source_epoch, &source_hello);
+        finish_ready(&controller, &fixture, &target, &target_epoch, &target_hello);
+        let missing = response(routes.clone(), Method::GET, &uri, HeaderMap::new(), "").await;
+        assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+        let headers = signed_headers(&routes, &fixture, &source, "GET", &uri, false).await;
+        let ready = response(routes.clone(), Method::GET, &uri, headers, "").await;
+        assert_eq!(ready.status(), StatusCode::OK);
+        assert_eq!(ready.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(ready.into_body(), 64 * 1024).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["data"].as_object().unwrap().len(), 5);
+        assert_eq!(value["data"]["scope"]["deviceId"], target.context.device_id);
+        assert_eq!(value["data"]["connectionEpoch"], target_epoch);
+        assert_eq!(value["data"]["membershipRevision"], 1);
+        assert!(!value["data"]["signedBinding"].as_str().unwrap().is_empty());
+        assert!(
+            !std::str::from_utf8(&bytes)
+                .unwrap()
+                .contains(source.access.as_str())
+        );
+        let headers =
+            signed_headers(&routes, &fixture, &source, "GET", "/v1/me/network", false).await;
+        let wrong = response(routes.clone(), Method::GET, &uri, headers, "").await;
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+        let query = response(
+            routes,
+            Method::GET,
+            &format!("{uri}?scope=other"),
+            HeaderMap::new(),
+            "",
+        )
+        .await;
+        assert_eq!(query.status(), StatusCode::BAD_REQUEST);
+    }
+
     #[test]
     fn catalog_route_accepts_only_fixed_bounded_catalog_schema() {
         let valid = json!({
@@ -438,6 +628,45 @@ pub(crate) mod tests {
             .merge(fixture.service.router())
             .merge(router(controller));
 
+        let preservation_uri = "/api/agent-network/catalog/self-preservation";
+        let headers =
+            signed_headers(&routes, &fixture, &device, "GET", preservation_uri, false).await;
+        let preserved = response(routes.clone(), Method::GET, preservation_uri, headers, "").await;
+        assert_eq!(preserved.status(), StatusCode::OK);
+        assert_eq!(preserved.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(preserved.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"ok":true,"data":{"empty":true}})
+        );
+        let headers =
+            signed_headers(&routes, &fixture, &device, "GET", preservation_uri, false).await;
+        let query = response(
+            routes.clone(),
+            Method::GET,
+            &format!("{preservation_uri}?device=foreign"),
+            headers,
+            "",
+        )
+        .await;
+        assert_eq!(query.status(), StatusCode::BAD_REQUEST);
+        let challenge = response(
+            routes.clone(),
+            Method::GET,
+            preservation_uri,
+            bearer_headers(&device),
+            "",
+        )
+        .await;
+        let nonce = challenge.headers()["dpop-nonce"].to_str().unwrap();
+        let mut headers = bearer_headers(&device);
+        headers.insert(
+            "dpop",
+            HeaderValue::from_str(&fixture.proof(&device, "POST", preservation_uri, Some(nonce)))
+                .unwrap(),
+        );
+        let wrong = response(routes.clone(), Method::GET, preservation_uri, headers, "").await;
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
         let policy_uri = "/api/agent-network/policy/self";
         let headers = signed_headers(&routes, &fixture, &device, "GET", policy_uri, false).await;
         let before_catalog = response(routes.clone(), Method::GET, policy_uri, headers, "").await;
@@ -507,6 +736,91 @@ pub(crate) mod tests {
         let bytes = to_bytes(policy.into_body(), 64 * 1024).await.unwrap();
         let value: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(value["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn preservation_http_includes_removed_records_and_never_uploads() {
+        let fixture = Fixture::new();
+        let device = fixture.device("preservation-owner");
+        let (controller, epoch, _) = joined_syncing_controller(&fixture, &device).await;
+        let routes = router(controller);
+        let catalog_uri = "/v1/devices/self/catalog";
+        let headers = signed_headers(&routes, &fixture, &device, "PUT", catalog_uri, true).await;
+        let body=json!({"version":1,"connectionEpoch":epoch,"catalogSeq":1,"items":[{
+            "localAgentId":"isolated-agent","localWorkspaceId":"isolated-workspace","name":"isolated",
+            "path":"/srv/isolated","lifecycle":"removed","exposureRevision":0
+        }]}).to_string();
+        let uploaded = response(routes.clone(), Method::PUT, catalog_uri, headers, &body).await;
+        assert_eq!(uploaded.status(), StatusCode::OK);
+        let uri = "/api/agent-network/catalog/self-preservation";
+        let headers = signed_headers(&routes, &fixture, &device, "GET", uri, false).await;
+        let result = response(routes.clone(), Method::GET, uri, headers, "").await;
+        assert_eq!(result.status(), StatusCode::OK);
+        assert_eq!(result.headers()[header::CACHE_CONTROL], "no-store");
+        let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            json!({"ok":true,"data":{"empty":false}})
+        );
+        let policy_uri = "/api/agent-network/policy/self";
+        let headers = signed_headers(&routes, &fixture, &device, "GET", policy_uri, false).await;
+        let result = response(routes, Method::GET, policy_uri, headers, "").await;
+        assert_eq!(result.status(), StatusCode::OK);
+        let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["data"]["items"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn preservation_rechecks_live_revocation_expiry_membership_and_epoch() {
+        for scenario in ["revoked", "expired", "left", "stale-epoch"] {
+            let fixture = Fixture::new();
+            let device = fixture.device("preservation-live-owner");
+            let (controller, epoch, _) = joined_syncing_controller(&fixture, &device).await;
+            let routes = router(controller);
+            let uri = "/api/agent-network/catalog/self-preservation";
+            // This genuine proof was minted while the owner was still current.
+            let headers = signed_headers(&routes, &fixture, &device, "GET", uri, false).await;
+            match scenario {
+                "revoked" => fixture.auth.revoke_session(&device.account_token).unwrap(),
+                "expired" => fixture
+                    .auth
+                    .expire_session_for_test(&device.account_token)
+                    .unwrap(),
+                "left" => {
+                    let leave = format!(
+                        "/v1/networks/{}/devices/{}/leave",
+                        fixture.network, device.context.device_id
+                    );
+                    let body=json!({"mutationId":uuid::Uuid::new_v4().to_string(),"expectedMembershipRevision":1}).to_string();
+                    assert_eq!(
+                        fixture.request(&device, "POST", &leave, &body).await.0,
+                        StatusCode::OK
+                    );
+                }
+                "stale-epoch" => fixture
+                    .service
+                    .metadata
+                    .set_presence(
+                        &device.context,
+                        1,
+                        &uuid::Uuid::new_v4().to_string(),
+                        myagents_agentnet_metadata_core::Presence::Syncing,
+                        None,
+                    )
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            let result = response(routes, Method::GET, uri, headers, "").await;
+            assert_eq!(result.status(), StatusCode::FORBIDDEN, "{scenario}");
+            assert_eq!(result.headers()[header::CACHE_CONTROL], "no-store");
+            let bytes = to_bytes(result.into_body(), 8192).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes).unwrap(),
+                json!({"ok":false,"error":{"code":"RELAY_REJECTED"}})
+            );
+            let _ = epoch;
+        }
     }
 
     #[tokio::test]
