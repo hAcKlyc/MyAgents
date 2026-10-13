@@ -6,6 +6,11 @@
 
 ### 本轮真实验收与修复（2026-10-13）
 
+- [x] MAH-DESKTOP-MANAGEMENT-20261013 真实桌面账号登录和重启后在线恢复已通过；原 MyAgents 并行运行保全。此项不代表 Linux Host 已授权或管理表单验收。
+- [x] 实际安装暴露并修复两处公有 CA 问题：证书不能放在 root-only 私密目录，Rust 公开证书校验不能禁止 group/other read。安全同版本迁移、状态查询失败拒绝、故障回滚等 installer/control 30 项与 connector 118 项检查通过；新 Linux CI 制品源 `710820e9` 与 `cadfa520` tree 相同，真实 `owned-auth-start` 成功。原密钥/身份/Node PID/MyAgents 和公网监听保全。
+- [ ] Host 用户浏览器授权尚未完成，首次请求已过期；待用户准备好后重新发起，不能拿 native QA 的两个临时身份替代实际已安装 Host。
+- [ ] 用户新增授权独立认证、AgentNet 与云 Host 的新服务器部署（MAH-CLOUD-20261013）。当前连接/已有服务基线已核查，独立 DNS/HTTPS 入口待确认，尚未发布公共服务；具体连接与凭据留在私有执行记录。
+
 - [x] 完整已打包 MoX Host 运行时的真实远程管理联合验收通过（run `20261012225449`）：直接运行 root 管理的不可变 release 中 Node24、`host-main.mjs`、worker 和固定 SDK 资源，保持独立 QA HOME/state。实际两个 PKCE 登录/明确入网、签名 TLS/Pairs、Node IPC、模型配置/合成加密凭据/禁用 Agent、两阶段 doctor、进程重启后三类原回执、12 次额外身份恢复、幂等/CAS/原目标 scope fence 全部通过。旧自制管理 bundle 不作为本轮运行程序。真实已安装 MoX 状态未改、owned 网络仍 inactive；原 MyAgents 与 MoX 四 unit/PID/current/配置与凭据摘要/组和公网监听完整保全，运行时完整树前后摘要一致。临时 operator/服务/容器/回环监听均清理；0 模型调用、未接受桌面表单或 SDK 模型执行。私有证据 `linux-host-qa/management-full-runtime-50f3722c/PROVENANCE.json`。网络/服务保留各自 `191b3e7b` 来源，完整 Host 保留 `b98294c7` 来源；对应运行源码至当前提交无修改，未改写制品 metadata。`36b2ee4c` 完整六项 Test CI38317715747 与 owned 服务 CI38317715760 均已成功。
 - [x] 工作分支 `91aca8b1` 的完整 Test 六项与 owned 服务 CI 成功（38312452871 / 38312452856）；91 制品源为 PR merge `191b3e7bc2932c09698905abeaa6c1401a0e5b89`，tree 与 `91aca8b1` 相同。`76ce62dc` 前序 CI 同样通过，旧制品源 `e50a74648f0d7cf8709f95ccdae4df8f72f998a9` 对应其旧 tree。完整 Linux Host、网络和服务制品均按各自来源核验，不改写 source-commit。
 - [x] 101.42.11.29 隔离联合环境中，实际两个网络客户端完成 PKCE、加密持久化与明确入网；生产 Controller 经签名 TLS/Pairs 和真实 Node Unix IPC 获得 snapshot，保存模型配置、合成测试凭据与禁用 Agent；真实进程重启后 snapshot、配置回执与凭据回执均读回。模型调用为 0，尚不证明模型执行。

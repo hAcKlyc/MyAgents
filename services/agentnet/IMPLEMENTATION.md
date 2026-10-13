@@ -1,5 +1,21 @@
 # MAH-SELFHOST-SERVICE-20261012
 
+## Current acceptance checkpoint — MAH-DESKTOP-MANAGEMENT-20261013
+
+This checkpoint supersedes the incomplete-client and relay statements in the historical milestones below. Source now includes the public descriptor, owned desktop/Host account adapters, real WS relay and encrypted Host management IPC; this is independently deployed service code, separate from the official account system.
+
+- [x] Automated/native two-device identity, relay/Pairs, management persistence, receipt and restart checks.
+- [x] Real MoX bot desktop account login and automatic online recovery after desktop restart; original MyAgents remains separate.
+- [x] Installed Linux connector CA directory and public-read permission fixes, safe same-release migration, original-service preservation, and actual `owned-auth-start` success. The first Host browser request expired without authorization.
+- [ ] User-authorized Host browser login, explicit enrollment and actual installed Host visibility from desktop.
+- [ ] Real desktop model/credential/Agent forms, original receipt recovery and persisted readback after restart; denial and keyboard paths.
+- [ ] Independent DNS/HTTPS deployment of authentication, AgentNet and a cloud Host on the newly authorized server; preserve its existing app. Target connection details and credentials remain outside Git.
+- [ ] Required CI, main delivery and deployment correspondence for the accepted final artifacts.
+
+Real model calls remain zero. Product-supplied credentials and any required paid-call authorization are a separate execution gate; they must not be requested through chat.
+
+## Historical milestones
+
 Goal: deploy an independently owned AgentNet service including browser login, device identity, zero-Agent discovery, encrypted relay, and desktop-to-Host configuration. This service does not require access to the upstream author's private server or official account credentials.
 
 Current base: fork main f0d630e3a3bac085c8615bdd49af728679b12c48 (MoX isolation, PR #11). Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
@@ -45,7 +61,7 @@ Real isolated Linux identity acceptance used source cbf15ae7ec0ef5f554f8ade67d0e
 
 The optional network HTTP adapter rechecks signed access against a live AuthStore session handle and current DeviceStore generation/SPKI before each metadata operation. It never accepts self-reported principal/network/epoch authority. The metadata database owns CAS revisions, immutable mutation IDs/tombstones, and cursor snapshots. Catalog upload and online presence have no public HTTP shortcut: a real relay connection owner must supply its current server-generated epoch and durable ACK evidence. An empty, acknowledged catalog can mean zero Agents; an offline/unpublished device has unknown counts.
 
-The standalone relay returns bounded effects; the future WebSocket owner must deliver those effects through bounded queues, invalidate affected connections on membership/session/generation changes, and close a channel if its opaque frame cannot be enqueued. It must sample fresh time after acquiring its owner lock. No relay, permit, return-route or remote-management capability is advertised by the current service. Product acceptance still requires owned login clients, real encrypted two-device transport, a human management grant, and Host-owned secret/configuration/Agent operations.
+The standalone relay returns bounded effects, now delivered by the parent WebSocket owner through bounded queues with membership/session/generation invalidation and exact-connection cleanup. The service descriptor advertises the implemented TLS transport, while Agent permit/return routes remain unsupported. Native clients exercise encrypted two-device management; real user-driven Host authorization and desktop secret/configuration/Agent acceptance remain open at the current checkpoint.
 
 Client-source integration review found two handshake prerequisites missing from the initial standalone relay: opaque TLS must flow during Accepted before endpoint Ready, and canonical channel roles require Offers and separate Accepts on both peers. These were repaired before delivery. Eight relay tests now include actual ServiceKeys-issued device certificates, mutual TLS and bidirectional ChannelHello through Accepted opaque forwarding, both UUID open directions and dual acceptance. They do not prove a running WebSocket adapter.
 
@@ -53,4 +69,4 @@ Client-source integration review found two handshake prerequisites missing from 
 
 The parent service composes identity, metadata, relay catalog/policy and WS through one production assembly helper. A real router smoke test caught and repaired duplicate fallbacks before deployment. Auth gates both channel endpoints in one transaction; PeerStore selects the exact signed issuance JTI; Metadata provides the current epoch and durable ACK; Runtime owns bounded connections/pairs/credits. An independent review identified a failed-Ready persistence window; controller now checks durable Ready on Open and immediately removes the exact runtime/core connection and emits cleanup on Ready persistence failure. The regression injects a real SQLite Ready-write failure.
 
-Current routes do not create a public descriptor, hand login sessions to desktop/Host owners, or dispatch management to the Host Unixsocket. Those gates remain required and cannot be substituted by the relay tests. Official Host state/services and MyAgents sessions are preserved.
+Later client stages added the public descriptor, separately owned desktop/Host login sessions and the encrypted management-to-Host Unix-socket path. Relay tests cannot substitute for the current user-driven management acceptance gates. Official Host state/services and MyAgents sessions remain separate.
