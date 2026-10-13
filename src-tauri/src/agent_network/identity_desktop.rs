@@ -94,6 +94,7 @@ pub(crate) async fn authorize_owned_identity(
     }
 
     let authorization_cancelled = cancelled.clone();
+    crate::ulog_info!("[agent-network] credential recovery stage=device-key-read");
     let authorization_scope = scope.clone();
     let authorization = tokio::task::spawn_blocking(move || {
         OsIdentityStore::authorize_existing(&authorization_scope, &authorization_cancelled)
@@ -121,6 +122,7 @@ pub(crate) async fn authorize_owned_identity(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     account_session.ensure_current()?;
+    crate::ulog_info!("[agent-network] credential recovery stage=device-key-validated");
     Ok(store)
 }
 
@@ -181,10 +183,7 @@ mod authorization_tests {
         let (scope, fingerprint) = authorized_scope_from_state(&account, device, valid).unwrap();
         assert_eq!(scope.issuer, "https://owned.example");
         assert_eq!(scope.key_generation, 2);
-        assert_eq!(
-            fingerprint,
-            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        );
+        assert_eq!(fingerprint, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
         for invalid in [
             state(

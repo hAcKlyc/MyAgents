@@ -430,6 +430,7 @@ impl NetworkRegistry {
             (record, previous)
         };
         let preflight = async {
+            crate::ulog_info!("[agent-network] credential recovery stage=session-read");
             let saved = record.clone();
             let token = cancelled.clone();
             let account = tokio::task::spawn_blocking(move || {
@@ -450,7 +451,9 @@ impl NetworkRegistry {
             if cancelled.load(Ordering::Acquire) {
                 return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
             }
+            crate::ulog_info!("[agent-network] credential recovery stage=session-validated");
             let store = super::identity_desktop::authorize_owned_identity(
+                // Session has passed durable scope and expiry checks.
                 account.clone(),
                 &record.device_id,
                 cancelled.clone(),
@@ -458,14 +461,19 @@ impl NetworkRegistry {
             .await?;
             Ok::<_, NetworkError>((account, store))
         };
-        let (account, store) =
-            match tokio::time::timeout(std::time::Duration::from_secs(180), preflight).await {
-                Ok(result) => result?,
-                Err(_) => {
-                    cancelled.store(true, Ordering::Release);
-                    return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
-                }
-            };
+        let (account, store) = match tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            preflight,
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                cancelled.store(true, Ordering::Release);
+                crate::ulog_warn!("[agent-network] credential recovery code=NETWORK_CREDENTIAL_STORE_UNAVAILABLE stage=deadline");
+                return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+            }
+        };
         let _mutation = self.mutation.lock().await;
         self.check_restore_boundary(expected_revision, &cancelled)?;
         if !self
@@ -519,6 +527,7 @@ impl NetworkRegistry {
         operations.finish(&operation_id, &cancelled);
         drop(operations);
         super::actor::start(app.clone(), actor, manager);
+        crate::ulog_info!("[agent-network] credential recovery stage=actor-published");
         let view = self.view();
         let _ = app.emit("agent-network:connections-changed", view.clone());
         Ok(view)
