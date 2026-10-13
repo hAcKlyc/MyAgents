@@ -113,3 +113,7 @@ Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution c
 SIDEBAR-ORG阶段更新：PR25已交付远端main c21e9f43，源头9d879a6e六项CI与独立23项实际UI通过；原生安装仍开放。用户已授权跨聊天协调，唯一本机安装owner“Bots 网络 可用”已确认旧6ac包不含sidebar，正准备联合候选；以实际制品/签名/运行回执和原生重启验收关闭。
 
 SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agent实际App拖Task/Agent进分区、菜单恢复、分区管理和正常重启保留完成，详见dev-docs/sidebar-organization-native.md的覆盖限制。临时分区已清理；凭据slot保存仍失败，由原owner修复，统一更新未全部验收。
+
+## TITLE-001 — 2026-10-14 概要性任务标题
+
+当前Agent修改后端自动命名：首个成功人类问答后异步概括对象和动作，扩大有界上下文并保留尾部需求，拒绝认证错误/失败终态。手动命名不覆盖；不批量修改历史。任务记录 `.agent-sync/tasks/codex-title-summary-20261014-7b0a1e0a.md`。自动测试、真实存储重载及DOM回归通过；当前源CI/main、统一包和真实模型/原生侧栏验收分开追踪。
