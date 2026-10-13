@@ -1027,6 +1027,77 @@ it('retains an exact rewind boundary across rejection and cold reopen', async ()
   expect(state.query.mock.calls.at(-1)?.[0].options.resume).toBe(meta.id);
 });
 
+it('recovers in an independent retained-prefix fork without reviving the discarded native tail', async () => {
+  const workspace = join(state.home, 'boundary-fork');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  const snapshot = await store.loadSessionTranscript(meta.id);
+  await store.appendSessionMessages(meta.id, snapshot.cursor, [
+    { id: 'kept-u', role: 'user', content: 'requirements', timestamp: 't', sdkUuid: 'lost-native-user-stamp' },
+    { id: 'kept-a', role: 'assistant', content: 'retained question', timestamp: 't', sdkUuid: 'native-question' },
+    { id: 'failed-u', role: 'user', content: 'unsent answer', timestamp: 't' },
+  ]);
+  await store.updateSessionMetadata(meta.id, { sdkResumeSessionAt: 'native-question' });
+  const forkSdkId = randomUUID();
+  const nativePrefix = [{ type: 'user', uuid: 'native-u', message: { content: [{ type: 'text', text: 'requirements' }] } }, { type: 'assistant', uuid: 'native-question' }];
+  state.sdkRead.mockImplementation(async (id: string) => id === forkSdkId
+    ? nativePrefix.map(row => ({ ...row, uuid: `fork-${row.uuid}` }))
+    : [...nativePrefix, { type: 'user', uuid: 'discarded-native-user' }]);
+  state.sdkFork.mockResolvedValue({ sessionId: forkSdkId });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  expect(await agent.forkSession('kept-a')).toMatchObject({ success: true, newSessionId: forkSdkId });
+  expect(state.sdkFork).toHaveBeenCalledWith(meta.id, { dir: workspace, upToMessageId: 'native-question' });
+  expect((await store.getSessionData(meta.id))!.messages.map(message => message.id))
+    .toEqual(['kept-u', 'kept-a', 'failed-u']);
+  expect(store.getSessionMetadata(forkSdkId)?.sdkResumeSessionAt).toBeUndefined();
+  await agent.resetSession();
+  await agent.initializeAgent(workspace, null, forkSdkId, { preWarmDisabled: true });
+  state.rejectedResumeAt = 'fork-native-question';
+  await agent.enqueueUserMessage('continue', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  expect(state.query.mock.calls.map(([args]) => args.options.resume)).toEqual([forkSdkId, forkSdkId]);
+  expect(state.query.mock.calls.map(([args]) => args.options.resumeSessionAt)).toEqual(['fork-native-question', undefined]);
+  expect(agent.getMessages().filter(message => message.content === 'continue')).toHaveLength(1);
+  expect(agent.getMessages().some(message => message.content === 'unsent answer')).toBe(false);
+  expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBe('native-question');
+});
+
+it.each(['result', 'throw'] as const)('stops automatic pre-warm after an exact native boundary rejection (%s)', async failure => {
+  const workspace = join(state.home, 'rejected-boundary');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('original', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  await store.updateSessionMetadata(meta.id, { sdkResumeSessionAt: 'tail-frame-1' });
+  await agent.resetSession();
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  const lifecycle = await import('../builtin-session/lifecycle');
+  lifecycle.setPreWarmDisabled(false);
+  const history = agent.getMessages().map(message => message.id);
+  state.query.mockClear();
+  if (failure === 'throw') state.query.mockImplementation(() => {
+    throw new Error('No message found with message.uuid of: tail-frame-1');
+  });
+  else state.rejectedResumeAt = 'tail-frame-1';
+  await agent.enqueueUserMessage('preserved retry', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(state.events.some(([name, payload]) =>
+    (name === 'chat:agent-error' || name === 'chat:message-error')
+      && JSON.stringify(payload).includes('会话恢复点已失效'))).toBe(true));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  // A real timer window proves the 500ms recovery scheduler does not relaunch.
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(state.query).toHaveBeenCalledTimes(1);
+  expect(lifecycle.lifecycleState.preWarmTimer).toBeNull();
+  expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBe('tail-frame-1');
+  expect(agent.getMessages().slice(0, history.length).map(message => message.id)).toEqual(history);
+  expect(agent.getMessages().some(message => message.content === 'preserved retry')).toBe(true);
+});
+
 it.each([
   ['v1', 'result', false], ['v2', 'result', false], ['v1', 'throw', false], ['v2', 'throw', false],
   ['v1', 'result', true], ['v2', 'throw', true],
