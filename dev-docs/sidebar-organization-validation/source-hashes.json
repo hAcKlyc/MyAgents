@@ -1,0 +1,18 @@
+{
+  "head": "15b11ab98e3e135925bfb2592ac4085be2b0b03e",
+  "verifiedAt": "2026-10-13T22:36:36.372603+08:00",
+  "sha256": {
+    "src/renderer/components/global-sidebar/GlobalSidebar.tsx": "84ece44db385d8722c3bb2fc30897f5b0bd03be0cb5cfec890afbe4ed287cccd",
+    "src/renderer/components/global-sidebar/SidebarOrganizationControls.tsx": "a144423169a1e97f32027d564d3b05101890d81b53c0cb902173ee222aee0269",
+    "src/renderer/components/SessionContextMenu.tsx": "fb2d5145161f0ab9333eb0243809ff2ae18b673d12ab1831251ffbae64061829",
+    "src/renderer/utils/sidebarOrganization.ts": "7e011bbffad91053f3a1a943c19b2fab46e75ea109cc423f4e7de402180bf028",
+    "src/renderer/utils/globalSidebarPreference.ts": "b1f5fb271d856e4b3beb11cb48a394fffc7f3e3fee426a3825452f45417d0e66",
+    "src/renderer/i18n/locales/zh-CN/app.json": "be6bd73fccc6ebc64210c0f035273d755bc93fbd0c4c212f95c2e5921b8d99e3",
+    "src/renderer/i18n/locales/en-US/app.json": "506cdda8116c0779e29b4b360c1761fd4323dc18034c6737f4f2cc534c0a66f9"
+  },
+  "uiChecks": 23,
+  "uiPassed": 23,
+  "environment": "headless Chromium 1243; synthetic renderer fixture; 1280x800 and 900x800",
+  "candidateStatus": "HEAD plus uncommitted storage-failure recovery changes to GlobalSidebar.tsx and SidebarOrganizationControls.tsx; hashes identify tested product source; source hashes verified identical to committed 45ad14d0",
+  "committedEquivalent": "45ad14d0"
+}
