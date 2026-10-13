@@ -13,6 +13,11 @@
     "cancel": "Cancel answer"
   },
   "input": {
+    "nextPrompt": {
+      "acceptHint": "Enter to accept as a draft · Esc to dismiss",
+      "unavailable": "Next-step suggestions unavailable for this runtime",
+      "unavailableReason": "This runtime does not yet provide tool-free text generation without saving a session."
+    },
     "launcherPlaceholder": "What do you want to do today?",
     "placeholder": "Message MyAgents, use @ for files and / for skills...",
     "companionPlaceholder": "Ask Mino or delegate a task...",

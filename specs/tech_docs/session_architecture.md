@@ -4,6 +4,14 @@
 
 ## 1. 权威边界
 
+### 下一步建议是草稿预览
+
+`POST /api/chat/next-prompt` 经当前 Tab 的 Session Sidecar 调用，只接收 `sessionId` 和最后一条 assistant 的 `anchorMessageId`。SessionEngine 校验实际绑定、idle、人类会话轮次、完成状态和最新 transcript；生成前后核对内容与配置，不能由 Renderer 提交历史、模型、Provider 或凭据。建议不写入 transcript、Session metadata 或任务队列，不改变执行会话。
+
+Builtin 的可选建议复用隔离 SDK 文本 utility：采用活动会话的模型和 Provider，无工具、MCP、设置加载或会话持久化，成功 terminal 后才接纳文本，超时/取消/失败返回空建议。最近 128 个完成结果（包含失败/空值）使用 LRU 缓存；在途请求合并且不淘汰，被淘汰的历史回复重新成为有效 anchor 时可重新生成。上下文为最近 6 条可见文本、每条最多 2,000 codepoints、总计最多 10,000 UTF-8 bytes；输出单行最多 420 codepoints。DSH、Claude Code 和 Codex 目前没有已验证的无工具、非持久化文本 utility，返回明确 `unsupported`，界面显示不可用；不能借用其它 Runtime 或系统 CLI 替代。
+
+灰色建议与输入值分开。空输入框、无附件、可发送且会话 idle 时才显示；第一次无修饰 Enter 只接纳为可编辑草稿，随后使用已有发送快捷键或按钮才发送。重复 Enter 不接纳/发送，Shift+Enter 保持换行，中文 composition 和 keyCode 229 优先于接纳、菜单与发送。输入或 Esc 忽略当前建议，已接纳/忽略的回复不重复展示；切换 Session/Runtime/模型、回复内容修订、执行或等待审批都会隔离迟到结果。生成失败时保留普通输入，不显示固定替代提示。
+
 Session 不是单一对象，而是同一产品会话在不同生命周期阶段的几种事实：
 
 | 事实 | Authority | 说明 |
