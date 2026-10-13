@@ -17,11 +17,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions, TryLockError},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
@@ -163,6 +163,12 @@ impl MetadataStore {
         let state_dir = validate_state_dir(state_dir.as_ref())?;
         let database = state_dir.join(DB_NAME);
         create_private_database_file(&database)?;
+        // WAL mode changes precede SQLite's profile transaction and can race
+        // another first open. A separate private lock inode avoids conflicting
+        // with SQLite's own database locks (including its macOS lock backend).
+        let initialization_path = state_dir.join("metadata-initialization.lock");
+        create_private_database_file(&initialization_path)?;
+        let _initialization_lock = lock_database_initialization(&initialization_path)?;
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_FULL_MUTEX;
@@ -1918,6 +1924,38 @@ fn validate_database_file(path: &Path) -> Result<(), MetadataError> {
     Ok(())
 }
 
+fn lock_database_initialization(path: &Path) -> Result<File, MetadataError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|_| MetadataError::UnsafePath)?;
+    validate_database_file(path)?;
+    let opened = file.metadata().map_err(|_| MetadataError::UnsafePath)?;
+    let entry = fs::symlink_metadata(path).map_err(|_| MetadataError::UnsafePath)?;
+    if opened.dev() != entry.dev() || opened.ino() != entry.ino() {
+        return Err(MetadataError::UnsafePath);
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match file.try_lock() {
+            Ok(()) => {
+                validate_database_file(path)?;
+                let entry = fs::symlink_metadata(path).map_err(|_| MetadataError::UnsafePath)?;
+                if opened.dev() != entry.dev() || opened.ino() != entry.ino() {
+                    return Err(MetadataError::UnsafePath);
+                }
+                return Ok(file);
+            }
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return Err(MetadataError::Storage),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -2021,6 +2059,85 @@ mod profile_pin_tests {
     }
 
     #[test]
+    fn first_open_waits_for_private_initialization_lock() {
+        let dir = private_temp_dir();
+        let lock_path = dir.path().join("metadata-initialization.lock");
+        create_private_database_file(&lock_path).unwrap();
+        let lock = lock_database_initialization(&lock_path).unwrap();
+        let path = dir.path().to_path_buf();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            entered_tx.send(()).unwrap();
+            result_tx
+                .send(MetadataStore::open(path, profile()))
+                .unwrap();
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            result_rx.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        drop(lock);
+        assert!(result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap()
+            .is_ok());
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn initialization_lock_is_private_same_inode_and_timeout_fails_closed() {
+        let dir = private_temp_dir();
+        let path = dir.path().join("metadata-initialization.lock");
+        create_private_database_file(&path).unwrap();
+        let lock = lock_database_initialization(&path).unwrap();
+        let opened = lock.metadata().unwrap();
+        let entry = fs::symlink_metadata(&path).unwrap();
+        assert!(opened.is_file());
+        assert_eq!(opened.permissions().mode() & 0o777, 0o600);
+        assert_eq!(opened.uid(), nix::unistd::Uid::effective().as_raw());
+        assert_eq!(opened.nlink(), 1);
+        assert_eq!((opened.dev(), opened.ino()), (entry.dev(), entry.ino()));
+        let started = Instant::now();
+        assert!(matches!(
+            MetadataStore::open(dir.path(), profile()),
+            Err(MetadataError::Storage)
+        ));
+        assert!(started.elapsed() >= Duration::from_secs(5));
+        // No WAL, schema, or profile publication happens before acquiring it.
+        assert_eq!(fs::metadata(dir.path().join(DB_NAME)).unwrap().len(), 0);
+        drop(lock);
+        MetadataStore::open(dir.path(), profile()).unwrap();
+    }
+
+    #[test]
+    fn initialization_lock_rejects_unsafe_existing_files() {
+        let dir = private_temp_dir();
+        let path = dir.path().join("metadata-initialization.lock");
+        create_private_database_file(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            MetadataStore::open(dir.path(), profile()),
+            Err(MetadataError::UnsafePath)
+        ));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let alias = dir.path().join("lock-alias");
+        fs::hard_link(&path, &alias).unwrap();
+        assert!(matches!(
+            MetadataStore::open(dir.path(), profile()),
+            Err(MetadataError::UnsafePath)
+        ));
+        fs::remove_file(&alias).unwrap();
+        fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&alias, &path).unwrap();
+        assert!(matches!(
+            MetadataStore::open(dir.path(), profile()),
+            Err(MetadataError::UnsafePath)
+        ));
+    }
+
+    #[test]
     fn concurrent_first_open_atomically_selects_one_service_profile() {
         let dir = private_temp_dir();
         let path = dir.path().to_path_buf();
@@ -2040,7 +2157,15 @@ mod profile_pin_tests {
             .into_iter()
             .map(|worker| worker.join().unwrap())
             .collect();
-        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "open errors: {:?}",
+            results
+                .iter()
+                .map(|result| result.as_ref().err())
+                .collect::<Vec<_>>()
+        );
         assert_eq!(
             results
                 .iter()
