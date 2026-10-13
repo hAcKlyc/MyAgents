@@ -99,3 +99,7 @@ Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution c
 SIDEBAR-ORG阶段更新：PR25已交付远端main c21e9f43，源头9d879a6e六项CI与独立23项实际UI通过；原生安装仍开放。用户已授权跨聊天协调，唯一本机安装owner“Bots 网络 可用”已确认旧6ac包不含sidebar，正准备联合候选；以实际制品/签名/运行回执和原生重启验收关闭。
 
 SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agent实际App拖Task/Agent进分区、菜单恢复、分区管理和正常重启保留完成，详见dev-docs/sidebar-organization-native.md的覆盖限制。临时分区已清理；凭据slot保存仍失败，由原owner修复，统一更新未全部验收。
+
+### 2026-10-14 — finite lifecycle release gate
+
+BOTS-CLOUD-EXEC-001 source is delivered by PR23/main75bb0269 with all required CI successful. Linux Node/native default-off upgrade is accepted, preserving prior management/credential/source ownership. The user has now authorized the concrete single-Bot finite whitelist; it is installed with account-capped expiry. Cloud runtime switch and real owner/admin lifecycle acceptance are still pending; no model inference or shared usage is claimed. Current gate/evidence are maintained in `.agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md`.
