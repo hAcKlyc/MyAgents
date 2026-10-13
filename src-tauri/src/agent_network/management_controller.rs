@@ -293,6 +293,8 @@ pub(crate) async fn execute(
     let channel = uuid::Uuid::new_v4().to_string();
     let request_id = CanonicalUuid::new(uuid::Uuid::new_v4());
     let message = request.message(request_id)?;
+    pairs.reserve_management_retirement(&channel, scope, local)?;
+    let mut known_to_peer = false;
     let operation = async {
         identity.account.ensure_current()?;
         let identity = identity.clone().ensure_peer().await?;
@@ -311,6 +313,7 @@ pub(crate) async fn execute(
             return Err(NetworkError::new("HOST_ADDRESS_INVALID"));
         }
         identity.account.ensure_current()?;
+        known_to_peer = true;
         send(
             socket,
             ClientMessage::Open {
@@ -391,6 +394,14 @@ pub(crate) async fn execute(
                         return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH"));
                     }
                     super::owned_profile::control(&envelope.message)?;
+                    if pairs.consume_retired_management(
+                        &envelope.message,
+                        scope,
+                        local,
+                        &scope.connection_epoch,
+                    )? {
+                        continue;
+                    }
                     match envelope.message {
                         ServerMessage::ChannelOffer {
                             channel_id,
@@ -403,6 +414,8 @@ pub(crate) async fn execute(
                             ..
                         } => {
                             if channel_id != channel {
+                                pairs.reserve_management_retirement(&channel_id, scope, local)?;
+                                pairs.retire_management(&channel_id, true);
                                 send(
                                     socket,
                                     ClientMessage::Close {
@@ -485,7 +498,8 @@ pub(crate) async fn execute(
                         ServerMessage::ChannelClosed { channel_id, .. }
                             if channel_id == channel =>
                         {
-                            return Err(NetworkError::new("HOST_MANAGEMENT_CHANNEL_CLOSED"))
+                            pairs.note_management_closed(&channel);
+                            return Err(NetworkError::new("HOST_MANAGEMENT_CHANNEL_CLOSED"));
                         }
                         ServerMessage::Changed { .. } => {
                             return Err(NetworkError::new("HOST_MANAGEMENT_POLICY_CHANGED"))
@@ -524,7 +538,7 @@ pub(crate) async fn execute(
     let result = tokio::time::timeout(Duration::from_secs(30), operation)
         .await
         .unwrap_or_else(|_| Err(NetworkError::new("HOST_MANAGEMENT_TIMEOUT")));
-    pairs.remove(&channel);
+    pairs.retire_management(&channel, known_to_peer);
     let _ = pairs.take_failures();
     // Cleanup is bounded and best effort. A failed Close cannot change a receipt.
     let _ = tokio::time::timeout(

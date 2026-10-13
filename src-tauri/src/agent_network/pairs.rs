@@ -5,7 +5,9 @@ use super::crypto::private_roots;
 use super::identity::{NetworkIdentity, PeerIdentity};
 use super::jwt::VerifiedPeer;
 use super::NetworkError;
-use myagents_agent_network_protocol::{budget, BusinessObject, DeviceScope};
+use myagents_agent_network_protocol::{
+    budget, BusinessObject, ConnectionScope, DeviceScope, ServerMessage,
+};
 use myagents_host_management_protocol::{ManagementMessage, PeerRole};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -158,6 +160,23 @@ struct Credits {
     received: u64,
     release_sequence: u64,
 }
+const MANAGEMENT_ACTIVE_TOMBSTONE_LIMIT: usize = 128;
+const MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT: usize = 128;
+const MANAGEMENT_TOMBSTONE_LIMIT: usize =
+    MANAGEMENT_ACTIVE_TOMBSTONE_LIMIT + MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT;
+
+struct RetiredManagementChannel {
+    channel_id: String,
+    connection_scope: ConnectionScope,
+    local: DeviceScope,
+    epoch: String,
+    known_to_peer: bool,
+    installed: bool,
+    ready_seen: bool,
+    closed_seen: bool,
+    credits: Option<Credits>,
+}
+
 #[derive(Default)]
 pub(crate) struct Pairs {
     memory: super::memory::MemoryBudget,
@@ -167,6 +186,7 @@ pub(crate) struct Pairs {
     channels: HashMap<String, Entry>,
     sequences: HashMap<String, PairSequences>,
     credits: HashMap<String, Credits>,
+    retired_management: VecDeque<RetiredManagementChannel>,
     failures: Vec<(String, NetworkError)>,
 }
 impl Pairs {
@@ -195,7 +215,13 @@ impl Pairs {
     }
 
     pub(crate) fn reserve(&mut self, id: &str) -> Result<(), NetworkError> {
-        if self.pending.contains_key(id) || self.channels.contains_key(id) {
+        if self.pending.contains_key(id)
+            || self.channels.contains_key(id)
+            || self
+                .retired_management
+                .iter()
+                .any(|entry| entry.channel_id == id && entry.known_to_peer)
+        {
             return Err(NetworkError::new("CHANNEL_ID_REUSED"));
         }
         let handshakes = self
@@ -482,7 +508,9 @@ impl Pairs {
         let Some(flow) = self.credits.get_mut(id) else {
             return Ok(());
         };
-        if sequence != flow.return_sequence + 1 || received <= flow.returned || received > flow.sent
+        if Some(sequence) != flow.return_sequence.checked_add(1)
+            || received <= flow.returned
+            || received > flow.sent
         {
             return Err(NetworkError::new("CREDIT_INVALID"));
         }
@@ -566,6 +594,202 @@ impl Pairs {
         self.credits.remove(channel_id);
         // Removal only releases bytes and therefore cannot exceed the budget.
         self.account_buffers().expect("buffer release");
+    }
+
+    /// Reserve bounded bookkeeping before sending an Open. A full tombstone
+    /// table therefore rejects before a remote management operation can run.
+    pub(crate) fn reserve_management_retirement(
+        &mut self,
+        channel_id: &str,
+        connection_scope: &ConnectionScope,
+        local: &DeviceScope,
+    ) -> Result<(), NetworkError> {
+        if self.management_role.is_none() {
+            return Err(NetworkError::new("CHANNEL_MODE_MISMATCH"));
+        }
+        if self
+            .retired_management
+            .iter()
+            .any(|entry| entry.channel_id == channel_id)
+            || self.pending.contains_key(channel_id)
+            || self.channels.contains_key(channel_id)
+        {
+            return Err(NetworkError::new("CHANNEL_ID_REUSED"));
+        }
+        let active = self
+            .retired_management
+            .iter()
+            .filter(|entry| !entry.closed_seen)
+            .count();
+        if active >= MANAGEMENT_ACTIVE_TOMBSTONE_LIMIT {
+            return Err(NetworkError::new("HOST_MANAGEMENT_CAPACITY"));
+        }
+        if self.retired_management.len() >= MANAGEMENT_TOMBSTONE_LIMIT {
+            let completed = self
+                .retired_management
+                .iter()
+                .filter(|entry| entry.closed_seen)
+                .count();
+            if completed >= MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT {
+                if let Some(index) = self
+                    .retired_management
+                    .iter()
+                    .position(|entry| entry.closed_seen)
+                {
+                    self.retired_management.remove(index);
+                } else {
+                    return Err(NetworkError::new("HOST_MANAGEMENT_CAPACITY"));
+                }
+            } else {
+                return Err(NetworkError::new("HOST_MANAGEMENT_CAPACITY"));
+            }
+        }
+        self.retired_management.push_back(RetiredManagementChannel {
+            channel_id: channel_id.to_owned(),
+            connection_scope: connection_scope.clone(),
+            local: local.clone(),
+            epoch: connection_scope.connection_epoch.clone(),
+            known_to_peer: false,
+            installed: false,
+            ready_seen: false,
+            closed_seen: false,
+            credits: None,
+        });
+        if let Err(error) = self.account_buffers() {
+            self.retired_management.pop_back();
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Remove the active pair while preserving only the bounded state needed
+    /// to validate controls already queued on this connection.
+    pub(crate) fn retire_management(&mut self, channel_id: &str, known_to_peer: bool) {
+        let Some(index) = self
+            .retired_management
+            .iter()
+            .position(|entry| entry.channel_id == channel_id)
+        else {
+            // Preserve a confirmed operation result if an internal invariant
+            // is ever violated; the actor's next strict control check will
+            // fail closed instead of rewriting a receipt as unconfirmed.
+            self.remove(channel_id);
+            return;
+        };
+        let active = self.channels.remove(channel_id);
+        let credits = self.credits.remove(channel_id);
+        self.pending.remove(channel_id);
+        if !known_to_peer {
+            self.retired_management.remove(index);
+            self.account_buffers()
+                .expect("pair retirement releases buffers");
+            return;
+        }
+        let retired = &mut self.retired_management[index];
+        retired.installed = active.is_some();
+        retired.ready_seen = active.as_ref().is_some_and(|entry| entry.channel.ready());
+        retired.credits = credits;
+        retired.known_to_peer = known_to_peer;
+        self.account_buffers()
+            .expect("pair retirement releases buffers");
+    }
+
+    pub(crate) fn note_management_closed(&mut self, channel_id: &str) {
+        if let Some(entry) = self
+            .retired_management
+            .iter_mut()
+            .find(|entry| entry.channel_id == channel_id)
+        {
+            entry.closed_seen = true;
+        }
+    }
+
+    /// Consume only valid, same-connection cleanup controls for a channel
+    /// retired by this management client. All other controls stay in the
+    /// caller's strict current-channel dispatch and are rejected there.
+    pub(crate) fn consume_retired_management(
+        &mut self,
+        message: &ServerMessage,
+        connection_scope: &ConnectionScope,
+        local: &DeviceScope,
+        epoch: &str,
+    ) -> Result<bool, NetworkError> {
+        let channel_id = match message {
+            ServerMessage::ChannelClosed { channel_id, .. }
+            | ServerMessage::ChannelReady { channel_id, .. }
+            | ServerMessage::Credit { channel_id, .. } => channel_id,
+            _ => return Ok(false),
+        };
+        let Some(retired) = self
+            .retired_management
+            .iter_mut()
+            .find(|entry| entry.channel_id == *channel_id)
+        else {
+            return Ok(false);
+        };
+        if !retired.known_to_peer {
+            return Ok(false);
+        }
+        if !retired.known_to_peer
+            || retired.connection_scope != *connection_scope
+            || retired.local != *local
+            || retired.epoch != epoch
+            || message.scope() != Some(connection_scope)
+        {
+            return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH"));
+        }
+        match message {
+            ServerMessage::ChannelClosed { .. } => {
+                if retired.closed_seen {
+                    return Err(NetworkError::new("CONTROL_UNEXPECTED"));
+                }
+                retired.closed_seen = true;
+            }
+            ServerMessage::ChannelReady { .. } => {
+                if !retired.installed || retired.ready_seen {
+                    return Err(NetworkError::new("CONTROL_UNEXPECTED"));
+                }
+                retired.ready_seen = true;
+            }
+            ServerMessage::Credit {
+                sequence,
+                received_bytes,
+                ..
+            } => {
+                let Some(flow) = retired.credits.as_mut() else {
+                    return Err(NetworkError::new("CREDIT_INVALID"));
+                };
+                if Some(*sequence) != flow.return_sequence.checked_add(1)
+                    || *received_bytes <= flow.returned
+                    || *received_bytes > flow.sent
+                {
+                    return Err(NetworkError::new("CREDIT_INVALID"));
+                }
+                flow.returned = *received_bytes;
+                flow.return_sequence = *sequence;
+            }
+            _ => unreachable!(),
+        }
+        if matches!(message, ServerMessage::ChannelClosed { .. }) {
+            // Urgent relay cleanup may overtake queued controls. Keep a bounded
+            // completed tombstone so valid late Ready/Credit can still be checked.
+            let completed = self
+                .retired_management
+                .iter()
+                .filter(|entry| entry.closed_seen)
+                .count();
+            if completed > MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT {
+                if let Some(index) = self
+                    .retired_management
+                    .iter()
+                    .position(|entry| entry.closed_seen && entry.channel_id != *channel_id)
+                {
+                    self.retired_management.remove(index);
+                }
+            }
+            self.account_buffers()?;
+        }
+        Ok(true)
     }
     pub(crate) fn send(
         &mut self,
@@ -686,6 +910,26 @@ impl Pairs {
                 .values()
                 .map(|entry| entry.bytes.len())
                 .sum::<usize>()
+            + self
+                .retired_management
+                .iter()
+                .map(|entry| {
+                    entry.channel_id.capacity()
+                        + entry.connection_scope.service_id.capacity()
+                        + entry.connection_scope.network_id.capacity()
+                        + entry.connection_scope.boot_epoch.capacity()
+                        + entry.connection_scope.connection_epoch.capacity()
+                        + entry.local.service_id.capacity()
+                        + entry.local.environment.capacity()
+                        + entry.local.network_id.capacity()
+                        + entry.local.principal_id.capacity()
+                        + entry.local.device_id.capacity()
+                })
+                .sum::<usize>()
+            + self
+                .retired_management
+                .capacity()
+                .saturating_mul(std::mem::size_of::<RetiredManagementChannel>())
     }
     pub(crate) fn expired(&self) -> Vec<(String, &'static str)> {
         let now = Instant::now();
@@ -1350,6 +1594,350 @@ pub(crate) mod tests {
         assert_eq!(
             pairs.accepted("offer").err().unwrap().code,
             "CHANNEL_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn retired_management_controls_are_scoped_validated_and_terminal_close_frees_slot() {
+        let (first, second) = management_scopes();
+        let local = first.clone();
+        let id = "00000000-0000-0000-0000-000000000099";
+        let connection = ConnectionScope {
+            service_id: local.service_id.clone(),
+            network_id: local.network_id.clone(),
+            boot_epoch: "00000000-0000-0000-0000-000000000010".into(),
+            connection_epoch: "00000000-0000-0000-0000-000000000011".into(),
+        };
+        let (first_offer, second_offer) =
+            verified_management_offers(Fixture::new(), id, &first, &second);
+        let mut local_pairs = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Host,
+        );
+        let mut peer_pairs = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Controller,
+        );
+        local_pairs
+            .reserve_management_retirement(id, &connection, &local)
+            .unwrap();
+        // The reservation coexists with the active channel until the request ends.
+        local_pairs.reserve(id).unwrap();
+        peer_pairs.reserve(id).unwrap();
+        local_pairs.accepted(id).unwrap();
+        peer_pairs.accepted(id).unwrap();
+        local_pairs
+            .install(first_offer, &first, &connection.connection_epoch)
+            .unwrap();
+        peer_pairs
+            .install(
+                second_offer,
+                &second,
+                "00000000-0000-0000-0000-000000000012",
+            )
+            .unwrap();
+        local_pairs.credits.get_mut(id).unwrap().sent = 100;
+        local_pairs.retire_management(id, true);
+
+        let late_ready = ServerMessage::ChannelReady {
+            scope: connection.clone(),
+            channel_id: id.into(),
+        };
+        assert!(local_pairs
+            .consume_retired_management(
+                &late_ready,
+                &connection,
+                &local,
+                &connection.connection_epoch
+            )
+            .unwrap());
+        assert_eq!(
+            local_pairs
+                .consume_retired_management(
+                    &late_ready,
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CONTROL_UNEXPECTED"
+        );
+        let late_credit = |sequence, received_bytes| ServerMessage::Credit {
+            scope: connection.clone(),
+            channel_id: id.into(),
+            sequence,
+            received_bytes,
+        };
+        assert!(local_pairs
+            .consume_retired_management(
+                &late_credit(1, 60),
+                &connection,
+                &local,
+                &connection.connection_epoch,
+            )
+            .unwrap());
+        assert_eq!(
+            local_pairs
+                .consume_retired_management(
+                    &late_credit(3, 90),
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CREDIT_INVALID"
+        );
+        let mut wrong_connection = connection.clone();
+        wrong_connection.connection_epoch = "00000000-0000-0000-0000-000000000013".into();
+        assert_eq!(
+            local_pairs
+                .consume_retired_management(
+                    &late_credit(2, 100),
+                    &wrong_connection,
+                    &local,
+                    &wrong_connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CONTROL_SCOPE_MISMATCH"
+        );
+        let mut wrong_local = local.clone();
+        wrong_local.key_generation += 1;
+        assert_eq!(
+            local_pairs
+                .consume_retired_management(
+                    &late_credit(2, 100),
+                    &connection,
+                    &wrong_local,
+                    &connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CONTROL_SCOPE_MISMATCH"
+        );
+        let unknown = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: "00000000-0000-0000-0000-000000000098".into(),
+            reason: "peer-closed".into(),
+        };
+        assert!(!local_pairs
+            .consume_retired_management(&unknown, &connection, &local, &connection.connection_epoch)
+            .unwrap());
+
+        let closed = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: id.into(),
+            reason: "peer-closed".into(),
+        };
+        assert!(local_pairs
+            .consume_retired_management(&closed, &connection, &local, &connection.connection_epoch)
+            .unwrap());
+        assert_eq!(local_pairs.retired_management.len(), 1);
+        assert_eq!(
+            local_pairs
+                .consume_retired_management(
+                    &closed,
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CONTROL_UNEXPECTED"
+        );
+        // Urgent relay delivery can overtake a queued Credit; retain and check
+        // that valid late frame after receiving Closed.
+        assert!(local_pairs
+            .consume_retired_management(
+                &late_credit(2, 100),
+                &connection,
+                &local,
+                &connection.connection_epoch,
+            )
+            .unwrap());
+        // A normal terminal ack releases the active slot for the next RPC while
+        // retaining bounded state for controls that urgent delivery may reorder.
+        local_pairs
+            .reserve_management_retirement(
+                "00000000-0000-0000-0000-000000000097",
+                &connection,
+                &local,
+            )
+            .unwrap();
+        peer_pairs.remove(id);
+    }
+
+    #[test]
+    fn rejected_management_offer_close_is_consumed_as_known_retirement() {
+        let (local, _) = management_scopes();
+        let connection = ConnectionScope {
+            service_id: local.service_id.clone(),
+            network_id: local.network_id.clone(),
+            boot_epoch: "00000000-0000-0000-0000-000000000020".into(),
+            connection_epoch: "00000000-0000-0000-0000-000000000021".into(),
+        };
+        let rejected_offer = "00000000-0000-0000-0000-000000000022";
+        let mut pairs = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Host,
+        );
+
+        // Mirrors the management-only Offer rejection path: reserve the exact
+        // peer-visible channel before sending Close, then accept its late ack.
+        pairs
+            .reserve_management_retirement(rejected_offer, &connection, &local)
+            .unwrap();
+        pairs.retire_management(rejected_offer, true);
+        let close_ack = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: rejected_offer.into(),
+            reason: "peer-closed".into(),
+        };
+        assert!(pairs
+            .consume_retired_management(
+                &close_ack,
+                &connection,
+                &local,
+                &connection.connection_epoch,
+            )
+            .unwrap());
+        let unknown = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: "00000000-0000-0000-0000-000000000023".into(),
+            reason: "peer-closed".into(),
+        };
+        assert!(
+            !pairs
+                .consume_retired_management(
+                    &unknown,
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap()
+        );
+        assert_eq!(pairs.retired_management.len(), 1);
+    }
+
+    #[test]
+    fn retired_management_tombstone_capacity_fails_before_open_and_closed_ack_recycles() {
+        let local = management_scopes().0;
+        let connection = ConnectionScope {
+            service_id: local.service_id.clone(),
+            network_id: local.network_id.clone(),
+            boot_epoch: "00000000-0000-0000-0000-000000000020".into(),
+            connection_epoch: "00000000-0000-0000-0000-000000000021".into(),
+        };
+        let mut pairs = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Controller,
+        );
+        for index in 0..MANAGEMENT_ACTIVE_TOMBSTONE_LIMIT {
+            pairs
+                .reserve_management_retirement(
+                    &format!("00000000-0000-0000-0000-{index:012}"),
+                    &connection,
+                    &local,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            pairs
+                .reserve_management_retirement(
+                    "10000000-0000-0000-0000-000000000000",
+                    &connection,
+                    &local,
+                )
+                .unwrap_err()
+                .code,
+            "HOST_MANAGEMENT_CAPACITY"
+        );
+        let oldest = "00000000-0000-0000-0000-000000000000";
+        pairs.retire_management(oldest, true);
+        let closed = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: oldest.into(),
+            reason: "peer-closed".into(),
+        };
+        assert!(pairs
+            .consume_retired_management(&closed, &connection, &local, &connection.connection_epoch)
+            .unwrap());
+        pairs
+            .reserve_management_retirement(
+                "10000000-0000-0000-0000-000000000000",
+                &connection,
+                &local,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn completed_management_tombstones_evict_oldest_at_fixed_bound() {
+        let local = management_scopes().0;
+        let connection = ConnectionScope {
+            service_id: local.service_id.clone(),
+            network_id: local.network_id.clone(),
+            boot_epoch: "00000000-0000-0000-0000-000000000030".into(),
+            connection_epoch: "00000000-0000-0000-0000-000000000031".into(),
+        };
+        let mut pairs = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Controller,
+        );
+        for index in 0..=MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT {
+            let id = format!("00000000-0000-0000-0001-{index:012}");
+            pairs
+                .reserve_management_retirement(&id, &connection, &local)
+                .unwrap();
+            pairs.retire_management(&id, true);
+            let closed = ServerMessage::ChannelClosed {
+                scope: connection.clone(),
+                channel_id: id.clone(),
+                reason: "peer-closed".into(),
+            };
+            assert!(pairs
+                .consume_retired_management(
+                    &closed,
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap());
+        }
+        assert_eq!(
+            pairs.retired_management.len(),
+            MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT
+        );
+        let evicted = ServerMessage::Credit {
+            scope: connection.clone(),
+            channel_id: "00000000-0000-0000-0001-000000000000".into(),
+            sequence: 1,
+            received_bytes: 1,
+        };
+        assert!(!pairs
+            .consume_retired_management(&evicted, &connection, &local, &connection.connection_epoch)
+            .unwrap());
+        let newest = ServerMessage::ChannelClosed {
+            scope: connection.clone(),
+            channel_id: format!(
+                "00000000-0000-0000-0001-{index:012}",
+                index = MANAGEMENT_COMPLETED_TOMBSTONE_LIMIT
+            ),
+            reason: "peer-closed".into(),
+        };
+        assert_eq!(
+            pairs
+                .consume_retired_management(
+                    &newest,
+                    &connection,
+                    &local,
+                    &connection.connection_epoch,
+                )
+                .unwrap_err()
+                .code,
+            "CONTROL_UNEXPECTED"
         );
     }
     #[test]

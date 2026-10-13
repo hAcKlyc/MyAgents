@@ -2,13 +2,16 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MyAgents -->
-<!-- codex-handoff:last-updated=2026-10-13T09:36:00+08:00 -->
-<!-- codex-handoff:latest-anchor=MAH-NEXT-DRAFT-20261013 -->
+<!-- codex-handoff:last-updated=2026-10-13T11:19:35+08:00 -->
+<!-- codex-handoff:latest-anchor=MAH-CLOUD-MANAGEMENT-20261013 -->
 
 ## Current Snapshot
 
-- **新云真实授权与待部署修复**：用户确认后，MoX bot 已通过公网受信 HTTPS 的真实浏览器密码/approval/callback/poll 接纳新云账号；101 的已安装 MoX Host 经严格旧配置 canonical/unit CAS、备份与四服务/state 保全，显式切到新云 origin，并通过同账号真实浏览器授权和 Host wait 返回 authenticated。尚未 join 或证明稳定在线。
-- 联调发现服务端心跳 wire 与实际客户端不一致：Desktop/Headless 发 raw `ma-network-ping` 并只接受 raw pong，旧服务错误要求/回复 quoted JSON 字符串，造成首个15秒心跳断线。仅 `relay_transport.rs` 修复精确raw ping→raw pong，保留所有入场/大小/控制校验；实际 WS 三次心跳及随后control/binary、畸形quoted/空白/suffix拒绝回归、15项transport与clippy通过，主审2项真实WS复核及独立审阅通过。当前云运行仍旧二进制，待CI Linux制品后发布并跨45秒稳定Ready、Host入网和桌面管理验收。此前短暂在线不证明持续连接。
+- **MAH-CLOUD-MANAGEMENT-20261013**：主 owner 沿用 `feat/mah-management-device-pairs`。源码 `02e55746` 的 Test CI 七作业和 Owned 服务构建通过；PR #14 仍待真实管理验收与主干交付。用户继续授权 goal 模式和桌面联调；模型密钥后续由产品界面配置，本轮没有付费模型调用。
+- **当前真实部署**：独立认证与云 AgentNet 已在用户授权的新云主机部署，受信 IP-SAN HTTPS 可用，不必要求域名；后端仅 loopback，既有应用和入口保全。心跳修复 `7cdfe315` 已用有来源与摘要的 CI 制品发布；桌面和已安装 Linux Host 完成真实同账号浏览器授权、入网，并跨 51 秒保持相同连接 epoch 的 Ready。身份、凭据、数据库和旧服务均保留；恢复必须用当前阶段一致性备份，不能覆盖为登录前数据库。
+- **真实管理进度与当前缺陷**：桌面原生 Host snapshot 成功，Kimi 默认模型配置保存到 Linux Host revision 1；密钥未配置、执行未授权、Agent 创建尚未验收。保存后的自动刷新遇旧请求迟到 `channel.closed`，原保存回执仍有效。正在补有界、严格 scope 的退役通道收尾，并同时覆盖 actor idle 与下一 RPC 接收；未知通道仍拒绝。通过修复回归后，整合 MoXBots 品牌分支并重新构建试用包，再完成 Agent 创建和重启持久化的真实桌面路径。
+- **实例和包区分**：原 MyAgents 保持运行。MoX bot / MoXBots 共用独立 `com.moxbot.app`、`~/.moxbot`、`moxbot://`；当前获授权的管理包为 `50f3722c`。独立品牌试用包不含 PR #14 管理代码，不能把其设备可见性当远程配置验收。新云服务指认证、准入、metadata 和 relay；已安装 Linux Host 是本轮执行节点，新云另装第三执行节点不作为本轮必需步骤。
+- 私有环境、账号、授权链接、PID、制品 SHA、备份及真实证据仅保存在主 owner 的受限 QA 目录；公开 Git 不记录凭据。下面保留旧 checkpoint 供历史追溯，其尚未授权/尚未入网等状态以本段为准。
 
 - **MAH-CLOUD-20261013 当前部署**：用户新增授权的云服务器上，原生 Dex v2.46.0 与 owned AgentNet 已以独立非 root UID991 部署并启用；使用现有受信 IP-SAN HTTPS 入口，后端仅 loopback，保留既有 `/mori/`。运行二进制摘要、四个私有数据库、原应用进程/页面、公网监听和实际重启后 descriptor/签名 keys 一致性已核验。证书续签 timer 与 Nginx reload hook 已核实。新云网络浏览器登录与桌面/Host 管理尚未验收，不能据此宣布完整流程完成。
 - 本轮同步并保留并发 PR #15 主干成果，分支 `8adfdf82` 已推送，主干 `efb22f16`；30项安装器回归、合并后 typecheck 与26项相关 server/shared unit 通过。云启用脚本停止失败回滚 P2 经修复、3项故障注入与独立复核关闭。实际部署备份/凭据/访问链接仅留私有目录；MoX bot 新云网络接入已准备，等待桌面即时权限确认。原私有 loopback 测试环境已停止且原四个服务保全。PR #14 仍 draft，未合入主干；模型调用仍0。

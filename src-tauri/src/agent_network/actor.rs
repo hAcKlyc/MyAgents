@@ -802,6 +802,9 @@ async fn connect(
                         let envelope = ServerEnvelope::parse(text.as_bytes()).map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
                         if envelope.message.scope().is_some_and(|current| current != &scope) { return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH")); }
                         if management_only { super::owned_profile::control(&envelope.message)?; }
+                        if management_only && pairs.consume_retired_management(
+                            &envelope.message, &scope, &local, &scope.connection_epoch,
+                        )? { continue; }
                         match envelope.message {
                             ServerMessage::Ready { catalog_seq: accepted, .. } if ready_requested && accepted == catalog_seq && local_policy.is_some() => {
                                 hydrated = true;
@@ -825,6 +828,8 @@ async fn connect(
                             ServerMessage::ChannelOffer { channel_id, initiator, responder, initiator_connection_epoch,
                                 responder_connection_epoch, initiator_binding, responder_binding, .. } => {
                                 if management_only {
+                                    pairs.reserve_management_retirement(&channel_id,&scope,&local)?;
+                                    pairs.retire_management(&channel_id,true);
                                     send(&mut socket, ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
                                     continue;
                                 }
@@ -846,9 +851,13 @@ async fn connect(
                                 let local=local.clone();let epoch=scope.connection_epoch.clone();
                                 work.push(async move {Work::Offer {channel_id,result:offer.verify(&identity,&local,&epoch).await}}.boxed());
                             }
-                            ServerMessage::Credit {channel_id,sequence,received_bytes,..} => pairs.credit(&channel_id,sequence,received_bytes)?,
+                            ServerMessage::Credit {channel_id,sequence,received_bytes,..} => {
+                                if management_only && !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
+                                pairs.credit(&channel_id,sequence,received_bytes)?
+                            },
                             ServerMessage::ChannelReady { channel_id, .. } => pairs.ready(&channel_id)?,
                             ServerMessage::ChannelClosed { channel_id, .. } => {
+                                if management_only && !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
                                 pairs.remove(&channel_id);pending_offers.remove(&channel_id);calls.channel_closed(&channel_id);target_returns.channel_closed(&channel_id);
                                 for op in incoming_calls.channel_ops(&channel_id) {
                                     prepared_targets.remove(&op);
