@@ -2,10 +2,12 @@
 
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
-<!-- codex-handoff:last-updated=2026-10-13T13:03:58+08:00 -->
-<!-- codex-handoff:latest-anchor=AN-SHARE-PROTOTYPE-20261013 -->
+<!-- codex-handoff:last-updated=2026-10-13T13:45:10+08:00 -->
+<!-- codex-handoff:latest-anchor=BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 -->
 
 ## Current Snapshot
+
+- **BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013**：当前用户追加管理员Bot新建、配置、启停、删除与所属用户/Host分配，仅规划和合成原型。分支codex/bots-admin-lifecycle-prototype，base main 5ee8f862；详细规划 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，原型LIFECYCLE-*设计/验收/记录，进度见TODO。主Agent负责规划、集成和main交付；原实现和独立UI worker复用，真实服务不开发。
 
 - **AN-SHARE-PROTOTYPE-20261013**：用户要求同步 Bots 管理与 Bots Net 两份规划、更新任务清单与接续、制作原型，真实共享服务暂不开发。当前分支 `codex/agentnets-sharing-v1`，base `848c0592473a95d7e332b258ff433b11d722a5a3`，本次已交付 main（PR #17），合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`，原型独立验收通过；状态见 `services/agentnet/planning/TODO.md`。
 - **新 Git 目标**：用户明确授权将 `heavenzhang/MyAgents` 更名为 `heavenzhang/MoXBots`，GitHub ID 1414574754 保持不变。origin fetch/push 已核验为 `https://github.com/heavenzhang/MoXBots.git`，upstream 保留原项目。旧历史链接保留，后续交付使用新地址。
@@ -130,3 +132,16 @@
 - PR #17 已合入 main，合并锚点 `421718d6756cb73dfffaf54e94344a5e497caf8c`；源头 `7a977724421f6c2b6923f3b8d1640aac28809185` 七项当前头部CI全部成功（Test 38348261646、Owned AgentNet 38348261659）。fetch后核验源头是远端main祖先且合并树完全一致。最终HTML hash保持8118ea…，原型和规划已在远端主干。
 - 本次TODO关闭，后续真实共享、多账号/Host联调、客户端Bots Net更名及生产发布保持开放。本文档后续关闭提交不改产品；完整证据、CI集成修复和native分工见原型DELIVERY.md。
 - 无生产共享服务发布或安装包替换；其他owner工作树不变。本任务已交付，下一步仅由用户启动后续开发。
+
+### 2026-10-13 — lifecycle prototype scope — BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013
+
+- 上轮最终main 5ee8f862的Test 38349556493/Owned AgentNet 38349556463已全部成功。复用已完成任务的干净隔离worktree，新分支start/task-init成功，保留其他owner工作区。
+- 决策：新建默认停止、共享关闭；执行配置须停止后更新；所属用户/Host配对由独立部署授权约束；变更归属失效原共享及旧审批，不转移私人上下文；删除为逻辑删除和回收站恢复，不永久清除。Bot停止、共享暂停、Host状态分开。
+- 代表新建页主审已验证布局、必填和默认状态；财务种子状态、窄屏进入新对象详情及reset归一化准备期问题反馈同一实现者。正式UI等待固定版本，不把自测当接受。
+- 下一步：冻结后独立UI验生命周期与共享回归，主审复核，再仅提交本任务到MoXBots main；不操作真实Host/API/模型/客户端或生产。
+
+### 2026-10-13 — lifecycle UI accepted — BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013
+
+- 固定HTML hash4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25，独立视觉/交互/响应式18项矩阵接受，主审实际新建/启停/运行中分配拒绝/停止后归属变更/刷新清空模型/重配/删除名称校验/回收站恢复与错误保草稿通过。
+- LB01–03经1轮正式修复关闭，准备期与选择器适配另列，证据按版本继承，不称最终头全套重跑。文件dev-docs/prototypes/agentnets-bot-sharing-v1/LIFECYCLE-{UI-REVIEW,PRIMARY-REVIEW,DELIVERY}.md与evidence/lifecycle-*。
+- 真实服务仍待开发；本地完整lint和文档/脚本/差异检查通过，current-head CI/main交付尚待完成。下一步仅Git集成。

@@ -1,0 +1,103 @@
+{
+  "started": "2026-10-13T05:49:06.143Z",
+  "finished": "2026-10-13T05:49:22.375Z",
+  "expected": "97790fd170c401f64a4751ebb5f6bc70359df68109c12f206b7adf62a6e83e5b",
+  "results": [
+    {
+      "id": "LC01-new-validation-cancel",
+      "status": "FAIL",
+      "reason": "Trim duplicate not blocked"
+    },
+    {
+      "id": "LC02-new-persistence-counts",
+      "status": "PASS"
+    },
+    {
+      "id": "LC02-empty-prompt-draft",
+      "status": "PASS"
+    },
+    {
+      "id": "LC03-paired-deployment-policy",
+      "status": "FAIL",
+      "reason": "locator.selectOption: Timeout 4000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#new-host')\u001b[22m\n\u001b[2m    - locator resolved to <select id=\"new-host\">…</select>\u001b[22m\n\u001b[2m  - attempting select option action\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - option being selected is not enabled\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m    - waiting 20ms\u001b[22m\n\u001b[2m    2 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - option being selected is not enabled\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 100ms\u001b[22m\n\u001b[2m    8 × waiting for element to be visible and enabled\u001b[22m\n\u001b[2m      - option being selected is not enabled\u001b[22m\n\u001b[2m    - retrying select option action\u001b[22m\n\u001b[2m      - waiting 500ms\u001b[22m\n"
+    },
+    {
+      "id": "LC04-config-version-quota",
+      "status": "PASS"
+    },
+    {
+      "id": "LC05-finance-config-start",
+      "status": "PASS"
+    },
+    {
+      "id": "LC06-stop-denies-preserves-release",
+      "status": "PASS"
+    },
+    {
+      "id": "LC07-pause-run-independence",
+      "status": "PASS"
+    },
+    {
+      "id": "LC08-offline-stop-unknown",
+      "status": "PASS"
+    },
+    {
+      "id": "LC09-assignment-entry-nochange",
+      "status": "PASS"
+    },
+    {
+      "id": "LC10-11-valid-migration-history",
+      "status": "FAIL",
+      "reason": "Model reference migrated"
+    },
+    {
+      "id": "LC12-13-delete-trash-restore",
+      "status": "FAIL",
+      "reason": "Deleting Bot reduced settled cumulative usage"
+    },
+    {
+      "id": "LC14-sharing-regression",
+      "status": "PASS"
+    },
+    {
+      "id": "LC15-config-modal-keyboard-reset",
+      "status": "PASS"
+    },
+    {
+      "id": "LCR-1440",
+      "status": "PASS"
+    },
+    {
+      "id": "LCR-768",
+      "status": "PASS"
+    },
+    {
+      "id": "LCR-390",
+      "status": "PASS"
+    },
+    {
+      "id": "LCR-590",
+      "status": "PASS"
+    },
+    {
+      "id": "LCQ-console",
+      "status": "PASS",
+      "errors": []
+    },
+    {
+      "id": "LCQ-network",
+      "status": "PASS",
+      "requests": [
+        "http://127.0.0.1:5197/",
+        "http://127.0.0.1:5197/assets/moxbots-icon.png",
+        "http://127.0.0.1:5197/?"
+      ]
+    },
+    {
+      "id": "fixed-hash",
+      "status": "PASS",
+      "expected": "97790fd170c401f64a4751ebb5f6bc70359df68109c12f206b7adf62a6e83e5b",
+      "actual": "97790fd170c401f64a4751ebb5f6bc70359df68109c12f206b7adf62a6e83e5b"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "started": "2026-10-13T06:00:14.797Z",
+  "finished": "2026-10-13T06:00:28.667Z",
+  "expected": "4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25",
+  "results": [
+    {
+      "id": "LC01-new-validation-cancel",
+      "status": "FAIL",
+      "reason": "locator.click: Timeout 4000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-a=\"create-bot\"]').first()\u001b[22m\n"
+    },
+    {
+      "id": "LC01-enter-preserves-validation",
+      "status": "PASS"
+    },
+    {
+      "id": "LC02-new-persistence-counts",
+      "status": "FAIL",
+      "reason": "locator.click: Timeout 4000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-a=\"create-bot\"]').first()\u001b[22m\n"
+    },
+    {
+      "id": "LC10-11-valid-migration-history",
+      "status": "PASS"
+    },
+    {
+      "id": "LC12-13-delete-trash-restore",
+      "status": "PASS"
+    },
+    {
+      "id": "LC14-sharing-regression",
+      "status": "PASS"
+    },
+    {
+      "id": "LCQ-console",
+      "status": "PASS",
+      "errors": []
+    },
+    {
+      "id": "LCQ-network",
+      "status": "PASS",
+      "requests": [
+        "http://127.0.0.1:5197/",
+        "http://127.0.0.1:5197/assets/moxbots-icon.png"
+      ]
+    },
+    {
+      "id": "fixed-hash",
+      "status": "PASS",
+      "expected": "4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25",
+      "actual": "4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25"
+    }
+  ],
+  "knownFailures": [],
+  "scope": "完整选择场景"
+}
