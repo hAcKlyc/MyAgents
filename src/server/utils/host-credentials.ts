@@ -1,16 +1,17 @@
+import { isHostProviderId } from '../../shared/hostProviderConfig';
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, type Stats } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 
 const PREFIX = 'systemd-credential:';
 export const HOST_PROVIDER_REFERENCE = 'host-provider-credential:moonshot-coding';
-let sessionCredential: { value: string | undefined } | undefined;
+let sessionCredential: { value: string | undefined; providerId:string } | undefined;
 
 /** Private supervisor IPC installs a single worker-birth snapshot, never config. */
-export function installHostSessionCredential(value: string | undefined): void {
-  if (process.env.MYAGENTS_HOST_MODE !== '1' || sessionCredential !== undefined
+export function installHostSessionCredential(value: string | undefined, providerId = 'moonshot-coding'): void {
+  if (process.env.MYAGENTS_HOST_MODE !== '1' || !isHostProviderId(providerId) || sessionCredential !== undefined
     || (value !== undefined && (!value.trim() || Buffer.byteLength(value, 'utf8') > 16 * 1024
       || /[\r\n\0]/.test(value)))) throw new Error('Host Session credential snapshot is invalid');
-  sessionCredential = { value };
+  sessionCredential = { value, providerId };
 }
 
 // systemd may expose root-owned credentials as 0440 using a service-user ACL.
@@ -66,15 +67,16 @@ export function readHostSystemdCredential(name: string, maxBytes: number): Buffe
 
 /** Resolve a non-secret reference only at execution, never while loading config. */
 export function resolveHostProviderCredential(value: string | undefined): string | undefined {
-  if (value === HOST_PROVIDER_REFERENCE) {
+  if (value?.startsWith('host-provider-credential:')) {
+    const providerId=value.slice('host-provider-credential:'.length);
+    if (!isHostProviderId(providerId) || sessionCredential?.providerId !== providerId) throw new Error('Host credential reference is unavailable');
     if (process.env.MYAGENTS_HOST_MODE !== '1' || sessionCredential === undefined)
       throw new Error('Host Session credential snapshot is unavailable');
     return sessionCredential.value;
   }
-  if (value?.startsWith('host-provider-credential:')) throw new Error('Host credential reference is unavailable');
   if (!value?.startsWith(PREFIX)) return value;
   if (process.env.MYAGENTS_HOST_CREDENTIAL_SOURCE === 'supervisor-ipc') {
-    if (process.env.MYAGENTS_HOST_MODE !== '1' || sessionCredential === undefined || value !== 'systemd-credential:kimi')
+    if (process.env.MYAGENTS_HOST_MODE !== '1' || sessionCredential === undefined || sessionCredential.providerId !== 'moonshot-coding' || value !== 'systemd-credential:kimi')
       throw new Error('Host Session credential snapshot is unavailable');
     return sessionCredential.value;
   }

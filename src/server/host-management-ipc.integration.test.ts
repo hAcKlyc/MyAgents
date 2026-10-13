@@ -803,6 +803,8 @@ it.skipIf(process.getuid?.() === 0)(
       credentials: { configured: false, revision: 0, writeAvailable: true },
       resources: { version: 1, revision: 0, roots: [{ rootId: 'workspaces' }], agents: [] },
     });
+    expect(await sendRequest('host.inspect',{})).toMatchObject({kind:'extended-snapshot',provider:null,settings:null});
+    expect(await sendRequest('host.snapshot',{})).not.toHaveProperty('provider');
     const credentialId = randomUUID();
     const syntheticSecret = 'ipc-test-only-provider-secret-never-use-for-network';
     const credentialRequest = { providerId: 'moonshot-coding', credential: syntheticSecret,
@@ -832,6 +834,10 @@ it.skipIf(process.getuid?.() === 0)(
       revision: 1,
       effect: "new-session",
     });
+    const hydratedLegacy=await sendRequest('host.inspect',{});
+    expect(hydratedLegacy).toMatchObject({kind:'extended-snapshot',settings:{workspace:{rootId:'workspaces',relativePath:'default'}},provider:{id:'moonshot-coding',sourceProviderId:'moonshot-coding',baseUrl:'https://api.kimi.com/coding/',modelAliases:{fable:'k3',sonnet:'k3',opus:'k3',haiku:'k3'}}});
+    expect(JSON.stringify(hydratedLegacy)).not.toContain(syntheticSecret);
+    expect(await sendRequest('host.snapshot',{})).not.toHaveProperty('provider');
     const persistedConfig = await readFile(join(home, '.myagents', 'config.json'), 'utf8');
     expect(persistedConfig).not.toContain(syntheticSecret);
     expect(JSON.parse(persistedConfig).providerApiKeys).toEqual({ 'moonshot-coding': 'host-provider-credential:moonshot-coding' });
@@ -939,3 +945,14 @@ it.skipIf(process.getuid?.() === 0)(
     });
   },
 );
+
+it('accepts only the closed portable extension fields and sends legal legacy upgrade-required errors',async()=> {
+  const calls:string[]=[];
+  const {peer}=await setup(async(method)=>{calls.push(method);if(method==='host.snapshot')throw new (await import('../host/management')).HostManagementUpgradeRequired();return {kind:'test-owner-result'};});
+  const profile={id:'generic-1',name:'Portable',apiProtocol:'openai',baseUrl:'https://api.example.test/v1',authType:'both'};
+  const requests:Array<[string,Record<string,unknown>]>=[['host.capabilities',{}],['host.inspect',{}],['config.provider.set',{provider:profile,model:'vendor/model',workspace:{rootId:'workspaces',relativePath:'客户 文件夹'},executionAuthorized:false,expectedRevision:0,mutationId:randomUUID()}],['credential.provider.set',{providerId:profile.id,credential:'synthetic-key',expectedRevision:0,mutationId:randomUUID()}],['resources.directory.list',{rootId:'workspaces',relativePath:''}],['resources.register',{rootId:'workspaces',relativePath:'客户 文件夹',expectedRevision:0,mutationId:randomUUID()}],['receipt.provider.get',{owner:'credentials',providerId:profile.id,mutationId:randomUUID()}]];
+  for(const [method,params]of requests){const response=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method,params}));expect((await response).result?.kind).toBe('test-owner-result');}
+  expect(calls).toEqual(requests.map(([method])=>method));
+  const refused=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'config.provider.set',params:{...requests[2][1],provider:{...profile,env:{secret:'no'}}}}));expect((await refused).result).toEqual({kind:'error',code:'INVALID_REQUEST'});
+  const legacy=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'host.snapshot',params:{}}));expect((await legacy).result).toEqual({kind:'error',code:'HOST_MANAGEMENT_UPGRADE_REQUIRED'});
+});

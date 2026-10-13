@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { HostSessionMessage, HostSessionRequest } from './host-session-protocol';
-import { configureHost } from '../host/management';
+import { configureHost, configureProviderHost } from '../host/management';
 
 const roots: string[] = [];
 const children: ChildProcess[] = [];
@@ -15,14 +15,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function start(home: string, workspace: string, sessionId?: string, credential?: string) {
+async function start(home: string, workspace: string, sessionId?: string, credential?: string, portable?: {id:string;model:string}) {
   const generation = `generation-${Math.random()}`;
   const child = fork(fileURLToPath(new URL('./host-session-worker.ts', import.meta.url)), [], {
     execArgv: ['--import', 'tsx', '--import', join(home, 'no-egress.mjs')],
     env: { ...process.env, HOME: home, USERPROFILE: home, MYAGENTS_HOST_MODE: '1',
       MYAGENTS_HOST_GENERATION: generation, MYAGENTS_HOST_WORKSPACE: workspace,
-      MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: credential ? 'k3' : 'claude-sonnet-4-6',
-      MYAGENTS_HOST_PROVIDER_ID: credential ? 'moonshot-coding' : 'anthropic-sub', MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
+      MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: portable?.model ?? (credential ? 'k3' : 'claude-sonnet-4-6'),
+      MYAGENTS_HOST_PROVIDER_ID: portable?.id ?? (credential ? 'moonshot-coding' : 'anthropic-sub'), MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
       MYAGENTS_HOST_CREDENTIAL_SOURCE: credential ? 'supervisor-ipc' : 'systemd',
       ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', CLAUDE_CODE_OAUTH_TOKEN: '',
       MYAGENTS_MANAGEMENT_PORT: '' },
@@ -36,7 +36,7 @@ async function start(home: string, workspace: string, sessionId?: string, creden
   child.on('message', message => {
     if ((message as HostSessionMessage).type === 'credential-needed') {
       expect((message as HostSessionMessage).generation).toBe(generation);
-      child.send({ type: 'host-provider-snapshot', generation, providerId: 'moonshot-coding', credential });
+      child.send({ type: 'host-provider-snapshot', generation, providerId: portable?.id ?? 'moonshot-coding', credential });
     }
     inbox.push(message as HostSessionMessage); for (const notify of waiters) notify();
   });
@@ -150,4 +150,24 @@ describe('headless Host Session worker bootstrap', () => {
     expect(afterConfig.hostSettings).toEqual(hostConfig.hostSettings);
     expect(afterConfig.hostConfigReceipts).toEqual(hostConfig.hostConfigReceipts);
   });
+});
+
+it('boots a portable OpenAI route using provider-bound private credentials without authorizing execution', async()=> {
+  const home=await mkdtemp(join(tmpdir(),'mox-host-portable-session-'));roots.push(home);const workspace=join(home,'客户 工作区');await mkdir(workspace);await mkdir(join(home,'.myagents'));
+  await writeFile(join(home,'no-egress.mjs'),`import net from 'node:net';import http from 'node:http';import https from 'node:https';import {syncBuiltinESMExports} from 'node:module';const deny=()=>{throw new Error('No network in fixture');};globalThis.fetch=deny;net.connect=deny;net.createConnection=deny;http.request=deny;https.request=deny;syncBuiltinESMExports();`);
+  const configPath=join(home,'.myagents','config.json');const id='portable-session-test';const model='vendor/model';
+  await configureProviderHost({hostId:randomUUID(),defaultWorkspace:workspace,readConfig:async()=>({}),writeConfig:async c=>{await writeFile(configPath,JSON.stringify(c));},workspacePath:async()=>workspace,busy:()=>false,selectWorkspace:async()=>({path:workspace,verify:()=>{},close:()=>{}})}, {provider:{id,name:'Portable test',apiProtocol:'openai',baseUrl:'https://api.example.test/v1',authType:'api_key'},model,workspace:{rootId:'workspaces',relativePath:'客户 工作区'},executionAuthorized:false,expectedRevision:0,mutationId:randomUUID()});
+  const secret='synthetic-portable-key-never-network';const worker=await start(home,workspace,undefined,secret,{id,model});
+  expect(await worker.request('describe')).toMatchObject({ok:true,data:{executionAuthorized:false,supportedProviderProtocols:['anthropic','openai']}});
+  expect(await worker.request('send',{text:'must remain unauthorized'})).toMatchObject({ok:false,error:expect.stringContaining('authorization')});
+  await worker.request('shutdown');
+  const rows=JSON.parse(await readFile(join(home,'.myagents','sessions.json'),'utf8'));expect(rows[0]).toMatchObject({providerRoute:{kind:'provider',providerId:id,model}});expect(rows[0].providerEnvJson).toBeUndefined();
+  expect(await readFile(configPath,'utf8')).not.toContain(secret);expect(JSON.stringify(rows)).not.toContain(secret);expect(worker.diagnostics()).not.toContain(secret);
+  await configureProviderHost({hostId:JSON.parse(await readFile(configPath,'utf8')).hostProviderConfigReceipts.hostId,defaultWorkspace:workspace,readConfig:async()=>JSON.parse(await readFile(configPath,'utf8')),writeConfig:async c=>{await writeFile(configPath,JSON.stringify(c));},workspacePath:async()=>workspace,busy:()=>false,selectWorkspace:async()=>({path:workspace,verify:()=>{},close:()=>{}})}, {provider:{id:'portable-session-version-2',name:'Portable version 2',apiProtocol:'openai',baseUrl:'https://other.example.test/v1',authType:'api_key'},model:'vendor/new-model',workspace:{rootId:'workspaces',relativePath:'客户 工作区'},executionAuthorized:false,expectedRevision:1,mutationId:randomUUID()});
+  const resumed=await start(home,workspace,rows[0].id,secret,{id,model:'vendor/new-model'});
+  expect(resumed.ready.sessionId).toBe(rows[0].id);
+  expect(await resumed.request('send',{text:'still unauthorized'})).toMatchObject({ok:false,error:expect.stringContaining('authorization')});
+  await resumed.request('shutdown');
+  const after=JSON.parse(await readFile(join(home,'.myagents','sessions.json'),'utf8'));expect(after[0]).toMatchObject({providerRoute:{kind:'provider',providerId:id,model}});
+  expect(after[0].providerEnvJson).toBeUndefined();expect(JSON.stringify(after)).not.toContain(secret);expect(resumed.diagnostics()).not.toContain(secret);
 });

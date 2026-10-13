@@ -1,5 +1,7 @@
 /** Internal local v1 owner. This is not an AgentNet management wire schema. */
 import { createHash } from 'node:crypto';
+import { opendir } from 'node:fs/promises';
+import { isHostRelativePath, isHostWorkspaceSelection, type HostWorkspaceSelection } from '../shared/hostProviderConfig';
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { getHomeDir } from '../server/utils/platform';
@@ -46,8 +48,7 @@ function request(value: HostResourceRequest): HostResourceRequest {
   if (!plain(value) || Object.keys(value).some(key => !['mutationId','expectedRevision','rootId','relativePath','operation'].includes(key)) ||
       typeof value.mutationId !== 'string' || !UUID.test(value.mutationId) || !integer(value.expectedRevision) ||
       typeof value.rootId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(value.rootId) ||
-      typeof value.relativePath !== 'string' || value.relativePath.length > 1024 ||
-      !value.relativePath.split('/').every(piece => /^[a-zA-Z0-9_.-]{1,128}$/.test(piece) && piece !== '.' && piece !== '..') ||
+      !isHostRelativePath(value.relativePath, false) ||
       (value.operation !== 'create' && value.operation !== 'register')) return fail('RESOURCE_REQUEST_INVALID');
   return { mutationId: value.mutationId.toLowerCase(), expectedRevision: value.expectedRevision, rootId: value.rootId,
     relativePath: value.relativePath, operation: value.operation };
@@ -97,7 +98,7 @@ function ledger(config: AdminAppConfig, options: Options): Ledger {
 }
 
 /** Linux kernel directory-fd anchoring: no lstat-to-mkdir path traversal fallback. */
-function workspace(root: string, relativePath: string, create: boolean, recovering: boolean): { path: string; verify: () => void; close: () => void } {
+function workspace(root: string, relativePath: string, create: boolean, recovering: boolean): { path: string; fd: number; verify: () => void; close: () => void } {
   if (process.platform !== 'linux') return fail('RESOURCE_PLATFORM_UNSUPPORTED');
   const fds: number[] = [];
   const paths: string[] = [];
@@ -119,7 +120,7 @@ function workspace(root: string, relativePath: string, create: boolean, recoveri
   try {
     if (realpathSync(root) !== root) fail('RESOURCE_PATH_UNSAFE');
     let parent = openDirectory(root, root, true);
-    const pieces = relativePath.split('/');
+    const pieces = relativePath === '' ? [] : relativePath.split('/');
     let path = root;
     for (let i = 0; i < pieces.length; i++) {
       verify();
@@ -139,7 +140,7 @@ function workspace(root: string, relativePath: string, create: boolean, recoveri
     }
     fsyncSync(parent);
     verify();
-    return { path, verify, close: () => { for (const fd of fds.reverse()) closeSync(fd); } };
+    return { path, fd: parent, verify, close: () => { for (const fd of fds.reverse()) closeSync(fd); } };
   } catch (error) {
     for (const fd of fds.reverse()) closeSync(fd);
     if (error instanceof HostResourceError) throw error;
@@ -159,6 +160,52 @@ export function createHostResourceOwner(input: Options) {
   const authorityHome = getHomeDir();
   const checkAuthority = () => { if (getHomeDir() !== authorityHome) fail('RESOURCE_AUTHORITY_CHANGED'); };
   return {
+    async selectWorkspace(selection: HostWorkspaceSelection) {
+      checkAuthority();
+      if (!isHostWorkspaceSelection(selection)) fail('RESOURCE_REQUEST_INVALID');
+      if (!Object.hasOwn(roots, selection.rootId)) fail('RESOURCE_ROOT_UNKNOWN');
+      return workspace(roots[selection.rootId], selection.relativePath, false, false);
+    },
+    async listDirectory(body: {rootId: string; relativePath: string; cursor?: string}) {
+      checkAuthority();
+      if (!plain(body) || !keys(body, ['rootId','relativePath','cursor']) || !isHostWorkspaceSelection({rootId:body.rootId,relativePath:body.relativePath}) || (body.cursor !== undefined && (typeof body.cursor !== 'string' || body.cursor.length > 1024))) fail('RESOURCE_REQUEST_INVALID');
+      if (!Object.hasOwn(roots,body.rootId)) fail('RESOURCE_ROOT_UNKNOWN');
+      const target = workspace(roots[body.rootId],body.relativePath,false,false);
+      let dir: Awaited<ReturnType<typeof opendir>> | undefined;
+      try {
+        const fingerprint = () => {const stat=fstatSync(target.fd, {bigint:true}); return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.ctimeNs}`;};
+        const stamp = fingerprint();
+        const location = createHash('sha256').update(JSON.stringify([options.hostId,body.rootId,body.relativePath])).digest('hex');
+        let offset = 0;
+        if (body.cursor !== undefined) {
+          try {
+            const parsed = JSON.parse(Buffer.from(body.cursor,'base64url').toString('utf8'));
+            if (!plain(parsed) || !keys(parsed,['location','stamp','offset']) || parsed.location !== location || parsed.stamp !== stamp || !integer(parsed.offset) || parsed.offset > 1_000_000) fail('RESOURCE_DIRECTORY_CHANGED');
+            offset=parsed.offset;
+          } catch (e) {if (e instanceof HostResourceError) throw e; fail('RESOURCE_CURSOR_INVALID');}
+        }
+        dir=await opendir(`/proc/self/fd/${target.fd}/.`, {bufferSize:32, encoding:'utf8'});
+        const entries: Array<{name:string;relativePath:string}> = [];
+        let index=0; let scanned=0; let bytes=0; let more=false;
+        while (true) {
+          const entry=await dir.read();
+          if (!entry) break;
+          if (index++ < offset) continue;
+          if (scanned++ >= 8192) {index--;more=true;break;}
+          const relativePath=body.relativePath ? `${body.relativePath}/${entry.name}` : entry.name;
+          if (!isHostRelativePath(relativePath,false)) continue;
+          const info = (() => {try {return lstatSync(`/proc/self/fd/${target.fd}/${entry.name}`);} catch {return fail('RESOURCE_DIRECTORY_CHANGED');}})();
+          if (info.isSymbolicLink() || !info.isDirectory() || info.uid !== process.geteuid?.() || (info.mode & 0o022) !== 0 || (info.mode & 0o7000) !== 0) continue;
+          const candidate={name:entry.name,relativePath}; const size=Buffer.byteLength(JSON.stringify(candidate));
+          if (entries.length >= 128 || bytes+size > 40*1024) {index--;more=true;break;}
+          entries.push(candidate);bytes+=size;
+        }
+        target.verify();checkAuthority();
+        if (fingerprint() !== stamp) fail('RESOURCE_DIRECTORY_CHANGED');
+        if (index > 1_000_000 && more) fail('RESOURCE_DIRECTORY_TOO_LARGE');
+        return {kind:'directory-list' as const, rootId:body.rootId, relativePath:body.relativePath,entries,nextCursor:more ? Buffer.from(JSON.stringify({location,stamp,offset:index})).toString('base64url') : null};
+      } finally {await dir?.close().catch(()=>{});target.close();}
+    },
     async inspect(): Promise<HostResourceInspection> {
       return withWorkspaceAgentRegistrationIntent(async () => {
         checkAuthority();

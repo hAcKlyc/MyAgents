@@ -62,6 +62,7 @@ interface ModelManagementPanelProps {
   onRefresh: () => Promise<void>;
   discoveryAction?: () => Promise<DiscoveredModel[]>;
   discoveryUnavailableMessage?: string;
+  showModelParameterSettings?: boolean;
 }
 
 // Both the panel and its portaled editor own their keyboard focus. Popover
@@ -92,6 +93,7 @@ export default function ModelManagementPanel({
   onRefresh,
   discoveryAction,
   discoveryUnavailableMessage,
+  showModelParameterSettings = true,
 }: ModelManagementPanelProps) {
   const { t } = useTranslation('settings');
   // ===== Discovery state =====
@@ -100,6 +102,7 @@ export default function ModelManagementPanel({
   // #325 — which model row has its inline settings editor expanded.
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [pendingCustomModel, setPendingCustomModel] = useState<ModelEntity | null>(null);
+  const [addingControlledModels, setAddingControlledModels] = useState(false);
   const editingAnchorRef = useRef<HTMLDivElement | null>(null);
   const pendingAnchorRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -117,8 +120,8 @@ export default function ModelManagementPanel({
     [customInput],
   );
   const hasAddableCustomInput = useMemo(
-    () => !pendingCustomModel && customInputModelIds.some(id => !activeModelIds.has(id)),
-    [pendingCustomModel, customInputModelIds, activeModelIds],
+    () => !pendingCustomModel && !addingControlledModels && customInputModelIds.some(id => !activeModelIds.has(id)),
+    [pendingCustomModel, addingControlledModels, customInputModelIds, activeModelIds],
   );
 
   useEffect(() => {
@@ -279,7 +282,7 @@ export default function ModelManagementPanel({
   }), [bundledModelsById, provider.vendor]);
 
   const handleAddCustomModel = useCallback(() => {
-    if (pendingCustomModel) return;
+    if (pendingCustomModel || addingControlledModels) return;
     const seen = new Set(activeModelIds);
     const modelIds = customInputModelIds.filter(id => {
       if (seen.has(id)) return false;
@@ -289,8 +292,21 @@ export default function ModelManagementPanel({
     if (modelIds.length === 0) return;
 
     setEditingModelId(null);
+    if (!showModelParameterSettings && !provider.isBuiltin && onUpdateCustomProvider) {
+      const added = modelIds.map(createManualModelEntity);
+      const addedIds = new Set(modelIds);
+      setAddingControlledModels(true);
+      void (async () => {
+        try {
+          await onUpdateCustomProvider({ ...provider, models: [...provider.models.filter(model => !addedIds.has(model.model)), ...added] });
+          await onRefresh();
+          setCustomInput('');
+        } finally { setAddingControlledModels(false); }
+      })();
+      return;
+    }
     setPendingCustomModel(createManualModelEntity(modelIds[0]));
-  }, [pendingCustomModel, customInputModelIds, activeModelIds, createManualModelEntity]);
+  }, [pendingCustomModel, addingControlledModels, customInputModelIds, activeModelIds, createManualModelEntity, showModelParameterSettings, provider, onUpdateCustomProvider, onRefresh]);
 
   const handleCancelPendingCustomModel = useCallback(() => {
     setPendingCustomModel(null);
@@ -575,13 +591,13 @@ export default function ModelManagementPanel({
                     <ActiveModelRow
                       model={model}
                       isPrimary={model.model === primaryModel}
-                      editable={editableModelIds.has(model.model)}
+                      editable={showModelParameterSettings && editableModelIds.has(model.model)}
                       isEditing={editingModelId === model.model}
                       onSetPrimary={handleSetPrimary}
                       onDelete={handleDeleteModel}
                       onToggleEdit={handleToggleEdit}
                     />
-                    {editingModelId === model.model && (
+                    {showModelParameterSettings && editingModelId === model.model && (
                       <ModelSettingsEditor
                         model={model}
                         provider={provider}
@@ -617,7 +633,7 @@ export default function ModelManagementPanel({
                   <PlusIcon className="h-4 w-4" />
                 </button>
               </div>
-              {pendingCustomModel && pendingCustomModel.source !== 'discovered' && (
+              {showModelParameterSettings && pendingCustomModel && pendingCustomModel.source !== 'discovered' && (
                 <ModelSettingsEditor
                   model={pendingCustomModel}
                   provider={provider}
@@ -722,6 +738,7 @@ export default function ModelManagementPanel({
                     fallbackFocusRef={panelRef}
                     onCancelPending={handleCancelPendingCustomModel}
                     onSavePending={handleSavePendingCustomModelSettings}
+                    showModelParameterSettings={showModelParameterSettings}
                   />
                 ))}
               </div>
@@ -1115,6 +1132,7 @@ const DiscoveredModelRow = React.memo(function DiscoveredModelRow({
   fallbackFocusRef,
   onCancelPending,
   onSavePending,
+  showModelParameterSettings = true,
 }: {
   model: DiscoveredModel;
   onAdd: (model: DiscoveredModel) => void;
@@ -1123,6 +1141,7 @@ const DiscoveredModelRow = React.memo(function DiscoveredModelRow({
   fallbackFocusRef: React.RefObject<HTMLDivElement | null>;
   onCancelPending: () => void;
   onSavePending: (modelId: string, patch: Partial<ModelEntity>) => Promise<void>;
+  showModelParameterSettings?: boolean;
 }) {
   const { t } = useTranslation('settings');
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -1165,7 +1184,7 @@ const DiscoveredModelRow = React.memo(function DiscoveredModelRow({
       >
         {t('providers.models.add')}
       </button>
-      {pending && (
+      {showModelParameterSettings && pending && (
         <ModelSettingsEditor
           model={pending}
           provider={provider}

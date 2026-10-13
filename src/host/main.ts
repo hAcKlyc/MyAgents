@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
-import { configureHost, createHostConfigMutationOwner, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type ConfigReceipt, type HostConfig } from './management';
+import { configureHost, configureProviderHost, createHostConfigMutationOwner, readProviderConfigReceipt, extendedHostSettings, selectedHostProviderProfile, legacyHostRepresentable, HostManagementUpgradeRequired, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type ConfigReceipt, type HostConfig, type GenericConfigReceipt } from './management';
 import { readNetworkStatus } from './network-status';
 import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
 import type { BotRunIdentity } from './bot-runtime';
@@ -141,6 +141,22 @@ async function serve(): Promise<void> {
     );
   }
 
+  async function configureProviderHostOwned(body: Record<string, unknown>): Promise<GenericConfigReceipt> {
+    return withHostConfigurationLocks(
+      operation => withWorkspaceAgentRegistrationIntent(() => operation(), {strictPersistence:true,notify:false}),
+      exclusive,
+      async () => configureProviderHost({
+        ...createHostConfigMutationOwner({
+          hostId:identity!.hostId,defaultWorkspace:join(workspaceRoot,'default'),
+          readConfig:async()=>loadConfig({strict:true}) as HostConfig,
+          atomicModifyConfig:async modify=>{await atomicModifyConfig(current=>modify(current as HostConfig) as typeof current,{strict:true});},
+          workspacePath,busy:()=>Boolean(active)||shuttingDown,
+        }),
+        selectWorkspace:selection=>resourceOwner.selectWorkspace(selection),
+      },body),
+    );
+  }
+
   function workerCall(target: Active, operation: HostSessionOperation, args: Record<string, unknown> = {}): Promise<unknown> {
     if (target.closing && operation !== 'shutdown') return Promise.reject(new Error('Session is closing'));
     return new Promise((resolveCall, reject) => {
@@ -176,10 +192,18 @@ async function serve(): Promise<void> {
     }
     const generation = bot?.run_generation ?? randomUUID();
     const childEnvironment: NodeJS.ProcessEnv = bot ? {PATH:process.env.PATH,LANG:process.env.LANG,TMPDIR:process.env.TMPDIR,USERPROFILE:home} : {...process.env};
-    const hasDynamicCredential = !bot && config.providerApiKeys?.['moonshot-coding'] === HOST_PROVIDER_REFERENCE;
-    let credential = hasDynamicCredential ? credentialOwner?.readForExecution('moonshot-coding') : undefined;
+    let sessionProviderId = bot?.provider_id ?? settings!.providerId;
+    if (sessionId) {
+      const rows=await jsonFile<Array<{id:string;providerId?:string;providerRoute?:{kind:string;providerId:string}}>>(join(home,'.myagents','sessions.json'),[]);
+      const meta=rows.find(row=>row.id===sessionId);
+      if (meta?.providerRoute?.kind === 'provider') sessionProviderId=meta.providerRoute.providerId;
+      else if (meta?.providerId) sessionProviderId=meta.providerId;
+      else throw new Error('Session Provider identity is unavailable');
+    }
+    const hasDynamicCredential = !bot && config.providerApiKeys?.[sessionProviderId] === `host-provider-credential:${sessionProviderId}`;
+    let credential = hasDynamicCredential ? credentialOwner?.readForExecution(sessionProviderId) : undefined;
     if (hasDynamicCredential && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
-    if (!bot && !hasDynamicCredential && process.env.CREDENTIALS_DIRECTORY) {
+    if (!bot && !hasDynamicCredential && sessionProviderId === 'moonshot-coding' && process.env.CREDENTIALS_DIRECTORY) {
       try { credential = resolveHostProviderCredential('systemd-credential:kimi'); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
@@ -189,7 +213,7 @@ async function serve(): Promise<void> {
       cwd: dirname(workerPath),
       env: { ...childEnvironment, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
         MYAGENTS_HOST_CREDENTIAL_SOURCE: 'supervisor-ipc',
-        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: bot?.provider_id ?? settings!.providerId,
+        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: sessionProviderId,
         MYAGENTS_HOST_MODEL: bot?.model ?? settings!.model, MYAGENTS_HOST_GENERATION: generation,
         MYAGENTS_HOST_EXECUTION_AUTHORIZED: !bot && settings?.executionAuthorized ? '1' : '0',
         ...(bot ? {MYAGENTS_HOST_BOT_BOOTSTRAP:Buffer.from(JSON.stringify(bot)).toString('base64url')} : {}) },
@@ -213,7 +237,7 @@ async function serve(): Promise<void> {
         }
         credentialDelivered = true;
         child.send({ type: 'host-provider-snapshot', generation,
-          providerId: 'moonshot-coding', credential: credential ?? null }, error => {
+          providerId: sessionProviderId, credential: credential ?? null }, error => {
           if (error) child.kill('SIGTERM');
         });
         credential = undefined;
@@ -293,68 +317,59 @@ async function serve(): Promise<void> {
 
   async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (shuttingDown) throw new Error('Host is stopping');
-    if (method === 'host.snapshot') {
-      return withHostSnapshotLocks(
-        () => resourceOwner.inspect(),
-        exclusive,
-        async resources => {
+    if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['host.snapshot','config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
+    if (method === 'host.snapshot' || method === 'host.inspect') return withHostSnapshotLocks(
+      ()=>resourceOwner.inspect(),exclusive,async resources=> {
         if (shuttingDown) throw new Error('Host is stopping');
-        const value = (await dispatch('/host/status', {})) as Record<string, unknown>;
-        return {
-          kind: 'snapshot',
-          version: 1,
-          hostId: value.hostId,
-          configured: value.configured,
-          settings: value.settings,
-          activeSession: value.activeSession,
-          stopping: value.stopping,
-          capabilities: value.capabilities,
-          agentNet: value.agentNet,
-          runtime: value.runtime,
-          credentials: credentialOwner
-            ? { ...credentialOwner.inspect(), writeAvailable: true }
-            : { providerId: 'moonshot-coding', configured: false, revision: 0, writeAvailable: false },
-          resources,
-        };
-        },
-      );
-    }
+        const config=loadConfig({strict:true}) as HostConfig;
+        if (method === 'host.snapshot' && !legacyHostRepresentable(config)) throw new HostManagementUpgradeRequired();
+        const value=(await dispatch('/host/status',{})) as Record<string,unknown>;
+        const providerId=method === 'host.inspect' ? config.hostSettings?.providerId ?? 'moonshot-coding' : 'moonshot-coding';
+        return {kind:method === 'host.inspect' ? 'extended-snapshot':'snapshot',version:1,hostId:value.hostId,configured:value.configured,
+          settings:method === 'host.inspect' ? extendedHostSettings(config,{workspaces:workspaceRoot}):value.settings,
+          ...(method === 'host.inspect' ? {provider:selectedHostProviderProfile(config)}:{}),
+          activeSession:value.activeSession,stopping:value.stopping,capabilities:value.capabilities,agentNet:value.agentNet,runtime:value.runtime,
+          credentials:credentialOwner ? {...credentialOwner.inspect(providerId),writeAvailable:true}:{providerId,configured:false,revision:0,writeAvailable:false},resources};
+      },
+    );
+    if (method === 'config.provider.set') return configureProviderHostOwned(params);
     if (method === 'config.set') {
-      const receipt = await configureHostOwned(params);
+      const receipt=await configureHostOwned(params);
       if (!('status' in receipt)) throw new Error('Untracked configuration result');
-      return receipt.status === 'persisted'
-        ? { kind: 'config-receipt', status: receipt.status, mutationId: receipt.mutationId,
-            revision: receipt.revision, effect: receipt.effect, settings: receipt.settings }
-        : { kind: 'config-receipt', status: receipt.status, mutationId: receipt.mutationId,
-            revision: receipt.revision, effect: receipt.effect };
+      return {kind:'config-receipt',...receipt};
     }
-    if (method === 'resources.create') {
+    if (method === 'resources.directory.list') return resourceOwner.listDirectory(params as {rootId:string;relativePath:string;cursor?:string});
+    if (method === 'resources.create' || method === 'resources.register') {
       if (params.rootId !== 'workspaces') throw new HostResourceError('RESOURCE_ROOT_UNKNOWN');
-      const result = await resourceOwner.mutate(params as unknown as HostResourceRequest);
-      if (result.status === 'unconfirmed') return { kind: 'error', code: 'RESOURCE_UNCONFIRMED' };
-      return { kind: 'resource-receipt', ...result };
+      const result=await resourceOwner.mutate((method === 'resources.register' ? {...params,operation:'register'}:params) as unknown as HostResourceRequest);
+      return result.status === 'unconfirmed' ? {kind:'error',code:'RESOURCE_UNCONFIRMED'}:{kind:'resource-receipt',...result};
     }
-    if (method === 'credential.set') {
+    if (method === 'credential.set' || method === 'credential.provider.set') return exclusive(async()=> {
+      if (shuttingDown) throw new Error('Host is stopping');
       if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
-      return { kind: 'credential-receipt', ...await credentialOwner.write(params as unknown as ProviderCredentialInput) };
-    }
+      return {kind:method === 'credential.set' ? 'credential-receipt':'provider-credential-receipt',...await credentialOwner.write(params as unknown as ProviderCredentialInput)};
+    });
+    if (method === 'receipt.provider.get') return exclusive(async()=> {
+      const id=params.mutationId as string;const provider=params.providerId as string;
+      const receipt=params.owner === 'config' ? readProviderConfigReceipt(loadConfig({strict:true}) as HostConfig,identity!.hostId,provider,id):credentialOwner?.receipt(id,provider);
+      if (!receipt && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+      return !receipt || receipt.status === 'not-found' ? {kind:'receipt-not-found',mutationId:id,owner:params.owner}:params.owner === 'config' ? receipt:{kind:'provider-credential-receipt',...receipt};
+    });
     if (method === 'receipt.get') {
-      const id = params.mutationId as string;
-      if (params.owner === 'credentials') {
-        if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
-        const receipt = credentialOwner.receipt(id);
-        return receipt.status === 'not-found'
-          ? { kind: 'receipt-not-found', mutationId: id, owner: 'credentials' }
-          : { kind: 'credential-receipt', ...receipt };
+      const id=params.mutationId as string;
+      if (params.owner === 'resources') {
+        const receipt=await resourceOwner.receipt(id);
+        return receipt ? {kind:'resource-receipt',...receipt}:{kind:'receipt-not-found',mutationId:id,owner:'resources'};
       }
-      if (params.owner === 'config') {
-        const receipt = await readConfigReceipt(loadConfig({ strict: true }) as HostConfig, identity!.hostId, { mutationId: id });
-        return receipt.status === 'not-found'
-          ? { kind: 'config-receipt', status: 'not-found', mutationId: id }
-          : { kind: 'config-receipt', ...receipt };
-      }
-      const receipt = await resourceOwner.receipt(id);
-      return receipt ? { kind: 'resource-receipt', ...receipt } : { kind: 'receipt-not-found', mutationId: id, owner: 'resources' };
+      return exclusive(async()=> {
+        if (params.owner === 'credentials') {
+          if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+          const receipt=credentialOwner.receipt(id);
+          return receipt.status === 'not-found' ? {kind:'receipt-not-found',mutationId:id,owner:'credentials'}:{kind:'credential-receipt',...receipt};
+        }
+        const receipt=readConfigReceipt(loadConfig({strict:true}) as HostConfig,identity!.hostId,{mutationId:id});
+        return {kind:'config-receipt',...receipt};
+      });
     }
     throw new Error('Unsupported management request');
   }
