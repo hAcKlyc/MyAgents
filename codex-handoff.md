@@ -244,3 +244,7 @@ SIDEBAR-ORG原生接续：已运行a8a60f1c包，Task/Agent整行拖入、分区
 ### MOXBOTS-HOST-CONFIG-20261013 clean delivery freeze
 
 Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in delivery branch. Only feature commits were cherry-picked; development credential-reader merge excluded. UI/source/backend checks and primary synthetic IAB completed, independent review closed. Exact-head CI, main and unified real Host/native gates remain open. See dev-docs/host-config-primary-acceptance.md.
+
+## 2026-10-14 Host daemon/status completion
+
+Root actual MoX deployment of operator source79c25045 adds separate network-status.conf and enables the explicitly joined connector at boot. doctor now agrees with native Ready. Actual isolated service stop/start with Node before connector passed; credentials/config/identity/finite policies and account binding/expiry preserved. Node/native binaries remain pairedcf741f. Private unit/config baseline and receipts retained. PR32 source/tests/docs and required CI/main gate are separate from pending desktopa838 installation confirmation and PR14 native credential/model/Agent acceptance; do not treat Linux closure as full goal completion. See MAH-HOST-DAEMON-STATUS-20261014.
