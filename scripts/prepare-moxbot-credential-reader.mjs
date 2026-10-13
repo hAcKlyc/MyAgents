@@ -26,6 +26,7 @@ export const MANIFEST_DESTINATION = 'Contents/Resources/credential-reader-manife
 const MANIFEST_FILENAME = 'credential-reader-manifest.json';
 const MAX_MANIFEST_BYTES = 4096;
 const MAX_READER_BYTES = 64 * 1024 * 1024;
+const MAX_SOURCE_FILE_BYTES = 64 * 1024 * 1024;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const HEX_40 = /^[0-9a-f]{40}$/;
 const MANIFEST_KEYS = [
@@ -51,6 +52,41 @@ function exactKeys(value, expected, label) {
   }
 }
 
+function validateReleaseLock(lock) {
+  exactKeys(lock, [
+    'version',
+    'protocolVersion',
+    'identifier',
+    'parentIdentifier',
+    'signingCertificateSha256',
+    'sourceInputSha256',
+    'artifacts',
+  ], 'release lock');
+  if (!lock.artifacts || typeof lock.artifacts !== 'object' || Array.isArray(lock.artifacts)) {
+    fail('release lock artifact pins must be an object');
+  }
+  const artifactArchitectures = Object.keys(lock.artifacts);
+  if (artifactArchitectures.length === 0
+    || artifactArchitectures.some((architecture) => !['arm64', 'x86_64'].includes(architecture))) {
+    fail('release lock artifact architectures are invalid');
+  }
+  for (const architecture of artifactArchitectures) {
+    const pin = lock.artifacts[architecture];
+    exactKeys(pin, ['sha256', 'cdhash'], `${architecture} artifact pin`);
+    if (!HEX_64.test(pin.sha256) || !HEX_40.test(pin.cdhash)) {
+      fail(`${architecture} artifact pin is invalid`);
+    }
+  }
+  if (lock.version !== 1 || lock.protocolVersion !== 1
+    || lock.identifier !== 'com.moxbot.credential-reader'
+    || lock.parentIdentifier !== 'com.moxbot.app'
+    || !HEX_64.test(lock.signingCertificateSha256)
+    || !HEX_64.test(lock.sourceInputSha256)) {
+    fail('release lock is invalid');
+  }
+  return lock;
+}
+
 function readReleaseLock(lockPath = RELEASE_LOCK) {
   const bytes = readSafeFile(lockPath, 4096, 'release lock');
   let lock;
@@ -59,20 +95,55 @@ function readReleaseLock(lockPath = RELEASE_LOCK) {
   } catch {
     fail('release lock is not valid JSON');
   }
-  exactKeys(lock, [
-    'version',
-    'protocolVersion',
-    'identifier',
-    'parentIdentifier',
-    'signingCertificateSha256',
-  ], 'release lock');
-  if (lock.version !== 1 || lock.protocolVersion !== 1
-    || lock.identifier !== 'com.moxbot.credential-reader'
-    || lock.parentIdentifier !== 'com.moxbot.app'
-    || !HEX_64.test(lock.signingCertificateSha256)) {
-    fail('release lock is invalid');
+  return validateReleaseLock(lock);
+}
+
+export function computeSourceInputSha256(repositoryRoot) {
+  if (!path.isAbsolute(repositoryRoot) || path.resolve(repositoryRoot) !== repositoryRoot) {
+    fail('source root must be an absolute normalized path');
   }
-  return lock;
+  const root = realpathSync(repositoryRoot);
+  if (root !== repositoryRoot) fail('source root must be physically canonical');
+
+  const files = [];
+  const collect = (absolutePath, relativePath) => {
+    let stat;
+    try {
+      stat = lstatSync(absolutePath);
+    } catch {
+      fail('pinned source input is missing');
+    }
+    if (stat.isSymbolicLink()) fail('pinned source input contains a symlink');
+    const relativeParts = relativePath.split('/');
+    if (relativeParts.includes('target')) return;
+    if (stat.isDirectory()) {
+      for (const entry of readdirSync(absolutePath).sort()) {
+        collect(path.join(absolutePath, entry), `${relativePath}/${entry}`);
+      }
+      return;
+    }
+    if (!stat.isFile()) fail('pinned source input contains a non-regular file');
+    const bytes = readSafeFile(absolutePath, MAX_SOURCE_FILE_BYTES, 'pinned source input');
+    files.push({ relativePath, sha256: sha256(bytes) });
+  };
+
+  collect(path.join(root, 'rust-toolchain.toml'), 'rust-toolchain.toml');
+  for (const directory of [
+    'src-tauri/agent-network-crypto',
+    'src-tauri/agent-network-protocol',
+    'vendor/agent-network-protocol',
+  ]) {
+    collect(path.join(root, directory), directory);
+  }
+  files.sort((left, right) => left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0);
+  const digest = createHash('sha256');
+  for (const file of files) {
+    digest.update(file.relativePath, 'utf8');
+    digest.update('\0', 'ascii');
+    digest.update(file.sha256, 'ascii');
+    digest.update('\n', 'ascii');
+  }
+  return digest.digest('hex');
 }
 
 function modeOf(stat) {
@@ -230,8 +301,16 @@ export function inspectMacArchitecture(binaryPath, { run = runFile } = {}) {
 export function verifyPackagedCredentialReader({
   appBundle,
   expectedManifest,
+  repositoryRoot = REPO_ROOT,
   inspectSignature = inspectMacSignature,
+  inspectArchitecture = inspectMacArchitecture,
 }) {
+  const lock = readReleaseLock(path.join(repositoryRoot, 'scripts/moxbot-credential-reader-release.json'));
+  if (expectedManifest.executable !== READER_DESTINATION) fail('packaged reader destination is invalid');
+  const sourceInputSha256 = computeSourceInputSha256(repositoryRoot);
+  if (sourceInputSha256 !== lock.sourceInputSha256) {
+    fail('source closure changed before Tauri bundle verification');
+  }
   const appStat = assertPhysicalPath(appBundle, { leafType: 'directory', label: 'built app bundle' });
   if (!appStat.isDirectory() || !appBundle.endsWith('.app')) fail('built output is not an app bundle');
   const manifestPath = path.join(appBundle, MANIFEST_DESTINATION);
@@ -249,11 +328,21 @@ export function verifyPackagedCredentialReader({
   }
   const binaryBytes = readSafeFile(binaryPath, MAX_READER_BYTES, 'bundled reader');
   if (sha256(binaryBytes) !== expectedManifest.sha256) fail('Tauri changed the bundled credential reader bytes');
+  const architectures = inspectArchitecture(binaryPath);
+  if (architectures.length !== 1) fail('bundled reader must be a thin binary');
+  const artifactPin = lock.artifacts[architectures[0]];
+  if (!artifactPin || expectedManifest.sha256 !== artifactPin.sha256
+    || expectedManifest.cdhash !== artifactPin.cdhash) {
+    fail('expected packaged reader does not match a trusted architecture artifact pin');
+  }
   const signature = inspectSignature(binaryPath);
   if (signature.identifier !== expectedManifest.identifier
     || signature.cdhash.toLowerCase() !== expectedManifest.cdhash
     || signature.signingCertificateSha256.toLowerCase() !== expectedManifest.signingCertificateSha256) {
     fail('Tauri changed the bundled credential reader signature');
+  }
+  if (computeSourceInputSha256(repositoryRoot) !== sourceInputSha256) {
+    fail('pinned source inputs changed during Tauri bundle verification');
   }
   return true;
 }
@@ -352,17 +441,16 @@ export function prepareMoxbotCredentialReader({
   if (platform !== 'darwin') fail('reader injection is only supported on macOS builds');
   if (!bundleDirectory) fail('MOXBOTS_CREDENTIAL_READER_BUNDLE is required for every MoXBots macOS build');
   validateArch(targetArch);
-  exactKeys(lock, [
-    'version',
-    'protocolVersion',
-    'identifier',
-    'parentIdentifier',
-    'signingCertificateSha256',
-  ], 'release lock');
-  if (lock.version !== 1 || lock.protocolVersion !== 1
-    || lock.identifier !== 'com.moxbot.credential-reader'
-    || lock.parentIdentifier !== 'com.moxbot.app'
-    || !HEX_64.test(lock.signingCertificateSha256)) fail('release lock is invalid');
+  validateReleaseLock(lock);
+
+  const artifactPin = lock.artifacts[targetArch];
+  if (!artifactPin) {
+    fail(`no signed reader artifact pin exists for ${targetArch}; it requires a separate release artifact`);
+  }
+  const sourceInputSha256 = computeSourceInputSha256(repositoryRoot);
+  if (sourceInputSha256 !== lock.sourceInputSha256) {
+    fail('source closure does not match the pinned reader artifact');
+  }
 
   const resolvedBundle = path.resolve(bundleDirectory);
   if (resolvedBundle !== bundleDirectory) fail('artifact directory must be absolute and normalized');
@@ -389,6 +477,9 @@ export function prepareMoxbotCredentialReader({
   if ((modeOf(binaryStat) & 0o111) === 0) fail('reader binary is not executable');
   const manifestBytes = readSafeFile(manifestPath, MAX_MANIFEST_BYTES, 'manifest');
   const manifest = parseManifest(manifestBytes, lock);
+  if (manifest.sha256 !== artifactPin.sha256 || manifest.cdhash !== artifactPin.cdhash) {
+    fail(`reader manifest does not match the trusted ${targetArch} artifact pin`);
+  }
   const binaryBytes = readSafeFile(binaryPath, MAX_READER_BYTES, 'reader binary');
   if (sha256(binaryBytes) !== manifest.sha256) fail('reader SHA-256 does not match the manifest');
 
@@ -405,6 +496,9 @@ export function prepareMoxbotCredentialReader({
   if (!readSafeFile(binaryPath, MAX_READER_BYTES, 'reader binary').equals(binaryBytes)
     || !readSafeFile(manifestPath, MAX_MANIFEST_BYTES, 'manifest').equals(manifestBytes)) {
     fail('artifact changed during signature verification');
+  }
+  if (computeSourceInputSha256(repositoryRoot) !== sourceInputSha256) {
+    fail('pinned source inputs changed during artifact verification');
   }
 
   const canonicalStageParent = realpathSync(stageParent);
