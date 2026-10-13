@@ -18,14 +18,15 @@
  * built at SDK granularity (source transcript ↔ fork transcript), then applied to the SDK
  * uuids we stored on each UI row. (This is the Codex BLOCKER the redesign fixed.)
  *
- * Hard rule: on ANY structural mismatch these return `ok:false`, so the caller ABORTS the
- * eager fork and falls back to the (default) lazy path — never a partial/guessed map.
+ * Hard rule: on structural mismatch return `ok:false` and abort the new fork,
+ * never publish a partial or guessed map.
  */
 
 /** Minimal shape of a `getSessionMessages()` entry this needs. */
 export interface ForkTranscriptEntry {
   type: 'user' | 'assistant' | 'system';
   uuid: string;
+  message?: unknown;
 }
 
 export type ForkUuidRemapResult =
@@ -81,4 +82,40 @@ export function remapStoredSdkUuids(
     remapped.push(n);
   }
   return { ok: true, remapped };
+}
+
+/** Repair only a missing legacy user stamp in the new fork. The exact text must
+ * identify one plain native user row in the whole source chain and that row
+ * must be inside the retained prefix. Neither source history nor boundary moves. */
+export function remapForkMessageUuids(
+  messages: readonly { role: string; content: unknown; sdkUuid?: string; attachments?: readonly unknown[] }[],
+  source: readonly ForkTranscriptEntry[],
+  map: ReadonlyMap<string, string>,
+): RemapStoredResult {
+  const resolved: (string | undefined)[] = [];
+  for (const message of messages) {
+    const uuid = message.sdkUuid;
+    if (uuid === undefined || map.has(uuid)) { resolved.push(uuid); continue; }
+    if (message.role !== 'user' || typeof message.content !== 'string' || !message.content
+      || message.attachments?.length || source.some(row => row.uuid === uuid)) {
+      return { ok: false, reason: 'stored native stamp cannot be safely recovered' };
+    }
+    const text = message.content;
+    const matches = source.filter(row => {
+      const content = typeof row.message === 'object' && row.message !== null && 'content' in row.message
+        ? row.message.content : undefined;
+      if (row.type !== 'user') return false;
+      if (typeof content === 'string') return content === text;
+      if (!Array.isArray(content) || content.length !== 1) return false;
+      const block = content[0] as { type?: unknown; text?: unknown } | null;
+      return block?.type === 'text' && block.text === text;
+    });
+    if (matches.length !== 1 || !map.has(matches[0].uuid)
+      || messages.some(other => other !== message && (other.sdkUuid === matches[0].uuid
+        || (other.role === 'user' && other.content === text)))) {
+      return { ok: false, reason: 'stored user text has no unique retained native match' };
+    }
+    resolved.push(matches[0].uuid);
+  }
+  return remapStoredSdkUuids(resolved, map);
 }
