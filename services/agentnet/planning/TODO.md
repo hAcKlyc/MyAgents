@@ -43,6 +43,12 @@
 
 ## 后续开发待办
 
+用户于2026-10-13明确启动真实实现，任务 **BOTS-CLOUD-ADMIN-001**；实施合同和逐阶段状态见 [BOTS-CLOUD-ADMIN-IMPLEMENTATION.md](BOTS-CLOUD-ADMIN-IMPLEMENTATION.md)。统一已有云服务后台为服务端管理员入口，个人 Bots Net 留在客户端。以下整体开发项不能仅因控制面登记完成而提前勾选。
+
+- [x] BOTS-CLOUD-ADMIN-001 本地阶段：真实鉴权/管理登记API与同源后台、隔离数据库联调及独立UI验收。
+- [ ] BOTS-CLOUD-ADMIN-001 交付阶段：远端CI、最新main集成、主干交付与现网权限/发布验收。
+- [ ] 现有云服务集成：保留现网中继修复、运维权限、备份/回滚、真实账号与发布路径验收。
+
 - [ ] BOT-ADMIN-LIFECYCLE-001：真实生命周期权限/配置/启停/分配、双Host运行防护、逻辑删除和恢复按新规划实现并多账号验收。
 
 - [ ] BNET-NAME-001：客户端现有 Agent Net 显示名称改为 Bots Net，核对导航、说明和国际化；协议及源码 namespace 是否变更另行评审，不全局替换。

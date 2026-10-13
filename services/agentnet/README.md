@@ -1,6 +1,6 @@
 # Owned AgentNet service
 
-This directory contains an independently owned AgentNet service: OIDC login, public instance discovery, device identity, DPoP-protected metadata, and a bounded WebSocket relay. The service is wired to the owned desktop and Linux Host client paths; fixed-protocol application messages reach the Host through its local management IPC. These code paths and their automated/native checks do not establish that a public deployment or the complete user-driven desktop-to-Host configuration flow has been accepted. Current delivery still requires the chosen public DNS/TLS ingress, consistent private-state operations, and the pending user-authorized Host login and management acceptance. No official account or encrypted Host identity is migrated.
+This directory contains the independently owned AgentNet service: OIDC login, public instance discovery, device identity, DPoP-protected metadata, a bounded WebSocket relay, and optional authenticated administrator registry routes. The source preserves the four metadata/relay safeguards from the deployed `04faeb1d` service. Desktop/Host adapters have their own owner and acceptance records; building this service does not establish complete remote-management, shared execution or production acceptance. No official account or encrypted Host identity is migrated.
 
 ## Authentication ownership
 
@@ -8,7 +8,7 @@ Dex supplies the login screen and local accounts, so deployment does not require
 
 The service executable uses a fixed OIDC provider, validates discovery endpoints before requests and exchanges authorization codes with a distinct provider PKCE verifier. Callback handling retains a verified subject in a bounded, short-lived transaction; client PKCE proof is separately required to claim the session once. Valid provider failures and exchange failures terminate the transaction. Signature/key validation failure can trigger one bounded refresh from the fixed, same-origin JWKS URI, followed by one validation retry. Concurrent refreshes share the result and failures have a cooldown; issuer/audience/nonce/expiry failures do not trigger refresh. Changes to the provider's JWKS URI or advertised algorithms require a service restart.
 
-Real isolated HTTPS acceptance with Dex v2.46.0 exercised its native password/approval forms, authorization-code exchange, device PKCE denial, one-use polling, service restart/session persistence, stable account mapping, revocation, cancellation, terminal provider denial and invalid-code replay rejection. Subsequent identity and relay acceptance exercised device enrollment, issued certificates, one-use proofs, restart persistence, live session revocation, catalog Ready, paired channels and opaque frame forwarding. These tests cover loopback/native paths; they do not prove public DNS/TLS deployment or the still-pending user-driven Host login and desktop management flow. The current Linux connector has completed its `auth-start` path; Host browser authorization and remote-management acceptance remain pending.
+Historical isolated HTTPS acceptance with Dex v2.46.0 exercised its native password/approval forms, authorization-code exchange, device PKCE denial, one-use polling, service restart/session persistence, stable account mapping, revocation, cancellation, terminal provider denial and invalid-code replay rejection. Subsequent identity and relay checks exercised device enrollment, issued certificates, one-use proofs, restart persistence, live session revocation, catalog Ready, paired channels and opaque frame forwarding. These checks establish their tested scope only. The owning task has separately verified independent public IP-SAN HTTPS login, native desktop/Linux Host visibility, model configuration, disabled Agent creation, persisted readback and own Host service restart on b116. Model credentials remain unconfigured and no paid inference was invoked. Fixed-reader first reads succeeded, but repeated-authorization acceptance after cold startup remains open. The administrator fixture separately validates the added registry operations; it does not establish Host execution.
 
 The login routes are `POST /auth/login/start`, `GET /auth/callback`, `POST /auth/login/poll`, `DELETE /auth/login/cancel`, and `GET|DELETE /auth/session`. When identity, network and relay are enabled together, `GET /api/agent-network/instance` returns the bounded public descriptor (service, environment, network, login issuer, fixed protocol and TLS capability, root certificate, and JWKS); it does not return an account identity. Session credentials are returned only in a no-store JSON response to the initiating client and never enter browser redirect URLs. `/health` reports only the authentication phase.
 
@@ -106,7 +106,11 @@ done
 python3 -m unittest discover -s services/agentnet/deploy -p 'test_*.py'
 ```
 
-These checks validate their local scope. Native Linux QA covers authenticated relay and Host management foundations; the public-domain deployment checklist above, browser authorization on the target Host, desktop online state, real configuration/credential and resource writes, restart/readback, and failure recovery remain separate acceptance steps.
+These checks validate their local scope. Target login, public ingress, desktop/Host management, restart/readback, and failure recovery require separate current acceptance evidence; administrator registry checks do not replace them.
+
+## Administrator control plane
+
+The optional same-origin `/admin` console and `/api/admin/` routes now use the existing OIDC/session authority, private Bot registry, CAS/idempotent receipts and metadata audit. Registered users and explicitly authorized Host/model references are checked server-side. Configuration and soft-delete are real control-plane writes; Host execution is not connected and `start` fails closed. Activation and operational acceptance are separate from the local fixture tests. See [ADMINISTRATION.md](ADMINISTRATION.md) and [implementation status](planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md).
 
 ## Future Bots administration and Bots Net sharing
 
@@ -114,4 +118,4 @@ The service is planned as a multi-user system with a platform-administrator Bots
 
 Canonical owned fork: https://github.com/heavenzhang/MoXBots.git (renamed from heavenzhang/MyAgents on 2026-10-13). Historical commit and release references are retained.
 
-管理员Bots生命周期的后续规划见 [BOT-ADMIN-LIFECYCLE-V1.md](planning/BOT-ADMIN-LIFECYCLE-V1.md)，覆盖新建、配置、启停、纳管所属用户/Host分配及逻辑删除；当前仅规划与原型，未实现服务端控制能力。
+管理员Bots生命周期的后续规划见 [BOT-ADMIN-LIFECYCLE-V1.md](planning/BOT-ADMIN-LIFECYCLE-V1.md)，覆盖新建、配置、启停、纳管所属用户/Host分配及逻辑删除；管理登记控制面已进入实现与验收；真实Host执行和跨用户共享仍另行接线。

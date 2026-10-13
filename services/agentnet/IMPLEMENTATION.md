@@ -7,12 +7,19 @@ This checkpoint supersedes the incomplete-client and relay statements in the his
 - [x] Automated/native two-device identity, relay/Pairs, management persistence, receipt and restart checks.
 - [x] Real MoX bot desktop account login and automatic online recovery after desktop restart; original MyAgents remains separate.
 - [x] Installed Linux connector CA directory and public-read permission fixes, safe same-release migration, original-service preservation, and actual `owned-auth-start` success. The first Host browser request expired without authorization.
-- [ ] User-authorized Host browser login, explicit enrollment and actual installed Host visibility from desktop.
-- [ ] Real desktop model/credential/Agent forms, original receipt recovery and persisted readback after restart; denial and keyboard paths.
-- [ ] Independent DNS/HTTPS deployment of authentication, AgentNet and a cloud Host on the newly authorized server; preserve its existing app. Target connection details and credentials remain outside Git.
+- [x] User-authorized Host login and enrollment; the installed Linux Host is visible online in the independent cloud network.
+- [x] Real b116 desktop model configuration and disabled Agent creation, persisted server readback and own Host service restart. Model API credentials and paid execution remain unconfigured.
+- [x] Independent IP-SAN HTTPS authentication and AgentNet deployment on the authorized cloud server, preserving its existing app. Target connection details and credentials remain outside Git.
+- [ ] Fixed credential reader first migration survives cold startup and a different desktop build without repeated authorization. First reads succeeded; same-build cold startup still returned authorization required, with no automatic retry.
 - [ ] Required CI, main delivery and deployment correspondence for the accepted final artifacts.
 
 Real model calls remain zero. Product-supplied credentials and any required paid-call authorization are a separate execution gate; they must not be requested through chat.
+
+## Administrator control plane and deployed service compatibility
+
+BOTS-CLOUD-ADMIN-001 adds optional authenticated registry administration. Status and acceptance are tracked in [the implementation contract](planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md). The four metadata/relay source files preserve the independently deployed `04faeb1d` safeguards (same-principal device address, persisted catalog preservation, raw heartbeat and private initialization locking). This does not declare the separate Desktop/Host management task accepted or merge its unrelated source. Actual Host controller delegation and shared execution remain open.
+
+The historical foundation milestones below are retained as history. Current source exposes the owned descriptor and real bounded WS relay; the earlier no-relay/no-client stage statements do not describe current capability.
 
 ## Historical milestones
 

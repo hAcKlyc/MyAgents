@@ -1,0 +1,40 @@
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const base=process.env.BOTS_ADMIN_FIXTURE_URL || 'http://127.0.0.1:5198'; const out = process.env.BOTS_ADMIN_QA_OUTPUT || await mkdtemp(join(tmpdir(), 'bots-admin-qa-'));
+if (!['127.0.0.1', 'localhost'].includes(new URL(base).hostname)) throw new Error('Only an isolated loopback fixture may be tested.');
+const sourceHashes = Object.fromEntries(await Promise.all(['index.html','app.js','styles.css'].map(async name => [name, createHash('sha256').update(await readFile(new URL('../../admin-web/'+name,import.meta.url))).digest('hex')])));
+const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE } : {})});
+const context=await browser.newContext({viewport:{width:1440,height:900},isMobile:true,hasTouch:true}); const page=await context.newPage();
+// Refuse evidence from an older fixture executable with different embedded assets.
+for (const [name, expected] of Object.entries(sourceHashes)) {
+ const response = await context.request.get(`${base}/${name === 'index.html' ? 'admin' : 'admin/' + name}`);
+ const digest = createHash('sha256').update(await response.body()).digest('hex');
+ if (response.status() !== 200 || digest !== expected) throw new Error(`Fixture asset does not match source: ${name}`);
+}
+
+let bearer=''; page.on('request',r=>{const a=r.headers().authorization||'';if(a.startsWith('Bearer '))bearer=a.slice(7)});
+const botName=`UI QA RWD ${Date.now()}`; const shots=[]; const actions=[];
+await page.goto(`${base}/fixture-identity/admin`); const popupWait=page.waitForEvent('popup'); await page.getByRole('button',{name:'使用账号登录'}).click(); const popup=await popupWait; await popup.waitForLoadState('domcontentloaded').catch(()=>{}); await page.waitForSelector('#console:not([hidden])');
+const bootResp=await context.request.get(`${base}/api/admin/bootstrap`,{headers:{authorization:`Bearer ${bearer}`}}); const boot=(await bootResp.json()).data;
+const admin=boot.users.find(u=>u.principal_id===boot.principal_id); const host=boot.hosts.find(h=>h.owner_ids.includes(admin.principal_id)); const model=boot.model_refs.find(m=>m.owner_ids.includes(admin.principal_id));
+for(const [w,h] of [[1440,900],[768,1024],[390,844]]){await page.setViewportSize({width:w,height:h});await page.screenshot({path:`${out}/final-admin-${w}x${h}.png`,fullPage:true});shots.push(await page.evaluate(()=>({viewport:innerWidth,bodyWidth:document.body.scrollWidth,rootWidth:document.documentElement.scrollWidth,tableHintVisible:!!document.querySelector('.table-hint')&&getComputedStyle(document.querySelector('.table-hint')).display!=='none',tableWrapFocusable:document.querySelector('.table-wrap')?.tabIndex>=0})));}
+// Keyboard path: focus navigation and activate with Enter; open then dismiss a dialog with Escape.
+await page.setViewportSize({width:390,height:844}); const users=page.getByRole('button',{name:'用户'}); await users.focus(); await users.press('Enter'); await page.getByText('已注册用户').waitFor(); actions.push('keyboard Enter activates Users navigation');
+const bots=page.getByRole('button',{name:'Bots 管理'}); await bots.focus(); await bots.press('Enter'); await page.getByRole('button',{name:'新建 Bot'}).waitFor();
+await page.getByRole('button',{name:'新建 Bot'}).click(); const dlg=page.getByRole('dialog'); await dlg.waitFor(); await page.keyboard.press('Escape'); await dlg.waitFor({state:'hidden'}); actions.push('Escape dismisses editor');
+await page.getByRole('button',{name:'新建 Bot'}).click(); const form=page.getByRole('dialog');
+await form.getByLabel('所属用户').selectOption(admin.principal_id); if(host) await form.getByLabel('运行 Host').selectOption(host.id); if(model) await form.getByLabel('模型配置引用').selectOption(model.id);
+await form.getByLabel('Bot 名称').fill(botName); await form.getByLabel('说明').fill('RWD synthetic acceptance'); await form.getByLabel('系统指令').fill('Synthetic UI QA only'); await form.getByLabel('每日 Token 上限').fill('100');
+const formShot=`${out}/final-editor-390x844.png`; await page.screenshot({path:formShot,fullPage:true}); await form.getByRole('button',{name:'保存配置'}).click(); await form.waitFor({state:'hidden'}); await page.locator('.table-wrap').getByText(botName,{exact:true}).waitFor(); await page.screenshot({path:`${out}/final-populated-390x844.png`,fullPage:true}); actions.push('390px create draft through visible form/button');
+const card=page.locator('.table-wrap tr').filter({hasText:botName});
+for(const label of ['配置','分配','关闭准入','删除']){const b=card.getByRole('button',{name:label}); if(!(await b.isVisible()))throw new Error(`390px ${label} control not visible`); await b.click(); await page.getByRole('dialog').waitFor(); actions.push(`390px ${label} control opens editor`); if(label==='配置'){await page.getByRole('dialog').getByLabel('说明').fill('RWD configured'); await page.getByRole('dialog').getByRole('button',{name:'保存配置'}).click(); await page.getByRole('dialog').waitFor({state:'hidden'}); await page.locator('.table-wrap').getByText(botName,{exact:true}).waitFor({timeout:5000}).catch(async e=>{console.log('DEBUG_CONFIG',JSON.stringify({buttons:await page.locator('.table-wrap').innerText().catch(()=>''),dialog:await page.locator('#editor').innerText().catch(()=>''),visible:await page.locator('#editor').evaluate(e=>e.open).catch(()=>false)}));throw e});}else if(label==='删除'){await page.getByRole('dialog').getByLabel('输入完整 Bot 名称确认').fill(botName); await page.getByRole('dialog').getByRole('button',{name:'确认删除'}).click(); await page.getByRole('dialog').waitFor({state:'hidden'}); await page.getByRole('button',{name:'回收站'}).click(); await page.locator('.table-wrap').getByText(botName,{exact:true}).waitFor(); break;}else{await page.getByRole('dialog').getByRole('button',{name:'取消'}).click(); await page.getByRole('dialog').waitFor({state:'hidden'});}}
+const deleted=page.locator('.table-wrap tr').filter({hasText:botName}); const restore=deleted.getByRole('button',{name:'恢复'}); if(!(await restore.isVisible()))throw new Error('390px restore control not visible'); await restore.click(); await page.getByRole('dialog').getByRole('button',{name:'确认恢复'}).click(); await page.getByRole('dialog').waitFor({state:'hidden'}); const afterRestore=await context.request.get(`${base}/api/admin/bootstrap`,{headers:{authorization:`Bearer ${bearer}`}}); const restored=(await afterRestore.json()).data.bots.find(b=>b.name===botName); if(!restored||restored.deleted)throw new Error('restore action did not persist'); actions.push('390px restore control visible and successful (verified through authoritative bootstrap)');
+// Capture focus treatment on the scrollable list region at tablet width.
+await page.getByRole('button',{name:'Bots 管理'}).click(); await page.setViewportSize({width:768,height:1024}); const region=page.locator('.table-wrap'); await page.getByRole('button',{name:'刷新'}).focus(); let tabCount=0; for(;tabCount<30;tabCount++){await page.keyboard.press('Tab'); if(await region.evaluate(e=>document.activeElement===e))break;} const focused=await region.evaluate(e=>({focused:document.activeElement===e,outline:getComputedStyle(e).outlineStyle,outlineWidth:getComputedStyle(e).outlineWidth,hint:getComputedStyle(document.querySelector('.table-hint')).display})); focused.tabCount=tabCount;
+if (shots.some(s => s.bodyWidth > s.viewport || s.rootWidth > s.viewport)) throw new Error('Page overflow');
+if (!shots.find(s => s.viewport === 768)?.tableHintVisible || !focused.focused || focused.outline === 'none' || parseFloat(focused.outlineWidth) < 1) throw new Error('Tablet scroll/focus affordance missing');
+const report={sourceHashes,viewports:shots,tabletFocus:focused,actions,fixture:'test-only loopback Rust AdminService/AuthStore; synthetic Bot only; not production acceptance'};
+console.log(JSON.stringify(report,null,2)); await browser.close();

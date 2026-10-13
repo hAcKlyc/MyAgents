@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MoXBots · 云服务后台</title><link rel="stylesheet" href="/admin/styles.css"><script src="/admin/app.js" defer></script></head>
+<body>
+<div id="login" class="login"><section class="login-card"><div class="brand-mark">M</div><p class="eyebrow">MOXBOTS CLOUD</p><h1>云服务管理后台</h1><p>管理纳管 Bots、所属用户和 Host。使用本实例账号登录，平台权限由服务端验证。</p><button id="login-button" class="primary" type="button">使用账号登录</button><p id="login-status" role="status"></p></section></div>
+<div id="console" class="shell" hidden>
+<aside><a class="brand" href="/admin">MoXBots <span>CLOUD</span></a><p class="nav-label">管理平台</p><nav aria-label="后台导航"><button data-page="bots" class="active" type="button">Bots 管理</button><button data-page="users" type="button">用户</button><button data-page="hosts" type="button">Hosts</button><button data-page="audit" type="button">操作审计</button></nav><div class="sidebar-note">个人使用与共享入口<br><strong>Bots Net</strong><small>在客户端中使用</small></div></aside>
+<main><header><div><p class="eyebrow">平台管理员 · 本实例</p><h1 id="page-title">Bots 管理</h1></div><div class="header-actions"><button id="refresh" type="button">刷新</button><button id="logout" type="button">退出</button></div></header><p id="account" class="account"></p><div id="notice" role="status" hidden></div><section id="pending" class="notice warning" hidden><strong>操作结果尚未确认</strong><p>保持原操作编号，查询回执或按原请求重试。</p><code id="pending-id"></code><div class="actions"><button id="check-receipt" type="button">查询原操作</button><button id="retry-operation" type="button">重试原请求</button></div></section>
+<div id="content"></div><footer>Host 执行适配尚未接入。登记、配置和准入状态均以服务端为准；不会把登记成功显示为运行成功。</footer></main>
+</div>
+<dialog id="editor"><form id="edit-form"><div class="dialog-head"><div><p class="eyebrow">BOTS 管理</p><h2 id="edit-title">新建 Bot</h2></div><button id="close-editor" aria-label="关闭" type="button">×</button></div><p id="edit-description" class="muted"></p><div id="fields"></div><p id="form-error" class="error" role="alert"></p><div class="dialog-actions"><button id="cancel-editor" type="button">取消</button><button id="save-editor" class="primary" type="submit">保存</button></div></form></dialog>
+</body></html>
