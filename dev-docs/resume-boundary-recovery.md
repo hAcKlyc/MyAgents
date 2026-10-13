@@ -13,7 +13,7 @@
 - `src/renderer/context/TabProvider.activity.test.tsx`：103 项通过，持久错误保留，多次事件不创建重复 toast。
 - `src/renderer/components/NativeResumeRecoveryAction.test.tsx`：5 项通过，正确 retained assistant、禁用状态和 unavailable 行为。
 - 候选真实组件通过独立本地 IAB fixture 的默认桌面布局和 Enter 操作检查。fixture 未接原生应用；不把它当作整客户端安装或业务发送验收。
-- 现有 MyAgents API 已读到本机恢复分支的四条保留历史；源/目标正文深比较相同，原 Product/native 文件与备份字节相同。恢复分支的隔离 native 空输入启动成功，模型发送为零。真实后续模型发送尚未执行。
+- 现有 MyAgents API 已读到本机恢复分支的四条保留历史；源/目标正文深比较相同，原 Product/native 文件与备份字节相同。恢复分支的隔离 native 空输入启动成功，模型发送为零。恢复分支已在实际客户端打开、历史与原模型恢复；随后真实用户输入已进入 native/model 执行，未重现该恢复点拒绝。本 Agent 未代发业务指令，原任务最终结果不在本修复范围。
 
 ## 安装边界与接续
 
