@@ -20,6 +20,84 @@ use tokio_tungstenite::{
 };
 
 pub(crate) type NetworkSocket = WebSocketStream<reqwest::Upgraded>;
+/// Owned-service extension. This is a current route, never a write grant.
+#[derive(Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DeviceAddress {
+    pub version: u8,
+    pub scope: myagents_agent_network_protocol::DeviceScope,
+    pub connection_epoch: String,
+    pub membership_revision: u64,
+    pub signed_binding: String,
+}
+impl DeviceAddress {
+    pub(crate) fn validate(
+        &self,
+        local: &myagents_agent_network_protocol::DeviceScope,
+        device: &str,
+    ) -> Result<(), NetworkError> {
+        let canonical = |s: &str| uuid::Uuid::parse_str(s).is_ok_and(|id| id.to_string() == s);
+        if self.version != 1
+            || !canonical(device)
+            || self.scope.device_id != device
+            || device == local.device_id
+            || self.scope.service_id != local.service_id
+            || self.scope.environment != local.environment
+            || self.scope.network_id != local.network_id
+            || self.scope.principal_id != local.principal_id
+            || self.scope.key_generation == 0
+            || self.scope.key_generation > 9_007_199_254_740_991
+            || !canonical(&self.connection_epoch)
+            || self.membership_revision == 0
+            || self.membership_revision > 9_007_199_254_740_991
+            || self.signed_binding.is_empty()
+            || self.signed_binding.len() > myagents_agent_network_protocol::budget("controlBytes")
+        {
+            return Err(NetworkError::new("HOST_ADDRESS_INVALID"));
+        }
+        Ok(())
+    }
+}
+fn decode_device_address(
+    bytes: &[u8],
+    local: &myagents_agent_network_protocol::DeviceScope,
+    device: &str,
+) -> Result<DeviceAddress, NetworkError> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Envelope {
+        ok: bool,
+        data: DeviceAddress,
+    }
+    // Decode bytes directly, preserving duplicate-field rejection at every layer.
+    let response: Envelope =
+        serde_json::from_slice(bytes).map_err(|_| NetworkError::new("HOST_ADDRESS_INVALID"))?;
+    if !response.ok {
+        return Err(NetworkError::new("HOST_ADDRESS_INVALID"));
+    }
+    response.data.validate(local, device)?;
+    Ok(response.data)
+}
+const PRESERVATION_PATH: &str = "/api/agent-network/catalog/self-preservation";
+fn decode_catalog_preservation(bytes: &[u8]) -> Result<bool, NetworkError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Data {
+        empty: bool,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Envelope {
+        ok: bool,
+        data: Data,
+    }
+    let response: Envelope =
+        serde_json::from_slice(bytes).map_err(|_| NetworkError::new("SOURCE_CATALOG_INVALID"))?;
+    if !response.ok {
+        return Err(NetworkError::new("SOURCE_CATALOG_INVALID"));
+    }
+    Ok(response.data.empty)
+}
 pub(crate) struct NetworkTransport {
     memory: super::memory::MemoryBudget,
     origin: url::Url,
@@ -28,6 +106,102 @@ pub(crate) struct NetworkTransport {
     nonce: Mutex<Option<String>>,
 }
 impl NetworkTransport {
+    /// Owned-only device-scoped preservation proof, not vendor metadata or a write grant.
+    pub(crate) async fn catalog_self_preservation(
+        &self,
+        token: &str,
+    ) -> Result<bool, NetworkError> {
+        let method = reqwest::Method::GET;
+        let url = self
+            .origin
+            .join(PRESERVATION_PATH)
+            .map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
+        let diagnostic = RequestDiagnostic::new("agent-network", &method, PRESERVATION_PATH);
+        let mut response = self
+            .authenticated(
+                self.client.get(url.clone()),
+                &method,
+                &url,
+                token,
+                &diagnostic,
+            )
+            .await?;
+        let status = response.status();
+        let retry_after = super::reconnect::retry_after(&response);
+        let mut request_id = response_request_id(&response);
+        let mut allocation = self.memory.reserve(0)?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_TRANSPORT_FAILED"))?
+        {
+            let size = bytes
+                .len()
+                .checked_add(chunk.len())
+                .filter(|size| *size <= 8192)
+                .ok_or_else(|| NetworkError::new("SOURCE_CATALOG_INVALID"))?;
+            allocation.resize(size.saturating_mul(2))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        if !status.is_success() {
+            return decode_response(status, &bytes, retry_after, &mut request_id)
+                .and_then(|_| Err(NetworkError::new("SOURCE_CATALOG_INVALID")));
+        }
+        decode_catalog_preservation(&bytes)
+    }
+    pub(crate) async fn device_address(
+        &self,
+        token: &str,
+        local: &myagents_agent_network_protocol::DeviceScope,
+        device: &str,
+    ) -> Result<DeviceAddress, NetworkError> {
+        if !uuid::Uuid::parse_str(device).is_ok_and(|id| id.to_string() == device) {
+            return Err(NetworkError::new("HOST_ADDRESS_INVALID"));
+        }
+        let path = format!("/api/agent-network/devices/{device}/address");
+        let method = reqwest::Method::GET;
+        let url = self
+            .origin
+            .join(&path)
+            .map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
+        let diagnostic = RequestDiagnostic::new("agent-network", &method, &path);
+        let mut response = self
+            .authenticated(
+                self.client.get(url.clone()),
+                &method,
+                &url,
+                token,
+                &diagnostic,
+            )
+            .await?;
+        let status = response.status();
+        let retry_after = super::reconnect::retry_after(&response);
+        let mut request_id = response_request_id(&response);
+        let mut allocation = self.memory.reserve(0)?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_TRANSPORT_FAILED"))?
+        {
+            let size = bytes
+                .len()
+                .checked_add(chunk.len())
+                .filter(|n| *n <= budget("controlBytes"))
+                .ok_or_else(|| NetworkError::new("HOST_ADDRESS_INVALID"))?;
+            allocation.resize(size.saturating_mul(2))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        if bytes.len() > myagents_agent_network_protocol::budget("controlBytes") {
+            return Err(NetworkError::new("HOST_ADDRESS_INVALID"));
+        }
+        if !status.is_success() {
+            return decode_response(status, &bytes, retry_after, &mut request_id)
+                .and_then(|_| Err(NetworkError::new("HOST_ADDRESS_INVALID")));
+        }
+        decode_device_address(&bytes, local, device)
+    }
     pub(crate) fn new(
         origin: &str,
         key: Arc<DevicePrivateKey>,
@@ -786,5 +960,104 @@ mod tests {
         assert_eq!(error.code, "RATE_LIMITED");
         assert!(error.retryable);
         assert_eq!(error.details, Some(serde_json::json!({"limit":2})));
+    }
+}
+
+#[cfg(test)]
+mod device_address_tests {
+    use super::*;
+    fn fixture() -> (myagents_agent_network_protocol::DeviceScope, DeviceAddress) {
+        let local = myagents_agent_network_protocol::DeviceScope {
+            service_id: "test.service".into(),
+            environment: "development".into(),
+            network_id: uuid::Uuid::new_v4().to_string(),
+            principal_id: uuid::Uuid::new_v4().to_string(),
+            device_id: uuid::Uuid::new_v4().to_string(),
+            key_generation: 1,
+        };
+        let address = DeviceAddress {
+            version: 1,
+            scope: myagents_agent_network_protocol::DeviceScope {
+                device_id: uuid::Uuid::new_v4().to_string(),
+                ..local.clone()
+            },
+            connection_epoch: uuid::Uuid::new_v4().to_string(),
+            membership_revision: 1,
+            signed_binding: "public-test-binding".into(),
+        };
+        (local, address)
+    }
+    #[test]
+    fn address_bytes_are_closed_including_duplicates() {
+        let (local, address) = fixture();
+        let data = serde_json::to_string(&address).unwrap();
+        assert!(decode_device_address(
+            format!("{{\"ok\":true,\"data\":{data}}}").as_bytes(),
+            &local,
+            &address.scope.device_id
+        )
+        .is_ok());
+        for raw in [
+            format!("{{\"ok\":true,\"ok\":true,\"data\":{data}}}"),
+            format!("{{\"ok\":true,\"data\":{data},\"grant\":true}}"),
+            format!(
+                "{{\"ok\":true,\"data\":{}}}",
+                data.replacen("\"version\":1", "\"version\":1,\"version\":1", 1)
+            ),
+        ] {
+            assert!(
+                decode_device_address(raw.as_bytes(), &local, &address.scope.device_id).is_err()
+            );
+        }
+    }
+    #[test]
+    fn address_rejects_foreign_scope_invalid_epoch_and_generation() {
+        let (local, address) = fixture();
+        for field in [
+            "principalId",
+            "networkId",
+            "environment",
+            "deviceId",
+            "connectionEpoch",
+            "signedBinding",
+        ] {
+            let mut value = serde_json::to_value(&address).unwrap();
+            if field == "connectionEpoch" || field == "signedBinding" {
+                value[field] = serde_json::json!("");
+            } else {
+                value["scope"][field] = serde_json::json!("foreign");
+            }
+            let raw = serde_json::to_vec(&serde_json::json!({"ok":true,"data":value})).unwrap();
+            assert!(decode_device_address(&raw, &local, &address.scope.device_id).is_err());
+        }
+        for generation in [0, 9_007_199_254_740_992u64] {
+            let mut bad = address.clone();
+            bad.scope.key_generation = generation;
+            assert!(bad.validate(&local, &bad.scope.device_id).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
+mod preservation_tests {
+    use super::*;
+    #[test]
+    fn preservation_is_closed_bool_on_fixed_self_route() {
+        assert_eq!(
+            PRESERVATION_PATH,
+            "/api/agent-network/catalog/self-preservation"
+        );
+        assert!(decode_catalog_preservation(br#"{"ok":true,"data":{"empty":true}}"#).unwrap());
+        assert!(!decode_catalog_preservation(br#"{"ok":true,"data":{"empty":false}}"#).unwrap());
+        for bytes in [
+            br#"{"ok":true,"data":{"empty":true,"token":"unexpected"}}"#.as_slice(),
+            br#"{"ok":true,"data":{"empty":true,"empty":false}}"#,
+            br#"{"ok":true,"data":{"empty":"true"}}"#,
+            br#"{"ok":false,"data":{"empty":true}}"#,
+            br#"{"ok":true,"data":{}}"#,
+            br#"{"ok":true,"data":{"empty":true},"scope":{}}"#,
+        ] {
+            assert!(decode_catalog_preservation(bytes).is_err());
+        }
     }
 }

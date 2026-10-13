@@ -6,13 +6,20 @@ import { createTranscriptProjection } from '../../shared/sessionTranscript';
 import { createDshBinding } from '../../shared/integrated-runtimes/identity';
 import type { SessionMessage, SessionMetadata } from '../types/session';
 
-const state = vi.hoisted(() => ({ home: '', denyBody: false, denyMetadata: false, denyReplacement: false, beforeBodyWrite: undefined as (() => Promise<void>) | undefined }));
+const state = vi.hoisted(() => ({ home: '', denyBody: false, denyMetadata: false, denyReplacement: false, beforeBodyWrite: undefined as (() => Promise<void>) | undefined,
+  publicationDenied: undefined as ((kind: 'replacement' | 'metadata') => void) | undefined }));
 vi.mock('os', async original => ({ ...await original<typeof import('os')>(), homedir: () => state.home }));
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>();
   return { ...actual, rename: (...args: Parameters<typeof actual.rename>) => {
-    if (state.denyReplacement && String(args[1]).includes('sessions-v2') && String(args[1]).endsWith('.jsonl')) return Promise.reject(new Error('replacement publication denied'));
-    if (state.denyMetadata && String(args[1]).endsWith('sessions.json')) return Promise.reject(new Error('metadata publication denied'));
+    if (state.denyReplacement && String(args[1]).includes('sessions-v2') && String(args[1]).endsWith('.jsonl')) {
+      state.publicationDenied?.('replacement');
+      return Promise.reject(new Error('replacement publication denied'));
+    }
+    if (state.denyMetadata && String(args[1]).endsWith('sessions.json')) {
+      state.publicationDenied?.('metadata');
+      return Promise.reject(new Error('metadata publication denied'));
+    }
     return actual.rename(...args);
   }, mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
     if (String(args[0]).endsWith('sessions-v2')) await state.beforeBodyWrite?.();
@@ -29,6 +36,7 @@ beforeEach(async () => {
   state.denyMetadata = false;
   state.denyReplacement = false;
   state.beforeBodyWrite = undefined;
+  state.publicationDenied = undefined;
   vi.resetModules();
   store = await import('../SessionStore');
   contentModule = await import('./content');
@@ -38,6 +46,7 @@ afterEach(async () => {
   state.denyBody = false;
   state.denyMetadata = false;
   state.denyReplacement = false;
+  state.publicationDenied = undefined;
   await store.drainSessionTranscripts();
   await rm(state.home, { recursive: true, force: true });
 });
@@ -336,10 +345,33 @@ describe('DSH execution journals with V2 product history', () => {
     expect(await session.active.writer.flush()).toBe(true);
     expect(await store.beginDshRewindMutation({ sessionId: session.metadata.id, targetUserMessageId: 'two', clientMutationId: 'rewind' })).toMatchObject({ success: true });
     expect(await store.recordPreparedDshRewind({ sessionId: session.metadata.id, clientMutationId: 'rewind', token: 'token', targetStableBoundaryId: 'boundary', sourceTranscriptPostcondition: 'a'.repeat(64), targetTranscriptPostcondition: 'b'.repeat(64) })).toMatchObject({ success: true });
+    const publicationDenied = Promise.withResolvers<void>();
+    state.publicationDenied = kind => { if (kind === failure) publicationDenied.resolve(); };
+    const releaseBodyWrite = Promise.withResolvers<void>();
+    state.beforeBodyWrite = () => releaseBodyWrite.promise;
     state.denyMetadata = failure === 'metadata';
     state.denyReplacement = failure === 'replacement';
-    expect(await store.commitDshRewindProduct({ sessionId: session.metadata.id, clientMutationId: 'rewind', token: 'token' })).toMatchObject({ success: true });
-    expect(await session.active.writer.flush(50)).toBe(false);
+    try {
+      expect(await store.commitDshRewindProduct({ sessionId: session.metadata.id, clientMutationId: 'rewind', token: 'token' })).toMatchObject({ success: true });
+      expect(await session.active.writer.flush(50)).toBe(false);
+    } finally {
+      state.beforeBodyWrite = undefined;
+      releaseBodyWrite.resolve();
+    }
+    // A flush deadline does not settle physical IO. Observe the injected
+    // publication failure before checking the preceding durable proof.
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        publicationDenied.promise,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('Expected rewind publication failure was not reached')), 2000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(deadline);
+      state.publicationDenied = undefined;
+    }
     expect((await disk(session.metadata.id)).pendingDshMutation).toMatchObject({ kind: 'dsh-rewind', transcript: { format: 2, targetGeneration: expect.any(String) } });
     await admit(session, 'three');
     expect((await disk(session.metadata.id)).pendingDshMutation).toMatchObject({ kind: 'dsh-rewind', transcript: { format: 2 } });

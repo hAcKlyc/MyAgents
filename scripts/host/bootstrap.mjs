@@ -3,10 +3,13 @@ import { readFile } from 'node:fs/promises';
 
 const REPOSITORY = 'heavenzhang/MyAgents';
 
-export function renderBootstrap({ sourceCommit, releaseTag, archiveName, archiveSha256, installerSha256, installerBase64 }) {
+export function renderBootstrap({ sourceCommit, releaseTag, archiveName, archiveSha256, installerSha256, installerBase64, profile = 'myagents-test' }) {
   if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error('Invalid source commit');
-  const tagMatch = /^host-test-([0-9]{14})-([0-9a-f]{12})$/.exec(releaseTag);
-  const archiveMatch = /^myagents-host-test-([0-9]{14})-([0-9a-f]{12})\.tar\.gz$/.exec(archiveName);
+  const profiles = { 'myagents-test': { root: 'myagents-host-test', tag: 'host-test-' }, 'moxbot-test': { root: 'moxbot-host-test', tag: 'host-test-moxbot-' } };
+  if (!Object.hasOwn(profiles, profile)) throw new Error('Invalid Host profile');
+  const selected = profiles[profile];
+  const tagMatch = new RegExp(`^${selected.tag}([0-9]{14})-([0-9a-f]{12})$`).exec(releaseTag);
+  const archiveMatch = new RegExp(`^${selected.root}-([0-9]{14})-([0-9a-f]{12})\\.tar\\.gz$`).exec(archiveName);
   if (!tagMatch || !archiveMatch || tagMatch[1] !== archiveMatch[1] || tagMatch[2] !== archiveMatch[2] || tagMatch[2] !== sourceCommit.slice(0, 12)) {
     throw new Error('Invalid or mismatched test release tag/archive/source commit');
   }
@@ -25,6 +28,7 @@ set -euo pipefail
 # Unsigned internal test bootstrap. Review this file and its pinned digests before use.
 readonly RELEASE_TAG='${releaseTag}'
 readonly SOURCE_COMMIT='${sourceCommit}'
+readonly PROFILE='${profile}'
 readonly ARCHIVE_NAME='${archiveName}'
 readonly ARCHIVE_SHA256='${archiveSha256}'
 readonly INSTALLER_SHA256='${installerSha256}'
@@ -112,7 +116,7 @@ if hashlib.sha256(installer).hexdigest() != expected_sha256:
 with open(path, "xb") as output:
     output.write(installer)
 PY
-bash "$installer" "$archive" --sha256 "$ARCHIVE_SHA256"
+bash "$installer" "$archive" --sha256 "$ARCHIVE_SHA256" --profile "$PROFILE"
 `;
 }
 

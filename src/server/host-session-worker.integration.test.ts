@@ -15,14 +15,15 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function start(home: string, workspace: string, sessionId?: string) {
+async function start(home: string, workspace: string, sessionId?: string, credential?: string) {
   const generation = `generation-${Math.random()}`;
   const child = fork(fileURLToPath(new URL('./host-session-worker.ts', import.meta.url)), [], {
     execArgv: ['--import', 'tsx', '--import', join(home, 'no-egress.mjs')],
-    env: { ...process.env, HOME: home, USERPROFILE: home,
+    env: { ...process.env, HOME: home, USERPROFILE: home, MYAGENTS_HOST_MODE: '1',
       MYAGENTS_HOST_GENERATION: generation, MYAGENTS_HOST_WORKSPACE: workspace,
-      MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: 'claude-sonnet-4-6',
-      MYAGENTS_HOST_PROVIDER_ID: 'anthropic-sub', MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
+      MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: credential ? 'k3' : 'claude-sonnet-4-6',
+      MYAGENTS_HOST_PROVIDER_ID: credential ? 'moonshot-coding' : 'anthropic-sub', MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
+      MYAGENTS_HOST_CREDENTIAL_SOURCE: credential ? 'supervisor-ipc' : 'systemd',
       ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', CLAUDE_CODE_OAUTH_TOKEN: '',
       MYAGENTS_MANAGEMENT_PORT: '' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -32,7 +33,13 @@ async function start(home: string, workspace: string, sessionId?: string) {
   child.stderr?.on('data', chunk => { diagnostics += String(chunk); });
   const inbox: HostSessionMessage[] = [];
   const waiters = new Set<() => void>();
-  child.on('message', message => { inbox.push(message as HostSessionMessage); for (const notify of waiters) notify(); });
+  child.on('message', message => {
+    if ((message as HostSessionMessage).type === 'credential-needed') {
+      expect((message as HostSessionMessage).generation).toBe(generation);
+      child.send({ type: 'host-provider-snapshot', generation, providerId: 'moonshot-coding', credential });
+    }
+    inbox.push(message as HostSessionMessage); for (const notify of waiters) notify();
+  });
   function waitFor(predicate: (message: HostSessionMessage) => boolean): Promise<HostSessionMessage> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { cleanup(); reject(new Error(`Worker timeout: ${diagnostics}`)); }, 30_000);
@@ -54,10 +61,47 @@ async function start(home: string, workspace: string, sessionId?: string) {
     if (operation === 'shutdown' && reply.ok && child.exitCode === null) await new Promise<void>(resolve => child.once('exit', () => resolve()));
     return reply;
   }
-  return { ready, request };
+  return { ready, request, diagnostics: () => diagnostics };
 }
 
 describe('headless Host Session worker bootstrap', () => {
+  it('receives a private credential birth snapshot without persisting it or executing a model', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'myagents-host-private-credential-'));
+    roots.push(home);
+    const workspace = join(home, 'workspace');
+    await mkdir(workspace);
+    await writeFile(join(home, 'no-egress.mjs'), `
+      import net from 'node:net'; import http from 'node:http'; import https from 'node:https';
+      import { syncBuiltinESMExports } from 'node:module';
+      const deny = () => { throw new Error('Integration worker network access is forbidden'); };
+      globalThis.fetch = deny; net.connect = deny; net.createConnection = deny;
+      http.request = deny; http.get = deny; https.request = deny; https.get = deny;
+      syncBuiltinESMExports();
+    `);
+    const configPath = join(home, '.myagents', 'config.json');
+    await mkdir(join(home, '.myagents'));
+    await configureHost({
+      hostId: randomUUID(), defaultWorkspace: workspace, credentialReference: 'host-provider-credential:moonshot-coding',
+      readConfig: async () => ({}),
+      writeConfig: async value => { await writeFile(configPath, JSON.stringify(value), { mode: 0o600 }); },
+      workspacePath: async value => value, busy: () => false,
+    }, { mutationId: randomUUID(), expectedRevision: 0, providerId: 'moonshot-coding', model: 'k3', executionAuthorized: false });
+    const secret = 'synthetic-session-private-credential-not-for-network';
+    const worker = await start(home, workspace, undefined, secret);
+    expect(await worker.request('send', { text: 'Must never execute' })).toMatchObject({ ok: false, error: expect.stringContaining('authorization') });
+    const describe = await worker.request('describe');
+    expect(describe).toMatchObject({ ok: true, data: { runtime: 'builtin', executionAuthorized: false } });
+    expect(JSON.stringify(describe)).not.toContain(secret);
+    expect(await worker.request('shutdown')).toMatchObject({ ok: true });
+    expect(worker.diagnostics()).not.toContain(secret);
+    for (const path of ['config.json', 'sessions.json']) {
+      const text = await readFile(join(home, '.myagents', path), 'utf8');
+      expect(text).not.toContain(secret);
+    }
+    const rows = JSON.parse(await readFile(join(home, '.myagents', 'sessions.json'), 'utf8'));
+    expect(rows[0]).toMatchObject({ providerRoute: { kind: 'provider', providerId: 'moonshot-coding', model: 'k3' } });
+    expect(rows[0].providerEnvJson).toBeUndefined();
+  });
   it('uses the real facade/store to persist birth, reject unauthorized execution and resume the same product identity', async () => {
     const home = await mkdtemp(join(tmpdir(), 'myagents-host-session-'));
     roots.push(home);

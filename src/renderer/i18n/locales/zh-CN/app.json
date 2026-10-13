@@ -1398,6 +1398,10 @@
       "keyInvalid": "设备 key 无效、已过期、被撤销或已绑定其他设备。",
       "trustChanged": "该地址的实例身份或信任材料已改变，请先核实部署。",
       "removalPending": "暂未确认服务端撤销。连接已停止，可稍后重试移除。",
+      "credentialStoreAuthorizationRequired": "系统凭据需要一次授权。后台恢复已停止，不会反复请求密码。",
+      "credentialStoreUnavailable": "系统凭据库暂不可用。后台恢复已停止，请检查系统凭据库状态。",
+      "credentialStoreInvalid": "本机保存的会话无法验证。为保护身份，连接已停止，记录未被自动覆盖。",
+      "ownedSessionMissing": "未找到此连接对应的本机登录会话。连接已停止，需要显式登录后才能恢复。",
       "privateKeyMissing": "本机私钥不可用。请管理员先撤销该设备，再用新 key 加入。",
       "protocolUnsupported": "此服务不支持当前 AgentNet 协议。",
       "featureDisabled": "请先在设置的开发者模式中开启 AgentNet 多网络。"
@@ -1405,6 +1409,18 @@
     "chooseNetwork": "选择网络",
     "officialNetwork": "MyAgents 官方网络",
     "joinSelfhost": "加入自部署网络",
+    "ownedCredentialRestore": {
+      "open": "授权并恢复",
+      "title": "授权并恢复已有连接",
+      "target": "连接：{{name}}（{{issuer}}）",
+      "explanation": "此操作只读取该连接已保存的登录会话和设备签名钥，并验证现有设备身份；不会重新登录、重新加入网络或更换设备身份。",
+      "systemPrompt": "如果系统显示凭据访问提示，请只在系统窗口中输入系统密码。若系统提供“总是允许”，可自行选择以支持后续恢复。应用不会收集或保存系统密码。",
+      "working": "正在授权并恢复…",
+      "timeout": "等待系统凭据授权超时。原连接和身份未更改；可在准备好后重新发起一次授权。",
+      "confirm": "继续并授权",
+      "cancel": "取消恢复",
+      "close": "关闭"
+    },
     "ownedLogin": {
       "mode": "账号登录",
       "hint": "通过浏览器完成登录。会话保存在操作系统凭据库中，令牌不会显示在这里。",
@@ -1618,6 +1634,34 @@
         "enabled": "已启用",
         "disabled": "已停用"
       }
+    },
+    "ownedHost": {
+      "title": "Host 远程管理",
+      "refresh": "刷新",
+      "offline": "设备离线，恢复在线后可管理。",
+      "loading": "正在读取 Host 配置…",
+      "failed": "操作未完成（{{code}}）。",
+      "unknown": "尚未确认保存结果。请查询原回执，不要重复提交。",
+      "checkReceipt": "查询保存结果",
+      "saved": "已持久化保存。",
+      "conflict": "配置已变化，请核对刷新后的内容再提交。",
+      "effect": "模型变更用于新建会话；密钥更新在下次启动会话时生效，正在运行的会话保持当前密钥。",
+      "model": "Kimi 模型 ID",
+      "execution": "允许本地会话执行",
+      "saveModel": "保存模型配置",
+      "activeSession": "Host 有活动会话，结束后可修改模型配置。",
+      "credential": "Kimi API Key",
+      "credentialConfigured": "Host 已保存密钥；这里不会显示或读回密钥。",
+      "credentialMissing": "Host 尚未配置密钥。",
+      "saveCredential": "保存密钥",
+      "workspace": "新 Agent 的工作区相对路径",
+      "agentHint": "使用英文字母、数字、短横线或下划线；可用 / 创建子目录。Agent 名称取工作区名，新 Agent 默认禁用。",
+      "createAgent": "创建 Agent",
+      "agents": "Host 上的 Agent",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "empty": "暂无 Agent",
+      "identityChanged": "设备身份已变化。请重新输入密钥；旧身份的未确认操作仍保留，且不会自动重复执行。"
     }
   }
 }

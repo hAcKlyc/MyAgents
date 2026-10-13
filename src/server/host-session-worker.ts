@@ -2,16 +2,48 @@ import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
 import { isHostSessionRequest, type HostSessionMessage, type HostSessionRequest } from './host-session-protocol';
+import { installHostSessionCredential } from './utils/host-credentials';
 
 // The supervisor is the only process owner. This entry owns exactly one existing
 // Product Session binding, and never implements a second SDK or transcript store.
+let initializationStage: 'admission' | 'credential' | 'modules' | 'session' | 'route' | 'restore' = 'admission';
 async function main(): Promise<void> {
   const generation = process.env.MYAGENTS_HOST_GENERATION;
   const workspace = process.env.MYAGENTS_HOST_WORKSPACE;
   if (!generation || !workspace || !isAbsolute(workspace) || !process.send) {
     throw new Error('Host worker requires IPC, generation and an absolute workspace');
   }
+  let birthCredential: string | undefined;
+  if (process.env.MYAGENTS_HOST_CREDENTIAL_SOURCE === 'supervisor-ipc') {
+    initializationStage = 'credential';
+    birthCredential = await new Promise<string | undefined>((resolveCredential, reject) => {
+      const timer = setTimeout(() => { cleanup(); reject(new Error('Host credential initialization timed out')); }, 10_000);
+      const onMessage = (raw: unknown) => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+        const value = raw as Record<string, unknown>;
+        if (value.type !== 'host-provider-snapshot') return;
+        cleanup();
+        if (Object.keys(value).length !== 4 || value.generation !== generation
+          || value.providerId !== 'moonshot-coding'
+          || !(value.credential === null || (typeof value.credential === 'string'
+            && value.credential.trim().length > 0 && Buffer.byteLength(value.credential, 'utf8') <= 16 * 1024
+            && !/[\r\n\0]/.test(value.credential)))) {
+          reject(new Error('Host credential initialization is invalid')); return;
+        }
+        resolveCredential(value.credential === null ? undefined : value.credential as string);
+      };
+      const onDisconnect = () => { cleanup(); reject(new Error('Host supervisor disconnected')); };
+      function cleanup() { clearTimeout(timer); process.off('message', onMessage); process.off('disconnect', onDisconnect); }
+      process.on('message', onMessage); process.once('disconnect', onDisconnect);
+      process.send?.({ type: 'credential-needed', generation }, undefined, undefined, (error: Error | null) => {
+        if (error) { cleanup(); reject(new Error('Host credential initialization transport failed')); }
+      });
+    });
+    installHostSessionCredential(birthCredential);
+  }
   const credentials = new Set<string>([process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN, process.env.CLAUDE_CODE_OAUTH_TOKEN].filter((value): value is string => Boolean(value)));
+  if (birthCredential) credentials.add(birthCredential);
+  birthCredential = undefined;
   const redactText = (text: string) => {
     for (const credential of credentials) text = text.split(credential).join('[redacted]');
     return text;
@@ -30,6 +62,7 @@ async function main(): Promise<void> {
   process.env.MYAGENTS_SIDECAR_ROLE = 'session';
   process.env.MYAGENTS_HOST_MODE = '1';
   process.env.MYAGENTS_RUNTIME = 'builtin';
+  initializationStage = 'modules';
   const [{ getSessionEngine }, agent, store, config, routes] = await Promise.all([
     import('./session-engine'), import('./agent-session'), import('./SessionStore'),
     import('./utils/admin-config'), import('../shared/providerRoute'),
@@ -43,9 +76,11 @@ async function main(): Promise<void> {
     throw new Error('Host worker only supports compatible builtin Sessions');
   }
   if (existing && resolve(existing.agentDir) !== resolve(workspace)) throw new Error('Session workspace does not match Host workspace');
+  initializationStage = 'session';
   await agent.initializeAgent(workspace, undefined, existingId, { preWarmDisabled: true });
   if (engine.kind !== 'builtin') throw new Error('Host worker only supports builtin Sessions');
   if (!existing) {
+    initializationStage = 'route';
     const model = process.env.MYAGENTS_HOST_MODEL?.trim();
     const providerId = process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
     if (!model || !providerId) throw new Error('New Host Session requires an explicit Provider/model route');
@@ -70,6 +105,7 @@ async function main(): Promise<void> {
   // --no-pre-warm deliberately skips startup discovery. Recover configuration
   // from the owning snapshot, without replacing it with supervisor defaults.
   const metadata = store.getSessionMetadata(sessionId);
+  initializationStage = 'restore';
   const restored = config.resolveWorkspaceConfig(workspace, metadata, { includeMcp: true });
   if (restored.providerEnv?.apiKey) credentials.add(restored.providerEnv.apiKey);
   if (existing && metadata) await agent.restoreBuiltinConfigFromOwnedMetadata(metadata);
@@ -172,4 +208,4 @@ async function main(): Promise<void> {
   send({ type: 'ready', generation, sessionId });
 }
 
-void main().catch(() => { process.stderr.write('Host Session worker initialization failed\n'); process.exit(1); });
+void main().catch(() => { process.stderr.write(`Host Session worker initialization failed (${initializationStage})\n`); process.exit(1); });

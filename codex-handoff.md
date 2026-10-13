@@ -16,6 +16,8 @@ BOTS-CLOUD-EXEC-001：用户已确认Host所有者有限指定Bot委派方案，
 
 ## Current Snapshot
 
+- **MAH-HOST-BASE-20261013**：从 `origin/main` `2a241591` 建立隔离分支，合入精确 Host 基础前缀 `b116404e`，随后同步主干文档提交 `e9767263`。Archive/Admin/Ask 主干内容保留。该前缀此前的真实桌面验收覆盖模型配置保存、创建 disabled Agent、Host 重启；当前隔离合并树仍待 CI 与复核，尚未合入主干。仅保留既有 bounded credential backend；fixed-reader 无提示方案及调用方变更不在此合并内，仍为 draft。此阶段没有构建、签名或安装新桌面包。
+
 - **BOTS-CLOUD-ADMIN-001**：用户已启动真实统一后台实现，当前隔离分支codex/bots-cloud-admin，base2796b13e；本地真实AuthStore/AdminStore与UI已验收，待CI/main和现网串行升级。源码services/agentnet/admin-web及admin_http/admin_store；规划BOTS-CLOUD-ADMIN-IMPLEMENTATION.md、执行接入提案BOTS-CLOUD-EXECUTION-V1.md，证据validation/。原型历史保持。现网04fa的四个服务模块修复原样保留，避免旧main覆盖运行修复；不修改其他Host/桌面任务。用户已授权向Host owner聊天同步；真实机器访问/账号/备份指针仅保留原owner私有协作记录。
 - **当前验收边界**：管理登记/配置/归属Host分配/逻辑删除恢复可持久化；start拒绝未连接执行端，stop只关准入。实际Host执行和跨用户共享未实现，首位平台管理员尚未授予，不能把fixture称作生产验收。组合service73项、metadata20项与clippy/fmt/lint、独立UI三gate通过。后台正式2轮、UI2轮修复，模型运行值和token/费用未知；纯Codex内置模式。
 
