@@ -519,13 +519,17 @@ impl Calls {
     }
     fn fail_uncertain(&mut self, op: &str) {
         if let Some(call) = self.calls.get(op) {
-            let mut error = NetworkError::new(if matches!(call.phase, Phase::Sent { .. }) && matches!(call.method, "session.start" | "session.send") {
-                "ADMISSION_UNCONFIRMED"
-            } else if matches!(call.phase, Phase::Sent { .. }) {
-                "NETWORK_QUERY_FAILED"
-            } else {
-                "NETWORK_REQUEST_NOT_SENT"
-            });
+            let mut error = NetworkError::new(
+                if matches!(call.phase, Phase::Sent { .. })
+                    && matches!(call.method, "session.start" | "session.send")
+                {
+                    "ADMISSION_UNCONFIRMED"
+                } else if matches!(call.phase, Phase::Sent { .. }) {
+                    "NETWORK_QUERY_FAILED"
+                } else {
+                    "NETWORK_REQUEST_NOT_SENT"
+                },
+            );
             error.details =
                 Some(serde_json::json!({ "requestId":call.request_id,"selector":call.selector }));
             self.settle(op, Err(error));

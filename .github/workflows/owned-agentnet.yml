@@ -26,6 +26,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
       - uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: rustfmt, clippy
@@ -50,6 +53,12 @@ jobs:
           cargo test --locked --manifest-path services/agentnet/identity-core/Cargo.toml
           cargo clippy --locked --all-targets --manifest-path services/agentnet/identity-core/Cargo.toml -- -D warnings
           cargo fmt --manifest-path services/agentnet/identity-core/Cargo.toml --check
+      - name: Validate finite Bot delegation and Rust/Node signature parity
+        run: |
+          cargo test --locked --manifest-path services/agentnet/execution-core/Cargo.toml
+          cargo clippy --locked --all-targets --manifest-path services/agentnet/execution-core/Cargo.toml -- -D warnings
+          cargo fmt --manifest-path services/agentnet/execution-core/Cargo.toml --check
+          node --test services/agentnet/execution-core/js/*.test.mjs
       - name: Validate durable device owner and proof of possession
         run: |
           cargo test --locked --manifest-path services/agentnet/device-core/Cargo.toml

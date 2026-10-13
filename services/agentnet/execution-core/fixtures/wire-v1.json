@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "now": 1800000001,
+  "scope": {
+    "issuer": "https://execution.invalid",
+    "service_id": "00000000-0000-4000-8000-000000000001",
+    "environment": "development",
+    "network_id": "00000000-0000-4000-8000-000000000002",
+    "host_owner_id": "00000000-0000-4000-8000-000000000003",
+    "host_device_id": "00000000-0000-4000-8000-000000000004",
+    "host_key_generation": 1,
+    "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+  },
+  "grant": {
+    "id": "00000000-0000-4000-8000-000000000006",
+    "generation": 1,
+    "scope": {
+      "issuer": "https://execution.invalid",
+      "service_id": "00000000-0000-4000-8000-000000000001",
+      "environment": "development",
+      "network_id": "00000000-0000-4000-8000-000000000002",
+      "host_owner_id": "00000000-0000-4000-8000-000000000003",
+      "host_device_id": "00000000-0000-4000-8000-000000000004",
+      "host_key_generation": 1,
+      "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+    },
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "root_id": "workspaces",
+    "relative_path": "finite-bot",
+    "operations": [
+      "create",
+      "configure",
+      "enable",
+      "disable",
+      "delete",
+      "restore"
+    ],
+    "allowed_runtimes": [
+      "builtin"
+    ],
+    "allowed_model_refs": [
+      "00000000-0000-4000-8000-000000000008"
+    ],
+    "max_daily_tokens": 1000,
+    "expires_at": 1800001000
+  },
+  "grant_claims": {
+    "iss": "https://execution.invalid",
+    "aud": "moxbot-host-bots/v1",
+    "namespace": "moxbot.bot.execution/v1",
+    "iat": 1800000000,
+    "nbf": 1800000000,
+    "exp": 1800000300,
+    "jti": "00000000-0000-4000-8000-000000000012",
+    "grant": {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "generation": 1,
+      "scope": {
+        "issuer": "https://execution.invalid",
+        "service_id": "00000000-0000-4000-8000-000000000001",
+        "environment": "development",
+        "network_id": "00000000-0000-4000-8000-000000000002",
+        "host_owner_id": "00000000-0000-4000-8000-000000000003",
+        "host_device_id": "00000000-0000-4000-8000-000000000004",
+        "host_key_generation": 1,
+        "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+      },
+      "bot_id": "00000000-0000-4000-8000-000000000007",
+      "root_id": "workspaces",
+      "relative_path": "finite-bot",
+      "operations": [
+        "create",
+        "configure",
+        "enable",
+        "disable",
+        "delete",
+        "restore"
+      ],
+      "allowed_runtimes": [
+        "builtin"
+      ],
+      "allowed_model_refs": [
+        "00000000-0000-4000-8000-000000000008"
+      ],
+      "max_daily_tokens": 1000,
+      "expires_at": 1800001000
+    }
+  },
+  "command": {
+    "mutation_id": "00000000-0000-4000-8000-000000000009",
+    "request_hash": "c386973af01f4b80e04fcf107f85a28de01f087217cef8851d8010d29ef69e94",
+    "actor_principal_id": "00000000-0000-4000-8000-000000000010",
+    "actor_session_handle": "00000000-0000-4000-8000-000000000011",
+    "grant_id": "00000000-0000-4000-8000-000000000006",
+    "grant_generation": 1,
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "binding_generation": 0,
+    "expected_host_revision": 0,
+    "operation": {
+      "method": "create",
+      "params": {
+        "name": "有限 Bot",
+        "description": "fixture only",
+        "runtime": "builtin",
+        "model_ref": "00000000-0000-4000-8000-000000000008",
+        "system_prompt": "只读取纳管目录。\n",
+        "daily_tokens": 500,
+        "resource_expected_revision": 0
+      }
+    }
+  },
+  "command_hash": "c386973af01f4b80e04fcf107f85a28de01f087217cef8851d8010d29ef69e94",
+  "intent": {
+    "iss": "https://execution.invalid",
+    "aud": "moxbot-host-bots/v1",
+    "namespace": "moxbot.bot.execution/v1",
+    "iat": 1800000000,
+    "nbf": 1800000000,
+    "exp": 1800000300,
+    "jti": "00000000-0000-4000-8000-000000000012",
+    "scope": {
+      "issuer": "https://execution.invalid",
+      "service_id": "00000000-0000-4000-8000-000000000001",
+      "environment": "development",
+      "network_id": "00000000-0000-4000-8000-000000000002",
+      "host_owner_id": "00000000-0000-4000-8000-000000000003",
+      "host_device_id": "00000000-0000-4000-8000-000000000004",
+      "host_key_generation": 1,
+      "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+    },
+    "grant": {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "generation": 1,
+      "scope": {
+        "issuer": "https://execution.invalid",
+        "service_id": "00000000-0000-4000-8000-000000000001",
+        "environment": "development",
+        "network_id": "00000000-0000-4000-8000-000000000002",
+        "host_owner_id": "00000000-0000-4000-8000-000000000003",
+        "host_device_id": "00000000-0000-4000-8000-000000000004",
+        "host_key_generation": 1,
+        "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+      },
+      "bot_id": "00000000-0000-4000-8000-000000000007",
+      "root_id": "workspaces",
+      "relative_path": "finite-bot",
+      "operations": [
+        "create",
+        "configure",
+        "enable",
+        "disable",
+        "delete",
+        "restore"
+      ],
+      "allowed_runtimes": [
+        "builtin"
+      ],
+      "allowed_model_refs": [
+        "00000000-0000-4000-8000-000000000008"
+      ],
+      "max_daily_tokens": 1000,
+      "expires_at": 1800001000
+    },
+    "command": {
+      "mutation_id": "00000000-0000-4000-8000-000000000009",
+      "request_hash": "c386973af01f4b80e04fcf107f85a28de01f087217cef8851d8010d29ef69e94",
+      "actor_principal_id": "00000000-0000-4000-8000-000000000010",
+      "actor_session_handle": "00000000-0000-4000-8000-000000000011",
+      "grant_id": "00000000-0000-4000-8000-000000000006",
+      "grant_generation": 1,
+      "bot_id": "00000000-0000-4000-8000-000000000007",
+      "binding_generation": 0,
+      "expected_host_revision": 0,
+      "operation": {
+        "method": "create",
+        "params": {
+          "name": "有限 Bot",
+          "description": "fixture only",
+          "runtime": "builtin",
+          "model_ref": "00000000-0000-4000-8000-000000000008",
+          "system_prompt": "只读取纳管目录。\n",
+          "daily_tokens": 500,
+          "resource_expected_revision": 0
+        }
+      }
+    }
+  },
+  "intent_hash": "c35f7f586fa17142f0ba89b9ade1427308e3117cd209b407afd42c94dc67ae19",
+  "lease": {
+    "iss": "https://execution.invalid",
+    "aud": "moxbot-host-bots/v1",
+    "namespace": "moxbot.bot.execution/v1",
+    "iat": 1800000000,
+    "nbf": 1800000000,
+    "exp": 1800000015,
+    "jti": "00000000-0000-4000-8000-000000000016",
+    "scope": {
+      "issuer": "https://execution.invalid",
+      "service_id": "00000000-0000-4000-8000-000000000001",
+      "environment": "development",
+      "network_id": "00000000-0000-4000-8000-000000000002",
+      "host_owner_id": "00000000-0000-4000-8000-000000000003",
+      "host_device_id": "00000000-0000-4000-8000-000000000004",
+      "host_key_generation": 1,
+      "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+    },
+    "grant_id": "00000000-0000-4000-8000-000000000006",
+    "grant_generation": 1,
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "binding_generation": 0,
+    "mutation_id": "00000000-0000-4000-8000-000000000009",
+    "request_hash": "c386973af01f4b80e04fcf107f85a28de01f087217cef8851d8010d29ef69e94",
+    "intent_hash": "c35f7f586fa17142f0ba89b9ade1427308e3117cd209b407afd42c94dc67ae19",
+    "host_context": {
+      "challenge_nonce": "00000000-0000-4000-8000-000000000013",
+      "local_auth_generation": 1,
+      "boot_epoch": "00000000-0000-4000-8000-000000000014",
+      "connection_epoch": "00000000-0000-4000-8000-000000000015",
+      "membership_revision": 1
+    },
+    "lease_id": "00000000-0000-4000-8000-000000000017"
+  },
+  "revocation": {
+    "iss": "https://execution.invalid",
+    "aud": "moxbot-host-bots/v1",
+    "namespace": "moxbot.bot.execution/v1",
+    "iat": 1800000000,
+    "nbf": 1800000000,
+    "exp": 1800000015,
+    "jti": "00000000-0000-4000-8000-000000000018",
+    "scope": {
+      "issuer": "https://execution.invalid",
+      "service_id": "00000000-0000-4000-8000-000000000001",
+      "environment": "development",
+      "network_id": "00000000-0000-4000-8000-000000000002",
+      "host_owner_id": "00000000-0000-4000-8000-000000000003",
+      "host_device_id": "00000000-0000-4000-8000-000000000004",
+      "host_key_generation": 1,
+      "identity_binding_id": "00000000-0000-4000-8000-000000000005"
+    },
+    "grant_id": "00000000-0000-4000-8000-000000000006",
+    "revoked_generation": 1,
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "host_context": {
+      "challenge_nonce": "00000000-0000-4000-8000-000000000013",
+      "local_auth_generation": 1,
+      "boot_epoch": "00000000-0000-4000-8000-000000000014",
+      "connection_epoch": "00000000-0000-4000-8000-000000000015",
+      "membership_revision": 1
+    }
+  },
+  "snapshot": {
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "agent_id": "fixture-agent",
+    "binding_generation": 1,
+    "revision": 1,
+    "deleted": false,
+    "admission": "closed",
+    "activity": "stopped",
+    "configured": false,
+    "runnable": false,
+    "unsupported_reason": "ADAPTER_NOT_CONNECTED",
+    "config": {
+      "name": "有限 Bot",
+      "description": "fixture only",
+      "runtime": "builtin",
+      "model_ref": "00000000-0000-4000-8000-000000000008",
+      "system_prompt": "只读取纳管目录。\n",
+      "daily_tokens": 500
+    }
+  },
+  "receipt": {
+    "mutation_id": "00000000-0000-4000-8000-000000000009",
+    "request_hash": "c386973af01f4b80e04fcf107f85a28de01f087217cef8851d8010d29ef69e94",
+    "grant_id": "00000000-0000-4000-8000-000000000006",
+    "grant_generation": 1,
+    "bot_id": "00000000-0000-4000-8000-000000000007",
+    "agent_id": "fixture-agent",
+    "binding_generation": 1,
+    "revision": 1,
+    "status": "persisted",
+    "snapshot": {
+      "bot_id": "00000000-0000-4000-8000-000000000007",
+      "agent_id": "fixture-agent",
+      "binding_generation": 1,
+      "revision": 1,
+      "deleted": false,
+      "admission": "closed",
+      "activity": "stopped",
+      "configured": false,
+      "runnable": false,
+      "unsupported_reason": "ADAPTER_NOT_CONNECTED",
+      "config": {
+        "name": "有限 Bot",
+        "description": "fixture only",
+        "runtime": "builtin",
+        "model_ref": "00000000-0000-4000-8000-000000000008",
+        "system_prompt": "只读取纳管目录。\n",
+        "daily_tokens": 500
+      }
+    }
+  },
+  "canonical_input": {
+    "z": [
+      0,
+      9007199254740991,
+      true,
+      null
+    ],
+    "a": "引号\"\\\n",
+    "b": {
+      "z": false,
+      "a": "中文"
+    }
+  },
+  "canonical_output": "{\"a\":\"引号\\\"\\\\\\n\",\"b\":{\"a\":\"中文\",\"z\":false},\"z\":[0,9007199254740991,true,null]}",
+  "observation": {
+    "host_revision": 1,
+    "resource_revision": 1,
+    "root_ids": [
+      "workspaces"
+    ],
+    "supported_runtimes": [],
+    "allowed_bot_ids": [
+      "00000000-0000-4000-8000-000000000007"
+    ],
+    "allowed_model_refs": [
+      "00000000-0000-4000-8000-000000000008"
+    ],
+    "max_daily_tokens": 1000,
+    "policy_expires_at": 1800001000,
+    "snapshots": [
+      {
+        "bot_id": "00000000-0000-4000-8000-000000000007",
+        "agent_id": "fixture-agent",
+        "binding_generation": 1,
+        "revision": 1,
+        "deleted": false,
+        "admission": "closed",
+        "activity": "stopped",
+        "configured": false,
+        "runnable": false,
+        "unsupported_reason": "ADAPTER_NOT_CONNECTED",
+        "config": {
+          "name": "有限 Bot",
+          "description": "fixture only",
+          "runtime": "builtin",
+          "model_ref": "00000000-0000-4000-8000-000000000008",
+          "system_prompt": "只读取纳管目录。\n",
+          "daily_tokens": 500
+        }
+      }
+    ]
+  }
+}

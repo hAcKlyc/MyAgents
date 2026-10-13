@@ -1,5 +1,6 @@
 use crate::admin_http::AdminService;
 use crate::admin_store::AdminConfig;
+use crate::execution_http::ExecutionService;
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
 use crate::network_http::{NetworkHttpConfig, NetworkService};
 use crate::relay_controller::RelayController;
@@ -68,6 +69,8 @@ pub struct ServiceFileConfig {
     pub relay: bool,
     #[serde(default)]
     pub administration: Option<AdminConfig>,
+    #[serde(default)]
+    pub execution: bool,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -276,7 +279,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         session_ttl: Duration::from_secs(config.session_ttl_seconds),
     };
     let store = Arc::new(AuthStore::open(&config.state_dir, &auth)?);
-    let administration = config
+    let mut administration = config
         .administration
         .clone()
         .map(|settings| {
@@ -326,6 +329,22 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     } else {
         None
     };
+    let execution = if config.execution {
+        Some(ExecutionService::open(
+            network.clone().ok_or(AuthError::Configuration)?,
+            relay.clone().ok_or(AuthError::Configuration)?,
+            &config.state_dir,
+            config
+                .administration
+                .clone()
+                .ok_or(AuthError::Configuration)?,
+        )?)
+    } else {
+        None
+    };
+    if let (Some(admin), Some(exec)) = (administration.as_mut(), execution.as_ref()) {
+        admin.connect_execution(exec.ledger());
+    }
     let app = Arc::new(App {
         client,
         http,
@@ -348,6 +367,11 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     let router = assemble_feature_routes(router, identity, network, relay, &config.issuer);
     let router = if let Some(admin) = administration {
         router.merge(admin.router())
+    } else {
+        router
+    };
+    let router = if let Some(exec) = execution {
+        router.merge(exec.router())
     } else {
         router
     };
@@ -1438,6 +1462,7 @@ mod tests {
             network: None,
             relay: false,
             administration: None,
+            execution: false,
         };
         assert!(validate_config(&good).is_ok());
         good.relay = true;

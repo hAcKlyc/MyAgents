@@ -704,6 +704,9 @@ pub(crate) mod tests {
                 service,
             }
         }
+        pub(crate) fn verified_subject(&self, label: &str) -> crate::VerifiedSubject {
+            self.oidc.subject(label)
+        }
         pub(crate) fn device(&self, subject: &str) -> Device {
             let id = Uuid::new_v4().to_string();
             let account_token = Zeroizing::new(

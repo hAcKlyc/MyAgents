@@ -36,3 +36,9 @@ npm run lint
 ```
 
 The existing Owned AgentNet workflow builds the Linux artifact and records the exact CI source commit, executable digest and native dependencies. A passing fixture/build is not a production acceptance or permission to grant an administrator role.
+
+## Finite Bot lifecycle (synthetic lane)
+
+Use the test-only `execution_browser_fixture::execution_browser_fixture` ignored test on127.0.0.1:5199; no test identity/control route is compiled into production. Run `node services/agentnet/validation/scripts/execution-ui-smoke.mjs` with an installed Playwright Chromium. The fixture injects a synthetic banner; served JS/CSS are checked against source. SDK effects are simulated and never reported as running.
+
+See [BOTS-CLOUD-EXEC-UI.md](BOTS-CLOUD-EXEC-UI.md) and versioned synthetic [desktop](bots-execution-evidence/admin-1440x900.png), [tablet](bots-execution-evidence/admin-768x1024.png), [mobile](bots-execution-evidence/admin-390x844.png) captures. Fresh fixtures are required for full replay; the final unconfirmed case intentionally leaves its original command pending. Linux-specific Node cases, distinct-UID IPC and actual Host Session acceptance remain separate gates.

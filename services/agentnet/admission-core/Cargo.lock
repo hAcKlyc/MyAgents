@@ -1008,6 +1008,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-agentnet-execution-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "myagents-agentnet-identity-core"
 version = "0.1.0"
 dependencies = [
@@ -1016,6 +1029,7 @@ dependencies = [
  "libc",
  "myagents-agent-network-crypto",
  "myagents-agent-network-protocol",
+ "myagents-agentnet-execution-core",
  "p256",
  "rand_core",
  "rcgen",

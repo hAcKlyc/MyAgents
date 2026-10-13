@@ -7,6 +7,11 @@
 
 mod admin_http;
 mod admin_store;
+#[cfg(test)]
+mod execution_browser_fixture;
+mod execution_gate;
+mod execution_http;
+mod execution_store;
 mod identity_http;
 mod instance_http;
 mod network_http;
