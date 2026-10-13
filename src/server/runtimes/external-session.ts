@@ -72,10 +72,10 @@ import {
   summarizeSensitiveValueForLog,
 } from '../utils/log-summary';
 import type {
-  AskUserQuestionInput,
   AskUserQuestion,
 } from '../../shared/types/askUserQuestion';
 import {
+  normalizeAskUserQuestionInput,
   withQuestionTextAnswerKeys,
   questionAnswersAsText,
 } from '../../shared/types/askUserQuestion';
@@ -2989,30 +2989,6 @@ function finalizeStoppedExternalTurn(
     finalization,
   );
   return completionTerminal;
-}
-
-// Mirrors agent-session.ts `isValidAskUserQuestionInput`. Malformed input would crash
-// AskUserQuestionPrompt (which maps over `options` etc.); the fallback path on failure
-// is the generic permission card, so the user at least sees a denial affordance.
-function isAskUserQuestionInput(input: unknown): input is AskUserQuestionInput {
-  if (!input || typeof input !== 'object') return false;
-  const obj = input as Record<string, unknown>;
-  if (!Array.isArray(obj.questions) || obj.questions.length === 0) return false;
-  return obj.questions.every((q: unknown) => {
-    if (!q || typeof q !== 'object') return false;
-    const question = q as Record<string, unknown>;
-    return (
-      typeof question.question === 'string' &&
-      typeof question.header === 'string' &&
-      Array.isArray(question.options) &&
-      typeof question.multiSelect === 'boolean' &&
-      (question.id === undefined || typeof question.id === 'string') &&
-      (question.required === undefined ||
-        typeof question.required === 'boolean') &&
-      (question.isSecret === undefined ||
-        typeof question.isSecret === 'boolean')
-    );
-  });
 }
 
 /**
@@ -10962,14 +10938,22 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       // needs the dedicated wizard UI, not the generic allow/deny card. Route it through
       // the ask-user-question:request channel so the frontend mounts AskUserQuestionPrompt
       // and the user's answers flow back as CC `updatedInput.answers`.
-      if (
-        event.toolName === 'AskUserQuestion' &&
-        isAskUserQuestionInput(event.input)
-      ) {
+      if (event.toolName === 'AskUserQuestion') {
+        const validation = normalizeAskUserQuestionInput(event.input);
+        if (!validation.ok) {
+          // A question cannot be answered by allow/deny. Return an actionable
+          // input error to its caller without pretending the user cancelled.
+          const active = getExternalActivePair();
+          if (active) {
+            void active.runtime.respondPermission(active.process, event.requestId, 'deny', validation.error)
+              .catch(error => console.error('[external-session] Invalid question response failed:', error));
+          }
+          break;
+        }
         setExternalAskUserQuestion(event.requestId, {
-          input: event.input as Record<string, unknown>,
+          input: validation.input as unknown as Record<string, unknown>,
         });
-        const questions = event.input.questions;
+        const questions = validation.input.questions;
         const previewFormat: 'html' | 'markdown' = 'html';
         const requestPayload = {
           requestId: event.requestId,

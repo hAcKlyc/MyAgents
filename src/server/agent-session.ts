@@ -4654,8 +4654,8 @@ const pendingPermissions = new Map<string, {
 }>();
 
 // AskUserQuestion types - import from shared
-import type { AskUserQuestionInput, AskUserQuestion } from '../shared/types/askUserQuestion';
-import { withQuestionTextAnswerKeys } from '../shared/types/askUserQuestion';
+import type { AskUserQuestionInput } from '../shared/types/askUserQuestion';
+import { normalizeAskUserQuestionInput, withQuestionTextAnswerKeys } from '../shared/types/askUserQuestion';
 export type { AskUserQuestionInput, AskUserQuestion, AskUserQuestionOption } from '../shared/types/askUserQuestion';
 
 // PlanMode types - import from shared
@@ -4731,49 +4731,17 @@ function interactiveEventScope(): { sessionId: string } {
 }
 
 /**
- * Validate AskUserQuestion input structure
- */
-function isValidAskUserQuestionInput(input: unknown): input is AskUserQuestionInput {
-  if (!input || typeof input !== 'object') return false;
-  const obj = input as Record<string, unknown>;
-  if (!Array.isArray(obj.questions) || obj.questions.length === 0) return false;
-
-  // Validate each question has required fields
-  return obj.questions.every((q: unknown) => {
-    if (!q || typeof q !== 'object') return false;
-    const question = q as Record<string, unknown>;
-    return (
-      typeof question.question === 'string' &&
-      typeof question.header === 'string' &&
-      Array.isArray(question.options) &&
-      typeof question.multiSelect === 'boolean' &&
-      (question.id === undefined || typeof question.id === 'string') &&
-      (question.required === undefined || typeof question.required === 'boolean') &&
-      (question.isSecret === undefined || typeof question.isSecret === 'boolean')
-    );
-  });
-}
-
-/**
  * Handle AskUserQuestion tool - prompts user for structured answers
  * Returns the input with answers filled in, or null if denied/aborted
  */
 async function handleAskUserQuestion(
-  input: unknown,
+  questionInput: AskUserQuestionInput,
   signal?: AbortSignal,
   blocksRoot = true
 ): Promise<Record<string, string> | null> {
   console.log('[AskUserQuestion] Requesting user input');
 
-  // Validate input structure
-  if (!isValidAskUserQuestionInput(input)) {
-    console.error('[AskUserQuestion] Invalid input structure:', input);
-    return null;
-  }
-
   const requestId = `ask_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const questionInput = input;
-
   // Broadcast AskUserQuestion request to frontend
   // Short-circuit if already aborted (addEventListener won't fire for past events)
   if (signal?.aborted) {
@@ -11708,8 +11676,12 @@ async function startStreamingSession(preWarm = false): Promise<void> {
               interrupt: true,
             };
           }
+          const validation = normalizeAskUserQuestionInput(input);
+          if (!validation.ok) {
+            return { behavior: 'deny' as const, message: validation.error, interrupt: false };
+          }
           console.log('[canUseTool] AskUserQuestion detected, prompting user');
-          const answers = await handleAskUserQuestion(input, options.signal, !options.agentID);
+          const answers = await handleAskUserQuestion(validation.input, options.signal, !options.agentID);
           if (answers === null) {
             return {
               behavior: 'deny' as const,
@@ -11721,8 +11693,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // looks each answer up by question TEXT (see withQuestionTextAnswerKeys);
           // our renderer keys by index, so we must alias them here or the model is
           // told "The user did not answer the questions." (0.2.119→0.3.158 regression).
-          const inputWithAnswers = input as Record<string, unknown>;
-          const askQuestions = (inputWithAnswers as { questions?: AskUserQuestion[] }).questions;
+          const inputWithAnswers = validation.input;
+          const askQuestions = inputWithAnswers.questions;
           return {
             behavior: 'allow' as const,
             updatedInput: { ...inputWithAnswers, answers: withQuestionTextAnswerKeys(askQuestions, answers) }

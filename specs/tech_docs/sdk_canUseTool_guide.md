@@ -92,7 +92,7 @@ Abort handler 必须先确认 entry 仍 pending，再 reject `AbortError`。如�
 
 `handleAskUserQuestion()` 负责：
 
-1. 验证 questions、options 和字段大小；
+1. 复用共享 `normalizeAskUserQuestionInput` 校验 questions、每个 option 与字段类型；省略 `multiSelect` 归一化为单选。无效输入返回可修正的字段错误，不使用用户取消语义；
 2. 生成 request ID 并广播到支持的 UI；
 3. 注册 abort-aware pending entry；
 4. 接收 renderer / native Channel card 的答案；
@@ -100,6 +100,8 @@ Abort handler 必须先确认 entry 仍 pending，再 reject `AbortError`。如�
 6. 通过 `updatedInput.answers` 交回 SDK。
 
 用户取消返回 deny + interrupt。当前 host 不支持 native card 时 fail closed，并要求模型用普通文本询问；不能把 request 丢到没有 response route 的 event bus。
+
+Tab 的待回答提问按 `requestId` 去重并 FIFO 展示，支持并行子Agent提问与重连回放；成功/过期只移除匹配项，随后显示下一个。Session边界清空整个队列。无效提问不能退化成普通allow/deny卡片。
 
 Chat 与 Companion 的问答表单保留 `requestId` 和提交 Promise。只有后端明确 `success=true` 才移除对应卡片；失败保留答案、显示错误并恢复操作。旧 request 的回执不能清新问题，取消也必须走对应的产品响应入口。
 
