@@ -7,6 +7,10 @@
 
 ## Current Snapshot
 
+- **当前 MAH-DESKTOP-MANAGEMENT-20261013 覆盖下方旧锁屏和服务源码阻断**：工作分支 `feat/mah-management-device-pairs`，PR #14 draft；`1525dc37` 七项 CI 全成功。交付桌面包源 `50f3722c`，真实并行启动与原 MyAgents 保全已核验。
+- 实际设置启用“AgentNet 多网络（实验性）”后，桌面账号登录请求创建成功；通过本机 SSH 隧道连接隔离独立服务。浏览器拒绝私有测试 CA，用户必须接管证书警告，未绕过或增加全局信任。私有测试账号与证据仅留本机任务 QA，不进 Git。
+- 下一步：用户完成测试登录后检查状态，明确加入网络、接入已安装 Linux MoX Host，真实表单保存配置/只写凭据/禁用 Agent，并检查重启持久化。真实模型调用仍需产品内凭据和费用授权。当前未认证、未接受完整管理 UI、未合入或发布 PR #14。
+
 - **最新核查 MAH-CLIENT-HOST-MGMT-20261012 覆盖下方旧协议阻断判断**：用户要求先核实仅改桌面与 Host 的路径；设备级 `channel.open` 没有 mount 字段，peer TLS/身份通道与 Agent permit 独立。固定本地业务 schema 不证明官方 relay 拒绝扩展；先做原固定协议的无副作用设备握手探针，不预设三个服务仓库都需要改动或权限。
 - 本地资源准备层已交付 PR #6 / main `1d2c806e2700cd70804a1174f27b6ec23acdca68`，完整 CI `38221628350` 六项通过，测试 merge 与主干 tree 相同；下方未完成 CI 和失败 checkpoint 已过期。远程配置/凭据/Agent 创建没有真实验收。
 - 当前隔离分支 `feat/mah-device-channel-probe` 从上述 main 建立。探针只发合法 Open/Accept/TLS/ChannelHello/Ready，不发 Agent invoke、不写配置/凭据、不新增公网端口，原身份留在独立 Rust owner。当前目录缺目标 key generation，需从已有 callable 路由投影取得或明确返回寻址不可用，不能猜代次；零 Agent 的设备目标发现仍待证实。

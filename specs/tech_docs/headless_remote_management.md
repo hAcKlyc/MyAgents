@@ -16,9 +16,10 @@
 - [x] `94af2a36` 新网络制品 `9bca98773fccb73f2a6b818aebdff2cf90c90b1b` tree 与工作分支匹配；与独立核验的完整 `b98294c7` MoX Host 包在测试服务器完成真实 marker 冲突后的 Node rollback（unit/current/Wants 均恢复不存在），随后同包重试成功、实际 Node24/SDK 存在及 encrypted provider credential 已加载。原两服务 PID/current/配置/凭据摘要/组与公网监听未变；新 MoX Node active，owned 网络 inactive，未登录/入网或调用模型。真实 repeat 拒绝揭示 `read_device_pin` 默认参数仍绑定原 MyAgents 路径；已改调用时取当前 profile pin 并加两个不同 pin 的切换回归。当时 repeat 待新制品复验，后续结果见下一项。证据目录 `linux-host-qa/unified-moxbot-9c6a815f`。
 - [x] `50f3722c` 干净网络 CI 制品 `33cebe63d17bb4af076ad063eeba5cce6ad2529e` tree 与提交一致，五项摘要与四安装脚本逐字核验。在真实 MoX 已安装状态下 repair 和同 release repeat 均成功：Host identity、根管理 pin、Node PID、provider/network 加密凭据、owned CA/config 保持一致；原两服务及公网监听仍未变。新 MoX Node active/owned network inactive，无隐式登录或入网、0 模型调用。证据 `linux-host-qa/unified-moxbot-pin-fix-50f3722c/PROVENANCE.json`。完整桌面与 SDK 模型执行未验收；完整六项 Test CI 38316589447 和 owned 服务 CI 38316589433 均已成功。新版桌面包原生构建、19 类精确资源、ZIP CRC/解压与 ad-hoc 严格签名均成功，来源 `50f3722c`。
 - [x] 已交付 `MoX-bot-Trial-macos-arm64-76ce62dc.zip`，独立应用身份 `com.moxbot.app`、数据目录 `~/.moxbot`，含 Space 构建配置，19 类资源和包摘要核验通过；原 MyAgents 及旧试用包保留。Apple Silicon 内部包，ad-hoc 签名、未公证。
-- [ ] Mac 当前锁屏，已请求用户解锁；本版真实并行启动、桌面独立登录、配置表单和 Linux 持久化仍待验收。PR #14 保持 draft，main 尚未包含本轮管理变更。
+- [x] 用户解锁并即时授权运行后，`50f3722c` 新 MoX bot 包真实启动，实际进程路径与二进制摘要一致；原 MyAgents 进程、设备身份、锁和端口保留。通过实际设置启用多网络，账号登录表单成功向独立服务创建 PKCE 请求。
+- [ ] 实际浏览器登录待用户接管：隔离环境仅监听回环，通过 SSH 隧道访问；桌面显式 CA 连接成功，但内置浏览器拒绝私有测试 CA。没有绕过警告或安装全局信任。已验证临时服务的实际清理操作及原四服务/公网监听保全，再恢复该隔离服务并设置 30 分钟自动清理。真实认证、桌面管理表单与已安装 MoX Host 入网尚未验收。`1525dc37` 七项 CI 成功；PR #14 保持 draft，main 尚未包含本轮管理变更。
 
-所有本轮隔离单元、容器、回环监听与配置回滚检查通过，原两个 Host 服务保持 active，未增加公网监听。失败证据保留，不能以已通过的部分路径替代完整桌面验收。
+前序完整运行时验收的隔离单元、容器、回环监听与配置回滚检查通过；本次桌面登录隔离服务恢复运行，设有自动清理期限，尚待最终清理。原 Host 服务保全，未增加公网监听。失败证据保留，不能以已通过的部分路径替代完整桌面验收。
 
 
 此前的官方接口核查和服务端仓库权限记录保留为历史证据。当前实际实现位于用户 fork `heavenzhang/MyAgents`，独立服务源码为 `services/agentnet`，不再以获取作者服务端源码作为实现前置。
