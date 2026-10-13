@@ -1,0 +1,625 @@
+Port 5173 is in use, trying another one...
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/moxbots-sidebar-ui-vite/deps/react-dom_client.js?v=1c9db808 as it exceeds the max of 500KB.
+{
+  "url": "http://127.0.0.1:5174/__sidebar_audit",
+  "logs": [],
+  "body": "MoXBots\n新对话\n自动化任务\n技能与工具\nAgentNet 局域网络\n更多\nAGENT 工作区\n产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单\n研发 Agent Alpha\n任务二：研发 Agent Alpha\n10:00\n任务一：研发 Agent Alpha\n09:00\n运营 Agent Gamma\n小助理\n设置\n正式 GlobalSidebar 合成验收；无模型、无真实后台。",
+  "buttons": [
+    {
+      "text": "",
+      "label": "收起侧边栏"
+    },
+    {
+      "text": "MoXBots",
+      "label": "打开 MoXBots 官网"
+    },
+    {
+      "text": "新对话",
+      "label": "新对话"
+    },
+    {
+      "text": "自动化任务",
+      "label": "自动化任务"
+    },
+    {
+      "text": "",
+      "label": "创建任务"
+    },
+    {
+      "text": "技能与工具",
+      "label": "技能与工具"
+    },
+    {
+      "text": "AgentNet 局域网络",
+      "label": "AgentNet 局域网络"
+    },
+    {
+      "text": "更多",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "工作区与会话显示选项"
+    },
+    {
+      "text": "",
+      "label": "新建 Agent"
+    },
+    {
+      "text": "产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "",
+      "label": "拖动 产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单"
+    },
+    {
+      "text": "研发 Agent Alpha",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "任务二：研发 Agent Alpha10:00",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "拖动 任务二：研发 Agent Alpha"
+    },
+    {
+      "text": "任务一：研发 Agent Alpha09:00",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "拖动 任务一：研发 Agent Alpha"
+    },
+    {
+      "text": "",
+      "label": "拖动 研发 Agent Alpha"
+    },
+    {
+      "text": "运营 Agent Gamma",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "",
+      "label": "拖动 运营 Agent Gamma"
+    },
+    {
+      "text": "小助理",
+      "label": "小助理"
+    },
+    {
+      "text": "设置",
+      "label": "设置"
+    },
+    {
+      "text": "",
+      "label": "通知"
+    }
+  ]
+}
+MENU MoXBots
+新对话
+自动化任务
+技能与工具
+AgentNet 局域网络
+更多
+AGENT 工作区
+产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单
+研发 Agent Alpha
+任务二：研发 Agent Alpha
+10:00
+任务一：研发 Agent Alpha
+09:00
+运营 Agent Gamma
+小助理
+设置
+正式 GlobalSidebar 合成验收；无模型、无真实后台。
+新建分区
+全部会话
+只看收藏
+已归档会话
+显示自动化历史
+DRAG {"a":{"x":39,"y":377.390625,"width":16,"height":32},"b":{"x":39,"y":409.390625,"width":194,"height":32},"source":"拖动 任务二：研发 Agent Alpha","target":"session:alpha-1"}
+DRAG {"a":{"x":39,"y":409.390625,"width":16,"height":32},"b":{"x":39,"y":377.390625,"width":194,"height":32},"source":"拖动 任务二：研发 Agent Alpha","target":"session:alpha-1"}
+DRAG {"a":{"x":39,"y":409.390625,"width":16,"height":32},"b":{"x":8,"y":481.390625,"width":225,"height":32},"source":"拖动 任务一：研发 Agent Alpha","target":null}
+DRAG {"a":{"x":8,"y":345.390625,"width":16,"height":32},"b":{"x":8,"y":449.390625,"width":225,"height":32},"source":"拖动 研发 Agent Alpha","target":null}
+DRAG {"a":{"x":8,"y":345.390625,"width":16,"height":32},"b":{"x":8,"y":385.390625,"width":225,"height":32},"source":"拖动 运营 Agent Gamma","target":null}
+DRAG {"a":{"x":39,"y":449.390625,"width":16,"height":32},"b":{"x":256,"y":0,"width":430.328125,"height":800},"source":"拖动 任务二：研发 Agent Alpha","target":null}
+DRAG {"a":{"x":39,"y":449.390625,"width":16,"height":32},"b":{"x":8,"y":313.390625,"width":225,"height":32},"source":"拖动 任务二：研发 Agent Alpha","target":null}
+DRAG {"a":{"x":8,"y":521.390625,"width":16,"height":32},"b":{"x":28,"y":353.390625,"width":169,"height":32},"source":"拖动 次要项目","target":null}
+SESSION MENU MoXBots
+新对话
+自动化任务
+技能与工具
+AgentNet 局域网络
+更多
+AGENT 工作区
+
+未分区
+
+产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单
+后续跟进
+
+拖入任务或 Agent，也可使用“移动到分区”
+
+重点项目
+研发 Agent Alpha
+任务二：研发 Agent Alpha
+10:00
+任务一：研发 Agent Alpha
+09:00
+运营 Agent Gamma
+Dragging was cancelled. Draggable item section-drag:section:c67ce580-5616-42ab-b941-2e7d58998281 was dropped.
+小助理
+设置
+正式 GlobalSidebar 合成验收；无模型、无真实后台。
+复制对话 ID
+重命名
+置顶
+收藏对话
+添加 Tag
+查看统计
+归档对话
+移动到分区
+删除
+RAIL ["打开 MoXBots 官网","新对话","自动化任务","技能与工具","AgentNet 局域网络","更多","Agent 工作区","小助理","设置","通知"]
+[
+  {
+    "name": "create section",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {},
+        "orders": {}
+      }
+    }
+  },
+  {
+    "name": "session downward reorder",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {},
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-1",
+            "session:alpha-2"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "session upward reorder",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {},
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2",
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "session drag to section",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "session:alpha-1": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2"
+          ],
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "session section navigation original Agent",
+    "status": "pass",
+    "evidence": {
+      "kind": "openSession",
+      "session": "alpha-1",
+      "project": "alpha",
+      "path": "/synthetic/alpha"
+    }
+  },
+  {
+    "name": "refresh preserves section",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "session:alpha-1": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2"
+          ],
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "workspace drag with children",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "session:alpha-1": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:alpha": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2"
+          ],
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "session:alpha-1",
+            "workspace:alpha"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "collapsed section receives workspace",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "session:alpha-1": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:alpha": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:gamma": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2"
+          ],
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "session:alpha-1",
+            "workspace:alpha",
+            "workspace:gamma"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "outside drop cancels",
+    "status": "pass",
+    "evidence": "unchanged"
+  },
+  {
+    "name": "foreign Agent rejects task drop",
+    "status": "fail",
+    "error": "foreign drop changed organization"
+  },
+  {
+    "name": "restore task original Agent via menu",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "workspace:alpha": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:gamma": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "workspace:alpha",
+            "workspace:gamma"
+          ],
+          "workspace:alpha": [
+            "session:alpha-2",
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create cancel focus returns",
+    "status": "pass",
+    "evidence": "工作区与会话显示选项"
+  },
+  {
+    "name": "second section and section sorting",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:c67ce580-5616-42ab-b941-2e7d58998281",
+            "name": "次要项目",
+            "collapsed": false
+          },
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "workspace:alpha": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:gamma": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "workspace:alpha",
+            "workspace:gamma"
+          ],
+          "workspace:alpha": [
+            "session:alpha-2",
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "rename section",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:c67ce580-5616-42ab-b941-2e7d58998281",
+            "name": "后续跟进",
+            "collapsed": false
+          },
+          {
+            "id": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+            "name": "重点项目",
+            "collapsed": false
+          }
+        ],
+        "placements": {
+          "workspace:alpha": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53",
+          "workspace:gamma": "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53"
+        },
+        "orders": {
+          "section:cb9b0c15-3c22-4917-83a0-05fdc21f3b53": [
+            "workspace:alpha",
+            "workspace:gamma"
+          ],
+          "workspace:alpha": [
+            "session:alpha-2",
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "keyboard drag Escape cancellation",
+    "status": "pass",
+    "evidence": "unchanged"
+  },
+  {
+    "name": "favorite view does not lose placement",
+    "status": "fail",
+    "error": "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('收藏', { exact: true })\u001b[22m\n"
+  },
+  {
+    "name": "archive view disables drag",
+    "status": "fail",
+    "error": "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('归档对话', { exact: true })\u001b[22m\n"
+  },
+  {
+    "name": "delete section restores items without resource deletion",
+    "status": "pass",
+    "evidence": {
+      "version": 1,
+      "preferredMode": "expanded",
+      "expandedWorkspaceKeys": [
+        "/synthetic/alpha"
+      ],
+      "hasSeededDefaultExpansion": true,
+      "showAutomationSessions": false,
+      "sessionView": "all",
+      "organization": {
+        "sections": [
+          {
+            "id": "section:c67ce580-5616-42ab-b941-2e7d58998281",
+            "name": "后续跟进",
+            "collapsed": false
+          }
+        ],
+        "placements": {},
+        "orders": {
+          "workspace:alpha": [
+            "session:alpha-2",
+            "session:alpha-1"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "900 rail flyout",
+    "status": "pass",
+    "evidence": "MoXBots\n新对话\n自动化任务\n技能与工具\nAgentNet 局域网络\n更多\n小助理\n设置\nAGENT 工作区\n\n未分区\n\n产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单\n研发 Agent Alpha\n任务二：研发 Agent Alpha\n10:00\n任务一：研发 Agent Alpha\n09:00\n运营 Agent Gamma\n后续跟进\n\n拖入任务或 Agent，也可使用“移动到分区”\n\n正式 GlobalSidebar 合成验收；无模型、无真实后台。"
+  }
+]

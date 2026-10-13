@@ -12,8 +12,8 @@
 ## 分项验证与发布状态
 
 - 实现：阶段功能fbc6abbb，已合并当时最新main fb92ce9c；后续收尾增加失败重试与归档视图创建保护。
-- 单元/DOM：19项整理/偏好/导航投影，65项侧栏（含旧回归与新故障路径），16项历史搜索通过；MoXBots Web构建和8项主题检查通过（最终收尾重建另记录）。
-- 独立实际UI：首轮22项正式renderer/合成service通过，发现的两项嵌套误命中均修复复验；收尾23项含真实浏览器Storage故障恢复待最终报告。详见 [独立报告](sidebar-organization-review.md) 与 [证据](sidebar-organization-validation/results.json)。
+- 单元/DOM：19项整理/偏好/导航投影，65项侧栏（含旧回归与新故障路径），16项历史搜索通过；MoXBots Web构建和8项主题检查通过；合并后的全量typecheck/lint和Web构建通过（失败恢复只改renderer，受影响DOM65及独立23项已复验）。
+- 独立实际UI：首轮22项正式renderer/合成service通过，发现的两项嵌套误命中均修复复验；收尾23项含真实浏览器Storage故障恢复全部通过，源码hash与45ad14d0一致。详见 [独立报告](sidebar-organization-review.md) 与 [证据](sidebar-organization-validation/results.json)。
 - 主审IAB：实际任务向下排序、拖入分区、reload保留、菜单入口及视觉核对。fixture仅合成数据，不能替代Tauri原生重启/已安装用户路径。
 - CI/远端main：待PR交付与最终远端包含核验。
 - 原生安装：原Host/凭据owner负责统一换包，当前客户端未由本任务替换；用户已授权协调与完整验收。不得把本地Web/CI当已安装。
