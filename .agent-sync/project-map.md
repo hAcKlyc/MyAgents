@@ -19,6 +19,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata、relay及可选管理员登记控制面；部署与桌面验收另行核实 |
 | 统一管理员后台 | `services/agentnet/admin-web/`、`src/admin_http.rs`、`src/admin_store.rs`（相对服务目录） | 同源页面、实时账号校验、私有Bot登记/配置/归属与审计；Host执行委派尚未接线，运维见ADMINISTRATION.md |
 | 架构与设计规范 | `specs/ARCHITECTURE.md`、`specs/DESIGN.md`、`specs/tech_docs/` | 当前 owner、边界和交互规范 |
+| 有限 Bot 执行（默认关闭） | `services/agentnet/src/execution_*`、`execution-core/`、`src/host/bot-*`、`src-tauri/headless-network/src/bot_execution*` | 真实身份/原操作账本、有限 proof/lease、Host 本地策略和独立IPC；PR23候选，真实Linux发布/验收分开追踪 |
 | 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理控制面已本地实现，执行/共享待接线 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |

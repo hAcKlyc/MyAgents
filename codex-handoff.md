@@ -216,6 +216,16 @@ BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host s
 - 分支codex/host-config-20261013，从main2a241591起；本地merge冻结Host依赖9149753c（5a9dd9b0）。远端main e9767263仍无Host管理基础，不能独自发布其未完成凭据实验。后续将本任务提交应用到原owner已验证基础。
 - 封闭扩展DTO、非秘密profile回显、不可变version ID、Provider私有key绑定、Linux fd目录选择/注册已实现；主核验unit16、Node42pass/13Linux skip、协议19、Headless125、范围lint通过。UI七项独立发现待修复冻结与主IAB验收；native/真实Host/模型路径仍开放。
 - 当前安装仍b116404e，统一安装由原凭据owner控制；主Agent不并发换包。接续清单及证据见任务记录、specs/tech_docs/host_configuration_reuse.md、dev-docs/host-config-independent-review.md。
+### 2026-10-13 — BOTS-CLOUD-EXEC-001 draft continuation
+
+Registry administrator release is accepted separately at main1cfa2f85 (recordse9767263); the explicit first-admin grant is fulfilled and must not be requested again. Finite lifecycle draft PR23 / codex/bots-cloud-execution-v1 remains default off. Contract, progress and current gate repairs are in .agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md and services/agentnet/planning/BOTS-CLOUD-EXECUTION-CONTRACT.md. Fixed9149753 Host/management/credential source is preserved, with common config/lock order repairs. No Desktop/Keychain/installer or actual Linux Host was changed.
+
+Next: latest-head Linux CI, clean artifact/backup/rollback, concrete single-Bot/Host protected opt-in, serial release and real OIDC→Host Session lifecycle/receipt verification. Synthetic UI passes and real local Session birth/stop do not close Linux/production gates. Do not reset pending/unconfirmed records or infer stopped from absent in-memory workers.
+
+### BOTS-CLOUD-EXEC-001 — accepted Host foundation integration
+
+PR24 main fb92ce9c passed seven checks and carries the existing Linux Host management/credentials/client base. The Bot continuation merges this accepted main and preserves finite execution, exact worker identity, bounded child stop and shared lock/config repairs; it does not install Desktop changes or alter Keychain. Synthetic UI/Host effects are distinguished from real Linux acceptance. Read-only production scope preflight passed; no opt-in, Bot ledger, or model refs were configured. Private single-Bot 24h lifecycle-only proposal and CI artifact preparation continue, including an owner-protected non-secret account binding pin. PR23 remains draft/default off until Linux CI, main delivery, concrete authority and real Session lifecycle acceptance pass. First administrator authorization and registry/browser release are already fulfilled.
+
 
 ### 2026-10-13 — MOXBOTS-SIDEBAR-ORG-001
 

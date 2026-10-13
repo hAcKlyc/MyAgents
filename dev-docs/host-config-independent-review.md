@@ -1,19 +1,19 @@
 # 独立验收：MOXBOTS-HOST-CONFIG-20261013
 
-状态：待最终冻结SHA确认。已完成非实现者源码集中复验与主Agent实际IAB截图独立审阅；本子Agent未进行实际IAB交互。模型primary回显及writeAvailable dispatch gate已静态闭合；现代Host显式执行授权入口回归已静态修复；等待最终SHA与主Agent测试结果确认。没有使用真实 Host、真实密钥、用户 Chrome 或现有已安装客户端。此记录不能证明真实 Host 联调、原生安装或生产验收。
+状态：冻结 UI 的独立源码与截图审阅通过，未发现剩余范围内阻断。冻结源提交由主Agent提供为 d829d8d3，交付 cherry-pick 为 34d598c9；本报告在交付树核对了最终关键源码并独立查看冻结后截图。本子Agent未进行实际IAB交互、真实Host联调、原生安装或生产验收；这些仍由主Agent负责。Bot execution 与新main 75bb0269的后续冲突集成不在本次冻结UI结论内。
 
 范围：Host 详情复用 Settings Provider/模型交互、桌面当前主 Agent 配置复用、远端目录浏览/选择。唯一写入文件为本报告。依据：用户 AGENTS 指令、`specs/tech_docs/host_configuration_reuse.md`、`specs/DESIGN.md` 状态可信/真实语义/跨平台及无障碍原则。
 
-## 新发现（初审源码，尚待修复后冻结复验）
+## 初审历史发现（已在最后复验闭合）
 
-- [ ] **P1 本地注册表越界可达。** `OwnedHostProviderConfiguration.tsx:57–62,77–79` 保留 source provider 原始 ID，只把 `isBuiltin` 设为 false。`ModelManagementPanel.tsx:138,168–198,428–468` 的 TokenDance/OpenCode 特殊发现/添加路径按 ID 判断，直接调用 `atomicModifyConfig`/`rebuildAndPersistAvailableProviders`，没有 builtin 或外部受控门禁。打开对应 API Provider 的 Host draft 管理模型，模型发现或添加可触发桌面本地注册表持久化。要求显式隔离受控模式或确保所有内部写路径不可达，并验证桌面 config 未改变。
-- [ ] **P1 当前 Host 配置编辑依赖有效桌面 source。** `OwnedHostProviderConfiguration.tsx:33–34,77–79,186–190` provider/fields 初始 null，唯一赋值入口是 source 导入；extended snapshot 只提供 ID/model，不能 hydrate 已配置 profile。复现：Host 已配置，desktop default Workspace/provider 为空或不支持；重新打开 Host，无法编辑原模型、连接参数或保存 profile。需 owner 读取非密钥 profile，或提供不依赖 source 的手动/预置配置入口。
-- [ ] **P1 未确认远端映射时静默用首个 root。** `OwnedHostProviderConfiguration.tsx:36` 无合法现有 workspace 时默认为 first-root/empty-path；导入只检查 rootId 后立即发送配置。Mac 本地 source path 只是提示，此 fallback 会把工作区设为根而不是强制选择。需未映射状态为空、显式选择后才允许应用；已有合法 Host workspace 可保留。
-- [ ] **P2 单层目录不能返回根。** `OwnedHostDirectoryPicker.tsx:49,58` 在 `relativePath="child"` 时 parent 为合法空字符串，却被 `disabled={!parent}` 禁用。应判断 parent===null；复验 root→中文/空格 child→返回根。
-- [ ] **P2 首页面/错误状态刷新无效。** `OwnedHostDirectoryPicker.tsx:47,58` effect 依赖 root/path/cursor，Refresh 只把 cursor 设 undefined、history 清空。首页面 cursor 已 undefined，刷新不重新请求；第一次请求错误也不能重试。需 refresh generation 并复验同路径新增项/错误后重试。
-- [ ] **P2 extension 逐方法能力未体现。** `OwnedHostManagement.tsx:95–102` 仅确认 inspect/config-set/list 后丢弃 capabilities；key/recovery/register 按钮仍发送未广告的方法，providerKinds 也未下传。需按方法与协议分别 gate，避免半升级 Host 执行不支持操作。验收 fixture 必须覆盖缺 credential/provider-receipt/register 方法。
+- [x] **P1 本地注册表越界可达。** `OwnedHostProviderConfiguration.tsx:57–62,77–79` 保留 source provider 原始 ID，只把 `isBuiltin` 设为 false。`ModelManagementPanel.tsx:138,168–198,428–468` 的 TokenDance/OpenCode 特殊发现/添加路径按 ID 判断，直接调用 `atomicModifyConfig`/`rebuildAndPersistAvailableProviders`，没有 builtin 或外部受控门禁。打开对应 API Provider 的 Host draft 管理模型，模型发现或添加可触发桌面本地注册表持久化。要求显式隔离受控模式或确保所有内部写路径不可达，并验证桌面 config 未改变。
+- [x] **P1 当前 Host 配置编辑依赖有效桌面 source。** `OwnedHostProviderConfiguration.tsx:33–34,77–79,186–190` provider/fields 初始 null，唯一赋值入口是 source 导入；extended snapshot 只提供 ID/model，不能 hydrate 已配置 profile。复现：Host 已配置，desktop default Workspace/provider 为空或不支持；重新打开 Host，无法编辑原模型、连接参数或保存 profile。需 owner 读取非密钥 profile，或提供不依赖 source 的手动/预置配置入口。
+- [x] **P1 未确认远端映射时静默用首个 root。** `OwnedHostProviderConfiguration.tsx:36` 无合法现有 workspace 时默认为 first-root/empty-path；导入只检查 rootId 后立即发送配置。Mac 本地 source path 只是提示，此 fallback 会把工作区设为根而不是强制选择。需未映射状态为空、显式选择后才允许应用；已有合法 Host workspace 可保留。
+- [x] **P2 单层目录不能返回根。** `OwnedHostDirectoryPicker.tsx:49,58` 在 `relativePath="child"` 时 parent 为合法空字符串，却被 `disabled={!parent}` 禁用。应判断 parent===null；复验 root→中文/空格 child→返回根。
+- [x] **P2 首页面/错误状态刷新无效。** `OwnedHostDirectoryPicker.tsx:47,58` effect 依赖 root/path/cursor，Refresh 只把 cursor 设 undefined、history 清空。首页面 cursor 已 undefined，刷新不重新请求；第一次请求错误也不能重试。需 refresh generation 并复验同路径新增项/错误后重试。
+- [x] **P2 extension 逐方法能力未体现。** `OwnedHostManagement.tsx:95–102` 仅确认 inspect/config-set/list 后丢弃 capabilities；key/recovery/register 按钮仍发送未广告的方法，providerKinds 也未下传。需按方法与协议分别 gate，避免半升级 Host 执行不支持操作。验收 fixture 必须覆盖缺 credential/provider-receipt/register 方法。
 
-- [ ] **P2 新 Host 成功加载后仍显示加载中。** `OwnedHostManagement.tsx` 的 loading 条件为 `online && !snapshot && !notice`，extended snapshot 始终不满足 legacy snapshot，成功显示新配置面板时仍留下 loading 状态。应以所有 snapshot/value 判断完成。
+- [x] **P2 新 Host 成功加载后仍显示加载中。** `OwnedHostManagement.tsx` 的 loading 条件为 `online && !snapshot && !notice`，extended snapshot 始终不满足 legacy snapshot，成功显示新配置面板时仍留下 loading 状态。应以所有 snapshot/value 判断完成。
 
 ## 已观察到的契约（只读证据，不等于运行通过）
 
@@ -124,3 +124,18 @@ Harness credential owner真实性修正：原fixture config切到新provider后�
 实际读取回归测试：host-provider-config.integration.test.ts:87起覆盖grant持久化为true再revoke持久化为false；OwnedHostManagement.test.tsx:318–329覆盖勾选草稿后source仍提交false，随后手动保存true。测试当前由主Agent运行，本审查不冒称已执行或通过。
 
 此修补关闭本次P1静态发现。最终review当前未留下已确认的范围内源码阻断；等待提交SHA及最终测试结果确认，所有真实Host/安装/生产边界仍保留。
+
+
+## 冻结后独立截图确认（23:15，2026-10-13，Asia/Shanghai）
+
+本次使用view_image独立实际查看主Agent提供的三张最终PNG。冻结绑定：source `d829d8d3` / delivery `34d598c9`（提交标识与测试结论来自主Agent；本子Agent不运行Git、不提交）。交付树关键源码核实：primaryModel:model、writeAvailable credential gate、手动execution草稿与source保持snapshot授权均仍存在。
+
+| 最终截图 | 独立所见 |
+| --- | --- |
+| final-configured-900.png | 900宽full-page；模型输入与owner当前显示均为qa-second，保存成功反馈可见；现代“允许本地会话执行”checkbox已恢复且未勾选；密钥状态与新Provider未配置一致。字段/动作无水平裁切 |
+| final-model-manager-900.png | 900宽full-page；真实共用模型面板显示qa-model和qa-second两个候选，qa-second明确“首选”；可见输入/添加入口及“列表仅用于选择，Host只保存最终选中的模型”说明；没有无效模型参数编辑控件，modal无横向溢出 |
+| final-directory-900.png | 900宽full-page；真实picker显示中文/空格child目录、上一级、根、刷新与选择此目录动作，层级/按钮完整；无横向裁切。full-page图的固定backdrop范围对应viewport，不能据整页bitmap高度推断viewport800全部可见 |
+
+主Agent报告最终实际IAB顺序：添加qa-second→选择→重开确认首选→保存Host→当前qa-second，已通过。模型panel最终截图独立佐证重开首选状态，configured截图独立佐证保存后的当前模型；静态截图不能单独证明全部交互时序。主Agent报告37最终DOM/profile测试通过，tsc与目标lint通过；本子Agent核查源码/测试覆盖、未自行重复执行，不冒称独立跑测。
+
+结论限于冻结UI实现、所读源码契约及实际截图覆盖：之前R1–R7、后续源一致性/版本/async/capability/焦点/模型回显/执行授权发现均闭合，没有剩余已确认阻断。真实Host私有通道、旧socket epoch fallback、重启持久化、安装/版本切换、真实账号业务路径与生产发布必须由整体集成/验收证据完成；newmain Bot execution冲突集成之后仍需主Agent整体复核。旧harness失败截图与旧partial凭据投影结果不进入最终接受证据。

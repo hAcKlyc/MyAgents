@@ -187,6 +187,80 @@ impl RcgenSigningKey for RcgenP256Key {
 }
 
 impl ServiceKeys {
+    /// Domain-separated execution grant; caller owns live human authorization.
+    pub fn sign_execution_grant(
+        &self,
+        profile: &IssuerProfile,
+        claims: &myagents_agentnet_execution_core::GrantClaims,
+    ) -> Result<String, IdentityCoreError> {
+        validate_execution_profile(profile, &claims.grant.scope)?;
+        claims
+            .validate_at(&claims.grant.scope, execution_now()?)
+            .map_err(|_| IdentityCoreError::TokenInvalid)?;
+        self.sign_jwt(
+            myagents_agentnet_execution_core::GRANT_TYP,
+            serde_json::to_value(claims).map_err(|_| IdentityCoreError::TokenInvalid)?,
+        )
+    }
+
+    /// Caller passes the live actor authority deadline; no user credential is signed.
+    pub fn sign_execution_intent(
+        &self,
+        profile: &IssuerProfile,
+        claims: &myagents_agentnet_execution_core::IntentClaims,
+        authorization_expires_at: u64,
+    ) -> Result<String, IdentityCoreError> {
+        validate_execution_profile(profile, &claims.scope)?;
+        let now = execution_now()?;
+        validate_execution_deadline(claims.exp, authorization_expires_at, now)?;
+        claims
+            .validate_at(&claims.scope, now)
+            .map_err(|_| IdentityCoreError::TokenInvalid)?;
+        self.sign_jwt(
+            myagents_agentnet_execution_core::INTENT_TYP,
+            serde_json::to_value(claims).map_err(|_| IdentityCoreError::TokenInvalid)?,
+        )
+    }
+
+    /// Caller must recheck current Host/actor sessions, key, membership and grant.
+    pub fn sign_execution_lease(
+        &self,
+        profile: &IssuerProfile,
+        claims: &myagents_agentnet_execution_core::LeaseClaims,
+        intent: &myagents_agentnet_execution_core::IntentClaims,
+        authorization_expires_at: u64,
+    ) -> Result<String, IdentityCoreError> {
+        validate_execution_profile(profile, &claims.scope)?;
+        let now = execution_now()?;
+        validate_execution_deadline(claims.exp, authorization_expires_at, now)?;
+        claims
+            .matches_intent(intent, &claims.host_context, now)
+            .map_err(|_| IdentityCoreError::TokenInvalid)?;
+        self.sign_jwt(
+            myagents_agentnet_execution_core::LEASE_TYP,
+            serde_json::to_value(claims).map_err(|_| IdentityCoreError::TokenInvalid)?,
+        )
+    }
+
+    /// A short, challenge-bound cancellation proof, never a fresh execution grant.
+    pub fn sign_execution_revocation(
+        &self,
+        profile: &IssuerProfile,
+        claims: &myagents_agentnet_execution_core::RevocationClaims,
+        authorization_expires_at: u64,
+    ) -> Result<String, IdentityCoreError> {
+        validate_execution_profile(profile, &claims.scope)?;
+        let now = execution_now()?;
+        validate_execution_deadline(claims.exp, authorization_expires_at, now)?;
+        claims
+            .validate_at(&claims.scope, now)
+            .map_err(|_| IdentityCoreError::TokenInvalid)?;
+        self.sign_jwt(
+            myagents_agentnet_execution_core::REVOCATION_TYP,
+            serde_json::to_value(claims).map_err(|_| IdentityCoreError::TokenInvalid)?,
+        )
+    }
+
     /// Load existing stable signing/CA material. Invalid or missing state is
     /// never replaced automatically.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, IdentityCoreError> {
@@ -456,6 +530,41 @@ impl ServiceKeys {
         header.kid = Some(self.kid.clone());
         jsonwebtoken::encode(&header, &claims, &key).map_err(|_| IdentityCoreError::TokenInvalid)
     }
+}
+
+fn execution_now() -> Result<u64, IdentityCoreError> {
+    u64::try_from(OffsetDateTime::now_utc().unix_timestamp())
+        .map_err(|_| IdentityCoreError::TokenInvalid)
+}
+fn validate_execution_deadline(
+    exp: u64,
+    authorized_until: u64,
+    now: u64,
+) -> Result<(), IdentityCoreError> {
+    if authorized_until > myagents_agentnet_execution_core::MAX_SAFE_INTEGER
+        || authorized_until <= now
+        || exp > authorized_until
+    {
+        return Err(IdentityCoreError::TokenInvalid);
+    }
+    Ok(())
+}
+fn validate_execution_profile(
+    profile: &IssuerProfile,
+    scope: &myagents_agentnet_execution_core::ExecutionScope,
+) -> Result<(), IdentityCoreError> {
+    profile.validate()?;
+    scope
+        .validate()
+        .map_err(|_| IdentityCoreError::ScopeInvalid)?;
+    if profile.issuer != scope.issuer
+        || profile.service_id != scope.service_id
+        || profile.environment != scope.environment
+        || profile.network_id != scope.network_id
+    {
+        return Err(IdentityCoreError::ScopeInvalid);
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -932,5 +1041,180 @@ mod tests {
         let issued = keys.issue(&profile, &request).unwrap();
         let leaf = certificate_chain(issued.certificate.as_deref().unwrap()).unwrap();
         assert!(TlsIdentity::new(leaf, std::sync::Arc::new(device)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod execution_tests {
+    use super::*;
+    use myagents_agentnet_execution_core::{
+        intent_hash, verify_grant, verify_intent, verify_lease, verify_revocation, GrantClaims,
+        HostContext, IntentClaims, LeaseClaims, RevocationClaims,
+    };
+    use std::os::unix::fs::PermissionsExt;
+
+    fn claims() -> (
+        IssuerProfile,
+        GrantClaims,
+        IntentClaims,
+        LeaseClaims,
+        RevocationClaims,
+    ) {
+        let f: Value =
+            serde_json::from_str(include_str!("../../execution-core/fixtures/wire-v1.json"))
+                .unwrap();
+        let mut g: GrantClaims = serde_json::from_value(f["grant_claims"].clone()).unwrap();
+        let mut i: IntentClaims = serde_json::from_value(f["intent"].clone()).unwrap();
+        let mut l: LeaseClaims = serde_json::from_value(f["lease"].clone()).unwrap();
+        let mut r: RevocationClaims = serde_json::from_value(f["revocation"].clone()).unwrap();
+        let now = execution_now().unwrap();
+        g.iat = now;
+        g.nbf = now;
+        g.exp = now + 300;
+        g.grant.expires_at = now + 1000;
+        i.iat = now;
+        i.nbf = now;
+        i.exp = now + 300;
+        i.grant = g.grant.clone();
+        l.iat = now;
+        l.nbf = now;
+        l.exp = now + 15;
+        l.intent_hash = intent_hash(&i).unwrap();
+        r.iat = now;
+        r.nbf = now;
+        r.exp = now + 15;
+        let p = IssuerProfile {
+            issuer: i.scope.issuer.clone(),
+            service_id: i.scope.service_id.clone(),
+            environment: i.scope.environment.clone(),
+            network_id: i.scope.network_id.clone(),
+        };
+        (p, g, i, l, r)
+    }
+    fn keys() -> (tempfile::TempDir, ServiceKeys) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let keys = ServiceKeys::generate_initial(dir.path().join("execution-key.json")).unwrap();
+        (dir, keys)
+    }
+    #[test]
+    fn typed_execution_signatures_verify_in_rust_and_node() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let (_dir, keys) = keys();
+        let (p, g, i, l, r) = claims();
+        let now = execution_now().unwrap();
+        let grant = keys.sign_execution_grant(&p, &g).unwrap();
+        let intent = keys.sign_execution_intent(&p, &i, i.exp).unwrap();
+        let lease = keys.sign_execution_lease(&p, &l, &i, l.exp).unwrap();
+        let revocation = keys.sign_execution_revocation(&p, &r, r.exp).unwrap();
+        verify_grant(&grant, &keys.jwks(), &i.scope, now).unwrap();
+        verify_intent(&intent, &keys.jwks(), &i.scope, now).unwrap();
+        verify_lease(&lease, &keys.jwks(), &i.scope, now, &i, &l.host_context).unwrap();
+        verify_revocation(
+            &revocation,
+            &keys.jwks(),
+            &i.scope,
+            now,
+            &r.host_context,
+            &r.grant_id,
+            &r.bot_id,
+            r.revoked_generation,
+        )
+        .unwrap();
+        let helper = url::Url::from_file_path(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../execution-core/js/index.mjs"),
+        )
+        .unwrap();
+        let program=format!("import fs from 'node:fs';import * as e from {};const x=JSON.parse(fs.readFileSync(0,'utf8'));const o={{jwks:x.jwks,scope:x.scope,now:x.now}};e.verifyGrant(x.grant,o);const i=e.verifyIntent(x.intent,o);e.verifyLease(x.lease,{{...o,intent:i,host_context:x.context}});e.verifyRevocation(x.revocation,{{...o,host_context:x.context,grant_id:i.grant.id,bot_id:i.grant.bot_id,revoked_generation:i.grant.generation}});",serde_json::to_string(helper.as_str()).unwrap());
+        let payload = json!({"jwks":keys.jwks(),"scope":i.scope,"now":now,"grant":grant,"intent":intent,"lease":lease,"revocation":revocation,"context":l.host_context});
+        let mut child = Command::new("node")
+            .args(["--input-type=module", "-e", &program])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Node is required for execution wire parity");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(serde_json::to_string(&payload).unwrap().as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "Node parity failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    #[test]
+    fn signer_rejects_wrong_profile_domain_hash_deadline_and_expiry() {
+        let (_dir, keys) = keys();
+        let (p, g, i, l, r) = claims();
+        let mut bad_profile = p.clone();
+        bad_profile.network_id = Uuid::new_v4().to_string();
+        assert!(keys.sign_execution_grant(&bad_profile, &g).is_err());
+        let mut bad = g.clone();
+        bad.aud = "myagents-agent-peer".into();
+        assert!(keys.sign_execution_grant(&p, &bad).is_err());
+        let mut bad = i.clone();
+        bad.namespace = "host.management".into();
+        assert!(keys.sign_execution_intent(&p, &bad, bad.exp).is_err());
+        let mut bad = i.clone();
+        bad.command.expected_host_revision += 1;
+        assert!(keys.sign_execution_intent(&p, &bad, bad.exp).is_err());
+        assert!(keys.sign_execution_intent(&p, &i, i.exp - 1).is_err());
+        assert!(keys.sign_execution_lease(&p, &l, &i, l.exp - 1).is_err());
+        let mut bad = l.clone();
+        bad.exp = bad.iat + 16;
+        assert!(keys.sign_execution_lease(&p, &bad, &i, bad.exp).is_err());
+        let mut bad = l.clone();
+        bad.intent_hash = "0".repeat(64);
+        assert!(keys.sign_execution_lease(&p, &bad, &i, bad.exp).is_err());
+        let mut bad = r.clone();
+        bad.exp = bad.iat + 16;
+        assert!(keys.sign_execution_revocation(&p, &bad, bad.exp).is_err());
+        let mut bad = g.clone();
+        bad.iat -= 301;
+        bad.nbf = bad.iat;
+        bad.exp = bad.iat + 300;
+        assert!(keys.sign_execution_grant(&p, &bad).is_err());
+    }
+    #[test]
+    fn real_signed_wrong_domain_scope_and_nonce_fail_verification() {
+        let (_dir, keys) = keys();
+        let (p, _g, i, l, r) = claims();
+        let now = execution_now().unwrap();
+        let token = keys.sign_execution_intent(&p, &i, i.exp).unwrap();
+        assert!(verify_grant(&token, &keys.jwks(), &i.scope, now).is_err());
+        let (_otherdir, other) = self::keys();
+        assert!(verify_intent(&token, &other.jwks(), &i.scope, now).is_err());
+        let mut bad = i.clone();
+        bad.aud = "unrelated".into();
+        let signed = keys
+            .sign_jwt(
+                myagents_agentnet_execution_core::INTENT_TYP,
+                serde_json::to_value(bad).unwrap(),
+            )
+            .unwrap();
+        assert!(verify_intent(&signed, &keys.jwks(), &i.scope, now).is_err());
+        let lease = keys.sign_execution_lease(&p, &l, &i, l.exp).unwrap();
+        let mut ctx: HostContext = l.host_context.clone();
+        ctx.challenge_nonce = Uuid::new_v4().to_string();
+        assert!(verify_lease(&lease, &keys.jwks(), &i.scope, now, &i, &ctx).is_err());
+        let rev = keys.sign_execution_revocation(&p, &r, r.exp).unwrap();
+        assert!(verify_revocation(
+            &rev,
+            &keys.jwks(),
+            &i.scope,
+            now,
+            &r.host_context,
+            &r.grant_id,
+            &r.bot_id,
+            r.revoked_generation + 1
+        )
+        .is_err());
+        assert!(verify_lease(&lease, &keys.jwks(), &i.scope, l.exp, &i, &l.host_context).is_err());
     }
 }

@@ -8,7 +8,7 @@ Current Agent owns integration. Settings connection fields and ModelManagementPa
 - [x] Shared Settings/model regressions: 48 passed.
 - [x] Protocol: 19 passed; headless: 125 passed; headless clippy passed.
 - [x] Final TypeScript and targeted ESLint passed.
-- [x] Primary IAB real components with synthetic IPC: 1280/900 layout; directory Unicode/space, parent/root, pagination, retry, focus/Escape; source reread, explicit target before write, partial key failure, original receipt recovery, capability gates; manual model add/select/reopen/Host save.
+- [x] Primary IAB real components with synthetic IPC: 1280/900 layout; directory Unicode/space, parent/root, pagination, retry, focus/Escape; source reread, explicit target before write, partial key failure, original receipt recovery, capability gates; manual model add/select/reopen/Host save; two unchanged saves retained identical profile ID (qa-api-v-b1e13a124a5617805abd7a0f) while revision advanced1→2→3.
 - [x] Independent source and primary screenshot review: dev-docs/host-config-independent-review.md. Reviewer could not access the isolated IAB; independent live interaction is not claimed.
 - [ ] Exact delivery-head CI/Linux filesystem/native checks.
 - [ ] Remote main integration verification.
@@ -29,3 +29,7 @@ Native macOS local compilation is blocked before task code by apple-cf Swift too
 | Independent acceptance | Sol / medium | source review and screenshot review |
 
 Runtime model attribution, tokens and monetary cost are unavailable. No AIRouter calls were used. Independent review caught local-registry leakage, incomplete hydration/capability gating and explicit execution-control regression; actual IAB caught an identity-dependent directory refresh loop. File ownership and dedicated clean delivery branch kept credential experiments out of main.
+
+## Concurrent main integration
+
+PR23 Bot execution main75bb0269 was integrated after UI freeze. Rust implementer performed read-only merged-source checks: protocol19, management42, Bot14, probe12 passed (groups overlap; no summed total), headless all-target clippy passed. This is integration verification, not independent review. Generic configuration must use main atomic mutation owner and registration→supervisor lock order to retain concurrent Bot/Agent state. Existing Bot execution dynamic encrypted-credential preflight limitation remains outside this configuration UI task; no Bot runtime acceptance is claimed.

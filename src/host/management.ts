@@ -23,7 +23,7 @@ export type ConfigReceipt =
   | { mutationId: string; status: 'conflict'; revision: number; effect: 'none' };
 type ReceiptEntry = { requestHash: string; receipt: ConfigReceipt };
 type Ledger = { schemaVersion: 1; hostId: string; entries: ReceiptEntry[] };
-type Owner = {
+export type HostConfigOwner = {
   hostId: string;
   defaultWorkspace: string;
   readConfig(): Promise<HostConfig>;
@@ -32,6 +32,10 @@ type Owner = {
   busy(): boolean;
   credentialReference?: string;
 };
+export interface HostConfigMutationOwnerInput extends Omit<HostConfigOwner, 'readConfig' | 'writeConfig'> {
+  readConfig(): Promise<HostConfig>;
+  atomicModifyConfig(modify: (current: HostConfig) => HostConfig): Promise<void>;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export class HostConfigError extends Error {
   readonly code = 'HOST_MANAGEMENT_UNCONFIRMED' as const;
@@ -97,9 +101,90 @@ export function readConfigReceipt(config: HostConfig, hostId: string, body: Reco
     ?? { mutationId: id, status: 'not-found' };
 }
 
+function sameField(left: HostConfig, right: HostConfig, key: string): boolean {
+  return Object.hasOwn(left, key) === Object.hasOwn(right, key)
+    && JSON.stringify(left[key]) === JSON.stringify(right[key]);
+}
+
+/**
+ * Merge the Host configuration owner's changed fields into the latest shared
+ * config under atomicModifyConfig. Other owners may have updated their
+ * projections since the Host read; those fields must never be overwritten.
+ */
+export function mergeHostConfigMutation(current: HostConfig, observed: HostConfig, next: HostConfig): HostConfig {
+  const fields = ['hostSettings','hostConfigReceipts','hostProviderWorkspace','hostProviderProfiles','hostProviderConfigReceipts'] as const;
+  for (const field of fields) {
+    if (!sameField(current,observed,field)) throw new HostConfigError();
+  }
+  const currentKeys=object(current.providerApiKeys) ? current.providerApiKeys:{};
+  const observedKeys=object(observed.providerApiKeys) ? observed.providerApiKeys:{};
+  const nextKeys=object(next.providerApiKeys) ? next.providerApiKeys:{};
+  const changedProviders=[...new Set([...Object.keys(observedKeys),...Object.keys(nextKeys)])].filter(id=>!sameField(observedKeys,nextKeys,id));
+  // A mutation may update only its credential references. Independently owned
+  // provider keys and Bot/Agent projections stay in the latest shared config.
+  for (const id of changedProviders) {
+    if (!sameField(currentKeys,observedKeys,id)) throw new HostConfigError();
+  }
+  const merged: HostConfig={...current};
+  for (const field of fields) {
+    if (!sameField(observed,next,field)) {
+      if (Object.hasOwn(next,field)) (merged as Record<string,unknown>)[field]=next[field];
+      else delete merged[field];
+    }
+  }
+  if (changedProviders.length) {
+    const providerApiKeys={...currentKeys};
+    for (const id of changedProviders) {
+      if (Object.hasOwn(nextKeys,id)) providerApiKeys[id]=nextKeys[id];
+      else delete providerApiKeys[id];
+    }
+    merged.providerApiKeys=providerApiKeys as Record<string,string>;
+  }
+  return merged;
+}
+
+/** Builds the Host config owner over the shared config.json atomic modifier. */
+export function createHostConfigMutationOwner(input: HostConfigMutationOwnerInput): HostConfigOwner {
+  let observed: HostConfig | undefined;
+  return {
+    hostId: input.hostId,
+    defaultWorkspace: input.defaultWorkspace,
+    workspacePath: input.workspacePath,
+    busy: input.busy,
+    credentialReference: input.credentialReference,
+    async readConfig() {
+      observed = await input.readConfig();
+      return observed;
+    },
+    async writeConfig(next) {
+      if (!observed) throw new Error('Host configuration read is required before write');
+      await input.atomicModifyConfig(current => mergeHostConfigMutation(current, observed!, next));
+    },
+  };
+}
+
+/** Enforces registration-intent -> supervisor order for Host config writes. */
+export function withHostConfigurationLocks<T>(
+  withRegistrationIntent: (operation: () => Promise<T>) => Promise<T>,
+  withSupervisor: (operation: () => Promise<T>) => Promise<T>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withRegistrationIntent(() => withSupervisor(operation));
+}
+
+/** Read registration-owned data before acquiring the supervisor lock. */
+export async function withHostSnapshotLocks<R, T>(
+  readResources: () => Promise<R>,
+  withSupervisor: (operation: () => Promise<T>) => Promise<T>,
+  readSupervisor: (resources: R) => Promise<T>,
+): Promise<T> {
+  const resources = await readResources();
+  return withSupervisor(() => readSupervisor(resources));
+}
+
 // The supervisor must call this under its existing lifecycle/configuration lock.
 // Config and receipt are one atomic config.json commit, never two stores.
-export async function configureHost(owner: Owner, body: Record<string, unknown>): Promise<ConfigReceipt | { persisted: true; revision: number; effect: 'new-session'; settings: HostSettings }> {
+export async function configureHost(owner: HostConfigOwner, body: Record<string, unknown>): Promise<ConfigReceipt | { persisted: true; revision: number; effect: 'new-session'; settings: HostSettings }> {
   if (!keys(body, ['expectedRevision', 'providerId', 'model', 'workspace', 'executionAuthorized', 'mutationId'])) throw new Error('Unsupported configuration field');
   if (!revision(body.expectedRevision) || body.expectedRevision === Number.MAX_SAFE_INTEGER
     || body.providerId !== 'moonshot-coding' || typeof body.model !== 'string' || !MODEL.test(body.model)
@@ -224,7 +309,7 @@ export function selectedHostProviderProfile(config: HostConfig): HostProviderPro
   return profile;
 }
 
-export async function configureProviderHost(owner: Owner & {selectWorkspace(selection: HostWorkspaceSelection): Promise<{path:string; verify():void; close():void}>}, body: Record<string, unknown>): Promise<GenericConfigReceipt> {
+export async function configureProviderHost(owner: HostConfigOwner & {selectWorkspace(selection: HostWorkspaceSelection): Promise<{path:string; verify():void; close():void}>}, body: Record<string, unknown>): Promise<GenericConfigReceipt> {
   if (!keys(body,['provider','model','workspace','executionAuthorized','expectedRevision','mutationId']) || !isHostProviderProfile(body.provider) || !isHostModelId(body.model) || !isHostWorkspaceSelection(body.workspace) || !revision(body.expectedRevision) || body.expectedRevision === Number.MAX_SAFE_INTEGER || typeof body.executionAuthorized !== 'boolean') throw new Error('Invalid portable Host configuration');
   const id = mutationId(body.mutationId); const profile: HostProviderProfile = {...body.provider,modelAliases:completeModelAliases(body.provider.modelAliases,body.model)};
   const config = await owner.readConfig(); const entries = genericLedger(config,owner.hostId);

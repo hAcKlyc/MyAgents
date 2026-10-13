@@ -1,6 +1,7 @@
 #[path = "../../src/agent_network/catalog_ack.rs"]
 pub(crate) mod catalog_ack;
 
+use crate::bot_execution::BotExecution;
 use crate::{
     agent_network::{
         account::NetworkAccountSession,
@@ -94,6 +95,67 @@ fn consume_join_grant(run: &AtomicBool, connection: &AtomicBool) -> bool {
     let connection_granted = connection.swap(false, Ordering::AcqRel);
     run_granted && connection_granted
 }
+struct ExecutionFence {
+    live: Arc<AtomicBool>,
+    execution: Arc<BotExecution>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+impl Drop for ExecutionFence {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::Release);
+        self.execution.cancel_pending();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+fn start_execution(
+    execution: &Option<Arc<BotExecution>>,
+    identity: Arc<NetworkIdentity>,
+    transport: Arc<NetworkTransport>,
+    scope: &myagents_agent_network_protocol::ConnectionScope,
+    local: &myagents_agent_network_protocol::DeviceScope,
+    policy: &policy::LocalPolicy,
+) -> Result<Option<ExecutionFence>, NetworkError> {
+    let Some(execution) = execution else {
+        return Ok(None);
+    };
+    let execution = execution.clone();
+    let live = Arc::new(AtomicBool::new(true));
+    let current = live.clone();
+    let source = execution.clone();
+    let scope = scope.clone();
+    let local = local.clone();
+    let policy = policy.clone();
+    let runtime = tokio::runtime::Handle::try_current()
+        .map_err(|_| NetworkError::new("BOT_EXECUTION_RUNTIME_REQUIRED"))?;
+    let task = runtime.spawn(async move {
+        while current.load(Ordering::Acquire) {
+            let result = source
+                .poll_once(&identity, &transport, &scope, &local, &policy, 1, &current)
+                .await;
+            if !current.load(Ordering::Acquire) {
+                break;
+            }
+            // Only fixed error codes cross diagnostics; no proof, token, body or model key.
+            if let Err(error) = result {
+                if error.code != "BOT_EXECUTION_BUSY" {
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({"code":error.code,"component":"finite-bot-poll"})
+                    );
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    });
+    Ok(Some(ExecutionFence {
+        live,
+        execution,
+        task: Some(task),
+    }))
+}
+
 fn is_management_enabled(owned_profile: bool, listener_enabled: bool) -> bool {
     owned_profile && listener_enabled
 }
@@ -109,6 +171,10 @@ struct ManagementRuntime<'a> {
     ipc: &'a crate::management_ipc::ManagementIpc,
     binding: &'a crate::management_admission::ManagementBinding,
 }
+struct ConnectionFeatures<'a> {
+    management: Option<ManagementRuntime<'a>>,
+    execution: &'a Option<Arc<BotExecution>>,
+}
 async fn connect(
     owner: &Owner,
     path: Option<&Path>,
@@ -116,8 +182,10 @@ async fn connect(
     owned: Option<&crate::owned::Connection>,
     join_authorized: &AtomicBool,
     admission_failed: &mut bool,
-    management: Option<ManagementRuntime<'_>>,
+    features: ConnectionFeatures<'_>,
 ) -> Result<(), NetworkError> {
+    let management = features.management;
+    let execution = features.execution;
     let account = if let Some(owned) = owned {
         owned
             .account(join_authorized.load(Ordering::Acquire))
@@ -133,14 +201,14 @@ async fn connect(
     }
     publish(owner, path, "initializing", None, false, None)?;
     let mut identity =
-        NetworkIdentity::initialize_with_store(account, None, owner.store.clone()).await?;
+        Arc::new(NetworkIdentity::initialize_with_store(account, None, owner.store.clone()).await?);
     let memory = MemoryBudget::default();
-    let transport = NetworkTransport::new_with_public_ca(
+    let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
         identity.device_key(),
         memory.clone(),
         identity.account.public_tls_ca(),
-    )?;
+    )?);
     if let NetworkAccountSession::Owned(account) = &identity.account {
         // One operator grant belongs to this run, not each reconnect.
         let grant = consume_join_grant(join_authorized, &account.join_authorized);
@@ -190,6 +258,7 @@ async fn connect(
     )
     .await?;
     let mut ready = false;
+    let mut execution_fence: Option<ExecutionFence> = None;
     let management_enabled =
         is_management_enabled(identity.account.is_management_only(), management.is_some());
     let mut pairs = management_enabled.then(|| Pairs::new_management(memory, PeerRole::Host));
@@ -212,9 +281,14 @@ async fn connect(
         if owned.is_some() { crate::agent_network::owned_profile::control(&envelope.message)?; }
         control_gate(&envelope.message,&scope,true,true)?;
         match envelope.message{
-        ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;},
-        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=if owned.is_some(){policy::hydrate_owned(&transport,&identity.token,&local).await?}else{policy::hydrate(&transport,&identity.token,&local).await?};if identity.account.is_management_only()&&!policy.joined{return Err(NetworkError::new("OWNED_MEMBERSHIP_REQUIRED"));}publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;},
-        ServerMessage::Changed{..} if identity.account.is_management_only()=>{policy=policy::hydrate_owned(&transport,&identity.token,&local).await?;if !policy.joined{return Err(NetworkError::new("OWNED_MEMBERSHIP_REQUIRED"));}},
+        ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;execution_fence=start_execution(execution,identity.clone(),transport.clone(),&scope,&local,&policy)?;},
+        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{drop(execution_fence.take());publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=if owned.is_some(){policy::hydrate_owned(&transport,&identity.token,&local).await?}else{policy::hydrate(&transport,&identity.token,&local).await?};if identity.account.is_management_only()&&!policy.joined{return Err(NetworkError::new("OWNED_MEMBERSHIP_REQUIRED"));}publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;if ready{execution_fence=start_execution(execution,identity.clone(),transport.clone(),&scope,&local,&policy)?;}},
+        ServerMessage::Changed{..} if identity.account.is_management_only()=>{
+            drop(execution_fence.take());
+            policy=policy::hydrate_owned(&transport,&identity.token,&local).await?;
+            if !policy.joined{return Err(NetworkError::new("OWNED_MEMBERSHIP_REQUIRED"));}
+            if ready{execution_fence=start_execution(execution,identity.clone(),transport.clone(),&scope,&local,&policy)?;}
+        },
         ServerMessage::Changed{..}|ServerMessage::RouteClosed{..}=>{},
         ServerMessage::ChannelOffer{channel_id,initiator,responder,initiator_connection_epoch,responder_connection_epoch,initiator_binding,responder_binding,..}=>{
             if !ready {
@@ -234,7 +308,7 @@ async fn connect(
                 send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id,reason:error.code}).await?;
                 continue;
             }
-            identity=identity.clone().ensure_peer().await?;
+            identity=Arc::new(identity.as_ref().clone().ensure_peer().await?);
             let binding=identity.peer.as_ref().ok_or_else(||NetworkError::new("NETWORK_CERTIFICATE_INVALID"))?.signed_binding.clone();
             pending_offers.insert(channel_id.clone(),offer);
             if let Err(error)=send(&mut socket,ClientMessage::Accept{scope:scope.clone(),channel_id:channel_id.clone(),signed_binding:binding}).await {
@@ -449,13 +523,14 @@ async fn drain_management(
     Ok(())
 }
 pub(crate) async fn run(owner: Arc<Owner>, path: Option<&Path>) -> Result<(), NetworkError> {
-    run_context(owner, None, path, false, None, None).await
+    run_context(owner, None, path, false, None, None, None).await
 }
 pub(crate) async fn run_owned(
     owner: Arc<Owner>,
     connection: &crate::owned::Connection,
     path: Option<&Path>,
     join_authorized: bool,
+    execution: Option<Arc<BotExecution>>,
     management: Option<&crate::management_ipc::ManagementIpcConfig>,
 ) -> Result<(), NetworkError> {
     // Pin this run to the encrypted local account generation before creating
@@ -479,6 +554,7 @@ pub(crate) async fn run_owned(
         join_authorized,
         ipc.as_ref(),
         management_binding.as_ref(),
+        execution,
     )
     .await
 }
@@ -496,6 +572,7 @@ async fn run_context(
     join_authorized: bool,
     management_ipc: Option<&crate::management_ipc::ManagementIpc>,
     management_binding: Option<&crate::management_admission::ManagementBinding>,
+    execution: Option<Arc<BotExecution>>,
 ) -> Result<(), NetworkError> {
     if management_ipc.is_some() != management_binding.is_some() {
         return Err(NetworkError::new("HOST_MANAGEMENT_BINDING_INVALID"));
@@ -508,7 +585,7 @@ async fn run_context(
     let mut backoff = ReconnectBackoff::default();
     loop {
         publish(&owner, path, "connecting", None, false, None)?;
-        let result = tokio::select! {r=connect(&owner,path,&mut backoff,owned,&join_authorized,&mut admission_failed,management)=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
+        let result = tokio::select! {r=connect(&owner,path,&mut backoff,owned,&join_authorized,&mut admission_failed,ConnectionFeatures {management,execution:&execution})=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
         let error = result.unwrap_err();
         let state = if [
             "SPACE_REAUTH_REQUIRED",

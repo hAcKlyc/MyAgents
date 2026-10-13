@@ -113,6 +113,17 @@ pub enum Presence {
 /// Durable metadata snapshot used by the relay's WebSocket admission path.
 /// `durable_ack_seq` is populated only from an intact persisted catalog whose
 /// epoch still matches the device's current connection epoch.
+/// Read-only ownership evidence for a freshly authenticated human account.
+/// Its browser device may be unenrolled; this does not confer device/relay rights.
+#[derive(Debug, Clone)]
+pub struct OwnedDeviceMembership {
+    pub identity_binding_id: String,
+    pub key_generation: u64,
+    pub key_fingerprint: String,
+    pub joined: bool,
+    pub membership_revision: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RelayMetadataState {
@@ -708,6 +719,36 @@ impl MetadataStore {
     /// The caller must already have freshly authenticated the session and
     /// checked the presented device identity; this method rechecks session
     /// expiry while waiting for and holding the owner lock.
+    /// Owner consent lookup. Caller must hold AuthStore's live human-session
+    /// gate and supply that exact projection. Unlike the device relay lookup,
+    /// this read does not pretend the browser is an enrolled target device.
+    pub fn read_owned_target(
+        &self,
+        context: &SessionContext,
+        target_device_id: &str,
+    ) -> Result<OwnedDeviceMembership, MetadataError> {
+        validate_context(context)?;
+        if !canonical_uuid(target_device_id) {
+            return Err(MetadataError::InvalidInput);
+        }
+        let connection = self.connection.lock().map_err(|_| MetadataError::Storage)?;
+        validate_context(context)?;
+        let row = connection.query_row(
+            "SELECT identity_binding_id,key_generation,key_fingerprint,joined,membership_revision
+             FROM devices WHERE network_id=?1 AND principal_id=?2 AND device_id=?3",
+            params![context.network_id,context.principal_id,target_device_id],
+            |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?)),
+        ).optional().map_err(|_| MetadataError::Storage)?.ok_or(MetadataError::DeviceOwnerMismatch)?;
+        validate_context(context)?;
+        Ok(OwnedDeviceMembership {
+            identity_binding_id: row.0,
+            key_generation: u64::try_from(row.1).map_err(|_| MetadataError::Storage)?,
+            key_fingerprint: row.2,
+            joined: row.3,
+            membership_revision: u64::try_from(row.4).map_err(|_| MetadataError::Storage)?,
+        })
+    }
+
     pub fn read_relay_state(
         &self,
         context: &SessionContext,

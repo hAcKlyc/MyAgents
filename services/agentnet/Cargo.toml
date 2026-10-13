@@ -14,6 +14,7 @@ libc = "=0.2.190"
 myagents-agentnet-device-core = { path = "device-core" }
 myagents-agent-network-protocol = { path = "../../src-tauri/agent-network-protocol" }
 myagents-agentnet-identity-core = { path = "identity-core" }
+myagents-agentnet-execution-core = { path = "execution-core" }
 myagents-agentnet-admission-core = { path = "admission-core" }
 myagents-agentnet-metadata-core = { path = "metadata-core" }
 myagents-agentnet-peer-core = { path = "peer-core" }
