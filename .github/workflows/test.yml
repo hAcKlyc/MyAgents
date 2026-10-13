@@ -37,6 +37,7 @@ jobs:
             exit 1
           fi
           python3 scripts/host/network-install.test.py
+          python3 scripts/host/network-control-daemon.test.py
           python3 scripts/host/unified-install.test.py
       - name: Record Linux artifact provenance
         env:
