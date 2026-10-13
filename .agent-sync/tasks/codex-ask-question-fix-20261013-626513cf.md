@@ -14,7 +14,7 @@ MOXBOTS-ASK-QUESTION-FIX-20261013. 用户明确由当前Agent修复3项问答问
 - [x] 省略multiSelect正常单选，畸形选项向caller返回字段错误，不误报用户取消。
 - [x] 并发提问FIFO逐项回答，重复回放/过期/失败重试/迟到回执不丢问题。
 - [x] SDK与external入口、组件、Tab和答案投影回归，typecheck/lint/build与独立审阅通过。
-- [ ] PR检查、最新远端main包含修复。
+- [x] PR检查、最新远端main包含修复。
 - [ ] 统一包更新当前客户端，保留回滚，并验证真实UI显示/回答到caller。
 
 ## Completed
@@ -31,4 +31,4 @@ MOXBOTS-ASK-QUESTION-FIX-20261013. 用户明确由当前Agent修复3项问答问
 
 ## Next step
 
-- 当前源代码可审阅。创建PR、等待当前头CI、同步最新main集成，向安装owner交付冻结提交；统一包后补原生提问显示与真实caller回执验收。
+- PR #21、six-check CI与main `d9749998f743707074d6d42dc5344bcb724d55a8` 已核验交付。安装owner已收到冻结source/patch/摘要；等待统一包和用户手动解锁，再补原生提问显示/真实caller回执，不重复实现或单独换包。
