@@ -880,3 +880,16 @@ fn device_name_and_membership_survive_store_restart() {
     assert_eq!(page["items"][0]["joined"], true);
     assert_eq!(page["items"][0]["membershipRevision"], 1);
 }
+
+
+#[test]
+fn human_owner_projection_does_not_require_browser_device_enrollment_or_grant_relay() {
+    let dir=private_dir();let store=MetadataStore::open(dir.path(),profile()).unwrap();
+    let host=context(Uuid::new_v4().to_string());let device=register(&store,&host);
+    let mut browser=host.clone();browser.device_id=Uuid::new_v4().to_string();browser.session_handle=Uuid::new_v4().to_string();
+    let owned=store.read_owned_target(&browser,&host.device_id).unwrap();
+    assert_eq!(owned.identity_binding_id,device.identity_binding_id);assert_eq!(owned.key_generation,device.key_generation);
+    assert!(store.read_relay_state(&browser,&host.device_id).is_err());
+    let mut other=browser.clone();other.principal_id=Uuid::new_v4().to_string();assert_eq!(store.read_owned_target(&other,&host.device_id).unwrap_err(),MetadataError::DeviceOwnerMismatch);
+    browser.expires_at=now_seconds().unwrap()-1;assert_eq!(store.read_owned_target(&browser,&host.device_id).unwrap_err(),MetadataError::InvalidSession);
+}

@@ -16,6 +16,7 @@ use crate::{
     status::{self, Status},
 };
 use futures_util::{SinkExt, StreamExt};
+use crate::bot_execution::BotExecution;
 use myagents_agent_network_protocol::{
     budget, CatalogSnapshot, ChangeScope, ClientMessage, ServerEnvelope, ServerMessage,
 };
@@ -91,6 +92,38 @@ fn consume_join_grant(run: &AtomicBool, connection: &AtomicBool) -> bool {
     let connection_granted = connection.swap(false, Ordering::AcqRel);
     run_granted && connection_granted
 }
+struct ExecutionFence {
+    live: Arc<AtomicBool>,
+    execution: Arc<BotExecution>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+impl Drop for ExecutionFence {
+    fn drop(&mut self) {
+        self.live.store(false, Ordering::Release);
+        self.execution.cancel_pending();
+        if let Some(task)=self.task.take(){task.abort();}
+    }
+}
+fn start_execution(
+    execution: &Option<Arc<BotExecution>>, identity: Arc<NetworkIdentity>,
+    transport: Arc<NetworkTransport>, scope: &myagents_agent_network_protocol::ConnectionScope,
+    local: &myagents_agent_network_protocol::DeviceScope, policy: &policy::LocalPolicy,
+) -> Result<Option<ExecutionFence>,NetworkError> {
+    let Some(execution)=execution else{return Ok(None)};
+    let execution=execution.clone();let live=Arc::new(AtomicBool::new(true));
+    let current=live.clone();let source=execution.clone();let scope=scope.clone();let local=local.clone();let policy=policy.clone();
+    let runtime=tokio::runtime::Handle::try_current().map_err(|_|NetworkError::new("BOT_EXECUTION_RUNTIME_REQUIRED"))?;
+    let task=runtime.spawn(async move {
+        while current.load(Ordering::Acquire) {
+            let result=source.poll_once(&identity,&transport,&scope,&local,&policy,1,&current).await;
+            if !current.load(Ordering::Acquire){break;}
+            // Only fixed error codes cross diagnostics; no proof, token, body or model key.
+            if let Err(error)=result {if error.code!="BOT_EXECUTION_BUSY" {eprintln!("{}",serde_json::json!({"code":error.code,"component":"finite-bot-poll"}));}}
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    });
+    Ok(Some(ExecutionFence{live,execution,task:Some(task)}))
+}
 async fn connect(
     owner: &Owner,
     path: Option<&Path>,
@@ -98,6 +131,7 @@ async fn connect(
     owned: Option<&crate::owned::Connection>,
     join_authorized: &AtomicBool,
     admission_failed: &mut bool,
+    execution: &Option<Arc<BotExecution>>,
 ) -> Result<(), NetworkError> {
     let account = if let Some(owned) = owned {
         owned
@@ -109,14 +143,13 @@ async fn connect(
         NetworkAccountSession::Official(official)
     };
     publish(owner, path, "initializing", None, false, None)?;
-    let identity =
-        NetworkIdentity::initialize_with_store(account, None, owner.store.clone()).await?;
-    let transport = NetworkTransport::new_with_public_ca(
+    let identity = Arc::new(NetworkIdentity::initialize_with_store(account, None, owner.store.clone()).await?);
+    let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
         identity.device_key(),
         MemoryBudget::default(),
         identity.account.public_tls_ca(),
-    )?;
+    )?);
     if let NetworkAccountSession::Owned(account) = &identity.account {
         // One operator grant belongs to this run, not each reconnect.
         let grant = consume_join_grant(join_authorized, &account.join_authorized);
@@ -166,6 +199,7 @@ async fn connect(
     )
     .await?;
     let mut ready = false;
+    let mut execution_fence:Option<ExecutionFence>=None;
     let mut last_status = Instant::now();
     let mut last_server = Instant::now();
     let mut last_ping = Instant::now();
@@ -184,8 +218,8 @@ async fn connect(
         if owned.is_some() { crate::agent_network::owned_profile::control(&envelope.message)?; }
         control_gate(&envelope.message,&scope,true,true)?;
         match envelope.message{
-        ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;},
-        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=if owned.is_some(){policy::hydrate_owned(&transport,&identity.token,&local).await?}else{policy::hydrate(&transport,&identity.token,&local).await?};publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;},
+        ServerMessage::Ready{catalog_seq:1,..} if !ready=>{ready=true;backoff.recovered();publish(owner,path,"ready",Some(&scope.network_id),true,None)?;execution_fence=start_execution(execution,identity.clone(),transport.clone(),&scope,&local,&policy)?;},
+        ServerMessage::Changed{change:ChangeScope::Settings|ChangeScope::Catalog,..}=>{drop(execution_fence.take());publish(owner,path,"hydrating",Some(&scope.network_id),false,None)?;policy=if owned.is_some(){policy::hydrate_owned(&transport,&identity.token,&local).await?}else{policy::hydrate(&transport,&identity.token,&local).await?};if execution.is_some()&&!policy.joined{return Err(NetworkError::new("OWNED_MEMBERSHIP_REQUIRED"));}publish(owner,path,if ready{"ready"}else{"hydrating"},Some(&scope.network_id),ready,None)?;if ready{execution_fence=start_execution(execution,identity.clone(),transport.clone(),&scope,&local,&policy)?;}},
         ServerMessage::Changed{..}|ServerMessage::ChannelClosed{..}|ServerMessage::RouteClosed{..}=>{},
         ServerMessage::ChannelOffer{channel_id,..}=>{send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;},
         ServerMessage::Error{code,retryable}=>{let mut e=NetworkError::cloud(&code,400);e.retryable=retryable;return Err(e);},
@@ -204,15 +238,16 @@ async fn connect(
     }
 }
 pub(crate) async fn run(owner: Arc<Owner>, path: Option<&Path>) -> Result<(), NetworkError> {
-    run_context(owner, None, path, false).await
+    run_context(owner, None, path, false, None).await
 }
 pub(crate) async fn run_owned(
     owner: Arc<Owner>,
     connection: &crate::owned::Connection,
     path: Option<&Path>,
     join_authorized: bool,
+    execution: Option<Arc<BotExecution>>,
 ) -> Result<(), NetworkError> {
-    run_context(owner, Some(connection), path, join_authorized).await
+    run_context(owner, Some(connection), path, join_authorized, execution).await
 }
 fn management_hello() -> ClientMessage {
     ClientMessage::Hello {
@@ -226,13 +261,14 @@ async fn run_context(
     owned: Option<&crate::owned::Connection>,
     path: Option<&Path>,
     join_authorized: bool,
+    execution: Option<Arc<BotExecution>>,
 ) -> Result<(), NetworkError> {
     let join_authorized = AtomicBool::new(join_authorized);
     let mut admission_failed = false;
     let mut backoff = ReconnectBackoff::default();
     loop {
         publish(&owner, path, "connecting", None, false, None)?;
-        let result = tokio::select! {r=connect(&owner,path,&mut backoff,owned,&join_authorized,&mut admission_failed)=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
+        let result = tokio::select! {r=connect(&owner,path,&mut backoff,owned,&join_authorized,&mut admission_failed,&execution)=>r,_=crate::shutdown()=>{publish(&owner,path,"stopped",None,false,None)?;return Ok(());}};
         let error = result.unwrap_err();
         let state = if [
             "SPACE_REAUTH_REQUIRED",

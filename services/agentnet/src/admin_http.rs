@@ -21,6 +21,7 @@ pub struct AdminService {
     auth: Arc<AuthStore>,
     store: Arc<AdminStore>,
     config: Arc<AdminConfig>,
+    execution: Option<Arc<crate::execution_store::ExecutionStore>>,
     origin: String,
     in_flight: Arc<Semaphore>,
 }
@@ -38,9 +39,16 @@ impl AdminService {
             auth,
             store: Arc::new(store),
             config: Arc::new(config),
+            execution: None,
             origin,
             in_flight: Arc::new(Semaphore::new(32)),
         })
+    }
+    pub(crate) fn connect_execution(
+        &mut self,
+        ledger: Arc<crate::execution_store::ExecutionStore>,
+    ) {
+        self.execution = Some(ledger);
     }
     pub fn router(&self) -> Router<()> {
         let s = Arc::new(self.clone());
@@ -97,7 +105,18 @@ async fn bootstrap(State(s): State<Arc<AdminService>>, h: HeaderMap) -> Result<J
   let models=s.config.model_refs.iter().map(|x|json!({"id":x.id,"label":x.name,"owner_ids":x.owner_ids,"runtimes":x.runtimes})).collect::<Vec<_>>();
   let bots=s.store.bots().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"ADMIN_STORAGE_UNAVAILABLE"))?;
   let audit=s.store.audit().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"ADMIN_STORAGE_UNAVAILABLE"))?;
-  Ok(json!({"ok":true,"data":{"principal_id":actor,"users":users,"hosts":hosts,"model_refs":models,"bots":bots,"audit":audit,"capabilities":{"sharing":false,"host_execution":false,"registry_only":true,"max_daily_tokens":s.config.max_daily_tokens}}}))
+  let execution=if let Some(exec)=&s.execution {
+      let rows=exec.grants().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"EXECUTION_STORAGE_UNAVAILABLE"))?;
+      let mut records=Vec::new();
+      for row in rows {
+          let snapshot=exec.known_bot_snapshot(&row.grant.scope,&row.grant.bot_id).map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"EXECUTION_STORAGE_UNAVAILABLE"))?;
+          records.push(json!({"grant":row.grant,"state":row.state,"snapshot":snapshot}));
+      }
+      let reports=exec.public_observations().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"EXECUTION_STORAGE_UNAVAILABLE"))?;
+      let reports=reports.into_iter().filter(|row|s.config.hosts.iter().any(|host|host.id==row.host_id&&host.owner_ids.contains(&row.scope.host_owner_id))).collect::<Vec<_>>();
+      json!({"enabled":true,"records":records,"hosts":reports,"invocation":false})
+  }else{json!({"enabled":false,"records":[],"hosts":[],"invocation":false})};
+  Ok(json!({"ok":true,"data":{"execution":execution,"principal_id":actor,"users":users,"hosts":hosts,"model_refs":models,"bots":bots,"audit":audit,"capabilities":{"sharing":false,"host_execution":s.execution.is_some(),"registry_only":s.execution.is_none(),"max_daily_tokens":s.config.max_daily_tokens}}}))
  }).await?;
     Ok(Json(out))
 }
@@ -283,6 +302,22 @@ async fn mutate(
             .iter()
             .map(|u| u.principal_id.clone())
             .collect::<Vec<_>>();
+        if a != "create"
+            && let Some(exec) = &s.execution
+        {
+            let target = b.get("id").and_then(Value::as_str).ok_or_else(Err::bad)?;
+            if exec.bot_has_live_grant(target).map_err(|_| {
+                Err::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "EXECUTION_STORAGE_UNAVAILABLE",
+                )
+            })? {
+                return Err(Err::new(
+                    StatusCode::CONFLICT,
+                    "HOST_EXECUTION_MUTATION_REQUIRED",
+                ));
+            }
+        }
         s.store
             .mutate(actor, a, id, &b, r, &s.config, &users)
             .map_err(|(c, retry)| Err {
@@ -455,7 +490,7 @@ impl IntoResponse for Err {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use axum::{
         body::Body,
@@ -485,6 +520,25 @@ mod tests {
         authorization_url: String,
     }
 
+    pub(crate) fn browser_fixture_router(
+        auth: Arc<AuthStore>,
+        subjects: HashMap<String, crate::VerifiedSubject>,
+        authorization_url: String,
+    ) -> Router {
+        let fixture = BrowserFixture {
+            auth,
+            subjects,
+            pending: Arc::new(Mutex::new(HashMap::new())),
+            authorization_url,
+        };
+        Router::new()
+            .route("/auth/login/start", post(fixture_login_start))
+            .route("/auth/login/poll", post(fixture_login_poll))
+            .route("/auth/session", delete(fixture_revoke))
+            .route("/fixture-login", get(fixture_login_page))
+            .route("/fixture-identity/{identity}", get(fixture_identity))
+            .with_state(fixture)
+    }
     async fn fixture_login_start(
         AxumState(s): AxumState<BrowserFixture>,
         headers: HeaderMap,

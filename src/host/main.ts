@@ -8,6 +8,15 @@ import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
 import { configureHost, readConfigReceipt, type HostConfig } from './management';
 import { readNetworkStatus } from './network-status';
+import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
+import type { BotRunIdentity } from './bot-runtime';
+import { createBotSessionAdapter } from './bot-session-adapter';
+import { loadBotExecutionPolicy } from './bot-execution-policy';
+import { connectBotExecutionIpc } from './bot-execution-ipc';
+import { createHostBotManager } from './bot-management';
+import { stopBotChild } from './bot-child-stop';
+import { loadConfig, loadProjects, materializeProviderRouteEnv } from '../server/utils/admin-config';
+import { createConcreteProviderRoute } from '../shared/providerRoute';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -16,7 +25,7 @@ const configPath = join(home, '.myagents', 'config.json');
 const workspaceRoot = join(stateDir, 'workspaces');
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY = 1024 * 1024;
-type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean };
+type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean; bot?: BotRunIdentity };
 
 async function jsonFile<T>(path: string, fallback: T): Promise<T> {
   try { return JSON.parse(await readFile(path, 'utf8')) as T; }
@@ -71,6 +80,9 @@ async function serve(): Promise<void> {
   if (!identity) { identity = { hostId: randomUUID(), schemaVersion: 1 }; await atomicJson(identityPath, identity); }
   if (identity.schemaVersion !== 1 || !uuidPattern.test(identity.hostId)) throw new Error('Unsupported Host identity');
   let active: Active | null = null;
+  const exitedBots = new Map<string,BotRunIdentity>();
+  let botExecutionIpc: Awaited<ReturnType<typeof connectBotExecutionIpc>> | undefined;
+  let botPolicyTimer:NodeJS.Timeout|undefined;
   let shuttingDown = false;
   let mutationTail: Promise<unknown> = Promise.resolve();
   const pending = new Map<string, { active: Active; resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
@@ -96,16 +108,17 @@ async function serve(): Promise<void> {
     });
   }
 
-  async function ensureSession(sessionId?: string): Promise<Active> {
+  async function ensureSession(sessionId?: string, botBootstrap?: HostBotBootstrap): Promise<Active> {
     if (shuttingDown) throw new Error('Host is stopping');
     if (active) {
       if (sessionId && active.sessionId === sessionId && !active.closing) return active;
       throw new Error('First version allows one active Session; release it before opening another');
     }
-    const config = await jsonFile<HostConfig>(configPath, {});
-    const settings = config.hostSettings;
-    if (!settings) throw new Error('Configure the Host before creating a Session');
-    let workspace = await workspacePath(settings.workspace);
+    const bot = botBootstrap ? parseHostBotBootstrap(botBootstrap) : undefined;
+    if (bot && sessionId) throw new Error('BOT_PRIVATE_SESSION_FORBIDDEN');
+    const settings = bot ? undefined : (await jsonFile<HostConfig>(configPath, {})).hostSettings;
+    if (!bot && !settings) throw new Error('Configure the Host before creating a Session');
+    let workspace = await workspacePath(bot?.workspace ?? settings!.workspace);
     if (sessionId) {
       if (!uuidPattern.test(sessionId)) throw new Error('Invalid Session ID');
       const rows = await jsonFile<Array<{ id: string; agentDir: string; runtime?: string }>>(join(home, '.myagents', 'sessions.json'), []);
@@ -113,18 +126,21 @@ async function serve(): Promise<void> {
       if (!row || (row.runtime && row.runtime !== 'builtin')) throw new Error('Unknown or unsupported Session');
       workspace = await workspacePath(row.agentDir);
     }
-    const generation = randomUUID();
+    const generation = bot?.run_generation ?? randomUUID();
     const child = fork(workerPath, [], {
       cwd: dirname(workerPath),
-      env: { ...process.env, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
-        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: settings.providerId,
-        MYAGENTS_HOST_MODEL: settings.model, MYAGENTS_HOST_GENERATION: generation,
-        MYAGENTS_HOST_EXECUTION_AUTHORIZED: settings.executionAuthorized ? '1' : '0' },
+      env: { ...(bot ? {PATH:process.env.PATH,LANG:process.env.LANG,TMPDIR:process.env.TMPDIR,USERPROFILE:home} : process.env),
+        HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+        MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: bot?.provider_id ?? settings!.providerId,
+        MYAGENTS_HOST_MODEL: bot?.model ?? settings!.model, MYAGENTS_HOST_GENERATION: generation,
+        MYAGENTS_HOST_EXECUTION_AUTHORIZED: !bot && settings?.executionAuthorized ? '1' : '0',
+        ...(bot ? {MYAGENTS_HOST_BOT_BOOTSTRAP:Buffer.from(JSON.stringify(bot)).toString('base64url')} : {}) },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
     const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false };
     active = target;
     child.on('exit', () => {
+      if (target.bot) {exitedBots.set(target.bot.run_generation,{...target.bot});if(exitedBots.size>256)exitedBots.delete(exitedBots.keys().next().value!);}
       if (active === target) active = null;
       for (const [id, entry] of pending) if (entry.active === target) {
         clearTimeout(entry.timer); pending.delete(id); entry.reject(new Error('Session process exited; inspect persisted state before retrying'));
@@ -141,9 +157,15 @@ async function serve(): Promise<void> {
     await new Promise<void>((resolveReady, reject) => {
       const timer = setTimeout(() => { target.closing = true; child.kill('SIGTERM'); reject(new Error('Session startup timed out')); }, 60000);
       const onMessage = (raw: unknown) => {
-        const value = raw as { type?: string; generation?: string; sessionId?: string };
+        const value = raw as { type?: string; generation?: string; sessionId?: string; bot?: BotRunIdentity };
         if (value?.type !== 'ready' || value.generation !== generation || !value.sessionId || !uuidPattern.test(value.sessionId)) return;
-        target.sessionId = value.sessionId; finish(); resolveReady();
+        if (bot && (!value.bot || value.bot.bot_id!==bot.snapshot.bot_id || value.bot.agent_id!==bot.snapshot.agent_id ||
+            value.bot.binding_generation!==bot.snapshot.binding_generation || value.bot.session_id!==value.sessionId ||
+            value.bot.run_generation!==generation || value.bot.snapshot_hash!==bot.snapshot.snapshot_hash || value.bot.runtime!=='builtin')) {
+          target.closing=true; child.kill('SIGTERM'); finish(); reject(new Error('BOT_RUN_BINDING_MISMATCH')); return;
+        }
+        if (!bot && value.bot) {target.closing=true; child.kill('SIGTERM'); finish(); reject(new Error('BOT_RUN_BINDING_MISMATCH')); return;}
+        target.bot=value.bot; target.sessionId = value.sessionId; finish(); resolveReady();
       };
       const onExit = () => { finish(); reject(new Error('Session initialization failed')); };
       function finish() { clearTimeout(timer); child.off('message', onMessage); child.off('exit', onExit); child.off('error', onError); }
@@ -155,6 +177,7 @@ async function serve(): Promise<void> {
 
   async function release(target: Active): Promise<void> {
     target.closing = true;
+    if(target.bot){await stopBotChild(target.child,()=>workerCall(target,'shutdown'));return;}
     const exited = new Promise<void>(resolveExit => target.child.once('exit', () => resolveExit()));
     await workerCall(target, 'shutdown');
     await Promise.race([exited, new Promise<never>((_, reject) => {
@@ -190,6 +213,7 @@ async function serve(): Promise<void> {
     }
     const match = /^\/session\/([0-9a-f-]+)\/(describe|send|state|result|permission|stop|release)$/.exec(path);
     if (!match || !uuidPattern.test(match[1])) throw new Error('Unknown Host operation');
+    if (active?.bot && active.sessionId===match[1]) throw new Error('Delegated Bot Session requires its exact Bot owner; private Session endpoints are unavailable');
     if (match[2] === 'release') return exclusive(async () => {
       const target = await ensureSession(match[1]);
       await release(target); return { released: true };
@@ -230,11 +254,78 @@ async function serve(): Promise<void> {
   }
   await new Promise<void>((resolveListen, reject) => { server.once('error', reject); server.listen(socket, () => resolveListen()); });
   await chmod(socket, 0o600);
-  console.log('MyAgents Host ready (local Unix socket, AgentNet not integrated)');
+  const policyPin = await loadBotExecutionPolicy(join(stateDir,'bot-execution-policy.json'),identity.hostId);
+  if (policyPin) {
+    const {policy}=policyPin;
+    const sameRun=(a:BotRunIdentity,b:BotRunIdentity)=>a.bot_id===b.bot_id && a.agent_id===b.agent_id &&
+      a.binding_generation===b.binding_generation && a.run_generation===b.run_generation && a.session_id===b.session_id &&
+      a.snapshot_hash===b.snapshot_hash && a.runtime===b.runtime;
+    const adapter=createBotSessionAdapter({
+      async resolve(snapshot) {
+        await policyPin.assertCurrent();
+        const binding=snapshot.config.model_ref ? policy.model_bindings[snapshot.config.model_ref] : undefined;
+        if(snapshot.runtime!=='builtin'||!binding)throw new Error('BOT_RUNTIME_UNSUPPORTED');
+        const project=loadProjects({strict:true}).find(p=>p.agentId===snapshot.agent_id);
+        if(!project)throw new Error('BOT_AGENT_BINDING_MISSING');
+        const workspace=await workspacePath(project.path);
+        const markerPath=join(workspace,'.moxbot-cloud-binding.json');
+        const markerInfo=await lstat(markerPath);
+        if(!markerInfo.isFile()||markerInfo.isSymbolicLink()||markerInfo.uid!==process.geteuid?.()||markerInfo.nlink!==1||(markerInfo.mode&0o777)!==0o600||markerInfo.size>4096)throw new Error('BOT_AGENT_BINDING_MISSING');
+        const marker=JSON.parse(await readFile(markerPath,'utf8')) as {host_id?:string;bot_id?:string};
+        if(marker.host_id!==identity!.hostId||marker.bot_id!==snapshot.bot_id)throw new Error('BOT_AGENT_BINDING_MISSING');
+        const route=createConcreteProviderRoute(binding.provider_id,binding.model);
+        const materialized=materializeProviderRouteEnv(route,loadConfig({strict:true}));
+        if(route.kind==='provider'&&(!materialized?.apiKey||materialized.apiProtocol!=='anthropic'))throw new Error('BOT_RUNTIME_UNSUPPORTED');
+        return {workspace,provider_id:binding.provider_id,model:binding.model};
+      },
+      prepare:bootstrap=>exclusive(async()=>{
+        await policyPin.assertCurrent();if(active||shuttingDown)throw new Error('HOST_BUSY');
+        const target=await ensureSession(undefined,bootstrap);
+        if(!target.bot)throw new Error('BOT_RUN_BINDING_MISMATCH');
+        return {session_id:target.sessionId,run_generation:target.bot.run_generation};
+      }),
+      inspect:run=>exclusive(async()=>{
+        if(active?.bot&&sameRun(active.bot,run))return {status:active.closing||active.child.exitCode!==null||active.child.signalCode!==null?'unknown' as const:'running' as const,identity:run};
+        const exited=exitedBots.get(run.run_generation);
+        return {status:exited&&sameRun(exited,run)?'stopped' as const:'unknown' as const,identity:run};
+      }),
+      stop:run=>exclusive(async()=>{
+        const exited=exitedBots.get(run.run_generation);
+        if(exited&&sameRun(exited,run))return {status:'stopped' as const,identity:run};
+        if(!active?.bot||!sameRun(active.bot,run))return {status:'unknown' as const,identity:run};
+        const target=active;
+        try{await release(target);return {status:'stopped' as const,identity:run};}catch{return {status:'unknown' as const,identity:run};}
+      }),
+    });
+    botExecutionIpc=await connectBotExecutionIpc({socket:policy.ipc_socket,networkUid:policy.network_uid,managementGid:policy.management_gid,
+      scope:policy.scope,assertAuthority:()=>policyPin.assertCurrent(),manager:currentHostContext=>createHostBotManager({hostId:identity!.hostId,
+        roots:policy.roots,scope:policy.scope,jwks:policy.jwks,localPolicy:policy.local_policy,authorityFingerprint:policyPin.authorityFingerprint,currentHostContext,runtimeAdapter:adapter})});
+    let expirationClosing=false;
+    botPolicyTimer=setInterval(()=>{
+      if(expirationClosing)return;
+      expirationClosing=true;
+      void (async()=>{
+        let changed=false;
+        const expired=Date.now()/1000>=policy.local_policy.expires_at;
+        try{await policyPin.assertCurrent();}catch{changed=true;}
+        if(expired||changed){
+          // The protected opt-in deadline/revocation closes only this Bot's
+          // exact supervisor-owned worker, never a private Session.
+          await exclusive(async()=>{if(active?.bot){try{await release(active);}catch{/* retain closing/unknown; never infer stopped */}}});
+          // Expired, unchanged authority permits only original receipt ACKs.
+          // Removing/changing the protected file closes the channel entirely.
+          if(changed)await botExecutionIpc?.close();
+        }
+      })().catch(()=>{console.error('BOT_POLICY_STOP_UNCONFIRMED');}).finally(()=>{expirationClosing=false;});
+    },1000);botPolicyTimer.unref();
+  }
+  console.log('MyAgents Host ready (private Unix control; finite Bot delegation requires protected opt-in)');
   const stop = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     server.close();
+    if(botPolicyTimer)clearInterval(botPolicyTimer);
+    await botExecutionIpc?.close();
     try { await exclusive(async () => { if (active) await release(active); }); }
     catch { process.exitCode = 1; }
     await unlink(socket).catch(() => {});

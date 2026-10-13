@@ -223,6 +223,67 @@ impl NetworkTransport {
         })?;
         Ok((value, allocation))
     }
+    pub(crate) fn execution_origin_matches(&self, issuer: &str) -> bool {
+        self.origin.origin().ascii_serialization() == issuer
+    }
+    /// Independent finite execution DTOs, never vendor MetadataKind. Caller
+    /// keeps the allocation alive for the decoded response's entire lifetime.
+    pub(crate) async fn execution_json<T: serde::de::DeserializeOwned>(
+        &self,
+        route: ExecutionRoute,
+        token: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<(T, super::memory::Allocation), NetworkError> {
+        let size = super::memory::measure(body)?.0;
+        let request_limit = if route == ExecutionRoute::Observe {
+            EXECUTION_REQUEST_BYTES + 1024
+        } else {
+            EXECUTION_REQUEST_BYTES
+        };
+        if size == 0 || size > request_limit {
+            return Err(NetworkError::new("BOT_EXECUTION_REQUEST_TOO_LARGE"));
+        }
+        let mut allocation = self.memory.reserve(size.saturating_mul(2))?;
+        let bytes = serde_json::to_vec(body)
+            .map_err(|_| NetworkError::new("BOT_EXECUTION_REQUEST_INVALID"))?;
+        let method = reqwest::Method::POST;
+        let path = route.path();
+        let url = self
+            .origin
+            .join(path)
+            .map_err(|_| NetworkError::new("NETWORK_ENDPOINT_INVALID"))?;
+        let request = self
+            .client
+            .post(url.clone())
+            .header("Content-Type", "application/json")
+            .body(bytes);
+        let diagnostic = RequestDiagnostic::new("bot-execution", &method, path);
+        let mut response = self
+            .authenticated(request, &method, &url, token, &diagnostic)
+            .await?;
+        allocation.resize(0)?;
+        let status = response.status();
+        let retry_after = super::reconnect::retry_after(&response);
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| NetworkError::new("BOT_EXECUTION_TRANSPORT_UNCONFIRMED"))?
+        {
+            let length = bytes
+                .len()
+                .checked_add(chunk.len())
+                .filter(|n| *n <= EXECUTION_RESPONSE_BYTES)
+                .ok_or_else(|| NetworkError::new("BOT_EXECUTION_RESPONSE_TOO_LARGE"))?;
+            allocation.resize(length.saturating_mul(3))?;
+            bytes
+                .try_reserve_exact(chunk.len())
+                .map_err(|_| NetworkError::new("CONNECTOR_CAPACITY"))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        let value = decode_execution_response(status.as_u16(), &bytes, retry_after)?;
+        Ok((value, allocation))
+    }
     pub(crate) async fn websocket(&self, token: &str) -> Result<NetworkSocket, NetworkError> {
         let key = generate_key();
         let url = self
@@ -416,6 +477,60 @@ fn page(cursor: Option<&str>, limit: usize) -> Result<String, NetworkError> {
         Some(cursor) => format!("?limit={limit}&cursor={}", uuid(cursor)?),
         None => format!("?limit={limit}"),
     })
+}
+pub(crate) const EXECUTION_REQUEST_BYTES: usize = 64 * 1024;
+pub(crate) const EXECUTION_RESPONSE_BYTES: usize = 1024 * 1024;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExecutionRoute {
+    Observe,
+    Pull,
+    Lease,
+    Receipt,
+}
+impl ExecutionRoute {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Observe => "/execution/self/observe",
+            Self::Pull => "/execution/self/pull",
+            Self::Lease => "/execution/self/lease",
+            Self::Receipt => "/execution/self/receipt",
+        }
+    }
+}
+fn decode_execution_response<T: serde::de::DeserializeOwned>(
+    status: u16,
+    bytes: &[u8],
+    retry_after: Option<Duration>,
+) -> Result<T, NetworkError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Envelope<T> {
+        ok: bool,
+        data: Option<T>,
+        code: Option<String>,
+    }
+    let response: Envelope<T> = serde_json::from_slice(bytes)
+        .map_err(|_| NetworkError::new("BOT_EXECUTION_RESPONSE_INVALID"))?;
+    if (200..300).contains(&status) && response.ok && response.code.is_none() {
+        return response
+            .data
+            .ok_or_else(|| NetworkError::new("BOT_EXECUTION_RESPONSE_INVALID"));
+    }
+    if (200..300).contains(&status) || response.ok || response.data.is_some() {
+        return Err(NetworkError::new("BOT_EXECUTION_RESPONSE_INVALID"));
+    }
+    let code = response
+        .code
+        .filter(|s| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.bytes()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
+        })
+        .ok_or_else(|| NetworkError::new("BOT_EXECUTION_RESPONSE_INVALID"))?;
+    let mut error = NetworkError::cloud(&code, status);
+    error.retry_after = retry_after;
+    Err(error)
 }
 pub(crate) enum NetworkRoute<'a> {
     Network,
@@ -786,5 +901,54 @@ mod tests {
         assert_eq!(error.code, "RATE_LIMITED");
         assert!(error.retryable);
         assert_eq!(error.details, Some(serde_json::json!({"limit":2})));
+    }
+}
+
+#[cfg(test)]
+mod execution_transport_tests {
+    use super::*;
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Data {
+        value: u64,
+    }
+    #[test]
+    fn execution_has_fixed_routes_and_closed_separate_envelope() {
+        assert_eq!(ExecutionRoute::Observe.path(), "/execution/self/observe");
+        assert_eq!(ExecutionRoute::Pull.path(), "/execution/self/pull");
+        assert_eq!(ExecutionRoute::Lease.path(), "/execution/self/lease");
+        assert_eq!(ExecutionRoute::Receipt.path(), "/execution/self/receipt");
+        assert_eq!(
+            decode_execution_response::<Data>(200, br#"{"ok":true,"data":{"value":1}}"#, None)
+                .unwrap()
+                .value,
+            1
+        );
+        for b in [
+            br#"{"ok":true,"ok":false,"data":{"value":1}}"#.as_slice(),
+            br#"{"ok":true,"data":{"value":1,"unexpected":0}}"#,
+            br#"{"ok":true,"data":{"value":1},"token":"forbidden"}"#,
+            br#"{"ok":true,"data":{"value":1},"code":"ANY"}"#,
+        ] {
+            assert!(decode_execution_response::<Data>(200, b, None).is_err());
+        }
+        let e = decode_execution_response::<Data>(
+            403,
+            br#"{"ok":false,"code":"SESSION_REJECTED"}"#,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "SESSION_REJECTED");
+        assert!(!e.retryable);
+        assert_eq!(
+            decode_execution_response::<Data>(
+                500,
+                br#"{"ok":false,"code":"unsafe-token value"}"#,
+                None
+            )
+            .unwrap_err()
+            .code,
+            "BOT_EXECUTION_RESPONSE_INVALID"
+        );
     }
 }

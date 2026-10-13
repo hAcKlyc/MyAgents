@@ -1,16 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
+import { bootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { isHostSessionRequest, type HostSessionMessage, type HostSessionRequest } from './host-session-protocol';
 
 // The supervisor is the only process owner. This entry owns exactly one existing
 // Product Session binding, and never implements a second SDK or transcript store.
 async function main(): Promise<void> {
+  const bot = bootstrapFromEnvironment();
   const generation = process.env.MYAGENTS_HOST_GENERATION;
   const workspace = process.env.MYAGENTS_HOST_WORKSPACE;
   if (!generation || !workspace || !isAbsolute(workspace) || !process.send) {
     throw new Error('Host worker requires IPC, generation and an absolute workspace');
   }
+  if (bot && (resolve(bot.workspace) !== resolve(workspace) || process.env.MYAGENTS_HOST_SESSION_ID)) throw new Error('BOT_BOOTSTRAP_INVALID');
   const credentials = new Set<string>([process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN, process.env.CLAUDE_CODE_OAUTH_TOKEN].filter((value): value is string => Boolean(value)));
   const redactText = (text: string) => {
     for (const credential of credentials) text = text.split(credential).join('[redacted]');
@@ -46,8 +49,8 @@ async function main(): Promise<void> {
   await agent.initializeAgent(workspace, undefined, existingId, { preWarmDisabled: true });
   if (engine.kind !== 'builtin') throw new Error('Host worker only supports builtin Sessions');
   if (!existing) {
-    const model = process.env.MYAGENTS_HOST_MODEL?.trim();
-    const providerId = process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
+    const model = bot?.model ?? process.env.MYAGENTS_HOST_MODEL?.trim();
+    const providerId = bot?.provider_id ?? process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
     if (!model || !providerId) throw new Error('New Host Session requires an explicit Provider/model route');
     const route = routes.createConcreteProviderRoute(providerId, model);
     const prepared = await engine.materializePendingDesktopSession({
@@ -70,14 +73,14 @@ async function main(): Promise<void> {
   // --no-pre-warm deliberately skips startup discovery. Recover configuration
   // from the owning snapshot, without replacing it with supervisor defaults.
   const metadata = store.getSessionMetadata(sessionId);
-  const restored = config.resolveWorkspaceConfig(workspace, metadata, { includeMcp: true });
+  const restored = config.resolveWorkspaceConfig(workspace, metadata, { includeMcp: !bot });
   if (restored.providerEnv?.apiKey) credentials.add(restored.providerEnv.apiKey);
-  if (existing && metadata) await agent.restoreBuiltinConfigFromOwnedMetadata(metadata);
+  if ((existing || bot) && metadata) await agent.restoreBuiltinConfigFromOwnedMetadata(metadata);
   // Restore the recorded permission mode for state inspection. A send below
   // still requires custom; a stronger recorded mode is never silently widened.
-  await engine.updateMcpServers(restored.mcpServers);
-  await engine.updateEnabledPluginIds(metadata?.enabledPluginIds ?? []);
-  await engine.updateOfficialToolIds(metadata?.enabledOfficialToolIds ?? []);
+  await engine.updateMcpServers(bot ? [] : restored.mcpServers);
+  await engine.updateEnabledPluginIds(bot ? [] : metadata?.enabledPluginIds ?? []);
+  await engine.updateOfficialToolIds(bot ? [] : metadata?.enabledOfficialToolIds ?? []);
   if (restored.reasoningEffort) await engine.updateReasoningEffort(restored.reasoningEffort);
   const send = (message: HostSessionMessage) => { if (process.connected) process.send?.(redact(message)); };
   let closing = false;
@@ -99,6 +102,7 @@ async function main(): Promise<void> {
         queueId: engine.getExecutionTurnId(), replay: engine.getStreamReplaySnapshot(), terminal: engine.getSessionCompletionTerminal() };
       case 'result': return { ...await engine.getLatestAssistantResult(), terminal: engine.getSessionCompletionTerminal() };
       case 'send': {
+        if (bot) throw new Error('Delegated Bot v1 supports lifecycle only; model invocation is not authorized');
         if (process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED !== '1') throw new Error('Model execution requires explicit Host execution authorization');
         if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 100_000) throw new Error('A bounded non-empty text is required');
         const snapshot = store.getSessionMetadata(sessionId);
@@ -158,7 +162,7 @@ async function main(): Promise<void> {
         // Only this entry's fixed validation messages may cross IPC. Provider
         // and SDK errors may carry bearer material and remain server diagnostics.
         const message = error instanceof Error ? error.message : '';
-        const safe = /^(Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
+        const safe = /^(Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
         send({ type: 'reply', generation: generation!, id: value.id, ok: false, error: safe ? message : 'Host Session operation failed; inspect worker diagnostics' });
       }
     };
@@ -169,7 +173,7 @@ async function main(): Promise<void> {
   });
   for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });
   process.on('disconnect', () => { void shutdown().finally(() => process.exit(0)); });
-  send({ type: 'ready', generation, sessionId });
+  send({ type: 'ready', generation, sessionId, ...(bot ? {bot: {bot_id: bot.snapshot.bot_id, agent_id: bot.snapshot.agent_id, binding_generation: bot.snapshot.binding_generation, session_id: sessionId, run_generation: bot.run_generation, snapshot_hash: bot.snapshot.snapshot_hash, runtime: 'builtin' as const}} : {}) });
 }
 
 void main().catch(() => { process.stderr.write('Host Session worker initialization failed\n'); process.exit(1); });

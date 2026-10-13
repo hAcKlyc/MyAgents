@@ -391,6 +391,13 @@ impl RelayController {
             .ok_or_else(rejected)
     }
 
+    /// Read the actual current server-owned WebSocket epoch. Callers already
+    /// hold their live account gate; this method never re-enters AuthStore.
+    pub(crate) fn execution_epoch(&self, access: &ValidatedAccess) -> Result<String, RelayFailure> {
+        let id = self.connection_for_access(access)?;
+        self.recheck_connection(&id, access)
+    }
+
     #[cfg(test)]
     pub(crate) fn connection_id_for_test(&self, access: &ValidatedAccess) -> String {
         self.connection_for_access(access).unwrap()

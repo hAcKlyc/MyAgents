@@ -17,6 +17,12 @@ const CHILD_PROCESS_ALLOWLIST = new Set([
   // model execution disabled and pre-warm off. They never launch the SDK.
   'src/server/host-controller.integration.test.ts',
   'src/server/host-session-worker.integration.test.ts',
+  // Boots the real Bot-local Host Session worker with a temporary HOME and
+  // network-deny shim; invocation is rejected before any provider call.
+  'src/server/host-bot-session-worker.integration.test.ts',
+  // Exercises bounded shutdown against isolated children that ignore shutdown
+  // and SIGTERM; only the exact child handle is signalled.
+  'src/server/host-bot-child-stop.integration.test.ts',
   // On Windows, runs process.execPath only to enumerate the sealed child's env
   // names. This catches OS-level case folding without secrets or network I/O.
   'src/server/integrated-runtimes/dsh/child-environment.unit.test.ts',
