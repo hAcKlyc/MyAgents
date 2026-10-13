@@ -18,7 +18,8 @@
 - [x] 四组状态、待开始入口、紧凑列表、搜索、窄面板分组和侧边详情。
 - [x] run/rerun/status/get/doc使用既有owner接口；问题与权限回原会话处理。
 - [x] 实际React页面点击、错误恢复、草稿/筛选保留、键盘与适配检查及独立UI审阅。
-- [ ] 类型/lint/必要测试/构建通过，同步最新main，CI及远端main核验。
+- [x] 同步最新main后typecheck/lint/99项相关用例/12组隔离交互/MoXBots build:web通过。
+- [ ] CI及远端main核验。
 - [ ] 发布制品/回滚与当前安装owner核实；真实运行版本和用户路径验收。
 
 ## Decisions
@@ -50,3 +51,5 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 真实API接线/产品组件完成，12组隔离交互通过；独立board_ui_review（请求gpt-6.1-sol/medium）完成深浅主题与4视口、失败恢复、回程和焦点审阅，两P2经一轮修复关闭。无真实Task写入、模型执行、Native联调或生产验收。报告与runner见dev-docs/project-board.md和project-board-review.md。完整typecheck/lint/build:web先前通过，修复后复验及同步最新main继续进行。
 
 阶段验证：typecheck、完整lint（既有16条dependency warnings、0 errors）与默认/MoXBots build:web通过。状态/API等20项unit、77项既有DOM及新增入口2项，共99项相关用例已通过（新增rail测试修正初始未展开fixture，发现并修复board入口收起flyout）。12组真实React隔离交互通过，独立UI一轮修复复验、追加rail入口检查通过；真实后台/Native/生产不计通过。
+
+集成结果：并行main只在plan追加产生冲突，双方记录均保留，产品看板/入口相对功能提交没有漂移。合并后typecheck、完整lint、99项unit/DOM、12组实际React隔离交互、MoXBots build:web成功。PR31及handoff门禁已通过；最终CI/main与统一Native包继续追踪。源与产物hash见dev-docs/project-board-validation/source-hashes.json，hash证明代码/制品对应，不代表安装或真实路径验收。

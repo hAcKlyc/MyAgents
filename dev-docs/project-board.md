@@ -28,3 +28,5 @@ MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/project-board-validation/run.mjs --c
 ## 主干与安装
 
 源码、远端 main、安装与真实路径分别追踪于 `.agent-sync/tasks/codex-project-board-20261014-da9bc0a5.md`。本任务不修改云服务、账号凭据或现有 Host。当前客户端更新由既有安装 owner 串行维护，未经独占窗口交接不并发换包或退出应用。安装交付需要实际冻结源码/包内 renderer与server来源、有效签名、回滚和原生看板路径复验。
+
+集成后本地验证：typecheck、完整lint、99项相关unit/DOM、12组隔离React交互与MoXBots生产web构建通过；独立审阅的产品文件未因main同步发生变化。已有dependency-cruiser warnings没有降级为新增错误，未修改无关依赖。固定源/看板bundle hash见validation/source-hashes.json。PR31等待当前头CI；已安装客户端不包含此次看板。
