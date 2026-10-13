@@ -371,9 +371,11 @@ fn write_unlocked(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkErr
         serde_json::to_string(secret)
             .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?,
     );
-    entry
-        .set_password(&json)
-        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))
+    #[cfg(all(target_os = "macos", not(test)))]
+    let result = myagents_agent_network_crypto::write_secret_noninteractive(entry, json.as_bytes());
+    #[cfg(any(not(target_os = "macos"), test))]
+    let result = entry.set_password(&json);
+    result.map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))
 }
 fn write(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkError> {
     let _transaction = storage_transaction_lock();
@@ -464,7 +466,11 @@ fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     read_unlocked(entry)
 }
 fn delete_unlocked(entry: &Entry) -> Result<(), NetworkError> {
-    match entry.delete_credential() {
+    #[cfg(all(target_os = "macos", not(test)))]
+    let result = myagents_agent_network_crypto::delete_secret_noninteractive(entry);
+    #[cfg(any(not(target_os = "macos"), test))]
+    let result = entry.delete_credential();
+    match result {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
         Err(_) => Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
     }

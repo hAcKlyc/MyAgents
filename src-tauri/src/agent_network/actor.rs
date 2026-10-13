@@ -502,6 +502,34 @@ pub(crate) fn auth_boundary_changed<R: tauri::Runtime>(app: &tauri::AppHandle<R>
         owner.auth_boundary(app);
     }
 }
+struct ConnectionKeyCache {
+    binding_id: String,
+    generation: u64,
+    store: Arc<dyn super::crypto::IdentityStore>,
+}
+
+// Keep successful OS reads only within this actor's account and generation.
+// Initialization still validates the issuer's fresh state and fingerprint.
+fn connection_identity_store(
+    cached: &mut Option<ConnectionKeyCache>,
+    binding_id: &str,
+    generation: u64,
+) -> Arc<dyn super::crypto::IdentityStore> {
+    if cached
+        .as_ref()
+        .is_some_and(|entry| entry.binding_id != binding_id || entry.generation != generation)
+    {
+        *cached = None;
+    }
+    cached
+        .get_or_insert_with(|| ConnectionKeyCache {
+            binding_id: binding_id.to_owned(),
+            generation,
+            store: super::crypto::OsIdentityStore::connection_cache(),
+        })
+        .store
+        .clone()
+}
 pub(crate) fn start(
     app: tauri::AppHandle,
     owner: ManagedConnection,
@@ -517,6 +545,7 @@ pub(crate) fn start(
         let mut boundary = owner.boundary.subscribe();
         let mut previous: Option<(String, PreviousConnection)> = None;
         let mut renewed: Option<NetworkIdentity> = None;
+        let mut connection_key_cache: Option<ConnectionKeyCache> = None;
         let mut reconnect = super::reconnect::ReconnectBackoff::default();
         loop {
             let phase = *boundary.borrow_and_update();
@@ -540,6 +569,14 @@ pub(crate) fn start(
                 Ok(account) => {
                     let principal = account.principal_id().ok().map(str::to_owned);
                     let binding = account.binding_id().to_owned();
+                    let identity_store =
+                        owner.authorized_identity_store.clone().unwrap_or_else(|| {
+                            connection_identity_store(
+                                &mut connection_key_cache,
+                                &binding,
+                                phase.generation,
+                            )
+                        });
                     owner.publish(
                         &app,
                         phase.generation,
@@ -569,6 +606,7 @@ pub(crate) fn start(
                             prior,
                             &mut previous,
                             renewed.take(),
+                            identity_store,
                             &mut reconnect,
                         );
                         tokio::pin!(attempt);
@@ -582,6 +620,7 @@ pub(crate) fn start(
                         reconnect.reset();
                         previous = None;
                         renewed = None;
+                        connection_key_cache = None;
                         continue;
                     };
                     let error = match result {
@@ -619,11 +658,13 @@ pub(crate) fn start(
                     }) {
                         // Only explicit recovery may request OS authorization.
                         // Keep the diagnostic stable instead of retrying reads.
+                        connection_key_cache = None;
                         let _ = boundary.changed().await;
                         continue;
                     }
                 }
                 Err(error) => {
+                    connection_key_cache = None;
                     retry_after = error.retry_after;
                     owner.publish(
                         &app,
@@ -661,7 +702,7 @@ pub(crate) fn start(
             let delay = reconnect.next_with_code(jitter, retry_after, code);
             tokio::select! {
                 _=tokio::time::sleep(delay)=>{},
-                _=boundary.changed()=>{previous=None;renewed=None;reconnect.reset();},
+                _=boundary.changed()=>{previous=None;renewed=None;connection_key_cache=None;reconnect.reset();},
             }
         }
     });
@@ -849,6 +890,7 @@ async fn connect(
     previous: Option<PreviousConnection>,
     previous_out: &mut Option<(String, PreviousConnection)>,
     renewed: Option<NetworkIdentity>,
+    identity_store: Arc<dyn super::crypto::IdentityStore>,
     reconnect: &mut super::reconnect::ReconnectBackoff,
 ) -> Result<NetworkIdentity, NetworkError> {
     let mut identity = match renewed {
@@ -856,12 +898,7 @@ async fn connect(
             account.ensure_current()?;
             identity
         }
-        _ => match &owner.authorized_identity_store {
-            Some(store) => {
-                NetworkIdentity::initialize_with_store(account, None, store.clone()).await?
-            }
-            None => NetworkIdentity::initialize(account, None).await?,
-        },
+        _ => NetworkIdentity::initialize_with_store(account, None, identity_store).await?,
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
@@ -1560,6 +1597,27 @@ fn metadata_response_lost(mutation: bool, auth_changed: bool) -> NetworkError {
 #[cfg(test)]
 mod metadata_response_tests {
     use super::metadata_response_lost;
+
+    #[test]
+    fn reconnect_keeps_key_cache_only_for_the_same_binding_and_actor_generation() {
+        let mut cached = None;
+        let first = super::connection_identity_store(&mut cached, "binding-a", 1);
+        let same = super::connection_identity_store(&mut cached, "binding-a", 1);
+        assert!(std::sync::Arc::ptr_eq(&first, &same));
+        let previous = std::sync::Arc::downgrade(&first);
+        drop(first);
+        drop(same);
+        let changed_binding = super::connection_identity_store(&mut cached, "binding-b", 1);
+        assert!(previous.upgrade().is_none());
+        let previous = std::sync::Arc::downgrade(&changed_binding);
+        drop(changed_binding);
+        let changed_generation = super::connection_identity_store(&mut cached, "binding-b", 2);
+        assert!(previous.upgrade().is_none());
+        let previous = std::sync::Arc::downgrade(&changed_generation);
+        drop(changed_generation);
+        drop(cached);
+        assert!(previous.upgrade().is_none());
+    }
 
     #[test]
     fn diagnostic_code_never_echoes_unknown_upstream_payload_or_details() {
