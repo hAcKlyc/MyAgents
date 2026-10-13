@@ -137,7 +137,7 @@ struct SessionSlot {
     app_profile: String,
     profile: String,
     issuer: String,
-    login_origin: String,
+    login_issuer: String,
     service_id: String,
     environment: String,
     network_id: String,
@@ -160,7 +160,9 @@ impl SessionSlot {
             app_profile: crate::app_dirs::APP_DATA_DIR_NAME.to_owned(),
             profile: instance.profile.clone(),
             issuer: instance.issuer.clone(),
-            login_origin: super::account::origin(&instance.login_issuer)?,
+            // OwnedInstance has already validated the fixed OIDC issuer. Keep
+            // its path: `/dex` is issuer identity, not an HTTP origin suffix.
+            login_issuer: instance.login_issuer.clone(),
             service_id: instance.service_id.clone(),
             environment: instance.environment.clone(),
             network_id: instance.network_id.clone(),
@@ -1041,6 +1043,23 @@ mod tests {
 
     fn slot(network_id: &str, ca: Option<&str>) -> SessionSlot {
         SessionSlot::new(&instance(network_id), "device-1", "principal-1", ca).unwrap()
+    }
+
+    #[test]
+    fn session_slot_preserves_and_isolates_full_oidc_issuer_path() {
+        let dex = instance("network-issuer-path");
+        let mut other_path = dex.clone();
+        other_path.login_issuer = "https://login.example/another-tenant".into();
+
+        let dex_slot = SessionSlot::new(&dex, "device-1", "principal-1", None).unwrap();
+        let other_slot = SessionSlot::new(&other_path, "device-1", "principal-1", None).unwrap();
+
+        assert_eq!(dex_slot.login_issuer, "https://login.example/dex");
+        assert_eq!(
+            other_slot.login_issuer,
+            "https://login.example/another-tenant"
+        );
+        assert_ne!(dex_slot, other_slot);
     }
 
     #[test]
