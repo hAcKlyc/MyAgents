@@ -29,6 +29,51 @@ export interface AskUserQuestionInput {
   metadata?: { source?: string };
 }
 
+export type AskUserQuestionValidation =
+  | { ok: true; input: AskUserQuestionInput }
+  | { ok: false; error: string };
+
+/** One boundary for runtime requests and replayed UI events. Missing multiSelect means single-select. */
+export function normalizeAskUserQuestionInput(value: unknown): AskUserQuestionValidation {
+  const invalid = (field: string): AskUserQuestionValidation => ({
+    ok: false,
+    error: `Invalid AskUserQuestion input: ${field}. Correct the input and ask again.`,
+  });
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid('expected an object');
+  const input = value as Record<string, unknown>;
+  if (!Array.isArray(input.questions) || input.questions.length === 0) return invalid('questions must be a non-empty array');
+  const questions: AskUserQuestion[] = [];
+  for (const [index, value] of input.questions.entries()) {
+    const field = `questions[${index}]`;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid(`${field} must be an object`);
+    const question = value as Record<string, unknown>;
+    if (typeof question.question !== 'string' || !question.question.trim()) return invalid(`${field}.question must be non-empty text`);
+    if (typeof question.header !== 'string' || !question.header.trim()) return invalid(`${field}.header must be non-empty text`);
+    if (!Array.isArray(question.options)) return invalid(`${field}.options must be an array`);
+    if (question.multiSelect !== undefined && typeof question.multiSelect !== 'boolean') return invalid(`${field}.multiSelect must be a boolean`);
+    if (question.id !== undefined && (typeof question.id !== 'string' || !question.id)) return invalid(`${field}.id must be non-empty text`);
+    for (const flag of ['required', 'isSecret'] as const) {
+      if (question[flag] !== undefined && typeof question[flag] !== 'boolean') return invalid(`${field}.${flag} must be a boolean`);
+    }
+    const options: AskUserQuestionOption[] = [];
+    for (const [optionIndex, value] of question.options.entries()) {
+      const optionField = `${field}.options[${optionIndex}]`;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid(`${optionField} must be an object`);
+      const option = value as Record<string, unknown>;
+      if (typeof option.label !== 'string' || !option.label.trim()) return invalid(`${optionField}.label must be non-empty text`);
+      if (option.description !== undefined && typeof option.description !== 'string') return invalid(`${optionField}.description must be text`);
+      if (option.preview !== undefined && typeof option.preview !== 'string') return invalid(`${optionField}.preview must be text`);
+      if (options.some(existing => existing.label === option.label)) return invalid(`${optionField}.label must be unique`);
+      options.push({ ...option, label: option.label, description: option.description ?? '' } as AskUserQuestionOption);
+    }
+    const normalized = { ...question, options, multiSelect: question.multiSelect ?? false } as unknown as AskUserQuestion;
+    const answerKey = normalized.id ?? String(index);
+    if (questions.some((previous, previousIndex) => (previous.id ?? String(previousIndex)) === answerKey)) return invalid(`${field}.id must identify a unique answer`);
+    questions.push(normalized);
+  }
+  return { ok: true, input: { ...input, questions } as AskUserQuestionInput };
+}
+
 /** Desktop answers preserve option labels and free text separately. Strings remain accepted from legacy/CLI callers. */
 export interface AskUserQuestionAnswer {
   selected: string[];

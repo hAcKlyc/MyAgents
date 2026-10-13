@@ -2,7 +2,7 @@
 
 ## 当前目标和范围
 
-用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，正在交付远端CI/main和准备现网串行升级。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
+用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，PR20已交付main be48a22b并发布现网，真实OIDC/admin API路径通过。独立标签页登录修复BOTS-ADMIN-LOGIN-002已由PR22交付main并发布，真实IAB登录及管理路径通过；真实有限Host执行BOTS-CLOUD-EXEC-001在独立工作树进行。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
 
 ### 已完成的规划/原型阶段（历史范围）
 
@@ -23,11 +23,12 @@
 
 ## 当前实现和依赖
 
-当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。第一位现网平台管理员尚未授予。
+当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。首位现网测试管理员已由用户明确授权并配置；实际OIDC/admin API通过，Browser fallback发布门槛仍待完成。
 
 - [x] 本地管理权限、登记API、SQLite/CAS/幂等审计、同源UI与独立验收。
-- [ ] 最新main集成、远端CI、主干包含成果核验。
-- [ ] 现网权限确认、备份回滚、串行升级、真实登录及管理路径验收。
+- [x] PR20 exact-head CI/main与远端包含成果核验。
+- [x] 现网权限确认、备份回滚、串行升级、真实OIDC/admin API验收。
+- [ ] BOTS-ADMIN-LOGIN-002浏览器fallback CI/main/发布/真实登录UI复验。
 - [ ] 有限Host委派与真实启停、共享执行及多账号验收。
 
 ### 前轮原型任务和依赖
@@ -67,3 +68,18 @@
 ## BOTS-CLOUD-EXEC-001 (approved execution continuation)
 
 User approved finite Bot delegation on2026-10-13. New isolated codex/bots-cloud-execution-v1 starts from canonical main b421b759; registry PR20 tracked in its own branch. Current implementation contract services/agentnet/planning/BOTS-CLOUD-EXECUTION-CONTRACT.md. Primary owns cloud gate/queue/UI/integration, Sol/high requested worker owns closed execution-core+typed signer, Luna/medium requested worker owns new Host-local Bot modules; runtime model/effort unverified. No AIRouter calls or shared cache; compact owned interface and parity fixtures prevent duplicated context. Staged tests, actual Host, CI/main and release remain open. First deployment requires actual role/Host opt-in authority; original Host task source remains untouched.
+## MOXBOTS-ASK-QUESTION-FIX-20261013
+
+用户已明确由当前Agent修复AskUserQuestion输入校验/错误语义、并发提问覆盖与畸形选项渲染问题，完成回归、main和当前客户端验收。范围为既有SDK/Runtime与Tab请求链路，不启动Bot共享服务。任务记录 `.agent-sync/tasks/codex-ask-question-fix-20261013-626513cf.md`。本机安装由现有Host/钥匙串任务统一提供包，双方已获用户明确跨聊天协调授权；本任务不并发换包、退出或重启。实现/回归/独立审阅/main/统一包/真实caller验收分别追踪，不以模拟回传代替真实客户端结果。
+
+该问答修复代码已由PR #21交付main `d9749998f743707074d6d42dc5344bcb724d55a8`，源头六项CI通过且merge tree一致；统一客户端安装/原生caller验收仍开放，详见任务记录。
+
+### 2026-10-13 — administrator release and real browser acceptance
+
+PR20 plus PR22 are in remote main. Login source `60e3a52c08bf79d3985e1453449719269a35fb1a` passed seven exact-head checks; PR22 merge `1cfa2f85dc6c936c02b86f1f40945961665608a7` passed Owned AgentNet run38396057654. Its CI artifact11812672883 has verified API archive digest5198fa3f… and binary SHA256 `9b9320f57685a938cee53492eec412567df8076a273e7ef72a12a461ca5f06bc`; complete source tree matches that accepted main commit. Subsequent main documentation changes do not alter the deployed service.
+
+The user explicitly authorized the existing integration test account as this instance's first platform administrator. The binary-only release preserved exact existing role/config and ingress hashes, stopped only the dedicated network service, created consistent private SQLite/state backups and retained the previous binary and rollback. Dex, Mori and Linux Host were not restarted. Runtime executable/source/hash and health were independently verified.
+
+Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
+
+BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.

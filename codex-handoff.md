@@ -1,5 +1,14 @@
 # Codex Handoff
 
+## 当前管理员云后台交付（2026-10-13）
+
+BOTS-CLOUD-ADMIN-001：PR20 / main be48a22b，exact-head 7项CI通过，已在既有云服务发布。运行CI source2dec7655与main完整tree一致，binary SHA2563a04ab08e02a21f4dd908239c6714d2e0e5d2d6befeecc7e55855936b3b5a8db核验；首位现有测试管理员获用户明确授权。云端一致性私有备份/回滚准备并核验，Dex/Mori保持active。实际OIDC/admin API停止态CRUD、原操作幂等、配置持久化、可恢复软删/恢复、logout后401通过，没有模型调用。具体账号与凭据仅在原私有operator配置。
+
+BOTS-ADMIN-LOGIN-002：IAB未暴露原popup页面，已补同源校验后的独立标签页链接/取消；fixture login/auth、390/768/focus通过。分支codex/bots-admin-login-fallback（base be48a22b）待CI/main/发布及实际浏览器验收。不要把API验收当作popup UI验收。
+
+BOTS-CLOUD-EXEC-001：用户已确认Host所有者有限指定Bot委派方案，独立工作树moxbots-cloud-execution继续实现typed签名、原session livegate、真实WS epoch、命令/lease/receipt、Host-scoped持久化与Session/run绑定。尚未main交付或真实Host验收，现网start继续409。保留PR14 owner的桌面/Host及未提交内容；个人客户端入口后续Bots Net，共享仍按规划另验收。
+
+
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
 <!-- codex-handoff:last-updated=2026-10-13T14:21:03+08:00 -->
@@ -175,3 +184,26 @@
 - 当前/Applications/MoXBots.app为b116404e，不含归档入口；候选33992eb0保留在/Applications/.MoXBots.chat-archive-trial-54dca77c5912.app及本地ZIP。归档PR #19和局部原生/重启验收保留在main，不回退源码。
 - Documents旧备份副本出现File Provider FinderInfo/resource-fork，严格签名失败；实际回滚使用原始Applications隐藏包，前后验证成功。不要直接采用Documents副本而忽略重新校验。
 - 回滚/网络恢复复验完成；安装权交回“评估 MyAgents 精简为 Linux Host”原凭据修复任务，联合更新延期。后续须同步origin/main保留归档，重新验运行版本、归档/恢复/重启和网络自动恢复。详细状态及本机证据位置见dev-docs/chat-task-archive-delivery.md。
+
+
+### 2026-10-13 — structured question repair — MOXBOTS-ASK-QUESTION-FIX-20261013
+
+- 用户明确当前Agent修复3项问答问题并main/当前客户端交付。共享输入校验、缺失multiSelect默认单选、字段错误不当取消/权限卡、FIFO去重及逐项结算；既有Runtime与答案键合约保留。
+- 回归与状态见dev-docs/ask-user-question-repair.md及当前.agent-sync任务记录；源码、模拟caller、CI/main、统一包、原生/真实caller验收分开追踪。
+- 用户明确授权与现有Host/钥匙串安装owner跨聊天协调、统一包。本任务不并发安装/退出/重启；后续核对安装源包含本次main后再在可控会话验提问与回传。主代理拥有最终问答验收责任。
+
+### 2026-10-13 — question repair main verified; native pending
+
+- MOXBOTS-ASK-QUESTION-FIX-20261013：PR #21源fc4e664c、6项current-head CI成功，main `d9749998f743707074d6d42dc5344bcb724d55a8` verified；422项相称用例、原生SDK+loopback provider普通/bypass模式均收到tool_result。源树与merge tree一致。
+- SDK会先补multiSelect，所以截图缺字段不直接证明原事故根因；本次修复防输入边界错误与FIFO覆盖。
+- 当前客户端仍由Host/钥匙串owner统一合包；已获用户跨聊天授权并发送冻结源。Mac锁定，待用户手动解锁和统一包回执，完成原生表单/真实caller及配置回归后才能关闭任务。主代理不得假报已安装或触发系统授权绕过。
+
+### 2026-10-13 — administrator release and real browser acceptance
+
+PR20 plus PR22 are in remote main. Login source `60e3a52c08bf79d3985e1453449719269a35fb1a` passed seven exact-head checks; PR22 merge `1cfa2f85dc6c936c02b86f1f40945961665608a7` passed Owned AgentNet run38396057654. Its CI artifact11812672883 has verified API archive digest5198fa3f… and binary SHA256 `9b9320f57685a938cee53492eec412567df8076a273e7ef72a12a461ca5f06bc`; complete source tree matches that accepted main commit. Subsequent main documentation changes do not alter the deployed service.
+
+The user explicitly authorized the existing integration test account as this instance's first platform administrator. The binary-only release preserved exact existing role/config and ingress hashes, stopped only the dedicated network service, created consistent private SQLite/state backups and retained the previous binary and rollback. Dex, Mori and Linux Host were not restarted. Runtime executable/source/hash and health were independently verified.
+
+Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
+
+BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
