@@ -6,23 +6,112 @@ import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { configureHost, readConfigReceipt, type HostConfig } from '../host/management';
+import { configureHost, createHostConfigMutationOwner, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type HostConfig, type HostConfigOwner } from '../host/management';
 
 let child: ChildProcess | undefined;
 let scratch: string | undefined;
-afterEach(async () => {
-  if (child && child.exitCode === null) {
-    const exited = new Promise(resolveExit => child!.once('exit', resolveExit));
-    child.kill('SIGTERM'); await exited;
+async function stopChild(): Promise<void> {
+  const target = child;
+  if (!target || target.exitCode !== null || target.signalCode !== null) return;
+  const waitForExit = (timeoutMs: number) => new Promise<boolean>(resolveExit => {
+    const done = () => { clearTimeout(timer); target.off('exit', done); resolveExit(true); };
+    const timer = setTimeout(() => { target.off('exit', done); resolveExit(false); }, timeoutMs);
+    target.once('exit', done);
+    if (target.exitCode !== null || target.signalCode !== null) done();
+  });
+  target.kill('SIGTERM');
+  if (!await waitForExit(3000) && target.exitCode === null && target.signalCode === null) {
+    target.kill('SIGKILL');
+    if (!await waitForExit(3000) && target.exitCode === null && target.signalCode === null)
+      throw new Error('Host controller child did not exit after SIGKILL');
   }
+}
+afterEach(async () => {
+  await stopChild();
   if (scratch) await rm(scratch, { recursive: true, force: true });
+});
+
+it('preserves concurrent Bot/resource config projections during a Host configuration commit', async () => {
+  let shared: HostConfig = {
+    providerApiKeys: { 'other-provider': 'other-secret' },
+    hostBotDelegationsV1: { revision: 4, bots: ['bot-ledger-latest'] },
+    hostResourceIntents: { revision: 7, intents: ['resource-ledger-latest'] },
+  };
+  const owner: HostConfigOwner = createHostConfigMutationOwner({
+    hostId: randomUUID(), defaultWorkspace: tmpdir(),
+    readConfig: async () => structuredClone(shared),
+    atomicModifyConfig: async modifier => { shared = modifier(shared); },
+    workspacePath: async value => {
+      // Model a Bot/resource owner committing after Host read but before its
+      // commit. The Host writer must patch only its own fields into this latest
+      // config rather than replacing the whole file with its stale read.
+      shared = {
+        ...shared,
+        hostBotDelegationsV1: { revision: 5, bots: ['bot-ledger-newer'] },
+        hostResourceIntents: { revision: 8, intents: ['resource-ledger-newer'] },
+        providerApiKeys: { ...shared.providerApiKeys, 'other-provider': 'rotated-other-secret' },
+      };
+      return value;
+    },
+    busy: () => false,
+    credentialReference: 'host-provider-credential:moonshot-coding',
+  });
+  const result = await configureHost(owner, {
+    mutationId: randomUUID(), expectedRevision: 0, providerId: 'moonshot-coding',
+    model: 'k3', executionAuthorized: false,
+  });
+  expect(result).toMatchObject({ status: 'persisted', revision: 1 });
+  expect(shared).toMatchObject({
+    hostBotDelegationsV1: { revision: 5, bots: ['bot-ledger-newer'] },
+    hostResourceIntents: { revision: 8, intents: ['resource-ledger-newer'] },
+    providerApiKeys: { 'other-provider': 'rotated-other-secret', 'moonshot-coding': 'host-provider-credential:moonshot-coding' },
+    hostSettings: { revision: 1, model: 'k3' },
+  });
+});
+
+it('uses registration-before-supervisor ordering for Bot runtime and Host snapshot inspection', async () => {
+  const mutex = () => {
+    let tail = Promise.resolve();
+    return async <T,>(operation: () => Promise<T>): Promise<T> => {
+      const prior = tail;
+      let release!: () => void;
+      tail = new Promise<void>(resolveRelease => { release = resolveRelease; });
+      await prior;
+      try { return await operation(); } finally { release(); }
+    };
+  };
+  const registrationLock = mutex();
+  const supervisorLock = mutex();
+  const withRegistration = <T,>(operation: () => Promise<T>) => registrationLock(operation);
+  const withSupervisor = <T,>(operation: () => Promise<T>) => supervisorLock(operation);
+  const events: string[] = [];
+  const botRuntime = withHostConfigurationLocks(withRegistration, withSupervisor, async () => {
+    events.push('bot-runtime'); return 'ready';
+  });
+  const snapshot = withHostSnapshotLocks(
+    () => withRegistration(async () => { events.push('resource-inspect'); return 'resource-snapshot'; }),
+    withSupervisor,
+    async resources => { events.push('host-snapshot'); return resources; },
+  );
+  const bounded = Promise.race([
+    Promise.all([botRuntime, snapshot]),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('lock order deadlocked')), 1000)),
+  ]);
+  await expect(bounded).resolves.toEqual(['ready', 'resource-snapshot']);
+  expect(events).toContain('resource-inspect');
+  expect(events).toContain('host-snapshot');
+  expect(events).toContain('bot-runtime');
 });
 
 it('persists Host identity and config CAS over a private Unix socket without model calls', async () => {
   scratch = await mkdtemp(join(tmpdir(), 'mah-host-'));
   const socket = join(scratch, 'control.sock');
   const entry = join(scratch, 'host-main.mjs');
-  await build({ entryPoints: [resolve('src/host/main.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent' });
+  await build({ entryPoints: [resolve('src/host/main.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
+    // Match the shipped ESM bundle's CJS dependency bridge, required by the
+    // actual registry owner now imported by Host main.
+    banner: { js: 'import { createRequire as __myAgentsCreateRequire } from "module"; const require = __myAgentsCreateRequire(import.meta.url);' },
+  });
   const call = (path: string, body: unknown = {}) => new Promise<{ ok: boolean; data: { hostId?: string; settings?: Record<string, unknown>; revision?: number; status?: string }; error?: string }>((resolveCall, reject) => {
     const req = request({ socketPath: socket, path, method: 'POST' }, res => {
       let text = ''; res.on('data', chunk => { text += chunk; });
@@ -37,9 +126,18 @@ it('persists Host identity and config CAS over a private Unix socket without mod
       { env: { PATH: process.env.PATH, HOME: join(scratch!, 'home'),
         MYAGENTS_HOST_STATE_DIR: scratch, MYAGENTS_HOST_SOCKET: socket }, stdio: ['ignore', 'pipe', 'pipe'] });
     await new Promise<void>((resolveReady, reject) => {
-      const timer = setTimeout(() => reject(new Error('Host startup timeout')), 10000);
-      child!.stdout!.on('data', chunk => { if (String(chunk).includes('Host ready')) { clearTimeout(timer); resolveReady(); } });
-      child!.once('exit', () => { clearTimeout(timer); reject(new Error('Host exited before ready')); });
+      let output = '';
+      const timer = setTimeout(() => reject(new Error(`Host startup timeout: ${output.slice(-2000)}`)), 10000);
+      const onData = (chunk: Buffer) => {
+        output += String(chunk);
+        if (output.includes('Host ready')) { clearTimeout(timer); resolveReady(); }
+      };
+      child!.stdout!.on('data', onData);
+      child!.stderr!.on('data', chunk => { output += String(chunk); });
+      child!.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`Host exited before ready (code=${code}, signal=${signal}): ${output.slice(-2000)}`));
+      });
     });
   };
   await start();
@@ -80,7 +178,7 @@ it('persists Host identity and config CAS over a private Unix socket without mod
   // Replaying a committed ID does not re-resolve a now-missing workspace.
   await rm(join(scratch, 'workspaces', 'default'), { recursive: true });
   expect(await call('/host/configure', { ...tracked, mutationId: tracked.mutationId.toUpperCase() })).toEqual(duplicate[0]);
-  const exited = new Promise(resolveExit => child!.once('exit', resolveExit)); child!.kill('SIGTERM'); await exited;
+  await stopChild();
   await start();
   const restored = (await call('/host/status')).data;
   expect(restored.hostId).toBe(initial.hostId);

@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
-import { configureHost, readConfigReceipt, type HostConfig } from './management';
+import { configureHost, createHostConfigMutationOwner, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type ConfigReceipt, type HostConfig } from './management';
 import { readNetworkStatus } from './network-status';
 import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
 import type { BotRunIdentity } from './bot-runtime';
@@ -15,8 +15,13 @@ import { loadBotExecutionPolicy } from './bot-execution-policy';
 import { connectBotExecutionIpc } from './bot-execution-ipc';
 import { createHostBotManager } from './bot-management';
 import { stopBotChild } from './bot-child-stop';
-import { loadConfig, loadProjects, materializeProviderRouteEnv } from '../server/utils/admin-config';
+import { atomicModifyConfig, loadConfig, loadProjects, materializeProviderRouteEnv } from '../server/utils/admin-config';
 import { createConcreteProviderRoute } from '../shared/providerRoute';
+import { createHostResourceOwner, HostResourceError, type HostResourceRequest } from './resources';
+import { connectHostManagementIpc } from './management-ipc';
+import { createHostProviderCredentialOwner, HostProviderCredentialError, type ProviderCredentialInput } from './provider-credentials';
+import { HOST_PROVIDER_REFERENCE, readHostSystemdCredential, resolveHostProviderCredential } from '../server/utils/host-credentials';
+import { withWorkspaceAgentRegistrationIntent } from '../server/utils/agent-workspace-identity';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -84,6 +89,32 @@ async function serve(): Promise<void> {
   let botExecutionIpc: Awaited<ReturnType<typeof connectBotExecutionIpc>> | undefined;
   let botPolicyTimer:NodeJS.Timeout|undefined;
   let shuttingDown = false;
+  let managementIpc: { close(): Promise<void> } | undefined;
+  const resourceOwner = createHostResourceOwner({
+    hostId: identity.hostId,
+    roots: { workspaces: workspaceRoot },
+  });
+  let credentialOwner: ReturnType<typeof createHostProviderCredentialOwner> | undefined;
+  if (process.env.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL !== undefined) {
+    if (process.env.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL !== 'provider-key')
+      throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_INVALID');
+    const storePath = join(stateDir, 'provider-credentials');
+    let created = false;
+    try { await mkdir(storePath, { mode: 0o700 }); created = true; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    credentialOwner = createHostProviderCredentialOwner({
+      hostId: identity.hostId, storePath,
+      loadMasterKey: () => readHostSystemdCredential('provider-key', 32),
+    });
+    if (created) {
+      // Initialization is allowed only for this just-created directory; losing
+      // an established encrypted store is an error, never a revision reset.
+      await credentialOwner.initialize();
+      const parent = await open(stateDir, 'r');
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
+    credentialOwner.inspect();
+  }
   let mutationTail: Promise<unknown> = Promise.resolve();
   const pending = new Map<string, { active: Active; resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
   const workerPath = join(dirname(fileURLToPath(import.meta.url)), 'host-session-worker.mjs');
@@ -92,6 +123,22 @@ async function serve(): Promise<void> {
     const result = mutationTail.then(operation);
     mutationTail = result.catch(() => {});
     return result;
+  }
+
+  async function configureHostOwned(body: Record<string, unknown>): Promise<ConfigReceipt | { persisted: true; revision: number; effect: 'new-session'; settings: NonNullable<HostConfig['hostSettings']> }> {
+    return withHostConfigurationLocks(
+      operation => withWorkspaceAgentRegistrationIntent(() => operation(), { strictPersistence: true, notify: false }),
+      exclusive,
+      async () => configureHost(createHostConfigMutationOwner({
+        hostId: identity!.hostId,
+        defaultWorkspace: join(workspaceRoot, 'default'),
+        readConfig: async () => loadConfig({ strict: true }) as HostConfig,
+        atomicModifyConfig: async modify => { await atomicModifyConfig(current => modify(current as HostConfig) as typeof current, { strict: true }); },
+        workspacePath,
+        busy: () => Boolean(active) || shuttingDown,
+        credentialReference: credentialOwner ? HOST_PROVIDER_REFERENCE : undefined,
+      }), body),
+    );
   }
 
   function workerCall(target: Active, operation: HostSessionOperation, args: Record<string, unknown> = {}): Promise<unknown> {
@@ -116,7 +163,8 @@ async function serve(): Promise<void> {
     }
     const bot = botBootstrap ? parseHostBotBootstrap(botBootstrap) : undefined;
     if (bot && sessionId) throw new Error('BOT_PRIVATE_SESSION_FORBIDDEN');
-    const settings = bot ? undefined : (await jsonFile<HostConfig>(configPath, {})).hostSettings;
+    const config = await jsonFile<HostConfig>(configPath, {});
+    const settings = bot ? undefined : config.hostSettings;
     if (!bot && !settings) throw new Error('Configure the Host before creating a Session');
     let workspace = await workspacePath(bot?.workspace ?? settings!.workspace);
     if (sessionId) {
@@ -127,10 +175,20 @@ async function serve(): Promise<void> {
       workspace = await workspacePath(row.agentDir);
     }
     const generation = bot?.run_generation ?? randomUUID();
+    const childEnvironment: NodeJS.ProcessEnv = bot ? {PATH:process.env.PATH,LANG:process.env.LANG,TMPDIR:process.env.TMPDIR,USERPROFILE:home} : {...process.env};
+    const hasDynamicCredential = !bot && config.providerApiKeys?.['moonshot-coding'] === HOST_PROVIDER_REFERENCE;
+    let credential = hasDynamicCredential ? credentialOwner?.readForExecution('moonshot-coding') : undefined;
+    if (hasDynamicCredential && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+    if (!bot && !hasDynamicCredential && process.env.CREDENTIALS_DIRECTORY) {
+      try { credential = resolveHostProviderCredential('systemd-credential:kimi'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    delete childEnvironment.MYAGENTS_HOST_PROVIDER_KEY_CREDENTIAL;
+    delete childEnvironment.CREDENTIALS_DIRECTORY;
     const child = fork(workerPath, [], {
       cwd: dirname(workerPath),
-      env: { ...(bot ? {PATH:process.env.PATH,LANG:process.env.LANG,TMPDIR:process.env.TMPDIR,USERPROFILE:home} : process.env),
-        HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+      env: { ...childEnvironment, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
+        MYAGENTS_HOST_CREDENTIAL_SOURCE: 'supervisor-ipc',
         MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: bot?.provider_id ?? settings!.providerId,
         MYAGENTS_HOST_MODEL: bot?.model ?? settings!.model, MYAGENTS_HOST_GENERATION: generation,
         MYAGENTS_HOST_EXECUTION_AUTHORIZED: !bot && settings?.executionAuthorized ? '1' : '0',
@@ -138,6 +196,7 @@ async function serve(): Promise<void> {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
     const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false };
+    let credentialDelivered = false;
     active = target;
     child.on('exit', () => {
       if (target.bot) {exitedBots.set(target.bot.run_generation,{...target.bot});if(exitedBots.size>256)exitedBots.delete(exitedBots.keys().next().value!);}
@@ -148,6 +207,18 @@ async function serve(): Promise<void> {
     });
     child.on('message', raw => {
       const reply = raw as HostSessionMessage;
+      if (reply?.type === 'credential-needed') {
+        if (credentialDelivered || reply.generation !== generation || Object.keys(reply).length !== 2) {
+          child.kill('SIGTERM'); return;
+        }
+        credentialDelivered = true;
+        child.send({ type: 'host-provider-snapshot', generation,
+          providerId: 'moonshot-coding', credential: credential ?? null }, error => {
+          if (error) child.kill('SIGTERM');
+        });
+        credential = undefined;
+        return;
+      }
       if (!reply || reply.generation !== generation || reply.type !== 'reply') return;
       const entry = pending.get(reply.id);
       if (!entry || entry.active !== target) return;
@@ -196,12 +267,8 @@ async function serve(): Promise<void> {
             ? Number(process.env.MYAGENTS_HOST_NETWORK_UID) : undefined, identity!.hostId),
         runtime: { node: process.versions.node, sdkBinaryPresent: existsSync(join(dirname(workerPath), 'claude-agent-sdk', 'claude')) } };
     }
-    if (path === '/host/configure') return exclusive(() => configureHost({
-      hostId: identity!.hostId, defaultWorkspace: join(workspaceRoot, 'default'),
-      readConfig: () => jsonFile<HostConfig>(configPath, {}), writeConfig: config => atomicJson(configPath, config),
-      workspacePath, busy: () => Boolean(active) || shuttingDown,
-    }, body));
-    if (path === '/host/receipt') return exclusive(async () => readConfigReceipt(await jsonFile<HostConfig>(configPath, {}), identity!.hostId, body));
+    if (path === '/host/configure') return configureHostOwned(body);
+    if (path === '/host/receipt') return readConfigReceipt(loadConfig({ strict: true }) as HostConfig, identity!.hostId, body);
     if (path === '/session/create') return exclusive(async () => {
       if (Object.keys(body).length) throw new Error('Session creation accepts no overrides');
       const target = await ensureSession();
@@ -222,6 +289,74 @@ async function serve(): Promise<void> {
     // and Stop must not wait behind a send's dispatch acknowledgement.
     const target = await exclusive(() => ensureSession(match[1]));
     return workerCall(target, match[2] as HostSessionOperation, body);
+  }
+
+  async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (shuttingDown) throw new Error('Host is stopping');
+    if (method === 'host.snapshot') {
+      return withHostSnapshotLocks(
+        () => resourceOwner.inspect(),
+        exclusive,
+        async resources => {
+        if (shuttingDown) throw new Error('Host is stopping');
+        const value = (await dispatch('/host/status', {})) as Record<string, unknown>;
+        return {
+          kind: 'snapshot',
+          version: 1,
+          hostId: value.hostId,
+          configured: value.configured,
+          settings: value.settings,
+          activeSession: value.activeSession,
+          stopping: value.stopping,
+          capabilities: value.capabilities,
+          agentNet: value.agentNet,
+          runtime: value.runtime,
+          credentials: credentialOwner
+            ? { ...credentialOwner.inspect(), writeAvailable: true }
+            : { providerId: 'moonshot-coding', configured: false, revision: 0, writeAvailable: false },
+          resources,
+        };
+        },
+      );
+    }
+    if (method === 'config.set') {
+      const receipt = await configureHostOwned(params);
+      if (!('status' in receipt)) throw new Error('Untracked configuration result');
+      return receipt.status === 'persisted'
+        ? { kind: 'config-receipt', status: receipt.status, mutationId: receipt.mutationId,
+            revision: receipt.revision, effect: receipt.effect, settings: receipt.settings }
+        : { kind: 'config-receipt', status: receipt.status, mutationId: receipt.mutationId,
+            revision: receipt.revision, effect: receipt.effect };
+    }
+    if (method === 'resources.create') {
+      if (params.rootId !== 'workspaces') throw new HostResourceError('RESOURCE_ROOT_UNKNOWN');
+      const result = await resourceOwner.mutate(params as unknown as HostResourceRequest);
+      if (result.status === 'unconfirmed') return { kind: 'error', code: 'RESOURCE_UNCONFIRMED' };
+      return { kind: 'resource-receipt', ...result };
+    }
+    if (method === 'credential.set') {
+      if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+      return { kind: 'credential-receipt', ...await credentialOwner.write(params as unknown as ProviderCredentialInput) };
+    }
+    if (method === 'receipt.get') {
+      const id = params.mutationId as string;
+      if (params.owner === 'credentials') {
+        if (!credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
+        const receipt = credentialOwner.receipt(id);
+        return receipt.status === 'not-found'
+          ? { kind: 'receipt-not-found', mutationId: id, owner: 'credentials' }
+          : { kind: 'credential-receipt', ...receipt };
+      }
+      if (params.owner === 'config') {
+        const receipt = await readConfigReceipt(loadConfig({ strict: true }) as HostConfig, identity!.hostId, { mutationId: id });
+        return receipt.status === 'not-found'
+          ? { kind: 'config-receipt', status: 'not-found', mutationId: id }
+          : { kind: 'config-receipt', ...receipt };
+      }
+      const receipt = await resourceOwner.receipt(id);
+      return receipt ? { kind: 'resource-receipt', ...receipt } : { kind: 'receipt-not-found', mutationId: id, owner: 'resources' };
+    }
+    throw new Error('Unsupported management request');
   }
 
   const server = createServer(async (incoming, outgoing) => {
@@ -254,7 +389,36 @@ async function serve(): Promise<void> {
   }
   await new Promise<void>((resolveListen, reject) => { server.once('error', reject); server.listen(socket, () => resolveListen()); });
   await chmod(socket, 0o600);
-  const policyPin = await loadBotExecutionPolicy(join(stateDir,'bot-execution-policy.json'),identity.hostId);
+  const managementPath = process.env.MYAGENTS_HOST_MANAGEMENT_IPC;
+  const managementUid = process.env.MYAGENTS_HOST_MANAGEMENT_NETWORK_UID;
+  const managementGid = process.env.MYAGENTS_HOST_MANAGEMENT_GID;
+  if (managementPath !== undefined || managementUid !== undefined || managementGid !== undefined) {
+    try {
+      if (managementPath === undefined || !managementUid || !managementGid || !/^[1-9][0-9]{0,9}$/.test(managementUid) || !/^[1-9][0-9]{0,9}$/.test(managementGid)) {
+        throw new Error('Incomplete Host management IPC configuration');
+      }
+      managementIpc = await connectHostManagementIpc({
+        socketPath: managementPath,
+        expectedUid: Number(managementUid),
+        expectedGid: Number(managementGid),
+        dispatch: dispatchManagement,
+        isShuttingDown: () => shuttingDown,
+        onFailure: code => console.error(`Host management IPC stopped: ${code}`),
+      });
+    } catch (error) {
+      server.close();
+      await unlink(socket).catch(() => {});
+      throw error;
+    }
+  }
+  let policyPin: Awaited<ReturnType<typeof loadBotExecutionPolicy>>;
+  try { policyPin = await loadBotExecutionPolicy(join(stateDir,'bot-execution-policy.json'),identity.hostId); }
+  catch(error) {
+    await managementIpc?.close();
+    await new Promise<void>(resolveClose=>server.close(()=>resolveClose()));
+    await unlink(socket).catch(()=>{});
+    throw error;
+  }
   if (policyPin) {
     const {policy}=policyPin;
     const sameRun=(a:BotRunIdentity,b:BotRunIdentity)=>a.bot_id===b.bot_id && a.agent_id===b.agent_id &&
@@ -319,10 +483,11 @@ async function serve(): Promise<void> {
       })().catch(()=>{console.error('BOT_POLICY_STOP_UNCONFIRMED');}).finally(()=>{expirationClosing=false;});
     },1000);botPolicyTimer.unref();
   }
-  console.log('MyAgents Host ready (private Unix control; finite Bot delegation requires protected opt-in)');
+  console.log(`MyAgents Host ready (private Unix control${managementIpc ? ', management IPC connected' : ''}; finite Bot delegation requires protected opt-in)`);
   const stop = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await managementIpc?.close();
     server.close();
     if(botPolicyTimer)clearInterval(botPolicyTimer);
     await botExecutionIpc?.close();

@@ -33,3 +33,11 @@ PR14 connector/IPC/main APIs actively owned by separate Host task; coordinate th
 ## Next step
 
 Finish independent UI gates, commit/push implementation and synchronize latest main; await the verified existing Linux Host management baseline (PR14) before integrating/releasing Node/connector hooks. Get exact protected opt-in only after the source/artifact/rollback is reviewable. Native/Node hooks are disabled by default; do not deploy a main-based Host artifact over deployed PR14 management/credential hooks.
+
+## Preserved Host baseline and repair evidence
+
+Draft PR23 holds the default-off implementation. Fixed9149753 Linux Host modules (matching deployed b98294c7) and native management dependencies were integrated without Desktop/Keychain/installer changes or modifications to the other owner's checkout. Native137/137 and codec11/11 pass locally. Host mixed integration40 passed/10 Linux-only skipped; Node focused22/2 skipped, typecheck and independent UI gates pass. Full lint is rerun with the versioned UI runner.
+
+Initial PR23 Linux gate found metadata-core format errors and two test precondition errors: secure creation requires an existing private relative-path parent, and the tombstone proof must first fit policy expiry. These were repaired without relaxing source gates; latest-head Linux validation is still required. Concurrency review found actual lock inversion and whole-config replacement; both were repaired and covered by bounded completion and projection preservation tests. Missing optional policy now leaves legacy Host off/usable; existing authority still gets full path/hash validation.
+
+No execution release or real Host effect is claimed. Specific finite opt-in, artifact provenance/rollback and primary production acceptance remain open. No model calls or external workers; requested native roles used Luna/medium for implementation/UI and Sol/high for cross-language/native authority. Actual runtime model/effort/tokens/cost are unavailable.

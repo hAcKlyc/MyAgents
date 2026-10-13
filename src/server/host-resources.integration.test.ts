@@ -28,6 +28,41 @@ beforeEach(() => {
 });
 afterEach(() => {vi.unstubAllEnvs(); vi.restoreAllMocks(); syncBuiltinESMExports(); rmSync(home, {recursive: true, force: true});});
 
+it('inspects only persisted linked Agents in admitted roots without exposing config secrets or repairing disk', async () => {
+  const inside = randomUUID(); const outside = randomUUID();
+  writeFileSync(config, JSON.stringify({providerApiKeys: {private: 'nonsecret-test-sentinel'}, agents: [
+    {id: inside, name: 'Inside', enabled: false, channels: [{botToken: 'nonsecret-test-sentinel'}]},
+    {id: outside, name: 'Outside', enabled: true},
+  ]}));
+  writeFileSync(projects, JSON.stringify([
+    {id: 'inside-project', name: 'Inside', path: join(root, 'nested/work'), agentId: inside},
+    {id: 'outside-project', name: 'Outside', path: root + '-neighbor/work', agentId: outside},
+  ]));
+  const beforeConfig = readFileSync(config, 'utf8'); const beforeProjects = readFileSync(projects, 'utf8');
+  const result = await owner.inspect();
+  expect(result).toEqual({version: 1, revision: 0, roots: [{rootId: 'local', workspacePath: root}], agents: [
+    {agentId: inside, projectId: 'inside-project', name: 'Inside', workspacePath: join(root, 'nested/work'), enabled: false, archived: false},
+  ]});
+  expect(JSON.stringify(result)).not.toContain('nonsecret-test-sentinel');
+  expect(readFileSync(config, 'utf8')).toBe(beforeConfig); expect(readFileSync(projects, 'utf8')).toBe(beforeProjects);
+  expect(await createHostResourceOwner({hostId, roots: {local: root}}).inspect()).toEqual(result);
+});
+it('refuses ambiguous or oversized inspection instead of silently returning an incomplete registry', async () => {
+  const id = randomUUID();
+  writeFileSync(config, JSON.stringify({agents: [{id, name: 'Agent', enabled: false}]}));
+  writeFileSync(projects, JSON.stringify([
+    {id: 'p1', name: 'Agent', path: join(root, 'one'), agentId: id},
+    {id: 'p2', name: 'Agent', path: join(root, 'two'), agentId: id},
+  ]));
+  const before = readFileSync(projects, 'utf8');
+  await expect(owner.inspect()).rejects.toThrow('RESOURCE_REGISTRY_AMBIGUOUS');
+  expect(readFileSync(projects, 'utf8')).toBe(before);
+  const agents = Array.from({length: 300}, (_, index) => ({id: randomUUID(), name: 'x'.repeat(256), enabled: false, index}));
+  writeFileSync(config, JSON.stringify({agents}));
+  writeFileSync(projects, JSON.stringify(agents.map(agent => ({id: `p${agent.index}`, name: agent.name, path: join(root, `a${agent.index}`), agentId: agent.id}))));
+  await expect(owner.inspect()).rejects.toThrow('RESOURCE_PROJECTION_TOO_LARGE');
+});
+
 it('strict config/projects reads refuse malformed disk authority and never use backups', async () => {
   writeFileSync(config, '{'); writeFileSync(config + '.bak', '{"agents":[]}');
   await expect(owner.snapshot()).rejects.toThrow('REGISTRY_CORRUPT');
@@ -161,6 +196,21 @@ it.runIf(process.platform !== 'linux')('never uses a weaker string-path mkdir fa
 });
 
 describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace authority', () => {
+  it('creates and fsyncs private missing ancestors for a nested Agent while retaining exclusive leaf and mutation identity', async () => {
+    const request = body('parent/nested/workspace', 'create');
+    const result = await owner.mutate(request);
+    expect(result).toMatchObject({ status: 'persisted', revision: 1,
+      resource: { workspacePath: join(root, 'parent/nested/workspace'), enabled: false } });
+    for (const path of ['parent', 'parent/nested', 'parent/nested/workspace'])
+      expect(lstatSync(join(root, path)).mode & 0o777).toBe(0o700);
+    const restarted = createHostResourceOwner({ hostId, roots: { local: root } });
+    expect(await restarted.mutate(request)).toEqual(result);
+    expect(await restarted.receipt(request.mutationId)).toEqual(result);
+    await expect(restarted.mutate({ ...body('parent/nested/workspace', 'create'), expectedRevision: 1 }))
+      .rejects.toThrow('RESOURCE_ALREADY_EXISTS');
+    expect(loadProjects({ strict: true })).toHaveLength(1);
+    expect(loadConfig({ strict: true }).agents).toHaveLength(1);
+  });
   it('creates disabled Agent through the original registry; duplicates/restart retain identity and exact receipt', async () => {
     const request = body('new', 'create');
     const results = await Promise.all([owner.mutate(request), owner.mutate(request)]);
@@ -172,6 +222,9 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
     expect(lstatSync(join(root, 'new')).mode & 0o777).toBe(0o700);
     const restarted = createHostResourceOwner({hostId, roots: {local: root}});
     expect(await restarted.mutate(request)).toEqual(results[0]);
+    expect(await restarted.inspect()).toMatchObject({version: 1, revision: 1,
+      roots: [{rootId: 'local', workspacePath: root}], agents: [{agentId: agents[0].id,
+        projectId: registry[0].id, workspacePath: join(root, 'new'), enabled: false, archived: false}]});
     const again = await restarted.mutate({...body('new'), expectedRevision:1});
     expect(again).toMatchObject({status:'persisted', resource:{agentId:agents[0].id, projectId:registry[0].id, created:false}});
   });
@@ -208,13 +261,15 @@ describe.runIf(process.platform === 'linux')('Linux real fd-anchored workspace a
       status:'persisted', revision:1, resource:{projectId:claim.id,agentId:claim.agentId,enabled:false}});
     expect(loadProjects({strict:true})).toHaveLength(1);
   });
-  it('refuses symlink escape, broad root permissions, and absent parents without external mkdir', async () => {
+  it('refuses symlink escape and writable intermediate directories without creating outside the admitted root', async () => {
     const outside = join(home, 'outside'); mkdirSync(outside, {mode:0o700});
     symlinkSync(outside, join(root, 'alias'));
     expect((await owner.mutate(body('alias/escape', 'create'))).status).toBe('unconfirmed');
     expect(() => lstatSync(join(outside, 'escape'))).toThrow();
-    expect((await owner.mutate({...body('missing/new','create'),expectedRevision:1})).status).toBe('unconfirmed');
-    expect(() => lstatSync(join(root, 'missing'))).toThrow();
+    mkdirSync(join(root, 'unsafe'), {mode:0o700});
+    chmodSync(join(root, 'unsafe'), 0o770);
+    expect((await owner.mutate({...body('unsafe/new','create'),expectedRevision:1})).status).toBe('unconfirmed');
+    expect(() => lstatSync(join(root, 'unsafe/new'))).toThrow();
     expect(loadProjects({strict:true})).toHaveLength(0);
   });
   it('reports an unknown final write outcome and reads the original durable receipt after real rename/fsync', async () => {

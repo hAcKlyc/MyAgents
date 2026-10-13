@@ -19,8 +19,10 @@ async function protectedBytes(path:string) {
   try{const s=await f.stat();if(!s.isFile()||s.nlink!==1||s.uid!==process.geteuid?.()||(s.mode&0o7777)!==0o600||s.size<1||s.size>256*1024)throw new Error('BOT_LOCAL_POLICY_UNSAFE');const bytes=await f.readFile();if(bytes.length!==s.size)throw new Error('BOT_LOCAL_POLICY_CHANGED');return bytes;}finally{await f.close();}
 }
 export async function loadBotExecutionPolicy(path:string,hostId:string) {
-  let bytes:Buffer;
-  try{bytes=await protectedBytes(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
+  // Missing opt-in is off, even when the legacy state path has a canonical
+  // alias (e.g. Darwin /var). Existing authority still requires every pin.
+  try{await lstat(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
+  const bytes=await protectedBytes(path);
   const digest=createHash('sha256').update(bytes).digest('hex');const raw:unknown=JSON.parse(bytes.toString('utf8'));
   if(!exact(raw,['version','host_id','scope','jwks','ipc_socket','network_uid','management_gid','roots','local_policy','model_bindings'])||raw.version!==1||raw.host_id!==hostId||
      typeof raw.ipc_socket!=='string'||!isAbsolute(raw.ipc_socket)||!Number.isSafeInteger(raw.network_uid)||(raw.network_uid as number)<=0||

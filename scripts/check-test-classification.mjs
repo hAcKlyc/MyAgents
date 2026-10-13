@@ -17,6 +17,10 @@ const CHILD_PROCESS_ALLOWLIST = new Set([
   // model execution disabled and pre-warm off. They never launch the SDK.
   'src/server/host-controller.integration.test.ts',
   'src/server/host-session-worker.integration.test.ts',
+  // Deployed Host management baseline: isolated Unix/flock service, model execution disabled.
+  'src/server/host-management-ipc.integration.test.ts',
+  // Deployed credential owner: private mkfifo scratch only, no provider/model invocation.
+  'src/server/host-provider-credentials.integration.test.ts',
   // Boots the real Bot-local Host Session worker with a temporary HOME and
   // network-deny shim; invocation is rejected before any provider call.
   'src/server/host-bot-session-worker.integration.test.ts',

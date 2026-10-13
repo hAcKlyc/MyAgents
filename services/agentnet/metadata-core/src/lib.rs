@@ -723,10 +723,14 @@ impl MetadataStore {
     /// gate and supply that exact projection. Unlike the device relay lookup,
     /// this read does not pretend the browser is an enrolled target device.
     pub fn read_owned_target(
-        &self, context: &SessionContext, target_device_id: &str,
+        &self,
+        context: &SessionContext,
+        target_device_id: &str,
     ) -> Result<OwnedDeviceMembership, MetadataError> {
         validate_context(context)?;
-        if !canonical_uuid(target_device_id) { return Err(MetadataError::InvalidInput); }
+        if !canonical_uuid(target_device_id) {
+            return Err(MetadataError::InvalidInput);
+        }
         let connection = self.connection.lock().map_err(|_| MetadataError::Storage)?;
         validate_context(context)?;
         let row = connection.query_row(
@@ -736,9 +740,13 @@ impl MetadataStore {
             |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?,row.get::<_,String>(2)?,row.get::<_,bool>(3)?,row.get::<_,i64>(4)?)),
         ).optional().map_err(|_| MetadataError::Storage)?.ok_or(MetadataError::DeviceOwnerMismatch)?;
         validate_context(context)?;
-        Ok(OwnedDeviceMembership { identity_binding_id:row.0,
-            key_generation:u64::try_from(row.1).map_err(|_|MetadataError::Storage)?,key_fingerprint:row.2,
-            joined:row.3,membership_revision:u64::try_from(row.4).map_err(|_|MetadataError::Storage)? })
+        Ok(OwnedDeviceMembership {
+            identity_binding_id: row.0,
+            key_generation: u64::try_from(row.1).map_err(|_| MetadataError::Storage)?,
+            key_fingerprint: row.2,
+            joined: row.3,
+            membership_revision: u64::try_from(row.4).map_err(|_| MetadataError::Storage)?,
+        })
     }
 
     pub fn read_relay_state(

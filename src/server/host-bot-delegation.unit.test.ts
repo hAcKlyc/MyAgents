@@ -316,7 +316,7 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
     const previousHome=process.env.HOME; const previousUserProfile=process.env.USERPROFILE;
     try {
       vi.stubEnv('HOME',home); vi.stubEnv('USERPROFILE',home); syncBuiltinESMExports();
-      mkdirSync(join(home,'.myagents'),{mode:0o700}); mkdirSync(root,{mode:0o700});
+      mkdirSync(join(home,'.myagents'),{mode:0o700}); mkdirSync(root,{mode:0o700}); mkdirSync(join(root,'delegated'),{mode:0o700});
       const localPolicy={host_id:hostId,owner_principal_id:principal,scope,allowed_bot_ids:[botId],allowed_root_ids:['bots'],
         allowed_runtimes:['builtin'],allowed_model_refs:[modelRef],allowed_operations:['create','configure','enable','disable','delete','restore'],
         max_daily_tokens:1000,expires_at:now+2_000};
@@ -507,7 +507,7 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       expect(reread).toEqual(first);
       const stored=loadConfig({strict:true}).hostBotDelegationsV1 as {revocation_tombstones:unknown[]};
       expect(stored.revocation_tombstones).toHaveLength(1);
-      const staleGrant:Grant={...grant(),bot_id:bot};
+      const staleGrant:Grant={...grant(),bot_id:bot,expires_at:now+800};
       await expect(manager.acceptGrant(jwt('moxbot-execution-grant+jwt',{iss:scope.issuer,aud:'moxbot-host-bots/v1',
         namespace:'moxbot.bot.execution/v1',iat:now,nbf:now,exp:now+90,jti:randomUUID(),grant:staleGrant})))
         .rejects.toThrow('BOT_GRANT_TOMBSTONED');
