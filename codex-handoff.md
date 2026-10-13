@@ -162,3 +162,16 @@
 - 用户明确启动开发，仓库目标MoXBots，复用现有云服务；执行主体为本聊天原生协作团队。primary前端/集成/交付，backend请求Sol/medium容量错误后Luna/medium完成Rust，独立Luna/medium验收；实际型号/effort、token与费用未知。
 - 本地控制面与版本化复现材料完成；保留现网04fa已有修复并组合验收。新平台管理员权限、现网真实登录、发布、Host委派和共享执行仍开放。
 - 接续先核查CI/远端main和私有协调窗口，沿用既有安全访问与回滚；不要从历史原型限制阻止当前已授权实现，也不要把新增执行架构或管理员权利视为自动授权。
+### 2026-10-13 — archive main and native feature accepted — MOXBOTS-CHAT-ARCHIVE-20261013
+
+- PR #19 main bd567cd6，源头59037d91；156项回归、六项CI、类型/lint/Web+server+bridge+CLI构建通过。已归档工作区与过期响应两项审阅修复关闭。
+- 独立原生归档/恢复/窄窗与主审正常退出重启保全通过，仅合成聊天、无模型执行；两消息、附件85字节/hash、收藏置顶均保留。
+- 试用包33992eb0保留实际接受的b116404e，不把Host/凭据改造合main；本机可逆安装、strict签名/摘要对应及备份完成，未Apple公证。包与私密资料留本机，不进Git。
+- 新包AgentNet系统凭据自动恢复停止，旧包此前两设备在线；没有点授权或再索取密码。等待用户保留/回退选择，整包发布验收未完成。已获授权协调原安装任务暂缓，最终状态确认后应释放；后续构建同步main保留归档。证据见dev-docs/chat-task-archive-delivery.md与chat-task-archive-review.md。
+
+### 2026-10-13 — user-selected rollback verified — MOXBOTS-CHAT-ARCHIVE-20261013
+
+- 用户明确回退原在线b116404e、待凭据修复后与归档一起更新。正常退出、零进程验证后恢复原始隐藏应用；原二进制cd5e602fe41c…、严格签名与唯一运行进程均核验，原生AgentNet确认两设备在线，未请求系统密码/修改凭据。
+- 当前/Applications/MoXBots.app为b116404e，不含归档入口；候选33992eb0保留在/Applications/.MoXBots.chat-archive-trial-54dca77c5912.app及本地ZIP。归档PR #19和局部原生/重启验收保留在main，不回退源码。
+- Documents旧备份副本出现File Provider FinderInfo/resource-fork，严格签名失败；实际回滚使用原始Applications隐藏包，前后验证成功。不要直接采用Documents副本而忽略重新校验。
+- 回滚/网络恢复复验完成；安装权交回“评估 MyAgents 精简为 Linux Host”原凭据修复任务，联合更新延期。后续须同步origin/main保留归档，重新验运行版本、归档/恢复/重启和网络自动恢复。详细状态及本机证据位置见dev-docs/chat-task-archive-delivery.md。
