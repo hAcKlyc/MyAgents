@@ -306,6 +306,45 @@ afterEach(async () => {
 });
 
 describe('builtin V2 execution independent of product storage', () => {
+  it('normalizes a question before UI delivery and returns the actual answer through builtin canUseTool', async () => {
+    const workspace = join(state.home, 'workspace');
+    await mkdir(workspace);
+    await agent.initializeAgent(workspace, null, undefined, { preWarmDisabled: true });
+    const engine = (await import('../session-engine/builtin-adapter')).createBuiltinSessionEngine();
+    await engine.sendDesktopMessage({ text: 'Start synthetic question test', workspacePath: workspace,
+      sessionId: agent.getSessionId()!, scenario: { type: 'desktop' } });
+    await vi.waitFor(() => expect(state.query).toHaveBeenCalled());
+    const canUseTool = (state.query.mock.calls.at(-1)![0].options as Options).canUseTool!;
+    const input = { questions: [{ question: 'Which channel?', header: 'Channel',
+      options: [{ label: 'Current agent', description: 'Local' }, { label: 'Mori', description: 'Delegate' }] }] };
+    const reply = canUseTool('AskUserQuestion', input, { signal: new AbortController().signal, toolUseID: 'ask-fixture', requestId: 'sdk-ask-fixture' });
+    await vi.waitFor(() => expect(state.events.some(([name]) => name === 'ask-user-question:request')).toBe(true));
+    const request = state.events.find(([name]) => name === 'ask-user-question:request')![1] as { requestId: string; questions: unknown[] };
+    expect(request.questions).toEqual([{ ...input.questions[0], multiSelect: false }]);
+    expect(agent.handleAskUserQuestionResponse(request.requestId, { '0': 'Current agent' })).toBe(true);
+    await expect(reply).resolves.toEqual({ behavior: 'allow', updatedInput: {
+      questions: [{ ...input.questions[0], multiSelect: false }],
+      answers: { '0': 'Current agent', 'Which channel?': 'Current agent' },
+    } });
+    const invalid = await canUseTool('AskUserQuestion', { questions: [{ ...input.questions[0], options: [null] }] },
+      { signal: new AbortController().signal, toolUseID: 'ask-invalid-fixture', requestId: 'sdk-ask-invalid-fixture' });
+    expect(invalid).toEqual({ behavior: 'deny', interrupt: false, message: expect.stringContaining('options[0]') });
+    expect(state.events.filter(([name]) => name === 'ask-user-question:request')).toHaveLength(1);
+    const cancelled = canUseTool('AskUserQuestion', input, { signal: new AbortController().signal,
+      toolUseID: 'ask-cancel-fixture', requestId: 'sdk-ask-cancel-fixture' });
+    const cancelRequest = state.events.filter(([name]) => name === 'ask-user-question:request').at(-1)![1] as { requestId: string };
+    expect(agent.handleAskUserQuestionResponse(cancelRequest.requestId, null)).toBe(true);
+    await expect(cancelled).resolves.toMatchObject({ behavior: 'deny', interrupt: true, message: '用户取消了问答' });
+    const abort = new AbortController();
+    const aborted = canUseTool('AskUserQuestion', input, { signal: abort.signal,
+      toolUseID: 'ask-abort-fixture', requestId: 'sdk-ask-abort-fixture' });
+    abort.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+    expect(state.events.some(([name, data]) => name === 'ask-user-question:expired'
+      && (data as { reason?: string }).reason === 'aborted')).toBe(true);
+
+  });
+
   it.each(['dsh', 'claude-code', 'codex'] as const)('does not start SDK prewarm or publish a %s transcript after a stray builtin reload', async runtime => {
     const workspace = join(state.home, 'workspace');
     await mkdir(workspace, { recursive: true });

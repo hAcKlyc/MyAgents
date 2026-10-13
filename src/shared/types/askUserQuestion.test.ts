@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withQuestionTextAnswerKeys, type AskUserQuestion } from './askUserQuestion';
+import { normalizeAskUserQuestionInput, withQuestionTextAnswerKeys, type AskUserQuestion } from './askUserQuestion';
 
 const q = (question: string, extra: Partial<AskUserQuestion> = {}): AskUserQuestion => ({
   question,
@@ -77,4 +77,41 @@ describe('withQuestionTextAnswerKeys', () => {
     expect(out['0']).toBe('first');
     expect(out['1']).toBe('second');
   });
+});
+
+
+describe('normalizeAskUserQuestionInput', () => {
+  it('normalizes screenshot-shaped single-select input without changing answer text', () => {
+    const question = { question: '本次走哪个执行渠道？', header: '执行渠道', options: [
+      { label: '当前 Agent', description: '本机实现' }, { label: '摩灵', description: '员工执行' },
+    ] };
+    const raw = { questions: [question], metadata: { source: 'fixture' } };
+    expect(normalizeAskUserQuestionInput(raw)).toEqual({ ok: true, input: {
+      ...raw, questions: [{ ...question, multiSelect: false }],
+    } });
+    expect(question).not.toHaveProperty('multiSelect');
+  });
+  it('preserves native ids, optional/secret questions, multi-select and free-text forms', () => {
+    const input = { questions: [q('Select', { id: 'choose', multiSelect: true }),
+      q('Secret', { id: 'secret', options: [], required: false, isSecret: true })] };
+    expect(normalizeAskUserQuestionInput(input)).toEqual({ ok: true, input });
+  });
+  it.each([null, [], 'A', { label: null }, { label: 'A', description: {} }, { label: 'A', preview: {} }])(
+    'rejects malformed options before rendering: %j', option => {
+      const result = normalizeAskUserQuestionInput({ questions: [{ ...q('Choose'), options: [option] }] });
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('options[0]') });
+    },
+  );
+  it('defaults an omitted description but rejects duplicate answer labels and ids', () => {
+    expect(normalizeAskUserQuestionInput({ questions: [{ ...q('Choose'), options: [{ label: 'A' }] }] })).toMatchObject({
+      ok: true, input: { questions: [{ options: [{ label: 'A', description: '' }] }] },
+    });
+    expect(normalizeAskUserQuestionInput({ questions: [{ ...q('Choose'), options: [q('Q').options[0], q('Q').options[0]] }] }).ok).toBe(false);
+    expect(normalizeAskUserQuestionInput({ questions: [q('First', { id: 'same' }), q('Second', { id: 'same' })] }).ok).toBe(false);
+  });
+  it.each([null, [], {}, { questions: [] }, { questions: [null] }, { questions: [{ ...q('Choose'), multiSelect: 'false' }] }])(
+    'reports invalid input without a cancellation: %j', input => {
+      expect(normalizeAskUserQuestionInput(input)).toMatchObject({ ok: false, error: expect.stringContaining('Correct the input') });
+    },
+  );
 });
