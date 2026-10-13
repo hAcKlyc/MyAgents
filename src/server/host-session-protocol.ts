@@ -1,3 +1,4 @@
+import type { BotRunIdentity } from '../host/bot-runtime';
 import type { TurnTerminalOutcome } from './session-core/turn-queue';
 
 export type HostSessionOperation = 'describe' | 'send' | 'state' | 'result' | 'permission' | 'stop' | 'shutdown';
@@ -10,7 +11,7 @@ export type HostSessionRequest = {
 export type HostSessionReply = { type: 'reply'; id: string; generation: string; ok: boolean; data?: unknown; error?: string };
 export type HostSessionMessage =
   | { type: 'credential-needed'; generation: string }
-  | { type: 'ready'; generation: string; sessionId: string }
+  | { type: 'ready'; generation: string; sessionId: string; bot?: BotRunIdentity }
   | HostSessionReply
   | { type: 'terminal'; generation: string; sessionId: string; outcome: TurnTerminalOutcome };
 

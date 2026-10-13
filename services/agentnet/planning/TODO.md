@@ -72,7 +72,7 @@
 
 - [x] BOTS-CLOUD-ADMIN-001 PR20/main be48a22b及现网制品、私有一致性备份/回滚核验。
 - [x] 用户首位测试管理员角色确认；真实OIDC/admin API停止态管理与撤销session验收。
-- [ ] BOTS-ADMIN-LOGIN-002独立标签页辅助登录：本地UI/auth验收已过，CI/main/发布和真实IAB路径待完成。
+- [x] BOTS-ADMIN-LOGIN-002独立标签页辅助登录：PR22/main1cfa2f85、CI发布制品和真实IAB登录/管理路径已验收。
 - [ ] BOTS-CLOUD-EXEC-001有限Bot委派、真实Session启停、重启未知结果与授权撤销：实现/联调进行中，未发布。
 - [ ] 客户端Bots Net命名与个人共享；跨用户多账号与收费模型路径另行验收。
 
