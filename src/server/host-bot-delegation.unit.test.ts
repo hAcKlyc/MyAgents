@@ -354,19 +354,24 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
         item.request_hash===createCommand.request_hash && item.receipt.status==='persisted')).toBe(true);
       const expiredReadManager=createHostBotManager({hostId,roots:{bots:realpathSync(root)},jwks,scope,currentHostContext:()=>context,now:()=>now,
         localPolicy} as HostBotManagerOptions);
-      expect(await expiredReadManager.pendingReceipts()).toHaveLength(2);
-      await expect(expiredReadManager.mutate(intentToken,leaseToken)).rejects.toThrow('BOT_LOCAL_POLICY_STALE');
-      await expect(expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,'f'.repeat(64)))
-        .rejects.toThrow('BOT_RECEIPT_ACK_MISMATCH');
-      expect(await expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,createCommand.request_hash))
-        .toEqual({lease_id:lease.lease_id});
-      expect(await expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,createCommand.request_hash))
-        .toEqual({lease_id:lease.lease_id});
-      expect(await expiredReadManager.pendingReceipts().then(rows=>rows.map(item=>item.lease_id)))
-        .toEqual([secondLease.lease_id]);
-      expect(await replayManager.ackReceipt(secondLease.lease_id,createCommand.mutation_id,createCommand.request_hash))
-        .toEqual({lease_id:secondLease.lease_id});
-      expect(await replayManager.pendingReceipts()).toEqual([]);
+      const dateNowSpy=vi.spyOn(Date,'now').mockReturnValue((localPolicy.expires_at+1)*1000);
+      try {
+        expect(await expiredReadManager.pendingReceipts()).toHaveLength(2);
+        await expect(expiredReadManager.mutate(intentToken,leaseToken)).rejects.toThrow('BOT_LOCAL_POLICY_STALE');
+        await expect(expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,'f'.repeat(64)))
+          .rejects.toThrow('BOT_RECEIPT_ACK_MISMATCH');
+        expect(await expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,createCommand.request_hash))
+          .toEqual({lease_id:lease.lease_id});
+        expect(await expiredReadManager.ackReceipt(lease.lease_id,createCommand.mutation_id,createCommand.request_hash))
+          .toEqual({lease_id:lease.lease_id});
+        expect(await expiredReadManager.pendingReceipts().then(rows=>rows.map(item=>item.lease_id)))
+          .toEqual([secondLease.lease_id]);
+        expect(await replayManager.ackReceipt(secondLease.lease_id,createCommand.mutation_id,createCommand.request_hash))
+          .toEqual({lease_id:secondLease.lease_id});
+        expect(await replayManager.pendingReceipts()).toEqual([]);
+      } finally {
+        dateNowSpy.mockRestore();
+      }
       const savedAfterAcks=loadConfig({strict:true}).hostBotDelegationsV1 as {mutations:Array<{receipt:Receipt;lease_acks:Array<{lease_id:string;acknowledged:boolean}>}>};
       expect(savedAfterAcks.mutations.find(item=>item.receipt.mutation_id===createCommand.mutation_id)?.lease_acks)
         .toEqual([{lease_id:lease.lease_id,acknowledged:true},{lease_id:secondLease.lease_id,acknowledged:true}]);
