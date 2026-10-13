@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/bots-cloud-execution-v1 -->
 <!-- git-project-sync-task:base=b421b759180fb36432186dbbbda42b11eb0d3a1c -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 <!-- git-project-sync-task:scaffold=false -->
 
 # Task: BOTS-CLOUD-EXEC-001 finite Host-delegated Bot execution
@@ -15,8 +15,8 @@ BOTS-CLOUD-EXEC-001 implements the finite Bot delegation approved by the user. U
 - [x] Closed schema/canonical hash/cross-language fixtures and typed signer domain checks.
 - [x] Actual authority/ledger implementation and cryptographic service fixture gates; production remains separate.
 - [x] Host-local implementation, exact proof/runtime identity, final receipt outbox and protected policy pin; Linux exact-head acceptance remains open.
-- [ ] Actual Linux Host outbound transport/Session hook, original operation recovery and restart validation (synthetic UI and local hooks are accepted).
-- [ ] Actual CI/main/remote delivery, approved roles/Host opt-in and serial release/acceptance.
+- [x] Actual Linux Host outbound transport/Session hook, original operation replay/CAS, restart persistence and six lifecycle methods accepted.
+- [x] CI/main/remote source delivery, approved role/single-Bot finite opt-in and actual serial release/acceptance.
 
 ## Completed
 
@@ -26,13 +26,15 @@ User architecture approval, source/owner read-only audit and minimal polling con
 
 Integrated local verification: service89 passed/2 manual ignored; headless137/137; codec11/11; closed core5/5 and Node parity7/7. Host unit22 passed/2 Linux-only skipped; actual worker/private regression and bounded child stop6/6 integration. Typecheck/full lint, both all-targets clippy and format checks, Host+Session bundle smoke pass. UI fixture tests are synthetic and do not prove Linux Host effects. Original registry production acceptance belongs to BOTS-CLOUD-ADMIN-001; no paid model invocation.
 
-## Blockers and unknowns
+## Current outcome and limits
 
-Host foundation PR24 is accepted in remote main fb92ce9c; synchronize that owner result while preserving finite Bot hooks and locking repairs. Platform administrator role was explicitly approved and registry release accepted separately. Specific Bot/Host protected opt-in and grant activation still require concrete permission. Actual model inference/fees, full runtime or multi-Bot parallelism are not claimed. Token/cost unknown.
+First finite builtin lifecycle scope is released and actually accepted. Main75 contains the implementation and its seven required checks passed; real IAB/Owner/admin and Node/native effects, exact worker exit, original replay/CAS, restart persistence, soft-delete/new-grant restore and effective revocation passed. Final Bot is restored, no worker/Session remains, both grant generations are revoked and all seven receipts ACKed. Detailed trace/source/artifact/rollback evidence: `services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`.
+
+Shared use, paid inference, other Runtime, true second-user validation and extended IAM writes remain future scope, not a failed gate for the approved single-Bot lifecycle. Actual model/effort/token/cost metrics are unavailable. Later main Host/client improvements are preserved in Git but were not installed by this75 runtime release.
 
 ## Next step
 
-Finish exact-head Linux gates after merging accepted PR24 main; pin CI artifacts, obtain the non-secret account binding through the protected owner, and prepare the single-Bot release/rollback. Get exact protected opt-in only after the source/artifact/rollback is reviewable. Native/Node hooks are disabled by default; preserve deployed management/credential state and profile during the coordinated release.
+Continue future account/role/Host/Bot capabilities only inside the single MoXBots cloud administrator console. Do not create additional login/account/Bot back offices. User-facing client login continues with the common auth service; Bots Net is the personal product surface. New specific Host authority or model invocation needs its applicable authorization; do not reuse the closed acceptance grant or silently extend expired policy.
 
 ## Preserved Host baseline and repair evidence
 
@@ -69,3 +71,9 @@ The default-off Linux upgrade is accepted: local clean Node sourcec5f6c9bf (Host
 The human explicitly authorized the concrete existing lifecycle acceptance Bot, for at most24h and only create/configure/enable/disable/delete/restore in its UUID path. The policy is installed with a shorter expiry capped by the existing Host account lifetime. Native socket/permissions and ready network are verified; no Bot grant or Session business effects are yet accepted. This fulfills the specific opt-in permission gate and must not be requested again.
 
 Cloud75 main CI artifact archive/source/executable hashes are verified locally. Target transfer/ABI, cloud execution activation, actual owner UI grant, six lifecycle effects, exact child exit, persistence/replay/CAS and effective revocation remain open. Slow binary transfer is a transport issue; cloud remains at the registry release until artifact verification and serial switch. Private files contain actual identifiers, accounts and deployment evidence; public Git records only source, checks and evidence roles. Model invocation and future shared use remain outside this lifecycle-only slice.
+
+## 2026-10-14 — actual release acceptance completed
+
+Cloud main75 artifact and Node/native runtime source/hashes are verified on the real targets. Six methods produced six persisted success receipts; one deliberate stale-revision operation produced a conflict and unchanged snapshot. Original replay/mismatch409, exact child exit, actual restart and final effective revocation were independently verified. Current live/account details and original receipts remain private. Linux source/model-call boundary and truthful UI/pending states are not weakened.
+
+The previous preparation/gate entries are historical; the completed current criteria and linked acceptance record supersede them. The latest user instruction requires one unified cloud console, including user/login administration as future modules of that same platform; no additional back office is planned.

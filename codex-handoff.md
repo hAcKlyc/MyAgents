@@ -1,6 +1,12 @@
 # Codex Handoff
 
-## 当前管理员云后台交付（2026-10-13）
+## 当前统一云后台（2026-10-14）
+
+BOTS-CLOUD-ADMIN-001、登录辅助及BOTS-CLOUD-EXEC-001已交付。有限生命周期运行source75bb0269已由真实IAB/Owner/admin和Linux Host完成六方法、原请求/CAS、精确退出、重启及有效撤销验收；最终恢复的控制Bot没有活动Session、两代授权已关闭，模型调用保持禁止。源码/CI/制品、独立与生产验收、备份及限制见 services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md。
+
+用户要求只保留一个MoXBots云管理后台：用户、Hosts、Bots、权限、审计及后续账号/登录策略都在此平台。原认证组件为内部依赖，客户端普通用户登录界面未替换；个人产品入口后续Bots Net，不新建其他后台。并发Host/客户端改动在main保留，按其owner发布记录继续，不宣称本次75运行制品包含所有后续main代码。具体有限权限不得隐式续期，重生成native unit注意保留原finite/context flags。
+
+## 先前管理员云后台交付（2026-10-13，历史）
 
 BOTS-CLOUD-ADMIN-001：PR20 / main be48a22b，exact-head 7项CI通过，已在既有云服务发布。运行CI source2dec7655与main完整tree一致，binary SHA2563a04ab08e02a21f4dd908239c6714d2e0e5d2d6befeecc7e55855936b3b5a8db核验；首位现有测试管理员获用户明确授权。云端一致性私有备份/回滚准备并核验，Dex/Mori保持active。实际OIDC/admin API停止态CRUD、原操作幂等、配置持久化、可恢复软删/恢复、logout后401通过，没有模型调用。具体账号与凭据仅在原私有operator配置。
 
