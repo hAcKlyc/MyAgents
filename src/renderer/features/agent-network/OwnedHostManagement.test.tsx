@@ -691,3 +691,22 @@ it("applies only the profile when credential methods exist but writeAvailable is
   expect(invoke.mock.calls.some(([, { request }]) => request.method === "credential.provider.set")).toBe(false);
   expect(document.body).not.toHaveTextContent("do-not-send-key");
 });
+
+it("hydrates Responses output defaults before editing a Host token limit", async () => {
+  const f = fixture();
+  const provider = { id: "responses-profile", name: "Responses", apiProtocol: "openai" as const, baseUrl: "https://api.example.test/v1", authType: "api_key" as const, upstreamFormat: "responses" as const };
+  const snapshot = { ...f.snapshot, kind: "extended-snapshot" as const, provider, settings: { revision: 1, providerId: provider.id, model: "qa-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false } };
+  const writes: Array<{ method: string; params: { provider?: { maxOutputTokens?: number; maxOutputTokensParamName?: string } } }> = [];
+  invoke.mockImplementation((_command, { request }) => {
+    if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.inspect", "config.provider.set", "receipt.provider.get"], providerKinds: ["openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
+    if (request.method === "host.inspect") return Promise.resolve({ scope: f.scope, result: snapshot });
+    writes.push(request);
+    return Promise.resolve({ scope: f.scope, result: { kind: "provider-config-receipt", mutationId: request.params.mutationId, status: "persisted", revision: 2, effect: "new-session", settings: snapshot.settings } });
+  });
+  render(<OwnedHostManagement locator={f.locator} online />);
+  expect(await screen.findByRole("button", { name: "max_output_tokens" })).toBeVisible();
+  fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4096" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存 Provider 和目录" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].params.provider).toMatchObject({ maxOutputTokens: 4096, maxOutputTokensParamName: "max_output_tokens" });
+});

@@ -34,3 +34,7 @@ Runtime model attribution, tokens and monetary cost are unavailable. No AIRouter
 ## Concurrent main integration
 
 PR23 Bot execution main75bb0269 was integrated after UI freeze. Rust implementer performed read-only merged-source checks: protocol19, management42, Bot14, probe12 passed (groups overlap; no summed total), headless all-target clippy passed. This is integration verification, not independent review. Generic configuration must use main atomic mutation owner and registration→supervisor lock order to retain concurrent Bot/Agent state. Existing Bot execution dynamic encrypted-credential preflight limitation remains outside this configuration UI task; no Bot runtime acceptance is claimed.
+
+## Final Responses default correction
+
+Primary visual follow-up found an absent Responses output parameter hydrated as the Chat Completions default. Corrected only the absent value to max_output_tokens while preserving explicit owner values. Entire Host DOM file21 tests passed, scoped ESLint passed, primary IAB edited4096/saved and showed max_output_tokens, independently screenshot/source reviewed. Evidence: final-responses-default-900.png. Unchanged model/directory/authorization tests inherit prior freeze; exact final-head CI required.

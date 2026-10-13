@@ -139,3 +139,13 @@ Harness credential owner真实性修正：原fixture config切到新provider后�
 主Agent报告最终实际IAB顺序：添加qa-second→选择→重开确认首选→保存Host→当前qa-second，已通过。模型panel最终截图独立佐证重开首选状态，configured截图独立佐证保存后的当前模型；静态截图不能单独证明全部交互时序。主Agent报告37最终DOM/profile测试通过，tsc与目标lint通过；本子Agent核查源码/测试覆盖、未自行重复执行，不冒称独立跑测。
 
 结论限于冻结UI实现、所读源码契约及实际截图覆盖：之前R1–R7、后续源一致性/版本/async/capability/焦点/模型回显/执行授权发现均闭合，没有剩余已确认阻断。真实Host私有通道、旧socket epoch fallback、重启持久化、安装/版本切换、真实账号业务路径与生产发布必须由整体集成/验收证据完成；newmain Bot execution冲突集成之后仍需主Agent整体复核。旧harness失败截图与旧partial凭据投影结果不进入最终接受证据。
+
+## Responses 默认输出参数局部复验（23:52，2026-10-13）
+
+只读核实交付树 `OwnedHostProviderConfiguration.tsx:21`：`provider.maxOutputTokensParamName ?? (provider.upstreamFormat === "responses" ? "max_output_tokens" : "max_tokens")`。因此显式已有参数优先保留；仅未指定参数时 Responses默认max_output_tokens，其他既有默认max_tokens。fieldsToProvider随后保存该字段，无另一路强制覆盖。
+
+使用view_image独立查看 `moxbots-host-config-evidence/final-responses-default-900.png`（mtime 23:52，900宽full-page）：Responses API已选中，输出参数选择器清楚显示max_output_tokens，limit为4096，Provider已保存反馈可见，没有旧“请选择”占位。该图片支持最终实际回显；不能独立证明服务器推理请求。
+
+实际读取新增DOM回归：OwnedHostManagement.test.tsx:697起构造Responses无显式参数profile，断言max_output_tokens按钮可见，输入4096后断言保存provider含maxOutputTokens:4096与maxOutputTokensParamName:max_output_tokens。测试仍由主Agent执行，本子Agent不重复跑测或声称执行通过。
+
+本处源码与截图局部接受，未新增已确认阻断；其余UI继承此前冻结结论。最终测试完成与提交标识由主Agent补录，真实Host/推理/安装/生产限制保持。

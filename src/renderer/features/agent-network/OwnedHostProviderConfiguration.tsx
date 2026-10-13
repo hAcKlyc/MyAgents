@@ -18,7 +18,7 @@ const pendingReceipts = new Map<string, GenericPending>();
 const receiptKey = (locatorKey: string, scope: OwnedHostScope) => JSON.stringify([locatorKey, scope.serviceId, scope.environment, scope.principalId, scope.networkId, scope.deviceId, scope.keyGeneration]);
 
 function toFields(provider: PortableHostProvider): ProviderConnectionValue {
-  return { apiProtocol: provider.apiProtocol, baseUrl: provider.baseUrl, authType: provider.authType, upstreamFormat: provider.upstreamFormat ?? "chat_completions", maxOutputTokens: provider.maxOutputTokens === undefined ? "" : String(provider.maxOutputTokens), maxOutputTokensParamName: provider.maxOutputTokensParamName ?? "max_tokens" };
+  return { apiProtocol: provider.apiProtocol, baseUrl: provider.baseUrl, authType: provider.authType, upstreamFormat: provider.upstreamFormat ?? "chat_completions", maxOutputTokens: provider.maxOutputTokens === undefined ? "" : String(provider.maxOutputTokens), maxOutputTokensParamName: provider.maxOutputTokensParamName ?? (provider.upstreamFormat === "responses" ? "max_output_tokens" : "max_tokens") };
 }
 function fieldsToProvider(base: PortableHostProvider, fields: ProviderConnectionValue): PortableHostProvider {
   return { ...base, apiProtocol: fields.apiProtocol, baseUrl: fields.baseUrl.trim(), authType: fields.authType, ...(fields.apiProtocol === "openai" ? { upstreamFormat: fields.upstreamFormat, ...(fields.maxOutputTokens.trim() ? { maxOutputTokens: Number.parseInt(fields.maxOutputTokens, 10) } : { maxOutputTokens: undefined }), maxOutputTokensParamName: fields.maxOutputTokensParamName } : { upstreamFormat: undefined, maxOutputTokens: undefined, maxOutputTokensParamName: undefined }) };
