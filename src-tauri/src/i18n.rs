@@ -149,6 +149,37 @@ fn persist_to_disk(value: UiLanguage) -> Result<(), String> {
 }
 
 pub fn t<'a>(key: &'a str, locale: SupportedLocale) -> &'a str {
+    if crate::app_dirs::IS_MOXBOT {
+        match (locale, key) {
+            (SupportedLocale::ZhCn, "tray.open") => return "打开 MoXBots",
+            (SupportedLocale::EnUs, "tray.open") => return "Open MoXBots",
+            (SupportedLocale::ZhCn, "notification.sessionCompleteTitle") => {
+                return "MoXBots - 任务完成"
+            }
+            (SupportedLocale::EnUs, "notification.sessionCompleteTitle") => {
+                return "MoXBots - Task complete"
+            }
+            (SupportedLocale::ZhCn, "notification.sessionStoppedTitle") => {
+                return "MoXBots - 任务已停止"
+            }
+            (SupportedLocale::EnUs, "notification.sessionStoppedTitle") => {
+                return "MoXBots - Task stopped"
+            }
+            (SupportedLocale::ZhCn, "notification.sessionErrorTitle") => {
+                return "MoXBots - 任务失败"
+            }
+            (SupportedLocale::EnUs, "notification.sessionErrorTitle") => {
+                return "MoXBots - Task failed"
+            }
+            (SupportedLocale::ZhCn, "notification.centerAnnouncementTitle") => {
+                return "MoXBots 公告"
+            }
+            (SupportedLocale::EnUs, "notification.centerAnnouncementTitle") => {
+                return "MoXBots announcement"
+            }
+            _ => {}
+        }
+    }
     match (locale, key) {
         (SupportedLocale::ZhCn, "tray.open") => "打开 MyAgents",
         (SupportedLocale::ZhCn, "tray.recording") => "正在录音…",
@@ -277,7 +308,11 @@ mod tests {
     fn translates_native_session_completion_notifications() {
         assert_eq!(
             t("notification.sessionCompleteTitle", SupportedLocale::ZhCn),
-            "MyAgents - 任务完成"
+            if crate::app_dirs::IS_MOXBOT {
+                "MoXBots - 任务完成"
+            } else {
+                "MyAgents - 任务完成"
+            }
         );
         assert_eq!(
             t("notification.sessionErrorBody", SupportedLocale::EnUs),

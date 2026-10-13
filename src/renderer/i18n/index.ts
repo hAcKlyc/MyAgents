@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../shared/appProfile';
 
 import { resolveEffectiveLocale, type SupportedLocale } from '../../shared/i18n';
 import appEn from './locales/en-US/app.json';
@@ -48,8 +49,20 @@ export function getInitialLocale(): SupportedLocale {
 
 void i18n
   .use(initReactI18next)
+  .use({
+    type: 'postProcessor',
+    name: 'applicationBrand',
+    process(value: string, keys: string[]) {
+      // Legal attribution and upstream community/network/Space services keep
+      // their own identities; only local application prose is rebranded.
+      const upstreamText = /^(?:[^:]+:)?(?:about\.(?:licensing|developer)|community\.|account\.|agentNetwork\.(?:info|officialNetwork)|space\.)/;
+      if (APP_BUILD_PROFILE !== 'moxbot' || keys.some((key) => upstreamText.test(key))) return value;
+      return value.replaceAll('MyAgents', APP_DISPLAY_NAME);
+    },
+  })
   .init({
     resources,
+    postProcess: ['applicationBrand'],
     lng: getInitialLocale(),
     fallbackLng: 'zh-CN',
     defaultNS: DEFAULT_I18N_NAMESPACE,

@@ -41,7 +41,12 @@ const buildProfile = getBuildProfile();
 
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: 'application-profile-title',
+    transformIndexHtml: (html) => buildProfile === 'moxbot'
+      ? html.replace('<title>MyAgents</title>', '<title>MoXBots</title>')
+      : html,
+  }],
   resolve: {
     alias: [
       { find: '@', replacement: resolve(__dirname, 'src/renderer') },

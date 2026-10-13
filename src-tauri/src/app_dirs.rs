@@ -29,7 +29,7 @@ pub const APP_DATA_DIR_NAME: &str = ".moxbot";
 #[cfg(not(myagents_moxbot))]
 pub const APP_DATA_DIR_NAME: &str = ".myagents";
 #[cfg(myagents_moxbot)]
-pub const APP_DISPLAY_NAME: &str = "MoX bot";
+pub const APP_DISPLAY_NAME: &str = "MoXBots";
 #[cfg(not(myagents_moxbot))]
 pub const APP_DISPLAY_NAME: &str = "MyAgents";
 #[cfg(myagents_moxbot)]

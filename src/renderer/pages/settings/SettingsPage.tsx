@@ -35,7 +35,7 @@ import React, {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
-import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -6299,10 +6299,10 @@ export default function Settings({
                       Website
                     </p>
                     <ExternalLink
-                      href="https://myagents.io"
+                      href={APP_WEBSITE_URL}
                       className="mt-1 block text-[var(--accent)] hover:underline"
                     >
-                      myagents.io
+                      {new URL(APP_WEBSITE_URL).hostname}
                     </ExternalLink>
                   </div>
                   <div>

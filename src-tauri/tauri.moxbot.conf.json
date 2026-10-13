@@ -1,5 +1,5 @@
 {
-  "productName": "MoX bot",
+  "productName": "MoXBots",
   "identifier": "com.moxbot.app",
   "app": {
     "security": {
@@ -12,7 +12,7 @@
         {
           "$schema": "../gen/schemas/desktop-schema.json",
           "identifier": "moxbot",
-          "description": "Isolated MoX bot desktop permissions",
+          "description": "Isolated MoXBots desktop permissions",
           "windows": [
             "main",
             "fb-ball",
@@ -92,6 +92,18 @@
     "macOS": {
       "infoPlist": "Info.moxbot.plist",
       "signingIdentity": null
+    },
+    "icon": [
+      "icons/moxbots/32x32.png",
+      "icons/moxbots/128x128.png",
+      "icons/moxbots/128x128@2x.png",
+      "icons/moxbots/icon.icns",
+      "icons/moxbots/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/moxbots/icon.ico"
+      }
     }
   },
   "plugins": {

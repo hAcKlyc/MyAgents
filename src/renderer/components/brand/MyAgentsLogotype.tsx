@@ -1,4 +1,5 @@
 import { APP_DISPLAY_NAME } from '../../../shared/appProfile';
+import { APP_ICON_SRC } from './appBrand';
 
 /**
  * MYAGENTS logotype (brand v1.1 trial).
@@ -45,6 +46,7 @@ export function MyAgentsLogotype({ variant = 'display', className, title }: MyAg
         aria-hidden={title ? undefined : true}
         data-app-profile-wordmark
       >
+        {variant === 'display' && <img src={APP_ICON_SRC} alt="" aria-hidden="true" className="app-profile-mark" />}
         {APP_DISPLAY_NAME}
       </span>
     );
