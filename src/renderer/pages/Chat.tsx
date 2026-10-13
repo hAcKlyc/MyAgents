@@ -1,4 +1,5 @@
 import { useChatDraftScope } from "@/hooks/useChatDraftScope";
+import { useNextPromptSuggestion } from '@/hooks/useNextPromptSuggestion';
 import type { Message } from "@/types/chat";
 import TaskDiscussionRecovery from "@/components/TaskDiscussionRecovery";
 import { desktopContextOf } from "../../shared/agentMentions";
@@ -4665,6 +4666,17 @@ export default function Chat({
     questionDraft?.sessionId === sessionId ? questionDraft : null;
   const questionTargetRef = useRef(questionTarget);
   questionTargetRef.current = questionTarget;
+  const nextPromptSuggestion = useNextPromptSuggestion({
+    sessionId,
+    messages,
+    enabled: isActive && isConnected && !isSessionLoading && !isLoading
+      && sessionState === 'idle' && !agentError && !lastTerminalReason
+      && !pendingPermission && !pendingAskUserQuestion && !pendingExitPlanMode && !pendingEnterPlanMode
+      && !questionTarget && !queuedMessages.length,
+    scope: JSON.stringify([tabId, agentDir, inputChromeRuntime, sessionRuntimeSource,
+      effectiveModelProvider?.id, inputUsesExternalRuntimeControls ? runtimeModel : selectedModel]),
+    apiPost,
+  });
 
   // PERFORMANCE: text is now passed from SimpleChatInput (which manages its own state)
   // This avoids re-rendering Chat on every keystroke.
@@ -6765,6 +6777,7 @@ export default function Chat({
               onStop={handleStop}
               active={isActive}
               sendBlocked={isSessionLoading}
+              nextPromptSuggestion={nextPromptSuggestion}
               isLoading={
                 isLoading ||
                 sessionState === 'running' ||

@@ -194,6 +194,23 @@ export async function generateTitle(
   providerEnv?: ProviderEnv,
   conversationId?: string,
 ): Promise<string | null> {
+  return generateUtilityText({ prompt: buildUserPrompt(rounds), systemPrompt: SYSTEM_PROMPT, clean: cleanTitle, settingSources: ['project'] }, model, providerEnv, conversationId);
+}
+
+export interface TextUtilityTask {
+  prompt: string;
+  systemPrompt: string;
+  clean: (text: string) => string | null;
+  signal?: AbortSignal;
+  requireSuccessfulTerminal?: boolean;
+  settingSources?: Array<'project'>;
+}
+
+/** Isolated SDK text turn: no tools, MCP, transcript persistence or Product Session writes. */
+export async function generateUtilityText(
+  task: TextUtilityTask, model: string, providerEnv?: ProviderEnv, conversationId?: string,
+): Promise<string | null> {
+  if (task.signal?.aborted) return null;
   const requestConversationId = conversationId ?? randomUUID();
   // PRD #124: register a per-call bridge token if the title-gen provider is
   // OpenAI-protocol — the SDK subprocess routes to ITS upstream via a
@@ -204,13 +221,24 @@ export async function generateTitle(
     : null;
   const controller = new AbortController();
   let prepared: PreparedProvider | undefined;
+  let resolveAbort: () => void = () => {};
+  const aborted = new Promise<null>(resolve => { resolveAbort = () => resolve(null); });
+  const abort = () => { controller.abort(); resolveAbort(); };
+  task.signal?.addEventListener('abort', abort, { once: true });
+  const deadline = setTimeout(abort, BUILTIN_TITLE_TIMEOUT_MS);
   try {
-    prepared = await prepareProviderBinding({ providerEnv, model, controller });
-    await prepared.beforeTurn();
-    return await generateTitleInner(rounds, model, prepared.providerEnv, bridge?.token, controller, prepared, requestConversationId);
+    const preparing = prepareProviderBinding({ providerEnv, model, controller });
+    void preparing.then(binding => { if (controller.signal.aborted && prepared !== binding) return binding.release(); }).catch(() => {});
+    prepared = await Promise.race([preparing, aborted]) ?? undefined;
+    if (!prepared || controller.signal.aborted) return null;
+    await Promise.race([prepared.beforeTurn(), aborted]);
+    if (controller.signal.aborted) return null;
+    return await generateTitleInner(task, model, prepared.providerEnv, bridge?.token, controller, prepared, requestConversationId);
   } catch {
     return null;
   } finally {
+    clearTimeout(deadline);
+    task.signal?.removeEventListener('abort', abort);
     controller.abort();
     await prepared?.release().catch(() => console.warn('[cliproxy] Title binding release was not confirmed'));
     bridge?.release();
@@ -218,7 +246,7 @@ export async function generateTitle(
 }
 
 async function generateTitleInner(
-  rounds: TitleRound[],
+  task: TextUtilityTask,
   model: string,
   providerEnv?: ProviderEnv,
   bridgeToken?: string,
@@ -247,7 +275,7 @@ async function generateTitleInner(
       model,
       Number(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW),
     );
-    const prompt = buildUserPrompt(rounds);
+    const prompt = task.prompt;
 
     async function* titlePrompt() {
       yield {
@@ -258,19 +286,19 @@ async function generateTitleInner(
       };
     }
 
-    titleQuery = await createGuardedSdkQuery(cliPath, () => query({
+    const launchPromise = Promise.resolve(createGuardedSdkQuery(cliPath, () => query({
       prompt: titlePrompt(),
       options: {
         abortController: controller,
         maxTurns: 1,
         sessionId,
         cwd,
-        settingSources: ['project'],
+        settingSources: task.settingSources ?? [],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         pathToClaudeCodeExecutable: cliPath,
         env,
-        systemPrompt: getPreparedSdkSystemPrompt(providerEnv, SYSTEM_PROMPT),
+        systemPrompt: getPreparedSdkSystemPrompt(providerEnv, task.systemPrompt),
         // Title generation is a short text-classification task. Adaptive thinking
         // can spend the whole one-shot budget on hidden reasoning or delay first
         // text on strong reasoning models, so force the cheapest text path.
@@ -295,8 +323,15 @@ async function generateTitleInner(
         // the suffix before the wire.
         ...(launchModel ? { model: launchModel } : {}),
       },
-    }));
+    })));
 
+    const abortPromise = new Promise<null>(resolve => {
+      if (controller.signal.aborted) resolve(null);
+      else controller.signal.addEventListener('abort', () => resolve(null), { once: true });
+    });
+    void launchPromise.then(handle => { if (controller.signal.aborted) handle.close(); }).catch(() => { /* handled by race */ });
+    titleQuery = await Promise.race([launchPromise, abortPromise]) ?? undefined;
+    if (!titleQuery) return null;
     let titleText: string | null = null;
 
     // Race: SDK response vs timeout
@@ -307,7 +342,7 @@ async function generateTitleInner(
     const queryPromise = (async (): Promise<string | null> => {
       for await (const message of titleQuery!) {
         const text = extractTitleTextFromSdkMessage(message);
-        if (!providerEnv?.endpointSource) { if (text) return text; continue; }
+        if (!providerEnv?.endpointSource && !task.requireSuccessfulTerminal) { if (text) return text; continue; }
         if (text) titleText = text;
         if (message.type === 'result') {
           await prepared?.reportTerminal(message.subtype === 'success');
@@ -318,7 +353,7 @@ async function generateTitleInner(
       return null;
     })();
 
-    titleText = await Promise.race([queryPromise, timeoutPromise]);
+    titleText = await Promise.race([queryPromise, timeoutPromise, abortPromise]);
 
     // If timeout won, terminate the SDK iterator to release the subprocess
     if (titleText === null) {
@@ -330,9 +365,8 @@ async function generateTitleInner(
       return null;
     }
 
-    const cleaned = cleanTitle(titleText);
-    console.log(`[title-generator] Generated title: "${cleaned}" (${Date.now() - startTime}ms, ${rounds.length} rounds)`);
-    return cleaned.length > 0 ? cleaned : null;
+    const cleaned = task.clean(titleText);
+    return cleaned || null;
   } catch (err) {
     await prepared?.reportTerminal(false);
     console.warn('[title-generator] SDK query failed:', err);
@@ -515,12 +549,10 @@ export async function generateTitleExternal(
         settle(null);
       }
     } else if (event.kind === 'permission_request') {
-      // Title-gen is text-only and forces the most permissive mode per runtime so this shouldn't
-      // fire. If it does, don't deadlock
-      // waiting on an approval we'd never grant — settle with whatever text we have and let the
-      // cleanup path kill the process. No respondPermission call needed.
+      // A text utility never grants permission or publishes partial text after a tool attempt.
+      // Settle null and let cleanup stop the process; no respondPermission call is made.
       outcome = 'permission';
-      settle(collected || null);
+      settle(null);
     }
   });
 
@@ -536,8 +568,11 @@ export async function generateTitleExternal(
     settle(null);
   });
 
-  const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), EXTERNAL_TIMEOUT_MS));
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), EXTERNAL_TIMEOUT_MS); });
   const titleText = await Promise.race([resultPromise, timeoutPromise]);
+
+  clearTimeout(timeout);
 
   // #296 review (Codex C2): mark the attempt finished now. If the TIMEOUT won the
   // race, `settle()` was never called so `resolved` is still false — and the
@@ -558,10 +593,12 @@ export async function generateTitleExternal(
   if (handle) {
     try { await runtime.stopSession(handle); } catch { /* ignore */ }
   } else {
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const lateHandle = await Promise.race([
       startPromise.catch(() => null),
-      new Promise<RuntimeProcess | null>((r) => setTimeout(() => r(null), 5_000)),
+      new Promise<RuntimeProcess | null>((r) => { graceTimer = setTimeout(() => r(null), 5_000); }),
     ]);
+    clearTimeout(graceTimer);
     if (lateHandle) {
       try { await runtime.stopSession(lateHandle); } catch { /* ignore */ }
     }

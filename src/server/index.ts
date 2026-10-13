@@ -717,6 +717,7 @@ import { createTaskDispatchGuard } from './session-engine/task-turn-orchestrator
 import { handleSessionEngineQueueRoute } from './routes/session-engine-queue';
 import { handleSessionEngineRuntimeRoute } from './routes/session-engine-runtime';
 import { handleSessionReadRoute } from './routes/session-read';
+import { handlePromptSuggestionRoute } from './routes/prompt-suggestion';
 import { handleChatStreamRoute } from './routes/chat-stream';
 import { handleSessionConfigRoute } from './routes/session-config';
 import { handleImModelRoute } from './routes/im-model-selection';
@@ -2916,6 +2917,9 @@ async function main() {
       }
 
       // Read historical session messages from SDK's persisted session files (v0.2.59+)
+      const promptSuggestionResponse = await handlePromptSuggestionRoute(pathname, request);
+      if (promptSuggestionResponse) return promptSuggestionResponse;
+
       // Works without an active Sidecar — reads directly from .claude/ session data
       if (pathname === '/api/session/messages' && request.method === 'GET') {
         const sdkSessionId = url.searchParams.get('sdkSessionId');

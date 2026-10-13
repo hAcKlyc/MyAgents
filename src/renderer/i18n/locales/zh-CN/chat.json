@@ -13,6 +13,11 @@
     "cancel": "取消回答"
   },
   "input": {
+    "nextPrompt": {
+      "acceptHint": "Enter 接纳为草稿 · Esc 忽略",
+      "unavailable": "下一步建议：当前 Runtime 暂不可用",
+      "unavailableReason": "当前 Runtime 尚未提供无工具调用、不保存会话的文本生成能力。"
+    },
     "launcherPlaceholder": "今天，想干点啥？",
     "placeholder": "输入消息，使用 @ 引用文件，/ 使用技能...",
     "companionPlaceholder": "问问 Mino，或者派个活…",
