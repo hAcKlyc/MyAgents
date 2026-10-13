@@ -16,6 +16,10 @@ BOTS-CLOUD-EXEC-001：用户已确认Host所有者有限指定Bot委派方案，
 
 ## Current Snapshot
 
+- **MAH Host 基础已主干交付**：PR24 接受头793dea18七CI成功，merge `fb92ce9c43962f56acaf894e72f1a64003f59cc7` 已核远端祖先和同树；后续Host配置/Bot任务基于此main，无需合入整个PR14。当前桌面仍在线b116，101未更新，云1cfa制品9b9320f5已由root重新只读核验。
+- **MAH reader 新记录修复**：普通恢复/显式迁移/删除均接入版本化本地slot；不覆盖新binding，已提交缺失slot不复活。主审补充并修复了注销选择未提交fresh的边界：先清理并读回Missing，再提交barrier删legacy，容量先验。实际源portable14+strict/redline Clippy及独立复核通过；生产编译/完整新包和真实迁移/同包冷启动/跨包更新仍开放。过时cc构建主动取消且未安装，固定v1未重签，旧凭据/原MyAgents保全。
+
+
 - **MAH-DESKTOP-CREDENTIALS-20261013 最新接续**：当前安装仍为在线 b116；用户确认 session/key 两项“总是允许”，没有再次触发系统窗口。新 credential_slots 本地版本化映射/非秘密 route 台账与 caller 接线未提交、未安装；旧记录不改，固定 v1 SHA/source pin 不变。迁移必须拒绝覆盖新的 binding、拒绝 barrier 后缺失条目复活。当前仍需代码检查/独立审阅、同包冷启动和另一个真实桌面构建验收。
 - **Host 基础独立交付**：PR #24 `feat/mah-host-base-20261013` / 2fbda663，b116 + main e9767263；排除 post-b116 固定 reader，新记录迁移继续 PR14。相关 Host/DOM/typecheck 已通过，完整 CI/main 仍待确认；无新安装或服务器更新。旧 synthetic cold 子进程曾 Unlock 自己临时钥匙串，不能把成功视作排除真实 ACL/缓存原因；无 Unlock 拒绝对照仍待运行。
 

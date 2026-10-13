@@ -1066,7 +1066,23 @@ pub(crate) fn delete_account_if_binding(
                 else {
                     return Ok::<_, NetworkError>(None);
                 };
-                Ok((binding_id == expected_binding).then_some(selected))
+                if binding_id != expected_binding {
+                    return Ok(None);
+                }
+                if !versioned {
+                    // While the route is still legacy, a current-slot item can
+                    // only be an uncommitted write. Clear and confirm it before
+                    // a deletion barrier makes the current route authoritative.
+                    let fresh = entry(&format!(
+                        "session:{}",
+                        super::credential_slots::session_hash(&legacy)?
+                    ))?;
+                    delete_unlocked(&fresh)?;
+                    if read_unlocked(&fresh)?.is_some() {
+                        return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+                    }
+                }
+                Ok(Some(selected))
             },
             |selected| delete_unlocked(&selected),
         )?;

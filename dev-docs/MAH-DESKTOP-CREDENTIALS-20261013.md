@@ -57,3 +57,8 @@ CI 修复：07e226a9 的 DOM 用例只等 adapter promise 而未等父组件提�
 
 
 编译/CI 接续：主 Agent 真实 release App 构建 0b9c2cf9 成功，来源与 clean tree 过程一致；尚未签名/安装，不视为免提示完成。本机 AgentNet 单元 146 passed / 1 helper ignored，caller 针对性 3 项通过。该头 Linux 完整测试通过，但 Clippy 拒绝测试中的直接 Command::new；已改用项目 process_cmd 封装，独立实际 process_cmd/process_cleanup harness 的 12 项及项目 redline/strict Clippy 通过，不放宽规则。下一包基于本 test-only 修复重新冻结构建，当前头 CI 仍需等待。
+
+
+注销边界补充：主 Agent 在最终复核发现未提交 fresh 记录可能被旧记录删除屏障选中。已调整为同锁先核旧 binding、清理 fresh 并确认 Missing，再提交屏障与删除旧记录；容量检查先于 selector，失败不激活 fresh 或删除旧记录。独立源码复核关闭 P2，主 Agent 实际源 portable 14 passed / 1 helper ignored、项目 redline/strict Clippy 通过。过时 cc0660bc 编译主动停止，未签名、未安装；生产模式检查与新包构建继续，真实迁移/冷启动仍开放。
+
+Host 基础 PR #24 已合入远端 main `fb92ce9c43962f56acaf894e72f1a64003f59cc7`，接受头 `793dea18e22d4c221ed4b7bd2638ce87e78df586` 七项 CI 成功；已核验远端祖先与 merge tree 一致。其不含 post-b116 reader 改造，也未触发本轮客户端/101更新。

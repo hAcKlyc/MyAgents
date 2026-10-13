@@ -560,6 +560,9 @@ fn deleted_route<E: From<CryptoError>, T>(
     let mut original = None;
     let result = ledger.transaction(|dir| {
         let mut routes = ledger.read(dir)?;
+        if !routes.contains(id) && routes.len() >= MAX_ROUTES {
+            return Err(unavailable());
+        }
         let selected = match select(routes.contains(id)) {
             Ok(value) => value,
             Err(error) => {
@@ -571,9 +574,6 @@ fn deleted_route<E: From<CryptoError>, T>(
             return Ok(false);
         };
         if !routes.contains(id) {
-            if routes.len() >= MAX_ROUTES {
-                return Err(unavailable());
-            }
             routes.insert(id.into());
             ledger.write(dir, routes)?;
         }
@@ -1469,5 +1469,133 @@ mod tests {
             |_| Ok::<_, Error>(())
         )
         .unwrap());
+    }
+    #[test]
+    fn deletion_preflights_capacity_before_selector_side_effects() {
+        let (_dir, ledger, _) = fixture();
+        let routes = (0..MAX_ROUTES)
+            .map(|i| format!("session:{}", hash43(format!("full-{i}").as_bytes())))
+            .collect();
+        ledger.transaction(|dir| ledger.write(dir, routes)).unwrap();
+        let called = AtomicBool::new(false);
+        let id = format!("session:{}", hash43(b"absent-capacity"));
+        assert!(deleted_route(
+            &ledger,
+            &id,
+            |_| {
+                called.store(true, Ordering::Release);
+                Ok::<_, CryptoError>(Some(()))
+            },
+            |_| { panic!("capacity rejection must not call delete") }
+        )
+        .is_err());
+        assert!(!called.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn uncommitted_orphan_cleanup_is_confirmed_before_delete_barrier() {
+        #[derive(Debug, PartialEq)]
+        enum Error {
+            Storage,
+            Cleanup,
+            Delete,
+        }
+        impl From<CryptoError> for Error {
+            fn from(_: CryptoError) -> Self {
+                Self::Storage
+            }
+        }
+        for mode in [
+            "success",
+            "cleanup-error",
+            "cleanup-unconfirmed",
+            "old-delete-error",
+            "wrong-binding",
+        ] {
+            let (_dir, ledger, _) = fixture();
+            let id = format!("session:{}", hash43(mode.as_bytes()));
+            let old = ledger.root.join("legacy.synthetic");
+            let fresh = ledger.root.join("fresh.synthetic");
+            fs::write(&old, b"expected-binding").unwrap();
+            fs::write(&fresh, b"orphan-binding").unwrap();
+            let delete_called = AtomicBool::new(false);
+            let result = deleted_route(
+                &ledger,
+                &id,
+                |committed| {
+                    assert!(!committed);
+                    assert!(ledger
+                        .root
+                        .join(LOCK_PARENT)
+                        .join(LOCK)
+                        .join("owner")
+                        .is_file());
+                    let expected: &[u8] = if mode == "wrong-binding" {
+                        b"other-binding"
+                    } else {
+                        b"expected-binding"
+                    };
+                    if fs::read(&old).map_err(|_| Error::Storage)?.as_slice() != expected {
+                        return Ok(None);
+                    }
+                    if mode == "cleanup-error" {
+                        return Err(Error::Cleanup);
+                    }
+                    if mode != "cleanup-unconfirmed" {
+                        fs::remove_file(&fresh).map_err(|_| Error::Cleanup)?;
+                    }
+                    match fs::read(&fresh) {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                        _ => return Err(Error::Cleanup),
+                    }
+                    Ok(Some(old.clone()))
+                },
+                |selected| {
+                    delete_called.store(true, Ordering::Release);
+                    assert!(ledger
+                        .root
+                        .join(LOCK_PARENT)
+                        .join(LOCK)
+                        .join("owner")
+                        .is_file());
+                    let data: LedgerData =
+                        serde_json::from_slice(&fs::read(ledger.root.join(NAME)).unwrap()).unwrap();
+                    assert!(data.routes.contains(&id));
+                    assert!(!fresh.exists());
+                    if mode == "old-delete-error" {
+                        return Err(Error::Delete);
+                    }
+                    fs::remove_file(selected).map_err(|_| Error::Delete)
+                },
+            );
+            match mode {
+                "success" => {
+                    assert_eq!(result, Ok(true));
+                    assert!(ledger.route(&id).unwrap());
+                    assert!(!old.exists());
+                    assert!(!fresh.exists());
+                }
+                "old-delete-error" => {
+                    assert_eq!(result, Err(Error::Delete));
+                    assert!(ledger.route(&id).unwrap());
+                    assert!(old.exists());
+                    assert!(!fresh.exists());
+                }
+                "wrong-binding" => {
+                    assert_eq!(result, Ok(false));
+                    assert!(!ledger.route(&id).unwrap());
+                    assert!(old.exists());
+                    assert!(fresh.exists());
+                    assert!(!delete_called.load(Ordering::Acquire));
+                }
+                _ => {
+                    assert_eq!(result, Err(Error::Cleanup));
+                    assert!(!ledger.route(&id).unwrap());
+                    assert!(old.exists());
+                    assert!(fresh.exists());
+                    assert!(!delete_called.load(Ordering::Acquire));
+                }
+            }
+        }
     }
 }
