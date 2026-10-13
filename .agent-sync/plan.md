@@ -128,3 +128,12 @@ User requires a single MoXBots cloud administrator console for users, Hosts, Bot
 ## TITLE-001 — 2026-10-14 概要性任务标题
 
 当前Agent修改后端自动命名：首个成功人类问答后异步概括对象和动作，扩大有界上下文并保留尾部需求，拒绝认证错误/失败终态。手动命名不覆盖；不批量修改历史。任务记录 `.agent-sync/tasks/codex-title-summary-20261014-7b0a1e0a.md`。自动测试、真实存储重载及DOM回归通过；当前源CI/main、统一包和真实模型/原生侧栏验收分开追踪。
+
+## MAH-CREDENTIAL-OFFICIAL-PUBLISHER-20261014
+
+- [x] Closed formal-publisher reader release, source a8387448, signed/extracted desktop artifact and seven CI checks.
+- [x] Paired Linux cf741f upgrade with backup and preserved identity/config/credential/policy evidence.
+- [ ] Exact package installation confirmation and actual migration/restart/update acceptance.
+- [ ] Real desktop remote configuration and disabled Agent persistence, then PR14/main delivery.
+
+Owner: root. Record: .agent-sync/tasks/feat-mah-credential-official-publisher-20261014.md. Do not overwrite frozen package worktrees or retry old OS authorization automatically.

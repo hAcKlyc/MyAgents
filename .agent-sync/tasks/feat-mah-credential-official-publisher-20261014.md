@@ -1,0 +1,15 @@
+# MAH-CREDENTIAL-OFFICIAL-PUBLISHER-20261014
+
+Repository https://github.com/heavenzhang/MoXBots; primary agent owns integration and acceptance. Frozen App worktree: /Users/zhangshaohua/Documents/Codex/2026-10-14/myagents-credential-official-publisher, source a83874482a97ec282531caf58f6ca2adbc0084e2. The parent-budget worktree is used only for progress records after fast-forwarding that source; do not rebuild the frozen package from a later documentation SHA.
+
+- [x] Separate Developer ID publisher release built from provenance-pinned unsigned output; old immutable reader and source closure unchanged.
+- [x] Closed release/publisher tests16, fresh desktop build, exact sidecar resource hashes, signed archive and extraction; all7 CI passed.
+- [x] Actual paired Linux release cf741f, consistent backup, original identity/credentials/config/policy and reconnect verification. Initial startup-check rollback retained.
+- [ ] Human per-package update confirmation, normal old-runtime stop, private data/App backup and exact installation.
+- [ ] Actual credential migration; cold restart and different-build update without repeated prompts.
+- [ ] Actual remote model settings, Unicode workspace selection and disabled Agent create/persist/readback. No paid inference or key request.
+- [ ] Sync current main, native gate closure, main delivery and installed-runtime/source correspondence.
+
+Next: continue the pending exact software confirmation; do not replay it or ask for a password. Current package is Developer ID signed but not notarized. Actual installed App uses formal publisher and differs from earlier a8 receipt; current running brand App and orphan Node must not be mistaken for the new candidate. Preserve all old credentials and original MyAgents.
+
+Details: specs/tech_docs/MAH-CREDENTIAL-OFFICIAL-PUBLISHER-20261014.md. Private runtime/backup receipts remain outside Git. Public pins may be committed; tokens, test identities, credential bodies and authorization URLs may not.
