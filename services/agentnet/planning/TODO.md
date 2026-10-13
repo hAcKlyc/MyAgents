@@ -73,7 +73,7 @@
 - [x] BOTS-CLOUD-ADMIN-001 PR20/main be48a22b及现网制品、私有一致性备份/回滚核验。
 - [x] 用户首位测试管理员角色确认；真实OIDC/admin API停止态管理与撤销session验收。
 - [x] BOTS-ADMIN-LOGIN-002独立标签页辅助登录：PR22/main1cfa2f85、CI发布制品和真实IAB登录/管理路径已验收。
-- [ ] BOTS-CLOUD-EXEC-001有限Bot委派、真实Session启停、重启未知结果与授权撤销：实现/联调进行中，未发布。
+- [x] BOTS-CLOUD-EXEC-001有限单Bot委派、真实Session启停、原请求/CAS、重启持久化、软删/新授权恢复及有效撤销：PR23/main75已发布并真实验收。
 - [ ] 客户端Bots Net命名与个人共享；跨用户多账号与收费模型路径另行验收。
 
 ### 2026-10-13 — administrator release and real browser acceptance
@@ -85,3 +85,14 @@ The user explicitly authorized the existing integration test account as this ins
 Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
 
 BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.
+
+## 2026-10-14 — 当前完成及统一后台约束
+
+- [x] 实际Owner/admin登录与有限授权、六生命周期效果、精确worker退出和最终Host ACK；六成功及一CAS冲突回执全部确认。
+- [x] 云制品/源码/ABI、Host Node/native与本地策略、私有备份/回滚核验。
+- [x] 单Bot验收收尾：恢复后准入关闭，没有活动Session，两代授权有效撤销，无模型调用。
+- [x] 用户明确：统一为唯一MoXBots云管理后台；普通用户登录与原认证复用，不增设登录后台、账号后台或Bot后台。
+- [ ] 在同一后台扩展账号停用、登录策略及角色维护，先定义现有认证owner的权限/撤销不变量；当前用户页仅查询已注册账号。
+- [ ] 第二真实账号/普通Owner产品入口、共享、收费模型授权等后续范围，不能用合成403代替真实联调。
+
+验收分层与运行版本见 `../validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`；前述未发布条目仅为历史准备状态，由此记录更新。

@@ -1,8 +1,8 @@
-# MoXBots 统一后台 · 管理登记控制面
+# MoXBots 统一云管理后台
 
 该模块复用本实例 owned AgentNet 的 OIDC 登录与实时会话，页面为 `/admin`。默认关闭；仅私有服务配置的 `administration.admin_principal_ids` 可访问管理 API。普通账号登录成功不等于平台管理员。此白名单只控制本实例纳管登记，不授予 Host OS、私人会话或凭据读取权。
 
-第一阶段提供 Bot 管理登记、新建停止草稿、配置、所属用户/Host成对分配、逻辑删除、恢复、幂等回执与审计。Host 配置是运营方声明的授权清单，不是在线发现，也不证明执行端已经接入。启动返回 `HOST_EXECUTION_NOT_CONNECTED`；关闭准入不表示 OS 进程已经停止。共享调用、真实启停与自动部署仍需执行 owner 的适配，不能拿这些登记接口替代。
+第一阶段提供 Bot 管理登记、新建停止草稿、配置、所属用户/Host成对分配、逻辑删除、恢复、幂等回执与审计。Host 配置是运营方声明的授权清单，不是在线发现，也不证明执行端已经接入。启动返回 `HOST_EXECUTION_NOT_CONNECTED`；关闭准入不表示 OS 进程已经停止。可选有限执行模块已在PR23/main75接入并真实验收；不能拿登记状态替代实际Host回执。共享调用与收费模型仍未开放。
 
 ## 私有配置
 
@@ -52,3 +52,13 @@
 发布前以实际运行二进制与源码为基线，保留现网尚未合入的修复，锁定部署所有权；备份私有配置、全部数据库及 systemd unit，记录旧二进制摘要。更改私有配置需要相称审批，不在公共Git记录原始凭据。升级失败恢复旧二进制和匹配配置；新管理库留存私有备份，不覆盖旧认证状态或回滚其他应用。
 
 完整目标、阶段验收和开放依赖见 [BOTS-CLOUD-ADMIN-IMPLEMENTATION.md](planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md)。
+
+## 有限 Host 生命周期及统一入口
+
+`execution=true` 是同一后台的可选执行模块，默认关闭。只由运营方在已获明确授权的scope安装Host本地私有策略；Owner签署具体Bot/Root/相对路径/Runtime/模型引用/额度/期限，管理员再用原mutation和当前Host revision排队六种生命周期操作。真实Host proof/lease/receipt和最新观察决定结果，unknown保留原请求，历史回执不当作当前运行状态。运行scope及完整验收见 [Linux实际验收](validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md)。
+
+恢复须先等旧grant有效撤销，再由Owner签署更高generation的新grant、提高binding generation；保持准入关闭，不复活旧Session。声明模型引用不是调用授权；首阶段worker.send拒绝，管理Product Session不执行模型。跨Owner/Host重新分配仍要等有效Host ACK；保持现有角色、账号和私人会话边界。
+
+Nginx在既有HTTPS入口添加精确的 `/api/bots/grants/accept`、`/api/bots/grants/revoke`、`/execution/self/pull`、`/execution/self/lease`、`/execution/self/receipt`、`/execution/self/observe`。人类端仍校验原认证会话/Owner/admin，Host端仍校验原DPoP/设备/WS上下文，不新增监听端口或绕过认证。
+
+只保留此一个云管理后台。用户、Hosts、Bots、权限与审计，以及后续账号停用/登录策略/角色维护均扩展在此平台；现有OIDC等组件是内部依赖，客户端普通用户登录是产品入口，不另建“登录后台”。当前用户模块仅查询已注册账号，不能据此宣称IAM写能力已交付。历史原型不是第二套生产后台。
