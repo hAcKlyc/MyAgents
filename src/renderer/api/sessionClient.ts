@@ -77,6 +77,8 @@ export interface SessionMetadata {
     /** User-pinned to the 收藏 filter view. Only `true` is persisted; absent
      *  has identical meaning to false. */
     favorite?: boolean;
+    /** Hidden from active sidebar lists; content and execution remain intact. */
+    archived?: boolean;
     /** Server-owned ordering timestamp for the workspace sidebar. */
     pinnedAt?: string;
     /** User-managed global names used to organize Session history. */
@@ -330,6 +332,8 @@ export async function updateSession(
          *  so toggling off shrinks the on-disk metadata back to the absent
          *  baseline. */
         favorite?: boolean;
+        /** true archives; false restores without altering execution or history. */
+        archived?: boolean;
         /** true pins to the workspace sidebar; false removes the canonical timestamp. */
         pinned?: boolean;
         // v0.1.69 snapshot fields — null clears, undefined leaves unchanged.

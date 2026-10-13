@@ -40,6 +40,7 @@
     "workspaceViewOptions": "Workspace and session view options",
     "allSessions": "All sessions",
     "favoriteSessions": "Favorites only",
+    "archivedSessions": "Archived chats",
     "showAutomationHistory": "Show automation history",
     "hideAutomationHistory": "Hide automation history",
     "archived": "Archived",

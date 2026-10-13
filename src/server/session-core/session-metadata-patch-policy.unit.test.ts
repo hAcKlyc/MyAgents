@@ -6,6 +6,7 @@ describe('Session metadata PATCH recency policy', () => {
   it('does not treat title, favorite, Tag-adjacent, or sidebar pin organization as activity', () => {
     expect(shouldBumpSessionRecency({ title: 'Renamed', titleSource: 'user' })).toBe(false);
     expect(shouldBumpSessionRecency({ favorite: true })).toBe(false);
+    expect(shouldBumpSessionRecency({ archived: true })).toBe(false);
     expect(shouldBumpSessionRecency({ pinned: true })).toBe(false);
     expect(shouldBumpSessionRecency({ pinned: false })).toBe(false);
   });

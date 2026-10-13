@@ -40,6 +40,7 @@
     "workspaceViewOptions": "工作区与会话显示选项",
     "allSessions": "全部会话",
     "favoriteSessions": "只看收藏",
+    "archivedSessions": "已归档会话",
     "showAutomationHistory": "显示自动化历史",
     "hideAutomationHistory": "隐藏自动化历史",
     "archived": "已归档",

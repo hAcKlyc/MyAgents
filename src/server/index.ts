@@ -4305,6 +4305,8 @@ async function main() {
            *  freshly toggled-off session matches "never favorited" exactly
            *  on disk. */
           favorite?: boolean;
+          /** Archive/unarchive in Session history; only true is persisted. */
+          archived?: boolean;
           /** Pin/unpin inside the owning workspace's sidebar Session list. */
           pinned?: boolean;
           model?: string | null;
@@ -4369,6 +4371,12 @@ async function main() {
             400,
           );
         }
+        if (payload.archived !== undefined && typeof payload.archived !== 'boolean') {
+          return jsonResponse(
+            { success: false, error: 'archived must be a boolean.' },
+            400,
+          );
+        }
 
         // `lastActiveAt` is the recency signal that drives history sort
         // order. Bumping it on EVERY PATCH means a pure-UI flag change
@@ -4416,6 +4424,9 @@ async function main() {
             // Convert false → undefined so the on-disk shape stays minimal
             // (the JSON serializer drops undefined keys).
             updates.favorite = payload.favorite === true ? true : undefined;
+          }
+          if (payload.archived !== undefined) {
+            updates.archived = payload.archived === true ? true : undefined;
           }
           if (payload.pinned !== undefined) updates.pinned = payload.pinned;
           if (payload.origin !== undefined) {
