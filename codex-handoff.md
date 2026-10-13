@@ -1,5 +1,14 @@
 # Codex Handoff
 
+## 当前管理员云后台交付（2026-10-13）
+
+BOTS-CLOUD-ADMIN-001：PR20 / main be48a22b，exact-head 7项CI通过，已在既有云服务发布。运行CI source2dec7655与main完整tree一致，binary SHA2563a04ab08e02a21f4dd908239c6714d2e0e5d2d6befeecc7e55855936b3b5a8db核验；首位现有测试管理员获用户明确授权。云端一致性私有备份/回滚准备并核验，Dex/Mori保持active。实际OIDC/admin API停止态CRUD、原操作幂等、配置持久化、可恢复软删/恢复、logout后401通过，没有模型调用。具体账号与凭据仅在原私有operator配置。
+
+BOTS-ADMIN-LOGIN-002：IAB未暴露原popup页面，已补同源校验后的独立标签页链接/取消；fixture login/auth、390/768/focus通过。分支codex/bots-admin-login-fallback（base be48a22b）待CI/main/发布及实际浏览器验收。不要把API验收当作popup UI验收。
+
+BOTS-CLOUD-EXEC-001：用户已确认Host所有者有限指定Bot委派方案，独立工作树moxbots-cloud-execution继续实现typed签名、原session livegate、真实WS epoch、命令/lease/receipt、Host-scoped持久化与Session/run绑定。尚未main交付或真实Host验收，现网start继续409。保留PR14 owner的桌面/Host及未提交内容；个人客户端入口后续Bots Net，共享仍按规划另验收。
+
+
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
 <!-- codex-handoff:last-updated=2026-10-13T14:21:03+08:00 -->

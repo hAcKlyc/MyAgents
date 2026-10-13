@@ -9,6 +9,7 @@ let busy = false;
 let editing = null;
 let uncertain = null;
 let loginAttempt = 0;
+let activeLogin = null;
 const errors = {
   HOST_EXECUTION_NOT_CONNECTED: 'Host 执行适配尚未接入，Bot 未启动。',
   FORBIDDEN: '当前账号没有本实例的平台管理权限。',
@@ -56,6 +57,8 @@ function forgetSession(message = '') {
   editing = null;
   uncertain = null;
   loginAttempt++;
+  activeLogin = null;
+  clearLoginLink();
   $('editor').close();
   $('fields').replaceChildren();
   $('content').replaceChildren();
@@ -100,45 +103,92 @@ async function request(path, method = 'GET', body, authenticated = true) {
   } finally { clearTimeout(timeout); }
 }
 const base64url = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+function clearLoginLink() {
+  const link = $('auth-link');
+  link.hidden = true;
+  link.removeAttribute('href');
+  $('cancel-login').hidden = true;
+}
+async function cancelLogin() {
+  const current = activeLogin;
+  if (current) current.cancelled = true;
+  loginAttempt++;
+  activeLogin = null;
+  clearLoginLink();
+  $('login-button').disabled = false;
+  $('login-status').textContent = '登录已取消。';
+  if (current?.popup && !current.popup.closed) current.popup.close();
+  if (current?.tx) {
+    try {
+      await request('/auth/login/cancel', 'DELETE', { transactionId: current.tx.transactionId,
+        deviceId: current.deviceId, pkceVerifier: current.verifier }, false);
+    } catch { /* bounded best effort */ }
+  }
+}
 async function login() {
   const attempt = ++loginAttempt;
+  const loginContext = { attempt, tx: null, deviceId: null, verifier: null, popup: null, cancelled: false };
+  activeLogin = loginContext;
+  clearLoginLink();
   $('login-button').disabled = true;
   $('login-status').textContent = '正在打开账号登录…';
-  const popup = window.open('about:blank', 'moxbots-account-login', 'popup,width=560,height=720');
+  let popup = null;
+  try { popup = window.open('about:blank', 'moxbots-account-login', 'popup,width=560,height=720'); } catch { /* use the visible link below */ }
+  loginContext.popup = popup;
   let tx = null;
   let deviceId;
   let verifier;
   try {
-    if (!popup) throw new Error('登录窗口被浏览器阻止，请允许此站点打开登录窗口。');
     deviceId = crypto.randomUUID();
+    loginContext.deviceId = deviceId;
     verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
+    loginContext.verifier = verifier;
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
     tx = await request('/auth/login/start', 'POST', { deviceId, pkceChallenge: base64url(new Uint8Array(digest)) }, false);
+    loginContext.tx = tx;
+    if (loginContext.cancelled) {
+      try { await request('/auth/login/cancel', 'DELETE', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false); } catch { /* bounded best effort */ }
+      tx = null;
+    }
     if (attempt !== loginAttempt) throw new Error('登录已取消。');
     const url = new URL(tx.authorizationUrl);
     if (url.username || url.password || (url.protocol !== 'https:' && url.origin !== location.origin)) throw new Error('服务端返回的登录地址无效。');
-    popup.location.href = url.href;
-    $('login-status').textContent = '请在登录窗口完成授权。';
+    const link = $('auth-link');
+    link.href = url.href;
+    link.hidden = false;
+    $('cancel-login').hidden = false;
+    if (popup) {
+      try { popup.location.href = url.href; } catch { /* separate tab link remains available */ }
+    }
+    $('login-status').textContent = popup ? '请在登录窗口完成授权；若窗口未显示，可使用下方独立标签页链接。' : '请使用下方独立标签页链接完成授权。';
     for (let i = 0; i < 150 && attempt === loginAttempt; i++) {
       const result = await request('/auth/login/poll', 'POST', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false);
       if (attempt !== loginAttempt) throw new Error('登录已取消。');
       if (result.accessToken) {
         token = result.accessToken;
-        popup.close();
+        activeLogin = null;
+        clearLoginLink();
+        if (popup && !popup.closed) popup.close();
+        tx = null;
         await refresh();
         return;
       }
-      if (popup.closed) throw new Error('登录窗口已关闭，请重新登录。');
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     throw new Error('登录已超时，请重新登录。');
   } catch (error) {
     if (attempt === loginAttempt) forgetSession(error.message);
-    if (tx) {
+    if (tx && !loginContext.cancelled) {
       try { await request('/auth/login/cancel', 'DELETE', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false); } catch { /* bounded best effort */ }
     }
     if (popup && !popup.closed) popup.close();
-  } finally { $('login-button').disabled = false; }
+  } finally {
+    if (attempt === loginAttempt) {
+      activeLogin = null;
+      clearLoginLink();
+      $('login-button').disabled = false;
+    }
+  }
 }
 async function refresh() {
   try {
@@ -383,6 +433,7 @@ const closeEditor = () => { if (!busy) { $('editor').close(); editing = null; } 
 $('close-editor').addEventListener('click', closeEditor); $('cancel-editor').addEventListener('click', closeEditor);
 $('editor').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
 $('login-button').addEventListener('click', login);
+$('cancel-login').addEventListener('click', cancelLogin);
 $('refresh').addEventListener('click', () => refresh().catch(() => {}));
 $('logout').addEventListener('click', async () => {
   const old = token; forgetSession('已退出。');
