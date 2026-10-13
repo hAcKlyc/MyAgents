@@ -535,6 +535,10 @@ pub use os_store::OsIdentityStore;
 #[cfg(all(feature = "os-store", target_os = "macos"))]
 mod macos_credential;
 #[cfg(all(feature = "os-store", target_os = "macos"))]
+mod macos_helper;
+#[cfg(all(feature = "os-store", target_os = "macos"))]
+pub use macos_helper::run_private_credential_helper;
+#[cfg(all(feature = "os-store", target_os = "macos"))]
 pub use macos_credential::{read_secret_noninteractive, credential_authorization_required};
 #[cfg(unix)]
 mod encrypted_store;

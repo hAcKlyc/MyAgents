@@ -61,6 +61,10 @@ pub fn read_secret_noninteractive(entry: &keyring::Entry) -> keyring::Result<Vec
             std::io::Error::other("unsupported credential backend"),
         )));
     };
+    super::macos_helper::read(credential)
+}
+
+pub(super) fn read_direct(credential: &MacCredential) -> keyring::Result<Vec<u8>> {
     let keychain = SecKeychain::default_for_domain(domain(credential))
         .map_err(keyring::macos::decode_error)?;
     generic_password(query(

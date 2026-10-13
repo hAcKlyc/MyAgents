@@ -13,13 +13,13 @@
 - **范围与接续**：原型仅合成数据、模拟身份和浏览器专用存储，不代表真实共享已实现。主 Agent 负责集成、验证和 Git；纯 Codex 内置实现与独立 UI 验收，不调用外部模型。现有 Host 联调工作树的未提交代码和接续记录没有被本任务改写。
 
 
-- **MAH-DESKTOP-CREDENTIALS-20261013**：用户授权安装固定本地签名 `04faeb1d` 并继续联调；已安装同签名诊断修订 `7ce8a342`。两版 app / archive / resources / designated requirement 已分别核实，原 MyAgents 保持运行。未保存 Mac 系统密码、未放宽全局 ACL/系统信任，签名私钥及随机构建密码仅存在 owner 私有构建目录。
-- **当前阻断已实测定位**：新桌面自部署网络离线；native `sample` 证明初始化串行恢复旧 QA 网络时停在 `keyring` 的 legacy `SecKeychainFindGenericPassword`，后续云网络与 registry mutation 因此等待。未观察到可见系统授权窗口。UI 离线和代码/CI 成功不能当 Agent 创建验收。
-- **本次修复**：macOS 凭据读取使用相同 service/account/User keychain 的逐查询 `AuthenticationUIFail`，不使用 Skip、不更换存储 namespace、不把授权失败当条目缺失或自动生成新身份；Windows/Linux 保持既有后端。非秘密进程内 guard 保留精确 scope、expiry、替换/取消失效约束。registry 按连接保留恢复错误，界面只对对应 Owned 连接显示具体原因。此 API 禁止后台交互，但不承诺 Security IPC 硬期限；真实已有记录的兼容与无反复提示仍待安装复验。没有新增恢复授权/登录按钮，不能宣称该产品流程已闭环。
+- **MAH-DESKTOP-CREDENTIALS-20261013**：用户授权安装固定本地签名 `04faeb1d` 并继续联调；已安装同签名诊断修订 `7ce8a342`，继而安装非交互查询修订 `2db45253`。两版 app / archive / resources / designated requirement 已分别核实，原 MyAgents 保持运行。未保存 Mac 系统密码、未放宽全局 ACL/系统信任，签名私钥及随机构建密码仅存在 owner 私有构建目录。
+- **当前阻断已实测定位**：新桌面自部署网络离线；native `sample` 证明初始化串行恢复旧 QA 网络时停在 `keyring` 的 legacy `SecKeychainFindGenericPassword`，后续云网络与 registry mutation 因此等待。未观察到可见系统授权窗口。2db 的真实 sample 又证明 `SecItemCopyMatching_osx` shim 仍停在 `SecKeychainItemCopyContent`，单独 UIFail 参数无法满足及时恢复门禁；截图/采样仅在私有 QA。UI 离线和代码/CI 成功不能当 Agent 创建验收。
+- **本次修复**：macOS 凭据读取使用相同 service/account/User keychain 的逐查询 `AuthenticationUIFail`，不使用 Skip、不更换存储 namespace、不把授权失败当条目缺失或自动生成新身份；Windows/Linux 保持既有后端。非秘密进程内 guard 保留精确 scope、expiry、替换/取消失效约束。registry 按连接保留恢复错误，界面只对对应 Owned 连接显示具体原因。此参数不构成 Security IPC 硬期限，真实旧记录读取仍卡住，不能宣称修复验收通过；正在增加同签名二进制的认证只读 helper，匿名管道传送受限数据、子进程禁交互、父进程硬期限 kill+wait，不保存系统密码/明文秘密。没有新增恢复授权/登录按钮，不能宣称该产品流程已闭环。
 - **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，origin 已核实；主干已核实 `5ee8f862`，并发 PR #17 规划/原型成果一并保留在当前管理分支。PR #14 仍 draft，未合入主干。`7ce8a342` Test CI 六作业与 Owned CI 全部通过；迟到管理 ACK 修复和 OIDC 完整 issuer-path guard 回归已在 Linux 真正运行。
 - **真实部署**：云认证进程与入口保留，AgentNet 服务受控更新为 `04faeb1d` 对应 CI 制品（artifact commit 的 Git tree 与 source 相同）；程序摘要、运行 UID、配置/身份不变、受限一致性备份及清单摘要均核实。不新增公网端口，既有应用保全。Linux Host 重连后超过四分钟仍为 Ready、相同 epoch/catalog/PID，status 新鲜度核实；metadata last-network-seen 是 presence 转换时间，不能拿它当心跳时间。
 - **真实管理进度**：之前 `50f3722c` 的原生 Host snapshot 成功，Kimi 默认模型保存到执行节点 revision 1；没有模型密钥、没有执行授权、没有付费模型调用。保存后迟到控制回执修复已实现/CI通过，但新版桌面远程配置、创建 Agent、重启持久化尚待真实复验。
-- **交付/实例区分**：MoXBots 为独立 `com.moxbot.app` / `.moxbot` / URL scheme，可与原 MyAgents 同时运行。已安装 Linux Node Host 源 `b98294c7`，网络 connector 对应 source `710820e9`，云 source `04faeb1d`，当前已安装桌面 `7ce8a342`；这四个组件不等于同一个部署 SHA。新云第三执行节点不作为本轮必需步骤。
+- **交付/实例区分**：MoXBots 为独立 `com.moxbot.app` / `.moxbot` / URL scheme，可与原 MyAgents 同时运行。已安装 Linux Node Host 源 `b98294c7`，网络 connector 对应 source `710820e9`，云 source `04faeb1d`，当前已安装桌面 `2db45253`；这四个组件不等于同一个部署 SHA。新云第三执行节点不作为本轮必需步骤。
 - **下一步**：完成非交互读取的原生构建/真实已有记录恢复测试；确实需要旧 ACL 授权时做一次明确的迁移操作，禁止记录/代输入系统密码。完成真实 Host snapshot→模型配置回读→禁用 Agent 创建→本任务服务重启后回读，再同步主干、关闭 PR14 与交付门禁。私有账号、凭据、访问链接、IP/PID/制品与截图等证据只在 owner 受限 QA 目录，不写公开 Git。下面是历史 checkpoint，以本段为准。
 
 - **MAH-CLOUD-20261013 当前部署**：用户新增授权的云服务器上，原生 Dex v2.46.0 与 owned AgentNet 已以独立非 root UID991 部署并启用；使用现有受信 IP-SAN HTTPS 入口，后端仅 loopback，保留既有 `/mori/`。运行二进制摘要、四个私有数据库、原应用进程/页面、公网监听和实际重启后 descriptor/签名 keys 一致性已核验。证书续签 timer 与 Nginx reload hook 已核实。新云网络浏览器登录与桌面/Host 管理尚未验收，不能据此宣布完整流程完成。

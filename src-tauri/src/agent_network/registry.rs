@@ -166,7 +166,14 @@ impl NetworkRegistry {
             .unwrap_or_else(|e| e.into_inner())
             .get(id)
             .cloned()
-            .ok_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))
+            .ok_or_else(|| {
+                self.owned_restore_errors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))
+            })
     }
     pub(crate) fn for_reference(
         &self,
@@ -1381,6 +1388,14 @@ mod tests {
                 .unwrap()
                 .code,
             "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+        );
+        assert_eq!(
+            owner.connection("blocked").err().unwrap().code,
+            "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+        );
+        assert_eq!(
+            owner.connection("unknown").err().unwrap().code,
+            "NETWORK_CONNECTION_NOT_FOUND"
         );
         assert_eq!(
             view.connections
