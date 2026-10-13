@@ -11,10 +11,10 @@
 - [x] Bot 新建、配置、分配、逻辑删除/恢复的私有 SQLite 持久化、CAS、幂等和审计。
 - [x] 同源后台界面登录、管理、错误恢复、刷新及响应式实际验证。
 - [x] 独立非实现者审阅与主智能体关键路径复核。
-- [ ] 相关测试、CI、最新 main 集成、远端主干核验。
+- [x] 登记控制面相关测试、PR20/22 CI、main集成和远端核验。
 - [ ] Host 执行适配与真实启停回执：依赖现有 Host owner 的授权控制链路，未接通时拒绝启动，界面不能声称运行成功。
 - [ ] 真实跨用户共享调用、隔离、审批和用量：依赖 Host 执行及资源授权链路，第一轮不从 metadata CRUD 推断完成。
-- [ ] 现有云实例访问、备份/回滚、发布与真实用户验收：云访问与现网版本已核实，正在准备串行发布；不得在Host owner维护窗口内重启云服务。
+- [x] 登记控制面云实例访问、串行备份/回滚、发布与真实管理员OIDC/UI/API验收；原维护窗口已释放。
 
 控制面第一轮可以独立交付，不将其称作整个云平台/共享执行完成。生产不灌入原型合成账号、Hosts或模型。模型引用仅命名，不携带密钥；用户预算上限由私有配置声明。所有操作采用实时服务端 authority，浏览器不持久保存 bearer、不用 localStorage 管业务状态。
 
@@ -54,3 +54,13 @@
 - 现网源码04faeb1d对应四个服务文件被原样保留，与新增后台组合验收，避免从旧main发布造成中继/首次初始化回退；不导入其他Host/桌面改动，也不放宽同principal设备管理规则。
 
 实际平台管理员角色尚未授予；Host委派执行与跨用户共享仍开放。新执行通信/权限owner方案见 [执行接入提案](BOTS-CLOUD-EXECUTION-V1.md)，提案不作为当前接口authority。
+
+### 2026-10-13 — administrator release and real browser acceptance
+
+PR20 plus PR22 are in remote main. Login source `60e3a52c08bf79d3985e1453449719269a35fb1a` passed seven exact-head checks; PR22 merge `1cfa2f85dc6c936c02b86f1f40945961665608a7` passed Owned AgentNet run38396057654. Its CI artifact11812672883 has verified API archive digest5198fa3f… and binary SHA256 `9b9320f57685a938cee53492eec412567df8076a273e7ef72a12a461ca5f06bc`; complete source tree matches that accepted main commit. Subsequent main documentation changes do not alter the deployed service.
+
+The user explicitly authorized the existing integration test account as this instance's first platform administrator. The binary-only release preserved exact existing role/config and ingress hashes, stopped only the dedicated network service, created consistent private SQLite/state backups and retained the previous binary and rollback. Dex, Mori and Linux Host were not restarted. Runtime executable/source/hash and health were independently verified.
+
+Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
+
+BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.

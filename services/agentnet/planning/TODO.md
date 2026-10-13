@@ -46,8 +46,8 @@
 用户于2026-10-13明确启动真实实现，任务 **BOTS-CLOUD-ADMIN-001**；实施合同和逐阶段状态见 [BOTS-CLOUD-ADMIN-IMPLEMENTATION.md](BOTS-CLOUD-ADMIN-IMPLEMENTATION.md)。统一已有云服务后台为服务端管理员入口，个人 Bots Net 留在客户端。以下整体开发项不能仅因控制面登记完成而提前勾选。
 
 - [x] BOTS-CLOUD-ADMIN-001 本地阶段：真实鉴权/管理登记API与同源后台、隔离数据库联调及独立UI验收。
-- [ ] BOTS-CLOUD-ADMIN-001 交付阶段：远端CI、最新main集成、主干交付与现网权限/发布验收。
-- [ ] 现有云服务集成：保留现网中继修复、运维权限、备份/回滚、真实账号与发布路径验收。
+- [x] BOTS-CLOUD-ADMIN-001 登记控制面交付：PR20/22、远端main、授权首位管理员、发布及真实OIDC/UI/API验收。
+- [x] 现有云服务登记后台集成：保留中继修复，备份/回滚与真实账号验收；Host执行仍另列开放。
 
 - [ ] BOT-ADMIN-LIFECYCLE-001：真实生命周期权限/配置/启停/分配、双Host运行防护、逻辑删除和恢复按新规划实现并多账号验收。
 
@@ -67,3 +67,21 @@
 - [ ] 分别完成实现、模拟验证、真实联调、主干交付、生产发布和路径复验。
 
 依赖、角色矩阵和详细标准以两份规划为准，原型通过不能提前完成后续开发项。
+
+## 已实现登记后台与剩余执行（2026-10-13）
+
+- [x] BOTS-CLOUD-ADMIN-001 PR20/main be48a22b及现网制品、私有一致性备份/回滚核验。
+- [x] 用户首位测试管理员角色确认；真实OIDC/admin API停止态管理与撤销session验收。
+- [ ] BOTS-ADMIN-LOGIN-002独立标签页辅助登录：本地UI/auth验收已过，CI/main/发布和真实IAB路径待完成。
+- [ ] BOTS-CLOUD-EXEC-001有限Bot委派、真实Session启停、重启未知结果与授权撤销：实现/联调进行中，未发布。
+- [ ] 客户端Bots Net命名与个人共享；跨用户多账号与收费模型路径另行验收。
+
+### 2026-10-13 — administrator release and real browser acceptance
+
+PR20 plus PR22 are in remote main. Login source `60e3a52c08bf79d3985e1453449719269a35fb1a` passed seven exact-head checks; PR22 merge `1cfa2f85dc6c936c02b86f1f40945961665608a7` passed Owned AgentNet run38396057654. Its CI artifact11812672883 has verified API archive digest5198fa3f… and binary SHA256 `9b9320f57685a938cee53492eec412567df8076a273e7ef72a12a461ca5f06bc`; complete source tree matches that accepted main commit. Subsequent main documentation changes do not alter the deployed service.
+
+The user explicitly authorized the existing integration test account as this instance's first platform administrator. The binary-only release preserved exact existing role/config and ingress hashes, stopped only the dedicated network service, created consistent private SQLite/state backups and retained the previous binary and rollback. Dex, Mori and Linux Host were not restarted. Runtime executable/source/hash and health were independently verified.
+
+Real OIDC PKCE login through the in-app browser's independent sign-in tab succeeded. Authenticated UI create/configure and approved owner/Host selection succeeded, revisions persisted, and disconnected start was truthfully rejected. Actual API verification also passed original mutation replay, reload persistence, recoverable delete/restore and logout token revocation. Controlled drafts only; no model calls. Real ordinary-user production login and actual Host execution remain unverified; fixture ordinary403 is not substituted for production evidence. Private production evidence is under `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin-evidence/deployment/`; raw accounts, tokens, credentials and Host identifiers remain outside Git.
+
+BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host source preservation, Linux gates and true Session lifecycle release are open. Shared usage remains future planning.

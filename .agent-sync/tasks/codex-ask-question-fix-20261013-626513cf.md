@@ -31,4 +31,10 @@ MOXBOTS-ASK-QUESTION-FIX-20261013. 用户明确由当前Agent修复3项问答问
 
 ## Next step
 
-- PR #21、six-check CI与main `d9749998f743707074d6d42dc5344bcb724d55a8` 已核验交付。安装owner已收到冻结source/patch/摘要；等待统一包和用户手动解锁，再补原生提问显示/真实caller回执，不重复实现或单独换包。
+- PR #21、six-check CI与main `d9749998f743707074d6d42dc5344bcb724d55a8` 已核验交付。安装owner已收到冻结source/patch/摘要；等待统一安全包及原生窗口，再补原生提问显示/真实caller回执，不重复实现或单独换包。
+
+## 2026-10-13 解锁后接续
+
+- 用户已解锁；已安装native仍旧版本，未改动。安装owner确认源9149753c有问答修复，但签名07e制品无修复；同产品release缺乏隔离profile，禁止启动备份/并发换包/触发凭据。
+- 独立实际组件UI→SDK原生进程→loopback caller已提交单选、多选和自定义文字并逐字段核验；生产样式/主题与wire/result证据完成。范围仅独立组件和合成provider，不等于当前客户端更新或真实推理。
+- 本轮无产品修改；下一步只在owner提供安全统一包及native窗口后完成安装制品对照和原生问答验收，无需重复要求用户解锁/授权。
