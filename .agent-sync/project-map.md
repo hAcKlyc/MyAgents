@@ -18,7 +18,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | 桌面与 Host 源码 | `src/renderer/`、`src/server/`、`src/shared/`、`src-tauri/`、`scripts/host/` | 桌面、Sidecar、Rust 身份和 Linux Host |
 | owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata 和 relay；部署与桌面验收另行核实 |
 | 架构与设计规范 | `specs/ARCHITECTURE.md`、`specs/DESIGN.md`、`specs/tech_docs/` | 当前 owner、边界和交互规范 |
-| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、第一版权限设计与 TODO；真实共享待开发 |
+| 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；真实实现待开发 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |
 | 运维与发布 | `services/agentnet/README.md`、`specs/guides/`、`dev-docs/moxbot-trial.md` | 非秘密说明；真实账号、备份和钥匙留在原 owner 私有目录 |

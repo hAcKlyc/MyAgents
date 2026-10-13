@@ -12,3 +12,6 @@
 资料来源是用户本次明确要求、GitHub 对实际目标仓库的 API 返回及本机 owning source，不采用同名第三方 AgentNets 产品的发布状态或规格。
 
 - 用户随后纠正主入口为平台管理员的Bots管理界面。个人体验放客户端网络入口，现有Agent Net后续称Bots Net；旧个人原型归档且不作为验收对象。
+
+- 2026-10-13用户追加管理员Bots生命周期（新建、配置、启停、删除、所属用户和Host分配），仍仅规划与原型。任务base为远端main5ee8f862，该头Test/Owned AgentNet均成功。新增平台权限、停止默认、回收站和分配规则为后续设计，不称现有后端已提供。
+- 参考流程于同日阅读Portainer官方新建/详情/删除确认与Dify官方应用管理文档，来源与用途见services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md；仅文档研究，非竞品登录实测。

@@ -1,4 +1,4 @@
-# Bots Net 多用户 Bot 共享任务清单
+# Bots 管理与 Bots Net 规划任务清单
 
 任务：AN-SHARE-PROTOTYPE-20261013。更新：2026-10-13。仓库：https://github.com/heavenzhang/MoXBots.git ，主干 `main`。
 
@@ -24,7 +24,26 @@
 
 主干交付锚点：PR #17 合入 `421718d6756cb73dfffaf54e94344a5e497caf8c`，已 fetch 核验包含源码头 `7a977724421f6c2b6923f3b8d1640aac28809185`，合并树与七项 CI 全通过的已审查头一致。HTML hash 与独立接受版一致。后续关闭记录提交仅改文档，不更改原型。
 
+## 管理员生命周期原型补充
+
+任务 BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013，分支codex/bots-admin-lifecycle-prototype，base main 5ee8f862。仅规划与合成原型，上一轮共享原型交付记录保留。
+
+- [x] 核验最新main、已有工作区和上轮主干CI成功，start/task-init gate通过。
+- [x] 明确生命周期、平台权限、成对部署授权、归属影响与逻辑删除规则。
+- [x] 新增详细生命周期规划并同步两份既有规划、任务清单和接续入口。
+- [x] 新建代表页主审，后续沿用表单与详情模式。
+- [x] 新建/配置/启停/删除/恢复及所属用户Host分配实际模拟可操作。
+- [x] 与用户共享调用、审批预留和历史结果联动，跨Bot/Host不串用。
+- [x] 独立视觉、交互、三视口响应式和键盘验收、主审关键路径通过，正式1轮集中修复。
+- [x] 文档链接、脚本语法、完整lint与本任务差异检查通过。
+- [x] 提交推送并通过handoff gate，当前头部CI通过后合入并核验远端main。
+- [x] 最终任务状态和本地可打开原型导出同步。
+
+交付锚点：[PR #18](https://github.com/heavenzhang/MoXBots/pull/18) 已合入 main `5652048579f776c5eebe9faebdbde212ce2b93c7`，源头 `159783a53b05c24c07d66d1204bfdd2cc05057be` 七项CI成功，fetch核验源头祖先与合并树一致；HTML保持独立接受版4f963…，关闭记录不改产品。
+
 ## 后续开发待办
+
+- [ ] BOT-ADMIN-LIFECYCLE-001：真实生命周期权限/配置/启停/分配、双Host运行防护、逻辑删除和恢复按新规划实现并多账号验收。
 
 - [ ] BNET-NAME-001：客户端现有 Agent Net 显示名称改为 Bots Net，核对导航、说明和国际化；协议及源码 namespace 是否变更另行评审，不全局替换。
 

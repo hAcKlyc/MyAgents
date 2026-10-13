@@ -1,0 +1,11 @@
+{
+  "purpose": "最终1440默认目录与新建表单展示取证，不新增验收用例",
+  "expected": "4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25",
+  "actual": "4f963fe34183ae1fe78315eec828691b482afe991fa877abb7607d6804cc0e25",
+  "fixed": true,
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "freshContext": true
+}
