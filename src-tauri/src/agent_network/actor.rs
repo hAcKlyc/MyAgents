@@ -73,11 +73,24 @@ enum Command {
     Watches(WatchesCommand),
     Metadata(MetadataCommand),
     Rpc(RpcCommand),
+    Management(ManagementCommand),
     Return { generation: u64, callback: Callback },
+}
+struct ManagementCommand {
+    generation: u64,
+    queued_at: Instant,
+    request: super::management_controller::ManagementRequest,
+    sent: Arc<AtomicBool>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    _allocation: Allocation,
+    reply: oneshot::Sender<Result<super::management_controller::ManagementResponse, NetworkError>>,
 }
 impl Command {
     fn reject(self, error: NetworkError) {
         match self {
+            Self::Management(command) => {
+                let _ = command.reply.send(Err(error));
+            }
             Self::Watches(command) => {
                 let _ = command.reply.send(Err(error));
             }
@@ -105,12 +118,14 @@ struct Boundary {
 pub(crate) struct AgentNetwork {
     pub(crate) connection_id: String,
     account: Option<NetworkAccountSession>,
+    authorized_identity_store: Option<Arc<dyn super::crypto::IdentityStore>>,
     memory: MemoryBudget,
     snapshot: Mutex<NetworkSnapshot>,
     boundary: watch::Sender<Boundary>,
     catalog_changed: Arc<Notify>,
     commands: mpsc::Sender<Command>,
     receiver: Mutex<Option<mpsc::Receiver<Command>>>,
+    management_slot: Arc<tokio::sync::Semaphore>,
 }
 pub(crate) type ManagedConnection = Arc<AgentNetwork>;
 pub(crate) use super::registry::ManagedAgentNetwork;
@@ -128,6 +143,15 @@ impl AgentNetwork {
         memory: MemoryBudget,
         seed: u64,
     ) -> ManagedConnection {
+        Self::with_authorized_store(connection_id, account, memory, seed, None)
+    }
+    pub(crate) fn with_authorized_store(
+        connection_id: String,
+        account: Option<NetworkAccountSession>,
+        memory: MemoryBudget,
+        seed: u64,
+        authorized_identity_store: Option<Arc<dyn super::crypto::IdentityStore>>,
+    ) -> ManagedConnection {
         let (boundary, _) = watch::channel(Boundary {
             generation: seed,
             auth_generation: seed,
@@ -138,6 +162,7 @@ impl AgentNetwork {
         Arc::new(Self {
             connection_id,
             account,
+            authorized_identity_store,
             memory,
             snapshot: Mutex::new(NetworkSnapshot {
                 state: "signedOut",
@@ -153,6 +178,7 @@ impl AgentNetwork {
             catalog_changed: Arc::new(Notify::new()),
             commands,
             receiver: Mutex::new(Some(receiver)),
+            management_slot: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
     pub(crate) fn snapshot(&self) -> NetworkSnapshot {
@@ -239,6 +265,64 @@ impl AgentNetwork {
             value.generation = value.generation.saturating_add(1);
             value.shutdown = true;
         });
+    }
+    pub(crate) async fn management(
+        &self,
+        request: super::management_controller::ManagementRequest,
+    ) -> Result<super::management_controller::ManagementResponse, NetworkError> {
+        let snapshot = self.snapshot();
+        if request.connection_id != self.connection_id
+            || request.auth_generation != snapshot.auth_generation
+            || snapshot.principal_id.as_deref() != Some(request.principal_id.as_str())
+            || snapshot.network_id.as_deref() != Some(request.network_id.as_str())
+        {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        if !self
+            .account
+            .as_ref()
+            .is_some_and(NetworkAccountSession::is_management_only)
+        {
+            return Err(NetworkError::new("OWNED_PROFILE_UNSUPPORTED"));
+        }
+        if snapshot.state != "ready" {
+            return Err(NetworkError::new("CONNECTOR_NOT_READY"));
+        }
+        request.message(myagents_host_management_protocol::CanonicalUuid::new(
+            uuid::Uuid::new_v4(),
+        ))?;
+        let allocation = self
+            .memory
+            .reserve(measure(&request.params)?.0.saturating_mul(3) + budget("controlBytes"))?;
+        let permit = self
+            .management_slot
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| NetworkError::new("HOST_MANAGEMENT_BUSY"))?;
+        let mutation = request.mutation();
+        let sent = Arc::new(AtomicBool::new(false));
+        let phase = *self.boundary.borrow();
+        let (reply, response) = oneshot::channel();
+        self.commands
+            .try_send(Command::Management(ManagementCommand {
+                generation: phase.generation,
+                queued_at: Instant::now(),
+                request,
+                sent: sent.clone(),
+                _permit: permit,
+                _allocation: allocation,
+                reply,
+            }))
+            .map_err(|_| NetworkError::new("NETWORK_REQUEST_CAPACITY"))?;
+        // Dropping the owning connection or a deadline never proves a write failed.
+        tokio::time::timeout(Duration::from_secs(34), response)
+            .await
+            .map_err(|_| {
+                super::management_controller::lost(mutation, sent.load(Ordering::Acquire))
+            })?
+            .map_err(|_| {
+                super::management_controller::lost(mutation, sent.load(Ordering::Acquire))
+            })?
     }
     pub(crate) async fn request(&self, request: MetadataRequest) -> Result<Value, NetworkError> {
         // Validate before queueing, and keep the queued payload metadata-only.
@@ -530,6 +614,14 @@ pub(crate) fn start(
                             connection_id: String::new(),
                         },
                     );
+                    if owner.snapshot().error.as_ref().is_some_and(|error| {
+                        error.code == "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+                    }) {
+                        // Only explicit recovery may request OS authorization.
+                        // Keep the diagnostic stable instead of retrying reads.
+                        let _ = boundary.changed().await;
+                        continue;
+                    }
                 }
                 Err(error) => {
                     retry_after = error.retry_after;
@@ -560,13 +652,133 @@ pub(crate) fn start(
             }
             let random = uuid::Uuid::new_v4();
             let jitter = u16::from_le_bytes([random.as_bytes()[0], random.as_bytes()[1]]);
-            let delay = reconnect.next(jitter, retry_after);
+            let snapshot = owner.snapshot();
+            let code = snapshot
+                .error
+                .as_ref()
+                .map(diagnostic_code)
+                .unwrap_or("OTHER_NETWORK_FAILURE");
+            let delay = reconnect.next_with_code(jitter, retry_after, code);
             tokio::select! {
                 _=tokio::time::sleep(delay)=>{},
                 _=boundary.changed()=>{previous=None;renewed=None;reconnect.reset();},
             }
         }
     });
+}
+/// Only closed, known codes enter diagnostics; even schema-safe upstream text
+/// must not become a log payload. Never include error details or account scope.
+pub(super) fn diagnostic_code(error: &NetworkError) -> &'static str {
+    const CODES: &[&str] = &[
+        "ACCOUNT_BINDING_CHANGED",
+        "ADMISSION_UNCONFIRMED",
+        "BUSINESS_CONTEXT_NOT_FOUND",
+        "CATALOG_INVALID",
+        "CATALOG_NOT_CURRENT",
+        "CATALOG_SEQUENCE_EXHAUSTED",
+        "CHANNEL_OFFER_MISSING",
+        "CONNECTOR_CAPACITY",
+        "CONNECTOR_NOT_READY",
+        "CONTROL_INVALID",
+        "CONTROL_SCOPE_MISMATCH",
+        "CONTROL_UNEXPECTED",
+        "DEVICE_ID_UNAVAILABLE",
+        "DEVICE_REGISTRATION_INVALID",
+        "DEVICE_REVOKED",
+        "ENROLLMENT_KEY_INVALID",
+        "EXTERNAL_CLI_CAPABILITY_NOT_OPEN",
+        "HOST_ADDRESS_INVALID",
+        "HOST_MANAGEMENT_BUSY",
+        "HOST_MANAGEMENT_CONNECTION_RESET",
+        "IDENTITY_CERTIFICATE_INVALID",
+        "IDENTITY_KEY_MISMATCH",
+        "IDENTITY_REQUEST_INVALID",
+        "IDENTITY_RESPONSE_INVALID",
+        "IDENTITY_SCOPE_MISMATCH",
+        "IDENTITY_STATE_INVALID",
+        "INVALID_REFERENCE",
+        "KEY_GENERATION_EXHAUSTED",
+        "MESSAGE_TOO_LARGE",
+        "NETWORK_ACCOUNT_RESPONSE_INVALID",
+        "NETWORK_ACCOUNT_UNAVAILABLE",
+        "NETWORK_BACKPRESSURE",
+        "NETWORK_BUFFER_LIMIT",
+        "NETWORK_CERTIFICATE_INVALID",
+        "NETWORK_CONFIG_INVALID",
+        "NETWORK_CONFIG_UNAVAILABLE",
+        "NETWORK_CONFIG_WRITE_FAILED",
+        "NETWORK_CONNECTION_CLOSED",
+        "NETWORK_CONNECTION_NOT_FOUND",
+        "NETWORK_CONNECTION_TIMEOUT",
+        "NETWORK_CREDENTIAL_BACKEND_UNSUPPORTED",
+        "NETWORK_CREDENTIAL_CORRUPT",
+        "NETWORK_CREDENTIAL_GENERATION_CONFLICT",
+        "NETWORK_CREDENTIAL_KEY_MISSING",
+        "NETWORK_CREDENTIAL_PATH_UNSAFE",
+        "NETWORK_CREDENTIAL_PERSISTENCE_UNCONFIRMED",
+        "NETWORK_CREDENTIAL_STORE_INVALID",
+        "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+        "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
+        "NETWORK_DESCRIPTOR_INVALID",
+        "NETWORK_ENDPOINT_INVALID",
+        "NETWORK_FEATURE_DISABLED",
+        "NETWORK_KEY_INVALID",
+        "NETWORK_METADATA_INVALID",
+        "NETWORK_PEER_BINDING_MISMATCH",
+        "NETWORK_POWER_BOUNDARY",
+        "NETWORK_PRIVATE_KEY_MISSING",
+        "NETWORK_PROOF_INVALID",
+        "NETWORK_PROTOCOL_UNSUPPORTED",
+        "NETWORK_PROXY_INVALID",
+        "NETWORK_QUERY_FAILED",
+        "NETWORK_REFERENCE_INVALID",
+        "NETWORK_REMOVAL_UNCONFIRMED",
+        "NETWORK_REQUEST_CAPACITY",
+        "NETWORK_REQUEST_INVALID",
+        "NETWORK_REQUEST_NOT_SENT",
+        "NETWORK_REQUEST_UNCONFIRMED",
+        "NETWORK_RESPONSE_INVALID",
+        "NETWORK_SCOPE_MISMATCH",
+        "NETWORK_TLS_FAILED",
+        "NETWORK_TOKEN_EXPIRED",
+        "NETWORK_TOKEN_INVALID",
+        "NETWORK_TRANSPORT_FAILED",
+        "NETWORK_TRUST_CHANGED",
+        "NETWORK_UPGRADE_REJECTED",
+        "NETWORK_URL_INVALID",
+        "OFFICIAL_NETWORK_CANNOT_REMOVE",
+        "OWNED_BROWSER_UNAVAILABLE",
+        "OWNED_CA_FILE_INVALID",
+        "OWNED_JOIN_REQUIRED",
+        "OWNED_JOIN_UNCONFIRMED",
+        "OWNED_LOGIN_CANCELLED",
+        "OWNED_LOGIN_EXPIRED",
+        "OWNED_LOGIN_INVALID",
+        "OWNED_LOGIN_NOT_FOUND",
+        "OWNED_LOGIN_RESULT_UNAVAILABLE",
+        "OWNED_LOGIN_SUPERSEDED",
+        "OWNED_PROFILE_UNSUPPORTED",
+        "OWNED_REQUEST_INVALID",
+        "OWNED_RESPONSE_INVALID",
+        "OWNED_RESPONSE_TOO_LARGE",
+        "OWNED_SESSION_INVALID",
+        "PAGE_LIMIT_INVALID",
+        "PERMIT_INVALID",
+        "PROOF_REJECTED",
+        "PROTOCOL_INVALID",
+        "SESSION_EXPIRED",
+        "SOURCE_CATALOG_INVALID",
+        "SOURCE_CATALOG_NOT_EMPTY",
+        "SPACE_REAUTH_REQUIRED",
+        "TARGET_PREPARATION_MISSING",
+        "TLS_FRAME_INVALID",
+        "UNAUTHORIZED",
+    ];
+    CODES
+        .iter()
+        .copied()
+        .find(|code| *code == error.code)
+        .unwrap_or("OTHER_NETWORK_FAILURE")
 }
 /// A connection-scoped fence for original owner jobs that have crossed the
 /// final handoff. They finish their ACK, then release remote watch resources
@@ -644,7 +856,12 @@ async fn connect(
             account.ensure_current()?;
             identity
         }
-        _ => NetworkIdentity::initialize(account, None).await?,
+        _ => match &owner.authorized_identity_store {
+            Some(store) => {
+                NetworkIdentity::initialize_with_store(account, None, store.clone()).await?
+            }
+            None => NetworkIdentity::initialize(account, None).await?,
+        },
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(
         &identity.network_url,
@@ -677,7 +894,14 @@ async fn connect(
     *previous_out = Some((identity.account.binding_id().to_owned(), resume));
     let connection_lifetime = ConnectionLifetime(Arc::new(AtomicBool::new(true)));
     let mut work: FuturesUnordered<BoxFuture<'static, Work>> = FuturesUnordered::new();
-    let mut pairs = Pairs::new(owner.memory.clone());
+    let mut pairs = if management_only {
+        Pairs::new_management(
+            owner.memory.clone(),
+            myagents_host_management_protocol::PeerRole::Controller,
+        )
+    } else {
+        Pairs::new(owner.memory.clone())
+    };
     let mut calls = Calls::default();
     let mut source_returns = SourceReturns::default();
     let mut target_returns = TargetReturns::new(manager.clone(), owner.connection_id.clone());
@@ -722,6 +946,9 @@ async fn connect(
                         let envelope = ServerEnvelope::parse(text.as_bytes()).map_err(|_| NetworkError::new("CONTROL_INVALID"))?;
                         if envelope.message.scope().is_some_and(|current| current != &scope) { return Err(NetworkError::new("CONTROL_SCOPE_MISMATCH")); }
                         if management_only { super::owned_profile::control(&envelope.message)?; }
+                        if management_only && pairs.consume_retired_management(
+                            &envelope.message, &scope, &local, &scope.connection_epoch,
+                        )? { continue; }
                         match envelope.message {
                             ServerMessage::Ready { catalog_seq: accepted, .. } if ready_requested && accepted == catalog_seq && local_policy.is_some() => {
                                 hydrated = true;
@@ -745,6 +972,8 @@ async fn connect(
                             ServerMessage::ChannelOffer { channel_id, initiator, responder, initiator_connection_epoch,
                                 responder_connection_epoch, initiator_binding, responder_binding, .. } => {
                                 if management_only {
+                                    pairs.reserve_management_retirement(&channel_id,&scope,&local)?;
+                                    pairs.retire_management(&channel_id,true);
                                     send(&mut socket, ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
                                     continue;
                                 }
@@ -766,9 +995,13 @@ async fn connect(
                                 let local=local.clone();let epoch=scope.connection_epoch.clone();
                                 work.push(async move {Work::Offer {channel_id,result:offer.verify(&identity,&local,&epoch).await}}.boxed());
                             }
-                            ServerMessage::Credit {channel_id,sequence,received_bytes,..} => pairs.credit(&channel_id,sequence,received_bytes)?,
+                            ServerMessage::Credit {channel_id,sequence,received_bytes,..} => {
+                                if management_only && !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
+                                pairs.credit(&channel_id,sequence,received_bytes)?
+                            },
                             ServerMessage::ChannelReady { channel_id, .. } => pairs.ready(&channel_id)?,
                             ServerMessage::ChannelClosed { channel_id, .. } => {
+                                if management_only && !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
                                 pairs.remove(&channel_id);pending_offers.remove(&channel_id);calls.channel_closed(&channel_id);target_returns.channel_closed(&channel_id);
                                 for op in incoming_calls.channel_ops(&channel_id) {
                                     prepared_targets.remove(&op);
@@ -873,6 +1106,11 @@ async fn connect(
                     Some(Ok(Message::Binary(bytes))) => {
                         let (channel_id, payload) = myagents_agent_network_protocol::decode_tls_frame(&bytes)
                             .map_err(|_| NetworkError::new("TLS_FRAME_INVALID"))?;
+                        if management_only {
+                            pairs.remove(&channel_id);
+                            send(&mut socket,ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
+                            continue;
+                        }
                         match pairs.feed(&channel_id, payload) {
                             Ok((objects,_decoded_allocation)) => {
                                 let (sequence,received_bytes)=pairs.release_credit(&channel_id,bytes.len())?;
@@ -1047,6 +1285,30 @@ async fn connect(
                 }
             }
             Some(command) = commands.recv() => {
+                if let Command::Management(command) = command {
+                    if command.reply.is_closed() || !management_only || command.generation != generation || !hydrated
+                        || command.request.auth_generation != owner.snapshot().auth_generation
+                        || command.request.connection_id != owner.connection_id
+                        || command.request.principal_id != local.principal_id
+                        || command.request.network_id != local.network_id {
+                        let _=command.reply.send(Err(NetworkError::new("CONNECTOR_NOT_READY")));
+                        continue;
+                    }
+                    let remaining = Duration::from_secs(30).checked_sub(command.queued_at.elapsed());
+                    let result = match remaining {
+                        Some(remaining) => tokio::time::timeout(remaining, super::management_controller::execute(&mut socket,&transport,&identity,&local,&scope,&mut pairs,&command.request,command.sent.clone()))
+                            .await.unwrap_or_else(|_|Err(super::management_controller::lost(command.request.mutation(),command.sent.load(Ordering::Acquire)))),
+                        None => Err(super::management_controller::lost(command.request.mutation(),false)),
+                    };
+                    let result=if owner.generation()!=generation || identity.account.ensure_current().is_err() {
+                        Err(super::management_controller::lost(command.request.mutation(),command.sent.load(Ordering::Acquire)))
+                    } else {result};
+                    let failed=result.is_err();
+                    let _=command.reply.send(result);
+                    if failed { return Err(NetworkError::new("HOST_MANAGEMENT_CONNECTION_RESET")); }
+                    last_server=Instant::now();last_ping=Instant::now();
+                    continue;
+                }
                 if management_only {
                     match &command {
                         Command::Metadata(metadata) => {
@@ -1298,6 +1560,21 @@ fn metadata_response_lost(mutation: bool, auth_changed: bool) -> NetworkError {
 #[cfg(test)]
 mod metadata_response_tests {
     use super::metadata_response_lost;
+
+    #[test]
+    fn diagnostic_code_never_echoes_unknown_upstream_payload_or_details() {
+        let mut error = super::NetworkError::cloud("ACCESS_CAPABILITY_NOT_A_KNOWN_CODE", 401);
+        error.details = Some(serde_json::json!({"secret":"private-fixture-value"}));
+        assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
+        error.code = "unexpected\nlog payload".into();
+        assert_eq!(super::diagnostic_code(&error), "OTHER_NETWORK_FAILURE");
+        assert_eq!(
+            super::diagnostic_code(&super::NetworkError::new(
+                "NETWORK_CREDENTIAL_STORE_INVALID"
+            )),
+            "NETWORK_CREDENTIAL_STORE_INVALID"
+        );
+    }
 
     #[test]
     fn lost_read_response_is_not_an_uncertain_save() {

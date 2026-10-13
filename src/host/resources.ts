@@ -1,10 +1,11 @@
 /** Internal local v1 owner. This is not an AgentNet management wire schema. */
 import { createHash } from 'node:crypto';
 import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { getHomeDir } from '../server/utils/platform';
 import { atomicModifyConfig, loadConfig, loadProjects, type AdminAppConfig } from '../server/utils/admin-config';
 import { withWorkspaceAgentRegistrationIntent, type RegisterWorkspaceAgentResult } from '../server/utils/agent-workspace-identity';
+import { resolveAgentWorkspaceProjections } from '../shared/agentWorkspaceIdentity';
 
 const strict = { strict: true };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -28,6 +29,13 @@ export interface HostResourceReceipt {
   resource?: RegisterWorkspaceAgentResult;
 }
 export type HostResourceResult = HostResourceReceipt | { mutationId: string; status: 'unconfirmed'; errorCode: 'RESOURCE_UNCONFIRMED' };
+/** Read-only projection of the existing registry within this owner's roots. */
+export interface HostResourceInspection {
+  version: 1;
+  revision: number;
+  roots: Array<{rootId: string; workspacePath: string}>;
+  agents: Array<{agentId: string; projectId: string; name: string; workspacePath: string; enabled: boolean; archived: boolean}>;
+}
 interface Intent { request: HostResourceRequest; hash: string; receipt: HostResourceReceipt }
 interface Ledger { version: 1; hostId: string; roots: Record<string, string>; revision: number; intents: Intent[] }
 interface Options { hostId: string; roots: Record<string, string> }
@@ -117,9 +125,15 @@ function workspace(root: string, relativePath: string, create: boolean, recoveri
       verify();
       const target = `/proc/self/fd/${parent}/${pieces[i]}`;
       path = join(path, pieces[i]);
-      if (create && i === pieces.length - 1) {
+      if (create) {
         try { mkdirSync(target, {mode: 0o700}); fsyncSync(parent); }
-        catch (error) { if (!recovering || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        catch (error) {
+          // Existing intermediates still pass openDirectory's pinned inode,
+          // owner, permission and O_NOFOLLOW checks. A fresh leaf stays
+          // exclusive; only recovery of its original intent may reuse it.
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST'
+            || (i === pieces.length - 1 && !recovering)) throw error;
+        }
       }
       parent = openDirectory(target, path, false);
     }
@@ -145,6 +159,39 @@ export function createHostResourceOwner(input: Options) {
   const authorityHome = getHomeDir();
   const checkAuthority = () => { if (getHomeDir() !== authorityHome) fail('RESOURCE_AUTHORITY_CHANGED'); };
   return {
+    async inspect(): Promise<HostResourceInspection> {
+      return withWorkspaceAgentRegistrationIntent(async () => {
+        checkAuthority();
+        const config = loadConfig(strict);
+        const current = ledger(config, options);
+        const projection = resolveAgentWorkspaceProjections(loadProjects(strict), config.agents ?? []);
+        // A read never repairs or reinterprets an ambiguous persisted identity.
+        if (projection.diagnostics.length) fail('RESOURCE_REGISTRY_AMBIGUOUS');
+        const agents: HostResourceInspection['agents'] = [];
+        for (const item of projection.agentProjections) {
+          if (item.association !== 'project-linked' || !item.project || !item.projectId) continue;
+          const admitted = Object.values(roots).some(root => {
+            const child = relative(root, item.workspacePath);
+            return child !== '' && !isAbsolute(child) && child.split('/')[0] !== '..';
+          });
+          if (!admitted) continue;
+          const name = item.project.displayName || item.project.name;
+          if (item.agentId.length > 256 || item.projectId.length > 256 || typeof name !== 'string'
+            || name.length > 256 || item.workspacePath.length > 4096 || !isAbsolute(item.workspacePath)
+            || resolve(item.workspacePath) !== item.workspacePath
+            || typeof item.agent.enabled !== 'boolean') fail('RESOURCE_PROJECTION_INVALID');
+          agents.push({agentId: item.agentId, projectId: item.projectId, name, workspacePath: item.workspacePath,
+            enabled: item.agent.enabled, archived: Boolean(item.project.archivedAt)});
+        }
+        const result: HostResourceInspection = {version: 1, revision: current.revision,
+          roots: Object.entries(roots).map(([rootId, workspacePath]) => ({rootId, workspacePath})),
+          agents: agents.sort((a, b) => a.agentId.localeCompare(b.agentId))};
+        // Reserve space for the surrounding management response; fail explicitly
+        // instead of returning a partial list that looks complete.
+        if (Buffer.byteLength(JSON.stringify(result)) > 48 * 1024) fail('RESOURCE_PROJECTION_TOO_LARGE');
+        return result;
+      });
+    },
     async snapshot(): Promise<{version: 1; revision: number}> {
       return withWorkspaceAgentRegistrationIntent(async () => {
         checkAuthority();

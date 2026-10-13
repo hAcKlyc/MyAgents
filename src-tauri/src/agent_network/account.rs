@@ -145,6 +145,15 @@ impl NetworkAccountSession {
         matches!(self,Self::Selfhost(a) if a.enrollment_key.is_some())
             || matches!(self, Self::Owned(_))
     }
+    /// Only legacy enrollment-key owners need a revoked-device replacement probe.
+    /// Owned sessions prove the current key through the normal consumed challenge;
+    /// probing first would leave an unused challenge on every initialization.
+    pub(crate) fn requires_revocation_probe(&self, key_generation: Option<u64>) -> bool {
+        match self {
+            Self::Selfhost(a) => a.enrollment_key.is_some() && key_generation.is_some(),
+            Self::Official(_) | Self::Owned(_) => false,
+        }
+    }
     pub(crate) fn is_management_only(&self) -> bool {
         matches!(self, Self::Owned(_))
     }
@@ -348,6 +357,56 @@ mod tests {
             ],
             root_certificate: "test-root".into(),
             jwks: serde_json::json!({"keys":[jwk]}),
+        }
+    }
+    #[test]
+    fn revocation_probe_is_exclusive_to_committed_legacy_enrollment_key_owner() {
+        for enrollment_key in [None, Some(Zeroizing::new("test-enrollment".into()))] {
+            let eligible = enrollment_key.is_some();
+            let legacy = NetworkAccountSession::Selfhost(Arc::new(SelfhostAccount {
+                connection_id: "legacy-test".into(),
+                descriptor: sample(),
+                active: Arc::new(AtomicBool::new(true)),
+                enrollment_key,
+            }));
+            assert!(!legacy.requires_revocation_probe(None));
+            assert_eq!(legacy.requires_revocation_probe(Some(1)), eligible);
+            assert_eq!(legacy.has_enrollment_key(), eligible);
+        }
+        let d = sample();
+        let owned = NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            connection_id: "owned-test".into(),
+            descriptor: super::super::owned_login::OwnedInstance {
+                version: 1,
+                profile: "owned-device-relay-v1".into(),
+                service_id: d.service_id,
+                environment: d.environment,
+                network_id: d.network_id.clone(),
+                name: d.name,
+                issuer: d.issuer,
+                login_issuer: "https://login.example.test".into(),
+                protocol: 1,
+                capabilities: vec!["tls13-mtls".into()],
+                root_certificate: d.root_certificate,
+                jwks: d.jwks,
+            },
+            active: Arc::new(AtomicBool::new(true)),
+            session: super::super::owned_login::OwnedSession {
+                access_token: "x".repeat(43),
+                expires_at: jsonwebtoken::get_current_timestamp() + 600,
+                principal_id: d.principal_id,
+                network_id: d.network_id,
+            },
+            public_tls_ca: None,
+            join_authorized: AtomicBool::new(false),
+            guard: Arc::new(|| Ok(())),
+        }));
+        // Preserve enrollment/management policy while excluding the legacy probe.
+        assert!(owned.has_enrollment_key());
+        assert!(owned.is_selfhost());
+        assert!(owned.is_management_only());
+        for generation in [None, Some(1), Some(9_007_199_254_740_991)] {
+            assert!(!owned.requires_revocation_probe(generation));
         }
     }
     #[test]

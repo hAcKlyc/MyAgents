@@ -25,8 +25,12 @@ async fn execute() -> Result<(), NetworkError> {
             "--device-name",
             "--status-file",
             "--target-device-id",
+            "--request-file",
             "--owned-instance",
             "--public-tls-ca-file",
+            "--management-socket",
+            "--management-host-uid",
+            "--management-gid",
         ]
         .contains(&key.as_str())
             || options.contains_key(&key)
@@ -46,6 +50,9 @@ async fn execute() -> Result<(), NetworkError> {
             .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))
     };
     if command == "status" {
+        if options.keys().any(|key| key.starts_with("--management-")) {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
         let path = PathBuf::from(required("--status-file")?);
         println!("{}", status::read(&path)?);
         return Ok(());
@@ -74,6 +81,7 @@ async fn execute() -> Result<(), NetworkError> {
             "owned-auth-wait",
             "owned-auth-cancel",
             "owned-auth-logout",
+            "owned-manage",
             "run",
         ]
         .contains(&command.as_str())
@@ -81,6 +89,50 @@ async fn execute() -> Result<(), NetworkError> {
         {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
         }
+        let management_keys = [
+            "--management-socket",
+            "--management-host-uid",
+            "--management-gid",
+        ];
+        let management_count = management_keys
+            .iter()
+            .filter(|key| options.contains_key(**key))
+            .count();
+        if management_count != 0 && (management_count != management_keys.len() || command != "run")
+        {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
+        let management = if management_count == 0 {
+            None
+        } else {
+            let parse_id = |key: &str| -> Result<u32, NetworkError> {
+                let value = required(key)?;
+                if value.is_empty()
+                    || value.len() > 10
+                    || !value.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(NetworkError::new("CLI_USAGE_INVALID"));
+                }
+                value
+                    .parse()
+                    .ok()
+                    .filter(|id: &u32| *id > 0)
+                    .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))
+            };
+            Some(crate::management_ipc::ManagementIpcConfig {
+                socket: PathBuf::from(required("--management-socket")?),
+                host_uid: parse_id("--management-host-uid")?,
+                management_gid: parse_id("--management-gid")?,
+            })
+        };
+        if options.contains_key("--request-file") != (command == "owned-manage") {
+            return Err(NetworkError::new("CLI_USAGE_INVALID"));
+        }
+        let _management_lock = if command == "owned-manage" {
+            Some(status::run_lock(&root)?)
+        } else {
+            None
+        };
         let ca = options.get("--public-tls-ca-file").map(PathBuf::from);
         let connection = if matches!(command.as_str(), "owned-auth-cancel" | "owned-auth-logout") {
             owned::Connection::from_pinned(origin, ca.as_deref(), store.clone(), &device)?
@@ -98,6 +150,18 @@ async fn execute() -> Result<(), NetworkError> {
                 connection.cancel().await?;
                 println!("{}", serde_json::json!({"status":"signedOut"}));
             }
+            "owned-manage" => {
+                let response = crate::native_management::run(
+                    &connection,
+                    &PathBuf::from(required("--request-file")?),
+                )
+                .await?;
+                println!(
+                    "{}",
+                    serde_json::to_string(&response)
+                        .map_err(|_| NetworkError::new("HOST_MANAGEMENT_RESPONSE_INVALID"))?
+                );
+            }
             "run" => {
                 let _lock = status::run_lock(&root)?;
                 connector::run_owned(
@@ -108,6 +172,7 @@ async fn execute() -> Result<(), NetworkError> {
                     &connection,
                     path.as_deref(),
                     options.contains_key("--join"),
+                    management.as_ref(),
                 )
                 .await?;
             }
@@ -115,7 +180,11 @@ async fn execute() -> Result<(), NetworkError> {
         }
         return Ok(());
     }
-    if options.contains_key("--public-tls-ca-file")
+    if options.contains_key("--request-file")
+        || options.contains_key("--public-tls-ca-file")
+        || options.contains_key("--management-socket")
+        || options.contains_key("--management-host-uid")
+        || options.contains_key("--management-gid")
         || options.contains_key("--join")
         || command.starts_with("owned-")
     {

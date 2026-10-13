@@ -10,6 +10,25 @@ import test from 'node:test';
 
 const node24 = process.env.MYAGENTS_HOST_TEST_NODE || process.execPath;
 const root = resolve(import.meta.dirname, '../..');
+
+test('Host build, bootstrap and installers agree on the two closed profile namespaces', () => {
+  const buildSource = readFileSync(join(root, 'scripts/host/build.mjs'), 'utf8');
+  const installSource = readFileSync(join(root, 'scripts/host/install.sh'), 'utf8');
+  const networkSource = readFileSync(join(root, 'scripts/host/network-install.py'), 'utf8');
+  const unifiedSource = readFileSync(join(root, 'scripts/host/unified-install.py'), 'utf8');
+  for (const profile of ['myagents-test', 'moxbot-test']) {
+    assert.ok(buildSource.includes(`'${profile}':`));
+    assert.ok(installSource.includes(`${profile})`));
+    assert.ok(networkSource.includes(`"${profile}"`));
+    assert.ok(unifiedSource.includes(`"${profile}"`));
+  }
+  assert.match(buildSource, /MYAGENTS_HOST_PROFILE/);
+  assert.match(installSource, /Profile must be myagents-test or moxbot-test/);
+  assert.match(networkSource, /choices=\("myagents-test", "moxbot-test"\)/);
+  assert.match(unifiedSource, /choices=\("myagents-test", "moxbot-test"\)/);
+  assert.match(installSource, /manifest_profile != expected_profile/);
+  assert.match(installSource, /expected_profile == 'myagents-test'/);
+});
 const runnerVersion = execFileSync(node24, ['--version'], { encoding: 'utf8' }).trim();
 test('Node 24 ESM worker bundle starts without credentials, persists Session v2, and shuts down', { skip: !/^v24\./.test(runnerVersion) }, async t => {
   const runtime = resolve(node24);

@@ -27,8 +27,17 @@ type Owner = {
   writeConfig(config: HostConfig): Promise<void>;
   workspacePath(value: string): Promise<string>;
   busy(): boolean;
+  credentialReference?: string;
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export class HostConfigError extends Error {
+  readonly code = 'HOST_MANAGEMENT_UNCONFIRMED' as const;
+
+  constructor() {
+    super('Configuration persistence outcome is unconfirmed; query the original mutation ID before retrying');
+    this.name = 'HostConfigError';
+  }
+}
 const MODEL = /^[a-zA-Z0-9._-]{1,128}$/;
 const CAPACITY = 256;
 const revision = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
@@ -105,7 +114,7 @@ export async function configureHost(owner: Owner, body: Record<string, unknown>)
     try { await owner.writeConfig(next); }
     catch (error) {
       if (!id) throw error;
-      throw new Error('Configuration persistence outcome is unconfirmed; query the original mutation ID before retrying');
+      throw new HostConfigError();
     }
   };
   const prior = id ? receipts.entries.find(entry => entry.receipt.mutationId === id) : undefined;
@@ -130,7 +139,7 @@ export async function configureHost(owner: Owner, body: Record<string, unknown>)
   };
   const receipt: ConfigReceipt | undefined = id ? { mutationId: id, status: 'persisted', revision: next.revision, effect: 'new-session', settings: next } : undefined;
   await persist({ ...config,
-    providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': 'systemd-credential:kimi' },
+    providerApiKeys: { ...config.providerApiKeys, 'moonshot-coding': owner.credentialReference ?? 'systemd-credential:kimi' },
     hostSettings: next,
     ...(receipt ? { hostConfigReceipts: { ...receipts, entries: [...receipts.entries, { requestHash, receipt }] } } : {}),
   });

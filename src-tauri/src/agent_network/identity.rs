@@ -202,10 +202,7 @@ impl NetworkIdentity {
             device_id: device.device_id.clone(),
             key_generation: state.key_generation.unwrap_or(1),
         };
-        let replacement = if account.is_selfhost()
-            && account.has_enrollment_key()
-            && state.key_generation.is_some()
-        {
+        let replacement = if account.requires_revocation_probe(state.key_generation) {
             match account.request(AccountOperation::Challenge,Some(json!({"deviceId":scope.device_id,"operation":"recover-query","targetFingerprint":state.key_fingerprint,"expectedKeyGeneration":scope.key_generation}))).await {
                 Err(error) if error.code=="DEVICE_REVOKED"=>true,
                 Err(error)=>return Err(error),
