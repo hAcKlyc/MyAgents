@@ -23,6 +23,7 @@ use myagents_agentnet_peer_core::PeerSnapshot;
 use myagents_agentnet_relay_core::{
     Effect, RelayConfig, RelayCore, RelayError, TrustedLiveSnapshot, TrustedReadyEvidence,
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -50,6 +51,18 @@ struct PreparedLive {
     peer: PeerSnapshot,
     metadata: RelayMetadataState,
     relay: TrustedLiveSnapshot,
+}
+
+/// A current device address, not a management permission or an Agent permit.
+/// The endpoints still verify the channel's signed bindings and device TLS.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeviceAddress {
+    version: u8,
+    scope: DeviceScope,
+    connection_epoch: String,
+    membership_revision: u64,
+    signed_binding: String,
 }
 
 pub struct RelayController {
@@ -138,6 +151,92 @@ impl RelayController {
                 .metadata
                 .list_self_policy(&live.context, &epoch, cursor, limit)
                 .map_err(map_metadata)
+        })
+    }
+
+    /// No catalog rewrite: the authenticated current device can inspect its
+    /// complete persisted source before uploading a new zero-Agent catalog.
+    pub(crate) fn self_catalog_preservation(
+        &self,
+        access: &ValidatedAccess,
+    ) -> Result<bool, RelayFailure> {
+        let connection_id = self.connection_for_access(access)?;
+        self.with_live(access, |live| {
+            if !live.metadata.joined {
+                return Err(rejected());
+            }
+            let epoch = self.recheck_connection(&connection_id, access)?;
+            if live.metadata.connection_epoch.as_deref() != Some(epoch.as_str())
+                || !matches!(live.metadata.presence, Presence::Syncing | Presence::Ready)
+            {
+                return Err(rejected());
+            }
+            self.network
+                .metadata
+                .self_catalog_empty(&live.context, &epoch)
+                .map_err(map_metadata)
+        })
+    }
+
+    /// Resolve a zero-Agent device only from the live relay and durable owners.
+    /// Both sessions are locked together; directory metadata is never enough.
+    pub(crate) fn device_address(
+        &self,
+        access: &ValidatedAccess,
+        target_device: &str,
+    ) -> Result<DeviceAddress, RelayFailure> {
+        if uuid::Uuid::parse_str(target_device)
+            .map(|id| id.to_string())
+            .as_deref()
+            != Ok(target_device)
+            || target_device == access.device_id()
+        {
+            return Err(rejected());
+        }
+        let source_id = self.connection_for_access(access)?;
+        let source = self.connection_entry(&source_id)?;
+        let (target_id, target) = {
+            let runtime = self.runtime()?;
+            let mut matches = runtime.connections.iter().filter(|(_, entry)| {
+                entry.access.device_id() == target_device
+                    && entry.access.principal_id() == access.principal_id()
+                    && entry.access.issuer_network_id() == access.issuer_network_id()
+            });
+            let (id, entry) = matches.next().ok_or_else(rejected)?;
+            let found = (id.clone(), entry.clone());
+            if matches.next().is_some() {
+                return Err(rejected());
+            }
+            found
+        };
+        self.with_two_live(access, &target.access, |source_live, target_live| {
+            if source_live.context.principal_id != target_live.context.principal_id
+                || source_live.context.network_id != target_live.context.network_id
+                || !durably_ready(&source_live.metadata, &source.epoch)
+                || !durably_ready(&target_live.metadata, &target.epoch)
+            {
+                return Err(rejected());
+            }
+            let runtime = self.runtime()?;
+            verify_runtime_pair(&runtime, &source_id, &source, &target_id, &target)?;
+            let (now, _) = fresh_times(&self.monotonic_origin)?;
+            for id in [&source_id, &target_id] {
+                if !runtime
+                    .core
+                    .connection_projection(id, now)
+                    .map_err(map_relay)?
+                    .is_ready()
+                {
+                    return Err(rejected());
+                }
+            }
+            Ok(DeviceAddress {
+                version: 1,
+                scope: target_live.relay.scope,
+                connection_epoch: target.epoch.clone(),
+                membership_revision: target_live.metadata.membership_revision,
+                signed_binding: target_live.peer.signed_binding,
+            })
         })
     }
 
@@ -290,6 +389,11 @@ impl RelayController {
             .find(|(_, entry)| entry.access == *access)
             .map(|(connection_id, _)| connection_id.clone())
             .ok_or_else(rejected)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn connection_id_for_test(&self, access: &ValidatedAccess) -> String {
+        self.connection_for_access(access).unwrap()
     }
 
     fn recheck_connection(
@@ -854,9 +958,160 @@ fn unavailable() -> RelayFailure {
 mod tests {
     use super::*;
     use crate::network_http::tests::Fixture;
-    use crate::relay_http::tests::{controller_access, joined_syncing_controller};
+    use crate::relay_http::tests::{
+        controller_access, finish_ready, join_on_controller, joined_syncing_controller,
+    };
     use serde_json::json;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn address_rejects_cross_principal_revocation_and_membership_leave() {
+        let fixture = Fixture::new();
+        let source = fixture.device("address-owner");
+        let target = fixture.device("address-owner");
+        let foreign = fixture.device("address-foreign");
+        let (controller, epoch, hello) = joined_syncing_controller(&fixture, &source).await;
+        finish_ready(&controller, &fixture, &source, &epoch, &hello);
+        let (target_epoch, target_hello) = join_on_controller(&controller, &fixture, &target).await;
+        finish_ready(&controller, &fixture, &target, &target_epoch, &target_hello);
+        let (foreign_epoch, foreign_hello) =
+            join_on_controller(&controller, &fixture, &foreign).await;
+        finish_ready(
+            &controller,
+            &fixture,
+            &foreign,
+            &foreign_epoch,
+            &foreign_hello,
+        );
+        let access = controller_access(&controller, &fixture, &source, "GET", "/v1/me/network");
+        assert!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .is_ok()
+        );
+        for device in [
+            &source.context.device_id,
+            &foreign.context.device_id,
+            &Uuid::new_v4().to_string(),
+        ] {
+            assert_eq!(
+                controller
+                    .device_address(&access, device)
+                    .err()
+                    .unwrap()
+                    .code(),
+                FAILURE_REJECTED
+            );
+        }
+        let leave_uri = format!(
+            "/v1/networks/{}/devices/{}/leave",
+            fixture.network, target.context.device_id
+        );
+        assert_eq!(
+            fixture
+                .request(
+                    &source,
+                    "POST",
+                    &leave_uri,
+                    &json!({
+                        "mutationId":Uuid::new_v4().to_string(),"expectedMembershipRevision":1
+                    })
+                    .to_string()
+                )
+                .await
+                .0,
+            StatusCode::OK
+        );
+        assert_eq!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .err()
+                .unwrap()
+                .code(),
+            FAILURE_REJECTED
+        );
+        let join_uri = leave_uri.replace("/leave", "/join");
+        assert_eq!(
+            fixture
+                .request(
+                    &source,
+                    "POST",
+                    &join_uri,
+                    &json!({
+                        "mutationId":Uuid::new_v4().to_string(),"expectedMembershipRevision":2
+                    })
+                    .to_string()
+                )
+                .await
+                .0,
+            StatusCode::OK
+        );
+        fixture.auth.revoke_session(&target.account_token).unwrap();
+        assert_eq!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .err()
+                .unwrap()
+                .code(),
+            FAILURE_REJECTED
+        );
+    }
+
+    #[tokio::test]
+    async fn address_tracks_replacement_epoch_and_never_returns_syncing_target() {
+        let fixture = Fixture::new();
+        let source = fixture.device("address-replace");
+        let target = fixture.device("address-replace");
+        let (controller, epoch, hello) = joined_syncing_controller(&fixture, &source).await;
+        finish_ready(&controller, &fixture, &source, &epoch, &hello);
+        let (old_epoch, target_hello) = join_on_controller(&controller, &fixture, &target).await;
+        let access = controller_access(&controller, &fixture, &source, "GET", "/v1/me/network");
+        assert!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .is_err()
+        );
+        finish_ready(&controller, &fixture, &target, &old_epoch, &target_hello);
+        assert_eq!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .unwrap()
+                .connection_epoch,
+            old_epoch
+        );
+        let target_access = controller_access(&controller, &fixture, &target, "GET", "/v1/ws");
+        let (_, effects) = controller
+            .hello(
+                target_access,
+                json!({
+                    "version":1,"controlId":Uuid::new_v4().to_string(),"type":"hello",
+                    "clientVersion":"replacement-test","capabilities":["tls13-mtls"]
+                }),
+            )
+            .unwrap();
+        let next_hello = effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::Control { json, .. } if json["type"] == "hello.result" => Some(json),
+                _ => None,
+            })
+            .unwrap();
+        let next_epoch = next_hello["connectionEpoch"].as_str().unwrap();
+        assert_ne!(next_epoch, old_epoch);
+        assert!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .is_err()
+        );
+        finish_ready(&controller, &fixture, &target, next_epoch, &next_hello);
+        assert_eq!(
+            controller
+                .device_address(&access, &target.context.device_id)
+                .unwrap()
+                .connection_epoch,
+            next_epoch
+        );
+    }
 
     #[tokio::test]
     async fn failed_durable_ready_immediately_removes_routable_connection() {

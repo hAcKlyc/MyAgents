@@ -3,9 +3,13 @@
 <!-- codex-handoff:version=1 -->
 <!-- codex-handoff:project=MoXBots -->
 <!-- codex-handoff:last-updated=2026-10-13T14:21:03+08:00 -->
-<!-- codex-handoff:latest-anchor=BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013 -->
+<!-- codex-handoff:latest-anchor=BOTS-CLOUD-ADMIN-001 -->
 
 ## Current Snapshot
+
+- **BOTS-CLOUD-ADMIN-001**：用户已启动真实统一后台实现，当前隔离分支codex/bots-cloud-admin，base2796b13e；本地真实AuthStore/AdminStore与UI已验收，待CI/main和现网串行升级。源码services/agentnet/admin-web及admin_http/admin_store；规划BOTS-CLOUD-ADMIN-IMPLEMENTATION.md、执行接入提案BOTS-CLOUD-EXECUTION-V1.md，证据validation/。原型历史保持。现网04fa的四个服务模块修复原样保留，避免旧main覆盖运行修复；不修改其他Host/桌面任务。用户已授权向Host owner聊天同步；真实机器访问/账号/备份指针仅保留原owner私有协作记录。
+- **当前验收边界**：管理登记/配置/归属Host分配/逻辑删除恢复可持久化；start拒绝未连接执行端，stop只关准入。实际Host执行和跨用户共享未实现，首位平台管理员尚未授予，不能把fixture称作生产验收。组合service73项、metadata20项与clippy/fmt/lint、独立UI三gate通过。后台正式2轮、UI2轮修复，模型运行值和token/费用未知；纯Codex内置模式。
+
 
 - **BOT-ADMIN-LIFECYCLE-PROTOTYPE-20261013**：当前用户追加管理员Bot新建、配置、启停、删除与所属用户/Host分配，仅规划和合成原型。分支codex/bots-admin-lifecycle-prototype，base main 5ee8f862；本轮已由PR #18交付main，合并锚点 `5652048579f776c5eebe9faebdbde212ce2b93c7` 已核验，详细规划 services/agentnet/planning/BOT-ADMIN-LIFECYCLE-V1.md，原型LIFECYCLE-*设计/验收/记录，进度见TODO。主Agent负责规划、集成和main交付；原实现和独立UI worker复用，真实服务不开发。
 
@@ -152,6 +156,12 @@
 - 当前生命周期任务关闭，真实API/Host启停、平台鉴权、双Host迁移/持久化/生产以及客户端Bots Net显示改名仍待开发。协作与状态证据见LIFECYCLE-DELIVERY.md；用量未知，无外部模型。
 - 下一步仅在用户启动真实实现后重读主干与对应权限/生命周期规划，不以模拟状态充当真实服务上线。
 
+
+### 2026-10-13 — unified cloud admin implementation — BOTS-CLOUD-ADMIN-001
+
+- 用户明确启动开发，仓库目标MoXBots，复用现有云服务；执行主体为本聊天原生协作团队。primary前端/集成/交付，backend请求Sol/medium容量错误后Luna/medium完成Rust，独立Luna/medium验收；实际型号/effort、token与费用未知。
+- 本地控制面与版本化复现材料完成；保留现网04fa已有修复并组合验收。新平台管理员权限、现网真实登录、发布、Host委派和共享执行仍开放。
+- 接续先核查CI/远端main和私有协调窗口，沿用既有安全访问与回滚；不要从历史原型限制阻止当前已授权实现，也不要把新增执行架构或管理员权利视为自动授权。
 ### 2026-10-13 — archive main and native feature accepted — MOXBOTS-CHAT-ARCHIVE-20261013
 
 - PR #19 main bd567cd6，源头59037d91；156项回归、六项CI、类型/lint/Web+server+bridge+CLI构建通过。已归档工作区与过期响应两项审阅修复关闭。

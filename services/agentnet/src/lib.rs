@@ -5,6 +5,8 @@
 //! can construct a `VerifiedSubject`, which is the only input accepted by the
 //! durable account/session owner.
 
+mod admin_http;
+mod admin_store;
 mod identity_http;
 mod instance_http;
 mod network_http;

@@ -1,5 +1,11 @@
 # MAH-SELFHOST-SERVICE-20261012
 
+## Administrator control plane and deployed service compatibility
+
+BOTS-CLOUD-ADMIN-001 adds optional authenticated registry administration. Status and acceptance are tracked in [the implementation contract](planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md). The four metadata/relay source files preserve the independently deployed `04faeb1d` safeguards (same-principal device address, persisted catalog preservation, raw heartbeat and private initialization locking). This does not declare the separate Desktop/Host management task accepted or merge its unrelated source. Actual Host controller delegation and shared execution remain open.
+
+The historical foundation milestones below are retained as history. Current source exposes the owned descriptor and real bounded WS relay; the earlier no-relay/no-client stage statements do not describe current capability.
+
 Goal: deploy an independently owned AgentNet service including browser login, device identity, zero-Agent discovery, encrypted relay, and desktop-to-Host configuration. This service does not require access to the upstream author's private server or official account credentials.
 
 Current base: fork main f0d630e3a3bac085c8615bdd49af728679b12c48 (MoX isolation, PR #11). Service worktree/branch: myagents-selfhost-service / feat/mah-selfhost-service. Existing official desktop/Host enrollment is preserved. Implementation, deterministic integration, real two-device acceptance, main delivery and deployment are separate gates.
