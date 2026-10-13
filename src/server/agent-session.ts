@@ -48,7 +48,7 @@ import { isRejectedReloadAnchor, resolveEffectiveResumeAt } from './utils/rewind
 import { nativeResumeBoundaryRecoveryMessage } from '../shared/nativeResumeBoundary';
 import { attemptFileRewind, type FileRewindStatus } from './utils/rewind-file-result';
 import { summarizeSensitiveSdkMessage } from './utils/sdk-log-summary';
-import { buildForkUuidRemap, remapStoredSdkUuids } from './utils/fork-remap';
+import { buildForkUuidRemap, remapForkMessageUuids } from './utils/fork-remap';
 import {
   decideInFlightCancelSettlement,
   terminalEventMatchesInFlight,
@@ -10671,7 +10671,7 @@ async function materializeBuiltinFork(opts: {
   const remap = buildForkUuidRemap(srcSliced, forkSdk);
   if (!remap.ok) return fail(`uuid remap failed: ${remap.reason}`);
 
-  const applied = remapStoredSdkUuids(forkedMessages.map(m => m.sdkUuid), remap.map);
+  const applied = remapForkMessageUuids(forkedMessages, srcSdk, remap.map);
   if (!applied.ok) return fail(`stored uuid re-stamp failed: ${applied.reason}`);
   const remapped = forkedMessages.map((m, i) => ({ ...m, sdkUuid: applied.remapped[i] }));
 
@@ -10962,6 +10962,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   let queryExitFailed = false;
   let preparedProvider: PreparedProvider | undefined;
   let recoveredRejectedReloadAnchor = false;
+  let rejectedNativeResumeBoundary = false;
 
   const recoverRejectedReloadAnchor = (rawError: string): boolean => {
     if (lifecycleState.abortRequested || sessionId !== queryProductSessionId
@@ -13488,6 +13489,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           continue;
         }
         const handling = await builtinTurnLifecycle.handleSdkResult(resultMessage, recoverRejectedReloadAnchor);
+        if (resultMessage.subtype === 'error_during_execution' && handling !== 'retrying' && nativeResumeBoundaryRecoveryMessage(
+          [resultMessage.result, ...(resultMessage.errors ?? [])].filter(Boolean).join('\n'),
+        )) rejectedNativeResumeBoundary = true;
         if (rewindInputGate && handling !== 'retrying') {
           retireRewoundQueryInput(rewindInputGate);
         }
@@ -13570,7 +13574,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
 
     // Cross-platform SDK subprocess diagnostics. Deterministic executable
     // denials also carry the Rust circuit's next legal probe delay.
-    let userFacingError = nativeResumeBoundaryRecoveryMessage(errorMessage) ?? errorMessage;
+    const nativeResumeError = nativeResumeBoundaryRecoveryMessage(errorMessage);
+    if (nativeResumeError) rejectedNativeResumeBoundary = true;
+    let userFacingError = nativeResumeError ?? errorMessage;
     const sdkSubprocessDiagnostic = diagnoseSdkSubprocessFailure({
       error,
       errorMessage,
@@ -13800,7 +13806,14 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     // They are cleared when the Sidecar Owner is fully released (IM Bot stops).
     resolveTermination!();
 
-    if (wasPreWarming) {
+    if (rejectedNativeResumeBoundary && !lifecycleState.abortRequested && sessionId === queryProductSessionId) {
+      // An exact saved boundary is deterministic: retrying the unchanged UUID
+      // cannot heal it. Keep its metadata and all Product history for recovery.
+      clearPreWarmTimer();
+      drainQueueWithCancellation();
+      setSessionState('idle');
+      console.warn('[agent] native resume boundary rejected; automatic recovery stopped');
+    } else if (wasPreWarming) {
       // sessionRegistered 不修改 — pre-warm 永不触碰此标志
 
       if (!preWarmStartedOk) {

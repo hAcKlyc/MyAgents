@@ -1,3 +1,5 @@
+import { NativeResumeRecoveryAction } from '@/components/NativeResumeRecoveryAction';
+import { NATIVE_RESUME_BOUNDARY_MESSAGE } from '../../shared/nativeResumeBoundary';
 import { useChatDraftScope } from "@/hooks/useChatDraftScope";
 import { useNextPromptSuggestion } from '@/hooks/useNextPromptSuggestion';
 import type { Message } from "@/types/chat";
@@ -6558,7 +6560,8 @@ export default function Chat({
                     }
                   }
                 }
-                const canRetry = !!lastUserMsg && !isLoading;
+                const resumeBoundaryRejected = agentError === NATIVE_RESUME_BOUNDARY_MESSAGE;
+                const canRetry = !!lastUserMsg && !isLoading && !resumeBoundaryRejected;
                 return (
                   <div className="relative z-10 flex-shrink-0 border-b border-[var(--line)] bg-[var(--paper-inset)] px-4 py-2 text-xs text-[var(--ink)]">
                     <div className="mx-auto flex max-w-3xl items-start gap-2">
@@ -6608,6 +6611,12 @@ export default function Chat({
                         >
                           <HelperIcon className="h-3.5 w-3.5" />
                         </button>
+                        <NativeResumeRecoveryAction
+                          error={agentError}
+                          messages={msgs}
+                          disabled={isLoading || forkPending}
+                          onFork={onForkSession ? handleFork : undefined}
+                        />
                         {canRetry && (
                           <button
                             type="button"

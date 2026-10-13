@@ -324,7 +324,10 @@ describe('Tab-owned query clock integration', () => {
     await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
     emit('chat:message-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
     expect(screen.getByTestId('agent-error')).toHaveTextContent(NATIVE_RESUME_BOUNDARY_MESSAGE);
-    expect(screen.getAllByRole('status').some(element => element.textContent?.includes(NATIVE_RESUME_BOUNDARY_MESSAGE))).toBe(true);
+    emit('chat:agent-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
+    emit('chat:agent-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
+    expect(screen.getByTestId('agent-error')).toHaveTextContent(NATIVE_RESUME_BOUNDARY_MESSAGE);
+    expect(screen.queryAllByRole('status').filter(element => element.tagName !== 'OUTPUT' && element.textContent?.includes(NATIVE_RESUME_BOUNDARY_MESSAGE))).toHaveLength(0);
   });
 
   it('keeps query time through tool updates and pauses only for unresolved human requests', async () => {

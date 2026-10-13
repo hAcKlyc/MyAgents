@@ -965,6 +965,7 @@
       "retry": "重试"
     },
     "agentError": {
+      "resumeInFork": "保留历史，分支继续",
       "title": "AI 调用失败：",
       "imageTooLargePrefix": "工具截图超过模型处理限制，",
       "rewindAction": "点击时间回溯到之前",
