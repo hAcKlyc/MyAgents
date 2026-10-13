@@ -403,7 +403,7 @@ describe("Host management UI v0 seam (isolated fixtures only)", () => {
     });
     expect(adapter.read).toHaveBeenCalledOnce();
     expect(
-      screen.getByRole("button", { name: /Host 管理\s*异常/ }),
+      await screen.findByRole("button", { name: /Host 管理\s*异常/ }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "读取最新状态" })).toBeEnabled();
     adapter.read.mockResolvedValue(host({ permissions: [] }));
@@ -412,7 +412,7 @@ describe("Host management UI v0 seam (isolated fixtures only)", () => {
       await adapter.read.mock.results.at(-1)?.value;
     });
     expect(
-      screen.getByText(/当前身份没有设备管理读取权限/),
+      await screen.findByText(/当前身份没有设备管理读取权限/),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("默认模型")).not.toBeInTheDocument();
   });
