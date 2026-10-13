@@ -216,3 +216,11 @@ BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host s
 - 分支codex/host-config-20261013，从main2a241591起；本地merge冻结Host依赖9149753c（5a9dd9b0）。远端main e9767263仍无Host管理基础，不能独自发布其未完成凭据实验。后续将本任务提交应用到原owner已验证基础。
 - 封闭扩展DTO、非秘密profile回显、不可变version ID、Provider私有key绑定、Linux fd目录选择/注册已实现；主核验unit16、Node42pass/13Linux skip、协议19、Headless125、范围lint通过。UI七项独立发现待修复冻结与主IAB验收；native/真实Host/模型路径仍开放。
 - 当前安装仍b116404e，统一安装由原凭据owner控制；主Agent不并发换包。接续清单及证据见任务记录、specs/tech_docs/host_configuration_reuse.md、dev-docs/host-config-independent-review.md。
+
+### 2026-10-13 — MOXBOTS-SIDEBAR-ORG-001
+
+当前Agent在隔离 `codex/sidebar-organization-20261013` 实现本机侧栏任务/Agent拖拽与自定义分区，兼容v1偏好，不改执行身份与工作目录；记录 `dev-docs/sidebar-organization-delivery.md`、独立报告和 `.agent-sync/tasks/codex-sidebar-organization-20261013-964955f1.md`。主干CI/交付及原生安装分别追踪。用户已授权本聊天向“Bots 网络 可用”“增加任务归档功能”协调，已发送阶段锚点，统一安装仍由原Host/凭据owner负责；本聊天负责安装后的侧栏真实路径与重启保留复验。不基于旧安装状态自行并发换包。
+
+### MOXBOTS-HOST-CONFIG-20261013 clean delivery freeze
+
+Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in delivery branch. Only feature commits were cherry-picked; development credential-reader merge excluded. UI/source/backend checks and primary synthetic IAB completed, independent review closed. Exact-head CI, main and unified real Host/native gates remain open. See dev-docs/host-config-primary-acceptance.md.
