@@ -165,7 +165,7 @@ mod authorization_tests {
             "environment": environment,
             "deviceId": device,
             "keyGeneration": 2,
-            "keyFingerprint": "verified-fingerprint"
+            "keyFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
     }
 
@@ -181,7 +181,10 @@ mod authorization_tests {
         let (scope, fingerprint) = authorized_scope_from_state(&account, device, valid).unwrap();
         assert_eq!(scope.issuer, "https://owned.example");
         assert_eq!(scope.key_generation, 2);
-        assert_eq!(fingerprint, "verified-fingerprint");
+        assert_eq!(
+            fingerprint,
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        );
 
         for invalid in [
             state(
