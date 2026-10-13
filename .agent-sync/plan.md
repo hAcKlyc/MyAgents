@@ -99,3 +99,7 @@ Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution c
 SIDEBAR-ORG阶段更新：PR25已交付远端main c21e9f43，源头9d879a6e六项CI与独立23项实际UI通过；原生安装仍开放。用户已授权跨聊天协调，唯一本机安装owner“Bots 网络 可用”已确认旧6ac包不含sidebar，正准备联合候选；以实际制品/签名/运行回执和原生重启验收关闭。
 
 SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agent实际App拖Task/Agent进分区、菜单恢复、分区管理和正常重启保留完成，详见dev-docs/sidebar-organization-native.md的覆盖限制。临时分区已清理；凭据slot保存仍失败，由原owner修复，统一更新未全部验收。
+
+## MOXBOTS-PROJECT-BOARD-001
+
+用户已确认MoXBots仓库并批准PB-002实现。当前Agent负责隔离分支codex/project-board-20261014及集成/主干交付；TaskStore/Session owner不变，工作区看板只读投影真实数据，有限activity快照明确新鲜度。原生更新与既有owner串行；无需新增付费模型任务。进度/门禁见`.agent-sync/tasks/codex-project-board-20261014-da9bc0a5.md`。
