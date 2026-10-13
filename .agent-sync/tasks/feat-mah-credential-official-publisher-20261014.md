@@ -8,7 +8,8 @@ Repository https://github.com/heavenzhang/MoXBots; primary agent owns integratio
 - [ ] Human per-package update confirmation, normal old-runtime stop, private data/App backup and exact installation.
 - [ ] Actual credential migration; cold restart and different-build update without repeated prompts.
 - [ ] Actual remote model settings, Unicode workspace selection and disabled Agent create/persist/readback. No paid inference or key request.
-- [ ] Sync current main, native gate closure, main delivery and installed-runtime/source correspondence.
+- [x] Sync remote main d86f7505, preserving ProjectBoard31 and daemon/status PR32; only plan/handoff documentation conflicts required resolution. Integration head575a3bb7 passed packaging16, Python46, typecheck and affected ProjectBoard/sidebar89 regressions. These checks are separate from frozen artifact/native acceptance.
+- [ ] Native gate closure, PR14 main delivery and installed-runtime/source correspondence.
 
 Next: continue the pending exact software confirmation; do not replay it or ask for a password. Current package is Developer ID signed but not notarized. Actual installed App uses formal publisher and differs from earlier a8 receipt; current running brand App and orphan Node must not be mistaken for the new candidate. Preserve all old credentials and original MyAgents.
 
