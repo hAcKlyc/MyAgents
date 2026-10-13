@@ -411,6 +411,72 @@ def _remove_created_host_dropin(created: bool) -> None:
         subprocess.run(["systemctl", "daemon-reload"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _host_status_dropin(config: dict) -> bool:
+    if not config["managementSocket"]:
+        return False
+    # Separate from the existing management drop-in: upgrades keep its exact
+    # provisioned peer UID/group and all finite execution settings untouched.
+    path = HOST_DROPIN_DIR / "network-status.conf"
+    content = ("[Service]\n"
+               f"Environment=MYAGENTS_HOST_NETWORK_STATUS={STATUS_FILE}\n"
+               f"Environment=MYAGENTS_HOST_NETWORK_UID={pwd.getpwnam(USER).pw_uid}\n").encode("ascii")
+    _ensure_root_dropin_dir(HOST_DROPIN_DIR)
+    if os.path.lexists(path):
+        st = path.lstat()
+        if (not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_gid != 0
+                or st.st_nlink != 1 or stat.S_IMODE(st.st_mode) != 0o644
+                or st.st_size != len(content)
+                or path.read_bytes() != content):
+            raise ValueError("Node Host status drop-in is unsafe or has unexpected content")
+        return False
+    _write_new_root_file(path, content, 0o644)
+    return True
+
+
+def _wait_ready_status(device_id: str, timeout: float = 30.0) -> None:
+    account = pwd.getpwnam(USER)
+    if account.pw_uid <= 0 or account.pw_gid <= 0:
+        raise ValueError("isolated connector account is invalid")
+    _assert_no_symlink(STATUS_FILE.parent)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            fd = os.open(STATUS_FILE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            try:
+                st = os.fstat(fd)
+                if (not stat.S_ISREG(st.st_mode) or st.st_uid != account.pw_uid
+                        or st.st_gid != account.pw_gid or st.st_nlink != 1
+                        or stat.S_IMODE(st.st_mode) != 0o640 or st.st_size > 2048):
+                    raise ValueError("connector status projection is unsafe")
+                raw = os.read(fd, 2049)
+            finally:
+                os.close(fd)
+            if len(raw) > 2048:
+                raise ValueError("connector status projection is oversized")
+            value = json.loads(raw)
+            if not isinstance(value, dict) or value.get("deviceId") != device_id:
+                raise ValueError("connector status identity does not match this Host")
+            now = int(time.time())
+            updated = value.get("updatedAt")
+            if type(updated) is not int or updated > now + 2 or now - updated > 30:
+                raise ValueError("connector status projection is stale")
+            if value.get("state") == "ready" and value.get("ready") is True and value.get("errorCode") is None:
+                if (type(value.get("pid")) is not int or not isinstance(value.get("networkId"), str)
+                        or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", value["networkId"])):
+                    raise ValueError("connector ready projection is invalid")
+                pid = subprocess.run(["systemctl", "show", DAEMON_UNIT, "--property=MainPID", "--value"],
+                                     check=True, capture_output=True, text=True).stdout.strip()
+                if not pid.isdigit() or int(pid) <= 0 or value.get("pid") != int(pid):
+                    raise ValueError("connector status process does not match the service")
+                return
+            if value.get("state") not in {"connecting", "initializing", "catalog", "hydrating"}:
+                raise ValueError("connector is not signed in and ready; boot activation was not enabled")
+        except FileNotFoundError:
+            pass
+        time.sleep(0.2)
+    raise ValueError("connector did not become ready; boot activation was not enabled")
+
+
 def _network_join_override(config: dict, device_id: str) -> bytes:
     binary = str(BIN)
     args = [binary, "run", "--state-dir", str(STATE), "--unit", DAEMON_UNIT,
@@ -431,12 +497,14 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
     if not config["ownedInstance"]:
         raise ValueError("owned instance configuration is missing")
     host_was_active = subprocess.run(["systemctl", "is-active", "--quiet", HOST_UNIT.name], check=False).returncode == 0
+    network_was_active = subprocess.run(["systemctl", "is-active", "--quiet", DAEMON_UNIT], check=False).returncode == 0
+    if command == "join" and network_was_active:
+        raise ValueError("stop the network service before requesting an explicit join")
     created_host_dropin = False
+    created_status_dropin = False
     join_override_created = False
     try:
         if command == "join":
-            if subprocess.run(["systemctl", "is-active", "--quiet", DAEMON_UNIT], check=False).returncode == 0:
-                raise ValueError("stop the network service before requesting an explicit join")
             _ensure_root_dropin_dir(DAEMON_DROPIN_DIR)
             override = _network_join_override(config, device_id)
             if JOIN_DROPIN.exists() or JOIN_DROPIN.is_symlink():
@@ -452,6 +520,7 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
         if config["managementSocket"]:
             _wait_management_socket(config)
             _, created_host_dropin = _host_dropin(config)
+            created_status_dropin = _host_status_dropin(config)
             subprocess.run(["systemctl", "daemon-reload"], check=True)
             subprocess.run(["systemctl", "restart" if host_was_active else "start", HOST_UNIT.name], check=True)
         if join_override_created:
@@ -459,28 +528,41 @@ def _activate_owned(command: str, config: dict, device_id: str) -> int:
             subprocess.run(["systemctl", "daemon-reload"], check=True)
         return 0
     except BaseException:
+        if created_status_dropin:
+            (HOST_DROPIN_DIR / "network-status.conf").unlink(missing_ok=True)
+            subprocess.run(["systemctl", "daemon-reload"], check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         _remove_created_host_dropin(created_host_dropin)
-        if created_host_dropin and host_was_active:
+        if (created_host_dropin or created_status_dropin) and host_was_active:
             subprocess.run(["systemctl", "restart", HOST_UNIT.name], check=False,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["systemctl", "stop", DAEMON_UNIT], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not network_was_active:
+            subprocess.run(["systemctl", "stop", DAEMON_UNIT], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if join_override_created:
             JOIN_DROPIN.unlink(missing_ok=True)
             subprocess.run(["systemctl", "daemon-reload"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         raise
 
 
-def run_control(command: str, profile: str = "myagents-test") -> int:
+def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot: bool = False) -> int:
     select_profile(profile)
     if os.geteuid() != 0:
         raise PermissionError("run this operator control as root")
     if command not in {"start", "wait", "cancel", "logout", "status", "run", "join"}:
         raise ValueError("unsupported operator action")
+    if enable_on_boot and command not in {"run", "join"}:
+        raise ValueError("boot activation requires an explicit run or join")
     device_id = verified_host_id()
     config = owned_config()
     if command in {"run", "join"}:
         if config is not None:
-            return _activate_owned(command, config, device_id)
+            result = _activate_owned(command, config, device_id)
+            if result == 0 and enable_on_boot:
+                _wait_ready_status(device_id)
+                subprocess.run(["systemctl", "enable", DAEMON_UNIT], check=True)
+            return result
+        if enable_on_boot:
+            raise ValueError("boot activation requires a configured owned instance")
         return subprocess.run(["systemctl", "start", DAEMON_UNIT], check=False).returncode
     account = pwd.getpwnam(USER)
     if account.pw_uid == 0 or account.pw_gid == 0:
@@ -524,9 +606,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("start", "wait", "cancel", "logout", "status", "run", "join"))
     parser.add_argument("--profile", choices=("myagents-test", "moxbot-test"), default="myagents-test")
+    parser.add_argument("--enable-on-boot", action="store_true", help="persist an explicitly run/joined, ready owned connector across boots")
     args = parser.parse_args()
     try:
-        return run_control(args.command, args.profile)
+        return run_control(args.command, args.profile, enable_on_boot=args.enable_on_boot)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         print(json.dumps({"status": "error", "code": "NETWORK_CONTROL_REJECTED", "detail": str(exc)}), file=sys.stderr)
         return 1

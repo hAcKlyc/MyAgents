@@ -127,3 +127,10 @@ User requires a single MoXBots cloud administrator console for users, Hosts, Bot
 ## TITLE-001 — 2026-10-14 概要性任务标题
 
 当前Agent修改后端自动命名：首个成功人类问答后异步概括对象和动作，扩大有界上下文并保留尾部需求，拒绝认证错误/失败终态。手动命名不覆盖；不批量修改历史。任务记录 `.agent-sync/tasks/codex-title-summary-20261014-7b0a1e0a.md`。自动测试、真实存储重载及DOM回归通过；当前源CI/main、统一包和真实模型/原生侧栏验收分开追踪。
+
+## MAH-HOST-DAEMON-STATUS-20261014
+
+- [x] Explicit owned boot option and additive doctor status, source79c25045; actual MoX enablement and restart/reconnect acceptance passed.
+- [ ] PR32 CI/main delivery; desktop PR14 native gates remain pending separately.
+
+Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No paid calls, other namespace or machine reboot.
