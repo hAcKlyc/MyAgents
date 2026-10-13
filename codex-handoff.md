@@ -262,3 +262,7 @@ SIDEBAR-ORG原生接续：已运行a8a60f1c包，Task/Agent整行拖入、分区
 ### MOXBOTS-HOST-CONFIG-20261013 clean delivery freeze
 
 Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in delivery branch. Only feature commits were cherry-picked; development credential-reader merge excluded. UI/source/backend checks and primary synthetic IAB completed, independent review closed. Exact-head CI, main and unified real Host/native gates remain open. See dev-docs/host-config-primary-acceptance.md.
+
+### MAH-CREDENTIAL-PARENT-BUDGET-20261013 — recovery remains unaccepted
+
+The current primary agent has installed and verified exact6ac and then approveda8; original MyAgents and rollback Apps are preserved. Native sidebar moves/section restart persistence passed separately. Real credential migration validated old account/key but failed before route commit, and the cause remains unknown. Candidate bae611a0 uses a source-pinned parent adapter with closed diagnostics and a30-second background budget; released v1 bytes/source/publisher/authentication stay unchanged. Accepted main cf741f is preserved in combined4a513ec7. See .agent-sync/tasks/feat-mah-credential-parent-budget-20261013.md. Combined package/actual credential recovery/remote configuration/main gates remain open. Do not automatically reread old OS credentials or overlap server state writes with the server maintenance owner.
