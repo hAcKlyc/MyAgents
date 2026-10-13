@@ -4,13 +4,15 @@
 
 **三项验收门均通过，范围限于本地 test-only fixture；不代表生产登录、发布或用户验收。** Visual、interaction、actual UI/API gates 均有当前编译版本的浏览器证据及服务端行为证据。先前的登出/revocation与窄屏交互问题已经分别通过 fixture 修复和 RWD 编译版本复验；早期版本的未通过记录保留在“历史轮次”中，不构成当前阻断。
 
-验收运行在 loopback `http://127.0.0.1:5198/admin`，使用 test-only same-origin OIDC/PKCE、真实 Rust `AdminService`/`AuthStore` 与临时 SQLite。身份、Host、模型引用、Bot 及说明均为合成测试数据；不保存 bearer 或浏览器会话，不代表生产登录或真实 Host 执行。
+验收运行在 loopback `http://127.0.0.1:5198/admin`，使用 test-only same-origin PKCE 登录流程、真实 Rust `AdminService`/`AuthStore` 与临时 SQLite。身份、Host、模型引用、Bot 及说明均为合成测试数据；不保存 bearer 或浏览器会话，不代表生产 OIDC 登录或真实 Host 执行。
 
-**当前验收版本绑定：** 仓库 `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin`，分支 `codex/bots-cloud-admin`，HEAD `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。fixture session 72891 的 served assets 与同一工作区源码逐字节 hash 相同：
+**登录 fallback 追加验收（2026-10-13）：** 仓库 `/Users/zhangshaohua/Documents/Codex/2026-10-13/moxbots-cloud-admin`，分支 `codex/bots-admin-login-fallback`，验收工作区基于 HEAD `be48a22b9eef0130bbf0f3c7e24fdcf1e52e8576`。test-only fixture session 15922 的 served assets 与本次工作区源码逐字节 hash 相同：
 
-- `services/agentnet/admin-web/index.html`：`2aedb2d48274f0cb5822ec78b7fd70729f42f3933a644d594479928529e0a9a3`
-- `services/agentnet/admin-web/app.js`：`975c798c4290d511f6524885160328c02c639cd97ca0b7e19c6ee23c873fdc29`
-- `services/agentnet/admin-web/styles.css`：`0dec267e5d32331626d40ae8ca40a31bad3c6d9f26ec59849cbb3ed28a919e53`
+- `services/agentnet/admin-web/index.html`：`fc37c7b324d9450261243475ec908b16ceed8afef26a6aed8ca08a7669e2f5ce`
+- `services/agentnet/admin-web/app.js`：`37579285d1769e650cc1824dc00b424ec933c6308ad91f4807a3f0eb427b0046`
+- `services/agentnet/admin-web/styles.css`：`3922947162d9c35ba36a54d83ef01bcbf8a19461f91bd864b0e014ba21dbf759`
+
+Fallback 浏览器回归确认 `window.open` 返回非 null 但未产生可见 popup 时，用户仍可在独立标签页打开服务端已校验的同源授权 URL，并通过 fixture 的真实 start/poll 与 `AuthStore` 完成管理员登录。另覆盖 `window.open` 返回 null、取消后链接清理以及随后重新登录；取消请求本身由 Playwright test shim 响应，因为当前 Rust 浏览器 fixture 没有 `/auth/login/cancel` 路由，因此本项只证明浏览器清理和发出取消请求，不证明服务端取消事务。390×844 与 768×1024 下登录页及 fallback 链接均无横向溢出，登录按钮和链接键盘焦点轮廓可见；截图保存在本次 smoke 输出临时目录。现有 `auth-retest.mjs` 同轮复验：logout 204、已撤销 bearer bootstrap 401、普通身份 bootstrap 403 `ADMIN_REQUIRED`。这些是本地 fixture 结果，不代替主审进行的生产 OIDC 验收。
 
 ## Gate 1 — Visual / responsive：通过
 

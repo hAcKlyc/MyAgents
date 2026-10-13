@@ -2,7 +2,7 @@
 
 ## 当前目标和范围
 
-用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，正在交付远端CI/main和准备现网串行升级。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
+用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，PR20已交付main be48a22b并发布现网，真实OIDC/admin API路径通过。独立标签页登录修复BOTS-ADMIN-LOGIN-002待CI/main/发布；真实有限Host执行BOTS-CLOUD-EXEC-001在独立工作树进行。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
 
 ### 已完成的规划/原型阶段（历史范围）
 
@@ -23,11 +23,12 @@
 
 ## 当前实现和依赖
 
-当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。第一位现网平台管理员尚未授予。
+当前隔离分支 `codex/bots-cloud-admin`，base main `2796b13eeb1ad69c1b9bd529b7108ecf534a4f7a`。主Agent负责前端、集成与发布；后台worker独占Rust并已交回ownership；独立UI reviewer完成三个fixture gate。保留现网04fa的四个服务文件修复，避免main升级回退；不触碰其他Host/桌面任务文件。首位现网测试管理员已由用户明确授权并配置；实际OIDC/admin API通过，Browser fallback发布门槛仍待完成。
 
 - [x] 本地管理权限、登记API、SQLite/CAS/幂等审计、同源UI与独立验收。
-- [ ] 最新main集成、远端CI、主干包含成果核验。
-- [ ] 现网权限确认、备份回滚、串行升级、真实登录及管理路径验收。
+- [x] PR20 exact-head CI/main与远端包含成果核验。
+- [x] 现网权限确认、备份回滚、串行升级、真实OIDC/admin API验收。
+- [ ] BOTS-ADMIN-LOGIN-002浏览器fallback CI/main/发布/真实登录UI复验。
 - [ ] 有限Host委派与真实启停、共享执行及多账号验收。
 
 ### 前轮原型任务和依赖

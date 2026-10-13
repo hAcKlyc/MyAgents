@@ -15,8 +15,9 @@
 - [x] 本地实际AuthStore鉴权、普通身份拒绝、会话撤销、授权资源校验。
 - [x] 私有SQLite管理登记CRUD/归属Host分配/删除恢复，CAS、原操作幂等与审计。
 - [x] 真实Rust API浏览器fixture三个UI gate与primary独立关键路径复核。
-- [ ] 远端CI、合入最新main、推送并核实远端主干包含成果。
-- [ ] 第一位平台管理员权限确认、现网备份回滚、串行升级、真实OIDC/账号路径验收。
+- [x] PR20 exact-head 7项CI通过，main be48a22b 已包含成果且远端核实。
+- [x] 用户明确授权首位测试管理员；已备份并升级现网、核验运行SHA和真实OIDC/admin API路径。
+- [ ] IAB独立标签页登录修复 BOTS-ADMIN-LOGIN-002 的发布与真实浏览器复验。
 - [ ] Host有限委派与真实启停；跨用户共享/多账号执行另外验收。
 
 ## Completed
@@ -27,10 +28,8 @@
 
 cargo test --locked（组合service73通过1忽略、metadata-core20通过）；clippy -Dwarnings、fmt、完整npm lint通过。新增手动test-only loopback fixture及版本化Playwright验收脚本；token不序列化，UI served/source hash一致。独立UI三gate通过，primary额外核验配置、分配清空、持久化与删除恢复。证据services/agentnet/validation/。这些检查不是现网OIDC或Host执行验收。
 
-## Blockers and unknowns
+## Current state and next step
 
-现有云目标与安全访问已经核实，正在与现有Host owner协调维护窗口；本任务不在该窗口中重启云服务。首位平台管理员尚未授予，不从Host所有权推定管理权限。真正Host执行需要controller/delegation契约和架构确认；目前start明确409拒绝，stop只关准入。共享/模型费用及生产验收未完成。模型运行元数据和token/费用未知。
+PR20已合入并发布。运行CI source2dec7655与main be48a22b完整tree相同，SHA2563a04ab08e02a21f4dd908239c6714d2e0e5d2d6befeecc7e55855936b3b5a8db已核验。Dex/Mori仍active；新管理SQLite0700父目录/0600文件及一致性备份通过。真实OIDC和授权停止态CRUD/CAS/幂等/持久化/软删恢复/退出后401通过；尚未验证真实普通账号（fixture普通403已过）。不保存实际账号/凭据到Git。
 
-## Next step
-
-查看当前Git/CI状态；提交本任务记录并同步最新main，遵守CI与远端交付门禁；在授权和维护窗口明确后复验现网基线、备份/回滚并串行发布。真实执行按BOTS-CLOUD-EXECUTION-V1.md讨论，不用SSH写Host状态替代用户路径。
+IAB未暴露popup页面，已另开BOTS-ADMIN-LOGIN-002补独立标签页辅助入口；该修复本地验收通过、待CI/main/发布。当前登记后台 start409明确未接执行；真实有限委派已获用户架构确认，由独立BOTS-CLOUD-EXEC-001继续实现。跨用户共享和收费模型调用不在已验收范围。原维护窗口已由Host owner释放，云端升级在主Agent单独窗口完成；不改桌面或101测试Host。
