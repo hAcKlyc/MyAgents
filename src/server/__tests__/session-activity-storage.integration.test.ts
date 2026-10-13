@@ -128,4 +128,27 @@ describe('session activity storage invariant', () => {
       now.mockRestore();
     }
   });
+
+  it('persists archive state across index reloads, preserves it on metadata patches, and clears false', async () => {
+    const session = await createPublishedSession(store, '/tmp/archive-workspace', {
+      title: 'Archive test',
+      lastActiveAt: '2026-07-14T12:00:00.000Z',
+    });
+    const archived = await store.updateSessionMetadata(session.id, { archived: true });
+    expect(archived?.archived).toBe(true);
+    expect(archived?.lastActiveAt).toBe('2026-07-14T12:00:00.000Z');
+
+    // Reload the store module to verify the durable index, not only the active
+    // Session metadata projection.
+    vi.resetModules();
+    store = await import('../SessionStore');
+    expect(store.getSessionMetadata(session.id)?.archived).toBe(true);
+    const renamed = await store.updateSessionMetadata(session.id, { title: 'Still archived' });
+    expect(renamed).toMatchObject({ archived: true, title: 'Still archived' });
+    expect(renamed?.lastActiveAt).toBe('2026-07-14T12:00:00.000Z');
+
+    const unarchived = await store.updateSessionMetadata(session.id, { archived: false });
+    expect(unarchived?.archived).toBeUndefined();
+    expect(store.getAllSessionMetadata().find(item => item.id === session.id)?.archived).toBeUndefined();
+  });
 });
