@@ -39,6 +39,15 @@ describe('globalSidebarPreference', () => {
     });
   });
 
+  it('restores the archived view while keeping old preferences compatible', () => {
+    expect(parseGlobalSidebarPreference({
+      ...DEFAULT_GLOBAL_SIDEBAR_PREFERENCE, sessionView: 'archived',
+    })?.sessionView).toBe('archived');
+    expect(parseGlobalSidebarPreference({
+      ...DEFAULT_GLOBAL_SIDEBAR_PREFERENCE, sessionView: 'unknown',
+    })?.sessionView).toBe('all');
+  });
+
   it('seeds only a valid default workspace and never reseeds after user ownership', () => {
     const untouched = seedDefaultWorkspaceExpansion(
       DEFAULT_GLOBAL_SIDEBAR_PREFERENCE,

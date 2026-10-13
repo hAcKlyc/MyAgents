@@ -1,4 +1,6 @@
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ChartIcon,
   CopyIcon,
   EditIcon,
@@ -7,10 +9,11 @@ import {
   StarIcon,
   TrashIcon,
 } from '@/components/icons';
-import { useState, type RefObject } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { SessionMetadata } from '@/api/sessionClient';
+import { updateSession, type SessionMetadata } from '@/api/sessionClient';
+import { useToast } from '@/components/Toast';
 import { MenuItem } from '@/components/ui/MenuItem';
 import { Popover, type PopoverPlacement } from '@/components/ui/Popover';
 import SessionTagMenuItem, { type GlobalUserTagChange } from '@/components/session-tags/SessionTagMenuItem';
@@ -32,6 +35,7 @@ interface SessionContextMenuProps {
     onSessionMutationStart: (sessionId: string, scope?: 'session' | 'global') => number;
     onSessionUpdated?: (session: SessionMetadata, mutationSequence: number) => boolean;
     onGlobalTagChange?: (change: GlobalUserTagChange) => void;
+    onArchiveChanged?: () => void;
 }
 
 /**
@@ -55,10 +59,36 @@ export default function SessionContextMenu({
     onSessionMutationStart,
     onSessionUpdated,
     onGlobalTagChange,
+    onArchiveChanged,
 }: SessionContextMenuProps) {
     const { t } = useTranslation('launcher');
+    const toast = useToast();
+    const archivePending = useRef(false);
+    const [archiving, setArchiving] = useState(false);
     const [tagLayerOpen, setTagLayerOpen] = useState(false);
     const [renameOpen, setRenameOpen] = useState(false);
+
+    const toggleArchive = async () => {
+        if (archivePending.current) return;
+        archivePending.current = true;
+        setArchiving(true);
+        const archived = session.archived !== true;
+        const sequence = onSessionMutationStart(session.id);
+        try {
+            const updated = await updateSession(session.id, { archived });
+            if (!updated) throw new Error('Session no longer exists.');
+            onSessionUpdated?.(updated, sequence);
+            onClose();
+            onArchiveChanged?.();
+            toast.success(t(archived ? 'rightRail.archivedSuccess' : 'rightRail.restoredSuccess'));
+        } catch (error) {
+            console.error('[SessionContextMenu] Failed to update archive state:', error);
+            toast.error(t('rightRail.archiveFailedRetry'));
+        } finally {
+            archivePending.current = false;
+            setArchiving(false);
+        }
+    };
 
     const closeRename = () => {
         setRenameOpen(false);
@@ -124,6 +154,14 @@ export default function SessionContextMenu({
                         onClose();
                         onShowStats(anchorRef.current);
                     }}
+                />
+                <MenuItem
+                    icon={session.archived
+                        ? <ArchiveRestoreIcon className="h-3.5 w-3.5" />
+                        : <ArchiveIcon className="h-3.5 w-3.5" />}
+                    label={t(session.archived ? 'rightRail.restore' : 'rightRail.archive')}
+                    disabled={archiving}
+                    onClick={() => { void toggleArchive(); }}
                 />
                 <MenuItem
                     icon={<TrashIcon className="h-3.5 w-3.5" />}

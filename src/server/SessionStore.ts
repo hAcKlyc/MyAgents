@@ -4241,6 +4241,7 @@ export async function updateSessionMetadata(
         | 'source'
         | 'origin'
         | 'favorite'
+        | 'archived'
         | 'lastMessagePreview'
         | 'titleSource'
         | 'titleGenAttempts'
@@ -4289,6 +4290,7 @@ export async function updateSessionMetadata(
         const current = active.metadata;
         if (changesPendingDshAuthority(current, updates)) return null;
         const { pinned: _pinned, ...patch } = updates;
+        if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
         if (patch.lastActiveAt !== undefined) patch.lastActiveAt = monotonicLastActiveAt(current.lastActiveAt, patch.lastActiveAt);
         return active.patchMetadata(patch);
     }
@@ -4322,6 +4324,7 @@ export async function updateSessionMetadata(
         const current = all[idx];
         const { pinned, ...updatesWithoutPinIntent } = updates;
         const patch: Partial<SessionMetadata> = { ...updatesWithoutPinIntent };
+        if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
         if (pinned !== undefined) {
             if (!pinned) {
                 patch.pinnedAt = undefined;
@@ -4363,6 +4366,7 @@ export async function updateSessionMetadataForBinding(
     if (!active) return updateSessionMetadata(sessionId, updates, precondition);
     if (!precondition(active.metadata) || changesPendingDshAuthority(active.metadata, updates)) return null;
     const { pinned: _pinned, ...patch } = updates;
+    if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
     return active.patchMetadata(patch);
 }
 
@@ -4595,7 +4599,9 @@ export async function publishForkSession(
         throw new Error('Fork target must be a fresh V2 Session birth');
     }
     await assertCompleteSessionForkSource(sourceSessionId);
-    const prepared: SessionMetadata = { ...metadata, materializationState: 'prepared', materializationSourceSessionId: sourceSessionId };
+    // Organization state belongs to the source Product Session and is not inherited by forks.
+    const { archived: _archived, ...forkMetadata } = metadata;
+    const prepared: SessionMetadata = { ...forkMetadata, materializationState: 'prepared', materializationSourceSessionId: sourceSessionId };
     let candidate: TranscriptFile | undefined;
     try {
         await publishV2Metadata(prepared, {}, true);

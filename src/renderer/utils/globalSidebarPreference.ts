@@ -11,7 +11,7 @@ export interface GlobalSidebarPreferenceV1 {
   expandedWorkspaceKeys: string[];
   hasSeededDefaultExpansion: boolean;
   showAutomationSessions: boolean;
-  sessionView: 'all' | 'favorites';
+  sessionView: 'all' | 'favorites' | 'archived';
 }
 
 export const DEFAULT_GLOBAL_SIDEBAR_PREFERENCE: GlobalSidebarPreferenceV1 = {
@@ -50,7 +50,8 @@ export function parseGlobalSidebarPreference(value: unknown): GlobalSidebarPrefe
     showAutomationSessions: typeof value.showAutomationSessions === 'boolean'
       ? value.showAutomationSessions
       : false,
-    sessionView: value.sessionView === 'favorites' ? 'favorites' : 'all',
+    sessionView: value.sessionView === 'favorites' || value.sessionView === 'archived'
+      ? value.sessionView : 'all',
   };
 }
 

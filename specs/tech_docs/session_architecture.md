@@ -108,6 +108,8 @@ session selected IDs
 
 `pinnedAt` 只表示 Workspace Session 列表中的置顶顺序。置顶与 Tag 都是整理动作，不推进 `lastActiveAt`。Tag assignment 绑定 Product Session id；pending materialization 保留，Reset 与 Fork 不继承。所有 Tag mutation 由 `SessionStore` 在 sessions index 锁内以 typed intent 更新，Renderer 不提交 replacement array，也不维护第二份 Tag catalog。
 
+`archived` 是 Session 历史的整理状态：只有 `true` 持久化，旧记录和缺省值均表示未归档。`PATCH /sessions/:id` 通过 `SessionStore` 的 metadata 锁内读改写链路写入，不改变 `lastActiveAt`、transcript、Runtime 或进程状态；读取接口继续返回归档记录供调用方筛选，Fork 不继承该状态。
+
 ## 4. Runtime 与 turn 生命周期
 
 ### 4.1 统一 facade

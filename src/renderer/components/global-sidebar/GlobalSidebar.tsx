@@ -1544,14 +1544,14 @@ interface WorkspaceTreeProps {
   expandedWorkspaceKeys: string[];
   sessionLimits: Record<string, number>;
   showAutomationSessions: boolean;
-  sessionView: 'all' | 'favorites';
+  sessionView: 'all' | 'favorites' | 'archived';
   archivedExpanded: boolean;
   sessionNotificationBadgeCounts?: ReadonlyMap<string, number>;
   onToggleWorkspace: (project: Project) => void;
   onRetryProjects: () => void;
   onLoadMore: (project: Project, total: number) => void;
   onToggleArchived: () => void;
-  onSetSessionView: (view: 'all' | 'favorites') => void;
+  onSetSessionView: (view: 'all' | 'favorites' | 'archived') => void;
   onToggleAutomation: () => void;
   onCreateAgent: (origin?: HTMLElement | null) => void;
   recentlyCreatedWorkspaceKey: string | null;
@@ -1690,7 +1690,8 @@ function WorkspaceTree({
   const sessionsByWorkspace = useMemo(() => {
     const map = new Map<string, SessionMetadata[]>();
     for (const session of taskCenterData.sessions) {
-      if (!showAutomationSessions && isAutomationHistoryOrigin(session.origin, {
+      if (sessionView === 'archived' ? session.archived !== true : session.archived === true) continue;
+      if (sessionView !== 'archived' && !showAutomationSessions && isAutomationHistoryOrigin(session.origin, {
         cronTaskId: session.cronTaskId,
         source: session.source,
       })) continue;
@@ -1747,7 +1748,7 @@ function WorkspaceTree({
     <section className="relative flex h-full min-h-0 flex-col" aria-label={t('globalSidebar.workspaces')}>
       <div className="flex h-8 shrink-0 items-center gap-1 pl-6 pr-[var(--global-sidebar-action-inset)]">
         <h2 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]">
-          {t('globalSidebar.workspaceSection')}
+          {t(sessionView === 'archived' ? 'globalSidebar.archivedSessions' : 'globalSidebar.workspaceSection')}
         </h2>
         <Tip label={tLauncher('workspaceCard.more')} position="bottom" align="end" disabled={viewMenuOpen}>
           <button
@@ -1778,6 +1779,12 @@ function WorkspaceTree({
             label={t('globalSidebar.favoriteSessions')}
             active={sessionView === 'favorites'}
             onClick={() => { onSetSessionView('favorites'); setViewMenu(false); }}
+          />
+          <MenuItem
+            icon={sessionView === 'archived' ? <CheckIcon className="h-3.5 w-3.5" /> : <ArchiveIcon className="h-3.5 w-3.5" />}
+            label={t('globalSidebar.archivedSessions')}
+            active={sessionView === 'archived'}
+            onClick={() => { onSetSessionView('archived'); setViewMenu(false); }}
           />
           <MenuItem
             icon={showAutomationSessions ? <EyeIcon className="h-3.5 w-3.5" /> : <EyeOffIcon className="h-3.5 w-3.5" />}
@@ -1907,7 +1914,9 @@ function WorkspaceTree({
                             <p className="px-3 py-2 text-xs text-[var(--ink-muted)]/70">
                               {sessionView === 'favorites'
                                 ? tLauncher('rightRail.emptyFavorites')
-                                : t('globalSidebar.emptyWorkspaceSessions')}
+                                : sessionView === 'archived'
+                                  ? tLauncher('rightRail.emptyArchived')
+                                  : t('globalSidebar.emptyWorkspaceSessions')}
                             </p>
                           ) : sessions.slice(0, limit).map((session) => (
                             <SessionRow
@@ -1922,6 +1931,7 @@ function WorkspaceTree({
                               onOpen={() => onOpenSession(session, project)}
                               onToggleFavorite={() => onToggleFavorite(session)}
                               onTogglePin={() => onToggleSessionPin(session)}
+                              onArchiveChanged={() => viewMenuRef.current?.focus()}
                               onRenameSession={onRenameSession}
                               onCopySessionId={() => onCopySessionId(session)}
                               onShowStats={(origin) => onShowStats(session, origin)}
@@ -2132,6 +2142,7 @@ interface SessionRowProps {
   onOpen: () => void;
   onToggleFavorite: () => void;
   onTogglePin: () => void;
+  onArchiveChanged: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<SessionMetadata | null>;
   onCopySessionId: () => void;
   onShowStats: (origin?: HTMLElement | null) => void;
@@ -2152,6 +2163,7 @@ function SessionRow({
   onOpen,
   onToggleFavorite,
   onTogglePin,
+  onArchiveChanged,
   onRenameSession,
   onCopySessionId,
   onShowStats,
@@ -2265,6 +2277,7 @@ function SessionRow({
         onCopySessionId={onCopySessionId}
         onToggleFavorite={onToggleFavorite}
         onTogglePin={onTogglePin}
+        onArchiveChanged={onArchiveChanged}
         onRenameSession={onRenameSession}
         onShowStats={onShowStats}
         onDelete={onDelete}

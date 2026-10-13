@@ -73,6 +73,8 @@ export interface SessionMetadata {
    *  identical semantics, so the on-disk size cost is zero for the common
    *  case. */
   favorite?: boolean;
+  /** User-archived in Session history. Only true is persisted; absent is active. */
+  archived?: boolean;
   /** User-pinned ordering inside the owning workspace's sidebar Session list.
    *  The server assigns a strictly increasing ISO timestamp; absent means unpinned. */
   pinnedAt?: string;
