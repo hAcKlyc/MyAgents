@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/bots-cloud-execution-v1 -->
 <!-- git-project-sync-task:base=b421b759180fb36432186dbbbda42b11eb0d3a1c -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 <!-- git-project-sync-task:scaffold=false -->
 
 # Task: BOTS-CLOUD-EXEC-001 finite Host-delegated Bot execution
@@ -14,9 +14,9 @@ BOTS-CLOUD-EXEC-001 implements the finite Bot delegation approved by the user. U
 
 - [x] Closed schema/canonical hash/cross-language fixtures and typed signer domain checks.
 - [x] Actual authority/ledger implementation and cryptographic service fixture gates; production remains separate.
-- [x] Host-local implementation, exact proof/runtime identity, final receipt outbox and protected policy pin; Linux exact-head acceptance remains open.
-- [ ] Actual Linux Host outbound transport/Session hook, original operation recovery and restart validation (synthetic UI and local hooks are accepted).
-- [ ] Actual CI/main/remote delivery, approved roles/Host opt-in and serial release/acceptance.
+- [x] Host-local implementation, exact proof/runtime identity, final receipt outbox and protected policy pin; exact-head Linux and authorized real lifecycle acceptance passed.
+- [x] Actual Linux Host outbound transport/Session hook, original operation replay/CAS, restart persistence and six lifecycle methods accepted.
+- [x] CI/main/remote source delivery, approved role/single-Bot finite opt-in and actual serial release/acceptance.
 
 ## Completed
 
@@ -28,11 +28,13 @@ Integrated local verification: service89 passed/2 manual ignored; headless137/13
 
 ## Blockers and unknowns
 
-Host foundation PR24 is accepted in remote main fb92ce9c; synchronize that owner result while preserving finite Bot hooks and locking repairs. Platform administrator role was explicitly approved and registry release accepted separately. Specific Bot/Host protected opt-in and grant activation still require concrete permission. Actual model inference/fees, full runtime or multi-Bot parallelism are not claimed. Token/cost unknown.
+First finite builtin lifecycle scope is released and actually accepted. Main75 contains the implementation and its seven required checks passed; real IAB/Owner/admin and Node/native effects, exact worker exit, original replay/CAS, restart persistence, soft-delete/new-grant restore and effective revocation passed. Final Bot is restored, no worker/Session remains, both grant generations are revoked and all seven receipts ACKed. Detailed trace/source/artifact/rollback evidence: `services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`.
+
+Shared use, paid inference, other Runtime, true second-user validation and extended IAM writes remain future scope, not a failed gate for the approved single-Bot lifecycle. Actual model/effort/token/cost metrics are unavailable. Later main Host/client improvements are preserved in Git but were not installed by this75 runtime release.
 
 ## Next step
 
-Finish exact-head Linux gates after merging accepted PR24 main; pin CI artifacts, obtain the non-secret account binding through the protected owner, and prepare the single-Bot release/rollback. Get exact protected opt-in only after the source/artifact/rollback is reviewable. Native/Node hooks are disabled by default; preserve deployed management/credential state and profile during the coordinated release.
+Continue future account/role/Host/Bot capabilities only inside the single MoXBots cloud administrator console. Do not create additional login/account/Bot back offices. User-facing client login continues with the common auth service; Bots Net is the personal product surface. New specific Host authority or model invocation needs its applicable authorization; do not reuse the closed acceptance grant or silently extend expired policy.
 
 ## Preserved Host baseline and repair evidence
 
@@ -59,3 +61,19 @@ A stopped administrator registry candidate was created through real authorized O
 The new early Linux gate exposed a production expiry-recovery defect at the final lifecycle stage: an exact confirmed stop cleared active_run but retained runtime_entry when the preceding inspect was running, failing strict ledger validation. The repair must remove the entry only on exact confirmed closure and preserve unknown identity/outcomes. No validation/schema relaxation or execution release is permitted to bypass this failure.
 
 Exact source c5f6c9bf passed all seven required checks, including the full Linux unit/DOM/integration/build pools, service/core validation and native/Windows/macOS gates. The fixed expiry scenario passed on Linux. PR23 is ready; concurrent accepted sidebar PR25 main c21e9f43 changed only renderer/docs and required preserving both append-only task records before merge. Host/service production source is unchanged by this integration; latest-head CI is still enforced. Local myagents-test Node24.20/SDK0.3.296 candidate is clean/source-pinned, but deployment and specific finite opt-in are not complete.
+
+## 2026-10-14 — main delivery and approved finite activation
+
+PR23 is merged at main75bb0269ff471973f1b7e594ab279f824b777e9e; the task source and all seven required checks are accepted. Main Test run38420752527 is successful after rerunning only the macOS queue-cancelled job; Owned run38420752530 is successful. Concurrent accepted renderer/resume/documentation main changes are preserved; this release deliberately uses the tested75 runtime baseline.
+
+The default-off Linux upgrade is accepted: local clean Node sourcec5f6c9bf (Host critical tree matches75), Node24.20.0/SDK0.3.296, and authenticated CI native test-merge sourceb0235d7d (whole source tree equals75). Original management, credential namespace, service UID/groups and profile remain intact. Software directory permission preflight was strengthened after two failed default-off attempts; each restored the original services. Failed evidence and consistent root-private backups are retained. No unrelated desktop/Keychain/Mori/Dex deployment was performed.
+
+The human explicitly authorized the concrete existing lifecycle acceptance Bot, for at most24h and only create/configure/enable/disable/delete/restore in its UUID path. The policy is installed with a shorter expiry capped by the existing Host account lifetime. Native socket/permissions and ready network are verified; no Bot grant or Session business effects are yet accepted. This fulfills the specific opt-in permission gate and must not be requested again.
+
+Cloud75 main CI artifact archive/source/executable hashes are verified locally. Target transfer/ABI, cloud execution activation, actual owner UI grant, six lifecycle effects, exact child exit, persistence/replay/CAS and effective revocation remain open. Slow binary transfer is a transport issue; cloud remains at the registry release until artifact verification and serial switch. Private files contain actual identifiers, accounts and deployment evidence; public Git records only source, checks and evidence roles. Model invocation and future shared use remain outside this lifecycle-only slice.
+
+## 2026-10-14 — actual release acceptance completed
+
+Cloud main75 artifact and Node/native runtime source/hashes are verified on the real targets. Six methods produced six persisted success receipts; one deliberate stale-revision operation produced a conflict and unchanged snapshot. Original replay/mismatch409, exact child exit, actual restart and final effective revocation were independently verified. Current live/account details and original receipts remain private. Linux source/model-call boundary and truthful UI/pending states are not weakened.
+
+The previous preparation/gate entries are historical; the completed current criteria and linked acceptance record supersede them. The latest user instruction requires one unified cloud console, including user/login administration as future modules of that same platform; no additional back office is planned.

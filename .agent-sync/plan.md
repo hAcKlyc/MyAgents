@@ -16,7 +16,7 @@ Root owns integration, packaging, installation and acceptance. Exact 6ac native 
 
 ## 当前目标和范围
 
-用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，PR20已交付main be48a22b并发布现网，真实OIDC/admin API路径通过。独立标签页登录修复BOTS-ADMIN-LOGIN-002已由PR22交付main并发布，真实IAB登录及管理路径通过；真实有限Host执行BOTS-CLOUD-EXEC-001在独立工作树进行。真实Host启停/跨用户共享仍待执行委派，不能因登记成功称为完成。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
+用户已于2026-10-13启动 **BOTS-CLOUD-ADMIN-001** 真实实现，覆盖此前仅原型限制。基于现有 owned AgentNet 的统一管理员后台；本地鉴权、私有管理登记持久化与同源UI已验收，PR20已交付main be48a22b并发布现网，真实OIDC/admin API路径通过。独立标签页登录修复BOTS-ADMIN-LOGIN-002已由PR22交付main并发布，真实IAB登录及管理路径通过；有限Host执行BOTS-CLOUD-EXEC-001已由PR23/main75bb0269发布并完成单Bot真实六项生命周期验收；跨用户共享与收费模型调用仍为后续范围。详细状态见 `services/agentnet/planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md`。
 
 ### 已完成的规划/原型阶段（历史范围）
 
@@ -43,7 +43,8 @@ Root owns integration, packaging, installation and acceptance. Exact 6ac native 
 - [x] PR20 exact-head CI/main与远端包含成果核验。
 - [x] 现网权限确认、备份回滚、串行升级、真实OIDC/admin API验收。
 - [x] BOTS-ADMIN-LOGIN-002浏览器fallback CI/main/发布/真实登录UI复验（main1cfa2f85；下方实际发布记录）。
-- [ ] 有限Host委派与真实启停、共享执行及多账号验收。
+- [x] 有限单Bot Host委派、真实Session启停、删除/新授权恢复、原请求/CAS、重启及有效撤销验收。
+- [ ] 共享执行、第二真实用户和收费模型路径（后续范围）。
 
 ### 前轮原型任务和依赖
 
@@ -113,6 +114,16 @@ Accepted Host foundation PR24 main fb92ce9c is incorporated into the execution c
 SIDEBAR-ORG阶段更新：PR25已交付远端main c21e9f43，源头9d879a6e六项CI与独立23项实际UI通过；原生安装仍开放。用户已授权跨聊天协调，唯一本机安装owner“Bots 网络 可用”已确认旧6ac包不含sidebar，正准备联合候选；以实际制品/签名/运行回执和原生重启验收关闭。
 
 SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agent实际App拖Task/Agent进分区、菜单恢复、分区管理和正常重启保留完成，详见dev-docs/sidebar-organization-native.md的覆盖限制。临时分区已清理；凭据slot保存仍失败，由原owner修复，统一更新未全部验收。
+
+### 2026-10-14 — finite lifecycle release gate
+
+BOTS-CLOUD-EXEC-001 source is delivered by PR23/main75bb0269 with all required CI successful. Linux Node/native default-off upgrade is accepted, preserving prior management/credential/source ownership. The user has now authorized the concrete single-Bot finite whitelist; it is installed with account-capped expiry. Cloud runtime switch and real owner/admin lifecycle acceptance are still pending; no model inference or shared usage is claimed. Current gate/evidence are maintained in `.agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md`.
+
+### 2026-10-14 — accepted lifecycle and one cloud console
+
+BOTS-CLOUD-EXEC-001 is released/accepted at runtime source75bb0269. Current source/artifacts/CI, primary actual user-path and rollback boundaries are in `services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`; the task record is complete. Final controlled Bot is restored, stopped/admission closed, both grants effectively revoked and all receipts ACKed; no model invocation.
+
+User requires a single MoXBots cloud administrator console for users, Hosts, Bots, permissions and audit. Existing auth components remain internal dependencies, not separate back offices. Client sign-in is retained; personal product surface is Bots Net. Current registered-user query does not imply IAM write capabilities: expand account/login/role administration in this same platform, never fork another admin system.
 
 ## TITLE-001 — 2026-10-14 概要性任务标题
 
