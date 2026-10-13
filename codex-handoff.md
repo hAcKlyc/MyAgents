@@ -7,13 +7,14 @@
 
 ## Current Snapshot
 
-- **MAH-DESKTOP-CREDENTIALS-20261013**：用户要求避免反复输入钥匙串密码。已核实后台 `ensure_current` 每次读取 OS 凭据和 ad-hoc 新包 hash 身份变化两个来源；修复仅缓存已验证的进程内非秘密 guard，首次 restore 仍读 OS 库，精确删除/替换/active/expiry 仍失效。取消新登录不撤销现有登录，存储同步锁不跨 await。凭据、Mac 密码不写 Git，不新增明文后端、不放宽全局 ACL；独立本地试用签名身份与私有构建密码只在 owner 私有目录，签名副本 strict 校验和固定证书 DR 已通过，旧凭据首次迁移可能仍需一次系统确认，真实不反复弹窗尚待验收。
-- **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，同一 GitHub repository ID，origin 已核查更新。主干 `848c0592` 合并 MoXBots 品牌 PR #16；管理分支已整合品牌源 `40c90d13`。PR #14 管理成果尚未合入。迟到控制消息修复 `3a294c78` 已完成源码独立审查，整合 `b359893b` Test CI 六作业通过；Owned CI 首次并发 metadata 初始化双失败，`16658390` 增加私有有界初始化锁，20 tests/clippy 与并发重复通过，原 Linux 失败未在 Mac 精确复现，待修复后 Linux CI。新桌面管理包原生构建成功，但不能当真实 Agent 创建验收。
-- **MAH-CLOUD-MANAGEMENT-20261013**：主 owner 沿用 `feat/mah-management-device-pairs`。源码 `02e55746` 的 Test CI 七作业和 Owned 服务构建通过；PR #14 仍待真实管理验收与主干交付。用户继续授权 goal 模式和桌面联调；模型密钥后续由产品界面配置，本轮没有付费模型调用。
-- **当前真实部署**：独立认证与云 AgentNet 已在用户授权的新云主机部署，受信 IP-SAN HTTPS 可用，不必要求域名；后端仅 loopback，既有应用和入口保全。心跳修复 `7cdfe315` 已用有来源与摘要的 CI 制品发布；桌面和已安装 Linux Host 完成真实同账号浏览器授权、入网，并跨 51 秒保持相同连接 epoch 的 Ready。身份、凭据、数据库和旧服务均保留；恢复必须用当前阶段一致性备份，不能覆盖为登录前数据库。
-- **真实管理进度与当前缺陷**：桌面原生 Host snapshot 成功，Kimi 默认模型配置保存到 Linux Host revision 1；密钥未配置、执行未授权、Agent 创建尚未验收。保存后的自动刷新遇旧请求迟到 `channel.closed`，原保存回执仍有效。正在补有界、严格 scope 的退役通道收尾，并同时覆盖 actor idle 与下一 RPC 接收；未知通道仍拒绝。通过修复回归后，整合 MoXBots 品牌分支并重新构建试用包，再完成 Agent 创建和重启持久化的真实桌面路径。
-- **实例和包区分**：原 MyAgents 保持运行。MoX bot / MoXBots 共用独立 `com.moxbot.app`、`~/.moxbot`、`moxbot://`；当前获授权的管理包为 `50f3722c`。独立品牌试用包不含 PR #14 管理代码，不能把其设备可见性当远程配置验收。新云服务指认证、准入、metadata 和 relay；已安装 Linux Host 是本轮执行节点，新云另装第三执行节点不作为本轮必需步骤。
-- 私有环境、账号、授权链接、PID、制品 SHA、备份及真实证据仅保存在主 owner 的受限 QA 目录；公开 Git 不记录凭据。下面保留旧 checkpoint 供历史追溯，其尚未授权/尚未入网等状态以本段为准。
+- **MAH-DESKTOP-CREDENTIALS-20261013**：用户授权安装固定本地签名 `04faeb1d` 并继续联调；已安装同签名诊断修订 `7ce8a342`。两版 app / archive / resources / designated requirement 已分别核实，原 MyAgents 保持运行。未保存 Mac 系统密码、未放宽全局 ACL/系统信任，签名私钥及随机构建密码仅存在 owner 私有构建目录。
+- **当前阻断已实测定位**：新桌面自部署网络离线；native `sample` 证明初始化串行恢复旧 QA 网络时停在 `keyring` 的 legacy `SecKeychainFindGenericPassword`，后续云网络与 registry mutation 因此等待。未观察到可见系统授权窗口。UI 离线和代码/CI 成功不能当 Agent 创建验收。
+- **本次修复**：macOS 凭据读取使用相同 service/account/User keychain 的逐查询 `AuthenticationUIFail`，不使用 Skip、不更换存储 namespace、不把授权失败当条目缺失或自动生成新身份；Windows/Linux 保持既有后端。非秘密进程内 guard 保留精确 scope、expiry、替换/取消失效约束。registry 按连接保留恢复错误，界面只对对应 Owned 连接显示具体原因。此 API 禁止后台交互，但不承诺 Security IPC 硬期限；真实已有记录的兼容与无反复提示仍待安装复验。没有新增恢复授权/登录按钮，不能宣称该产品流程已闭环。
+- **canonical 仓库**：`https://github.com/heavenzhang/MoXBots` 是原 fork 的重命名，origin 已核实；主干上次核实 `848c0592`，已并入当前管理分支。PR #14 仍 draft，未合入主干。`7ce8a342` Test CI 六作业与 Owned CI 全部通过；迟到管理 ACK 修复和 OIDC 完整 issuer-path guard 回归已在 Linux 真正运行。
+- **真实部署**：云认证进程与入口保留，AgentNet 服务受控更新为 `04faeb1d` 对应 CI 制品（artifact commit 的 Git tree 与 source 相同）；程序摘要、运行 UID、配置/身份不变、受限一致性备份及清单摘要均核实。不新增公网端口，既有应用保全。Linux Host 重连后超过四分钟仍为 Ready、相同 epoch/catalog/PID，status 新鲜度核实；metadata last-network-seen 是 presence 转换时间，不能拿它当心跳时间。
+- **真实管理进度**：之前 `50f3722c` 的原生 Host snapshot 成功，Kimi 默认模型保存到执行节点 revision 1；没有模型密钥、没有执行授权、没有付费模型调用。保存后迟到控制回执修复已实现/CI通过，但新版桌面远程配置、创建 Agent、重启持久化尚待真实复验。
+- **交付/实例区分**：MoXBots 为独立 `com.moxbot.app` / `.moxbot` / URL scheme，可与原 MyAgents 同时运行。已安装 Linux Node Host 源 `b98294c7`，网络 connector 对应 source `710820e9`，云 source `04faeb1d`，当前已安装桌面 `7ce8a342`；这四个组件不等于同一个部署 SHA。新云第三执行节点不作为本轮必需步骤。
+- **下一步**：完成非交互读取的原生构建/真实已有记录恢复测试；确实需要旧 ACL 授权时做一次明确的迁移操作，禁止记录/代输入系统密码。完成真实 Host snapshot→模型配置回读→禁用 Agent 创建→本任务服务重启后回读，再同步主干、关闭 PR14 与交付门禁。私有账号、凭据、访问链接、IP/PID/制品与截图等证据只在 owner 受限 QA 目录，不写公开 Git。下面是历史 checkpoint，以本段为准。
 
 - **MAH-CLOUD-20261013 当前部署**：用户新增授权的云服务器上，原生 Dex v2.46.0 与 owned AgentNet 已以独立非 root UID991 部署并启用；使用现有受信 IP-SAN HTTPS 入口，后端仅 loopback，保留既有 `/mori/`。运行二进制摘要、四个私有数据库、原应用进程/页面、公网监听和实际重启后 descriptor/签名 keys 一致性已核验。证书续签 timer 与 Nginx reload hook 已核实。新云网络浏览器登录与桌面/Host 管理尚未验收，不能据此宣布完整流程完成。
 - 本轮同步并保留并发 PR #15 主干成果，分支 `8adfdf82` 已推送，主干 `efb22f16`；30项安装器回归、合并后 typecheck 与26项相关 server/shared unit 通过。云启用脚本停止失败回滚 P2 经修复、3项故障注入与独立复核关闭。实际部署备份/凭据/访问链接仅留私有目录；MoX bot 新云网络接入已准备，等待桌面即时权限确认。原私有 loopback 测试环境已停止且原四个服务保全。PR #14 仍 draft，未合入主干；模型调用仍0。

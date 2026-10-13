@@ -71,6 +71,7 @@ pub(crate) struct NetworkRegistry {
     connections: Mutex<HashMap<String, ManagedConnection>>,
     stored: Mutex<Vec<StoredConnection>>,
     owned_stored: Mutex<Vec<StoredOwnedConnection>>,
+    owned_restore_errors: Mutex<HashMap<String, NetworkError>>,
     owned_login: OwnedLoginManager,
     selected: Mutex<String>,
     revision: AtomicU64,
@@ -138,6 +139,7 @@ impl NetworkRegistry {
             connections: Mutex::new(connections),
             stored: Mutex::new(Vec::new()),
             owned_stored: Mutex::new(Vec::new()),
+            owned_restore_errors: Mutex::new(HashMap::new()),
             owned_login: OwnedLoginManager::default(),
             selected: Mutex::new(OFFICIAL.into()),
             revision: AtomicU64::new(0),
@@ -272,7 +274,7 @@ impl NetworkRegistry {
                         principal_id: Some(c.principal_id.clone()),
                         network_id: Some(c.network_id.clone()),
                         device_name: None,
-                        error: Some(NetworkError::new("CONNECTOR_NOT_READY")),
+                        error: Some(self.owned_restore_error(&c.id)),
                         revision: 0,
                         auth_generation: 0,
                         connection_id: c.id.clone(),
@@ -438,6 +440,15 @@ impl NetworkRegistry {
                 &login,
                 || (guard_account.guard)(),
                 || {
+                    let mut restore_errors = self
+                        .owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    restore_errors.remove(&owned.id);
+                    if let Some(old_id) = &replaced_id {
+                        restore_errors.remove(old_id);
+                    }
+                    drop(restore_errors);
                     if let Some(old_id) = replaced_id.filter(|old_id| old_id != &owned.id) {
                         if let Some(previous) = self
                             .connections
@@ -1013,6 +1024,10 @@ impl NetworkRegistry {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
+        self.owned_restore_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| records.iter().any(|record| &record.id == id));
         let mut started = Vec::new();
         let seed = self.revision.load(Ordering::Acquire).saturating_add(1);
         for record in records.into_iter().filter(|r| !r.removing) {
@@ -1035,11 +1050,27 @@ impl NetworkRegistry {
             ) {
                 Ok(Some(account)) => account,
                 Ok(None) => {
-                    crate::ulog_warn!("[agent-network] owned restore skipped code=OWNED_SESSION_RECORD_MISSING");
+                    self.owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(
+                            record.id.clone(),
+                            NetworkError::new("OWNED_SESSION_RECORD_MISSING"),
+                        );
+                    crate::ulog_warn!(
+                        "[agent-network] owned restore skipped code=OWNED_SESSION_RECORD_MISSING"
+                    );
                     continue;
                 }
                 Err(error) => {
-                    crate::ulog_warn!("[agent-network] owned restore failed code={}", super::actor::diagnostic_code(&error));
+                    crate::ulog_warn!(
+                        "[agent-network] owned restore failed code={}",
+                        super::actor::diagnostic_code(&error)
+                    );
+                    self.owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(record.id.clone(), error);
                     continue;
                 }
             };
@@ -1049,6 +1080,10 @@ impl NetworkRegistry {
                 self.memory.clone(),
                 seed,
             );
+            self.owned_restore_errors
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&record.id);
             let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
             if !connections.contains_key(&record.id) {
                 connections.insert(record.id, actor.clone());
@@ -1058,6 +1093,15 @@ impl NetworkRegistry {
         for actor in started {
             super::actor::start(app.clone(), actor, manager.clone());
         }
+    }
+
+    fn owned_restore_error(&self, id: &str) -> NetworkError {
+        self.owned_restore_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| NetworkError::new("CONNECTOR_NOT_READY"))
     }
 }
 fn selfhost_gate_enabled(config: &Value) -> bool {
@@ -1291,6 +1335,84 @@ pub(crate) fn start(
 mod tests {
     use super::*;
     use myagents_agent_network_protocol::{AgentReference, SessionReference};
+
+    #[test]
+    fn owned_restore_failure_is_scoped_and_does_not_hide_a_live_actor() {
+        let owner = NetworkRegistry::new();
+        let make_record = |id: &str| StoredOwnedConnection {
+            id: id.into(),
+            descriptor: OwnedInstance {
+                version: 1,
+                profile: "owned-device-relay-v1".into(),
+                service_id: "00000000-0000-4000-8000-000000000001".into(),
+                environment: "development".into(),
+                network_id: "00000000-0000-4000-8000-000000000002".into(),
+                name: id.into(),
+                issuer: "https://owned.example".into(),
+                login_issuer: "https://owned.example/dex".into(),
+                protocol: 1,
+                capabilities: vec!["tls13-mtls".into()],
+                root_certificate: String::new(),
+                jwks: json!({}),
+            },
+            public_tls_ca: None,
+            device_id: "00000000-0000-4000-8000-000000000003".into(),
+            principal_id: "00000000-0000-4000-8000-000000000004".into(),
+            network_id: "00000000-0000-4000-8000-000000000002".into(),
+            binding_id: id.into(),
+            join_authorized: true,
+            removing: false,
+        };
+        *owner.owned_stored.lock().unwrap() = vec![make_record("blocked"), make_record("other")];
+        owner.set_selfhost_enabled(true).unwrap();
+        owner.owned_restore_errors.lock().unwrap().insert(
+            "blocked".into(),
+            NetworkError::new("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"),
+        );
+        let view = owner.view();
+        assert_eq!(
+            view.connections
+                .iter()
+                .find(|c| c.id == "blocked")
+                .unwrap()
+                .snapshot
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+        );
+        assert_eq!(
+            view.connections
+                .iter()
+                .find(|c| c.id == "other")
+                .unwrap()
+                .snapshot
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "CONNECTOR_NOT_READY"
+        );
+        let live = AgentNetwork::new("blocked".into(), None, owner.memory_budget());
+        owner
+            .connections
+            .lock()
+            .unwrap()
+            .insert("blocked".into(), live.clone());
+        let snapshot = owner
+            .view()
+            .connections
+            .into_iter()
+            .find(|c| c.id == "blocked")
+            .unwrap()
+            .snapshot;
+        assert_eq!(
+            snapshot.error.as_ref().map(|e| &e.code),
+            live.snapshot().error.as_ref().map(|e| &e.code)
+        );
+        assert_eq!(owner.owned_stored.lock().unwrap().len(), 2);
+    }
 
     fn source_routing_fixture() -> (ManagedAgentNetwork, AgentReference) {
         let owner = NetworkRegistry::new();

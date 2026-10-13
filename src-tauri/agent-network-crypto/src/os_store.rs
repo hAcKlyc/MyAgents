@@ -6,6 +6,16 @@ use zeroize::Zeroizing;
 /// keyring's process-global default override and its mock fallback entirely.
 pub struct OsIdentityStore;
 impl OsIdentityStore {
+    fn read(entry: &keyring::Entry) -> keyring::Result<Vec<u8>> {
+        #[cfg(target_os = "macos")]
+        {
+            crate::read_secret_noninteractive(entry)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            entry.get_secret()
+        }
+    }
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     fn entry(scope: &KeyScope) -> Result<keyring::Entry, CryptoError> {
         let user = scope.credential_name()?;
@@ -26,17 +36,15 @@ impl OsIdentityStore {
     }
 
     pub fn load(scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
-        let secret = Self::entry(scope)?
-            .get_secret()
-            .map_err(|error| match error {
-                keyring::Error::NoEntry => CryptoError::CredentialMissing,
-                _ => CryptoError::CredentialUnavailable,
-            })?;
+        let secret = Self::read(&Self::entry(scope)?).map_err(|error| match error {
+            keyring::Error::NoEntry => CryptoError::CredentialMissing,
+            _ => CryptoError::CredentialUnavailable,
+        })?;
         DevicePrivateKey::from_der(Zeroizing::new(secret))
     }
     pub fn save_pending(scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), CryptoError> {
         let entry = Self::entry(scope)?;
-        match entry.get_secret() {
+        match Self::read(&entry) {
             Ok(existing) => {
                 let existing = DevicePrivateKey::from_der(Zeroizing::new(existing))?;
                 if existing.public_fingerprint()? != key.public_fingerprint()? {

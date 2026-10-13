@@ -168,6 +168,17 @@ describe("network read and settings outcome", () => {
     expect(networkErrorKey({ code })).toBe("failed");
     expect(networkErrorKey({ code }, "mutation")).toBe("unconfirmed");
   });
+  it.each([
+    [
+      "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+      "credentialStoreAuthorizationRequired",
+    ],
+    ["NETWORK_CREDENTIAL_STORE_UNAVAILABLE", "credentialStoreUnavailable"],
+    ["NETWORK_CREDENTIAL_STORE_INVALID", "credentialStoreInvalid"],
+    ["OWNED_SESSION_RECORD_MISSING", "ownedSessionMissing"],
+  ])("maps %s to a fixed credential-store message", (code, key) => {
+    expect(networkErrorKey({ code })).toBe(key);
+  });
   it("never checks a mutation receipt for a failed read", async () => {
     const error = { code: "NETWORK_TRANSPORT_FAILED" };
     invoke.mockRejectedValueOnce(error);

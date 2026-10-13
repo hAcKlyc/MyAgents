@@ -532,6 +532,10 @@ impl InnerTls {
 mod os_store;
 #[cfg(feature = "os-store")]
 pub use os_store::OsIdentityStore;
+#[cfg(all(feature = "os-store", target_os = "macos"))]
+mod macos_credential;
+#[cfg(all(feature = "os-store", target_os = "macos"))]
+pub use macos_credential::{read_secret_noninteractive, credential_authorization_required};
 #[cfg(unix)]
 mod encrypted_store;
 #[cfg(unix)]

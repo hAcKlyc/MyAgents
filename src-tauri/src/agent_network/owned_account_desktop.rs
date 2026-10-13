@@ -386,12 +386,20 @@ thread_local! {
 fn read_unlocked(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     #[cfg(test)]
     KEYRING_READS.with(|reads| reads.set(reads.get().saturating_add(1)));
-    let value = match entry.get_password() {
+    #[cfg(all(target_os = "macos", not(test)))]
+    let result = myagents_agent_network_crypto::read_secret_noninteractive(entry);
+    #[cfg(any(not(target_os = "macos"), test))]
+    let result = entry.get_secret();
+    let value = match result {
         Ok(value) => Zeroizing::new(value),
         Err(keyring::Error::NoEntry) => return Ok(None),
+        #[cfg(all(target_os = "macos", not(test)))]
+        Err(error) if myagents_agent_network_crypto::credential_authorization_required(&error) => {
+            return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"));
+        }
         Err(_) => return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
     };
-    serde_json::from_str(&value)
+    serde_json::from_slice(&value)
         .map(Some)
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"))
 }

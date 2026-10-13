@@ -42,13 +42,37 @@ import {
 import { NetworkHeader } from "@/features/agent-network/NetworkHeader";
 import { NetworkSelector } from "@/features/agent-network/NetworkSelector";
 
+const ownedCredentialStoreErrors = new Set([
+  "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+  "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
+  "NETWORK_CREDENTIAL_STORE_INVALID",
+  "OWNED_SESSION_RECORD_MISSING",
+]);
+
+function networkStatusMessage(snapshot: NetworkSnapshot, official: boolean) {
+  if (
+    !official &&
+    snapshot.state === "disconnected" &&
+    snapshot.error &&
+    ownedCredentialStoreErrors.has(snapshot.error.code)
+  ) {
+    return `agentNetwork.errors.${networkErrorKey(snapshot.error)}`;
+  }
+  if (snapshot.error?.code === "NETWORK_REMOVAL_UNCONFIRMED")
+    return "agentNetwork.errors.removalPending";
+  if (snapshot.state === "connecting") return "agentNetwork.connecting";
+  if (snapshot.state === "disconnected") return "agentNetwork.reconnecting";
+  return `agentNetwork.errors.${networkErrorKey(snapshot.error)}`;
+}
+
 export default function AgentNetwork({
   isActive = true,
 }: {
   isActive?: boolean;
 }) {
   const registry = useAgentNetworkRegistry();
-  const selected = registry.selfhostEnabled === true ? registry.selected : "official";
+  const selected =
+    registry.selfhostEnabled === true ? registry.selected : "official";
   const connection =
     registry.connections.find((c) => c.id === selected) ??
     registry.connections[0];
@@ -437,15 +461,7 @@ function AgentNetworkContent({
         )}
         {snapshot.state !== "ready" && (
           <p role="status" className="mb-4 text-sm text-[var(--ink-muted)]">
-            {t(
-              snapshot.error?.code === "NETWORK_REMOVAL_UNCONFIRMED"
-                ? "agentNetwork.errors.removalPending"
-                : snapshot.state === "connecting"
-                  ? "agentNetwork.connecting"
-                  : snapshot.state === "disconnected"
-                    ? "agentNetwork.reconnecting"
-                    : `agentNetwork.errors.${networkErrorKey(snapshot.error)}`,
-            )}
+            {t(networkStatusMessage(snapshot, official))}
           </p>
         )}
         {showSetup && (
