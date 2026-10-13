@@ -390,5 +390,6 @@ jobs:
           cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store --all-targets -- -D warnings
       - name: Test immutable MoXBots credential component without accessing Keychain
         run: |
+          node --test scripts/prepare-moxbot-credential-reader.test.mjs
           cargo test --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store,fixed-macos-reader
           cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store,fixed-macos-reader --all-targets -- -D warnings
