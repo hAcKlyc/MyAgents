@@ -14,7 +14,7 @@ BOTS-CLOUD-EXEC-001 implements the finite Bot delegation approved by the user. U
 
 - [x] Closed schema/canonical hash/cross-language fixtures and typed signer domain checks.
 - [x] Actual authority/ledger implementation and cryptographic service fixture gates; production remains separate.
-- [x] Host-local implementation, exact proof/runtime identity, final receipt outbox and protected policy pin; Linux exact-head acceptance remains open.
+- [x] Host-local implementation, exact proof/runtime identity, final receipt outbox and protected policy pin; exact-head Linux and authorized real lifecycle acceptance passed.
 - [x] Actual Linux Host outbound transport/Session hook, original operation replay/CAS, restart persistence and six lifecycle methods accepted.
 - [x] CI/main/remote source delivery, approved role/single-Bot finite opt-in and actual serial release/acceptance.
 

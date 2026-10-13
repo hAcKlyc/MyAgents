@@ -8,6 +8,7 @@ import {
   AUTO_TITLE_MIN_ROUNDS,
   TITLE_GEN_MESSAGE_LIMIT,
   MAX_TITLE_GEN_ATTEMPTS,
+  boundTitleContext,
   type TitleRoundMessage,
 } from './sessionTitle';
 import { buildFloatingBallContextReminder, buildGoalContinuationReminder } from './systemReminder';
@@ -143,6 +144,9 @@ const u = (content: string): TitleRoundMessage => ({ role: 'user', content });
 const a = (content: string): TitleRoundMessage => ({ role: 'assistant', content });
 
 describe('buildTitleRoundsFromMessages', () => {
+  it('does not summarize an authentication error as a completed answer', () => {
+    expect(buildTitleRoundsFromMessages([u('优化费用包'), a('Not logged in · Please run /login')])).toEqual([]);
+  });
   it('pairs adjacent user→assistant turns into rounds', () => {
     const rounds = buildTitleRoundsFromMessages([
       u('帮我优化 Redis 缓存'), a('好的，可以从连接池入手'),
@@ -197,11 +201,21 @@ describe('buildTitleRoundsFromMessages', () => {
     expect(rounds).toEqual([{ user: '再试一次', assistant: '成功了，结果是 42' }]);
   });
 
-  it('truncates each side to 200 chars', () => {
-    const long = 'x'.repeat(500);
+  it('keeps requirements beyond the old 200-character prefix', () => {
+    const long = '背景'.repeat(120) + '调整费用包保存校验和毛利展示';
     const rounds = buildTitleRoundsFromMessages([u(long), a(long)]);
-    expect(rounds[0].user).toHaveLength(200);
-    expect(rounds[0].assistant).toHaveLength(200);
+    expect(rounds[0].user).toBe(long);
+    expect(rounds[0].assistant).toBe(long);
+  });
+
+  it('bounds long context while preserving its opening and final request', () => {
+    const long = '项目：MoXBots\n' + '背景'.repeat(3000) + '\n请完善公司目标承接界面';
+    const rounds = buildTitleRoundsFromMessages([u(long), a(long)]);
+    expect([...rounds[0].user]).toHaveLength(2000);
+    expect([...rounds[0].assistant]).toHaveLength(500);
+    expect(rounds[0].user).toMatch(/^项目：MoXBots/);
+    expect(rounds[0].user).toMatch(/请完善公司目标承接界面$/);
+    expect(boundTitleContext('👍'.repeat(3000)).isWellFormed()).toBe(true);
   });
 
   it('ignores a trailing unpaired user message (turn in flight)', () => {
@@ -225,6 +239,9 @@ describe('buildTitleRoundsFromMessages', () => {
 });
 
 describe('shouldAttemptAutoTitle', () => {
+  it('summarizes after the first completed human turn', () => {
+    expect(shouldAttemptAutoTitle({ titleSource: 'default', userMessageCount: 1 })).toBe(true);
+  });
   it('attempts for a fresh session with enough user turns', () => {
     expect(shouldAttemptAutoTitle({ userMessageCount: AUTO_TITLE_MIN_ROUNDS })).toBe(true);
     expect(shouldAttemptAutoTitle({ titleSource: 'default', userMessageCount: 5 })).toBe(true);

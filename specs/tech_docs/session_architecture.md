@@ -78,6 +78,14 @@ DSH 原生会话使用官方 JSONL persistence，Runtime 自己的 coordination 
 
 ## 3. Session metadata 的语义
 
+### 3.0 自动任务标题
+
+`session-title-service.ts` 是自动命名 owner。首次成功且可用于命名的人类问答完成后，后台异步概括任务对象和动作；标题通常为 8–16 个中文字符，最多 30 个字符，保留必要的项目、版本或文件标识。创建时的首条消息预览仅作暂存标题，不应被当作最终概要。
+
+命名上下文每轮最多保留用户 2000、助手 500 个 Unicode code point；超限同时保留首部和尾部，避免长背景后的真实需求丢失。系统自动消息、错误回答和失败的生成终态不用于发布标题；认证错误也不能成为标题。失败保持当前标题并按现有有界策略在后续成功轮次重试。
+
+生成成功通过 `SessionStore.updateSessionMetadata` 持久化，并发布 `chat:session-title-changed` 更新界面。生成期间发生的手动命名在写入锁内再次检查，自动命名不得覆盖 `titleSource: 'user'`。已概括或手动命名的历史任务不会批量重新命名。
+
 ### 3.1 配置快照
 
 已打开 Chat 的配置快照修改通过 `sessionSidecarFetch` 携带 Tab owner 调用 `PATCH /sessions/:id`，由对应 Session Sidecar 的 `SessionStore` 同时发布磁盘 metadata 并更新活动 V2 binding。不能经 Global Sidecar 保存后仅推送 runtime config：下一轮的 Session 快照会仍读到旧 binding，覆盖刚选的新配置。生产 Session Sidecar 只接受自身 Session ID 的 PATCH；未打开会话的标题、收藏等管理修改保留 Global 入口。
