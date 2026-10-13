@@ -510,8 +510,12 @@ describe('Host Bot delegation uses real pinned ES256 proofs',()=>{
       stopStatus='unknown';
       expect(await manager.status()).toMatchObject({snapshots:[{bot_id:botId,activity:'unknown',admission:'closed',runnable:false,
         active_run:{session_id:'80000000-0000-4000-8000-000000000001'}}]});
+      const unknownLedger=loadConfig({strict:true}).hostBotDelegationsV1 as {bots:Array<{snapshot:BotSnapshot;runtime_entry?:BotRunEntry}>};
+      expect(unknownLedger.bots[0]?.runtime_entry).toBeDefined();
       stopStatus='stopped';
       expect(await manager.status()).toMatchObject({snapshots:[{bot_id:botId,activity:'stopped',admission:'closed',runnable:false,active_run:null}]});
+      const closedLedger=loadConfig({strict:true}).hostBotDelegationsV1 as {bots:Array<{snapshot:BotSnapshot;runtime_entry?:BotRunEntry}>};
+      expect(closedLedger.bots[0]?.runtime_entry).toBeUndefined();
       expect(await manager.receipt(expiryEnable.mutation_id,expiryEnable.actor_principal_id,expiryEnable.actor_session_handle))
         .toMatchObject({status:'persisted',snapshot:{activity:'running',admission:'open',runnable:true}});
     } finally {

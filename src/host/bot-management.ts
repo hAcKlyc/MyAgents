@@ -429,9 +429,11 @@ export function createHostBotManager(input: HostBotManagerOptions) {
       const laneWasExact=!!active && sameRun(active,identity);
       const inspection=await runtimeLane.inspect(identity,entry);
       let snapshot:BotSnapshot;
+      let runClosureConfirmed=inspection.status==='stopped' && sameRun(inspection.identity,identity);
       if(expiredIds.has(item.snapshot.bot_id) && !(inspection.status==='stopped' && sameRun(inspection.identity,identity))) {
         const stopped=await runtimeLane.stop(identity);
         if(stopped.status==='ready' && sameRun(stopped.data,identity)) {
+          runClosureConfirmed=true;
           snapshot={...item.snapshot,admission:'closed',activity:'stopped',active_run:null,runnable:false,
             unsupported_reason:'BOT_GRANT_EXPIRED'};
         } else {
@@ -449,7 +451,7 @@ export function createHostBotManager(input: HostBotManagerOptions) {
         snapshot={...item.snapshot,admission:'closed',activity:'unknown',active_run:run,runnable:false,
           unsupported_reason:'BOT_RUN_OUTCOME_UNKNOWN'};
       }
-      const nextItem:StoredBot=inspection.status==='stopped' && sameRun(inspection.identity,identity)
+      const nextItem:StoredBot=runClosureConfirmed
         ? (({runtime_entry:_runtimeEntry,...rest})=>({...rest,snapshot}))(item)
         : {...item,snapshot};
       if(!sameJson(nextItem,item)) { changed=true; changedBots.add(item.snapshot.bot_id); }
