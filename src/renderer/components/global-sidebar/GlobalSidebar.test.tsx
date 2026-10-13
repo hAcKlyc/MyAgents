@@ -247,6 +247,18 @@ describe('GlobalSidebar rail flyout', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens a project board separately from workspace expansion and new chat', async () => {
+    mocks.projects.push({id:'project-1',name:'Project one',path:'/work/project-one'});
+    const onOpenProjectBoard = vi.fn();
+    const onOpenWorkspace = vi.fn(async () => true);
+    renderSidebar({onOpenProjectBoard,onOpenWorkspace});
+    fireEvent.click(screen.getByRole('button', {name:'Agent 工作区'}));
+    fireEvent.click(screen.getByRole('button', {name:'打开 Project one 项目看板'}));
+    expect(onOpenProjectBoard).toHaveBeenCalledWith(mocks.projects[0]);
+    expect(onOpenWorkspace).not.toHaveBeenCalled();
+    expect(screen.queryByRole('region', {name:'Agent 工作区'})).not.toBeInTheDocument();
+  });
+
   it('keeps helper and settings above independent account and notification controls', () => {
     mocks.forcedRail = false;
     const onOpenSpace = vi.fn();

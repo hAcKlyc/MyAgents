@@ -391,6 +391,7 @@ class ControlTests(unittest.TestCase):
                 mock.patch.object(control, "_write_new_root_file", side_effect=write_new),
                 mock.patch.object(control, "_wait_management_socket", side_effect=lambda _cfg: order.append(("socket-ready",))),
                 mock.patch.object(control, "_host_dropin", side_effect=lambda _cfg: (b"env", True)),
+                mock.patch.object(control, "_host_status_dropin", return_value=False),
                 mock.patch.object(control.os, "chown"),
                 mock.patch.object(control.subprocess, "run", side_effect=run),
             ):
@@ -411,7 +412,8 @@ class ControlTests(unittest.TestCase):
 
         def run(args, **kwargs):
             calls.append(tuple(args))
-            return type("Result", (), {"returncode": 0})()
+            network_probe = args == ["systemctl", "is-active", "--quiet", control.DAEMON_UNIT]
+            return type("Result", (), {"returncode": 1 if network_probe else 0})()
 
         with (
             mock.patch.object(control.subprocess, "run", side_effect=run),
