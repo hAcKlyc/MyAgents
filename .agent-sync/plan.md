@@ -83,7 +83,7 @@ BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host s
 
 ## RESUME-BOUNDARY-20261013
 
-用户确认当前 Agent 在 MoXBots 仓库修复实际 MyAgents 的 native resume 拒绝/重复提示。代码保持原边界和历史，阻断确定性自动重试，使用现有独立 native prefix Fork 恢复；旧 user stamp 只在唯一完整纯文本证据下修正新分支。任务/验收见 `.agent-sync/tasks/codex-resume-boundary-fix-20261013-4a93836a.md`、`dev-docs/resume-boundary-recovery.md`。本机恢复分支已由实际客户端 API 和零发送的隔离 native 启动核对，原文件未改。代码 main/CI 和客户端安装分别追踪；原签名团队不在本机且其它任务活跃，永久安装与后续真实发送仍未完成，不代替 Host 或其它发布任务。
+用户确认当前 Agent 在 MoXBots 仓库修复实际 MyAgents 的 native resume 拒绝/重复提示。代码保持原边界和历史，阻断确定性自动重试，使用现有独立 native prefix Fork 恢复；旧 user stamp 只在唯一完整纯文本证据下修正新分支。任务/验收见 `.agent-sync/tasks/codex-resume-boundary-fix-20261013-4a93836a.md`、`dev-docs/resume-boundary-recovery.md`。本机恢复分支已由实际客户端 API 和零发送的隔离 native 启动核对，原文件未改。代码 main/CI 和客户端安装分别追踪；原签名团队不在本机且其它任务活跃，永久安装尚未完成；恢复分支的首次真实输入已进入 native/model 执行，原业务任务结果不在本修复范围，不代替 Host 或其它发布任务。
 
 ## MOXBOTS-SIDEBAR-ORG-001
 
