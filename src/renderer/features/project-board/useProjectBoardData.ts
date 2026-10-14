@@ -76,7 +76,7 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
 
   useEffect(() => {
     if (!isActive) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [isActive]);
 

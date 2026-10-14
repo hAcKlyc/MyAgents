@@ -1467,6 +1467,10 @@ function publishExternalToolPresentation(
   void events.deferred?.then(deliver);
 }
 
+export function getExternalExecutionStartedAt(): string | undefined {
+  return getExternalProductContent()?.executionStartedAt;
+}
+
 export function publishExternalTranscriptSaveStatus(
   status: import('../../shared/sessionTranscript').TranscriptSaveStatus,
 ): void {

@@ -26,15 +26,19 @@
 
 ## 当前证据
 
-- 全量unit：557 files，5607 passed / 5 skipped；无失败。
+- 同步主干37279后的全量unit：560 files，5615 passed / 5 skipped；DOM267 files / 2290 passed。原基线unit5607通过。
 - 定向owner/receipt：含真实Global Node routes与跨进程落盘handoff、并发与失败注入、过期进程租约、10k总容量（模拟容量2）、不保存prompt。最终聚焦测试14+1通过。
 - Host：service7、IPC11、真实worker3、Bot1；排队ACK helper3；保留Bot执行权限与私有history。
 - Renderer：账号/冷恢复、API、持久操作编号、DOM、分页、安全Markdown等回归通过；实际组件1280/390流程由非UI实现者验收，见 `dev-docs/remote-session/ui-simulation-review.md`，均为模拟传输。
 - Rust：协议25、pairs16、controller13、admission owner1通过；Host与protocol Clippy通过；DOCS_RS desktop type-check通过。
-- TypeScript全量与改动文件ESLint通过；Web/Node MoXBots profile构建通过。
+- TypeScript全量、完整lint/依赖门禁/文档链接通过（16既有orphan warnings，无errors）；Web/Node MoXBots profile构建通过。合并后真实Node/Host owner30项复验通过。
 - 原生构建限制已重复核实：CommandLineTools Swift6.3.2的apple-metal PackageDescription arm64 undefined symbol，当前无完整Xcode。DOCS_RS不能代替真实原生构建。
 - 真实双端、Provider、安装客户端、发布验收仍未完成。
 
 ## 下一步
 
-完成desktop owner、receipt跨进程与原Session admission验证，统一检查全部文件；再独立审查与实际运行验证。代码、模拟、真实联调、主干、发布当前分别未验收完成。
+PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已同步37279，额外主干0c7b8e72（会话时长）正在整合。CI原head的tokio spawn测试违反共享runtime红线，已改join并按CI all-targets clippy重跑通过；最新合并SHA的六项CI必须全部通过才可合入。无生产部署/安装动作。
+
+原生缓存复核取得真实证据：锁定apple-metal62、apple-cf87、screencapturekit70源码文件全匹配；APFS复制到独立target，不修改旧target/fingerprint/output，普通Cargo（无DOCS_RS）probe实际Metal/CF运行成功。证据 `/private/tmp/moxbots-remote-native-cache-probe-20261015/evidence.json`。当前源码候选必须再走标准MoXBots builder/资产重建/固定签名reader验证；第一次候选构建因并发主干更新在资产阶段主动停止，不能把它当成果。
+
+下一步：统一验证0c7b8e72整合结果、完成PR45主干交付及真实native候选。然后完成同账号双端/真实Provider与审批、断线、停止路径。正式发布仍须活动owner、签名/公证、回滚与真实用户验收门禁；缓存复用不表示fresh-cold Swift环境问题已修。

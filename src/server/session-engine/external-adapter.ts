@@ -32,6 +32,7 @@ import {
   getExternalSessionPermissionMode,
   getExternalSessionReasoningEffort,
   getExternalSessionState,
+  getExternalExecutionStartedAt,
   getExternalSessionWorkspacePath,
   getExternalSystemInitPayload,
   getExternalMcpEffectiveSnapshot,
@@ -296,7 +297,9 @@ export function createExternalSessionEngine(): SessionEngine {
 
     publishTranscriptSaveStatus(status) { publishExternalTranscriptSaveStatus(status); },
     getLiveSessionState() {
+      const executionStartedAt = getExternalExecutionStartedAt();
       return {
+        ...(executionStartedAt ? { executionStartedAt } : {}),
         sessionState: getExternalSessionState(),
         isBusy: isExternalSessionBusy(),
         waitingForUser: getExternalPendingInteractiveRequests().some(request => {
