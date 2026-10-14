@@ -40,6 +40,14 @@ Linux 的 `--prepare`、Debug 和 Release 入口共用 `build_linux.sh`，由 `s
 
 macOS Dev / Release 在构建业务 bundle 前检查已安装的 SDK JS wrapper；此检查同时核对根 manifest 和 lock 中的八个平台原生包版本。原生 Mach-O 的目标架构、文件完整性与签名仍由既有平台校验入口负责。
 
+### MoXBots macOS 固定凭据读取器
+
+MoXBots macOS 包只从显式 `MOXBOTS_CREDENTIAL_READER_BUNDLE` 输入固定凭据读取器；不下载、重编或在 App 构建期间签名该组件。该绝对目录仅含 `credential-reader-manifest.json` 与 `moxbots-credential-reader`。权威发布契约在 `scripts/moxbot-credential-reader-release.json`：锁定 reader / parent bundle ID、协议版本、专用发布叶证书 SHA-256、源码闭包摘要，以及每个已发布架构的二进制 SHA-256/CDHash。源码闭包按 `rust-toolchain.toml`、crypto/protocol/vendor 源树中所有 regular file 的 root-relative POSIX 路径排序，排除任一路径组件名为 `target` 的文件，再按 `path + NUL + fileSHA256 + LF` 汇总。输入路径逐级拒绝符号链接，并限制祖先目录属主与写权限；仅系统固定的 root-owned `/private/tmp` sticky 01777 和 `/Applications` 0775 祖先例外。输入目录与文件本身仍必须只读、无特殊权限位，payload 不可有硬链接。准备 helper 从当前仓库重新计算源码摘要，并核对 manifest 与受信架构制品 SHA/CDHash，不信任制品自报摘要；Tauri 后再次检查源码闭包，防止打包期间源码漂移。当前仅锁定 arm64 reader，x86_64 必须先单独发布固定制品。
+
+`scripts/build-moxbot.mjs` 是 macOS MoXBots 唯一支持的 Tauri 构建入口，例如 `MOXBOTS_CREDENTIAL_READER_BUNDLE=/absolute/immutable/<arch> npm run tauri:build:moxbot -- --target aarch64-apple-darwin --bundles app`。它要求通过上述 artifact 校验，加入 `moxbot-credential-reader` Cargo feature，以临时 `bundle.macOS.files` overlay 把二进制放到 `Contents/Helpers`、manifest 放到 `Contents/Resources`，并强制 Tauri 使用 `--no-sign`。Tauri 生成 `.app` 后，wrapper 再校验嵌套文件字节、SHA、标识、CDHash 和叶证书；`src-tauri/build.rs` 还会拒绝绕过 wrapper 后直接构建不带固定 reader 的 macOS MoXBots profile。普通 MyAgents 与非 macOS 构建不启用此 feature。
+
+初始组件的源码构建、签名和私有不可变缓存归专用发布流水线；日常 App 构建只能验证和复用该已签名输入。源码、协议或工具链变化时不得缓存未命中后自动重建/重签；必须人工升级组件版本及发布记录。MoXBots macOS 开发构建同样需要有效 reader artifact；当前没有降级到同进程 Keychain helper 的开发豁免。Tauri 后的 wrapper 检查只证明该次未签名 `.app` 保留了 reader 文件。外层 App 应显式签名且不使用 `--deep`，随后验证严格 App 签名封印；ZIP 解包后再次核对 reader SHA/CDHash。最终 notarization 和真实 Keychain 冷启动仍由主发布流水线单独验收，不能由此脚本测试代替。
+
 Linux 的 setup 通过 `build_linux.sh --install-deps` 和 `--prepare` 复用资源路径，debug/release 也走该脚本。macOS/Windows 的开发版仍可使用项目 node_modules 提供 sharp/tsx；正式包必须携带自包含资源。
 
 ## 业务 bundle 与本次 Runtime 选择一致

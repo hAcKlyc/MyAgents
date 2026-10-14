@@ -22,6 +22,24 @@
     "menu": "MyAgents 账号",
     "editProfile": "编辑账号资料"
   },
+  "ownedAccountEntry": {
+    "account": "账号",
+    "menu": "MoXBots 账号",
+    "instance": "MoXBots 实例",
+    "signIn": "登录 MoXBots",
+    "signedInAs": "{{instance}} · {{account}}",
+    "accountId": "账号 {{account}}",
+    "signedInOfflineSafe": "网络暂时离线不会退出账号。",
+    "restore": "授权恢复 MoXBots 账号",
+    "unavailable": "MoXBots 账号暂不可用",
+    "unconfigured": "未配置 MoXBots 登录服务",
+    "loginTitle": "登录 MoXBots",
+    "openNetwork": "打开 AgentNet 与 Host 管理",
+    "signOut": "退出此实例",
+    "confirmSignOut": "确认退出此实例",
+    "signOutMessage": "将退出“{{name}}”实例并移除此设备的本地连接。不会退出 MyAgents 官方账号。",
+    "failed": "操作失败，请稍后重试。"
+  },
   "globalSidebar": {
     "navigation": "全局导航",
     "openWebsite": "打开 MyAgents 官网",
@@ -1404,7 +1422,7 @@
       "keyInvalid": "设备 key 无效、已过期、被撤销或已绑定其他设备。",
       "trustChanged": "该地址的实例身份或信任材料已改变，请先核实部署。",
       "removalPending": "暂未确认服务端撤销。连接已停止，可稍后重试移除。",
-      "credentialStoreAuthorizationRequired": "系统凭据需要一次授权。后台恢复已停止，不会反复请求密码。",
+      "credentialStoreAuthorizationRequired": "系统凭据需要授权。后台恢复已停止，不会自动重复请求密码。",
       "credentialStoreUnavailable": "系统凭据库暂不可用。后台恢复已停止，请检查系统凭据库状态。",
       "credentialStoreInvalid": "本机保存的会话无法验证。为保护身份，连接已停止，记录未被自动覆盖。",
       "ownedSessionMissing": "未找到此连接对应的本机登录会话。连接已停止，需要显式登录后才能恢复。",
@@ -1430,6 +1448,7 @@
     "ownedLogin": {
       "mode": "账号登录",
       "hint": "通过浏览器完成登录。会话保存在操作系统凭据库中，令牌不会显示在这里。",
+      "fixedServiceUrl": "此实例地址已固定，登录只会发往该服务。",
       "start": "在浏览器中继续",
       "started": "登录请求已创建。请在浏览器完成登录，再回来检查状态。",
       "waiting": "等待浏览器登录",

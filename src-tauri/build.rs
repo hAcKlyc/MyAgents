@@ -25,12 +25,34 @@ const DSH_BUILD_SELECTION_PATH: &str = "resources/integrated-runtimes/dsh-build-
 
 fn expose_app_build_profile() {
     println!("cargo:rerun-if-env-changed=MYAGENTS_BUILD_PROFILE");
+    println!("cargo:rerun-if-env-changed=MOXBOTS_OWNED_SERVICE_URL");
+    println!("cargo:rerun-if-env-changed=MOXBOTS_CREDENTIAL_WRITER_FAMILY");
     println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
-    match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
-        Err(env::VarError::NotPresent) | Ok("myagents") => {},
-        Ok("moxbot") => println!("cargo:rustc-cfg=myagents_moxbot"),
+    let profile = match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
+        Err(env::VarError::NotPresent) | Ok("myagents") => "myagents",
+        Ok("moxbot") => {
+            println!("cargo:rustc-cfg=myagents_moxbot");
+            "moxbot"
+        }
         _ => panic!("MYAGENTS_BUILD_PROFILE must be myagents or moxbot"),
+    };
+    let target_os =
+        env::var("CARGO_CFG_TARGET_OS").expect("Cargo must provide CARGO_CFG_TARGET_OS");
+    let reader_enabled = env::var_os("CARGO_FEATURE_MOXBOT_CREDENTIAL_READER").is_some();
+    if target_os == "macos" && profile == "moxbot" && !reader_enabled {
+        panic!(
+            "macOS MoXBots builds require the moxbot-credential-reader feature; use scripts/build-moxbot.mjs with the verified reader artifact"
+        );
     }
+    // Bind physical credential slots to the verified reader's publisher at
+    // compilation. Runtime environment changes must never select a keychain.
+    let writer_family = match env::var("MOXBOTS_CREDENTIAL_WRITER_FAMILY").as_deref() {
+        Ok("local-v1") => "local-v1",
+        Ok("developer-id-v2") => "developer-id-v2",
+        Err(env::VarError::NotPresent) if target_os != "macos" || profile != "moxbot" => "local-v1",
+        _ => panic!("macOS MoXBots requires a closed credential writer family from scripts/build-moxbot.mjs"),
+    };
+    println!("cargo:rustc-env=MOXBOTS_CREDENTIAL_WRITER_FAMILY={writer_family}");
 }
 
 fn main() {

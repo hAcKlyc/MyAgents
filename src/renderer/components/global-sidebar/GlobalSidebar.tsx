@@ -74,10 +74,11 @@ import { track } from '@/analytics';
 import { APP_ICON_SRC } from '@/components/brand/appBrand';
 import { updateSession, type SessionMetadata } from '@/api/sessionClient';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
-import { APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import FeedbackPopover from '@/components/FeedbackPopover';
 import AccountEntry from '@/features/account/AccountEntry';
+import OwnedAccountEntry from '@/features/account/OwnedAccountEntry';
 import { APP_SHELL_POPOVER_CHROME } from '@/components/global-sidebar/appShellPopoverChrome';
 import OverlayBackdrop from '@/components/OverlayBackdrop';
 import SessionStatsModal from '@/components/SessionStatsModal';
@@ -1394,8 +1395,12 @@ export default memo(function GlobalSidebar({
             onClick={onOpenSettings}
           />
           <div className="global-sidebar-account-row grid grid-cols-[minmax(0,1fr)_var(--global-sidebar-action-size)]" data-global-sidebar-account-row>
-            <AccountEntry expanded={expanded} available={teamSpaceAvailable}
-              environment={config.spaceEnvironment ?? 'production'} onOpenSpace={onOpenSpace} />
+            {APP_BUILD_PROFILE === 'moxbot' ? (
+              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} />
+            ) : (
+              <AccountEntry expanded={expanded} available={teamSpaceAvailable}
+                environment={config.spaceEnvironment ?? 'production'} onOpenSpace={onOpenSpace} />
+            )}
             <span className="global-sidebar-notification-slot">
               <button
                 ref={notificationTriggerRef}

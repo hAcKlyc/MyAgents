@@ -54,6 +54,14 @@ function fixture() {
   };
   return { locator, scope, snapshot };
 }
+function extendedBase(f: ReturnType<typeof fixture>) {
+  return {
+    ...f.snapshot,
+    capabilities: ["local-session", "permission", "stop", "persistent-history", "local-config-receipt"],
+    agentNet: { available: true, reason: null },
+    runtime: { node: "24.14.0", sdkBinaryPresent: true },
+  };
+}
 beforeEach(() => {
   invoke.mockReset();
   loadSource.mockReset();
@@ -290,7 +298,7 @@ it("clears an unsubmitted secret and isolates unresolved receipts when the signe
 it("applies a fresh desktop source profile and credential as separate writes while keeping the key out of the UI", async () => {
   const f = fixture();
   const extended = {
-    ...f.snapshot,
+    ...extendedBase(f),
     kind: "extended-snapshot" as const,
     settings: null,
     provider: null,
@@ -333,7 +341,7 @@ it("applies a fresh desktop source profile and credential as separate writes whi
 
 it("recovers an uncertain versioned key receipt without resending the desktop secret", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   const profileId = "portable-v-immutable";
   loadSource.mockResolvedValue({ agentName: "主 Agent", localWorkspacePath: "/Users/source/工作区", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "model-1", credential: "one-time-secret" });
   let keyMutation = "";
@@ -360,7 +368,7 @@ it("recovers an uncertain versioned key receipt without resending the desktop se
 
 it("saves a manual key against the persisted immutable profile ID after saving the draft", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   const submitted: Array<{ method: string; params: Record<string, unknown> }> = [];
   loadSource.mockResolvedValue({ agentName: "主 Agent", localWorkspacePath: "/Users/source/工作区", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "model-1" });
   invoke.mockImplementation((_command, { request }) => {
@@ -390,7 +398,7 @@ it("saves a manual key against the persisted immutable profile ID after saving t
 
 it("does not write a delayed desktop source into a replacement Host and deduplicates source reads", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   let resolveSource!: (value: unknown) => void;
   loadSource.mockImplementation(() => new Promise(resolve => { resolveSource = resolve; }));
   invoke.mockImplementation((_command, { request }) => {
@@ -413,7 +421,7 @@ it("does not write a delayed desktop source into a replacement Host and deduplic
 
 it("browses and selects a Unicode directory through the Host API", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   const listedPaths: string[] = [];
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"], providerKinds: ["anthropic", "openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
@@ -466,7 +474,7 @@ it("browses and selects a Unicode directory through the Host API", async () => {
 
 it("disables only actions whose required capabilities are absent", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   invoke.mockImplementation((_command, { request }) => request.method === "host.capabilities"
     ? Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.capabilities", "host.inspect", "config.provider.set", "resources.directory.list"], providerKinds: ["anthropic", "openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } })
     : Promise.resolve({ scope: f.scope, result: extended }));
@@ -480,7 +488,7 @@ it("disables only actions whose required capabilities are absent", async () => {
 
 it("retries a failed first-page directory read on explicit refresh", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   let directoryCalls = 0;
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.capabilities", "host.inspect", "resources.directory.list"], providerKinds: ["anthropic", "openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
@@ -499,7 +507,7 @@ it("retries a failed first-page directory read on explicit refresh", async () =>
 
 it("applies the supported profile but never sends a source key when credential capability is absent", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: true, revision: 1, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: true, revision: 1, writeAvailable: true } };
   const methods = ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"];
   loadSource.mockResolvedValue({ agentName: "主 Agent", localWorkspacePath: "/Users/source/work", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "model-1", credential: "never-send-me" });
   const writes: string[] = [];
@@ -524,7 +532,7 @@ it("adds and selects a Host model through the real controlled panel without loca
   const f = fixture();
   const portable = { id: "portable-v-immutable", sourceProviderId: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" };
   const extended = {
-    ...f.snapshot,
+    ...extendedBase(f),
     kind: "extended-snapshot" as const,
     configured: true,
     settings: { revision: 3, providerId: portable.id, model: "qa-first-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false },
@@ -561,7 +569,7 @@ it("adds and selects a Host model through the real controlled panel without loca
 it("allows key rotation during an active session while blocking profile writes", async () => {
   const f = fixture();
   const provider = { id: "portable-v-immutable", sourceProviderId: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" };
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: { revision: 3, providerId: provider.id, model: "qa-first-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false }, provider, activeSession: { sessionId: "session", generation: "1", closing: false }, credentials: { providerId: provider.id, configured: true, revision: 1, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: { revision: 3, providerId: provider.id, model: "qa-first-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false }, provider, activeSession: { sessionId: "session", generation: "1", closing: false }, credentials: { providerId: provider.id, configured: true, revision: 1, writeAvailable: true } };
   const submitted: Array<{ method: string; params: Record<string, unknown> }> = [];
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"], providerKinds: ["openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
@@ -583,7 +591,7 @@ it("allows key rotation during an active session while blocking profile writes",
 
 it("discards a delayed source read across an offline-online cycle before a newer import", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   const pending: Array<(value: unknown) => void> = [];
   loadSource.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
   invoke.mockImplementation((_command, { request }) => request.method === "host.capabilities"
@@ -606,7 +614,7 @@ it("discards a delayed source read across an offline-online cycle before a newer
 
 it("serializes duplicate manual profile saves while the version hash is pending", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   let finish!: (profile: { id: string; name: string; apiProtocol: "anthropic"; baseUrl: string; authType: "auth_token" }) => void;
   const writes: Array<Record<string, unknown>> = [];
   prepareProfile.mockImplementationOnce(_profile => new Promise(resolve => { finish = resolve as typeof finish; }));
@@ -631,7 +639,7 @@ it("serializes duplicate manual profile saves while the version hash is pending"
 
 it("shows actionable key failure without a receipt button after a confirmed rejection", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   loadSource.mockResolvedValue({ agentName: "Desktop Agent", localWorkspacePath: "/desktop/work", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "model-1", credential: "one-time-key" });
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"], providerKinds: ["openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
@@ -651,7 +659,7 @@ it("shows actionable key failure without a receipt button after a confirmed reje
 
 it("hydrates Host model choices from Desktop Host source candidates", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true } };
   loadSource.mockResolvedValue({ agentName: "Desktop Agent", localWorkspacePath: "/desktop/work", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "qa-first-model", models: [{ model: "qa-first-model", modelName: "First", modelSeries: "custom" }, { model: "qa-second-model", modelName: "Second", modelSeries: "custom" }] });
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"], providerKinds: ["openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });
@@ -671,7 +679,7 @@ it("hydrates Host model choices from Desktop Host source candidates", async () =
 
 it("applies only the profile when credential methods exist but writeAvailable is false", async () => {
   const f = fixture();
-  const extended = { ...f.snapshot, kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: false } };
+  const extended = { ...extendedBase(f), kind: "extended-snapshot" as const, settings: null, provider: null, credentials: { providerId: null, configured: false, revision: 0, writeAvailable: false } };
   const methods = ["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"];
   loadSource.mockResolvedValue({ agentName: "Desktop Agent", localWorkspacePath: "/desktop/work", provider: { id: "portable", name: "Provider", apiProtocol: "openai", baseUrl: "https://api.example.test/v1", authType: "api_key" }, model: "model-1", credential: "do-not-send-key" });
   const writes: string[] = [];
@@ -695,7 +703,7 @@ it("applies only the profile when credential methods exist but writeAvailable is
 it("hydrates Responses output defaults before editing a Host token limit", async () => {
   const f = fixture();
   const provider = { id: "responses-profile", name: "Responses", apiProtocol: "openai" as const, baseUrl: "https://api.example.test/v1", authType: "api_key" as const, upstreamFormat: "responses" as const };
-  const snapshot = { ...f.snapshot, kind: "extended-snapshot" as const, provider, settings: { revision: 1, providerId: provider.id, model: "qa-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false } };
+  const snapshot = { ...extendedBase(f), kind: "extended-snapshot" as const, provider, settings: { revision: 1, providerId: provider.id, model: "qa-model", workspace: { rootId: "workspaces", relativePath: "" }, executionAuthorized: false } };
   const writes: Array<{ method: string; params: { provider?: { maxOutputTokens?: number; maxOutputTokensParamName?: string } } }> = [];
   invoke.mockImplementation((_command, { request }) => {
     if (request.method === "host.capabilities") return Promise.resolve({ scope: f.scope, result: { kind: "capabilities", version: 1, methods: ["host.inspect", "config.provider.set", "receipt.provider.get"], providerKinds: ["openai"], limits: { directoryEntries: 128, pathBytes: 4096 } } });

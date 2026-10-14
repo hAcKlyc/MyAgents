@@ -1,10 +1,32 @@
 //! Desktop uses the shared crypto implementation with the original explicit OS store.
+#[cfg(not(all(
+    target_os = "macos",
+    myagents_moxbot,
+    feature = "moxbot-credential-reader"
+)))]
 pub use myagents_agent_network_crypto::*;
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    feature = "moxbot-credential-reader"
+))]
+pub use myagents_agent_network_crypto_parent::*;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(not(all(
+        target_os = "macos",
+        myagents_moxbot,
+        feature = "moxbot-credential-reader"
+    )))]
     pub(crate) use myagents_agent_network_crypto::tests::Fixture;
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        feature = "moxbot-credential-reader"
+    ))]
+    pub(crate) use myagents_agent_network_crypto_parent::tests::Fixture;
     #[test]
     fn network_channel_requires_encrypted_scope_hello_and_preserves_pair_sequences() {
         use super::super::channel::{Channel, PairSequences};

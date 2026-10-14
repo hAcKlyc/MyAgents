@@ -1,7 +1,7 @@
 use crate::{CryptoError, DevicePrivateKey, IdentityStore, KeyScope};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use zeroize::Zeroizing;
 
@@ -10,6 +10,10 @@ use zeroize::Zeroizing;
 /// keyring's process-global default override and its mock fallback entirely.
 pub struct OsIdentityStore;
 impl OsIdentityStore {
+    /// One actor/binding/generation owns this cache; never share it globally.
+    pub fn connection_cache() -> Arc<dyn IdentityStore> {
+        Arc::new(ConnectionCache::new(Arc::new(Self)))
+    }
     fn read(entry: &keyring::Entry) -> keyring::Result<Vec<u8>> {
         #[cfg(target_os = "macos")]
         {
@@ -97,9 +101,11 @@ impl OsIdentityStore {
             Err(keyring::Error::NoEntry) => {}
             Err(error) => return Err(Self::read_error(error)),
         }
-        entry
-            .set_secret(&key.der)
-            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        #[cfg(target_os = "macos")]
+        let written = crate::write_secret_noninteractive(&entry, &key.der);
+        #[cfg(not(target_os = "macos"))]
+        let written = entry.set_secret(&key.der);
+        written.map_err(Self::read_error)?;
         // Confirm persistence before allowing issuer activation. Failure never
         // falls back to a file or an in-memory replacement identity.
         let persisted = Self::load(scope)?;
@@ -109,7 +115,12 @@ impl OsIdentityStore {
         Ok(())
     }
     pub fn delete(scope: &KeyScope) -> Result<(), CryptoError> {
-        match Self::entry(scope)?.delete_credential() {
+        let entry = Self::entry(scope)?;
+        #[cfg(target_os = "macos")]
+        let deleted = crate::delete_secret_noninteractive(&entry);
+        #[cfg(not(target_os = "macos"))]
+        let deleted = entry.delete_credential();
+        match deleted {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(CryptoError::CredentialUnavailable),
         }
@@ -233,5 +244,239 @@ mod authorization_tests {
             CryptoError::CredentialAuthorizationRequired.to_string(),
             "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
         );
+    }
+}
+
+fn same_scope(a: &KeyScope, b: &KeyScope) -> bool {
+    a.issuer == b.issuer
+        && a.environment == b.environment
+        && a.service_id == b.service_id
+        && a.principal_id == b.principal_id
+        && a.device_id == b.device_id
+        && a.key_generation == b.key_generation
+}
+struct ConnectionCache {
+    backend: Arc<dyn IdentityStore>,
+    cached: Mutex<Option<(KeyScope, DevicePrivateKey)>>,
+}
+impl ConnectionCache {
+    fn new(backend: Arc<dyn IdentityStore>) -> Self {
+        Self {
+            backend,
+            cached: Mutex::new(None),
+        }
+    }
+}
+impl IdentityStore for ConnectionCache {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+        scope.credential_name()?;
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        if cached
+            .as_ref()
+            .is_some_and(|(stored, _)| !same_scope(stored, scope))
+        {
+            *cached = None;
+        }
+        if let Some((_, key)) = &*cached {
+            return DevicePrivateKey::from_der(Zeroizing::new(key.der.to_vec()));
+        }
+        let key = self.backend.load(scope)?;
+        let returned = DevicePrivateKey::from_der(Zeroizing::new(key.der.to_vec()))?;
+        *cached = Some((scope.clone(), key));
+        Ok(returned)
+    }
+    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), CryptoError> {
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        // An unconfirmed mutation must not leave an optimistic cached identity.
+        *cached = None;
+        self.backend.save_pending(scope, key)
+    }
+    fn delete(&self, scope: &KeyScope) -> Result<(), CryptoError> {
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|_| CryptoError::CredentialUnavailable)?;
+        *cached = None;
+        self.backend.delete(scope)
+    }
+}
+
+#[cfg(test)]
+mod connection_cache_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
+    struct Counting {
+        keys: Mutex<HashMap<String, Zeroizing<Vec<u8>>>>,
+        reads: AtomicUsize,
+        writes: AtomicUsize,
+        deletes: AtomicUsize,
+        failed: AtomicBool,
+        dropped: Arc<AtomicBool>,
+    }
+    impl Drop for Counting {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::Release);
+        }
+    }
+    impl IdentityStore for Counting {
+        fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            if self.failed.load(Ordering::Acquire) {
+                return Err(CryptoError::CredentialUnavailable);
+            }
+            let keys = self.keys.lock().unwrap();
+            DevicePrivateKey::from_der(Zeroizing::new(
+                keys.get(&scope.credential_name()?)
+                    .ok_or(CryptoError::CredentialMissing)?
+                    .to_vec(),
+            ))
+        }
+        fn save_pending(
+            &self,
+            scope: &KeyScope,
+            key: &DevicePrivateKey,
+        ) -> Result<(), CryptoError> {
+            self.writes.fetch_add(1, Ordering::Relaxed);
+            if self.failed.load(Ordering::Acquire) {
+                return Err(CryptoError::CredentialPersistenceUnconfirmed);
+            }
+            self.keys
+                .lock()
+                .unwrap()
+                .insert(scope.credential_name()?, Zeroizing::new(key.der.to_vec()));
+            Ok(())
+        }
+        fn delete(&self, scope: &KeyScope) -> Result<(), CryptoError> {
+            self.deletes.fetch_add(1, Ordering::Relaxed);
+            self.keys.lock().unwrap().remove(&scope.credential_name()?);
+            Ok(())
+        }
+    }
+    fn backend() -> Arc<Counting> {
+        Arc::new(Counting {
+            keys: Mutex::new(HashMap::new()),
+            reads: AtomicUsize::new(0),
+            writes: AtomicUsize::new(0),
+            deletes: AtomicUsize::new(0),
+            failed: AtomicBool::new(false),
+            dropped: Arc::new(AtomicBool::new(false)),
+        })
+    }
+    fn scope() -> KeyScope {
+        KeyScope {
+            issuer: "https://isolated.invalid".into(),
+            environment: "development".into(),
+            service_id: "123e4567-e89b-42d3-a456-426614174001".into(),
+            principal_id: "isolated".into(),
+            device_id: "123e4567-e89b-42d3-a456-426614174000".into(),
+            key_generation: 1,
+        }
+    }
+    #[test]
+    fn same_actor_concurrent_reads_share_one_valid_key_and_scope_change_evicts() {
+        let backend = backend();
+        let scope = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        backend.save_pending(&scope, &key).unwrap();
+        let cache = Arc::new(ConnectionCache::new(backend.clone()));
+        let barrier = std::sync::Barrier::new(4);
+        std::thread::scope(|threads| {
+            for _ in 0..4 {
+                let cache = cache.clone();
+                let scope = &scope;
+                let barrier = &barrier;
+                let key = &key;
+                threads.spawn(move || {
+                    barrier.wait();
+                    assert_eq!(
+                        cache.load(scope).unwrap().public_fingerprint().unwrap(),
+                        key.public_fingerprint().unwrap()
+                    );
+                });
+            }
+        });
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 1);
+        let mut next = scope.clone();
+        next.key_generation = 2;
+        assert!(matches!(
+            cache.load(&next),
+            Err(CryptoError::CredentialMissing)
+        ));
+        cache.load(&scope).unwrap();
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 3);
+        next = scope.clone();
+        next.principal_id = "other".into();
+        assert!(cache.load(&next).is_err());
+        cache.load(&scope).unwrap();
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 5);
+    }
+    #[test]
+    fn missing_and_errors_are_not_cached_and_mutations_invalidate() {
+        let backend = backend();
+        let scope = scope();
+        let cache = ConnectionCache::new(backend.clone());
+        for _ in 0..2 {
+            assert!(matches!(
+                cache.load(&scope),
+                Err(CryptoError::CredentialMissing)
+            ));
+        }
+        backend.failed.store(true, Ordering::Release);
+        for _ in 0..2 {
+            assert!(matches!(
+                cache.load(&scope),
+                Err(CryptoError::CredentialUnavailable)
+            ));
+        }
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 4);
+        backend.failed.store(false, Ordering::Release);
+        let key = DevicePrivateKey::generate().unwrap();
+        cache.save_pending(&scope, &key).unwrap();
+        cache.load(&scope).unwrap();
+        cache.load(&scope).unwrap();
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 5);
+        cache.save_pending(&scope, &key).unwrap();
+        cache.load(&scope).unwrap();
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 6);
+        backend.failed.store(true, Ordering::Release);
+        assert_eq!(
+            cache.save_pending(&scope, &key),
+            Err(CryptoError::CredentialPersistenceUnconfirmed)
+        );
+        assert!(cache.load(&scope).is_err());
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 7);
+        backend.failed.store(false, Ordering::Release);
+        cache.load(&scope).unwrap();
+        cache.delete(&scope).unwrap();
+        assert!(matches!(
+            cache.load(&scope),
+            Err(CryptoError::CredentialMissing)
+        ));
+        assert_eq!(backend.writes.load(Ordering::Relaxed), 3);
+        assert_eq!(backend.deletes.load(Ordering::Relaxed), 1);
+    }
+    #[test]
+    fn actor_local_cache_drop_releases_backend_and_zeroizing_owned_key() {
+        let backend = backend();
+        let dropped = backend.dropped.clone();
+        let weak = Arc::downgrade(&backend);
+        let scope = scope();
+        backend
+            .save_pending(&scope, &DevicePrivateKey::generate().unwrap())
+            .unwrap();
+        let cache = ConnectionCache::new(backend.clone());
+        cache.load(&scope).unwrap();
+        drop(backend);
+        assert!(weak.upgrade().is_some());
+        drop(cache);
+        assert!(weak.upgrade().is_none());
+        assert!(dropped.load(Ordering::Acquire));
     }
 }
