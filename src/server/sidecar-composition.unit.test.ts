@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { EXTERNAL_CLI_PUBLIC_CAPABILITIES } from '../shared/externalCliCapabilities';
+import { hasValidInternalCliCredential } from './external-cli-admission';
 import {
   classifySidecarRequest,
   composeSidecarRequestHandler,
@@ -13,6 +14,21 @@ function request(path: string, method = 'GET'): Request {
 }
 
 describe('Sidecar production composition', () => {
+  it.each(['global', 'session'] as const)('%s reaches update lifecycle credential admission', async role => {
+    const control = request('/api/process/update-quiesce', 'POST');
+    const credentialGate = vi.fn(async (incoming: Request) =>
+      Response.json({ success: false, error: hasValidInternalCliCredential(incoming)
+        ? 'UPDATE_ACTIVITY_UNKNOWN' : 'INTERNAL_CALLER_REQUIRED' }, { status: 401 }));
+    const dispatch = composeSidecarRequestHandler(resolveSidecarComposition(role, false), credentialGate);
+    expect(classifySidecarRequest(control)).toBe('common');
+    const response = await dispatch(control);
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ success: false, error: 'INTERNAL_CALLER_REQUIRED' });
+    expect(credentialGate).toHaveBeenCalledExactlyOnceWith(control);
+    credentialGate.mockClear();
+    expect((await dispatch(request('/api/process/update-quiesce/other', 'POST'))).status).toBe(404);
+    expect(credentialGate).not.toHaveBeenCalled();
+  });
   it('keeps omitted role fail-safe Session and requires an explicit development union', () => {
     expect([...resolveSidecarComposition(null, false).capabilities]).toEqual(['common', 'session']);
     expect([...resolveSidecarComposition(null, true).capabilities]).toEqual(['common', 'global', 'session']);
@@ -44,6 +60,7 @@ describe('Sidecar production composition', () => {
     ['POST', '/api/provider/verify', 'global'],
     ['POST', '/api/cliproxy/control', 'common'],
     ['POST', '/api/process/graceful-shutdown', 'global'],
+    ['POST', '/api/process/update-quiesce', 'common'],
     ['POST', '/api/browser/session/retire', 'global'],
     ['POST', '/api/mcp/oauth/discover', 'global'],
     ['POST', '/mcp/playwright', 'global'],
