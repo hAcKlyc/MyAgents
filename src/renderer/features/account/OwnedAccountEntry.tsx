@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LoaderIcon, LogOutIcon, UserIcon } from "@/components/icons";
+import {
+  HelperIcon,
+  LoaderIcon,
+  LogOutIcon,
+  UserIcon,
+} from "@/components/icons";
+import { openExternal } from "@/utils/openExternal";
 import { Popover } from "@/components/ui/Popover";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
@@ -21,7 +27,9 @@ import {
 } from "@/features/agent-network/store";
 import { JoinNetworkDialog } from "@/features/agent-network/JoinNetworkDialog";
 
-export function canonicalOwnedIssuer(value: string | null | undefined): string | null {
+export function canonicalOwnedIssuer(
+  value: string | null | undefined,
+): string | null {
   if (!value) return null;
   try {
     const parsed = new URL(value);
@@ -32,14 +40,18 @@ export function canonicalOwnedIssuer(value: string | null | undefined): string |
       parsed.search !== "" ||
       parsed.hash !== "" ||
       (parsed.pathname !== "" && parsed.pathname !== "/")
-    ) return null;
+    )
+      return null;
     return parsed.origin;
   } catch {
     return null;
   }
 }
 
-function ownedConnection(registry: NetworkRegistry, issuer: string | null): NetworkConnection | null {
+function ownedConnection(
+  registry: NetworkRegistry,
+  issuer: string | null,
+): NetworkConnection | null {
   if (!issuer) return null;
   const connections = registry.connections;
   const eligible = connections.filter(
@@ -63,9 +75,11 @@ function ownedConnection(registry: NetworkRegistry, issuer: string | null): Netw
 export default function OwnedAccountEntry({
   expanded,
   onOpenAgentNetwork,
+  onOpenHelper,
 }: {
   expanded: boolean;
   onOpenAgentNetwork?: () => void;
+  onOpenHelper?: () => void;
 }) {
   const { t } = useTranslation("app");
   const toast = useToast();
@@ -125,32 +139,41 @@ export default function OwnedAccountEntry({
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => {
-      void networkConnections().then((next) => {
-        if (
-          !active ||
-          !mounted.current ||
-          sequence !== projectionSequence.current ||
-          currentProjectionBoundary.current !== boundary ||
-          canonicalOwnedIssuer(next.ownedServiceUrl) !== serviceUrl
-        ) return;
-        acceptNetworkRegistry(next);
-      }).catch(() => {
-        // Keep the last confirmed account projection during transient network errors.
-      });
+      void networkConnections()
+        .then((next) => {
+          if (
+            !active ||
+            !mounted.current ||
+            sequence !== projectionSequence.current ||
+            currentProjectionBoundary.current !== boundary ||
+            canonicalOwnedIssuer(next.ownedServiceUrl) !== serviceUrl
+          )
+            return;
+          acceptNetworkRegistry(next);
+        })
+        .catch(() => {
+          // Keep the last confirmed account projection during transient network errors.
+        });
     };
     refresh();
-    if (state === "authenticated" && expiresAt !== null && Number.isFinite(expiresAt)) {
+    if (
+      state === "authenticated" &&
+      expiresAt !== null &&
+      Number.isFinite(expiresAt)
+    ) {
       const refreshAtExpiry = () => {
         const delay = expiresAt * 1000 - Date.now();
         if (delay <= 0) refresh();
-        else timer = setTimeout(refreshAtExpiry, Math.min(delay, 2_147_000_000));
+        else
+          timer = setTimeout(refreshAtExpiry, Math.min(delay, 2_147_000_000));
       };
       refreshAtExpiry();
     }
     return () => {
       active = false;
       if (timer) clearTimeout(timer);
-      if (projectionSequence.current === sequence) projectionSequence.current += 1;
+      if (projectionSequence.current === sequence)
+        projectionSequence.current += 1;
     };
   }, [
     expanded,
@@ -178,8 +201,6 @@ export default function OwnedAccountEntry({
     openedLoginGeneration.current = generation.current;
     if (pending) void cancelOwnedNetworkLogin(pending).catch(() => {});
   }, [loginBoundary]);
-
-  if (!expanded) return null;
 
   const startLogin = () => {
     if (!serviceUrl) return;
@@ -230,6 +251,15 @@ export default function OwnedAccountEntry({
       if (mounted.current) setBusy(false);
     }
   };
+  const openFeedback = async () => {
+    if (!serviceUrl) return;
+    try {
+      await openExternal(`${serviceUrl}/feedback`);
+      setMenuOpen(false);
+    } catch {
+      toast.error(t("ownedAccountEntry.feedbackFailed"));
+    }
+  };
 
   const label =
     state === "authenticated"
@@ -250,37 +280,31 @@ export default function OwnedAccountEntry({
       <button
         ref={trigger}
         type="button"
-        disabled={
-          busy ||
-          (!serviceUrl && !owned) ||
-          (state === "authorizationRequired" && !onOpenAgentNetwork)
-        }
-        onClick={() =>
-          state === "authenticated"
-            ? setMenuOpen((value) => !value)
-            : state === "authorizationRequired"
-              ? void selectRecoveredConnection()
-              : state === "unavailable"
-                ? onOpenAgentNetwork?.()
-                : startLogin()
-        }
-        aria-haspopup={state === "authenticated" ? "dialog" : undefined}
-        className="global-sidebar-row relative flex h-8 min-w-0 items-center text-left text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60"
+        disabled={busy}
+        onClick={() => setMenuOpen((value) => !value)}
+        aria-label={expanded ? undefined : t("ownedAccountEntry.menu")}
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        className={`global-sidebar-row relative flex h-8 min-w-0 items-center text-left text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60 ${expanded ? "" : "w-10 justify-center"}`}
         data-owned-account-trigger
         data-global-account-trigger
       >
-        <span className="absolute left-3 flex h-4 w-4 shrink-0 items-center justify-center">
+        <span
+          className={`${expanded ? "absolute left-3" : ""} flex h-4 w-4 shrink-0 items-center justify-center`}
+        >
           {busy ? (
             <LoaderIcon className="h-4 w-4 animate-spin" />
           ) : (
             <UserIcon className="h-4 w-4" />
           )}
         </span>
-        <span className="global-sidebar-label min-w-0 flex-1 truncate pl-10 pr-3">
-          {label}
-        </span>
+        {expanded && (
+          <span className="global-sidebar-label min-w-0 flex-1 truncate pl-10 pr-3">
+            {label}
+          </span>
+        )}
       </button>
-      {state === "authenticated" && (
+      {
         <Popover
           open={menuOpen}
           onClose={() => setMenuOpen(false)}
@@ -296,34 +320,85 @@ export default function OwnedAccountEntry({
             <strong className="block truncate">
               {owned?.name ?? t("ownedAccountEntry.instance")}
             </strong>
-            <p className="text-xs text-[var(--ink-muted)]">
-              {t("ownedAccountEntry.accountId", {
-                account: principalId.slice(0, 8),
-              })}
-            </p>
-            <p className="text-xs text-[var(--ink-muted)]">
-              {t("ownedAccountEntry.signedInOfflineSafe")}
-            </p>
+            {state === "authenticated" && (
+              <p className="text-xs text-[var(--ink-muted)]">
+                {t("ownedAccountEntry.accountId", {
+                  account: principalId.slice(0, 8),
+                })}
+              </p>
+            )}
+            {state === "authenticated" && (
+              <p className="text-xs text-[var(--ink-muted)]">
+                {t("ownedAccountEntry.signedInOfflineSafe")}
+              </p>
+            )}
+            {state !== "authenticated" && (
+              <button
+                type="button"
+                disabled={
+                  !serviceUrl ||
+                  busy ||
+                  (state === "authorizationRequired" && !onOpenAgentNetwork)
+                }
+                className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (state === "authorizationRequired")
+                    void selectRecoveredConnection();
+                  else if (state === "unavailable") onOpenAgentNetwork?.();
+                  else startLogin();
+                }}
+              >
+                {label}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void selectRecoveredConnection()}
-              className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)]"
-              disabled={!onOpenAgentNetwork || busy}
+              disabled={!onOpenHelper}
+              onClick={() => {
+                setMenuOpen(false);
+                onOpenHelper?.();
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
             >
-              {t("ownedAccountEntry.openNetwork")}
+              <HelperIcon className="h-4 w-4" />
+              {t("globalSidebar.helper")}
             </button>
             <button
               type="button"
-              onClick={() => { setMenuOpen(false); setLogoutOpen(true); }}
-              disabled={busy}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[var(--error)] hover:bg-[var(--hover-bg)]"
+              disabled={!serviceUrl}
+              onClick={() => void openFeedback()}
+              className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
             >
-              <LogOutIcon className="h-4 w-4" />
-              {t("ownedAccountEntry.signOut")}
+              {t("titlebar.feedbackTitle")}
             </button>
+            {state === "authenticated" && (
+              <button
+                type="button"
+                onClick={() => void selectRecoveredConnection()}
+                className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)]"
+                disabled={!onOpenAgentNetwork || busy}
+              >
+                {t("ownedAccountEntry.openNetwork")}
+              </button>
+            )}
+            {state === "authenticated" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setLogoutOpen(true);
+                }}
+                disabled={busy}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-[var(--error)] hover:bg-[var(--hover-bg)]"
+              >
+                <LogOutIcon className="h-4 w-4" />
+                {t("ownedAccountEntry.signOut")}
+              </button>
+            )}
           </div>
         </Popover>
-      )}
+      }
       {loginOpen && state !== "authenticated" && serviceUrl && (
         <JoinNetworkDialog
           accountOnly
@@ -366,13 +441,12 @@ export default function OwnedAccountEntry({
             pendingAttemptId.current = null;
             completedAttempt.current = true;
             acceptNetworkRegistry(next);
-            const match =
-              next.connections.find(
-                (connection) =>
-                  !connection.official &&
-                  !connection.removing &&
-                  canonicalOwnedIssuer(connection.url) === serviceUrl,
-              );
+            const match = next.connections.find(
+              (connection) =>
+                !connection.official &&
+                !connection.removing &&
+                canonicalOwnedIssuer(connection.url) === serviceUrl,
+            );
             if (match) {
               const selected = await selectNetworkConnection(match.id);
               if (loginEpochIsCurrent(epoch)) acceptNetworkRegistry(selected);

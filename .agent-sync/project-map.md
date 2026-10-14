@@ -50,3 +50,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 ## IP website download channel
 
 User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
+
+## 个人菜单与反馈中心
+
+`OwnedAccountEntry`承接设置下方个人菜单的小助理和云端反馈入口。`services/agentnet/feedback-web/`、`src/feedback_http.rs`、`src/feedback_store.rs`为普通用户同源提单及私有历史；现有admin-web追加管理员处理。API、权限、发布/回滚边界见`services/agentnet/FEEDBACK.md`，验收见`dev-docs/feedback-independent-review.md`。
