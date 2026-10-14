@@ -110,5 +110,35 @@ class DaemonTests(unittest.TestCase):
                     control._wait_ready_status(DEVICE)
 
 
+class RenewalOperatorTests(unittest.TestCase):
+    def test_renewal_requires_stopped_owned_daemon_and_never_starts_it(self):
+        calls = []
+        def run(args, **kwargs):
+            calls.append(tuple(args))
+            if args[:2] == ["systemctl", "show"]:
+                return types.SimpleNamespace(stdout="MainPID=0\nActiveState=inactive\n", returncode=0)
+            return types.SimpleNamespace(returncode=0)
+        with (mock.patch.object(control.os, "geteuid", return_value=0),
+              mock.patch.object(control, "verified_host_id", return_value=DEVICE),
+              mock.patch.object(control, "owned_config", return_value=CONFIG),
+              mock.patch.object(control.pwd, "getpwnam", return_value=types.SimpleNamespace(pw_uid=990, pw_gid=990)),
+              mock.patch.object(control.subprocess, "run", side_effect=run)):
+            self.assertEqual(control.run_control("renew-management"), 0)
+            command = calls[-1]
+            self.assertIn("owned-management-renew", command)
+            self.assertIn("--property=User=" + control.USER, command)
+            self.assertTrue(any(x.startswith("--property=LoadCredentialEncrypted=") for x in command))
+            self.assertFalse(any(x in command for x in ("--join", "--management-socket", "--bot-execution-policy")))
+            self.assertFalse(any(c[:2] in (("systemctl", "start"), ("systemctl", "stop"), ("systemctl", "enable")) for c in calls))
+            for state in ("ActiveState=active\nMainPID=123\n", "ActiveState=inactive\nMainPID=12\n", "MainPID=0\n", "MainPID=0\nMainPID=0\nActiveState=inactive\n"):
+                calls.clear()
+                with mock.patch.object(control.subprocess, "run", return_value=types.SimpleNamespace(stdout=state)) as invoke:
+                    with self.assertRaises(ValueError): control.run_control("renew-management")
+                    self.assertEqual(invoke.call_count, 1)
+            with mock.patch.object(control, "owned_config", return_value=None), mock.patch.object(control.subprocess, "run") as invoke:
+                with self.assertRaises(ValueError): control.run_control("renew-management")
+                invoke.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

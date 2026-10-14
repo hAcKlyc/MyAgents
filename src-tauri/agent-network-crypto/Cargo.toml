@@ -10,6 +10,7 @@ default = []
 os-store = ["dep:keyring", "dep:security-framework", "dep:security-framework-sys", "dep:core-foundation"]
 # Real crypto fixtures used by existing Desktop channel parity tests only.
 test-support = []
+fixed-macos-reader = ["os-store"]
 
 [dependencies]
 base64 = "0.22"
@@ -41,3 +42,8 @@ keyring = { version = "=3.6.3", optional = true, default-features = false, featu
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "moxbots-credential-reader"
+path = "src/bin/moxbots-credential-reader.rs"
+required-features = ["os-store", "fixed-macos-reader"]

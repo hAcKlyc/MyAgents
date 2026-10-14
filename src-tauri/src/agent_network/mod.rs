@@ -8,6 +8,8 @@ mod channel;
 pub(crate) mod commands;
 mod connection;
 mod credential_restore;
+#[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
+mod credential_slots;
 mod crypto;
 pub(crate) mod discovery;
 mod identity;
@@ -15,8 +17,8 @@ mod identity_desktop;
 mod incoming;
 mod jwt;
 mod local_owner;
-mod memory;
 mod management_controller;
+mod memory;
 mod owned_account_desktop;
 mod owned_admission;
 mod owned_login;

@@ -62,6 +62,9 @@ export interface OwnedHostExtendedSnapshot extends Omit<OwnedHostSnapshot, "kind
   kind: "extended-snapshot"; settings: OwnedHostExtendedSettings | null;
   provider: PortableHostProvider | null;
   credentials: { providerId: string | null; configured: boolean; revision: number; writeAvailable: boolean };
+  capabilities: Array<"local-session" | "permission" | "stop" | "persistent-history" | "local-config-receipt">;
+  agentNet: { available: boolean; reason: string | null };
+  runtime: { node: string; sdkBinaryPresent: boolean };
 }
 export interface OwnedHostCapabilities {
   kind: "capabilities"; version: 1;
@@ -186,6 +189,9 @@ const extendedSettings = z.object({ revision: revision.min(1), providerId, model
 const extendedSnapshot = z.object({
   kind: z.literal("extended-snapshot"), version: z.literal(1), hostId: z.string().min(1), configured: z.boolean(), settings: extendedSettings.nullable(), provider: provider.nullable(), stopping: z.boolean(),
   activeSession: z.object({ sessionId: z.string().min(1), generation: z.string().min(1), closing: z.boolean() }).nullable(),
+  capabilities: z.array(z.enum(["local-session", "permission", "stop", "persistent-history", "local-config-receipt"])).max(16),
+  agentNet: z.object({ available: z.boolean(), reason: z.string().max(64).nullable() }).strict(),
+  runtime: z.object({ node: z.string().min(1).max(32).regex(/^[0-9.\-+]+$/), sdkBinaryPresent: z.boolean() }).strict(),
   credentials: z.object({ providerId: providerId.nullable(), configured: z.boolean(), revision, writeAvailable: z.boolean() }).strict(),
   resources: z.object({ version: z.literal(1), revision, roots: z.array(z.object({ rootId: z.string().min(1), workspacePath: z.string().min(1) }).strict()), agents: z.array(z.object({ agentId: z.string().min(1), projectId: z.string().min(1), name: z.string().min(1), workspacePath: z.string().min(1), enabled: z.boolean(), archived: z.boolean() }).strict()) }).strict(),
 }).strict();

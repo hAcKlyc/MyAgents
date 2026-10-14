@@ -36,6 +36,12 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
   const restoreCloseButton = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false),
     [join, setJoin] = useState(false),
+    [ownedLoginTarget, setOwnedLoginTarget] = useState<{
+      connectionId: string;
+      url: string;
+      principalId: string;
+      authGeneration: number;
+    } | null>(null),
     [remove, setRemove] = useState(false),
     [busy, setBusy] = useState(false),
     [restoreOpen, setRestoreOpen] = useState(false),
@@ -53,6 +59,9 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
     authGeneration: number;
   } | null>(null);
   const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ownedLoginGeneration = useRef(0);
+  const pendingOwnedLoginAttempt = useRef<string | null>(null);
+  const completedOwnedLoginAttempt = useRef(false);
   const current =
     registry.connections.find((c) => c.id === registry.selected) ??
     registry.connections[0];
@@ -75,6 +84,21 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
       selectedConnection.snapshot.error?.code ===
         "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED" &&
       Number.isSafeInteger(registry.revision),
+  );
+  const selectedOwnedNeedsLogin = Boolean(
+    selectedConnection &&
+      !selectedConnection.official &&
+      !selectedConnection.removing &&
+      selectedConnection.ownedAccount?.state === "signInRequired",
+  );
+  const selectedOwnedLoginUrl = selectedConnection?.url ?? null;
+  const ownedLoginTargetIsCurrent = Boolean(
+    ownedLoginTarget &&
+      selectedConnection &&
+      selectedConnection.id === ownedLoginTarget.connectionId &&
+      selectedConnection.url === ownedLoginTarget.url &&
+      (selectedConnection.ownedAccount?.principalId ?? "") === ownedLoginTarget.principalId &&
+      selectedConnection.snapshot.authGeneration === ownedLoginTarget.authGeneration,
   );
   const restoreCanContinue = Boolean(
     selectedConnection &&
@@ -225,6 +249,11 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
   }, [restoreOpen, closeRestore]);
   useEffect(
     () => () => {
+      ownedLoginGeneration.current += 1;
+      const pendingLogin = pendingOwnedLoginAttempt.current;
+      pendingOwnedLoginAttempt.current = null;
+      if (pendingLogin && !completedOwnedLoginAttempt.current)
+        void cancelOwnedNetworkLogin(pendingLogin).catch(() => {});
       if (restoreTimer.current) clearTimeout(restoreTimer.current);
       restoreTimer.current = null;
       const active = restoreOperation.current;
@@ -234,6 +263,18 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
     },
     [],
   );
+  useEffect(() => {
+    if (!ownedLoginTarget || ownedLoginTargetIsCurrent) return;
+    setOwnedLoginTarget(null);
+    const pending = pendingOwnedLoginAttempt.current;
+    pendingOwnedLoginAttempt.current = null;
+    if (completedOwnedLoginAttempt.current) {
+      completedOwnedLoginAttempt.current = false;
+      return;
+    }
+    ownedLoginGeneration.current += 1;
+    if (pending) void cancelOwnedNetworkLogin(pending).catch(() => {});
+  }, [ownedLoginTarget, ownedLoginTargetIsCurrent]);
   async function select(id: string) {
     if (restoreOperation.current || restoreOpen) closeRestore();
     setOpen(false);
@@ -358,6 +399,28 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
               {t("agentNetwork.ownedCredentialRestore.open")}
             </button>
           )}
+          {selectedOwnedNeedsLogin && selectedConnection && (
+            <button
+              role="menuitem"
+              disabled={!selectedOwnedLoginUrl}
+              className="w-full rounded-md px-3 py-2.5 text-left text-sm hover:bg-[var(--hover-bg)] disabled:opacity-50"
+              onClick={() => {
+                if (!selectedOwnedLoginUrl) return;
+                setOpen(false);
+                ownedLoginGeneration.current += 1;
+                completedOwnedLoginAttempt.current = false;
+                pendingOwnedLoginAttempt.current = null;
+                setOwnedLoginTarget({
+                  connectionId: selectedConnection.id,
+                  url: selectedOwnedLoginUrl,
+                  principalId: selectedConnection.ownedAccount?.principalId ?? "",
+                  authGeneration: selectedConnection.snapshot.authGeneration,
+                });
+              }}
+            >
+              {selectedOwnedLoginUrl ? t("ownedAccountEntry.signIn") : t("ownedAccountEntry.unconfigured")}
+            </button>
+          )}
         </div>
       </Popover>
       {restoreOpen && restoreConnection && (
@@ -462,6 +525,65 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
             } catch (failure) {
               throw Error(error(failure));
             }
+          }}
+        />
+      )}
+      {ownedLoginTarget && (
+        <JoinNetworkDialog
+          accountOnly
+          initialUrl={ownedLoginTarget.url}
+          title={t("ownedAccountEntry.loginTitle")}
+          onCancel={() => {
+            ownedLoginGeneration.current += 1;
+            pendingOwnedLoginAttempt.current = null;
+            setOwnedLoginTarget(null);
+          }}
+          onConfirm={async () => { throw Error(t("agentNetwork.errors.failed")); }}
+          onOwnedStart={async (issuer, ca) => {
+            const generation = ownedLoginGeneration.current;
+            try {
+              const attempt = await startOwnedNetworkLogin(issuer, ca);
+              if (generation !== ownedLoginGeneration.current || !ownedLoginTargetIsCurrent) {
+                await cancelOwnedNetworkLogin(attempt.attemptId).catch(() => {});
+                throw Error(t("agentNetwork.errors.failed"));
+              }
+              pendingOwnedLoginAttempt.current = attempt.attemptId;
+              completedOwnedLoginAttempt.current = false;
+              return attempt;
+            }
+            catch (failure) { throw Error(error(failure)); }
+          }}
+          onOwnedOpen={async (attemptId) => {
+            try { await openOwnedNetworkAuthorization(attemptId); }
+            catch (failure) { throw Error(error(failure)); }
+          }}
+          onOwnedCancel={async (attemptId) => {
+            ownedLoginGeneration.current += 1;
+            pendingOwnedLoginAttempt.current = null;
+            try { await cancelOwnedNetworkLogin(attemptId); }
+            catch {
+              // End locally and allow a new attempt; the old server attempt expires on its own.
+            }
+          }}
+          onOwnedPoll={async (attemptId) => {
+            const generation = ownedLoginGeneration.current;
+            try {
+              const result = await pollOwnedNetworkLogin(attemptId);
+              if (result.status !== "authenticated" || generation !== ownedLoginGeneration.current) return "pending";
+              const next = result.registry;
+              pendingOwnedLoginAttempt.current = null;
+              completedOwnedLoginAttempt.current = true;
+              const matching = next.connections.find((connection) =>
+                !connection.official && !connection.removing && connection.url === ownedLoginTarget.url,
+              );
+              if (matching) {
+                const selected = await selectNetworkConnection(matching.id);
+                if (generation === ownedLoginGeneration.current) acceptNetworkRegistry(selected);
+              } else if (generation === ownedLoginGeneration.current) {
+                acceptNetworkRegistry(next);
+              }
+              return "authenticated";
+            } catch (failure) { throw Error(error(failure)); }
           }}
         />
       )}

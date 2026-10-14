@@ -74,11 +74,15 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 同一持久槽位的新登录提交会失效旧 guard；取消尚未完成的新登录不撤销此前仍有效的登录。精确 binding 删除、账号 active 失效、会话过期和服务器拒绝仍停止旧权限。恢复、登录写入及精确删除由模块内同步存储锁串行化，锁不跨网络 await。正常路径不轮询 Keychain，用户在应用外手工编辑凭据的检测边界是下次恢复；这不代替服务器的过期或撤销检查。
 
-内部 MoXBots 试用包更新应复用固定代码签名证书。ad-hoc 签名把代码 hash 作为身份，每次新构建可能再次触发 Keychain 确认；固定 bundle identifier 和证书 designated requirement 可保留后续版本身份。签名私钥、专用构建钥匙串和随机构建密码只在本机私有目录，不进入 Git 或试用归档，不保存 Mac 登录密码、不修改全局凭据 ACL 或系统信任。旧 ad-hoc 包创建的凭据首次迁移仍可能需要一次用户系统确认；本地试用证书不等于 Developer ID 或 Apple 公证。
+内部 MoXBots 试用包更新复用固定代码签名证书，但固定 designated requirement 不能单独保证更新后免提示。Apple 的 [securityd client partition](https://github.com/apple-oss-distributions/Security/blob/main/securityd/src/clientid.cpp) 对无法归入 Apple 证书体系的已签代码仍使用 `cdhash:`；[ACL 验证](https://github.com/apple-oss-distributions/Security/blob/main/securityd/src/acls.cpp) 会额外检查这个 partition。自签名新构建的代码 hash 改变，旧记录可能需要再次批准。手工附加 TeamIdentifier 不会变成 Apple 锚定的签名。本地试用证书不等于 Developer ID 或 Apple 公证。
 
-后台读取以同签名二进制的认证子进程执行，闭集 service/account/User-domain、匿名管道、有界结果及 5 秒期限，不请求系统 UI。真实授权错误保留固定码并停止普通重试，不把它当作条目不存在或自动生成新钥。显式“授权并恢复”仅针对已保存的 Owned 连接，整体最多 180 秒，可取消；验证会话全 scope 和服务器现有 key generation/fingerprint 后，在 registry revision、saved record、Actor generation 门禁内发布。它不执行登录、入网、密钥替换或配置写入。
+MoXBots macOS 构建显式启用 `moxbot-credential-reader`，使用 `Contents/Helpers/moxbots-credential-reader` 固定组件和外层 App 封印内的闭集 manifest。桌面更新原样复用组件已签字节，不重编或重签；调用双方验证各自真实运行代码 hash、严格签名、相同叶证书、闭集角色、UID、真实 parent 和同一 App 路径。组件不存在或被修改时拒绝访问，不回退到 App 自身读取。默认 MyAgents 和其他平台的后端保持原路径；构建约束见 [资源准备](build_resource_preparation.md)。签名私钥与专用构建钥匙串仅在本机私有目录，不保存 Mac 登录密码、不修改全局 ACL 或系统信任。
 
-恢复所得私钥仅由对应 Actor 的完整 scope 只读 store 持有；重连可再次加载它，store 拒绝写入与删除。关闭、取消、超时、账号/registry/generation 边界会阻止迟到结果发布，并保留持久记录。系统窗口仍可能要求用户处理旧签名 ACL；选择“允许一次”只能说明该次读取成功，不能承诺跨重启或更新免提示。只有真实重启/同签名更新复验才能关闭这项产品验收。
+后台访问闭集 service/account/User-domain，经匿名管道和有界结果传输，不请求系统 UI。固定组件承担既有 owner 裁决的读、写、删除；写入确认内容持久化、删除检查真实状态，不能将超时或未知写当成功。显式 Authorize 只允许读取已保存 Owned 连接；整体最多 180 秒，可取消，验证会话及服务器现有 key generation/fingerprint 后才发布 Actor，不执行登录、入网、身份替换或配置写入。后台管道预算 5 秒，前置同步签名封印验证自身不能由这个管道循环中断；大 App 的实际耗时仍需真机验收，不能将单测当作整链硬期限。真实授权错误停止普通重试，不作为条目不存在或新建钥匙的依据。
+
+显式恢复的私钥仅由对应 Actor 的完整 scope 只读 store 持有，拒绝写删。普通恢复使用连接内至多一项的完整 KeyScope 缓存；断线仍重新验证服务器状态与 fingerprint，但不重复读取同一钥匙。缓存随 binding/Actor generation、账号边界及退休清除；未知写或删除也使缓存失效，不掩盖存储结果。关闭、取消、超时及 registry 边界阻止迟到发布，并保留持久记录。
+
+旧记录第一次迁移到固定组件时，会话和设备钥是独立条目，系统可能分别要求确认；不能承诺恰好只输入一次密码。组件本身安全升级改变代码 hash，也可能需要新授权。用户选择“允许一次”不代表持久授权；只有真实冷启动、替换桌面而保持组件不变且恢复在线的对照才能关闭更新免提示验收。
 
 ### 端到端通道与消息路径
 

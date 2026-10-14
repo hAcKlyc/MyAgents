@@ -154,6 +154,96 @@ it("cancels a pending owned attempt when the dialog is closed", async () => {
   await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
 });
 
+it("offers account-only re-login for an owned signInRequired connection and selects it after authentication", async () => {
+  const owned = {
+    ...registry,
+    selected: "self-a",
+    connections: registry.connections.map((connection) => connection.id === "self-a"
+      ? { ...connection, url: "https://login.example.test/dex", ownedAccount: { state: "signInRequired", principalId: "principal-a", expiresAt: null } }
+      : connection),
+  } as NetworkRegistry;
+  calls.ownedPoll.mockResolvedValue({ status: "authenticated", registry: owned });
+  calls.select.mockResolvedValue({ ...owned, selected: "self-a" });
+  render(<NetworkSelector registry={owned} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "登录 MoXBots" }));
+  expect(screen.getByLabelText("服务 URL")).toHaveValue("https://login.example.test/dex");
+  expect(screen.getByLabelText("服务 URL")).toHaveAttribute("readonly");
+  fireEvent.change(screen.getByLabelText("服务 URL"), {
+    target: { value: "https://different.example.test" },
+  });
+  expect(screen.getByLabelText("服务 URL")).toHaveValue("https://login.example.test/dex");
+  expect(screen.queryByLabelText("设备 key")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  await waitFor(() => expect(calls.select).toHaveBeenCalledWith("self-a"));
+  expect(calls.accept).toHaveBeenCalledWith(expect.objectContaining({ selected: "self-a" }));
+});
+
+it("does not select or accept a late re-login result after the dialog is unmounted", async () => {
+  let resolvePoll!: (value: unknown) => void;
+  calls.ownedPoll.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+  const owned = {
+    ...registry,
+    selected: "self-a",
+    connections: registry.connections.map((connection) => connection.id === "self-a"
+      ? { ...connection, url: "https://login.example.test/dex", ownedAccount: { state: "signInRequired", principalId: "principal-a", expiresAt: null } }
+      : connection),
+  } as NetworkRegistry;
+  const view = render(<NetworkSelector registry={owned} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  await waitFor(() => expect(calls.ownedPoll).toHaveBeenCalledWith("attempt-1"));
+  view.unmount();
+  expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1");
+  await act(async () => { resolvePoll({ status: "authenticated", registry: owned }); });
+  expect(calls.accept).not.toHaveBeenCalled();
+  expect(calls.select).not.toHaveBeenCalled();
+});
+
+it("cancels and fences a pending instance login when its account generation changes", async () => {
+  let resolvePoll!: (value: unknown) => void;
+  calls.ownedCancel.mockRejectedValueOnce(new Error("cancel unavailable"));
+  calls.ownedPoll.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+  const owned = {
+    ...registry,
+    selected: "self-a",
+    connections: registry.connections.map((connection) => connection.id === "self-a"
+      ? { ...connection, url: "https://login.example.test/dex", ownedAccount: { state: "signInRequired", principalId: "principal-a", expiresAt: null } }
+      : connection),
+  } as NetworkRegistry;
+  const view = render(<NetworkSelector registry={owned} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  await waitFor(() => expect(calls.ownedPoll).toHaveBeenCalledWith("attempt-1"));
+
+  const changed = {
+    ...owned,
+    connections: owned.connections.map((connection) => connection.id === "self-a"
+      ? { ...connection, snapshot: { ...connection.snapshot, authGeneration: 2 } }
+      : connection),
+  } as NetworkRegistry;
+  view.rerender(<NetworkSelector registry={changed} />);
+  await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
+  expect(screen.queryByText("等待浏览器登录")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  expect(calls.ownedStart).toHaveBeenCalledTimes(2);
+
+  await act(async () => resolvePoll({ status: "authenticated", registry: owned }));
+  expect(calls.accept).not.toHaveBeenCalled();
+  expect(calls.select).not.toHaveBeenCalled();
+});
+
 it("offers restore only for the selected owned connection with the exact authorization error", () => {
   const ownedError = {
     code: "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",

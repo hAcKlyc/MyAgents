@@ -548,7 +548,7 @@ def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot:
     select_profile(profile)
     if os.geteuid() != 0:
         raise PermissionError("run this operator control as root")
-    if command not in {"start", "wait", "cancel", "logout", "status", "run", "join"}:
+    if command not in {"start", "wait", "cancel", "logout", "status", "run", "join", "renew-management"}:
         raise ValueError("unsupported operator action")
     if enable_on_boot and command not in {"run", "join"}:
         raise ValueError("boot activation requires an explicit run or join")
@@ -567,6 +567,21 @@ def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot:
     account = pwd.getpwnam(USER)
     if account.pw_uid == 0 or account.pw_gid == 0:
         raise ValueError("isolated service account is invalid")
+    if command == "renew-management":
+        if config is None:
+            raise ValueError("management renewal requires an owned-instance configuration")
+        state = subprocess.run(["systemctl", "show", DAEMON_UNIT,
+                                "--property=ActiveState", "--property=MainPID"],
+                               check=True, capture_output=True, text=True, timeout=10).stdout
+        fields = {}
+        for line in state.splitlines():
+            key, sep, value = line.partition("=")
+            if not sep or key not in {"ActiveState", "MainPID"} or key in fields:
+                raise ValueError("network service state is invalid")
+            fields[key] = value
+        if (set(fields) != {"ActiveState", "MainPID"}
+                or fields["ActiveState"] not in {"inactive", "failed"} or fields["MainPID"] != "0"):
+            raise ValueError("stop the network service before explicit management renewal")
     if command == "logout" and config is None:
         raise ValueError("logout requires an owned-instance configuration")
     if command == "logout":
@@ -574,7 +589,8 @@ def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot:
     operation = {"start": "owned-auth-start" if config else "auth-start",
                  "wait": "owned-auth-wait" if config else "auth-wait",
                  "cancel": "owned-auth-cancel" if config else "auth-cancel",
-                 "logout": "owned-auth-logout", "status": "status"}[command]
+                 "logout": "owned-auth-logout", "status": "status",
+                 "renew-management": "owned-management-renew"}[command]
     unit = AUTH_UNIT.replace("-auth.service", f"-auth-{command}.service")
     args = [
         "systemd-run", "--quiet", "--pipe", "--wait", "--collect", f"--unit={unit}",
@@ -584,7 +600,7 @@ def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot:
         "--property=RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
         f"--property=ReadOnlyPaths={STATUS_FILE.parent}",
     ]
-    if command in {"start", "wait", "cancel", "logout"}:
+    if command in {"start", "wait", "cancel", "logout", "renew-management"}:
         args.extend([
             f"--property=LoadCredentialEncrypted=identity-kek:{CREDENTIAL}",
             f"--property=ReadWritePaths={STATE}",
@@ -604,7 +620,7 @@ def run_control(command: str, profile: str = "myagents-test", *, enable_on_boot:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("start", "wait", "cancel", "logout", "status", "run", "join"))
+    parser.add_argument("command", choices=("start", "wait", "cancel", "logout", "status", "run", "join", "renew-management"))
     parser.add_argument("--profile", choices=("myagents-test", "moxbot-test"), default="myagents-test")
     parser.add_argument("--enable-on-boot", action="store_true", help="persist an explicitly run/joined, ready owned connector across boots")
     args = parser.parse_args()
