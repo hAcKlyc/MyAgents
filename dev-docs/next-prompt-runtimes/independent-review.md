@@ -77,3 +77,5 @@
 | `src/server/runtimes/codex-text-utility.unit.test.ts` | `0f9e06e1dc468cf3416835800a33d18144905733af09cc4854b90a9b0aeb9a27` |
 | `src/server/modelqa/next-prompt.ts` | `891918b45a6d60920dbc333ee8f59a77d25a0cb0018a2ee73a929b264df56081` |
 | `src/server/modelqa/next-prompt.unit.test.ts` | `4d34c25cbb5a9bc94693bbdc2a39516488eedb73eb5e0eb259155a9f9a8c16e3` |
+
+冻结后仅清理Codex unit文件一处尾随空格，产品源码未变化；既有审阅hash对应冻结测试文本，最终HEAD应以Git及CI为准。

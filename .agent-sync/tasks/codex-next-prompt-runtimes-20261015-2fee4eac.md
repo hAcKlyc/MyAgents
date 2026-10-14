@@ -27,7 +27,7 @@
 
 ## Blockers and unknowns
 
-当前依赖统一owner profile af6c790081efcc1fb21b099bd795aca2b31f4be2提供isModelQaBuild；阶段先保存再merge该精确commit。主干排队遵守owner统一顺序，不与品牌PR50竞争。0.5.5原生modelqa窗口、正式打包/更新仍待统一owner串行接线和验收。
+已merge统一owner profile af6c790081efcc1fb21b099bd795aca2b31f4be2（保留ancestry），isModelQaBuild依赖齐备。主干排队遵守owner统一顺序，不与品牌PR50竞争。0.5.5原生modelqa窗口、正式打包/更新仍待统一owner串行接线和验收。
 
 ## Next step
 

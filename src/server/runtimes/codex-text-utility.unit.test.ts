@@ -232,7 +232,7 @@ describe('native Codex utility lifecycle', () => {
     expect(await generateCodexTextUtility({ prompt: 'context', systemPrompt: 'suggest', model: 'session-model' })).toBeNull();
   });
   it('times out inference, kills its own children and closes the gate without publishing partial text', async () => {
-    mocks.fetch = vi.fn((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))); 
+    mocks.fetch = vi.fn((_url, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })));
     expect(await generateCodexTextUtility({ prompt: 'context', systemPrompt: 'suggest', model: 'session-model', timeoutMs: 5 })).toBeNull();
     expect(mocks.close).toHaveBeenCalled();
     const { killWithEscalation } = await import('./utils/kill-with-escalation');
