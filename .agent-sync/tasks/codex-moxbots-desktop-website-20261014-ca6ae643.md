@@ -28,6 +28,7 @@ Make every visible MoXBots brand entry in the desktop app open `https://140.143.
 - `vitest run --project dom src/renderer/components/launcher/BrandSection.test.tsx` using bundled Node v24.19.0 — passed (14 tests), including MoXBots click/Enter behavior and MyAgents non-clickable behavior.
 - `vitest run --project unit src/renderer/i18n/applicationBrand.test.ts` using bundled Node v24.19.0 — passed (2 tests, both profiles).
 - `MYAGENTS_BUILD_PROFILE=moxbot vite build` using bundled Node v24.19.0 — passed. Inspected emitted `dist/assets/index-C01_WTKT.js`: the requested URL appears once and `https://myagents.io` appears zero times in that app entry bundle. Vite emitted pre-existing dynamic-import/chunk-size warnings.
+- First CI on head `5c83a40f` found an existing integration assertion still pinned to the previous MoXBots URL (`src/server/utils/app-profile.integration.test.ts`); updated it and reran that file locally (5 tests passed). CI is rerunning on the correction commit.
 - Source inspection confirms `vite.config.ts` defaults `MYAGENTS_BUILD_PROFILE` to `myagents`, while `scripts/build-moxbot.mjs` sets it to `moxbot` for MoXBots bundles. The renderer URL is profile-gated in `src/shared/appProfile.ts`.
 - Native bundle URL, installed app behavior, and actual external browser launch remain unverified pending parent integration/build and native acceptance.
 

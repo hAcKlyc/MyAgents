@@ -65,7 +65,7 @@ describe('compiled application profile isolation', () => {
     expect(standard.DEFAULT_CONFIG.globalSummonShortcut.enabled).toBe(true);
     expect(isolated.DEFAULT_CONFIG.globalSummonShortcut.enabled).toBe(false);
     expect(isolated.APP_DISPLAY_NAME).toBe('MoXBots');
-    expect(isolated.APP_WEBSITE_URL).toBe('https://moxbot.mailxf.chatgpt.site');
+    expect(isolated.APP_WEBSITE_URL).toBe('https://140.143.183.232/');
     expect(standard.APP_WEBSITE_URL).toBe('https://myagents.io');
     expect(isolated.serializeAppRoute(isolated.createSpaceHomeAppRoute())).toBe('moxbot://open/v1/spaces');
     expect(isolated.parseAppRouteUrl('myagents://open/v1/spaces')).toBeNull();
