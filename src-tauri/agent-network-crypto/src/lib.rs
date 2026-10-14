@@ -543,6 +543,7 @@ pub use macos_helper::run_private_credential_helper;
 #[cfg(all(feature = "os-store", target_os = "macos"))]
 pub use macos_credential::{
     credential_authorization_required, read_secret_authorized, read_secret_noninteractive,
+    delete_secret_noninteractive, write_secret_noninteractive,
 };
 #[cfg(unix)]
 mod encrypted_store;

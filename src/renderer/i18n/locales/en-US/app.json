@@ -1399,7 +1399,7 @@
       "keyInvalid": "The device key is invalid, expired, revoked, or bound to another device.",
       "trustChanged": "The instance identity or trust at this address changed. Verify the deployment first.",
       "removalPending": "Server revocation is unconfirmed. The connection is stopped; retry removal later.",
-      "credentialStoreAuthorizationRequired": "System credentials need one authorization. Background restore has stopped and will not repeatedly request your password.",
+      "credentialStoreAuthorizationRequired": "System credentials need authorization. Background restore has stopped and will not automatically repeat the password request.",
       "credentialStoreUnavailable": "The system credential store is unavailable. Background restore has stopped; check the system credential store.",
       "credentialStoreInvalid": "The saved local session could not be validated. The connection is stopped to protect your identity; the record was not overwritten.",
       "ownedSessionMissing": "No local login session was found for this connection. It is stopped and requires an explicit sign-in to recover.",

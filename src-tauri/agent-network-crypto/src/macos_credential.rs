@@ -95,6 +95,36 @@ pub fn read_secret_authorized(
     super::macos_helper::read_authorized(credential, cancelled)
 }
 
+/// Owner-authorized mutation only; background policy never displays a prompt.
+pub fn write_secret_noninteractive(entry: &keyring::Entry, secret: &[u8]) -> keyring::Result<()> {
+    #[cfg(feature = "fixed-macos-reader")]
+    {
+        let Some(credential) = entry.get_credential().downcast_ref::<MacCredential>() else {
+            #[cfg(test)]
+            return entry.set_secret(secret);
+            #[cfg(not(test))]
+            return Err(super::macos_helper::unavailable());
+        };
+        super::macos_helper::write(credential, secret)
+    }
+    #[cfg(not(feature = "fixed-macos-reader"))]
+    entry.set_secret(secret)
+}
+pub fn delete_secret_noninteractive(entry: &keyring::Entry) -> keyring::Result<()> {
+    #[cfg(feature = "fixed-macos-reader")]
+    {
+        let Some(credential) = entry.get_credential().downcast_ref::<MacCredential>() else {
+            #[cfg(test)]
+            return entry.delete_credential();
+            #[cfg(not(test))]
+            return Err(super::macos_helper::unavailable());
+        };
+        super::macos_helper::delete(credential)
+    }
+    #[cfg(not(feature = "fixed-macos-reader"))]
+    entry.delete_credential()
+}
+
 pub(super) fn read_direct(credential: &MacCredential, mode: ReadMode) -> keyring::Result<Vec<u8>> {
     let keychain = SecKeychain::default_for_domain(domain(credential))
         .map_err(keyring::macos::decode_error)?;
@@ -105,6 +135,46 @@ pub(super) fn read_direct(credential: &MacCredential, mode: ReadMode) -> keyring
         mode,
     ))
     .map_err(keyring::macos::decode_error)
+}
+
+#[cfg(feature = "fixed-macos-reader")]
+pub(super) fn write_direct(credential: &MacCredential, secret: &[u8]) -> keyring::Result<()> {
+    let keychain = SecKeychain::default_for_domain(domain(credential))
+        .map_err(keyring::macos::decode_error)?;
+    match keychain.find_generic_password(&credential.service, &credential.account) {
+        Ok((_, mut item)) => item
+            .set_password(secret)
+            .map_err(keyring::macos::decode_error)?,
+        Err(error) if error.code() == -25300 => keychain
+            .add_generic_password(&credential.service, &credential.account, secret)
+            .map_err(keyring::macos::decode_error)?,
+        Err(error) => return Err(keyring::macos::decode_error(error)),
+    }
+    let stored = zeroize::Zeroizing::new(read_direct(credential, ReadMode::Background)?);
+    if stored.as_slice() != secret {
+        return Err(super::macos_helper::unavailable());
+    }
+    Ok(())
+}
+#[cfg(feature = "fixed-macos-reader")]
+pub(super) fn delete_direct(credential: &MacCredential) -> keyring::Result<()> {
+    let keychain = SecKeychain::default_for_domain(domain(credential))
+        .map_err(keyring::macos::decode_error)?;
+    security_framework::passwords::delete_generic_password_options(query(
+        &credential.service,
+        &credential.account,
+        CFArray::from_CFTypes(&[keychain]),
+        ReadMode::Background,
+    ))
+    .map_err(keyring::macos::decode_error)?;
+    match read_direct(credential, ReadMode::Background) {
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Ok(secret) => {
+            let _secret = zeroize::Zeroizing::new(secret);
+            Err(super::macos_helper::unavailable())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn credential_authorization_required(error: &keyring::Error) -> bool {

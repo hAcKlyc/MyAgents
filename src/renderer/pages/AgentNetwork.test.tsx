@@ -388,7 +388,7 @@ describe("Agent network account and device management", () => {
   it.each([
     [
       "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
-      "系统凭据需要一次授权。后台恢复已停止，不会反复请求密码。",
+      "系统凭据需要授权。后台恢复已停止，不会自动重复请求密码。",
     ],
     [
       "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
@@ -432,7 +432,7 @@ describe("Agent network account and device management", () => {
     expect(
       await screen.findByText(/网络连接失败，正在自动重连/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/系统凭据需要一次授权/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/系统凭据需要授权/)).not.toBeInTheDocument();
   });
   it("offers read retry without claiming an uncertain save", async () => {
     mocks.devices.mockRejectedValueOnce({ code: "NETWORK_TRANSPORT_FAILED" });
