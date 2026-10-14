@@ -15,7 +15,7 @@
 - [x] 协议与 owner 边界：owned encrypted management session.remote 扩展，不改vendor固定协议包。
 - [x] 桌面与Host执行 owner：配置冻结、权限检查、durable operation receipt、精确generation/turn审批和停止。
 - [x] RemoteSessionTab：账号隔离、真实快照、分页、断线恢复、不自动重发、关闭窗口不停止。
-- [ ] 代码检查及模拟验证：TypeScript/Rust、IPC/DOM/权限与重复请求反证、独立审查。
+- [x] 代码检查及模拟验证：TypeScript/Rust、IPC/DOM/权限与重复请求反证、独立审查。
 - [ ] 真实联调：两设备身份与真实Provider会话；模拟通过不替代此项。
 - [ ] 提交、CI、合入远端主干并核实SHA。
 - [ ] 候选包、发布、真实用户路径复验：受现有release owner/资源签名/原生工具链约束。
@@ -26,7 +26,7 @@
 
 ## 当前证据
 
-- 同步主干37279后的全量unit：560 files，5615 passed / 5 skipped；DOM267 files / 2290 passed。原基线unit5607通过。
+- 同步主干0c7后的全量unit：560 files，5625 passed / 5 skipped；DOM267 files / 2290 passed（37279整合时）。原基线unit5607通过。
 - 定向owner/receipt：含真实Global Node routes与跨进程落盘handoff、并发与失败注入、过期进程租约、10k总容量（模拟容量2）、不保存prompt。最终聚焦测试14+1通过。
 - Host：service7、IPC11、真实worker3、Bot1；排队ACK helper3；保留Bot执行权限与私有history。
 - Renderer：账号/冷恢复、API、持久操作编号、DOM、分页、安全Markdown等回归通过；实际组件1280/390流程由非UI实现者验收，见 `dev-docs/remote-session/ui-simulation-review.md`，均为模拟传输。
@@ -35,10 +35,14 @@
 - 原生构建限制已重复核实：CommandLineTools Swift6.3.2的apple-metal PackageDescription arm64 undefined symbol，当前无完整Xcode。DOCS_RS不能代替真实原生构建。
 - 真实双端、Provider、安装客户端、发布验收仍未完成。
 
-## 下一步
+## 当前交付与下一步
 
-PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已同步37279，额外主干0c7b8e72（会话时长）正在整合。CI原head的tokio spawn测试违反共享runtime红线，已改join并按CI all-targets clippy重跑通过；最新合并SHA的六项CI必须全部通过才可合入。无生产部署/安装动作。
+PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已整合主干0c7b8e72。3330471e的CI五项Rust/平台检查通过；Node集成测试仅Linux旧资源列表断言失败（新增远程夹具产生第二Agent）。修正为创建receipt准确身份、完整列表/长度/roots/revision断言，本机IPC11/11通过，Linux分支须CI复验；不降低门禁。新主干d7264a43反馈中心待同步后再提交CI。
 
-原生缓存复核取得真实证据：锁定apple-metal62、apple-cf87、screencapturekit70源码文件全匹配；APFS复制到独立target，不修改旧target/fingerprint/output，普通Cargo（无DOCS_RS）probe实际Metal/CF运行成功。证据 `/private/tmp/moxbots-remote-native-cache-probe-20261015/evidence.json`。当前源码候选必须再走标准MoXBots builder/资产重建/固定签名reader验证；第一次候选构建因并发主干更新在资产阶段主动停止，不能把它当成果。
+原生缓存：锁定apple-metal62、apple-cf87、screencapturekit70源码文件全匹配；APFS复制到独立target，不修改旧target/fingerprint/output，普通Cargo（无DOCS_RS）probe实际Metal/CF运行成功。证据 `/private/tmp/moxbots-remote-native-cache-probe-20261015/evidence.json`。当前无完整Xcode，fresh-cold Swift环境问题仍未修复。
 
-下一步：统一验证0c7b8e72整合结果、完成PR45主干交付及真实native候选。然后完成同账号双端/真实Provider与审批、断线、停止路径。正式发布仍须活动owner、签名/公证、回滚与真实用户验收门禁；缓存复用不表示fresh-cold Swift环境问题已修。
+标准MoXBots builder已完成3330471e真实原生编译/打包（无DOCS_RS，无stub；固定reader验证通过）。候选 `/private/tmp/moxbots-remote-session-candidate-20261015/target/aarch64-apple-darwin/release/bundle/macos/MoXBots.app`，日志 `/tmp/moxbots-remote-session-native-candidate.log`。未签名、未安装、未发布、未做真实双端/Provider验收；后续主干整合变化需重新构建。
+
+明确的日常App保护约束：WPS项目 `output/formal-install-20261015/PROTECTED-DAILY-APP.md`。不借用/修改日常App、~/.moxbot、登录或钥匙串。开发目录本身不证明bundle/单实例/数据/端口/credential namespace隔离。本候选未启动。已有101验收记录普通execution=false且Agent禁用，不能擅自开启；本机SSH agent的只读BatchMode连接返回publickey,password拒绝，尚未找到本任务可复用的Host凭据路径。
+
+下一步：整合最新主干、六项CI全绿、合入并核实远端main；重建与记录最终候选。真实验收需独立测试身份/运行环境及目标已授权的可执行Agent，正式发布仍须签名/公证、活动owner、回滚与真实用户验收。不得把源码/模拟/原生编译冒充生产可用。

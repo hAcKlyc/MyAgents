@@ -918,37 +918,60 @@ it.skipIf(process.getuid?.() === 0)(
       mutationId: configId,
       revision: 1,
     });
+    const fixtureResourceAgent = {
+      agentId: 'remote-fixture-agent', projectId: 'remote-fixture-project',
+      name: 'Remote fixture', workspacePath: join(state, 'workspaces', 'default'),
+      enabled: false, archived: false,
+    };
+    const resourceAgents = [fixtureResourceAgent];
+    let resourceRevision = 0;
+    // Mutation uses Linux-only O_NOFOLLOW directory-fd anchoring through
+    // /proc/self/fd (resources.ts::workspace). Inspection remains cross-platform.
     if (process.platform === "linux") {
       const resourceId = randomUUID();
-      expect(
-        await sendRequest("resources.create", {
+      const createdReceipt = await sendRequest("resources.create", {
           rootId: "workspaces",
           relativePath: "ipc-created/workspace",
           expectedRevision: 0,
           mutationId: resourceId,
           operation: "create",
-        }),
-      ).toMatchObject({
+        });
+      expect(createdReceipt).toMatchObject({
         kind: "resource-receipt",
         status: "persisted",
         mutationId: resourceId,
+        revision: 1,
         effect: "registered-disabled-agent",
         resource: { enabled: false, archived: false },
       });
+      expect(createdReceipt.resource).toEqual({
+        created: true,
+        agentId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+        projectId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+        name: 'workspace', workspacePath: join(state, 'workspaces', 'ipc-created', 'workspace'),
+        enabled: false, archived: false,
+      });
+      const createdResource = createdReceipt.resource as { agentId: string; projectId: string; name: string; workspacePath: string; enabled: boolean; archived: boolean };
+      expect(createdResource.agentId).not.toBe(fixtureResourceAgent.agentId);
+      expect(createdResource.projectId).not.toBe(fixtureResourceAgent.projectId);
+      resourceAgents.push({ agentId: createdResource.agentId, projectId: createdResource.projectId,
+        name: createdResource.name, workspacePath: createdResource.workspacePath,
+        enabled: createdResource.enabled, archived: createdResource.archived });
+      resourceRevision = 1;
       expect(
         await sendRequest("receipt.get", {
           mutationId: resourceId,
           owner: "resources",
         }),
-      ).toMatchObject({
-        kind: "resource-receipt",
-        status: "persisted",
-        mutationId: resourceId,
-      });
-      expect(await sendRequest('host.snapshot', {})).toMatchObject({
-        resources: { revision: 1, agents: [{ enabled: false, archived: false }] },
-      });
+      ).toEqual(createdReceipt);
     }
+    // The same complete projection assertion runs on macOS (one fixture) and
+    // Linux (the preserved fixture plus the exact newly registered Agent).
+    const resourceSnapshot = (await sendRequest('host.snapshot', {})).resources as { agents: unknown[] };
+    expect(resourceSnapshot.agents).toHaveLength(process.platform === 'linux' ? 2 : 1);
+    expect(resourceSnapshot).toEqual({ version: 1, revision: resourceRevision,
+      roots: [{ rootId: 'workspaces', workspacePath: join(state, 'workspaces') }],
+      agents: resourceAgents.sort((left, right) => left.agentId.localeCompare(right.agentId)) });
     const disconnectedMutation = randomUUID();
     peer.write(
       frame({
