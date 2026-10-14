@@ -22,11 +22,11 @@
 
 ## Completed
 
-FEEDBACK真实原生入口/账号恢复已完成，文档PR51 CI进行中，与此实现分支隔离。Server闭集授权/fixture/UUID操作、精确取消、单活跃operation、隔离receipt及Renderer页面已写入阶段代码，已通过28实际HTTP/文件IO联调、8真实组件DOM及61原title/context/admission unit；完整typecheck通过。UI首轮原生select被lint拒绝后改既有CustomSelect与主题token，DOM复验通过；测试多余ByRole exact参数被typecheck发现并移除，未改运行断言。
+FEEDBACK真实原生入口/账号恢复已完成，文档PR51 CI进行中，与此实现分支隔离。Server闭集授权/fixture/UUID操作、精确取消、单活跃operation、隔离receipt及Renderer页面已写入阶段代码，已通过29实际HTTP/文件IO联调、8真实组件DOM及61原title/context/admission unit；完整typecheck通过。UI首轮原生select被lint拒绝后改既有CustomSelect与主题token，DOM复验通过；测试多余ByRole exact参数被typecheck发现并移除，未改运行断言。
 
 ## Verification
 
-28 HTTP/profile文件IO联调、8 DOM、61 title/context/admission unit、完整typecheck、相邻4文件ESLint、测试分类通过。Node初次默认v22被devEngines拒绝，改用已安装Node24.21.0，不降低门禁。依赖边界待最终结果。测试mock实际Provider调用，未运行真实模型；不把这些当真实Provider验收。
+29 HTTP/profile文件IO联调、8 DOM、61 title/context/admission unit、完整typecheck、相邻4文件ESLint、测试分类通过。Node初次默认v22被devEngines拒绝，改用已安装Node24.21.0，不降低门禁。真实depcruise通过0 errors/16既有warnings。测试mock实际Provider调用，未运行真实模型；不把这些当真实Provider验收。
 
 ## Blockers and unknowns
 
@@ -35,3 +35,5 @@ FEEDBACK真实原生入口/账号恢复已完成，文档PR51 CI进行中，与�
 ## Next step
 
 将此源码候选交统一负责人接线并独立审阅、整合最终依赖和CI。终态与取消在Tauri无法中断invoke的条件下通过明确DELETE协议确认，不能把前端放弃结果当后端退出。
+
+独立自审补充真实@hono/node-server loopback适配验证：旧7f4对空DELETE stream误拒400，先保留失败断言再修为读取实际空stream，非空payload仍400且不abort。最终29联调通过；完整typecheck与相邻lint再次通过。不是仅new Request mock证据；SDK调用仍合成mock，真实原生/Provider待负责人候选。
