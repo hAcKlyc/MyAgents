@@ -86,3 +86,9 @@ QA追加隔离正在工作树，暂未主干交付。独立审阅初轮终端ENV
 ## CI dependency repair 2026-10-15
 
 CI c46 head发现composer runtime导入tabPersistence→builtin UI composition的四个循环；已将serializer/parser通过App既有owner注入，checkpoint仅保留type import，没有复制协议/serializer或放宽schema。Root与独立复核相关62/62通过；bundled Node24 fullLint通过（0依赖错误，16已有orphan警告）、typecheck/diff通过。c46三份尚在编译的候选以精确本任务PGID SIGINT停止，未发布；所有最终资源及native重建用追加修复source pin，保留失败证据。
+
+## Final native candidates and CI contract maintenance
+
+正式和QA A2/B2 source pin = 3000f30fb28151ad74d393a7d99ac62dd463c404，三份assets/native成功；固定production reader复核通过。主干并发反馈PR44/d726在冻结后合入，不修改冻结包源码；最终主干同步和源码版本分别记录。Source freeze 3311 tracked-file hashes及生产key/pub配置一致性验证在project pointer work/updater-20261014/D-source-freeze-3000f30f.json。
+
+CI3000五项通过；JS唯一失败是已有AppShellChrome.contract仍找旧无参重启调用（unit5621通过，1失败，5跳过）。仅调整此既有测试：Record/file保存位置非负且早于checkpoint.persist，checkpoint早于带lease的restart；相关78/78及最终contract16/16、lint/diff通过，独立16项复跑。runtime文件未改，因此包source3000保持，不用修改/伪造实际产物来源；追加测试/文档将重新跑CI。原生A2/B2准备签名，尚未执行安装；生产stable仍204。

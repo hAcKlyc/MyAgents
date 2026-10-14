@@ -49,8 +49,16 @@ describe('App Shell chrome contract', () => {
     ).toBeLessThan(myagentsUpdateGuard.indexOf('performRestartAndUpdate()'));
     const moxbotUpdateGuard = updateGuard.slice(0, updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
     expect(moxbotUpdateGuard).not.toContain('requestLifecycleExitConfirmation()');
-    expect(moxbotUpdateGuard.indexOf('pendingRecordNoteSubmittersRef.current.values()')).toBeLessThan(moxbotUpdateGuard.indexOf('performRestartAndUpdate()'));
-    expect(moxbotUpdateGuard.indexOf('fileEditSubmittersRef.current.values()')).toBeLessThan(moxbotUpdateGuard.indexOf('performRestartAndUpdate()'));
+    const checkpoint = moxbotUpdateGuard.indexOf('await checkpoint.persist(');
+    const restart = moxbotUpdateGuard.indexOf('await performRestartAndUpdate(checkpoint)');
+    const recordSave = moxbotUpdateGuard.indexOf('pendingRecordNoteSubmittersRef.current.values()');
+    const fileSave = moxbotUpdateGuard.indexOf('fileEditSubmittersRef.current.values()');
+    expect(recordSave).toBeGreaterThanOrEqual(0);
+    expect(fileSave).toBeGreaterThanOrEqual(0);
+    expect(checkpoint).toBeGreaterThanOrEqual(0);
+    expect(restart).toBeGreaterThan(checkpoint);
+    expect(recordSave).toBeLessThan(checkpoint);
+    expect(fileSave).toBeLessThan(checkpoint);
     expect(app).toContain('onExitRequested: requestLifecycleExitConfirmation');
   });
 

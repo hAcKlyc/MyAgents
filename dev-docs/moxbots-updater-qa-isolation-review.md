@@ -132,3 +132,9 @@ B 就绪之前不安装、不退出 QA。后续确认/取消、busy 拒绝、签
 CI发现checkpoint运行时导入tabs codec引入UI composition循环。独立审阅4文件修复：checkpoint改成 `import type PersistedTabState`，begin/load接收App已有 `serializeTabs`/`deserializeTabs` 函数；App以原codec传入，测试也用原codec。没有新 serializer、schema变化、role/permission放松，移除 leaf→composition运行时反向依赖。独立复跑 checkpoint unit19 + DOM6 + tabPersistence37，共62/62通过，diff-check通过；full dependency lint/typecheck由主实现者运行，不将此局部结果冒称full CI通过。
 
 主实现者已精确停止3份旧c46构建，旧构建未生成/发布候选；本审阅未操作进程。需要从包含依赖修复的新source pin重建QA A2/B2与正式包，UI继续暂停。
+
+### 既有 App Shell contract 断言同步
+
+CI旧断言仍寻找无参 `performRestartAndUpdate()`，而MoxBots路径现传入checkpoint。独立审阅单文件测试更新：检查checkpoint调用存在并在restart(checkpoint)之前，Record/file提交仍必须先于checkpoint；MyAgents路径无参断言保留。产品runtime没有修改，不构成新候选包。独立 `AppShellChrome.contract.test.ts` 16/16通过。
+
+另已通知主实现者强化旧有Record/file `indexOf` 的存在断言：负一也满足“在checkpoint前”，应各自检查>=0再比较。此为测试覆盖严谨性建议，当前产品源码实际两类提交器仍存在；不宣称存在产品数据丢失。
