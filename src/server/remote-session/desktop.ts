@@ -11,7 +11,7 @@ import { resolveWorkspaceConfig } from '../utils/admin-config';
 import { isManagedCodexProviderReady } from '../utils/managed-codex-readiness';
 import { handleAgentShow } from '../admin-api';
 import { claimPreparedSessionForTurnAdmission, getSessionMetadata, getSessionsByAgentDir, isHistoryVisibleSession, saveSessionMetadata, publishSessionForHandoff } from '../SessionStore';
-import { getSessionEngine, stopActiveTurn } from '../session-engine';
+import { getSessionEngine, stopActiveTurn, runProcessUpdateAdmission } from '../session-engine';
 import { buildRemoteSnapshot, projectRemoteInteractions } from './projection';
 import { createRemoteReceiptOwner, RemoteSessionError } from './receipts';
 
@@ -35,6 +35,10 @@ async function target(agentId:string,sessionId?:string,preparedOperation?:string
 /** Global owner freezes a hidden birth before Rust creates the original Session
  * Sidecar. The network never supplies a path or runtime configuration. */
 export async function prepareDesktopRemoteSession(value:unknown) {
+  try { return await runProcessUpdateAdmission(() => prepareDesktopRemoteSessionOwned(value)); }
+  catch (error) { return failure(error); }
+}
+async function prepareDesktopRemoteSessionOwned(value:unknown) {
   try {
     const input=z.object({request:remoteSessionRequestSchema}).strict().parse(value);
     const request=input.request;
@@ -59,6 +63,9 @@ export async function prepareDesktopRemoteSession(value:unknown) {
 }
 type Mutation=Extract<RemoteSessionRequest,{kind:'start'|'send'|'respond'|'stop'}>;
 async function perform(request:Mutation,sessionId:string,generation:string) {
+  return runProcessUpdateAdmission(() => performOwned(request,sessionId,generation));
+}
+async function performOwned(request:Mutation,sessionId:string,generation:string) {
   let handedOff=false;
   try {
     const {identity}=await target(request.agentId,sessionId,request.kind==='start'?request.operationId:undefined);
@@ -106,6 +113,10 @@ async function perform(request:Mutation,sessionId:string,generation:string) {
 /** Returns a durable processing receipt without waiting for a queued turn, so
  * permission replies and stop remain available on the same encrypted channel. */
 export async function handleDesktopRemoteSession(value:unknown,role:'global'|'session'|'standalone') {
+  try { return await runProcessUpdateAdmission(() => handleDesktopRemoteSessionOwned(value,role)); }
+  catch (error) { return failure(error); }
+}
+async function handleDesktopRemoteSessionOwned(value:unknown,role:'global'|'session'|'standalone') {
   try {
     const {request,generation,preparedSessionId}=envelope.parse(value);
     if(generation!==process.env.MYAGENTS_SIDECAR_GENERATION)throw new RemoteSessionError('REMOTE_SESSION_OWNER_CHANGED');

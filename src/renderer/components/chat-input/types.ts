@@ -42,6 +42,9 @@ interface ScheduledTaskBarProjection {
 }
 
 export interface SimpleChatInputProps {
+  /** Exact main-window Tab owner for MoxBots update draft handoff. */
+  composerTabId?: string;
+  composerDiscussionId?: string;
   value?: string;
   onChange?: (value: string) => void;
   onSend: (
