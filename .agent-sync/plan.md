@@ -1,6 +1,6 @@
 ## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
 
-a838 已获用户批准、备份安装并核对实际 sidecar 来源；旧会话与身份显式读取成功，身份目标保存失败，未切换路由。当前做 publisher 分离及锁内授权事务修复；不重复旧授权、不收密码。行为测试与最终复核开放，17项 reader 打包检查通过。新包完成后用户已明确要求官网和 GitHub 试用下载公开；页面 IAB/合成下载及独立视觉检查完成，真实安装包下载与产品验收尚未完成。记录 `.agent-sync/tasks/feat-mah-credential-publisher-routes-20261014.md`。
+5f1a8feb 七CI、两个完整候选签名与资源验证通过；用户后来明确要求安装/官网上架，直接从a838更新5f并真实启动，84fd未运行。官网下载公开版本7/source7da419c，实际下载ZIP大小与SHA和安装原包相同。试用包未公证，公开不等于全部Native/业务验收。看板owner已完成真实受控任务与持久化路径；当前云会话 OWNED_SESSION_INVALID，凭据迁移/免提示冷启动/远程配置仍开放，UI遇用户操作冲突后停止。PR14仍草稿，未主干交付。下一步及精确证据见 `.agent-sync/tasks/feat-mah-credential-publisher-routes-20261014.md`。
 
 ## MAH-CREDENTIAL-PARENT-BUDGET-20261013 — native recovery continuation (historical)
 
