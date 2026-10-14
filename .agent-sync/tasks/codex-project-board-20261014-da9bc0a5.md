@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/project-board-20261014 -->
 <!-- git-project-sync-task:base=43994b75ca9278420ecd352af2e0cc663f4a7cdc -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 
 
 # Task: MOXBOTS-PROJECT-BOARD-001: workspace execution overview from PB-002
@@ -20,7 +20,8 @@
 - [x] 实际React页面点击、错误恢复、草稿/筛选保留、键盘与适配检查及独立UI审阅。
 - [x] 同步最新main后typecheck/lint/99项相关用例/12组隔离交互/MoXBots build:web通过。
 - [x] PR31六项当前头CI及远端main核验；merge cda773cf，16个产品文件hash一致。
-- [ ] 发布制品/回滚与当前安装owner核实；真实运行版本和用户路径验收。
+- [x] 安装owner交付候选源/签名/回滚对应证据；5f1a8feb已真实安装，项目看板Native关键路径通过。
+- [x] 官网公开包匿名全量下载、大小、SHA256及ZIP完整性与本地候选包一致。
 
 ## Decisions
 
@@ -40,11 +41,11 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 
 ## Blockers and unknowns
 
-当前App有Host/凭据owner活跃，禁止并发换包、退出或改凭据。安装阶段需核实实际owner状态与具体包来源。没有新增付费模型执行授权，不为UI验收启动模型任务。
+安装、桌面验收与官网发布均已完成；其余未验收边界见dev-docs/project-board-native-acceptance.md。没有新增付费模型执行授权，本次未启动模型任务。
 
 ## Next step
 
-已完成源码main交付；用户2026-10-14授权联系「Bots 网络 可用」并完成统一更新/真实桌面验收。消息已发送且owner确认，等待含PR31的新统一冻结包、来源/验签/回滚回执和独占UI窗口。收到窗口后按Native矩阵检验既有TaskStore/Session API与原会话回程。
+已完成源码main交付、5f1a8feb统一客户端安装、真实桌面关键路径验收，并独立比对官网匿名全量下载件。当前结束条件满足；跨重启/窄视口/归档恢复等未覆盖项目已明确列入验收边界。
 
 ## 当前实现与审阅
 
@@ -54,6 +55,14 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 
 集成结果：并行main只在plan追加产生冲突，双方记录均保留，产品看板/入口相对功能提交没有漂移。合并后typecheck、完整lint、99项unit/DOM、12组实际React隔离交互、MoXBots build:web成功。PR31及handoff门禁已通过；最终CI/main与统一Native包继续追踪。源与产物hash见dev-docs/project-board-validation/source-hashes.json，hash证明代码/制品对应，不代表安装或真实路径验收。
 
-## 2026-10-14 — 已授权统一原生更新
+## 2026-10-14 — 已授权统一原生更新与看板Native验收
 
-用户明确授权跨聊天协调；已向「Bots 网络 可用」发送main提交、源码hash、验收记录与受控Task规则。owner确认唯一负责退出/换包/安装/重启，新包将包含PR31。其同步源f51c16a7（含main d86f7505）reported 7项CI通过，但当前运行a8387448尚不含看板，不能据此做验收。当前凭据迁移在identity-save失败、无ledger提交，owner正在修复物理slot路由，未交出UI窗口。本Agent不碰凭据或并发操作App。
+用户明确授权跨聊天协调与原生验收；已向「Bots 网络 可用」发送main提交、源码hash、验收记录与受控Task规则。owner独占负责退出/备份/替换/安装/启动。最终候选为source 5f1a8feb879775a9655c7e5cf848661f692be542，macOS ARM64 ZIP SHA256 e26a8e9a48a9083fe4283c0c6a0538dfd2dd639922a04326f718ff67fd7e220c。安装路径 /Applications/MoXBots.app；owner复核19个资源和Developer ID签名（Team QJ5URBG9AP），未经过Apple公证；安装二进制SHA256 a289686ab5c2b7605b9951c4215b3135efdfb6974eb77e5d80a7e056c3c9cea3，保留回滚App /Applications/.MoXBots.previous-8b9f734d-before-5f1a8feb.app。原MyAgents未改动。
+
+真实Native操作经CUA在安装后的MoXBots窗口完成：从Mino侧栏入口打开唯一 Mino · 看板 标签；看到真实项目汇总、四组状态和独立“其他任务与会话”分组。搜索与列表视图返回时保留过滤、选择和详情；打开已有空闲会话返回原对话，无输入/模型执行。超过快照新鲜期时该会话先如实显示“执行状态未知”，手动刷新后回到“当前空闲”。
+
+通过MoXBots集成终端的正式CLI创建受控本地Task PB-NATIVE-QA-20261014（ID 5dc7e135-3d4f-4fbd-a351-077fd22e395d，executor user），无Agent dispatch、模型调用或业务数据变更。真实看板读到Task；todo→running→verifying后在UI提交验收说明并点“确认验收完成”，看板状态/需要我计数与CLI task get读回的done一致；随后对这条受控Task作recoverable archive，CLI读回archived。该Task未跨重启验证，未做unarchive恢复步骤。当前窗口有效最窄布局为单列状态折叠；≤700 CSS px详情抽屉、键盘遮罩和Task跨重启未能在本机可调整窗口中复现，仍列为未验证。其余矩阵见 dev-docs/project-board-native-acceptance.md。
+
+官网owner确认Sites公开部署：https://moxbot.mailxf.chatgpt.site/download/，发行页 https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-20261014-5f1a8feb。主Agent从官网真实下载链接取得完整文件并独立复核：346377153字节、SHA256 e26a8e9a48a9083fe4283c0c6a0538dfd2dd639922a04326f718ff67fd7e220c，与本机候选ZIP完全一致；`unzip -tq`通过。匿名页面与manifest HTTP 200证据见发布凭证；本次shell客户端直接GET静态manifest遭403，但不影响IAB匿名下载得到完整ZIP及其hash核验。公开页面注明包未经过Apple公证。包凭据迁移、远程设置等其它产品路径未纳入本次看板验收。
+
+真实运行/桌面证据详见私有目录 /Users/zhangshaohua/Documents/Codex/2026-10-14/moxbots-project-board-native-evidence/ 与owner发布回执 /Users/zhangshaohua/Documents/WPS Cloud/【项目】目录/MoxBot/output/download-page-release/；目录外的系统备份/回滚数据不进入Git。
