@@ -259,6 +259,7 @@ fn on_summon_pressed<R: Runtime>(app: &AppHandle<R>) {
 /// Returns Err with a user-friendly message if the OS refuses (already taken,
 /// platform doesn't support the combo, etc.).
 pub fn register<R: Runtime>(app: &AppHandle<R>, accelerator: &str) -> Result<(), String> {
+    if crate::app_dirs::IS_ISOLATED_QA { return Err("ISOLATED_QA_GLOBAL_SHORTCUT_DISABLED".into()); }
     let shortcut = parse_accelerator(accelerator)?;
     let gs = app.global_shortcut();
 
@@ -343,6 +344,7 @@ pub fn build_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// Failure → log + leave summon disabled (frontend will surface via the
 /// settings panel; we don't want a one-time conflict to abort app boot).
 pub fn setup_on_startup<R: Runtime>(app: &AppHandle<R>) {
+    if crate::app_dirs::IS_ISOLATED_QA { return; }
     let cfg = load_config();
     if !cfg.enabled {
         ulog_info!("[global-shortcut] disabled in config, skipping registration");

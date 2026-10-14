@@ -247,6 +247,9 @@ fn app_context() -> tauri::Context<tauri::Wry> {
     if crate::app_dirs::IS_UPDATER_QA {
         assert_eq!(context.config().identifier, "com.moxbot.updaterqa", "QA requires its isolated bundle configuration");
         assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Updater QA"));
+    } else if crate::app_dirs::IS_MODEL_QA {
+        assert_eq!(context.config().identifier, "com.moxbot.modelqa", "Model QA requires its isolated bundle configuration");
+        assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Model QA"));
     } else if crate::app_dirs::IS_MOXBOT {
         assert_eq!(context.config().identifier, "com.moxbot.app", "MoX bot requires its isolated bundle configuration");
     }

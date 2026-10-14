@@ -24,15 +24,15 @@ use std::path::PathBuf;
 use crate::{ulog_error, ulog_info, ulog_warn};
 
 /// Compile-time product identity; never inferred from inherited user environment.
-#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+#[cfg(all(myagents_moxbot, not(myagents_isolated_qa)))]
 pub const APP_DATA_DIR_NAME: &str = ".moxbot";
 #[cfg(not(myagents_moxbot))]
 pub const APP_DATA_DIR_NAME: &str = ".myagents";
-#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+#[cfg(all(myagents_moxbot, not(myagents_isolated_qa)))]
 pub const APP_DISPLAY_NAME: &str = "MoXBots";
 #[cfg(not(myagents_moxbot))]
 pub const APP_DISPLAY_NAME: &str = "MyAgents";
-#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+#[cfg(all(myagents_moxbot, not(myagents_isolated_qa)))]
 pub const APP_CLI_NAME: &str = "moxbot";
 #[cfg(not(myagents_moxbot))]
 pub const APP_CLI_NAME: &str = "myagents";
@@ -43,6 +43,14 @@ pub const APP_DATA_DIR_NAME: &str = ".moxbot-updaterqa";
 pub const APP_DISPLAY_NAME: &str = "MoXBots Updater QA";
 #[cfg(myagents_updater_qa)]
 pub const APP_CLI_NAME: &str = "moxbot-updaterqa";
+#[cfg(myagents_model_qa)]
+pub const APP_DATA_DIR_NAME: &str = ".moxbot-modelqa";
+#[cfg(myagents_model_qa)]
+pub const APP_DISPLAY_NAME: &str = "MoXBots Model QA";
+#[cfg(myagents_model_qa)]
+pub const APP_CLI_NAME: &str = "moxbot-modelqa";
+pub const IS_MODEL_QA: bool = cfg!(myagents_model_qa);
+pub const IS_ISOLATED_QA: bool = cfg!(myagents_isolated_qa);
 pub const IS_UPDATER_QA: bool = cfg!(myagents_updater_qa);
 pub const IS_MOXBOT: bool = cfg!(myagents_moxbot);
 
@@ -59,6 +67,11 @@ mod app_profile_tests {
             assert_eq!(APP_CLI_NAME, "moxbot-updaterqa");
             assert_eq!(APP_URL_SCHEME, "moxbot-updaterqa");
             assert_ne!(data, home.join(".moxbot"));
+        } else if IS_MODEL_QA {
+            assert_eq!(data, home.join(".moxbot-modelqa"));
+            assert_eq!(APP_CLI_NAME, "moxbot-modelqa");
+            assert_ne!(data, home.join(".moxbot"));
+            assert_ne!(data, home.join(".moxbot-updaterqa"));
         } else if IS_MOXBOT {
             assert_eq!(data, home.join(".moxbot"));
             assert_ne!(data.join("app.lock"), home.join(".myagents/app.lock"));

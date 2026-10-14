@@ -1,4 +1,4 @@
-import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { isUpdaterQaBuild, isIsolatedQaBuild } from '../shared/updaterQa';
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * Provider verification utilities
@@ -54,7 +54,7 @@ function keychainAccount(): string | null {
 }
 
 function hasClaudeCodeOAuthCredentialsStored(): boolean {
-  if (isUpdaterQaBuild()) return false;
+  if (isIsolatedQaBuild()) return false;
   if (existsSync(claudeCredentialsFilePath())) return true;
   if (process.platform !== 'darwin') return false;
 
@@ -566,7 +566,7 @@ export async function verifyProviderViaSdk(
  * Uses the same SDK spawning pattern as verify, but only reads initialization data.
  */
 export async function fetchSdkSupportedModels(): Promise<Array<{ value: string; displayName: string; description: string }>> {
-  if (isUpdaterQaBuild()) return [];
+  if (isIsolatedQaBuild()) return [];
   // PRD #124: this path uses default Anthropic env (subscription / Anthropic-
   // protocol providers go straight to api.anthropic.com), so no bridge token
   // is needed. `buildClaudeSessionEnv()` is now a pure function — no global
@@ -629,7 +629,7 @@ export async function fetchSdkSupportedModels(): Promise<Array<{ value: string; 
  *      `claude auth login`" case where the JSON cache hasn't been seeded yet
  */
 export function checkAnthropicSubscription(): SubscriptionStatus {
-  if (isUpdaterQaBuild()) return { available: false };
+  if (isIsolatedQaBuild()) return { available: false };
   const claudeJsonPath = join(homedir(), '.claude.json');
 
   if (existsSync(claudeJsonPath)) {
