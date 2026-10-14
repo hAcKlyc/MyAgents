@@ -19,7 +19,7 @@
 - [x] run/rerun/status/get/doc使用既有owner接口；问题与权限回原会话处理。
 - [x] 实际React页面点击、错误恢复、草稿/筛选保留、键盘与适配检查及独立UI审阅。
 - [x] 同步最新main后typecheck/lint/99项相关用例/12组隔离交互/MoXBots build:web通过。
-- [ ] CI及远端main核验。
+- [x] PR31六项当前头CI及远端main核验；merge cda773cf，16个产品文件hash一致。
 - [ ] 发布制品/回滚与当前安装owner核实；真实运行版本和用户路径验收。
 
 ## Decisions
@@ -44,7 +44,7 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 
 ## Next step
 
-固定产品改动并同步最新main；验证合并后结果与CI、交付远端主干。原生包与真实路径仍需统一安装owner串行交接。
+已完成源码main交付；用户2026-10-14授权联系「Bots 网络 可用」并完成统一更新/真实桌面验收。消息已发送且owner确认，等待含PR31的新统一冻结包、来源/验签/回滚回执和独占UI窗口。收到窗口后按Native矩阵检验既有TaskStore/Session API与原会话回程。
 
 ## 当前实现与审阅
 
@@ -53,3 +53,7 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 阶段验证：typecheck、完整lint（既有16条dependency warnings、0 errors）与默认/MoXBots build:web通过。状态/API等20项unit、77项既有DOM及新增入口2项，共99项相关用例已通过（新增rail测试修正初始未展开fixture，发现并修复board入口收起flyout）。12组真实React隔离交互通过，独立UI一轮修复复验、追加rail入口检查通过；真实后台/Native/生产不计通过。
 
 集成结果：并行main只在plan追加产生冲突，双方记录均保留，产品看板/入口相对功能提交没有漂移。合并后typecheck、完整lint、99项unit/DOM、12组实际React隔离交互、MoXBots build:web成功。PR31及handoff门禁已通过；最终CI/main与统一Native包继续追踪。源与产物hash见dev-docs/project-board-validation/source-hashes.json，hash证明代码/制品对应，不代表安装或真实路径验收。
+
+## 2026-10-14 — 已授权统一原生更新
+
+用户明确授权跨聊天协调；已向「Bots 网络 可用」发送main提交、源码hash、验收记录与受控Task规则。owner确认唯一负责退出/换包/安装/重启，新包将包含PR31。其同步源f51c16a7（含main d86f7505）reported 7项CI通过，但当前运行a8387448尚不含看板，不能据此做验收。当前凭据迁移在identity-save失败、无ledger提交，owner正在修复物理slot路由，未交出UI窗口。本Agent不碰凭据或并发操作App。
