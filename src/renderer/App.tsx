@@ -4673,12 +4673,24 @@ export default function App() {
     if (APP_BUILD_PROFILE === 'moxbot') {
       // Updates never offer to interrupt work; Rust rejects busy/unknown owners.
       if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
+      try {
+        for (const submit of pendingRecordNoteSubmittersRef.current.values()) {
+          if (!(await submit())) return;
+        }
+        for (const submit of fileEditSubmittersRef.current.values()) {
+          if (!(await submit())) return;
+        }
+      } catch (error) {
+        console.error('[App] Failed to save drafts before update:', error);
+        toastRef.current?.error(t('appChrome.updateInstallFailed'));
+        return;
+      }
       await performRestartAndUpdate();
       return;
     }
     if (!(await requestLifecycleExitConfirmation())) return;
     await performRestartAndUpdate();
-  }, [performRestartAndUpdate, requestLifecycleExitConfirmation]);
+  }, [performRestartAndUpdate, requestLifecycleExitConfirmation, t]);
 
   // System tray event handling (minimize to tray, exit confirmation)
   useTrayEvents({

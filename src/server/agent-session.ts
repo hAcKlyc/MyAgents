@@ -290,6 +290,7 @@ export type {
 } from './builtin-session/types';
 import type { ProviderEnv } from './provider-types';
 export { stripPlaywrightResults } from './builtin-session/transcript-persistence';
+export { hasBuiltinActivityForUpdate, setUpdateRestartFrozen } from './builtin-session/lifecycle';
 import {
   clearQueryMcpPrewarmOwner,
   completeQueryBackgroundTask,

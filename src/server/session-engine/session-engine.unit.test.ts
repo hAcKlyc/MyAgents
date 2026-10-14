@@ -350,7 +350,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../agent-session', () => ({
+vi.mock('../agent-session', async () => ({
+  hasBuiltinActivityForUpdate: (await import('../builtin-session/lifecycle')).hasBuiltinActivityForUpdate,
+  setUpdateRestartFrozen: (await import('../builtin-session/lifecycle')).setUpdateRestartFrozen,
   applyMcpOverrideAndAwaitReady: mocks.applyMcpOverrideAndAwaitReady,
   cancelImRequest: mocks.cancelBuiltinImRequest,
   cancelQueueItem: mocks.cancelQueueItem,

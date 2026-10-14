@@ -1,11 +1,9 @@
 import { assertSessionTranscriptsDurableForUpdate } from '../SessionStore';
-import { interruptCurrentResponse } from "../agent-session";
 import {
-  hasQueryBackgroundTasks,
-  lifecycleState,
-  getQueryMcpMutation,
+  interruptCurrentResponse,
+  hasBuiltinActivityForUpdate,
   setUpdateRestartFrozen,
-} from "../builtin-session/lifecycle";
+} from "../agent-session";
 import {
   getActiveRuntimeSource,
   getActiveRuntimeType,
@@ -407,11 +405,7 @@ export async function freezeSessionAdmissionsForUpdate(
       live.sessionState === "starting" ||
       engine.getQueueStatus().length > 0 ||
       engine.getStreamReplaySnapshot().pendingInteractiveRequests.length > 0 ||
-      hasQueryBackgroundTasks() ||
-      getQueryMcpMutation() ||
-      lifecycleState.preWarming ||
-      lifecycleState.preWarmTimer !== null ||
-      (lifecycleState.processing && !lifecycleState.query)
+      hasBuiltinActivityForUpdate()
     )
       throw new Error("UPDATE_BUSY");
     updateRestartToken = token;
