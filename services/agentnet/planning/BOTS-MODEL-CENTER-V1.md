@@ -28,10 +28,10 @@ Host 通过原 supervisor → worker → SessionEngine → builtin SDK 消费限
 - [x] Host 实际已安装 native SDK 三协议隔离接入、不可变配置和全目录凭据泄漏扫描。
 - [x] HTTP 与实际 owner authority 接线、接口/会话/撤销端到端；135 Rust tests、clippy通过。
 - [x] 真实 Rust fixture 控制台 CRUD、模型分配、监控、普通账号拒绝及响应式独立验收，详见dev-docs/bots-model-center-review.md。
-- [ ] 合入远端 main、CI 和来源核验。
-- [ ] 云端窗口/备份/回滚/现网控制台发布和真实账号路径复验。
-- [ ] 指定平台供应商配置与单 Bot 有限 Host opt-in、费用授权后的真实收费路径。尚无本任务平台 API Key，不能复制私人 Host key 或以 mock 代替验收。
+- [x] PR38 合入远端 main、源码/主干七项 CI 成功，制品整树来源一致。
+- [x] 既有云窗口、备份/回滚、现网控制台发布及真实管理员配置/分配/监控/重启保留复验。
+- [ ] 后续用户自行配置供应商后，进行单 Bot 有限 Host opt-in 与真实调用/费用验收。用户已明确本次仅复用功能，不导入已有配置、不调用模型；这不是当前交付阻断。
 
-当前详细任务记录 `.agent-sync/tasks/codex-bots-model-center-001-a165b438.md`；未勾选项不代表已实现或生产完成。
+当前任务记录 `.agent-sync/tasks/codex-bots-model-center-001-a165b438.md`；生产发布证据 `dev-docs/bots-model-center-production-acceptance.md`。本次管理功能已发布，后续供应商调用尚未验收。
 
 模型停用后有界拉取保留原正常 FIFO，跳过确定的 catalog 不可用请求，使后续有限 Disable/Delete 能下发；已租约且结果未知的同 Bot 操作仍阻断 Delete，必须先核对原 receipt。基线超过 8 个旧失效 actor 的通用公平性缺口列入后续 BOTS-EXEC-QUEUE-FAIRNESS-002，本轮不宣称全部授权阻断均被清理。
