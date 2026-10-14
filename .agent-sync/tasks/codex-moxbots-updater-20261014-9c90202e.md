@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/moxbots-updater-20261014 -->
 <!-- git-project-sync-task:base=0bb3f934368860f46c8e19981feb7ab10ddf1709 -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 
 # Task: MoxBots independent updater with task-safe confirmed restart and notarized release
 
@@ -15,10 +15,10 @@ MOXBOTS-UPDATER-20261014：基于当前main0bb3f934接通独立MoxBots更新地�
 - [x] 自有更新签名、公钥与独立endpoint配置；不使用上游更新源。
 - [x] 后台检查/下载与跨重启pending恢复的代码及确定性回归；实际 UI 与更新仍待验收。
 - [x] 实际执行owner保护代码：busy/approval/unknown拒绝，防新任务竞态，不停止任务；运行实例验收待执行。
-- [ ] 聚焦确定性测试、类型/源码检查、独立UI验收。
-- [ ] 官网服务器更新路径、私有发布备份/回滚与实际HTTPS下载验证。
-- [ ] 原生签名A→B真实更新与重启/版本/数据保全验收。
-- [ ] 主干/远端SHA、正式包签名/公证/票据/Gatekeeper/独立产物审计。
+- [x] 聚焦确定性测试、类型/源码检查、独立UI验收。
+- [x] 官网服务器更新路径、私有发布备份/回滚与实际HTTPS下载验证。
+- [x] 原生签名A→B真实更新与重启/版本/数据保全验收（独立QA profile，非日常/paidProvider）。
+- [x] 产品源码PR46主干/远端SHA、正式包签名/公证/票据/Gatekeeper/独立产物审计；本最终记录随文档PR收尾。
 
 ## Completed
 
@@ -131,3 +131,17 @@ D/3000f30f App虽然Apple Accepted且附票，因新发现编辑入口而superse
 边界：paidProvider运行中保护为owner回归，不冒称native paid任务不中断；实际Host/发行issuer登录退出/反馈cloud与真实SDK计时样本未验收。remote-session tab正式安全更新证明未就绪时明确阻断；中文IME/评论处理中为DOM覆盖。普通TaskCenter切tab会卸载未保存inline编辑是已有独立导航缺陷，本次只证明mounted编辑拒绝更新。更新dialog实际1200×800；900×700仅小助理/账户popup适配。
 
 统一接收owner01a12b99-7b38-78b1-831f-9c60257d386a独占GitHub trial draft与IP手动下载页，本Root不重复发行或覆盖9ed设计/站点pointer。source、主干、native、正式包验收已有可领取证据；最终HTTP完成后更新结果receipt和本记录收尾。
+
+## Final acceptance settlement
+
+本轮实现/native/正式包/生产更新服务验收全部完成。具体字段与可复用命令见 dev-docs/moxbots-updater-054-delivery.md；最新接收记录WPS output/updater-20261014/final-e5a05f76/DELIVERY.json，最终main SHA在该receipt结算，package source始终e5a05f76974a4962beb0b7de259690daaef08fd5。产品源码PR46 main0c85b571；统一官网元数据PR47 main16ab3dbd及看板原生补验main80faaab7已正常整合，均无运行源码改动，不重建/重签已发布0.5.4。
+
+Own更新URL保持官网IP：/updates/stable/darwin-aarch64.json；同一SHA归档通过官网exactimmutableURL302到自有Repo同一公开版本的独立SHA-named TAR asset。未新建tag/release、未覆盖原ZIP/校验文件/发行正文、未改变公钥或stable JSON，也保留服务器original。GitHub serverdigest/343281849bytes符合；真正从官网入口跟随两跳HTTPS完整下载，37.188525s、9230854bytes/s，SHA89572190...和ownminisign/trustedcomment全部PASS；HEAD/immutable、range206及1024精确bytes、unsupported204、私有history/receipt/manifest404、stable no-store通过。原慢速自身curl48969已核对PPID/argv后TERM并保留partial，没有停止任何客户进程。
+
+CDN单exactpath prefix在五把既有maintenance flock下加到owned /etc/nginx/moxbots-updates.locations；base原文96b0...逐字节保留，nginx-t/仅gracefulreload、cloudPID1075503不变；backup/root/moxbots-updater-cdn-backup-20261015-e5a05f76。此前homepagebe516...到015b5a...变化为并发授权网站设计发布，已核对current /var/www/moxbots-website/releases/e7e283c096a1654bad1dddd7f1e9de874fcf1a21-download-054-ce86cc4f/index.html SHA015b5a...与真实HTTP逐字节一致，不把整体hash变化误当updater覆盖或假称旧页未变。Root未写任何网站文件，旧Nginx其它路由/源base未改变；GitHubZIP/IP下载页由统一owner独立通过完整下载和桌面/移动UI。
+
+GUI Root及所有children停止查询/操作，ProjectBoard也明确释放；统一receiver永久退出GUI队列，下一队列仅RemoteSession owner01a134fe-e48b-7ed0-9bfe-37021d9d41f7，在其自己人类授权下负责日常安装/真实账号/Host。Root未安装/启动/退出日常App，不从其他会话的完成推导安装授权。旧0.5.3/5949需要首次手动修复基线；更新验收A3是修复后QA基线，不能声称旧5949自动升级已通过。
+
+所有已明确边界保留：真实Provider/发行issuer登录退出/Host联调和真实running计时由其授权owner后续验收；不作为本次默认必做项或伪称已通过。普通TaskCenter切tab未保存编辑卸载缺陷仍独立未修，挂载状态更新已拒绝/保全；正式remote安全更新证明未就绪明确拒绝。0.5.4制品/签名/版本已公开冻结，后续代码修复或正式协议接入应使用新版本0.5.5及新完整制品，不复写本版。
+
+执行记录：Root负责整合、源码/主干核实、生产发布和整体接受；Composer worker只编辑草稿准入文件，独立QA worker发现并复核实际route/内联编辑/恢复风险，DMG worker负责仅包装/镜像清单。均为既有本地协作，未调用外部模型服务或收费Provider；token/费用未统计，不虚报节省比例。实际本轮三份native release约10m30–33s并行，各自源码及目标隔离。所有临时/失败/淘汰候选和回滚证据保留，没有以Accepted替代native。

@@ -194,12 +194,8 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 
 ### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
 
-用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。PR42六CI/main58b6720f、原生补验记录main80faaab7；隔离B3卡片/列表/详情与原会话/草稿、回看状态、idle过期未知及刷新通过。真实running计时无合法模型样本仍未覆盖。原生窗口已释放，后续按各owner授权串行；记录见 `.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
 
+### MOXBOTS-UPDATER-20261014 final0.5.4 delivery
 
-### MOXBOTS-UPDATER-20261014 final0.5.4 cutover
-
-PR46/sourcee5a05f76 landed main0c85b571, sixCI, main3351runtimeblob equality. Independent nativeQA A3→B3 passes unsigned/tamper priornegative, actualcancel/edit/realPTY refusal, signedidle install/nativecleanup/exactdraft&Record restoration; Root actualAX/screenshot recheck. FinalApp/DMG AppleAccepted/stapled/Gatekeeper and ZIP/TAR fullroundtrip gates pass. WPS output/updater-20261014/final-e5a05f76 provides finalApp-distribution receipts. Ownupdate stable0.5.4 atomic cutover complete; fullHTTPSGET/hash/signature/range/privacy/unchangedsite verification ongoing due measuredslowlink, not marked complete. QA GUI now soleProjectBoardowner; Root/children stopped, sharedlease record output/remote-session-20261015/OWNER-WINDOW-HANDOFF.json. Unifiedowner controls trialGitHub/IP download page; remoteowner handles separately authorizeddaily install afterlease. PaidProvider/realissuer/Host/providertimer not nativeaccepted.
-用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；原生隔离0.5.4/B3会话导航、回看、草稿保持及空闲快照已通过，真实运行计时无合法样本仍未覆盖，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
-
-MOXBOTS-PROJECT-BOARD-002 追加授权：用户已允许联系实际统一更新负责人；冻结e5a05f76的10个看板关键文件与已验收源码哈希一致。A3→B3窗口已释放，原生补验后04:12交回；新增接收方授权不再阻断。官网0.5.4与正式安装由既有owner串行核实，真实计时仍待合法现成样本。记录见本任务接续。
+Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已整合统一官网PR47 main16ab3dbd/看板记录80faaab7，无客户端重建。独立QA真实A3→B3、编辑/realPTY拒绝不中断、cancel、signed install/nativecleanup/exactdraft&Record恢复和Root实际UI复看通过。App/DMG AppleAccepted/stapled/Gatekeeper，ZIP/TAR/DMG全清单/签名门禁通过。Own官网stable0.5.4及独立ownkey签名生效；sameSHA TAR复用自有Repo CDN（官网URL和公钥不变，服务器原件保留），完整实际HTTPS343281849bytes/37.19s/9.23MBps、signature/range/privacy通过；网站新设计当前源hash已对齐、其它Nginxbase保全/cloudPID不变。正式文件WPS output/updater-20261014/final-e5a05f76/，最终交接 dev-docs/moxbots-updater-054-delivery.md。paidProvider/realissuer/Host/runningtimer不是本native覆盖；remote-session安全更新证明未就绪明确阻止安装。Root/children、board与unified均停止GUI，remoteowner后续只按其自己的授权安装/联调。已公开0.5.4不可变，下一源码变更发0.5.5。
