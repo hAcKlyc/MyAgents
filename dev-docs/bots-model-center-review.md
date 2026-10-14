@@ -46,3 +46,8 @@
 ## 尚未完成的验收
 
 代码/测试工作区尚未合并；本记录只覆盖独立审查及 loopback UI 验收。assignment stale CAS、usage 空态与 populated 响应式布局、登录权限路径均已通过本地合成 fixture。没有运行生产、真实供应商 API、真实 API key 或付费调用；不能据此认定生产发布或真实供应商联调完成。
+
+
+## 接续状态
+
+上述未完成项是独立审查时的历史状态；PR38 后续已交主干并发布。实际生产与主审验证另见 `bots-model-center-production-acceptance.md`，不将 loopback 审查改称生产验收。真实供应商调用仍未执行，用户选择后续自行配置。

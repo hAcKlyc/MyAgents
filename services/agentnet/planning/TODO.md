@@ -1,9 +1,9 @@
 # 当前任务：BOTS-MODEL-CENTER-001
 
 - [x] 独立 core/Host 实际 SDK 隔离验证。
-- [ ] HTTP/原 owner authority、UI 组合与独立验收。
-- [ ] 主干/CI/现有云后台发布、真实账号路径。
-- [ ] 用户指定供应商配置与单 Bot 有限模型授权后收费路径。
+- [x] HTTP/原 owner authority、UI 组合与独立验收。
+- [x] PR38 主干/七项 CI/现有云后台发布、真实账号配置/分配/监控及重启保留。
+- [ ] 后续用户自行配置供应商，有限 Host 联合升级/授权后真实调用验收；本次不导入、不调用，非当前阻断。
 
 详见 `BOTS-MODEL-CENTER-V1.md`；以下历史清单保留。
 
