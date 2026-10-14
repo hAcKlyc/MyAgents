@@ -165,3 +165,8 @@ Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No 
 ### BOTS-ADMIN-LOGIN-UX-001 最终交付（2026-10-14）
 
 已交付PR33/main1ece497d并发布现有统一云后台：当前标签页中文OIDC登录及固定后台返回替代旧弹窗/独立标签页fallback，错误/取消/过期可恢复。代码七项CI通过，Linux制品及Dex资源manifest/运行源对应已核实；真实受控管理员登录→中文确认→Bots目录→退出204，以及callback400恢复通过。仅两个既有云服务更新展示和回跳，原身份与权限不变，101 Host及模型未操作。备份标记 moxbots-login-ux-backup-20261014T101958，恢复原unit+Dex配置即可回滚且保留业务状态。详细最终验收和后续状态见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`；现网维护窗口已释放，后续无本任务云端写入。
+
+
+### MOXBOTS-AUTH-HOST-20261014 actual29 acceptance
+
+User specifically approved29 update; native owned-account recovery, bottom-left menu, remote Kimi Code/k3 save, disabled Agent creation and client+Host service restart persistence now pass without a new keychain prompt or model call. Extended Host resources had a display gap; a read-only registered-Agent list and three regressions are added. Final latest-main integration, combined candidate/CI, PR14 merge and public trial refresh remain open. Authoritative current scope/evidence/next step: `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`; old114/29 pending-approval notes are historical.
