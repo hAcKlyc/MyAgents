@@ -3819,6 +3819,10 @@ export default function App() {
         return true;
       }
       if (APP_BUILD_PROFILE === 'moxbot') {
+        if (route.name !== 'space.home') {
+          toastRef.current.info(t('globalSidebar.legacySpaceUnavailable'));
+          return true;
+        }
         void openOwnedCloudPage('community').catch(() => toastRef.current.error(t('globalSidebar.cloudUnavailable')));
         return true;
       }
@@ -3981,12 +3985,16 @@ export default function App() {
   ]);
 
   const handleOpenToolMarket = useCallback(() => {
+    if (APP_BUILD_PROFILE === 'moxbot') {
+      toastRef.current.info(t('globalSidebar.legacySpaceUnavailable'));
+      return;
+    }
     if (!teamSpaceAvailable) {
       handleOpenSpace();
       return;
     }
     handleOpenAppRoute(createSpaceToolsAppRoute(DEFAULT_SPACE_ID));
-  }, [handleOpenAppRoute, handleOpenSpace, teamSpaceAvailable]);
+  }, [handleOpenAppRoute, handleOpenSpace, teamSpaceAvailable, t]);
 
   useEffect(() => {
     window.addEventListener(CUSTOM_EVENTS.OPEN_SPACE, handleOpenSpace);

@@ -35,6 +35,8 @@ Base c7bab28594a03dfba7167200a90ae73ad0a6b5aa；start/task-init gate passed。�
 
 ## Completed
 
+旧工具市集在MoXBots不再宣传或误跳社区；旧Space资源深链给出不兼容提示，首页仍进入owned社区。2项动态profile DOM和相关品牌回归/独立源审通过。主干afa7d819无冲突集成，20项Host/品牌回归通过。
+
 实现、前述确定性验证与独立39项验收已完成；产品48f458fd和证据29fe738a已同步任务分支。
 
 ## Blockers and unknowns
