@@ -11,7 +11,7 @@
 
 ## Acceptance criteria
 
-- [x] 重新核验TITLE-001在最新main；当前installed sidecar来源5949b7f1已核验包含TITLE-001；真实Provider标题生成未复验。
+- [x] 重新核验TITLE-001在最新main；当前已安装正式0.5.4冻结源码e5a05f76已核验包含TITLE-001及PR44；真实Provider标题生成未复验。
 - [x] 隔离新工作树，保留其他任务；约定后端/UI互斥所有权。
 - [x] 桌面个人菜单含小助理和帮助反馈，去掉MoXBots单独小助理；未登录及窄屏可用，登录/退出回归。
 - [x] 云端现有OIDC登录/同源页面，用户只看自己反馈；无需模型或新凭据。
@@ -19,7 +19,9 @@
 - [x] 实际UI视觉/交互/响应式、独立复验与主Agent关键路径。
 - [x] 聚焦测试、构建、最新main同步；PR44七项CI通过，合入并核验远端main包含。
 - [x] 云端备份/回滚/串行发布，真实受控账号反馈闭环5/5。
-- [ ] 统一客户端包纳入PR44，实际个人菜单/小助理/反馈入口原生验收。
+- [x] 统一正式0.5.4已纳入PR44，签名/公证交付及本机安装源码、binary摘要对应已核验。
+- [x] 复用非实现者实际原生个人菜单/小助理/窄rail铃铛/900×700布局证据。
+- [ ] 本次实际原生所属issuer反馈入口及真实账号退出恢复验收；TITLE-001真实Provider生成单独待验。
 - [ ] 生产普通多主体隔离单独复验（本轮没有普通测试账号；本地真实AuthStore权限/隔离通过）。
 
 ## Completed
@@ -32,11 +34,15 @@
 
 ## Blockers and unknowns
 
-唯一客户端打包owner仍在推进0.5.4；“Bots 网络 可用”已登记收包队列并确认其更新分支c46df2b8尚未整合PR44。尚无含本次代码的冻结原生候选和安装证明，不能把已安装5949b7f1宣告为新菜单已生效。新增两个目标聊天的授权问题未获回复；本轮仅沿用用户明确授权的既有“Bots 网络 可用”聊天协调，没有向新目标发送消息。普通生产主体账号未取得，不以同一QA管理员走user/admin两面宣称生产多主体隔离通过。
+2026-10-15 07:14（UTC+8）现场核验：/Applications/MoXBots.app为正式0.5.4、干净冻结源码e5a05f76974a4962beb0b7de259690daaef08fd5，binary SHA256 c16afdde9d0b0fb2fb52ad464de167c5870282e969dacdce358ef9e63dcef561；Git ancestry确认包含PR44。远端main核验c7bab28594a03dfba7167200a90ae73ad0a6b5aa包含功能，不再使用此前5949b7f1/c46旧快照。
+
+用户本轮明确允许同步给“MyAgents 桌面端 Host 远程管理改造”（01a12bc2-907a-7702-b6dd-788225c5dfe4）并完成统一更新/原生验收，已发送源码、发布证据及串行验收请求；该负责人登记FEEDBACK-001/TITLE-001待验队列。共同OWNER-WINDOW-HANDOFF.json仍windowReleased=false，由“设计 免@ 调用远程 Agent 方案”（01a134fe-e48b-7ed0-9bfe-37021d9d41f7）持有原生窗口并执行另项已授权联调。未操作GUI、打断会话、改共同租约或重复打包。用户随后明确允许向当前窗口owner协调交接，主Agent已发送等待现有联调结束后安全释放的请求；该授权不扩展到中断活动测试。通过共同回执读取交接状态，不要求对方跨聊天回信。
+
+普通生产主体账号未取得，不以同一QA管理员走user/admin两面宣称生产多主体隔离通过。现有独立原生QA只证明入口与布局；云端真实浏览器5/5不能替代桌面实际issuer入口及账号退出恢复。
 
 ## Next step
 
-从已登记的统一收包队列串行整合PR44、确认新的冻结源码及原生签名/更新包。实际验收个人菜单小助理、所属issuer /feedback、未登录/退出及窄轨铃铛，再核实安装版本的源码包含main交付。云端保持本次已验证发布；不重复部署或改账号/模型/Host配置。标题真实Provider生成沿原TITLE-001验收单独追踪。
+取得当前owner明确窗口释放和串行交接后，由主Agent复用已安装0.5.4验收实际个人菜单到所属issuer /feedback、真实账号退出恢复。通知只复验既有独立铃铛入口，不新增无关通知服务门禁。云端保持已验证发布，不重复部署；不改其他任务账号/模型/Host配置。TITLE-001真实Provider生成单独追踪。安装receipt保存在本机私有证据目录installed-client-receipt.json。
 
 ## Execution
 
@@ -52,4 +58,4 @@ PR44已合入main d7264a43db59249c207736b74991ffd210d50ff3，远端包含候选4
 
 生产/feedback及三个关联assets与源码逐字节一致且no-store，匿名API401。真实受控QA账号5项通过：同页OIDC提单、管理员大于8KiB中文回复/解决、用户回读、退出204并确认旧token401/重登保留、390px布局；主Agent查看实际截图。第一次回读脚本未等异步refresh结束点了旧列表节点，超时证据保留，补加载完成等待后完整5/5，不改产品或降低断言。生产无模型调用或Host修改。仅2条明确标注受控验收的记录保留。
 
-公开非秘密摘要见dev-docs/feedback-production-validation.md；完整部署、测试脚本、结果和截图在本机私有证据目录 /Users/zhangshaohua/Documents/Codex/2026-10-15/moxbots-feedback-private/，不进入Git。源码/main与云端发布通过；原生客户端交付未完成，task仍in-progress。
+公开非秘密摘要见dev-docs/feedback-production-validation.md；完整部署、测试脚本、结果和截图在本机私有证据目录 /Users/zhangshaohua/Documents/Codex/2026-10-15/moxbots-feedback-private/，不进入Git。源码/main、云端发布及统一客户端安装已通过；原生实际issuer/退出恢复及真实Provider标题生成未完成，task仍in-progress。
