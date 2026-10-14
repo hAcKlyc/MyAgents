@@ -79,3 +79,19 @@
 | `src/server/modelqa/next-prompt.unit.test.ts` | `4d34c25cbb5a9bc94693bbdc2a39516488eedb73eb5e0eb259155a9f9a8c16e3` |
 
 冻结后仅清理Codex unit文件一处尾随空格，产品源码未变化；既有审阅hash对应冻结测试文本，最终HEAD应以Git及CI为准。
+
+## QA executable 启动依赖增量复核（07:45:50 +08）
+
+基于 HEAD `3277aeb561e0910ef316c3aa7fb54a7ed31cc15f` 后四文件增量，结论通过，可以提交。仅独立运行新 `modelqa-utility-command.unit.test.ts` 8 项，8/8 通过；未重复旧测试、模型或 App 验收，`git diff --check` 无错误。
+
+- 可执行文件 override 只在编译期 `isModelQaBuild()`、非 updaterqa、source=`system-cli` 时读取。production/updaterqa/managed 先返回原 fallback，不读取 override。
+- QA 分支要求显式绝对路径、`realpathSync(path) === path`、普通文件以及 POSIX X_OK（Windows F_OK）；缺失/无效直接失败，不回退到未批准发现路径。二进制 SHA 校验由统一 launcher 的受控 manifest 负责，本 helper 没有自称再次验证 SHA。
+- Codex 先沿用原 context 取得 source/env/home/auth/model，仅本次两个 utility launch 换 commandPath；CC 仅 utility spawn 边界选择显式路径，原全局 resolver、native HOME、认证、模型均未修改。未新增通用系统命令 override。
+- 这项通过只覆盖 utility 消费受控路径的代码，不代替统一 owner 对 manifest、SHA、profile 隔离及最终安装包/native 运行的验收。
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `src/server/runtimes/modelqa-utility-command.ts` | `cf4c05e16195c7088ea17b516b2321f831b67aaf23f261b9ef9da86088e522cd` |
+| `src/server/runtimes/modelqa-utility-command.unit.test.ts` | `2a8812f3b66c5f9a0673c684e90b68a14348a6ba2edae1a536fddc8d34d4ec99` |
+| `src/server/runtimes/claude-text-utility.ts` | `bc29ff21de3d86fceea40cb792f1d9e8b4a76d2e1fb937abeca08281e71b652f` |
+| `src/server/runtimes/codex-text-utility.ts` | `bc741096b0eb7f2f290452681e2f4ff0431a9bd0289c6e3643f4ce7495a19630` |

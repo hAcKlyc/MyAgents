@@ -1,3 +1,4 @@
+import { modelqaUtilityCommand } from './modelqa-utility-command';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer, type IncomingMessage } from 'node:http';
@@ -220,12 +221,13 @@ export async function generateCodexTextUtility(input: CodexTextUtilityInput): Pr
     return await Promise.race([(async (): Promise<string | null> => {
       const context = await resolveCodexCommandContext({ source: input.runtimeSource, envPolicy: input.envPolicy });
       if (controller.signal.aborted) return null;
+      const commandPath = modelqaUtilityCommand('codex', context.source, () => context.commandPath);
       const createdDirectory = await mkdtemp(join(tmpdir(), 'moxbots-codex-utility-'));
       if (controller.signal.aborted) { await rm(createdDirectory, { recursive: true, force: true }); return null; }
       directory = createdDirectory;
       const launch = (extra: string[] = [], cwd = directory) => {
         if (controller.signal.aborted) throw new Error('Utility cancelled');
-        const config = buildCodexAppServerLaunchConfig({ commandPath: context.commandPath, runtimeSource: context.source, codexEnv: context.env, mcpServers: [] });
+        const config = buildCodexAppServerLaunchConfig({ commandPath, runtimeSource: context.source, codexEnv: context.env, mcpServers: [] });
         const args = [...config.args.slice(0, -1), '-c', 'features.hooks=false', '-c', 'notify=[]', '-c', 'features.apps=false', '-c', 'features.connectors=false', ...extra, 'app-server'];
         const noProxy = [context.env.no_proxy ?? context.env.NO_PROXY, '127.0.0.1', 'localhost', '::1'].filter(Boolean).join(',');
         const proc = spawn(args, { cwd, env: { ...context.env, PWD: cwd, NO_PROXY: noProxy, no_proxy: noProxy }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', detached: process.platform !== 'win32', windowsHide: true });

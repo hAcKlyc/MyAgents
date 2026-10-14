@@ -23,3 +23,7 @@
 主/root负责CC/DSH、集成、最终验收和main；next_prompt_runtime_audit requested Sol medium，独占Codex两新文件，先发现零工具API缺口再实现网关；next_prompt_review requested Sol medium，非实现者审review并只写报告。精确token/费用未知；不调用外部原因：明确采用ai-yaoren-local纯内置模式。真实模型调用费用由既有账户计费，未获取精确账单，不估算金额。
 
 DSH modelqa准备本身创建独立profile随机native session/attachment工件并保留取证，receipt明确标记；正式utility零工具/不改原native会话与整个准备流程零落盘是不同范围。0.5.5与main交付仍开放。
+
+统一owner要求的隔离CLI路径增量：只在compile-time modelqa且system-cli utility读取两条受控完整executable env；要求absolute/canonical/regular/X_OK，launcher另校验SHA。普通prod/updaterqa/managed不读取override，模型/auth/home不变。新增8项独立测试及39项聚焦回归、tsc/scopedlint通过；此增量不重复计作真实模型调用。首轮PR53 JS CI被af6 profile的Mac-only /private/tmp测试在Linux拒绝，准备同步owner ab935修复后精确HEAD重跑。
+
+已同步ab935 profile跨平台修复；route unit因mock编译开关与真实profile宏不匹配触发guard，已只在unit固定同一隔离profile常量，未改production一致性检查。最终9文件89项组合测试通过，4项modelqa构建脚本测试通过；native helper未因测试修订变化。
