@@ -1,4 +1,3 @@
-import { getBuiltinProductContent } from '../builtin-session/transcript';
 import { broadcast } from "../sse";
 import { applySessionModelSelection } from '../agent-session';
 import { questionAnswersAsText } from '../../shared/types/askUserQuestion';
@@ -16,6 +15,7 @@ import {
   getAndClearLastAgentError,
   getAgents,
   getAgentState,
+  getBuiltinExecutionStartedAt,
   getBuiltinLiveSessionSnapshot,
   getBuiltinSessionCompletionTerminal,
   getCurrentMcpServers,
@@ -275,9 +275,9 @@ export function createBuiltinSessionEngine(): SessionEngine {
 
     publishTranscriptSaveStatus(status) { publishBuiltinTranscriptSaveStatus(status); },
     getLiveSessionState() {
-      const turn = getBuiltinProductContent()?.currentTurn;
+      const executionStartedAt = getBuiltinExecutionStartedAt();
       return {
-        ...(turn?.status === 'running' ? { executionStartedAt: turn.startedAt } : {}),
+        ...(executionStartedAt ? { executionStartedAt } : {}),
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),

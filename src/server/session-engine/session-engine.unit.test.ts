@@ -105,6 +105,7 @@ const mocks = vi.hoisted(() => {
         ? { queueId: state.builtinDispatchedQueueId }
         : state.builtinTurnIdentity
     )),
+    getBuiltinExecutionStartedAt: vi.fn<() => string | undefined>(() => undefined),
     getAgentState: vi.fn<() => Record<string, unknown>>(() => ({ sessionState: 'idle', agentDir: '/workspace' })),
     getBuiltinLiveSessionSnapshot: vi.fn<() => Record<string, unknown> | null>(() => null),
     getBuiltinMcpEffectiveSnapshot: vi.fn(() => null),
@@ -198,6 +199,7 @@ const mocks = vi.hoisted(() => {
     getExternalSessionModel: vi.fn(() => 'gpt-5'),
     getExternalSessionPermissionMode: vi.fn(() => 'no-restrictions'),
     getExternalSessionReasoningEffort: vi.fn(() => 'medium'),
+    getExternalExecutionStartedAt: vi.fn<() => string | undefined>(() => undefined),
     getExternalSessionState: vi.fn(() => 'idle'),
     getExternalSessionWorkspacePath: vi.fn(() => '/workspace'),
     getExternalSystemInitPayload: vi.fn(() => null),
@@ -364,6 +366,7 @@ vi.mock('../agent-session', async () => ({
   getCurrentImBridgeTurnContext: mocks.getCurrentImBridgeTurnContext,
   getDispatchedTurnIdentity: mocks.getDispatchedTurnIdentity,
   getAgentState: mocks.getAgentState,
+  getBuiltinExecutionStartedAt: mocks.getBuiltinExecutionStartedAt,
   isBuiltinWaitingForUser: mocks.isBuiltinWaitingForUser,
   getBuiltinLiveSessionSnapshot: mocks.getBuiltinLiveSessionSnapshot,
   getBuiltinMcpEffectiveSnapshot: mocks.getBuiltinMcpEffectiveSnapshot,
@@ -440,6 +443,7 @@ vi.mock('../runtimes/external-session', () => ({
   getExternalSessionPermissionMode: mocks.getExternalSessionPermissionMode,
   getExternalSessionReasoningEffort: mocks.getExternalSessionReasoningEffort,
   getExternalSessionState: mocks.getExternalSessionState,
+  getExternalExecutionStartedAt: mocks.getExternalExecutionStartedAt,
   getExternalSessionWorkspacePath: mocks.getExternalSessionWorkspacePath,
   getExternalSystemInitPayload: mocks.getExternalSystemInitPayload,
   getLastExternalAssistantText: mocks.getLastExternalAssistantText,
@@ -660,20 +664,15 @@ describe('session-engine selector and adapters', () => {
   });
 
 
-  it.each([false, true])('observes only the current product turn start (external=%s)', async external => {
+  it.each([false, true])('reads current turn start through the runtime facade (external=%s)', external => {
     mocks.state.useExternal = external;
-    const start = '2026-10-14T12:00:00.000Z';
-    const spy = external
-      ? vi.spyOn(await import('../runtimes/external-session/transcript-persistence'), 'getExternalProductContent')
-      : vi.spyOn(await import('../builtin-session/transcript'), 'getBuiltinProductContent');
+    const getter = external ? mocks.getExternalExecutionStartedAt : mocks.getBuiltinExecutionStartedAt;
     try {
-      for (const status of ['running', 'complete', 'stopped', 'error', 'interrupted'] as const) {
-        spy.mockReturnValue({currentTurn:{status,startedAt:start}} as ReturnType<typeof import('../builtin-session/transcript').getBuiltinProductContent>);
-        expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBe(status === 'running' ? start : undefined);
+      for (const start of ['2026-10-14T12:00:00.000Z','2026-10-14T13:00:00.000Z',undefined]) {
+        getter.mockReturnValue(start);
+        expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBe(start);
       }
-      spy.mockReturnValue(undefined);
-      expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBeUndefined();
-    } finally { spy.mockRestore(); }
+    } finally { getter.mockReturnValue(undefined); }
   });
   it('projects root-blocking interactions without treating child approvals as Session suspension', () => {
     mocks.state.useExternal = true;

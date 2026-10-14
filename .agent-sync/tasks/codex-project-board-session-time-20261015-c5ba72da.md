@@ -24,8 +24,9 @@ MOXBOTS-PROJECT-BOARD-002：会话卡片显示当前执行轮次耗时，直接�
 
 ## Verification
 
-- Node24：132项相关unit、typecheck、完整lint、生产build:web通过。
-- 实际React隔离合成验收14组通过；证据 `dev-docs/project-board-session-time-acceptance.md` 和 `dev-docs/project-board-validation/session-time/`。
+- Node24：153项相关unit、typecheck、完整lint、生产build:web通过。
+- CI首次因2项runtime-boundary拒绝adapter直接import内部owner；已改正式facade读取，边界和计时复验通过。完整CI必须验证修复后head。
+- MoXBots profile实际React隔离合成验收14组通过；证据 `dev-docs/project-board-session-time-acceptance.md` 和 `dev-docs/project-board-validation/session-time/`。
 - 同步最新origin/main ff957fdf，无产品文件并发差异；base元数据仍记录任务初始7ec5b6d。
 
 - start/task-init 同步门禁通过，明确远端 https://github.com/heavenzhang/MoXBots.git。

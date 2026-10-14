@@ -1,4 +1,3 @@
-import { getExternalProductContent } from '../runtimes/external-session/transcript-persistence';
 import { updateExternalRuntimeConfig } from '../runtimes/external-session';
 import { retryDesktopRequest } from './retry';
 import { randomUUID } from 'node:crypto';
@@ -33,6 +32,7 @@ import {
   getExternalSessionPermissionMode,
   getExternalSessionReasoningEffort,
   getExternalSessionState,
+  getExternalExecutionStartedAt,
   getExternalSessionWorkspacePath,
   getExternalSystemInitPayload,
   getExternalMcpEffectiveSnapshot,
@@ -297,9 +297,9 @@ export function createExternalSessionEngine(): SessionEngine {
 
     publishTranscriptSaveStatus(status) { publishExternalTranscriptSaveStatus(status); },
     getLiveSessionState() {
-      const turn = getExternalProductContent()?.currentTurn;
+      const executionStartedAt = getExternalExecutionStartedAt();
       return {
-        ...(turn?.status === 'running' ? { executionStartedAt: turn.startedAt } : {}),
+        ...(executionStartedAt ? { executionStartedAt } : {}),
         sessionState: getExternalSessionState(),
         isBusy: isExternalSessionBusy(),
         waitingForUser: getExternalPendingInteractiveRequests().some(request => {
