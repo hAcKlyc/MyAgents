@@ -275,9 +275,22 @@ jobs:
       - name: Verify bundled Node replacement with native NSIS
         shell: pwsh
         run: |
-          choco install nsis --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
-          $env:MYAGENTS_TEST_MAKENSIS = Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe'
+          node --test scripts/ci/download-nsis.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nsisArchive = Join-Path $env:RUNNER_TEMP 'nsis-3.13.zip'
+          node scripts/ci/download-nsis.mjs $nsisArchive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $nsisRoot = Join-Path $env:RUNNER_TEMP 'myagents-nsis'
+          Expand-Archive -LiteralPath $nsisArchive -DestinationPath $nsisRoot
+          $env:MYAGENTS_TEST_MAKENSIS = Join-Path $nsisRoot 'nsis-3.13\makensis.exe'
+          if (!(Test-Path -LiteralPath $env:MYAGENTS_TEST_MAKENSIS -PathType Leaf)) {
+            throw "Verified NSIS archive lacks compiler: $env:MYAGENTS_TEST_MAKENSIS"
+          }
+          $nsisVersion = & $env:MYAGENTS_TEST_MAKENSIS /VERSION
+          if ($LASTEXITCODE -ne 0 -or "$nsisVersion".Trim() -ne 'v3.13') {
+            throw "NSIS compiler probe failed: path=$env:MYAGENTS_TEST_MAKENSIS version=$nsisVersion exit=$LASTEXITCODE"
+          }
+          Write-Host "Native NSIS compiler: $env:MYAGENTS_TEST_MAKENSIS ($nsisVersion)"
           node --test scripts/windows-node-runtime-install.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare signed CLIProxy build inputs
