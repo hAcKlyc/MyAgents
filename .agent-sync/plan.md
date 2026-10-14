@@ -1,6 +1,6 @@
 ## MOXBOTS-AUTH-HOST-20261014 — current continuation
 
-Root owns the unified macOS candidate and real Host integration. Installed/public5f is an earlier package, not the new account UI. Normal same-account desktop credential recovery succeeded with both fixed-family slots persisted and no new OS prompt; controlled cold restart/update remains open. Account/sidebar code and explicit same-account Linux management renewal are implemented with focused tests and independent source review; Linux connector is currently stopped after binding mismatch until exact native artifact renewal. Signed unified package, real model-config/disabled-Agent persistence, CI/main and download refresh remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md` for ownership, authorization, checks and next step.
+Root owns the unified macOS candidate and real Host integration. Human-approved114e2ac5 is now installed/running with exact source/resource verification and app/data backups; bottom-left owned account restored, both devices online, no keychain prompt during update/startup. Public5f remains unchanged. Real Host reads exposed a deterministic diagnostic-to-wire schema mismatch; explicit narrow projection is implemented, focused19 integration tests/typecheck pass, exact-source Linux repair and actual model/Agent acceptance remain open. Cold restart, CI/main and download refresh follow real acceptance. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
 
 ## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
 

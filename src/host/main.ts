@@ -7,7 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HostSessionRequest, HostSessionMessage, HostSessionOperation } from '../server/host-session-protocol';
 import { configureHost, configureProviderHost, createHostConfigMutationOwner, readProviderConfigReceipt, extendedHostSettings, selectedHostProviderProfile, legacyHostRepresentable, HostManagementUpgradeRequired, readConfigReceipt, withHostConfigurationLocks, withHostSnapshotLocks, type ConfigReceipt, type HostConfig, type GenericConfigReceipt } from './management';
-import { readNetworkStatus } from './network-status';
+import { managementNetworkStatus, readNetworkStatus } from './network-status';
 import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
 import type { BotRunIdentity } from './bot-runtime';
 import { createBotSessionAdapter } from './bot-session-adapter';
@@ -328,7 +328,8 @@ async function serve(): Promise<void> {
         return {kind:method === 'host.inspect' ? 'extended-snapshot':'snapshot',version:1,hostId:value.hostId,configured:value.configured,
           settings:method === 'host.inspect' ? extendedHostSettings(config,{workspaces:workspaceRoot}):value.settings,
           ...(method === 'host.inspect' ? {provider:selectedHostProviderProfile(config)}:{}),
-          activeSession:value.activeSession,stopping:value.stopping,capabilities:value.capabilities,agentNet:value.agentNet,runtime:value.runtime,
+          activeSession:value.activeSession,stopping:value.stopping,capabilities:value.capabilities,
+          agentNet:managementNetworkStatus(value.agentNet as Awaited<ReturnType<typeof readNetworkStatus>>),runtime:value.runtime,
           credentials:credentialOwner ? {...credentialOwner.inspect(providerId),writeAvailable:true}:{providerId,configured:false,revision:0,writeAvailable:false},resources};
       },
     );

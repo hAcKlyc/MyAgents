@@ -6,6 +6,11 @@ type Report = {
   available: true; state: string; ready: boolean; deviceId: string;
   networkId: string | null; errorCode: string | null; reportedAt: number;
 };
+
+/** The management wire contract is narrower than the local diagnostic report. */
+export function managementNetworkStatus(status: Unavailable | Report): { available: boolean; reason: string | null } {
+  return { available: status.available, reason: status.available ? null : status.reason };
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const states = new Set(['connecting', 'initializing', 'catalog', 'hydrating', 'ready',
   'signedOut', 'expired', 'unavailable', 'stopped']);
