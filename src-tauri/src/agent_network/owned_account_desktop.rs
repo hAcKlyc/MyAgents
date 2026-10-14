@@ -291,6 +291,7 @@ fn storage_transaction_lock() -> MutexGuard<'static, ()> {
 }
 
 fn entry(user: &str) -> Result<Entry, NetworkError> {
+    if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
     let builder: Box<keyring::credential::CredentialBuilder> = {
         #[cfg(target_os = "macos")]
         {
@@ -351,7 +352,7 @@ fn pending_entry(
     public_tls_ca: Option<&str>,
 ) -> Result<Entry, NetworkError> {
     let hash = key(instance, device_id, "pending", public_tls_ca);
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     let hash = session_physical_hash(&hash, super::credential_slots::selected_writer_selection()?)?
         .ok_or_else(|| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     // Pending transactions are newly created by this process, never migrated.
@@ -364,7 +365,7 @@ fn session_entry(
     public_tls_ca: Option<&str>,
 ) -> Result<Entry, NetworkError> {
     let hash = key(instance, device_id, principal, public_tls_ca);
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     let hash = session_physical_hash(
         &hash,
         super::credential_slots::selection(&format!("session:{hash}"))?,
@@ -373,7 +374,7 @@ fn session_entry(
     // A committed route never falls back when its current item is missing.
     entry(&format!("session:{hash}"))
 }
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
 fn session_entry_for_route(
     instance: &OwnedInstance,
     device_id: &str,
@@ -411,7 +412,7 @@ fn write_session_unlocked(
     _preserve_existing: bool,
     before_commit: impl Fn() -> Result<(), NetworkError>,
 ) -> Result<(), NetworkError> {
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         let legacy = key(instance, device_id, principal, public_tls_ca);
         let target_selection = super::credential_slots::selected_writer_selection()?;
@@ -439,7 +440,7 @@ fn write_session_unlocked(
             )
         })
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
     {
         before_commit()?;
         write_unlocked(
@@ -482,17 +483,17 @@ fn write_session_family_route(
             // The authorized source read is already the target readback.
             // Avoid a second Keychain read that can prompt again.
             target_confirmed = true;
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-confirm outcome=authorized-source"
             );
         } else {
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-destination-read outcome=start"
             );
             let target_read = read(target);
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-destination-read outcome={}",
                 if target_read.is_ok() { "ok" } else { "failed" }
@@ -501,12 +502,12 @@ fn write_session_family_route(
                 Some(existing) if existing.as_slice() == expected => target_confirmed = true,
                 Some(_) => return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED")),
                 None => {
-                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
                     crate::ulog_info!(
                         "[credential-migration] stage=session-destination-write outcome=start"
                     );
                     let result = write(target);
-                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
                     crate::ulog_info!(
                         "[credential-migration] stage=session-destination-write outcome={}",
                         if result.is_ok() { "ok" } else { "failed" }
@@ -517,10 +518,10 @@ fn write_session_family_route(
         }
     }
     if !target_confirmed {
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
         crate::ulog_info!("[credential-migration] stage=session-confirm outcome=start");
         let result = read(target);
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
         crate::ulog_info!(
             "[credential-migration] stage=session-confirm outcome={}",
             if result.is_ok() { "read" } else { "failed" }
@@ -530,13 +531,13 @@ fn write_session_family_route(
         if confirmed.as_slice() != expected {
             return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"));
         }
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
         crate::ulog_info!("[credential-migration] stage=session-confirm outcome=ok");
     }
     before_commit()?;
     Ok(())
 }
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
 fn serialized_secret(secret: &SecretRecord) -> Result<Zeroizing<Vec<u8>>, NetworkError> {
     serde_json::to_vec(secret)
         .map(Zeroizing::new)
@@ -739,6 +740,7 @@ impl OwnedLoginManager {
         device_id: &str,
         public_tls_ca_file: Option<&str>,
     ) -> Result<StartedLogin, NetworkError> {
+        if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
         let public_tls_ca = read_public_ca_file(public_tls_ca_file)?;
         let device = crate::device_identity::current_device_identity()
             .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
@@ -1146,7 +1148,7 @@ pub(crate) fn delete_account_if_binding(
     expected_binding: &str,
 ) -> Result<bool, NetworkError> {
     let _storage = storage_transaction_lock();
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         let legacy = key(instance, device, principal, public_tls_ca);
         let removed = super::credential_slots::with_deleted_route_family(
@@ -1172,7 +1174,7 @@ pub(crate) fn delete_account_if_binding(
         session_guard_cache().invalidate_binding(&slot, expected_binding);
         return Ok(removed);
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
     {
         let entry = session_entry(instance, device, principal, public_tls_ca)?;
         let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&entry)? else {
@@ -1227,7 +1229,7 @@ pub(crate) fn restore_account_authorized(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     let _storage = storage_transaction_lock();
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     let validated = {
         use super::credential_slots::RouteSelection as Selection;
         let logical = key(instance, device, principal, public_tls_ca);
@@ -1310,7 +1312,7 @@ pub(crate) fn restore_account_authorized(
         transaction?;
         validated.ok_or_else(|| NetworkError::new("OWNED_SESSION_RECORD_MISSING"))?
     };
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
     {
         let record = read_authorized_unlocked(
             &session_entry(instance, device, principal, public_tls_ca)?,
@@ -1336,17 +1338,17 @@ pub(crate) fn restore_account_authorized(
             None => Ok(None),
         };
     }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     let restored = publish_validated_session(validated, join_authorized)?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     restore_if_not_cancelled(Some(restored), cancelled)
 }
 
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
 fn current_account_binding(account: &OwnedAccount, device: &str) -> Result<String, NetworkError> {
     (account.guard)()?;
     let slot = SessionSlot::new(
@@ -1369,7 +1371,7 @@ fn current_account_binding(account: &OwnedAccount, device: &str) -> Result<Strin
     Ok(current.binding_id.clone())
 }
 
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
 pub(crate) fn promote_current_account(
     account: &OwnedAccount,
     device: &str,
@@ -1382,7 +1384,7 @@ pub(crate) fn promote_current_account(
 /// Persist only a session already validated by the account/identity owners.
 /// Legacy encrypted records remain unchanged for rollback. The durable route
 /// prevents a later missing/deleted current item from reviving a legacy token.
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
 pub(crate) fn promote_account(
     account: &OwnedAccount,
     device: &str,
@@ -1515,7 +1517,7 @@ fn validate_session_record(
     }))
 }
 
-#[cfg(any(test, all(target_os = "macos", myagents_moxbot, not(test))))]
+#[cfg(any(test, all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
 fn validate_restore_commit_fence(
     validated: &ValidatedSession,
     instance: &OwnedInstance,
@@ -2181,5 +2183,14 @@ mod tests {
         // A late response from the old poll cannot be mistaken for the current attempt.
         assert!(!state.is_current("issuer/device", "attempt-old"));
         assert!(state.is_current("issuer/device", "attempt-new"));
+    }
+}
+
+#[cfg(all(test, myagents_updater_qa))]
+mod updater_qa_credential_tests {
+    #[test]
+    fn qa_never_constructs_an_os_keyring_entry() {
+        let error = super::entry("synthetic-only").err().expect("QA entry is disabled");
+        assert_eq!(error.code, "UPDATER_QA_CREDENTIALS_DISABLED");
     }
 }

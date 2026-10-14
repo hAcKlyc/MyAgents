@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { realpathSync, statSync } from 'fs';
 import { managementApi } from './management-api-client';
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
 import {
   diagnoseSdkSubprocessFailure,
   SdkChildLaunchCircuitOpenError,
@@ -78,6 +79,8 @@ export async function createGuardedSdkQuery<T>(
   createQuery: () => T,
   options: GuardOptions = {},
 ): Promise<T> {
+  // QA update acceptance never launches a model process or its OAuth fallback.
+  if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
   const sidecarId = options.sidecarId ?? process.env.MYAGENTS_SIDECAR_ID?.trim();
   if (!sidecarId) {
     return continueWithoutCircuit(createQuery, 'missing sidecar identity');

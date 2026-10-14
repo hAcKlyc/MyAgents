@@ -1,3 +1,4 @@
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
 import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { execFile } from 'child_process';
 import { posix as pathPosix, win32 as pathWin32 } from 'path';
@@ -64,6 +65,9 @@ export function getFallbackPaths(options: FallbackPathOptions = {}): string[] {
         ? getBundledNodeDir()
         : options.bundledNodeDir;
 
+    if (isUpdaterQaBuild()) {
+        return bundledNodeDir ? [bundledNodeDir, '/usr/bin', '/bin', '/usr/sbin', '/sbin'] : ['/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+    }
     if (platform === 'win32') {
         const userProfile = envValue(env, 'USERPROFILE');
         const localAppData = envValue(env, 'LOCALAPPDATA');
@@ -227,6 +231,7 @@ let detectedTerminalProxyEnv: TerminalProxyEnv | null = null;
  * fallback) and can wait should use `ensureShellPath()`.
  */
 export function getShellPath(): string {
+    if (isUpdaterQaBuild()) return getFallbackPaths().join(':');
     if (cachedPath && detectedUserPath === null) {
         // Fallback-only cache. Return it; warmup may still be pending.
         return cachedPath;
@@ -285,6 +290,7 @@ export async function ensureShellPath(): Promise<string> {
  * detection is in flight or after it has completed.
  */
 export function warmupShellPath(): Promise<void> {
+    if (isUpdaterQaBuild()) return Promise.resolve();
     if (warmupInFlight) return warmupInFlight;
     if (detectedUserPath !== null) return Promise.resolve(); // already done
 
