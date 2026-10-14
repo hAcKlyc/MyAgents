@@ -446,7 +446,7 @@ function renderModelUsage(root) {
     for (const item of modelUsage.rows) {
       const row = node('tr');
       const cell=(label,value)=>{const td=node('td');td.append(node('span',label,'row-label'),node('span',String(value)));return td;};
-      row.append(cell('时间',item.started_at ? new Date(item.started_at * 1000).toLocaleString() : '未知'));
+      row.append(cell('时间',item.started_at ? new Date(item.started_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '未知'));
       row.append(cell('Bot / 用户',`${(data.bots.find(x=>x.id===item.bot_id)?.name)||item.bot_id} / ${userName(item.owner_id)}`));
       row.append(cell('模型',modelLabel(item.model_ref)));
       row.append(cell('Tokens',`${item.input_tokens ?? '未知'} / ${item.output_tokens ?? '未知'}`));
@@ -460,7 +460,7 @@ function renderModelUsage(root) {
   }
   if (modelUsage.state === 'ready') {
     const summary = modelUsage.summary || {};
-    const stats = node('p', `当前返回 ${modelUsage.rows.length} 条 · 总请求 ${summary.requests ?? '未知'} · Tokens ${summary.tokens ?? '未知'} · 估算费用 USD ${summary.cost_microusd == null ? '未知' : (summary.cost_microusd / 1_000_000).toFixed(6)} · 平均耗时 ${summary.avg_duration_ms == null ? '未知' : `${summary.avg_duration_ms} ms`} · 失败率 ${summary.failure_rate == null ? '未知' : `${(summary.failure_rate * 100).toFixed(1)}%`}`, 'usage-summary');
+    const stats = node('p', `当前返回 ${modelUsage.rows.length} 条 · 最近 500 条内的筛选统计：请求 ${summary.requests ?? '未知'} · Tokens ${summary.tokens ?? '未知'} · 估算费用 USD ${summary.cost_microusd == null ? '未知' : (summary.cost_microusd / 1_000_000).toFixed(6)} · 平均耗时 ${summary.avg_duration_ms == null ? '未知' : `${summary.avg_duration_ms} ms`} · 失败率 ${summary.failure_rate == null ? '未知' : `${(summary.failure_rate * 100).toFixed(1)}%`}`, 'usage-summary');
     panel.append(stats);
   }
   root.append(panel);
