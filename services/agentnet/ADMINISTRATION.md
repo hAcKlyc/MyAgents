@@ -62,3 +62,10 @@
 Nginx在既有HTTPS入口添加精确的 `/api/bots/grants/accept`、`/api/bots/grants/revoke`、`/execution/self/pull`、`/execution/self/lease`、`/execution/self/receipt`、`/execution/self/observe`。人类端仍校验原认证会话/Owner/admin，Host端仍校验原DPoP/设备/WS上下文，不新增监听端口或绕过认证。
 
 只保留此一个云管理后台。用户、Hosts、Bots、权限与审计，以及后续账号停用/登录策略/角色维护均扩展在此平台；现有OIDC等组件是内部依赖，客户端普通用户登录是产品入口，不另建“登录后台”。当前用户模块仅查询已注册账号，不能据此宣称IAM写能力已交付。历史原型不是第二套生产后台。
+
+
+## 网页登录交互
+
+管理员点击登录后在当前标签页进入现有 OIDC 身份页；`browserReturn: true` 仅为既有登录事务的 UI 选项，回调按绑定 state 返回固定 `/admin?login=complete|failed`，不接受任意 return URL。客户端未传选项时保持原回调行为。
+
+仅临时事务（id/device/PKCE verifier/expiry）放入 tab-scoped sessionStorage，以跨页面完成现有单次消费；成功、取消、过期或错误时清除，会话 bearer 始终只在内存。刷新已登录页面仍需再次认证。中文 Dex 模板及部署说明见 `deploy/dex-web/README.md`；既有部署增量更新 frontend 配置，禁止用 bootstrap 重建账号、密钥或数据库。

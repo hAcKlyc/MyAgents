@@ -134,3 +134,8 @@ User requires a single MoXBots cloud administrator console for users, Hosts, Bot
 - [ ] PR32 CI/main delivery; desktop PR14 native gates remain pending separately.
 
 Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No paid calls, other namespace or machine reboot.
+
+
+### BOTS-ADMIN-LOGIN-UX-001（2026-10-14）
+
+用户反馈管理员网页登录双窗口割裂。独立任务 `codex/bots-admin-login-ux-001` 基线 d86f7505，改为当前标签页 OIDC 登录、固定 /admin 返回、短期 tab-scoped PKCE 事务恢复，bearer仍只在内存。中文 Dex 品牌模板保持原 POST/同意授权语义；不改变账号、权限、客户端身份、Host或模型调用。服务端与loopback浏览器回归已通过，独立只读审阅与CI/生产真实路径待完成。详细任务见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`。此条覆盖历史弹窗/独立标签页fallback的产品方向。
