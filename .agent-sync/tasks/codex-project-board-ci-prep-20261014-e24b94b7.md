@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/project-board-ci-prep-20261014 -->
 <!-- git-project-sync-task:base=644434fa685ee7e2ccc0d6421c95b5431aea1b0c -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 
 # Task: Repair native Windows NSIS CI provisioning
 
@@ -15,7 +15,7 @@ Repair PR #35's Windows native NSIS prerequisite without bypassing compiler or a
 - [x] Replace floating Chocolatey provisioning with a fixed official portable asset and verify bytes before extraction.
 - [x] Preserve existing native NSIS tests and fail explicitly for missing/wrong/non-executable compiler.
 - [x] Verify deterministic failure cases and actual publisher archive download on macOS.
-- [ ] Primary Agent review, Windows exact-head CI and main delivery (integration owner).
+- [x] Primary Agent review/cherry-pick, Windows exact-head CI and main delivery through PR35/main8f53a6ad; all six check jobs passed.
 
 ## Completed
 
@@ -33,8 +33,8 @@ Repair PR #35's Windows native NSIS prerequisite without bypassing compiler or a
 
 ## Blockers and unknowns
 
-- Windows execution remains CI-only; local macOS checks must not be reported as actual Windows compiler/install verification. No existing test skips or expectations were changed.
+- Actual Windows CI ran all six existing native NSIS lifecycle checks with zero skips and passed cargo/native IO; run38536820445. The local macOS-only skipped cases are still reported separately. No existing expectations were relaxed.
 
 ## Next step
 
-- Primary Agent reviews/cherry-picks this worker commit into PR #35, awaits all current-head CI including the unchanged real Windows NSIS lifecycle tests, then integrates the acceptance report into main.
+- CI repair is integrated into main by PR35. Worker scope is closed; the primary owns the separate native acceptance follow-up record.
