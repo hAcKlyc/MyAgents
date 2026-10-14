@@ -41,6 +41,23 @@ beforeEach(() => {
     },
   );
 });
+
+it.each([
+  ['Status: 204 No Content\nBody length: 0 bytes', 'up-to-date'],
+  ['Status: 503 Service Unavailable\nversion: 0.9.0', 'error'],
+  ['Status: 200 OK\ninvalid JSON', 'error'],
+])('handles manual update response %s without starting a download', async (response, expected) => {
+  mocks.invoke.mockImplementation(async (command: string) => command === 'test_update_connectivity' ? response : null);
+  const { result, unmount } = renderHook(() => useUpdater());
+  await act(async () => {
+    expect(await result.current.checkForUpdate()).toBe(expected);
+  });
+  expect(result.current.checking).toBe(false);
+  expect(result.current.downloading).toBe(false);
+  expect(mocks.invoke).not.toHaveBeenCalledWith('check_and_download_update');
+  expect(mocks.invoke).not.toHaveBeenCalledWith('install_pending_update');
+  unmount();
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

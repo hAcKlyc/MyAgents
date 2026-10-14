@@ -1,4 +1,5 @@
 import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../../shared/appProfile';
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
 import { randomUUID } from 'crypto';
 import { basename, extname, isAbsolute, relative, resolve, win32 } from 'path';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'fs';
@@ -111,6 +112,7 @@ workspace safety boundary as image paths; arbitrary absolute paths are rejected.
 }
 
 export async function analyzeImages(input: VisionAnalyzeInput): Promise<VisionAnalyzeResult> {
+  if (isUpdaterQaBuild()) throw new VisionToolError('UPDATER_QA_EXECUTION_DISABLED', 403);
   const config = loadConfig();
   const workspacePath = input.workspacePath?.trim();
   if (!workspacePath) {

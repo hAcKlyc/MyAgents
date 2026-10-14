@@ -111,3 +111,25 @@ then cover actual cryptographic verification (including tampered archive/trusted
 wrong key), archive identity/architecture/traversal/link rejection, same-version immutability,
 promotion, downgrade rejection, explicit rollback and preservation of prior release files.
 No production stable endpoint or application is changed by these tests.
+
+## Isolated native acceptance
+
+Use `npm run tauri:build:moxbot-updaterqa -- --qa-workspace /private/tmp/<new-directory>
+--qa-public-key /absolute/path/temporary.key.pub --qa-endpoint
+'http://127.0.0.1:<port>/updates/{{target}}.json' --qa-version <A-version> --
+--target aarch64-apple-darwin --bundles app` (as one shell invocation).
+The wrapper requires a fresh APFS workspace and a temporary key distinct from production.
+It rebuilds every asset with the closed QA profile. Keep the private key outside Git.
+
+The native app uses `com.moxbot.updaterqa`, `MoXBots Updater QA`, `.moxbot-updaterqa`,
+its own CLI/scheme/sidecar marker and port range. Launch with a clean environment and a
+separate test HOME. Do not copy daily configuration, credentials or history. QA forbids
+production credential readers, OS account stores, model probes, SDK/DSH/external runtime
+execution and auxiliary model utilities. Its terminal clears inherited environment and
+uses a non-login system shell. Verify the compiled identity and these boundaries before
+launch; moving a production app into a temporary directory does not isolate it.
+
+Native acceptance may exercise updater signing/download/pending/confirmation and a real
+QA terminal busy owner. Model execution-owner regressions are deterministic tests; they
+are not proof of an active paid Provider task surviving a native update. Never use daily
+`/Applications/MoXBots.app`, `.moxbot`, or shared Keychain state for this acceptance.
