@@ -17,6 +17,10 @@ let modelFilters = { bot_id: '', owner_id: '', model_ref: '' };
 let activeModelMutationBody = null;
 let modelAccessToken = null;
 const errors = {
+  COMMUNITY_NOT_FOUND: '话题不存在或当前不可见，请重新加载。',
+  COMMUNITY_LOCKED: '话题已锁定，无法发布回复。',
+  COMMUNITY_UNAVAILABLE: '社区服务暂不可用，请稍后重试。',
+  MUTATION_CONFLICT: '原操作编号与请求不一致，请保留原请求并核对。',
   MODEL_RESOURCE_REJECTED: '所选模型已停用、未配置密钥或不在当前授权范围内。',
   MODEL_CATALOG_UNAVAILABLE: '模型目录暂不可读，不能启动或配置模型；请核对存储状态。',
   COMMAND_DEPENDENCY_PENDING: '同一 Bot 有更早的待执行操作，请先核对原操作回执。',
@@ -90,6 +94,7 @@ function forgetSession(message = '') {
   modelAccessToken=null;
   const shownModelAccess=$('fields').querySelector('textarea[aria-label="一次性模型访问凭据"]'); if(shownModelAccess) shownModelAccess.value='';
   window.FeedbackAdmin?.reset();
+  CommunityAdmin.reset();
   token = null;
   data = null;
   editing = null;
@@ -298,7 +303,7 @@ function summary() {
 }
 function render() {
   if (!data) return;
-  const titles = { bots: 'Bots 管理', models: '模型中心', users: '用户', hosts: 'Hosts', audit: '操作审计', feedback: '用户反馈' };
+  const titles = { bots: 'Bots 管理', models: '模型中心', users: '用户', hosts: 'Hosts', audit: '操作审计', feedback: '用户反馈', community: '协作社区' };
   $('page-title').textContent = titles[page];
   document.querySelectorAll('[data-page]').forEach(b => {
     b.classList.toggle('active', b.dataset.page === page);
@@ -317,10 +322,12 @@ function render() {
   if (page === 'hosts') renderHosts(content);
   if (page === 'audit') renderAudit(content);
   if (page === 'feedback') window.FeedbackAdmin.render(content, request, () => page === 'feedback' && !!token);
+  if (page === 'community') void CommunityAdmin.render(content);
   scheduleFreshnessRefresh();
 }
 function scheduleFreshnessRefresh() {
   clearTimeout(freshnessTimer);
+  if (page === 'community') return;
   if (!data?.execution?.hosts?.length) return;
   const now = Math.floor(Date.now()/1000);
   const future = data.execution.hosts.map(host=>host.seen_at+31).filter(at=>at>now).sort((a,b)=>a-b)[0];
@@ -1040,3 +1047,117 @@ $('logout').addEventListener('click', async () => {
   }
 });
 document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => { page = b.dataset.page; render(); if(page==='models'&&modelView==='usage') void loadModelUsage(); }));
+
+/* Community moderation uses the existing admin session and server-owned revision.
+ * Unknown mutation outcomes retain the exact body, even when navigating sections. */
+const CommunityAdmin = (() => {
+  const categories = { discussion: '交流讨论', question: '使用求助', showcase: '实践分享', announcement: '社区公告' };
+  let epoch = 0, session = 0, pending = null, inFlight = false;
+  let selectedId = null, query = '', category = 'all';
+  const date = value => new Date(value).toLocaleString('zh-CN');
+  const active = (current, root) => current === epoch && page === 'community' && !!token && root.isConnected;
+  const control = (text, action, cls) => {
+    const b = node('button', text, cls); b.type = 'button'; b.addEventListener('click', action); return b;
+  };
+  function reset() { epoch++; session++; pending = null; inFlight = false; selectedId = null; query = ''; category = 'all'; }
+  function tags(item) {
+    const row = node('div', undefined, 'community-tags'); row.append(node('span', categories[item.category] || '交流讨论', 'badge blue'));
+    row.append(node('span', item.visibility === 'hidden' ? '已隐藏' : '已公开', item.visibility === 'hidden' ? 'badge orange' : 'badge'));
+    if (item.pinned) row.append(node('span', '置顶', 'badge blue')); if (item.locked) row.append(node('span', '已锁定', 'badge')); return row;
+  }
+  async function render(root) {
+    const current = ++epoch;
+    root.append(node('p', '查看社区话题与讨论，管理置顶、锁定和可见性。隐藏后普通用户无法查看，管理员仍可核对内容。', 'muted'));
+    const message = node('p', '', 'notice'); message.hidden = true; message.setAttribute('role', 'status'); root.append(message);
+    const showMessage = text => { message.textContent = text; message.hidden = !text; };
+    const content = node('div'); root.append(content);
+    if (pending) {
+      const warning = node('section', undefined, 'notice warning');
+      warning.append(node('strong', inFlight ? '正在确认社区操作' : '社区操作结果尚未确认'), node('p', '请重试原请求，操作编号和内容保持不变。确认前暂时停止其他社区修改。'));
+      const retry = control('重试原社区操作', () => void mutate(pending, retry)); retry.disabled = inFlight; warning.append(retry); root.insertBefore(warning, content);
+    }
+    async function mutate(operation, submit) {
+      if (!operation || inFlight) return;
+      const capturedSession = session; pending = operation; inFlight = true; submit.disabled = true;
+      root.querySelectorAll('.community-moderation input,.community-moderation button').forEach(c => { c.disabled = true; });
+      showMessage('正在保存社区设置…');
+      try {
+        await request(operation.path, 'PATCH', operation.body);
+        if (capturedSession !== session) return;
+        pending = null; inFlight = false;
+        if (active(current, root)) { root.replaceChildren(); await render(root); }
+      } catch (error) {
+        if (capturedSession !== session) return;
+        inFlight = false;
+        if (!error.uncertain) pending = null;
+        if (!active(current, root)) return;
+        if (error.uncertain) {
+          showMessage('保存结果尚未确认，请用原请求重试。');
+          const retry = control('重试原社区操作', () => void mutate(operation, retry)); message.append(document.createTextNode(' '), retry);
+        } else if (error.code === 'REVISION_CONFLICT') {
+          showMessage('话题已被其他管理员更新。当前修改尚未保存，请重新加载最新话题并核对后再操作。');
+          const reload = control('重新加载最新话题', () => { root.replaceChildren(); void render(root); }); message.append(document.createTextNode(' '), reload);
+        } else {
+          showMessage(error.message);
+          root.querySelectorAll('.community-moderation input,.community-moderation button').forEach(c => { c.disabled = false; });
+          submit.disabled = false;
+        }
+      }
+    }
+    if (selectedId) { await detail(); return; }
+    const toolbar = node('div', undefined, 'community-toolbar');
+    const searchLabel = node('label', '搜索话题', 'field'); const searchInput = node('input'); searchInput.type = 'search'; searchInput.maxLength = 120; searchInput.placeholder = '标题、内容或作者'; searchInput.value = query; searchLabel.append(searchInput);
+    const filterLabel = node('label', '话题分类', 'field'); const select = node('select');
+    for (const [value, text] of Object.entries({ all: '全部分类', ...categories })) { const option = node('option', text); option.value = value; select.append(option); } select.value = category; filterLabel.append(select);
+    toolbar.append(searchLabel, filterLabel); content.append(toolbar);
+    const list = node('div', undefined, 'provider-list'); content.append(list); showMessage('正在加载社区话题…');
+    try {
+      const result = await request('/api/admin/community'); if (!active(current, root)) return; showMessage('');
+      const draw = () => {
+        list.replaceChildren(); const q = query.trim().toLocaleLowerCase();
+        const rows = result.items.filter(item => (category === 'all' || item.category === category) && (!q || [item.title, item.content, item.author_name].some(value => String(value || '').toLocaleLowerCase().includes(q))))
+          .sort((a,b) => Number(b.pinned) - Number(a.pinned) || b.updated_at - a.updated_at);
+        if (!rows.length) list.append(node('p', '暂无符合条件的社区话题。', 'empty'));
+        for (const item of rows) {
+          const card = control('', () => { selectedId = item.id; root.replaceChildren(); void render(root); }, 'community-admin-row');
+          const meta = node('small', `${item.author_name || '社区成员'} · ${date(item.created_at)} · ${item.reply_count || 0} 条回复`);
+          card.append(tags(item), node('h2', item.title), node('p', item.content, 'community-excerpt'), meta); list.append(card);
+        }
+      };
+      searchInput.addEventListener('input', () => { query = searchInput.value; draw(); }); select.addEventListener('change', () => { category = select.value; draw(); }); draw();
+    } catch (error) {
+      if (!active(current, root)) return; showMessage(error.message);
+      const retry = control('重新加载社区话题', () => { root.replaceChildren(); void render(root); }); content.append(retry);
+    }
+    async function detail() {
+      content.append(control('← 返回话题列表', () => { selectedId = null; root.replaceChildren(); void render(root); }, 'community-back'));
+      showMessage('正在加载话题详情…'); const id = selectedId;
+      try {
+        const result = await request(`/api/admin/community/${encodeURIComponent(id)}`); if (!active(current, root)) return; showMessage('');
+        const item = result.topic, article = node('article', undefined, 'provider-card community-admin-detail');
+        article.append(tags(item), node('h2', item.title), node('small', `${item.author_name || '社区成员'} · ${date(item.created_at)} · 修订 ${item.revision}`), node('p', item.content, 'feedback-description community-body'));
+        const form = node('form', undefined, 'community-moderation'); form.append(node('h3', '话题管理'));
+        const fields = {};
+        for (const [key, text, checked] of [['pinned', '置顶话题', item.pinned], ['locked', '锁定讨论（暂停新回复）', item.locked], ['hidden', '隐藏话题（普通用户不可见）', item.visibility === 'hidden']]) {
+          const label = node('label', undefined, 'check-field field'); const input = node('input'); input.type = 'checkbox'; input.checked = checked; input.disabled = !!pending; fields[key] = input; label.append(input, node('span', text)); form.append(label);
+        }
+        const save = node('button', '保存社区设置', 'primary'); save.type = 'submit'; save.disabled = !!pending; form.append(save, node('small', '根据当前修订保存；并发更新后需重新加载核对。', 'community-save-hint')); article.append(form);
+        form.addEventListener('submit', event => {
+          event.preventDefault(); if (pending || inFlight) return;
+          const next = { pinned: fields.pinned.checked, locked: fields.locked.checked, visibility: fields.hidden.checked ? 'hidden' : 'published' };
+          if (next.pinned === item.pinned && next.locked === item.locked && next.visibility === item.visibility) { showMessage('设置没有变化。'); return; }
+          void mutate({ path: `/api/admin/community/${id}`, body: { mutation_id: crypto.randomUUID(), expected_revision: item.revision, ...next } }, save);
+        });
+        article.append(node('h3', `讨论 · ${item.reply_count} 条回复`, 'community-replies-title'));
+        if (item.reply_count > result.replies.length) article.append(node('p', `仅展示最新 ${result.replies.length} 条回复。`, 'muted'));
+        if (!result.replies.length) article.append(node('p', '暂无回复。', 'muted'));
+        for (const reply of result.replies) { const row = node('section', undefined, 'audit-event'); row.append(node('small', `${reply.author_name || '社区成员'} · ${date(reply.created_at)}`), node('p', reply.content, 'feedback-description')); article.append(row); }
+        content.append(article);
+      } catch (error) {
+        if (!active(current, root)) return; showMessage(error.message);
+        content.append(control('重新加载话题详情', () => { root.replaceChildren(); void render(root); }));
+      }
+    }
+  }
+  return { reset, render };
+})();

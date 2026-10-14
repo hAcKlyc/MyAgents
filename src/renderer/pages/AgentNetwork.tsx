@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE, APP_WEBSITE_URL } from '../../shared/appProfile';
 import {
   useCallback,
   useEffect,
@@ -476,11 +477,17 @@ function AgentNetworkContent({
               aria-label={t("agentNetwork.learnMore")}
               onClick={() => {
                 void openExternal(
-                  "https://myagents.io/blog/private-agent-network",
+                  APP_BUILD_PROFILE === 'moxbot' ? APP_WEBSITE_URL : "https://myagents.io/blog/private-agent-network",
                 );
               }}
               className="mb-4 block w-full overflow-hidden rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--paper)]"
             >
+              {APP_BUILD_PROFILE === 'moxbot' ? (
+                <div className="bg-[var(--paper-inset)] p-5 text-left">
+                  <h2 className="text-lg font-semibold text-[var(--ink)]">Bots Net</h2>
+                  <p className="mt-2 text-sm text-[var(--ink-secondary)]">{t('agentNetwork.infoIntro')}</p>
+                </div>
+              ) : (
               <img
                 src={agentNetworkBanner}
                 width={1980}
@@ -488,6 +495,7 @@ function AgentNetworkContent({
                 alt=""
                 className="block h-auto w-full"
               />
+              )}
             </button>
             <SetupGuide />
           </>
