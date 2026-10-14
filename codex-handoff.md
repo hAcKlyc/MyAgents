@@ -1,5 +1,13 @@
 # Codex Handoff
 
+## 当前桌面凭据与公开下载门禁（2026-10-14）
+
+MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014：a838 已经批准、备份安装，真实 sidecar 来源核对通过；旧会话与身份授权读取成功但身份目标保存失败，原凭据与原 MyAgents 保留。修复 84fd35f8 分离 physical publisher family，闭集编译绑定同一个固定 reader release；显式迁移在同一账本锁内授权来源、核验、目标写/读回及提交，保留删除屏障和缓存路由失效。原 crypto/protocol closure 和 immutable reader 未改。
+
+两个 family 的 source-exact 测试各25项通过，主审实际native slots25/owned15/identity2、reader打包17项通过，真实MoX profile+reader feature编译通过，独立末轮代码审查通过。首次失败的7项测试证据保留并已修正fixture/预检；不以cargo check替代行为测试。首个候选84fd已冻结并全量构建，后续文档提交用于第二完整构建，两包实际来源/签名/CodeDirectory和ZIP校验准备好后合并一次具体操作确认。当前未通过新包迁移、冷启动、不同构建更新或真实远程配置，不宣布发布完成。
+
+MOXBOTS-DOWNLOAD-001：用户明确要求新包完成后在主网站做下载页，并选择官网和GitHub试用下载公开。现有Sites源码为独立website-luma工作区，主审IAB已验证三视口、FAQ/首页往返、准备/错误/无效/ready门禁及55字节合成下载SHA；独立视觉内容复核通过。替代Chrome/headless证据不计入验收。实际新包链接、公开release与官网发布仍开放；不得公开旧失败候选、账号、凭据或授权链接。
+
 ## 当前统一云后台（2026-10-14）
 
 BOTS-CLOUD-ADMIN-001、登录辅助及BOTS-CLOUD-EXEC-001已交付。有限生命周期运行source75bb0269已由真实IAB/Owner/admin和Linux Host完成六方法、原请求/CAS、精确退出、重启及有效撤销验收；最终恢复的控制Bot没有活动Session、两代授权已关闭，模型调用保持禁止。源码/CI/制品、独立与生产验收、备份及限制见 services/agentnet/validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md。

@@ -12,7 +12,8 @@ The repair separates physical storage by the closed publisher family while prese
 - [x] Implement closed reader → compile-time writer family mapping; reader packaging 17 checks pass.
 - [x] Independent review: address same-key save idempotence and source reread risk; identify final expiry fence and behavior fixture failures.
 - [x] Source-exact temporary-ledger tests 25 per family; primary native slots25/owned15/identity2 passed with unchanged source hashes; final review clear. Actual profile/feature production compile passed; packaging17 passed.
-- [ ] Submit, push and exact-source CI; preserve latest main and project board.
+- [x] Implementation submitted and pushed at 84fd35f8cfb35c1d3de19268ef8ae64021f474a7, preserving main d86f7505 and project board.
+- [ ] Exact-head CI and frozen artifact acceptance (separate gates).
 - [ ] Two full signed builds with distinct CodeDirectories for one concrete migration/cold-start/update approval batch; exact resources, reader pin, archive and extraction checks.
 - [ ] Actual desktop/Linux remote config and disabled Agent create/persist/readback; no paid inference.
 - [ ] PR14 main delivery and installed artifact/source correspondence.
@@ -21,3 +22,5 @@ The repair separates physical storage by the closed publisher family while prese
 Website source is a separate Sites checkout. Primary IAB page/fixture behavior and independent visual/content review passed; actual installer remains pending. Cloud login owner has a separate maintenance window; do not concurrently deploy its services. Private backup/runtime/credential evidence stays outside Git.
 
 Details: `specs/tech_docs/credential_publisher_routes.md`. Follow that checklist and current runtime receipts rather than interpreting old pending approval as still unanswered.
+
+First full candidate is frozen at 84fd35f8 in a detached worktree. A second full build follows this documentation-only handoff update, with unchanged functional inputs; compare both signed CodeDirectories before requesting one concrete approval for the migration/cold-start/update sequence. Native tests and source-exact ledgers are passing, while installed migration, both signed artifacts and public release remain pending.
