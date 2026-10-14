@@ -1,6 +1,6 @@
 ## MOXBOTS-AUTH-HOST-20261014 — current continuation
 
-Root owns the unified macOS candidate and real Host integration. Human-approved114e2ac5 is now installed/running with exact source/resource verification and app/data backups; bottom-left owned account restored, both devices online, no keychain prompt during update/startup. Public5f remains unchanged. Real Host reads exposed a deterministic diagnostic-to-wire schema mismatch; explicit narrow projection is implemented, focused19 integration tests/typecheck pass, exact-source Linux repair and actual model/Agent acceptance remain open. Cold restart, CI/main and download refresh follow real acceptance. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
+Root owns integration. Human-approved114e2ac5 is installed/running; update and controlled cold start both restored owned account/two devices without keychain prompts. Actual reads revealed Node ready-diagnostic wire mismatch (fixed/deployed), frontend complete-DTO mismatch and footer click CSS mismatch (fixed/tested, final package pending). Node IPC connect/close race is being repaired with deterministic regression; ordered native→Node restart restored the real IPC channel. Main5315 website branding is integrated for one final candidate. Actual model save/disabled-Agent persistence, corrected package approval/acceptance, final CI/main and public download refresh remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
 
 ## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
 
