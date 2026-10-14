@@ -52,3 +52,9 @@ Evidence (private/local, no tokens committed): workspace pointer output/auth-hos
 ## Next step
 
 Sync accepted main NSIS repair, preserve frozen package source114e2ac5 and record doc-only/CI changes separately. Install only after concrete package confirmation and exclusive native handback; perform cold restart/update, model config preserving existing test key and disabled Agent create/readback through actual desktop. Then sync main, CI/review/merge and verify remote main/runtime. No paid inference or finite execution-policy extension.
+
+## Final pre-install checkpoint
+
+Integration e4132b7560d077d91e7384f93ed706cf679c4e0c passed all seven CI checks (Test38538591420 and owned authentication38538591348). Main3ee8aab5c185b87d607d4692482d987830c63536 adds only four board acceptance/task/plan documents beyond8f53a6ad; incorporated without changing runtime source or frozen114e2ac5 package. Independent board owner completed controlled5f Cmd+Q/process-exit/cold-start (PID65620), no credential/recovery prompt, both devices online, QA Task archived with zero executions. Native window has been returned to root with no pending dialog. Specific114e2ac5 update approval was requested and has not yet been received; do not treat board handback as software update approval.
+
+Candidate remains /Users/zhangshaohua/Downloads/MoXBots-Trial-macos-arm64-114e2ac5.zip. New package installation, cross-update credential behavior and real model/disabled-Agent configuration remain open; PR14 remains draft and unmerged.
