@@ -1,0 +1,78 @@
+{
+  "environment": "local real browser, actual product assets with explicitly mocked auth/API and admin fixture",
+  "cases": [
+    {
+      "name": "auth callback clears PKCE and bearer not persisted",
+      "pass": true
+    },
+    {
+      "name": "required validation blocks empty form",
+      "pass": true
+    },
+    {
+      "name": "known error preserves editable content",
+      "pass": true
+    },
+    {
+      "name": "submit401 unlocks retained content after same-document simulated reauth",
+      "pass": true
+    },
+    {
+      "name": "network uncertainty locks original mutation",
+      "pass": true
+    },
+    {
+      "name": "15 second timeout preserves original immutable request",
+      "pass": true
+    },
+    {
+      "name": "retry completes safely and detail escapes markup",
+      "pass": true
+    },
+    {
+      "name": "mobile 390 has no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "logout revokes captured bearer and clears page",
+      "pass": true
+    },
+    {
+      "name": "reload requires fresh login",
+      "pass": true
+    },
+    {
+      "name": "real reload callback restores same-principal bounded draft without submitting",
+      "pass": true
+    },
+    {
+      "name": "different-principal callback clears retained draft",
+      "pass": true
+    },
+    {
+      "name": "same-principal uncertain draft restores frozen original mutation then retries identical body",
+      "pass": true
+    },
+    {
+      "name": "different-principal uncertain draft clears mutation and form",
+      "pass": true
+    },
+    {
+      "name": "admin text safe and status reply conflict preserves input",
+      "pass": true
+    },
+    {
+      "name": "admin uncertain retry uses same mutation body",
+      "pass": true
+    },
+    {
+      "name": "admin definitive conflict after uncertain retry restores editing",
+      "pass": true
+    },
+    {
+      "name": "admin retry success refreshes cards",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

@@ -23,6 +23,7 @@
     "editProfile": "Edit account profile"
   },
   "ownedAccountEntry": {
+    "feedbackFailed": "Could not open Help and feedback. Please try again.",
     "account": "Account",
     "menu": "MoXBots account",
     "instance": "MoXBots instance",

@@ -181,3 +181,9 @@ User specifically approved29 update; native owned-account recovery, bottom-left 
 ### MOXBOTS-AUTH-HOST-20261014 final native acceptance
 
 Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.
+
+## FEEDBACK-001 — 2026-10-15
+
+把MoXBots小助理并入设置下方个人菜单，通知保持原功能。新增同源云端反馈页：用户提交和查看自己的反馈，管理员回复及处理；既有账号权限/PKCE登录、幂等/CAS和私有存储。记录 `.agent-sync/tasks/codex-feedback-center-20261015-3b6a3c97.md`；代码、fixture、main、云发布和客户端真实路径独立追踪。
+
+FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管理员处理已实现，代码/本地/独立UI验证通过；CI/main、生产与安装包验收分开，状态见任务记录。

@@ -1368,7 +1368,7 @@ export default memo(function GlobalSidebar({
           className={`shrink-0 pb-2 ${expanded ? 'pl-3 pr-[var(--global-sidebar-action-inset)] pt-0' : 'global-sidebar-rail-stack pt-3'}`}
           data-global-sidebar-footer-actions
         >
-          <div
+          {APP_BUILD_PROFILE !== 'moxbot' && <div
             ref={feedbackTriggerRef}
             className={`-mr-3 pr-3 ${expanded ? '' : 'flex justify-center'}`}
             data-feedback-popover-anchor
@@ -1386,7 +1386,7 @@ export default memo(function GlobalSidebar({
               onOpenBugReport={() => { setShowFeedback(false); onOpenBugReport(); }}
               triggerRef={feedbackTriggerRef}
             />
-          </div>
+          </div>}
           <SidebarNavButton
             expanded={expanded}
             active={activeView === 'settings'}
@@ -1394,9 +1394,9 @@ export default memo(function GlobalSidebar({
             label={t('globalSidebar.settings')}
             onClick={onOpenSettings}
           />
-          <div className="global-sidebar-account-row grid grid-cols-[minmax(0,1fr)_var(--global-sidebar-action-size)]" data-global-sidebar-account-row>
+          <div className="global-sidebar-account-row grid grid-cols-[minmax(0,1fr)_var(--global-sidebar-action-size)]" data-global-sidebar-account-row data-owned-account-row={APP_BUILD_PROFILE === 'moxbot' ? 'true' : undefined}>
             {APP_BUILD_PROFILE === 'moxbot' ? (
-              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} />
+              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} onOpenHelper={() => { closeFlyout(); closeNotificationCenter(); onOpenBugReport(); }} />
             ) : (
               <AccountEntry expanded={expanded} available={teamSpaceAvailable}
                 environment={config.spaceEnvironment ?? 'production'} onOpenSpace={onOpenSpace} />
