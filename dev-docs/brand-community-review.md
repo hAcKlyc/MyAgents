@@ -70,3 +70,13 @@ cargo test --manifest-path services/agentnet/Cargo.toml --locked --lib community
 ```
 
 about-run 会生成可重复抽取的 about-extracted.tsx；它是临时 harness 输入，不是产品组件。模拟、真实本地与生产分别记录，39项本地通过不替代主 Agent 最终验收。
+
+## 发布前相邻入口复核（追加）
+
+主 Agent 随后发现旧资源市场入口在 MoXBots 下显示 upstream 市场宣传，却因 Space gate 关闭而跳到社区；已修复。独立复核候选 HEAD `bae5dceeb85b3f834fbd4d336c479f4237c6b3a5` 上未提交的最终入口修正：
+
+- 实际运行 DOM `ToolMarketEntry.profile.test.tsx`，**2/2通过**：动态切换 moxbot / myagents profile 并重载产品模块；moxbot 不渲染按钮/宣传图、不会触发回调，myagents 原按钮点击调用 onOpen 一次。
+- `scripts/check-test-classification.mjs` 通过；文件有 `@vitest-environment jsdom`，由 dom 项目的 `src/**/*.test.tsx` 收集，不进入 unit 池。
+- 源码确认 App 的 `handleOpenToolMarket` 在 moxbot 分支仅显示本地化不可用说明；合法 `space.home` 仍打开 owned community，其他旧 Space route 只提示并返回已处理，`task.comment` 在此前独立处理，未被误拦截。中英文 `globalSidebar.legacySpaceUnavailable` 位于正确 namespace。
+
+没有新增缺陷。上述为2项真实 React DOM 检查及有界源码审查，未启动完整 App/原生 deep link，不改变此前39项浏览器验收的证据边界。没有服务/社区 assets 变更，未无谓重跑已通过的服务验收。最终相关文件哈希已更新进 source-hashes.json。
