@@ -1,0 +1,33 @@
+{
+  "source": "e5a05f76974a4962beb0b7de259690daaef08fd5",
+  "version": "0.5.4",
+  "binarySha256": "664158a5823317740f244ba78393fa471eb5323c2ef9b7d0e2cd72b27675801d",
+  "captureDate": "2026-10-15",
+  "files": [
+    {
+      "file": "01-native-card.png",
+      "sha256": "f5db0fbdf854dc93b15dd05b61eb5361fb9c232826f0bedaa89c6d101f724906",
+      "scope": "native Tauri UI with isolated synthetic QA fixture; no Provider execution"
+    },
+    {
+      "file": "04-native-list.png",
+      "sha256": "8283c139868fb39f7837f89e126e01a6cc5e7537374edba262d9ce8d6429b178",
+      "scope": "native Tauri UI with isolated synthetic QA fixture; no Provider execution"
+    },
+    {
+      "file": "05-list-original-chat.png",
+      "sha256": "fb30c5cbe42b2aad36abb6d905e64585a1e82c3fd8ab6ae79638cf6e948a1b74",
+      "scope": "native Tauri UI with isolated synthetic QA fixture; no Provider execution"
+    },
+    {
+      "file": "06-list-return.png",
+      "sha256": "902b75cf347ea7cf811a299ea87bfc024e92813bb0b4388f8e317598ab194c4f",
+      "scope": "native Tauri UI with isolated synthetic QA fixture; no Provider execution"
+    },
+    {
+      "file": "07-native-detail.png",
+      "sha256": "5dc6e7715fc2af910450e01d1067b05e6cd2350e441b1e27f1fe7f335f93ed75",
+      "scope": "native Tauri UI with isolated synthetic QA fixture; no Provider execution"
+    }
+  ]
+}
