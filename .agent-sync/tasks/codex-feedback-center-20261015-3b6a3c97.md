@@ -39,3 +39,5 @@
 ## Execution
 
 采用ai-yaoren-local，主/root负责集成、发布和整体验收；feedback_backend为原生子Agent，不调用外部原因：明确采用ai-yaoren-local纯内置模式。选择依据：后端权限/持久化可独立于前端菜单和页面，并且文件互斥。无模型升级，运行精确变体/推理档及费用未知。独立feedback_ui_review请求gpt-6.1-sol/medium，29项通过；修复管理员确定性重试锁表单和401再认证草稿恢复，主Agent复核整合。Token/费用未测，不声称节约金额。
+
+CI容量修复：最新主干37279ce4已无冲突整合，82 DOM及typecheck再次通过。Owned Linux run38606531983全部验证和产物上传成功，但15分钟时限在post-cache保存阶段取消job；本次仅将完整workflow时限增至20分钟，保留全部门禁并重新运行，取消run不用于发布。
