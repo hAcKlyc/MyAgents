@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({ modelqa: true, config: {} as Record<string, un
   provider: { id: 'qa-provider', enabled: true, models: [{ model: 'qa-model' }] },
 }));
 vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => false, isModelQaBuild: () => mocks.modelqa }));
+// This route unit toggles the admission flag; compiled profile consistency has separate integration coverage.
+vi.mock('../../shared/appProfile', () => ({ APP_BUILD_PROFILE: 'moxbot', APP_DATA_DIR_NAME: '.moxbot-modelqa', APP_CLI_NAME: 'moxbot-modelqa', APP_DISPLAY_NAME: 'MoXBots Model QA' }));
 vi.mock('../../shared/integrated-runtimes/provider-constraints', () => ({ getProviderExecutionConstraint: () => ({ kind: 'portable' }) }));
 vi.mock('../utils/admin-config', () => ({ loadConfig: vi.fn(() => mocks.config), findEffectiveProvider: vi.fn(() => mocks.provider), resolveProviderEnv: vi.fn(() => ({ apiKey: 'fixture-never-emit' })) }));
 vi.mock('../title-generator', () => ({ generateUtilityText: vi.fn(() => { throw new Error('SDK path forbidden'); }) }));
