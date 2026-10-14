@@ -173,3 +173,8 @@ Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No 
 ### MOXBOTS-AUTH-HOST-20261014 actual29 acceptance
 
 User specifically approved29 update; native owned-account recovery, bottom-left menu, remote Kimi Code/k3 save, disabled Agent creation and client+Host service restart persistence now pass without a new keychain prompt or model call. Extended Host resources had a display gap; a read-only registered-Agent list and three regressions are added. Final latest-main integration, combined candidate/CI, PR14 merge and public trial refresh remain open. Authoritative current scope/evidence/next step: `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`; old114/29 pending-approval notes are historical.
+
+
+### MOXBOTS-AUTH-HOST-20261014 final native acceptance
+
+Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.

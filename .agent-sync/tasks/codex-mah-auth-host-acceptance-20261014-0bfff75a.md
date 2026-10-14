@@ -25,9 +25,9 @@ Restore owned desktop credentials, wire the bottom-left account entry to the exi
 - [x] Actual remote writes: saved Kimi Code/k3 and existing Host directory through the native UI; created remote-agent-qa-20261014 as disabled, browsed its server-created directory, saved it as configuration workspace; revision6 receipt and independent server readback agree.
 - [x] Persistence: normal client quit/cold start plus both isolated101 Host services restarted. Model/directory/settings/Agent/project IDs and disabled state retained; real desktop read back k3/new directory. Node690386/native690383 ready, no active Session or inference.
 - [x] Found and repaired a final UI gap: extended DTO resources were not rendered. Added only a read-only registered-Agent list; no enabling/sharing controls, network catalog stays separate. Three DOM regression cases, ESLint and typecheck pass. New native package acceptance is pending.
-- [x] Synced main da4ed114 (PR38/39), resolved shared-plan conflict preserving both owners; 57 combined focused cases/10 files pass. Exact-head seven CI remains in progress.
-- [x] Built/verified clean combined package27d6ed8c: same immutable reader, strict signing/19 resources/ZIP CRC and extraction pass. New native list/account recovery acceptance awaits concrete update answer.
-- [ ] Review and merge PR14, verify remote main; publish accepted trial release and refresh the already-public download page.
+- [x] Synced main da4ed114 (PR38/39), resolved shared-plan conflict preserving both owners; 57 combined focused cases/10 files pass. Seven exact-head dd7192d4 CI checks passed (Test38582638208 / Owned38582638099).
+- [x] Built/verified clean combined package27d6ed8c: same immutable reader, strict signing/19 resources/ZIP CRC and extraction pass. Human specifically approved27; backed up/installed and opened. Actual owned account/two-device restoration and Host k3/new-directory/registered-disabled-Agent list readback passed.
+- [ ] Review/merge PR14 and verify remote main after this final evidence record/checkpoint. Publish accepted trial release; website update separately blocked by Sites account context (original mailxf project404, current connector lists zshedu Sites).
 
 ## Completed
 
@@ -43,9 +43,14 @@ Host101 devicecc8fc885-529b-43e9-8a58-ee7c5f2a4c58, network7b4e69be-f3ef-439a-af
 
 ## Verification
 
-Combined57 cases and independent main compatibility/UI reviews passed; list-only change preserves disabled/shared/authority state. Reviewer notes a nonblocking future display enhancement: archived resources currently show enabled/disabled without a separate archive label. Protocol/project owner remains unchanged. Exact source27 CI is still running; older green checks do not close it.
+Actual27 source is installed with executableSHA256850cb6aca85731c0c9beb67fdcf236754e7e3f14bfd07c255d3988bb0bf4cfae; native36100 restored owned account and both devices, remote snapshot returnedk3 and QA directory plus `remote-agent-qa-20261014 · 已禁用` in the new Host resource list. No new keychain interaction during root operations. Intermediate blank AgentNet page was the documented background double-rAF deferral; user foregrounded it and the actual page rendered. Separate concurrent migration caused process quits/restarts before cross-chat coordination; root then yielded all UI/data operations until migration owner released the window. Preserve its current8-project/34-history target; never restore old app-data backups.
 
-Combined ZIP346343830bytes, SHA256416bad4edaa83c210f7e5c63ef2e79481198d862a61b9e9a5a9ecd9dcc022d78, source27d6ed8cb405f2ccdc905798611df218d18b4caf. Source includes da4ed114 and the registered-Agent list. Package27 is signed but not notarized/installed/published at this checkpoint.
+Final Linux Node dd7192d4 (same runtime source as27, only task-record delta) built clean from pinned Linux resources, archiveSHA25644feefbc4df790d17d2814d8b5c9c91ea5096a83ea6f31f3fc4662287a3bb691, release20261014152711-dd7192d4fea2. Deployed with root-private backup/root/moxbot-combined-dd7192d4. Config/projects bytes and units/dropins unchanged, revision6 retained, Node722967/native722962 ready, actual management.sock ESTAB. cloud_models absent/default-off, no active Session or inference. Native source unchanged from114.
+
+
+Combined57 cases and independent main compatibility/UI reviews passed; list-only change preserves disabled/shared/authority state. Reviewer notes a nonblocking future display enhancement: archived resources currently show enabled/disabled without a separate archive label. Protocol/project owner remains unchanged. Seven exact dd7192d4 checks passed; that tree differs from frozen27 only in this task record.
+
+Combined ZIP346343830bytes, SHA256416bad4edaa83c210f7e5c63ef2e79481198d862a61b9e9a5a9ecd9dcc022d78, source27d6ed8cb405f2ccdc905798611df218d18b4caf. Source includes da4ed114 and the registered-Agent list. Package27 is signed and actually installed, but not notarized. Full GitHub draft asset uploaded346343830bytes with server-reported matching SHA256; public release waits PR14 integration.
 
 ## Evidence and rollback
 
@@ -57,8 +62,8 @@ Public website currently serves old5f trial, not29; new source/package/runtime/m
 
 ## Blockers and unknowns
 
-Awaiting the specific27 update answer and exact-head CI; continue independent artifact/source verification. No model key is configured, so inference is untested and out of scope. Historical goal API blocked status cannot be resumed by available mutations; user has explicitly resumed actual work. No password/key request or automatic migration is pending.
+27 approval/install/real readback and exact-head CI are complete. Final evidence is documentation-only; integration/publishing remain to finish. Website is an external access blocker: existing project appgprj_6acd8941b2448191bc0247fdf5556aaf now404 in current Sites account, which lists only zshedu Sites; user has been asked to restore original mailxf owner/editor access. Do not recreate/rebind the Site or switch accounts without authorization. No model key is configured, so inference is untested and out of scope. Historical goal API blocked status cannot be resumed by available mutations; user has explicitly resumed actual work. No password/key request or automatic migration is pending.
 
 ## Next step
 
-Accept combined27 native list/cold recovery after the requested concrete update answer; obtain exact-head CI and Linux artifact provenance, preserve101 policy while aligning its Node source, then merge PR14 and verify remote main. Refresh the already-public trial download with a new immutable release; keep old downloads for rollback.
+Verify final documentation-only CI and merge PR14, confirm remote main contains all runtime changes, then publish immutable27 trial. Refresh original public Site only after its account access is restored; preserve old release/download for rollback. No further native replacement or app-data restore is required.
