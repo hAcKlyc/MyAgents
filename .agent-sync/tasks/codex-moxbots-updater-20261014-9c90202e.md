@@ -102,3 +102,32 @@ Root 9文件211项回归、composition139项、独立154项通过；full lint/ty
 原生A2手动合法204已通过；实际TaskCenter内联编辑未覆盖被发现后停止安装。普通tab导航会卸载未保存inline编辑，是独立导航缺陷，不能当作升级已保存。退场前独立操作员重新构造ownRecord marker并UI保存，磁盘SHA f89c44737adfe6049df86dfd38bc5ef7e0730c61964aa1ce540ea2a43919671f；Chat exact3行/尾空格仅AX证据，不冒称旧版durable保存。A2正常退出后两个exact QA orphan由Root验证argv/PPID并限定TERM，qa-A2-retirement.json；未操作日常App/data/Keychain。
 
 D/3000f30f App虽然Apple Accepted且附票，因新发现编辑入口而superseded，未发布。本次重新冻结A3/B3/正式E同源，TaskCenter编辑保持mounted直接点顶栏更新验证拒绝，再执行真实signed A→B/草稿恢复/sidecar退出。最终DMG公证和HTTPS签名制品发布仍待完成；stable仍204。
+
+## Unified 0.5.4 receiving handoff
+
+已核实本次freeze e5a05f76974a4962beb0b7de259690daaef08fd5 包含PR44反馈 main d7264a43（candidate428e8a23）、PR42会话计时/原会话入口 main58b6720f/0c7b8e72、RemoteSession main1c1f3ee2，及本任务全部dirty/IO准入和durable草稿交接；Root与两份QA runtime文件哈希全量核对一致。证据指针WPS项目work/updater-20261014/unified-054-source-receipt.json、E-source-freeze-e5a05f76.json。没有因为新的统一接收消息重复废弃同源候选。
+
+统一接收聊天MOXBOTS-UNIFIED-054-20261015（01a12b99-7b38-78b1-831f-9c60257d386a）提出由其接收/复核并串行发布IP下载页；Root继续唯一构建/签名/公证/原生QA更新与已有更新stable服务owner。本任务不修改官网页面；接收方领取前须最终候选与隔离门槛通过，避免静态锁/版本并发。未获得向接收方发新消息的直接人类授权，当前通过本记录提供状态。
+
+原生队列核心之后补菜单/小助理/未登录/窄轨账户与铃铛、PR42ownQA原会话入口；无真实issuer/账户凭据/模型执行的QA边界明确记录，不把DOM或空态当真实登录/帮助URL/计时任务验收。
+
+
+项目看板接收方01a13592-fe31-7aa2-a2a1-fe3b73865cb5已提交PR42组合证据：main0c7b8e72、merge58b6720f、CI38606936447六项通过、154unit/14组React合成UI；本次冻结已包含，并不重复构建。当前原生UI窗口状态为独占待A3/B3更新验收，不移交并发操作；最终候选/实际PID及QA正常退场后释放状态在本记录和WPS结果receipt更新。项目看板原生真实Provider计时样本尚无，本任务禁收费模型执行，空态/准确Session导航与真实计时任务区分；看板接收方可在释放后按其自身授权补验收。未向其发送新跨任务消息。
+
+## Final source/native/package delivery and production cutover
+
+2026-10-15：PR46 已合远端main0c85b57109335b97eb1d77fbc7024e6cb25fb831，source e5a05f76974a4962beb0b7de259690daaef08fd5。CI38623129708六项全部success；main3351个运行相关Gitblob哈希逐项等于freeze，没有以不同主干源码冒充本包。
+
+独立QA A3→B3全部核心真实验收通过，详dev-docs/moxbots-updater-qa-isolation-review.md第十轮：后台签名下载不自动安装；cancel；mounted ThoughtCard/ThoughtInput未提交编辑拒绝且仍可编辑；真实PTY持续输出时拒绝安装；空闲signed安装→原生request_restart、cleanup_complete且old App25229/Global25347/Session31196全部退出；B34881实际0.5.4/binary664158a5823317740f244ba78393fa471eb5323c2ef9b7d0e2cd72b27675801d；恢复exact98Session/Tab及3行/@file/尾空格，没有send；Record SHA3129602b3e3bc54f6291c20946e2680b8d841fefabca33806ee6de73202b1d7a保全；handoff main/bak/tmp正常消费；B204最新反馈。Root随后通过Cua exactApp的AX/截图亲自复看草稿、About0.5.4、manual204正常，返回Chat仍完整。
+
+最终production E App：/private/tmp/moxbots-updater-20261014/E-final-054-e5a05f76/MoXBots.app，binaryc16afdde9d0b0fb2fb52ad464de167c5870282e969dacdce358ef9e63dcef561，QJ5URBG9AP；Apple App6ca95f9a-a094-49cd-94e6-dd2844074776 Accepted/stapled/deepstrict/Gatekeeper全部PASS。固定Reader二进制284118e3与manifest逐字节等于immutablecache，Cuse原字节独立ZIP预审通过，无helper/App嵌套重签。
+
+正式分发在WPS项目指针 output/updater-20261014/final-e5a05f76/：ZIP MoxBots-0.5.4-macOS-arm64.zip 351866393bytes/SHA9548da2b9e4d47a6fe30db15a244adc9822893a6eaf567aa8435d6e7a6ee1ff7；TAR MoXBots.app.tar.gz 343281849bytes/SHA89572190e920b8c1dcb640ae294f2d4cba870128ad209c6848c11ec187a90d49，自己的production minisign key；ZIP/TAR真实解包12508项字节/链接/执行位全等、App签名/票据/Gatekeeper全部通过。最终DMG MoxBots-0.5.4-macOS-arm64.dmg 344646848bytes/SHA97eba5703af4c257c30f7a31be5c2d5fd3156048e0327b7efeda558fc3ac7f30；DMGc4ed4dc5-1972-430c-8ffe-316f7c3753bb Accepted/stapled、DMG自身signature/Gatekeeper/integrity及最终readonly挂载全清单/zeroattrs/App全部门禁通过。中间formal-D pre-staple摘要不当最终摘要。
+
+服务stable已原子发布0.5.4，无新端口/网站修改。https://140.143.183.232/updates/stable/darwin-aarch64.json；artifact /updates/releases/0.5.4/89572190e920b8c1dcb640ae294f2d4cba870128ad209c6848c11ec187a90d49-MoXBots.app.tar.gz。服务器upload SHA/343281849bytes通过，firststable事务/history存/srv/moxbots/updates/.history/MOXBOTS-UPDATER-20261014-first-stable.json，previous=null，回滚只退役此exactstable→204且保留不可变归档。普通TLS GET清单200/no-store与artifactHEAD size/immutable已通过；公网全量GET在当前链路约80–100KB/s，直连1MB实测约55KB/s没有改善；Nginx未配置limit_rate，具体出口套餐未知，不调整系统代理或付费带宽。全量HTTP hash/signature、range/unsupported/private404/websiteunchanged最终复验仍在进行，不能宣称该门槛已完成。
+
+原生窗口Root和全部children已停止GUI操作：先明确释放QA给接收方，随后看板owner01a13592-fe31-7aa2-a2a1-fe3b73865cb5独占，统一接收方已承认其小助理弹窗可能留现场并永久退出GUI队列；不当产品故障。全局交接最新状态见WPS output/remote-session-20261015/OWNER-WINDOW-HANDOFF.json / work/updater-20261014/QA-WINDOW-RELEASED.json。日常安装/真实账号/远程会话由其各自明确授权owner，在看板释放后串行；本Root不操作日常App/data/Keychain账号。
+
+边界：paidProvider运行中保护为owner回归，不冒称native paid任务不中断；实际Host/发行issuer登录退出/反馈cloud与真实SDK计时样本未验收。remote-session tab正式安全更新证明未就绪时明确阻断；中文IME/评论处理中为DOM覆盖。普通TaskCenter切tab会卸载未保存inline编辑是已有独立导航缺陷，本次只证明mounted编辑拒绝更新。更新dialog实际1200×800；900×700仅小助理/账户popup适配。
+
+统一接收owner01a12b99-7b38-78b1-831f-9c60257d386a独占GitHub trial draft与IP手动下载页，本Root不重复发行或覆盖9ed设计/站点pointer。source、主干、native、正式包验收已有可领取证据；最终HTTP完成后更新结果receipt和本记录收尾。

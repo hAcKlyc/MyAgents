@@ -195,3 +195,8 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 ### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
 
 用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+
+
+### MOXBOTS-UPDATER-20261014 final0.5.4 cutover
+
+PR46/sourcee5a05f76 landed main0c85b571, sixCI, main3351runtimeblob equality. Independent nativeQA A3→B3 passes unsigned/tamper priornegative, actualcancel/edit/realPTY refusal, signedidle install/nativecleanup/exactdraft&Record restoration; Root actualAX/screenshot recheck. FinalApp/DMG AppleAccepted/stapled/Gatekeeper and ZIP/TAR fullroundtrip gates pass. WPS output/updater-20261014/final-e5a05f76 provides finalApp-distribution receipts. Ownupdate stable0.5.4 atomic cutover complete; fullHTTPSGET/hash/signature/range/privacy/unchangedsite verification ongoing due measuredslowlink, not marked complete. QA GUI now soleProjectBoardowner; Root/children stopped, sharedlease record output/remote-session-20261015/OWNER-WINDOW-HANDOFF.json. Unifiedowner controls trialGitHub/IP download page; remoteowner handles separately authorizeddaily install afterlease. PaidProvider/realissuer/Host/providertimer not nativeaccepted.

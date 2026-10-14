@@ -170,3 +170,59 @@ Mox remote-session tab在begin前、persist、最后verify均明确拒绝更新�
 按主实现者明确授权，退场前AX仍可读取Chat exact三行及最后空格，保存nonsecret证据 `/private/tmp/moxbots-updaterqa-home-20261015/qa-ui-A2-retirement-draft.json`，无模型发送。返回TaskCenter时发现旧未保存inline编辑已在切换到Chat后被组件卸载，当前无保存按钮、旧persisted内容不含marker。不能声称旧UNSAVED-A2已保存或一直留现场。这是普通tab导航本地编辑生命周期的独立缺陷/范围，不是本次真实升级丢失。A3应保持TaskCenter edit已mount，用顶栏更新直接触发保护；不能跨tab改变fixture后仍当其存在。已通知主实现者。
 
 随后按授权重新打开同一own text Record，追加完全同样marker并UI点击保存，确认卡片退出编辑且native文件实际内容为 `QA-UPDATER-20261015-PERSISTED-RECORD #updaterqa QA-RECORD-EDIT-A2-20261015-UNSAVED`。content.md SHA256为 `f89c44737adfe6049df86dfd38bc5ef7e0730c61964aa1ce540ea2a43919671f`。正常Cmd+Q唯一exactA2返回App quit，PID83835退出；只读检查已知QA子进程83907(global33415)、85770(session33416)成为PPID1仍监听，argv均exactA2资源路径与--moxbot-updaterqa-sidecar。未kill侧进程或用户进程，交root处理。未安装B2；真实A3新版门禁与A→B仍未验收。
+
+## 第九轮：A3/B3 原生验收检查表（准备，尚未执行）
+
+主实现者通知A2精确残余83907/85770已验证自身argv/PPID1后TERM并退出，收据 `work/updater-20261014/qa-A2-retirement.json`；真实Node routes integration1通过。当前checkout HEAD为e5a05f76974a4962beb0b7de259690daaef08fd5，A3/B3与productionE由主实现者重建。本审阅不启动旧A2/B2，不操作生产、日常App、日常数据、钥匙串或未知进程。待精确A3路径/PID和签名B3manifest移交后才执行下表；开始时再次核对exactApp/com.moxbot.updaterqa/独立HOME。
+
+| 待验项目 | 操作与通过标准 | 当前证据边界 |
+| --- | --- | --- |
+| A3身份及204 | get_app_state核对唯一QA PID/About0.5.3；手动检查合法204显示最新、可重试、无parse失败 | A2已原生通过，A3待复验 |
+| 合法签名下载/ready | Root启用唯一loopback合法B3后UI检查下载，验签完成显示0.5.4 ready；旧App仍运行，未自动退出 | 原A已通过，A3待复验 |
+| inline编辑阻断 | ready后在TaskCenter编辑同一ownRecord追加UNSAVED-A3，保持textarea/保存按钮挂载；从顶栏直接确认更新，要求明确暂停、文字仍在且可编辑、ready保留、PID不变；不跨tab使fixture消失 | ThoughtCard DOM9通过；A3真实待验 |
+| 新文本记录阻断 | 在TaskCenter顶部ThoughtInput输入ownmarker，保持挂载，从顶栏确认，暂停且原文保留；随后仅自己清除这一marker | LocalEditors DOM14通过；A3真实待验 |
+| 手工保存fixture | 仅ownRecord手工点击保存，UI退出编辑且content.md/readback包含新marker；记录SHA作升级基准 | A2手工保存已通过，A3基准待建立 |
+| Chat草稿/@引用 | 打开ownSession98a856...，Shift+Return分三行输入QA-CHAT-DRAFT-A3-20261015/LINE-2-KEEP-EDITABLE；实际@候选选择myagents_files/update-fixture.txt，AX记录exacttext及尾空格；不发送 | A2同路径可输入，A3待建立 |
+| 确认取消 | 确认dialog明确目标0.5.4及任务保护；点稍后保留ready/A版本/PID/草稿，未安装 | 原A真实通过，A3待复验 |
+| 真实PTY busy持续 | 只ownSession终端启动系统/bin/date+/bin/sleep5循环；确认安装busy拒绝，loop持续产生新的marker、草稿仍在、无重启；仅Ctrl+C自建loop后exit该PTY | 原A真实通过，A3待复验；不代表付费SDK任务验收 |
+| 空闲signed A→B | 保留Session，不关闭owner绕guard；无自建PTY/不安全editor后UI再次明确确认，真实安装及relaunch0.5.4；核对新PID/允许App路径/binaryhash | 原A因404失败，不宣称已通；A3待验 |
+| 草稿实际恢复 | 新B restore pill恢复精确Session/工作区；AX和截图逐字核对三行/@ref/尾空格，并验证可编辑；无自动send；handoff消费/清理读回符合规则 | 源码/DOM通过，native待验 |
+| 数据/旧owner保全 | ownRecord readback/SHA与升级前相同；已知旧QA App/Global/Session PID应退出、新owner按正确身份启动；只读核对，不kill | native待验 |
+| B204/Cuse | Root撤manifest成204后手动检查最新反馈；ownQA日志不再有Cuse missing；允许安全resize时补窄桌面modal可用性 | native待验 |
+
+本轮遇到P1、unknown/busy其他owner或20分钟内build/UI未就绪即保留证据报告，不绕guard，不借用daily App/数据。评论/中文IME/structuredcontext仅保留DOM验证边界；无需创建真实评论/付费SDK任务或触发用户系统权限。通过后UI交回root复核，不擅自退出。
+
+### A3 附加入口原生检查（核心升级之后，尚未执行）
+
+只读Git ancestry核验e5a05f76包含d7264a43/428e8a23、58b6720f/0c7b8e72与1c1f3ee2，无需为既有主干入口重复构建。先完成Updater全部关键路径；active dirty editor、PTY或草稿恢复期间不切页补查。允许native附加：个人菜单实际打开小助理、未登录提示/合理空态、窄轨账户与通知铃铛为独立入口；ownQA ProjectBoard计时显示及回到原Session98a856...。这里只证明入口、空态与导航，不具有SDK执行计时真实样本。issuer帮助反馈与退出仅在QA无真实凭据状态检查不可用或合理空态；不新建账号、读取/借用真实凭据或发送收费模型，不宣称真实issuer服务、账号退出或收费任务验收。追加UI项尚未执行，不废弃已冻结candidate源码。
+
+### 退出证据语义修正
+
+A2及原A均调用computer_use `press_key({app: exactQAPath, key: 'super+q'})`，没有调用App.quit、forcequit或shell kill。工具约5秒返回 `Computer Use server error -10005: App quit`，随后只读ps确认App PID退出、已知QA侧进程残余。此处只证明按键工具被调用与PID结果，不足以证明实际经过Rust RunEvent ExitRequested；无法排除工具内部对quit按键特判。此前“正常Cmd+Q”应按此限定理解，不能从缺少app_lifecycle exit_requested日志推断源码清理失败。Root已只读确认RESTART_EXIT_CODE路径包含stop_all_sidecars/settle。
+
+A3/B3更新验收需记录Rust原生request_restart、exit_requested、cleanup日志和已知oldQA Global/Session PID实际退出，tool成功或窗口消失不能替代。最终安全退出优先实际QA App菜单Quit并核对原生日志，不使用forcequit/App.quit替代；期间仍不终止未知或日常进程。
+
+## 第十轮：A3 → B3 独立原生真实更新（核心通过）
+
+2026-10-15 03:36–03:53（本机UTC+8；qa-native日志以UTC记19:36–19:53）。仅exactApp `/private/tmp/moxbots-updaterqa-live-A3-20261015/MoXBots Updater QA.app` / com.moxbot.updaterqa / 独立QA HOME。源码pin由主实现者提供e5a05f76974a4962beb0b7de259690daaef08fd5；独立核对A二进制SHA9250f855d3e634280a0067adbcf9f28d0d3fc6c626728dd51aa26d7a00532f03。A PID25229、Global25347、后来Session31196；About0.5.3、手动204“当前已是最新版本”通过。旧Recordf89c哈希基准匹配。
+
+主实现者启用独立签名B3manifest，仅127.0.0.1:52831；342752406bytes，archiveSHA9e041f0dab53e47b87614d4708dab12e28ca59b4b9dbe887f8fd1a1c10516ebc。原生下载26/50/76/100%→磁盘pending→ready0.5.4，A仍运行、未自动安装/重启。
+
+- **真实mounted inline门禁通过。** ready后在TaskCenter旧ownRecord追加UNSAVED-A3-20261015，始终保持textarea及保存按钮挂载，从titlebar直接确认。明确toast“更新已暂停：任务中心文本记录仍在编辑或保存…内容已保留”，文字/ready/PID全部保留；继续追加EDITABLE-AFTER-REJECT证明可编辑，再手工点击保存。未借切tab卸载fixture绕门禁。截图ownQAhome/qa-ui-A3-inline-block.png。
+- **真实ThoughtInput非空门禁通过。** 同TaskCenter顶部输入QA-THOUGHT-INPUT-A3-UNSAVED-20261015，从titlebar确认，明确暂停新记录未提交，原文保留；仅手工选择并清除自己的这条测试输入，不自动保存/执行。截图qa-ui-A3-thought-block.png。
+- 记录手工保存后nativecontent.md完整含原内容、UNSAVED-A3-20261015与EDITABLE-AFTER-REJECT，升级基准SHA3129602b3e3bc54f6291c20946e2680b8d841fefabca33806ee6de73202b1d7a。
+- 工作区隐藏动作的鼠标自动化曾触发DnD aria而未打开；使用实际键盘焦点导航到Board→Return成功。看板显示已有New Chat当前空闲/最近更新01:03，通过进入原会话打开ownSession98a85638-b8be-405d-b0f7-56edd540a537。未注入state或改metadata。
+- **真实多行/@引用与取消通过。** 通过Shift+Return输入三行并从真实@候选选择update-fixture.txt；AX exact text为 `QA-CHAT-DRAFT-A3-20261015\nLINE-2-KEEP-EDITABLE\n@myagents_files/update-fixture.txt `。未发模型，点确认dialog“稍后”保持ready/A/草稿。snapshot ownQAhome/qa-ui-A3-pre-upgrade-baseline.json，截图qa-ui-A3-draft-before.png。
+- **真实PTY busy不中断通过。** 只ownPTY64fc4074-c734-42ac-bf49-393fadea9804，系统/bin/sh执行date+sleep5循环；03:45:32用户确认安装，Rust明确user terminal still open，ready保留、A不重启。新输出继续到03:45:52及之后，草稿完整。截图qa-ui-A3-busy-survived.png。仅Ctrl+C自建循环、exit此shell，03:46:16日志Shell exited/Self-cleaned确认PTY退出。未关Session绕guard。
+- **真实签名安装/原生重启清理通过。** 03:46:43空闲明确确认，原生读取同342752406bytes、cached Update，03:46:49 installed/restarting；日志272–284真实exit_requested code2147483647 reasonapp-restart、stop_all begin/complete、cleanup_complete creation_gate_ok/sidecars_ok true，Global graceful-shutdown complete。旧25229/25347/31196独立ps全部消失，没有验收者kill。
+- **真实B版本/二进制通过。** 同exactApp新PID34881，Info.plist com.moxbot.updaterqa/0.5.4，独立二进制SHA664158a5823317740f244ba78393fa471eb5323c2ef9b7d0e2cd72b27675801d与B3匹配；新Global34967、restore后Session35459均parent34881、QA marker/own98Session路径一致。RecordSHA3129602b...与升级前一致。
+- **实际恢复/可编辑/消费通过。** B启动restore pill1（原codec只保存Chat tab，正常），读取真实handoff核对精确Tabtab-1792007034981-wbuiz4、Session98/ownmino路径及exact3行/尾空格；点pill后实际Chat输入逐字恢复，没有send。实际键入X后BackSpace撤回，证明仍可编辑并保持baseline完全一致。handoff main/bak/tmp随后均不存在，正常消费。截图qa-ui-B3-draft-restored.png。
+- **B204复验/Cuse资源边界通过。** Root撤manifest成204后About0.5.4手动检查显示最新，按钮正常，截图qa-ui-B3-latest.png。exactB Resources包含bundled-skills/cuse/Cuse.app二进制/CodeSignature/SKILL/scripts，ownnative日志无Cuse missing；未执行Cuse（QA执行禁用），不宣称其功能联调。
+
+### 附加入口与适配边界
+
+个人菜单在无真实账号的QA下显示实例/登录/小助理/帮助反馈；实际点击小助理打开AI小助理空modal，无模型选择、发送禁用，未输入/发送。窄rail账户和铃铛是独立按钮，账户菜单可用，铃铛实际打开消息中心，显示“暂时无法获取通知/检查网络重试”（QA没有真实account/backend联调），不能宣称通知服务或issuer账号真实通过。截图qa-ui-B3-narrow-account.png、qa-ui-B3-notification-unavailable.png。
+
+只用exactQA窗口右下角实际resize1200×800→900×700，小助理modal/账号popup均未裁切，可关闭，截图qa-ui-B3-small-modal.png。随后恢复1200×800/完整sidebar，返回ownmino Chat保留草稿。更新确认modal已在1200×800实际验收，900×700的更新modal未单独重建pending复验；不把小助理modal代替更新modal。PR42在已有QA会话只确认原会话入口和最近更新时间，无SDK执行计时样本；中文IME/structuredcontext、真实评论、付费SDK任务/真实issuer退出不在native证明范围，既有DOM/源码边界保留。
+
+全部关键更新路径仅QA独立bundle/签名/HTTP/数据进行，日常App、用户数据/身份/钥匙串未操作。正式production候选/publication由root另行收口，本报告不宣称production安装/真实Host/付费执行验收。当前exactQA B PID34881保持运行，UI在ownChat（draft未send），窗口1200×800；交回root复看后才按其通知进行真实QA菜单Quit，不擅自退出。
