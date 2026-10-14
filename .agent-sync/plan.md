@@ -184,4 +184,4 @@ Approved combined27 is installed; actual owned account/device recovery, k3/direc
 
 ### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
 
-用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；153项unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，当前PR/main交付与统一候选包原生验收分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。

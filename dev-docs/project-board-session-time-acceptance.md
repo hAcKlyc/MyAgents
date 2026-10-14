@@ -13,11 +13,11 @@
 
 | 层级 | 结果 | 证据 |
 | --- | --- | --- |
-| 代码/只读协议 | 通过 | 7 文件153项 unit，覆盖两类adapter当前/终结turn、owner隔离、无时间、非法/未来开始、等待、过期、旧响应 |
+| 代码/只读协议 | 通过 | 7 文件154项组合 unit，覆盖两类adapter当前/终结turn、owner隔离、无时间、非法/未来开始、等待、过期、旧响应 |
 | 静态与构建 | 通过 | Node24 typecheck、完整lint/依赖边界/agent docs、MoXBots profile生产build:web/build:server和8项主题测试 |
 | 实际React交互（合成数据） | 通过 | 14组 journeys；单击/键盘定位准确原会话、列表入口、保留筛选草稿、错误恢复、过期冻结/手动恢复、无后台轮询；1440/1024/768/540、深浅主题，无pageerror |
 | 原生安装/真实执行 | 待统一更新 | 当前已装0.5.3/5949b7f1不含本次功能；统一owner工作树仍有其他修改，未并发构建/换包/退出运行中客户端 |
-| main/CI | 等待当前PR | 与最新main ff957fdf同步，记录随源码提交；合并后另核实远端SHA |
+| main/CI | 通过 | 与PR43/main37279ce4组合，head e22b7b7c完整CI38606936447六项通过；PR42合入main58b6720f，远端ref及源码树一致 |
 
 合成截图和结果：`project-board-validation/session-time/`；本地完整输出 `/tmp/moxbots-board-session-time-20261015`。截图仅用于界面回归，不能替代原生实际API或真实模型执行证据。
 
@@ -28,3 +28,9 @@
 计时是当前轮次的墙钟时间，包含等待，不是所有历史轮次累计或模型token耗时。未建立新的执行状态authority或持久化owner，未更改云服务或数据。后续统一包须核实renderer/server同源、空闲安装窗口、回滚及原生会话直达路径。
 
 PR42首次CI（38603665188）的JS gate在550个unit文件中仅runtime-boundary两项失败：adapter直接import内部transcript违反既有facade边界。修复为ProductTranscriptContent只读executionStartedAt getter，由agent-session/external-session正式facade暴露；adapter不再越界。未修改/抑制边界测试，153项相关复验通过，终结/中止/错误/打断turn均不再暴露计时起点。CI和main仍以修复后PR head为准。
+
+## 主干交付与剩余原生门禁
+
+PR42已合入远端main；集成锚点58b6720f296484c8ccd3ada08fc38695827df016，源码验收锚点e22b7b7c1c4ad6f4ee1fb56a9f3fc36ceda3ecf4。原始失败run38603665188、修复后run38605229874（因同步并发主干取消）与最终通过run38606936447分开记录；取消不当作失败或通过。组合后154项相关unit、typecheck、MoXBots前后端构建通过；Git树比较确认合并未改变验收源码。
+
+只读查看统一更新owner的当前状态：升级器不能确认会话owner活动状态，A→B原生升级仍阻断，门禁保留。另已请求追加联系实际owner任务的明确授权；收到授权并获得窗口前，不发新跨任务消息、不并发构建或替换其客户端。本次主干和合成UI交付完成；安装、原生真实计时/会话直达、官网包更新仍未完成。
