@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/project-board-20261014 -->
 <!-- git-project-sync-task:base=43994b75ca9278420ecd352af2e0cc663f4a7cdc -->
-<!-- git-project-sync-task:status=complete -->
+<!-- git-project-sync-task:status=in-progress -->
 
 
 # Task: MOXBOTS-PROJECT-BOARD-001: workspace execution overview from PB-002
@@ -45,7 +45,7 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 
 ## Next step
 
-已完成源码main交付、5f1a8feb统一客户端安装、真实桌面关键路径验收，并独立比对官网匿名全量下载件。当前结束条件满足；跨重启/窄视口/归档恢复等未覆盖项目已明确列入验收边界。
+已完成源码main交付、5f1a8feb统一客户端安装、真实桌面关键路径验收，并独立比对官网匿名全量下载件。用户已要求继续修复PR35 CI、合main并补验。CI修复已集成；原生最窄支持窗口/键盘/归档恢复通过，跨受控正常重启因macOS锁屏暂停，待用户手动解锁。
 
 ## 当前实现与审阅
 
@@ -63,6 +63,17 @@ Tab由现有App/module registry统一管理，新增工作区看板variant，无
 
 通过MoXBots集成终端的正式CLI创建受控本地Task PB-NATIVE-QA-20261014（ID 5dc7e135-3d4f-4fbd-a351-077fd22e395d，executor user），无Agent dispatch、模型调用或业务数据变更。真实看板读到Task；todo→running→verifying后在UI提交验收说明并点“确认验收完成”，看板状态/需要我计数与CLI task get读回的done一致；随后对这条受控Task作recoverable archive，CLI读回archived。该Task未跨重启验证，未做unarchive恢复步骤。当前窗口有效最窄布局为单列状态折叠；≤700 CSS px详情抽屉、键盘遮罩和Task跨重启未能在本机可调整窗口中复现，仍列为未验证。其余矩阵见 dev-docs/project-board-native-acceptance.md。
 
-官网owner确认Sites公开部署：https://moxbot.mailxf.chatgpt.site/download/，发行页 https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-20261014-5f1a8feb。主Agent从官网真实下载链接取得完整文件并独立复核：346377153字节、SHA256 e26a8e9a48a9083fe4283c0c6a0538dfd2dd639922a04326f718ff67fd7e220c，与本机候选ZIP完全一致；`unzip -tq`通过。匿名页面与manifest HTTP 200证据见发布凭证；本次shell客户端直接GET静态manifest遭403，但不影响IAB匿名下载得到完整ZIP及其hash核验。公开页面注明包未经过Apple公证。包凭据迁移、远程设置等其它产品路径未纳入本次看板验收。
+官网owner确认Sites公开部署：https://moxbot.mailxf.chatgpt.site/download/，发行页 https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-20261014-5f1a8feb。安装/发布owner在IAB点击官网真实下载链接取得完整文件，主Agent对取回文件独立复核：346377153字节、SHA256 e26a8e9a48a9083fe4283c0c6a0538dfd2dd639922a04326f718ff67fd7e220c，与本机候选ZIP完全一致；`unzip -tq`通过。匿名页面与manifest HTTP 200证据见发布凭证；本次shell客户端直接GET静态manifest遭403，但不影响IAB匿名下载得到完整ZIP及其hash核验。公开页面注明包未经过Apple公证。包凭据迁移、远程设置等其它产品路径未纳入本次看板验收。
 
 真实运行/桌面证据详见私有目录 /Users/zhangshaohua/Documents/Codex/2026-10-14/moxbots-project-board-native-evidence/ 与owner发布回执 /Users/zhangshaohua/Documents/WPS Cloud/【项目】目录/MoxBot/output/download-page-release/；目录外的系统备份/回滚数据不进入Git。
+
+## 2026-10-14 — PR35 CI修复与原生补验
+
+- [x] 读取完整失败日志：Chocolatey V2 feed获取NSIS3.13收到HTTP406、安装0包；后续编译器缺失与Rust诊断无产物均为次生错误。
+- [x] CI worker在独立main基线工作树交付修复：固定Tauri官方portable3.13、size/SHA256校验后解压、compiler存在及v3.13探测，保留真实Windows install/upgrade/reinstall/uninstall/deletion-failure用例。主Agentreview/cherry-pick、12项本机检查通过，Windows原生3项只在CI验证。
+- [x] 修复提交的新CI Windows job整体通过：6项真实NSIS用例pass、0skip，cargo check与native workspace IO也通过；其余CI收尾中。
+- [x] 原生800 CSS px最窄支持窗口、详情键盘Tab/Escape/focus-return、正式authority的Task archived→todo恢复和UI回读通过。
+- [ ] 受控正常退出/重启后任务状态/文档/看板读回，再归档测试Task；当前macOS锁屏，工具要求手动解锁，已向用户请求。
+- [ ] PR35当前最终头CI全部通过、合main、远端main包含最终验收记录并核实。
+
+不调用外部原因：明确采用ai-yaoren-local纯内置模式。CI worker只写CI与自己的分支记录，主Agent独占Native并负责集成/最终验收。执行模型及token费用不作未测量报告。Native≤700CSS和第二项目主窗口超出当前客户端支持边界，不伪报原生通过；已支持的最窄800CSS与单main多项目Tab按实际路径验收。详细补验见dev-docs/project-board-native-acceptance.md。
