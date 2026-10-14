@@ -1,0 +1,21 @@
+{
+  "scope": "Actual GlobalSidebar + openOwnedCloudPage; native registry/opener mocked; callback matches App source",
+  "cases": [
+    {
+      "name": "1440 actual sidebar keyboard and owned community navigation",
+      "pass": true
+    },
+    {
+      "name": "768 actual sidebar keyboard and owned community navigation",
+      "pass": true
+    },
+    {
+      "name": "390 actual sidebar keyboard and owned community navigation",
+      "pass": true
+    },
+    {
+      "name": "missing configured issuer reports error without upstream fallback",
+      "pass": true
+    }
+  ]
+}

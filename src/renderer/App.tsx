@@ -1,6 +1,7 @@
 import { restoreRemoteTabForAccount } from '@/features/remote-session/accountFence';
 import { currentNetworkSnapshot } from '@/features/agent-network/store';
 import type { RemoteSessionOpenIntent } from '@/features/remote-session/tabContract';
+import { openOwnedCloudPage } from '@/utils/ownedCloud';
 import { APP_BUILD_PROFILE } from '../shared/appProfile';
 import { DEFAULT_SPACE_ID } from '@/api/spaceCloud';
 import { startAgentNetworkStore } from '@/features/agent-network/store';
@@ -408,6 +409,7 @@ export default function App() {
   } = useConfig();
   const spaceBuildCapability = useSpaceBuildCapability(config.spaceEnvironment);
   const teamSpaceAvailable =
+    APP_BUILD_PROFILE !== 'moxbot' &&
     !configLoading &&
     spaceBuildCapability.available &&
     config.teamSpaceDevGate !== false;
@@ -3816,6 +3818,10 @@ export default function App() {
         if (!opened) return false;
         return true;
       }
+      if (APP_BUILD_PROFILE === 'moxbot') {
+        void openOwnedCloudPage('community').catch(() => toastRef.current.error(t('globalSidebar.cloudUnavailable')));
+        return true;
+      }
       if (!configLoading && config.teamSpaceDevGate === false) {
         toastRef.current.info(t('titlebar.teamUnavailable'));
         return false;
@@ -3943,6 +3949,10 @@ export default function App() {
   }, [handleOpenAppRoute]);
 
   const handleOpenSpace = useCallback(() => {
+    if (APP_BUILD_PROFILE === 'moxbot') {
+      void openOwnedCloudPage('community').catch(() => toastRef.current.error(t('globalSidebar.cloudUnavailable')));
+      return;
+    }
     if (configLoading || spaceBuildCapability.isLoading) {
       toastRef.current.info(t('titlebar.teamLoading'));
       return;

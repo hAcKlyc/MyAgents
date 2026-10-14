@@ -6,6 +6,7 @@ import {
   LogOutIcon,
   UserIcon,
 } from "@/components/icons";
+import { canonicalOwnedIssuer } from '@/utils/ownedCloud';
 import { openExternal } from "@/utils/openExternal";
 import { Popover } from "@/components/ui/Popover";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -27,26 +28,7 @@ import {
 } from "@/features/agent-network/store";
 import { JoinNetworkDialog } from "@/features/agent-network/JoinNetworkDialog";
 
-export function canonicalOwnedIssuer(
-  value: string | null | undefined,
-): string | null {
-  if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.search !== "" ||
-      parsed.hash !== "" ||
-      (parsed.pathname !== "" && parsed.pathname !== "/")
-    )
-      return null;
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
+export { canonicalOwnedIssuer } from '@/utils/ownedCloud';
 
 function ownedConnection(
   registry: NetworkRegistry,

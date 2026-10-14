@@ -42,6 +42,8 @@
     "failed": "操作失败，请稍后重试。"
   },
   "globalSidebar": {
+    "community": "协作社区",
+    "cloudUnavailable": "尚未配置可用的 MoXBots 云服务，请在账号入口检查云服务连接。",
     "navigation": "全局导航",
     "openWebsite": "打开 MyAgents 官网",
     "collapse": "收起侧边栏",

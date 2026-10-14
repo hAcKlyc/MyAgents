@@ -15,7 +15,15 @@ export function transformMoxbotResource(relative, bytes) {
   if (relative.startsWith('bundled-skills/cuse/') || /(?:^|\/)(?:LICENSE|NOTICE|THIRD_PARTY_NOTICES)(?:\.[^/]+)?$/i.test(relative)) return bytes;
   const text = bytes.toString('utf8');
   if (relative.endsWith('.md')) {
-    return Buffer.from(text
+    let prose = text;
+    if (relative === 'bundled-agents/myagents_helper/CLAUDE.md') {
+      prose = prose
+        .replace(/^\*\*MyAgents Space.*$/m, '**MoXBots 协作社区与帮助反馈属于所配置的 MoXBots 云服务**。社区用于交流话题和回复；帮助与反馈用于私有提单及管理员处理。它们复用现有云账号，不继承上游 Space 的 Issue、Goal、Skill 或 Tool API。')
+        .replace(/^MyAgents 账号在.*$/m, 'MoXBots 云账号位于全局侧栏设置下方。账号入口提供登录、退出、小助理和帮助与反馈；更多菜单中的协作社区打开配置的云服务。浏览器通过同一云服务完成登录。')
+        .replace(/^- 确认产品 Bug 或功能建议后，.*$/m, '- 确认产品 Bug 或功能建议后，先形成脱敏报告，引导用户通过账号菜单的「帮助与反馈」在所属 MoXBots 云服务提交。交流与分享使用「更多 → 协作社区」。未经用户明确授权，不自动发帖、回复或提交反馈；不可用时交付可复制的报告。不要向上游仓库或 Space 发送本产品反馈。');
+    }
+    return Buffer.from(prose
+      .replace(/(?<![A-Za-z0-9_-])MyAgents(?![A-Za-z0-9_-])/g, 'MoXBots')
       .replace(/~\/\.myagents(?=\/|[^a-zA-Z0-9_.-]|$)/g, '~/.moxbot')
       .replace(CLI, 'moxbot')
       .replace(/\bmyagents:\/\/open(?=\/|[^a-zA-Z0-9_.-]|$)/g, 'moxbot://open'));
