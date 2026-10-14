@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/feedback-center-20261015 -->
 <!-- git-project-sync-task:base=ff957fdf078d8e96e732c5b22c89ee2f41337fe9 -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 
 # FEEDBACK-001 — 个人菜单中的小助理与云端反馈
 
@@ -21,8 +21,9 @@
 - [x] 云端备份/回滚/串行发布，真实受控账号反馈闭环5/5。
 - [x] 统一正式0.5.4已纳入PR44，签名/公证交付及本机安装源码、binary摘要对应已核验。
 - [x] 复用非实现者实际原生个人菜单/小助理/窄rail铃铛/900×700布局证据。
-- [ ] 本次实际原生所属issuer反馈入口及真实账号退出恢复验收；TITLE-001真实Provider生成单独待验。
-- [ ] 生产普通多主体隔离单独复验（本轮没有普通测试账号；本地真实AuthStore权限/隔离通过）。
+- [x] 正式0.5.4实际个人菜单、所属issuer反馈入口、真实退出/同主体OIDC恢复、8原标签与运行PID保留。
+- [ ] TITLE-001真实Provider生成由独立task记录跟踪，等待统一负责人的modelqa utility-only环境；不属于FEEDBACK实现完成标准。
+生产普通多主体另行复验未安排；本轮没有普通测试账号。本地真实AuthStore权限/隔离通过，不将其称作生产多主体证明。
 
 ## Completed
 
@@ -36,13 +37,15 @@
 
 2026-10-15 07:14（UTC+8）现场核验：/Applications/MoXBots.app为正式0.5.4、干净冻结源码e5a05f76974a4962beb0b7de259690daaef08fd5，binary SHA256 c16afdde9d0b0fb2fb52ad464de167c5870282e969dacdce358ef9e63dcef561；Git ancestry确认包含PR44。远端main核验c7bab28594a03dfba7167200a90ae73ad0a6b5aa包含功能，不再使用此前5949b7f1/c46旧快照。
 
-用户本轮明确允许同步给“MyAgents 桌面端 Host 远程管理改造”（01a12bc2-907a-7702-b6dd-788225c5dfe4）并完成统一更新/原生验收，已发送源码、发布证据及串行验收请求；该负责人登记FEEDBACK-001/TITLE-001待验队列。共同OWNER-WINDOW-HANDOFF.json仍windowReleased=false，由“设计 免@ 调用远程 Agent 方案”（01a134fe-e48b-7ed0-9bfe-37021d9d41f7）持有原生窗口并执行另项已授权联调。未操作GUI、打断会话、改共同租约或重复打包。用户随后明确允许向当前窗口owner协调交接，主Agent已发送等待现有联调结束后安全释放的请求；该授权不扩展到中断活动测试。通过共同回执读取交接状态，不要求对方跨聊天回信。
+用户明确允许同步给“MyAgents 桌面端 Host 远程管理改造”（01a12bc2-907a-7702-b6dd-788225c5dfe4）及向“设计 免@ 调用远程 Agent 方案”（01a134fe-e48b-7ed0-9bfe-37021d9d41f7）协调串行窗口。当前owner在CLI准备/CI期间明确释放，root按FileLock/owner/token独占接手；实际验收结束后以相同校验释放并交回，未抢占或打断测试。统一负责人接受FEEDBACK原生结果，继续准备TITLE独立modelqa环境与后续统一0.5.5；本任务不重复安装或部署。
 
-普通生产主体账号未取得，不以同一QA管理员走user/admin两面宣称生产多主体隔离通过。现有独立原生QA只证明入口与布局；云端真实浏览器5/5不能替代桌面实际issuer入口及账号退出恢复。
+原生实际结果见dev-docs/feedback-native-acceptance.md，私有native-gui-results.json/feedback-entry.json/account-after-relogin.json及截图保存在既有私有证据目录。正式App实际打开个人菜单与小助理、帮助反馈打开正确origin的新浏览器页；真实退出、客户端创建PKCE登录请求、Codex IAB用同账号既有凭据完成真实Dex授权、原生检查并恢复同principal，另一owned账号保留。原8标签文本完全相同，App及5Sidecar PID均保留，4原Session实时idle。未调用模型或写Host配置。
+
+个人菜单验收前后均提示网络暂时离线；本任务不声称Host连接或通知服务联网通过，仅确认既有独立铃铛实际打开消息中心。普通生产主体账号未取得，同一QA管理员两面验证不作为生产多主体隔离证明。TITLE真实Provider调用仍开放，由独立task追踪。
 
 ## Next step
 
-取得当前owner明确窗口释放和串行交接后，由主Agent复用已安装0.5.4验收实际个人菜单到所属issuer /feedback、真实账号退出恢复。通知只复验既有独立铃铛入口，不新增无关通知服务门禁。云端保持已验证发布，不重复部署；不改其他任务账号/模型/Host配置。TITLE-001真实Provider生成单独追踪。安装receipt保存在本机私有证据目录installed-client-receipt.json。
+将本轮非秘密生产/原生验收摘要、任务状态合入当前main并核实远端。TITLE由当前root在统一负责人准备的隔离modelqa utility-only环境就绪后验收真实Provider/持久化，不占日常GUI等待；完整主干/统一0.5.5由唯一发布负责人串行处理。云端保持已验证发布，不改模型/Host或重复部署。
 
 ## Execution
 
@@ -58,4 +61,4 @@ PR44已合入main d7264a43db59249c207736b74991ffd210d50ff3，远端包含候选4
 
 生产/feedback及三个关联assets与源码逐字节一致且no-store，匿名API401。真实受控QA账号5项通过：同页OIDC提单、管理员大于8KiB中文回复/解决、用户回读、退出204并确认旧token401/重登保留、390px布局；主Agent查看实际截图。第一次回读脚本未等异步refresh结束点了旧列表节点，超时证据保留，补加载完成等待后完整5/5，不改产品或降低断言。生产无模型调用或Host修改。仅2条明确标注受控验收的记录保留。
 
-公开非秘密摘要见dev-docs/feedback-production-validation.md；完整部署、测试脚本、结果和截图在本机私有证据目录 /Users/zhangshaohua/Documents/Codex/2026-10-15/moxbots-feedback-private/，不进入Git。源码/main、云端发布及统一客户端安装已通过；原生实际issuer/退出恢复及真实Provider标题生成未完成，task仍in-progress。
+公开非秘密摘要见dev-docs/feedback-production-validation.md；完整部署、测试脚本、结果和截图在本机私有证据目录 /Users/zhangshaohua/Documents/Codex/2026-10-15/moxbots-feedback-private/，不进入Git。FEEDBACK源码/main、云端发布、统一0.5.4安装及真实原生入口/同主体退出恢复通过；TITLE真实Provider及后续统一0.5.5由各独立task追踪，不宣称全部项目验收完成。
