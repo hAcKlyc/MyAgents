@@ -33,6 +33,14 @@ MOXBOTS-BRAND-COMMUNITY-001：清理 MoXBots 用户可见的原项目品牌与�
 
 Base c7bab28594a03dfba7167200a90ae73ad0a6b5aa；start/task-init gate passed。代码48f458fd已推送并创建PR50。TypeScript、完整lint（含依赖边界/文档链接）、两profile Web构建、品牌/导航/i18n 18项、主题8项、资源投影6项及许可合同通过。独立UI 39/39通过，报告`dev-docs/brand-community-review.md`；后端社区7/反馈9及clippy通过。主Agent亦在内置浏览器使用真实本地HTTP/临时库发布合成话题与回复并核对结果。生产OIDC/原生不由这些证据推断。
 
-## Next action
+## Completed
+
+实现、前述确定性验证与独立39项验收已完成；产品48f458fd和证据29fe738a已同步任务分支。
+
+## Blockers and unknowns
+
+CI和main合入尚未完成。统一0.5.5负责人已接受纳入，但原生验收/打包尚未执行。用户已明确授权跨聊天协调。云端停服现SIGTERM/5s；remote-session等共享中转可能仍在使用，现暂不发布，须确认维护窗口、有效连接排空和Graceful stop，不强杀。备份/rollback准备中。生产不写测试话题。
+
+## Next step
 
 等待最终CI，合main后比对Linux制品tree再发布。已只读核实线上feedback-d7264a版本、两个维护锁可用、pending执行/活动模型均0、社区库尚不存在；正式停服前需防止新请求进入，确保已有业务排空。跨聊天发消息纳入0.5.5已向用户申请明确授权，未收到不发送；客户端安装保持统一owner串行。
