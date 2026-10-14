@@ -21,7 +21,7 @@
 
 ## 发布与回滚
 
-仅升级既有网络服务和同源HTTPS页面/API，无新账号或监听端口。Nginx需在原同源配置增加精确`/feedback`、前缀`/feedback/`与`/api/feedback`代理；`/api/admin/`沿用原代理，auth/Dex/Host和下载更新路由保留。公开静态页面无反馈数据；数据API要求实时账号。
+仅升级既有网络服务和同源HTTPS页面/API，无新账号或监听端口。Nginx需在原同源配置增加精确`/feedback`、前缀`/feedback/`与`/api/feedback`代理；反馈专用`/api/admin/feedback`及前缀代理也需64KiB，避免既有admin 8KiB限制截断合法中文回复；其他admin/auth/Dex/Host和下载更新路由保留。公开静态页面无反馈数据；数据API要求实时账号。
 
 发布前核实维护owner、运行二进制/配置、无活动模型调用和悬挂Host执行，获取既有维护锁。停止唯一网络写入服务后备份私有state/config/unit/nginx并做SQLite integrity_check；新库由原服务身份创建。更改unit只切换已验证来源/摘要的二进制，不改账号、模型或Host配置。回滚恢复旧binary/unit/nginx，保留新的feedback.sqlite3及备份，不覆盖为旧认证或业务库；Dex不重启。
 
