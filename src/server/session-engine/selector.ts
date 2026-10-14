@@ -1,4 +1,5 @@
 import { assertSessionTranscriptsDurableForUpdate } from '../SessionStore';
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
 import {
   interruptCurrentResponse,
   hasBuiltinActivityForUpdate,
@@ -53,11 +54,16 @@ async function withUpdateAdmission<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+async function withExecutionAdmission<T>(operation: () => Promise<T>): Promise<T> {
+  if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
+  return withUpdateAdmission(operation);
+}
+
 function queryFacade(engine: SessionEngine): SessionEngine {
   return {
     ...engine,
     sendDesktopMessage: (request) =>
-      withUpdateAdmission(async () => {
+      withExecutionAdmission(async () => {
         const prepared = await prepareDesktopQuery(request);
         const result = await engine.sendDesktopMessage(prepared.request);
         return {
@@ -68,20 +74,20 @@ function queryFacade(engine: SessionEngine): SessionEngine {
         };
       }),
     enqueueImMessage: (request) =>
-      withUpdateAdmission(() => engine.enqueueImMessage(request)),
+      withExecutionAdmission(() => engine.enqueueImMessage(request)),
     enqueueBackgroundMessage: (request) =>
-      withUpdateAdmission(() => engine.enqueueBackgroundMessage(request)),
+      withExecutionAdmission(() => engine.enqueueBackgroundMessage(request)),
     enqueueInboxMessage: (request) =>
-      withUpdateAdmission(() => engine.enqueueInboxMessage(request)),
+      withExecutionAdmission(() => engine.enqueueInboxMessage(request)),
     prepareScheduledTurn: (request) =>
-      withUpdateAdmission(() => engine.prepareScheduledTurn(request)),
+      withExecutionAdmission(() => engine.prepareScheduledTurn(request)),
     runInjectedTurn: (request) =>
-      withUpdateAdmission(() => engine.runInjectedTurn(request)),
-    compactContext: () => withUpdateAdmission(() => engine.compactContext()),
+      withExecutionAdmission(() => engine.runInjectedTurn(request)),
+    compactContext: () => withExecutionAdmission(() => engine.compactContext()),
     retryUserMessage: (id, options) =>
-      withUpdateAdmission(() => engine.retryUserMessage(id, options)),
+      withExecutionAdmission(() => engine.retryUserMessage(id, options)),
     forceQueuedMessage: (id) =>
-      withUpdateAdmission(() => engine.forceQueuedMessage(id)),
+      withExecutionAdmission(() => engine.forceQueuedMessage(id)),
     retryMcpServer: (id) =>
       withUpdateAdmission(() => engine.retryMcpServer(id)),
     applyModelSelection: (input) =>
@@ -308,7 +314,7 @@ async function updateExternalRuntimeConfigAtSelectorOwner(request: {
 
 export const prewarmExternalRuntimeAtSelector: typeof prewarmExternalRuntimeAtSelectorOwner =
   (...args) =>
-    withUpdateAdmission(() => prewarmExternalRuntimeAtSelectorOwner(...args));
+    withExecutionAdmission(() => prewarmExternalRuntimeAtSelectorOwner(...args));
 
 async function prewarmExternalRuntimeAtSelectorOwner(options: {
   sessionId: string;
@@ -347,6 +353,7 @@ async function restoreInitialExternalSessionAtSelectorOwner(
   workspacePath: string,
 ): Promise<boolean> {
   if (!shouldUseExternalRuntime()) return false;
+  if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
   const restored = await restoreExternalSessionState(sessionId, workspacePath, {
     type: "desktop",
   });
@@ -357,7 +364,7 @@ async function restoreInitialExternalSessionAtSelectorOwner(
 
 export const retryLastExternalUserMessageAtSelector: typeof retryLastExternalUserMessageAtSelectorOwner =
   (...args) =>
-    withUpdateAdmission(() =>
+    withExecutionAdmission(() =>
       retryLastExternalUserMessageAtSelectorOwner(...args),
     );
 

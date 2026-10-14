@@ -110,7 +110,7 @@ pub async fn cmd_terminal_create(
     // and prevents the zsh PROMPT_EOL_MARK (%) on the first line.
     let shell = default_shell();
     let mut cmd = CommandBuilder::new(&shell);
-    #[cfg(unix)]
+    #[cfg(all(unix, not(myagents_updater_qa)))]
     cmd.args(&["-l"]);
     cmd.cwd(&workspace_path);
 
@@ -381,7 +381,12 @@ fn terminal_read_loop(
 
 /// Select the default shell for the current platform.
 fn default_shell() -> String {
-    #[cfg(unix)]
+    #[cfg(all(unix, myagents_updater_qa))]
+    {
+        // QA terminals must never source the user's login shell configuration.
+        "/bin/sh".into()
+    }
+    #[cfg(all(unix, not(myagents_updater_qa)))]
     {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
     }
@@ -408,6 +413,16 @@ fn default_shell() -> String {
 /// 2. Proxy configuration (NO_PROXY protects localhost)
 /// 3. Bundled Bun and Node.js (same PATH as SDK subprocesses)
 fn inject_terminal_env(cmd: &mut CommandBuilder, app: &AppHandle, sidecar_port: Option<u16>) {
+    if crate::app_dirs::IS_UPDATER_QA {
+        if let Some(root) = crate::app_dirs::myagents_data_dir() {
+            let home = root.join("terminal-home");
+            let _ = std::fs::create_dir_all(&home);
+            inject_updater_qa_terminal_env(cmd, &home, app.path().resource_dir().ok().as_deref(), sidecar_port);
+        } else {
+            cmd.env_clear();
+        }
+        return;
+    }
     // 1. Build PATH. Product-owned launchers must win over stale
     // npm/AppData/inherited commands with the same name.
     let mut extra_paths: Vec<String> = Vec::new();
@@ -532,4 +547,42 @@ fn inject_terminal_env(cmd: &mut CommandBuilder, app: &AppHandle, sidecar_port: 
 
     // 7. Terminal indicator (so scripts can detect they're in MyAgents terminal)
     cmd.env("MYAGENTS_TERMINAL", "1");
+}
+
+fn inject_updater_qa_terminal_env(cmd: &mut CommandBuilder, home: &std::path::Path, resources: Option<&std::path::Path>, port: Option<u16>) {
+    cmd.env_clear();
+    let mut paths = vec![];
+    if let Some(resources) = resources {
+        paths.push(resources.join("nodejs/bin").to_string_lossy().into_owned());
+    }
+    paths.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(str::to_owned));
+    cmd.env("PATH", paths.join(":"));
+    cmd.env("HOME", home);
+    cmd.env("CODEX_HOME", home.join(".codex"));
+    cmd.env("CLAUDE_CONFIG_DIR", home.join(".claude"));
+    cmd.env("SHELL", "/bin/sh");
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env("TERM_PROGRAM", "MoXBots Updater QA");
+    cmd.env("LANG", "en_US.UTF-8");
+    cmd.env("MYAGENTS_TERMINAL", "1");
+    cmd.env("NO_PROXY", "127.0.0.1,localhost");
+    if let Some(port) = port { cmd.env("MYAGENTS_PORT", port.to_string()); }
+}
+
+#[cfg(test)]
+mod updater_qa_terminal_environment_tests {
+    #[test]
+    fn qa_terminal_discards_credentials_user_path_and_shell_startup_environment() {
+        let mut cmd = portable_pty::CommandBuilder::new("/bin/sh");
+        for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK", "ENV", "BASH_ENV", "ZDOTDIR"] {
+            cmd.env(key, "synthetic-user-value");
+        }
+        cmd.env("PATH", "/synthetic/user/tools");
+        super::inject_updater_qa_terminal_env(&mut cmd, std::path::Path::new("/qa/terminal-home"), Some(std::path::Path::new("/qa/app/Contents/Resources")), Some(33415));
+        for key in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SSH_AUTH_SOCK", "ENV", "BASH_ENV", "ZDOTDIR"] { assert!(cmd.get_env(key).is_none()); }
+        assert_eq!(cmd.get_env("PATH").unwrap(), "/qa/app/Contents/Resources/nodejs/bin:/usr/bin:/bin:/usr/sbin:/sbin");
+        assert_eq!(cmd.get_env("CODEX_HOME").unwrap(), "/qa/terminal-home/.codex");
+        assert_eq!(cmd.get_env("CLAUDE_CONFIG_DIR").unwrap(), "/qa/terminal-home/.claude");
+    }
 }

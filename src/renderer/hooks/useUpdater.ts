@@ -114,6 +114,13 @@ export function useUpdater(): UseUpdaterResult {
         try {
             // Step 1: Get remote version
             const result = await invoke('test_update_connectivity') as string;
+            // The updater service uses HTTP 204 when no release is published.
+            // Its empty body is a successful check, not a malformed manifest.
+            const statusMatch = result.match(/^Status:\s*(\d{3})(?:\s|$)/m);
+            if (statusMatch?.[1] === '204') return 'up-to-date';
+            if (statusMatch && statusMatch[1] !== '200') {
+                throw new Error(`Update check HTTP ${statusMatch[1]}`);
+            }
             const versionMatch = result.match(/version:\s*([^\n]+)/);
             if (!versionMatch) {
                 throw new Error(updaterText('remoteVersionParseFailed'));

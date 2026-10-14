@@ -14,7 +14,7 @@ async function bundleFixture(contents: string, output: string, home: string, pro
   await build({
     stdin: { contents, resolveDir: process.cwd(), sourcefile: 'profile-fixture.ts', loader: 'ts' },
     outfile: output, bundle: true, platform: 'node', format,
-    define: profile === undefined ? {} : { __MYAGENTS_BUILD_PROFILE__: JSON.stringify(profile) },
+    define: profile === undefined ? {} : { __MYAGENTS_BUILD_PROFILE__: JSON.stringify(profile), __MYAGENTS_UPDATER_QA__: JSON.stringify(profile === 'moxbot-updaterqa') },
     banner: format === 'esm' ? { js: 'import { createRequire as __fixtureRequire } from "node:module"; const require = __fixtureRequire(import.meta.url);' } : undefined,
     plugins: [{ name: 'fixture-home-path-api', setup(builder) {
       builder.onResolve({ filter: /^(node:)?os$/ }, args => args.namespace === 'fixture-os'
@@ -49,6 +49,29 @@ async function profiles() {
 }
 
 describe('compiled application profile isolation', () => {
+  it('QA persists config and history only in its compiled root, with distinct CLI and deep links', async () => {
+    const { home, isolated } = await profiles();
+    await isolated.atomicModifyConfig((config: Record<string, unknown>) => ({ ...config, cliToolEnv: { probe: { PROFILE_LABEL: 'production-canary' } } }));
+    const original = readFileSync(join(home, '.moxbot', 'config.json'));
+    const qaPath = join(home, 'qa.mjs');
+    await bundleFixture(fixtureEntry, qaPath, home, 'moxbot-updaterqa');
+    const qa = await import(pathToFileURL(qaPath).href);
+    expect(qa.IS_UPDATER_QA).toBe(true);
+    expect(qa.APP_BUILD_PROFILE).toBe('moxbot');
+    expect(qa.APP_DISPLAY_NAME).toBe('MoXBots Updater QA');
+    expect(qa.APP_DATA_DIR_NAME).toBe('.moxbot-updaterqa');
+    expect(qa.APP_CLI_NAME).toBe('moxbot-updaterqa');
+    expect(qa.loadConfig().cliToolEnv).toBeUndefined();
+    await qa.atomicModifyConfig((config: Record<string, unknown>) => ({ ...config, cliToolEnv: { probe: { PROFILE_LABEL: 'qa' } } }));
+    expect(readFileSync(join(home, '.moxbot', 'config.json'))).toEqual(original);
+    expect(qa.getProvidersDir()).toBe(resolve(home, '.moxbot-updaterqa', 'providers'));
+    expect(qa.serializeAppRoute(qa.createSpaceHomeAppRoute())).toBe('moxbot-updaterqa://open/v1/spaces');
+    expect(qa.parseAppRouteUrl('moxbot://open/v1/spaces')).toBeNull();
+    await qa.saveSessionMetadata({ id: '33333333-3333-4333-8333-333333333333', agentDir: join(home, 'qa-workspace'), title: 'QA only', createdAt: '2026-10-15T00:00:00Z', lastActiveAt: '2026-10-15T00:00:00Z' });
+    expect(qa.getAllSessionMetadata()).toHaveLength(1);
+    expect(isolated.getAllSessionMetadata()).toHaveLength(0);
+  });
+
   it('writes real config through its existing owner without reading or altering the other profile', async () => {
     const { home, standard, isolated } = await profiles();
     await standard.atomicModifyConfig((config: Record<string, unknown>) => ({ ...config, cliToolEnv: { probe: { PROFILE_LABEL: 'standard' } } }));

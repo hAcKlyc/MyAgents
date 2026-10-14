@@ -244,7 +244,10 @@ fn should_request_exit_confirmation(code: Option<i32>, confirmed: bool) -> bool 
 
 fn app_context() -> tauri::Context<tauri::Wry> {
     let context = tauri::generate_context!();
-    if crate::app_dirs::IS_MOXBOT {
+    if crate::app_dirs::IS_UPDATER_QA {
+        assert_eq!(context.config().identifier, "com.moxbot.updaterqa", "QA requires its isolated bundle configuration");
+        assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Updater QA"));
+    } else if crate::app_dirs::IS_MOXBOT {
         assert_eq!(context.config().identifier, "com.moxbot.app", "MoX bot requires its isolated bundle configuration");
     }
     #[cfg(target_os = "windows")]

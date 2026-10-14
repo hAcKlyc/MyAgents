@@ -1,4 +1,5 @@
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
+import { isUpdaterQaBuild } from '../shared/updaterQa';
 /**
  * title-generator.ts — AI-powered session title generation.
  *
@@ -218,6 +219,7 @@ export interface TextUtilityTask {
 export async function generateUtilityText(
   task: TextUtilityTask, model: string, providerEnv?: ProviderEnv, conversationId?: string,
 ): Promise<string | null> {
+  if (isUpdaterQaBuild()) return null;
   if (task.signal?.aborted) return null;
   const requestConversationId = conversationId ?? randomUUID();
   // PRD #124: register a per-call bridge token if the title-gen provider is
@@ -492,6 +494,7 @@ export async function generateTitleExternal(
   workspacePath: string,
   runtimeSource?: RuntimeSource,
 ): Promise<string | null> {
+  if (isUpdaterQaBuild()) return null;
   const startTime = Date.now();
   // Plain UUID — Claude Code CLI rejects `--session-id <non-uuid>` with
   // "Invalid session ID. Must be a valid UUID." A `title-` prefix would tank

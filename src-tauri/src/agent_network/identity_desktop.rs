@@ -12,21 +12,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 /// The versioned route is a local credential lookup only; protocol Scope is unchanged.
 pub(crate) fn selected_store() -> Arc<dyn IdentityStore> {
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(myagents_updater_qa)]
+    { return Arc::new(UpdaterQaDeniedIdentityStore); }
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         super::credential_slots::desktop_store()
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         Arc::new(OsIdentityStore)
     }
 }
 pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(myagents_updater_qa)]
+    { return Arc::new(UpdaterQaDeniedIdentityStore); }
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         super::credential_slots::connection_cache()
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         OsIdentityStore::connection_cache()
     }
@@ -51,7 +55,7 @@ impl IdentityStore for ReadOnlyScopeStore {
         {
             return Err(super::crypto::CryptoError::CredentialConflict);
         }
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
         {
             let current = super::credential_slots::selection(
                 &super::credential_slots::identity_route_id(scope)?,
@@ -91,9 +95,10 @@ pub(crate) async fn initialize_selected(
     retired_generation: Option<u64>,
     store: Arc<dyn IdentityStore>,
 ) -> Result<NetworkIdentity, NetworkError> {
+    if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
     let identity =
         NetworkIdentity::initialize_with_store(account, retired_generation, store).await?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         identity.account.ensure_current()?;
         if super::credential_slots::selection(&super::credential_slots::identity_route_id(
@@ -182,6 +187,7 @@ pub(crate) async fn authorize_owned_identity(
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
+    if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
     let account_session = NetworkAccountSession::Owned(account);
     account_session.ensure_current()?;
     account_session.validate_instance().await?;
@@ -209,7 +215,7 @@ pub(crate) async fn authorize_owned_identity(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     account_session.ensure_current()?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
     {
         let migration_scope = scope.clone();
         let migration_fingerprint = expected_fingerprint.clone();
@@ -243,7 +249,7 @@ pub(crate) async fn authorize_owned_identity(
             inner: authorized_store,
         }));
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
     {
         let authorization_scope = scope.clone();
         let authorization_cancelled = cancelled.clone();
@@ -408,6 +414,29 @@ mod authorization_tests {
             }),
         ] {
             assert!(authorized_scope_from_state(&account, device, invalid).is_err());
+        }
+    }
+}
+
+#[cfg(myagents_updater_qa)]
+struct UpdaterQaDeniedIdentityStore;
+#[cfg(myagents_updater_qa)]
+impl IdentityStore for UpdaterQaDeniedIdentityStore {
+    fn load(&self, _: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> { Err(super::crypto::CryptoError::CredentialUnavailable) }
+    fn save_pending(&self, _: &KeyScope, _: &DevicePrivateKey) -> Result<(), super::crypto::CryptoError> { Err(super::crypto::CryptoError::CredentialUnavailable) }
+    fn delete(&self, _: &KeyScope) -> Result<(), super::crypto::CryptoError> { Err(super::crypto::CryptoError::CredentialUnavailable) }
+}
+
+#[cfg(all(test, myagents_updater_qa))]
+mod updater_qa_identity_tests {
+    #[test]
+    fn qa_identity_store_and_connection_cache_reject_all_credential_operations() {
+        use super::super::crypto::{CryptoError, DevicePrivateKey, KeyScope};
+        let scope = KeyScope { issuer: "https://fixture.invalid".to_owned(), environment: "development".to_owned(), service_id: "qa".to_owned(), principal_id: "synthetic".to_owned(), device_id: "fixture".to_owned(), key_generation: 1 };
+        for store in [super::selected_store(), super::connection_cache()] {
+            assert!(matches!(store.load(&scope), Err(CryptoError::CredentialUnavailable)));
+            assert!(matches!(store.save_pending(&scope, &DevicePrivateKey::generate().unwrap()), Err(CryptoError::CredentialUnavailable)));
+            assert!(matches!(store.delete(&scope), Err(CryptoError::CredentialUnavailable)));
         }
     }
 }
