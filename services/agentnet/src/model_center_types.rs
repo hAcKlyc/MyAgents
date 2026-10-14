@@ -140,6 +140,13 @@ pub struct UsageRecord {
     pub model_ref: String,
     pub model_revision: u64,
     pub provider_revision: u64,
+    // Captured call metadata; old rows retain unknown names instead of using the current catalog.
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub model_label: Option<String>,
+    #[serde(default)]
+    pub provider_id: Option<String>,
     pub started_at: u64,
     pub started_at_millis: u64,
     pub duration_ms: Option<u64>,

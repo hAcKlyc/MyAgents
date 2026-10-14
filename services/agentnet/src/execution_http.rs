@@ -81,7 +81,13 @@ impl ExecutionService {
             Some(store) => self
                 .config
                 .with_managed_models(store)
-                .map_err(|_| Error::unavailable()),
+                .map_err(|error| match error {
+                    crate::model_center_types::ModelCenterError::Storage
+                    | crate::model_center_types::ModelCenterError::UnsafeState => {
+                        Error::new(StatusCode::SERVICE_UNAVAILABLE, "MODEL_CATALOG_UNAVAILABLE")
+                    }
+                    _ => Error::unavailable(),
+                }),
             None => Ok((*self.config).clone()),
         }
     }
@@ -158,6 +164,34 @@ impl ExecutionService {
                     && g.allowed_runtimes.iter().any(|r| m.runtimes.contains(r))
             }) {
                 return Err(Error::forbidden("MODEL_RESOURCE_REJECTED"));
+            }
+        }
+        Ok(())
+    }
+    fn check_pull_dependency(
+        &self,
+        bot: &Bot,
+        grant: &Grant,
+        row: &CommandRow,
+        evaluated_ids: &[String],
+    ) -> Result<(), Error> {
+        if matches!(
+            row.command.operation,
+            Operation::Disable(_) | Operation::Delete(_)
+        ) && self.store.has_prior_noncleanup(
+            &row.scope,
+            &row.command,
+            gate::now()?,
+            evaluated_ids,
+        )? {
+            match self.check_bot_grant(bot, grant) {
+                Err(error)
+                    if matches!(
+                        error.code,
+                        "MODEL_RESOURCE_REJECTED" | "MODEL_CATALOG_UNAVAILABLE"
+                    ) => {}
+                Err(error) => return Err(error),
+                Ok(()) => return Err(Error::conflict("COMMAND_DEPENDENCY_PENDING")),
             }
         }
         Ok(())
@@ -372,14 +406,11 @@ impl ExecutionService {
                 let q: PullRequest = decode(body)?;
                 q.host_context.validate().map_err(|_| Error::bad())?;
                 let mut response_bytes = 256usize;
-                let (scope, commands, grants, revocations) = gate::with_host(
-                    &self.network,
-                    &self.relay,
-                    a,
-                    |live| {
+                let (scope, commands, grant_rows, revocations) =
+                    gate::with_host(&self.network, &self.relay, a, |live| {
                         live.check_context(&q.host_context)?;
                         let now = gate::now()?;
-                        let mut grants = Vec::new();
+                        let mut grant_rows = Vec::new();
                         let mut revocations = Vec::new();
                         let commands = self.store.queued_for(&live.scope).map_err(to_gate)?;
                         let needed: std::collections::BTreeSet<_> = commands
@@ -392,12 +423,8 @@ impl ExecutionService {
                             if row.grant.scope != live.scope {
                                 continue;
                             }
-                            if row.state == GrantState::Active
-                                && row.grant.expires_at > now
-                                && grants.len() < 8
-                            {
-                                let item = json!({"grant_token":self.sign_grant(&row,now,live.expires_at).map_err(error_gate)?});
-                                push_budget(&mut grants, item, &mut response_bytes)?;
+                            if row.state == GrantState::Active && row.grant.expires_at > now {
+                                grant_rows.push(row);
                             } else if row.state == GrantState::Revoking && revocations.len() < 8 {
                                 let exp = deadline(now, MAX_LEASE_SECONDS, live.expires_at)
                                     .map_err(error_gate)?;
@@ -431,13 +458,18 @@ impl ExecutionService {
                                 )?;
                             }
                         }
-                        Ok((live.scope.clone(), commands, grants, revocations))
-                    },
-                )?;
+                        Ok((live.scope.clone(), commands, grant_rows, revocations))
+                    })?;
                 let mut intents = Vec::new();
+                let mut grants = Vec::new();
+                let mut selected_grants = std::collections::BTreeSet::new();
+                let mut evaluated_ids = Vec::new();
                 // Never re-enter AuthStore inside with_host: each original actor
                 // gets a separate complete Host+actor gate after the first ends.
                 for row in commands {
+                    if intents.len() == 8 {
+                        break;
+                    }
                     let result = gate::with_host_and_actor(
                         &self.network,
                         &self.relay,
@@ -460,6 +492,8 @@ impl ExecutionService {
                                 .map_err(error_gate)?;
                             self.check_operation(&bot, &row.command.operation)
                                 .map_err(error_gate)?;
+                            self.check_pull_dependency(&bot, &g.grant, &row, &evaluated_ids)
+                                .map_err(error_gate)?;
                             let exp =
                                 deadline(now, MAX_PROOF_SECONDS, until.min(g.grant.expires_at))
                                     .map_err(error_gate)?;
@@ -472,7 +506,7 @@ impl ExecutionService {
                                 exp,
                                 jti: Uuid::new_v4().to_string(),
                                 scope: live.scope,
-                                grant: g.grant,
+                                grant: g.grant.clone(),
                                 command: row.command.clone(),
                             };
                             if let Some(old) = self
@@ -495,12 +529,36 @@ impl ExecutionService {
                                 )
                                 .map_err(|_| GateError("EXECUTION_SIGNING_UNAVAILABLE"))?;
                             let hash = self.store.issue_intent(&claims, now).map_err(to_gate)?;
-                            Ok(json!({"intent_token":token,"intent_hash":hash}))
+                            let grant_token =
+                                self.sign_grant(&g, now, until).map_err(error_gate)?;
+                            Ok((
+                                json!({"intent_token":token,"intent_hash":hash}),
+                                g.grant.id,
+                                json!({"grant_token":grant_token}),
+                            ))
                         },
                     );
+                    evaluated_ids.push(row.command.mutation_id.clone());
                     match result {
-                        Ok(value) => {
-                            push_budget(&mut intents, value, &mut response_bytes)?;
+                        Ok((value, grant_id, grant_value)) => {
+                            // Admit the intent and its locally installed grant as
+                            // one bounded response unit. Internal candidates can
+                            // span sixteen grants; wire intents/grants stay at eight.
+                            let mut budget = response_bytes;
+                            let mut next_grant = Vec::new();
+                            let mut next_intent = Vec::new();
+                            if !selected_grants.contains(&grant_id)
+                                && !push_budget(&mut next_grant, grant_value, &mut budget)?
+                            {
+                                break;
+                            }
+                            if !push_budget(&mut next_intent, value, &mut budget)? {
+                                break;
+                            }
+                            response_bytes = budget;
+                            selected_grants.insert(grant_id);
+                            grants.extend(next_grant);
+                            intents.extend(next_intent);
                         }
                         Err(e)
                             if matches!(
@@ -510,9 +568,49 @@ impl ExecutionService {
                                     | "GRANT_NOT_ACTIVE"
                                     | "COMMAND_NOT_PENDING"
                             ) => {}
+                        Err(e)
+                            if matches!(
+                                e.0,
+                                "MODEL_RESOURCE_REJECTED" | "MODEL_CATALOG_UNAVAILABLE"
+                            ) => {}
+                        Err(e)
+                            if matches!(
+                                row.command.operation,
+                                Operation::Disable(_) | Operation::Delete(_)
+                            ) && e.0 == "COMMAND_DEPENDENCY_PENDING" => {}
+                        Err(e)
+                            if matches!(row.command.operation, Operation::Delete(_))
+                                && e.0 == "HOST_COMMAND_OUTCOME_UNCONFIRMED" => {}
                         Err(e) => return Err(e.into()),
                     }
                 }
+                // Preserve bootstrap grant delivery after reserving every grant
+                // used by this batch. This gate begins after all actor gates end.
+                gate::with_host(&self.network, &self.relay, a, |live| {
+                    live.check_context(&q.host_context)?;
+                    if live.scope != scope {
+                        return Err(GateError("HOST_CONTEXT_REJECTED"));
+                    }
+                    let now = gate::now()?;
+                    for row in grant_rows {
+                        if grants.len() == 8 {
+                            break;
+                        }
+                        if selected_grants.contains(&row.grant.id) || row.grant.expires_at <= now {
+                            continue;
+                        }
+                        let current = self.store.grant(&row.grant.id).map_err(to_gate)?;
+                        if current.state != GrantState::Active || current.grant != row.grant {
+                            continue;
+                        }
+                        let item = json!({"grant_token":self.sign_grant(&row,now,live.expires_at).map_err(error_gate)?});
+                        if !push_budget(&mut grants, item, &mut response_bytes)? {
+                            break;
+                        }
+                        selected_grants.insert(row.grant.id);
+                    }
+                    Ok(())
+                })?;
                 Ok(json!({"grants":grants,"intents":intents,"revocations":revocations}))
             }
             "/execution/self/lease" => {
@@ -1921,12 +2019,7 @@ pub(crate) mod tests {
             host(t, "/execution/self/pull", json!({"host_context":t.context})).await;
         assert_eq!(status, StatusCode::OK, "{pull}");
         let intent_hash = pull["data"]["intents"][0]["intent_hash"].as_str().unwrap();
-        let (status, lease) = host(
-            t,
-            "/execution/self/lease",
-            json!({"host_context":t.context,"intent_hash":intent_hash}),
-        )
-        .await;
+        let (status, lease) = lease_intent(t, intent_hash).await;
         assert_eq!(status, StatusCode::OK, "{lease}");
         let command = t.s.store.command(&request_id).unwrap().command;
         let mut snapshot = empty_snapshot(t);
@@ -1962,7 +2055,73 @@ pub(crate) mod tests {
         );
     }
     fn reduction_queue(t: &Setup, operation: Value) -> Value {
-        json!({"mutation_id":Uuid::new_v4().to_string(),"grant_id":t.grant.id,"grant_generation":1,"binding_generation":1,"expected_host_revision":1,"operation":operation})
+        let snapshot =
+            t.s.store
+                .known_bot_snapshot(&t.grant.scope, &t.bot_id)
+                .unwrap();
+        let binding = snapshot.as_ref().map_or(0, |s| s.binding_generation);
+        let revision = snapshot.as_ref().map_or(0, |s| s.revision);
+        json!({"mutation_id":Uuid::new_v4().to_string(),"grant_id":t.grant.id,"grant_generation":t.grant.generation,"binding_generation":binding,"expected_host_revision":revision,"operation":operation})
+    }
+    fn pull_intent_hash(t: &Setup, pull: &Value, request_id: &str) -> Option<String> {
+        pull["data"]["intents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|value| {
+                let hash = value["intent_hash"].as_str().unwrap();
+                (t.s.store.intent(hash).unwrap().command.mutation_id == request_id)
+                    .then(|| hash.to_owned())
+            })
+    }
+    async fn lease_intent(t: &Setup, intent_hash: &str) -> (StatusCode, Value) {
+        let mut context = t.context.clone();
+        context.challenge_nonce = Uuid::new_v4().to_string();
+        host(
+            t,
+            "/execution/self/lease",
+            json!({"host_context":context,"intent_hash":intent_hash}),
+        )
+        .await
+    }
+    async fn confirm_fixture_receipt(
+        t: &Setup,
+        request_id: &str,
+        lease_id: Value,
+        status: myagents_agentnet_execution_core::ReceiptStatus,
+    ) {
+        let row = t.s.store.command(request_id).unwrap();
+        let mut snapshot =
+            t.s.store
+                .known_bot_snapshot(&row.scope, &t.bot_id)
+                .unwrap()
+                .unwrap();
+        if status == myagents_agentnet_execution_core::ReceiptStatus::Persisted {
+            snapshot.revision += 1;
+            snapshot.admission = Admission::Closed;
+            snapshot.activity = Activity::Stopped;
+            snapshot.active_run = None;
+            if matches!(row.command.operation, Operation::Delete(_)) {
+                snapshot.deleted = true;
+                snapshot.runnable = false;
+            }
+        }
+        let receipt = Receipt {
+            mutation_id: request_id.into(),
+            request_hash: row.command.request_hash,
+            grant_id: row.command.grant_id,
+            grant_generation: row.command.grant_generation,
+            bot_id: t.bot_id.clone(),
+            agent_id: snapshot.agent_id.clone(),
+            binding_generation: snapshot.binding_generation,
+            revision: snapshot.revision,
+            status,
+            code: (status == myagents_agentnet_execution_core::ReceiptStatus::Failed)
+                .then(|| "HOST_MODEL_UNAVAILABLE".into()),
+            snapshot: Some(snapshot),
+        };
+        let(result,body)=host(t,"/execution/self/receipt",json!({"kind":"command","host_context":t.context,"lease_id":lease_id,"receipt":receipt})).await;
+        assert_eq!(result, StatusCode::OK, "{body}");
     }
     #[tokio::test]
     async fn reduction_disable_and_delete_remain_leasable_after_managed_catalog_disabled() {
@@ -2086,6 +2245,13 @@ pub(crate) mod tests {
                     saved.command.operation,
                     Operation::Disable(_) | Operation::Delete(_)
                 ));
+                confirm_fixture_receipt(
+                    &t,
+                    &request_id,
+                    value["data"]["lease_id"].clone(),
+                    myagents_agentnet_execution_core::ReceiptStatus::Persisted,
+                )
+                .await;
             }
             let disable: Operation =
                 serde_json::from_value(json!({"method":"disable","params":{"policy":"cancel"}}))
@@ -2139,5 +2305,391 @@ pub(crate) mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         drop(store);
+    }
+    async fn managed_created_setup() -> (
+        Setup,
+        Arc<crate::model_center_store::ModelCenterStore>,
+        String,
+    ) {
+        let mut t = browser_setup().await;
+        let owner = t.owner.context.principal_id.clone();
+        let model_ref = Uuid::new_v4().to_string();
+        let store = install_managed_model(&mut t, &owner, model_ref.clone());
+        let (status, body) =
+            managed_registry_configure(&t, store.clone(), &model_ref, "builtin").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        t.grant.allowed_model_refs = vec![model_ref.clone()];
+        accept(&t).await;
+        persisted_managed_bot(&t, &model_ref).await;
+        (t, store, model_ref)
+    }
+    #[tokio::test]
+    async fn cleanup_pull_bypasses_more_than_eight_catalog_blocked_commands() {
+        for failure in ["model", "provider", "database"] {
+            let (t, store, model_ref) = managed_created_setup().await;
+            let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+            let mut previous = Vec::new();
+            for index in 0..10 {
+                let operation = if index % 2 == 0 {
+                    json!({"method":"enable","params":{}})
+                } else {
+                    serde_json::to_value(model_config_operation(&model_ref, "builtin")).unwrap()
+                };
+                let body = reduction_queue(&t, operation);
+                let id = body["mutation_id"].as_str().unwrap().to_owned();
+                let (status, value) = human(&t, &t.admin.account_token, &path, body).await;
+                assert_eq!(status, StatusCode::OK, "{value}");
+                previous.push((id.clone(), t.s.store.command(&id).unwrap().command));
+            }
+            let (status, before) = host(
+                &t,
+                "/execution/self/pull",
+                json!({"host_context":t.context}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{before}");
+            assert_eq!(before["data"]["intents"].as_array().unwrap().len(), 8);
+            let old_hash = pull_intent_hash(&t, &before, &previous[0].0).unwrap();
+            if failure == "model" {
+                store
+                    .delete_model(
+                        &t.owner.context.principal_id,
+                        &Uuid::new_v4().to_string(),
+                        &model_ref,
+                        1,
+                    )
+                    .unwrap();
+            } else if failure == "provider" {
+                let provider = store.model(&model_ref).unwrap().config.provider_id;
+                store
+                    .delete_provider(
+                        &t.owner.context.principal_id,
+                        &Uuid::new_v4().to_string(),
+                        &provider,
+                        1,
+                    )
+                    .unwrap();
+            } else {
+                let db = t.f.dir.path().join("model-center.sqlite3");
+                std::fs::rename(&db, db.with_extension("unavailable-fixture")).unwrap();
+            }
+            let (status, value) = lease_intent(&t, &old_hash).await;
+            assert_ne!(status, StatusCode::OK, "{failure}: {value}");
+            assert_eq!(t.s.store.command(&previous[0].0).unwrap().lease_count, 0);
+            let name =
+                t.s.bot(&t.bot_id)
+                    .unwrap_or_else(|error| panic!("{}", error.code))
+                    .name;
+            for operation in [
+                json!({"method":"disable","params":{"policy":"cancel"}}),
+                json!({"method":"delete","params":{"confirmation":name}}),
+            ] {
+                let body = reduction_queue(&t, operation);
+                let id = body["mutation_id"].as_str().unwrap().to_owned();
+                assert_eq!(
+                    human(&t, &t.other.account_token, &path, body.clone())
+                        .await
+                        .0,
+                    StatusCode::FORBIDDEN
+                );
+                let (status, value) = human(&t, &t.admin.account_token, &path, body).await;
+                assert_eq!(status, StatusCode::OK, "{failure}: {value}");
+                let (status, pull) = host(
+                    &t,
+                    "/execution/self/pull",
+                    json!({"host_context":t.context}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{failure}: {pull}");
+                assert!(serde_json::to_vec(&pull).unwrap().len() <= MAX_PULL_BYTES);
+                assert!(pull["data"]["intents"].as_array().unwrap().len() <= 8);
+                let hash = pull_intent_hash(&t, &pull, &id)
+                    .expect("cleanup beyond oldest eight must remain available");
+                let (status, lease) = lease_intent(&t, &hash).await;
+                assert_eq!(status, StatusCode::OK, "{failure}: {lease}");
+                confirm_fixture_receipt(
+                    &t,
+                    &id,
+                    lease["data"]["lease_id"].clone(),
+                    myagents_agentnet_execution_core::ReceiptStatus::Persisted,
+                )
+                .await;
+            }
+            for (id, original) in previous {
+                let row = t.s.store.command(&id).unwrap();
+                assert_eq!(row.command, original);
+                assert_eq!(row.lease_count, 0);
+                assert!(row.receipt.is_none());
+            }
+        }
+    }
+    #[tokio::test]
+    async fn cleanup_candidates_keep_every_wire_intent_grant_installed_across_nine_bots() {
+        let (mut t, store, model_ref) = managed_created_setup().await;
+        let mut bots = vec![(t.bot_id.clone(), t.grant.clone())];
+        for index in 1..9 {
+            t.bot_id = Uuid::new_v4().to_string();
+            t.grant.id = Uuid::new_v4().to_string();
+            t.grant.bot_id = t.bot_id.clone();
+            t.grant.relative_path = format!("bots/{}", t.bot_id);
+            let body = json!({"id":t.bot_id,"name":format!("synthetic {index}"),"description":"","owner_id":t.host.context.principal_id,"host_id":t.host.context.device_id,"runtime":"builtin","model_ref":model_ref,"system_prompt":"","daily_tokens":100,"revision":1,"deleted":false,"state":"stopped","configured":false,"expected_revision":0,"mutation_id":t.bot_id});
+            t.s.registry
+                .mutate(
+                    &t.admin.context.principal_id,
+                    "create",
+                    Uuid::parse_str(&t.bot_id).unwrap(),
+                    &body,
+                    None,
+                    &t.s.effective_config().unwrap(),
+                    std::slice::from_ref(&t.host.context.principal_id),
+                )
+                .unwrap();
+            accept(&t).await;
+            persisted_managed_bot(&t, &model_ref).await;
+            bots.push((t.bot_id.clone(), t.grant.clone()));
+        }
+        for (bot, grant) in &bots {
+            t.bot_id = bot.clone();
+            t.grant = grant.clone();
+            let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+            let body = reduction_queue(&t, json!({"method":"enable","params":{}}));
+            let (status, value) = human(&t, &t.admin.account_token, &path, body).await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+        }
+        let (status, healthy) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{healthy}");
+        assert_eq!(healthy["data"]["intents"].as_array().unwrap().len(), 8);
+        assert_wire_intents_have_grants(&t, &healthy);
+        let provider = store.model(&model_ref).unwrap().config.provider_id;
+        store
+            .delete_provider(
+                &t.owner.context.principal_id,
+                &Uuid::new_v4().to_string(),
+                &provider,
+                1,
+            )
+            .unwrap();
+        let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+        let body = reduction_queue(&t, json!({"method":"disable","params":{"policy":"cancel"}}));
+        let id = body["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.admin.account_token, &path, body).await.0,
+            StatusCode::OK
+        );
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        assert!(pull["data"]["intents"].as_array().unwrap().len() <= 8);
+        assert!(pull["data"]["grants"].as_array().unwrap().len() <= 8);
+        assert!(serde_json::to_vec(&pull).unwrap().len() <= MAX_PULL_BYTES);
+        assert_wire_intents_have_grants(&t, &pull);
+        let hash = pull_intent_hash(&t, &pull, &id)
+            .expect("ninth Bot cleanup must pass blocked normal window");
+        assert_eq!(lease_intent(&t, &hash).await.0, StatusCode::OK);
+    }
+    fn assert_wire_intents_have_grants(t: &Setup, pull: &Value) {
+        let now = gate::now().unwrap();
+        let jwks = t.f.service._keys.jwks();
+        let grants = pull["data"]["grants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| {
+                myagents_agentnet_execution_core::verify_grant(
+                    value["grant_token"].as_str().unwrap(),
+                    &jwks,
+                    &t.grant.scope,
+                    now,
+                )
+                .unwrap()
+                .grant
+            })
+            .collect::<Vec<_>>();
+        for value in pull["data"]["intents"].as_array().unwrap() {
+            let intent = verify_intent(
+                value["intent_token"].as_str().unwrap(),
+                &jwks,
+                &t.grant.scope,
+                now,
+            )
+            .unwrap();
+            assert!(
+                grants.contains(&intent.grant),
+                "wire intent grant must be installed in the same pull"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn cleanup_delete_waits_for_original_leased_outcome_even_after_actor_logout() {
+        let (t, store, model_ref) = managed_created_setup().await;
+        let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+        let enable = reduction_queue(&t, json!({"method":"enable","params":{}}));
+        let enable_id = enable["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.admin.account_token, &path, enable).await.0,
+            StatusCode::OK
+        );
+        let name =
+            t.s.bot(&t.bot_id)
+                .unwrap_or_else(|error| panic!("{}", error.code))
+                .name;
+        let delete = reduction_queue(
+            &t,
+            json!({"method":"delete","params":{"confirmation":name}}),
+        );
+        let delete_id = delete["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.owner.account_token, &path, delete).await.0,
+            StatusCode::OK
+        );
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        let ids = pull["data"]["intents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                t.s.store
+                    .intent(v["intent_hash"].as_str().unwrap())
+                    .unwrap()
+                    .command
+                    .mutation_id
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![enable_id.clone(), delete_id.clone()]);
+        let enable_hash = pull_intent_hash(&t, &pull, &enable_id).unwrap();
+        let delete_hash = pull_intent_hash(&t, &pull, &delete_id).unwrap();
+        let (status, enable_lease) = lease_intent(&t, &enable_hash).await;
+        assert_eq!(status, StatusCode::OK, "{enable_lease}");
+        t.f.auth.revoke_session(&t.admin.account_token).unwrap();
+        let provider = store.model(&model_ref).unwrap().config.provider_id;
+        store
+            .delete_provider(
+                &t.owner.context.principal_id,
+                &Uuid::new_v4().to_string(),
+                &provider,
+                1,
+            )
+            .unwrap();
+        let (status, value) = lease_intent(&t, &delete_hash).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{value}");
+        assert_eq!(value["code"], "HOST_COMMAND_OUTCOME_UNCONFIRMED");
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        assert!(pull_intent_hash(&t, &pull, &delete_id).is_none());
+        assert_eq!(t.s.store.command(&delete_id).unwrap().lease_count, 0);
+        confirm_fixture_receipt(
+            &t,
+            &enable_id,
+            enable_lease["data"]["lease_id"].clone(),
+            myagents_agentnet_execution_core::ReceiptStatus::Failed,
+        )
+        .await;
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        let hash = pull_intent_hash(&t, &pull, &delete_id).unwrap();
+        let (status, value) = lease_intent(&t, &hash).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert_eq!(t.s.store.command(&delete_id).unwrap().lease_count, 1);
+    }
+    #[tokio::test]
+    async fn cleanup_pull_skips_revoked_actor_and_closed_unleased_grant_without_new_deadlock() {
+        let (mut t, _store, _model_ref) = managed_created_setup().await;
+        let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+        let old = reduction_queue(&t, json!({"method":"enable","params":{}}));
+        let old_id = old["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.admin.account_token, &path, old).await.0,
+            StatusCode::OK
+        );
+        let original = t.s.store.command(&old_id).unwrap().command;
+        t.f.auth.revoke_session(&t.admin.account_token).unwrap();
+        let cleanup = reduction_queue(&t, json!({"method":"disable","params":{"policy":"cancel"}}));
+        let cleanup_id = cleanup["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.owner.account_token, &path, cleanup).await.0,
+            StatusCode::OK
+        );
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        assert!(pull_intent_hash(&t, &pull, &old_id).is_none());
+        assert!(pull_intent_hash(&t, &pull, &cleanup_id).is_some());
+        let(status,value)=human(&t,&t.owner.account_token,"/api/bots/grants/revoke",json!({"grant_id":t.grant.id,"expected_generation":t.grant.generation,"mutation_id":Uuid::new_v4().to_string()})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        let token = pull["data"]["revocations"][0]["revocation_token"]
+            .as_str()
+            .unwrap();
+        let snapshot =
+            t.s.store
+                .known_bot_snapshot(&t.grant.scope, &t.bot_id)
+                .unwrap()
+                .unwrap();
+        let(status,value)=host(&t,"/execution/self/receipt",json!({"kind":"revocation","host_context":t.context,"revocation_token":token,"snapshot":snapshot})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        t.grant.id = Uuid::new_v4().to_string();
+        t.grant.generation = 2;
+        let (status, value) = human(
+            &t,
+            &t.owner.account_token,
+            "/api/bots/grants/accept",
+            json!({"grant":t.grant,"expected_generation":1}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let cleanup = reduction_queue(&t, json!({"method":"disable","params":{"policy":"cancel"}}));
+        let id = cleanup["mutation_id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            human(&t, &t.owner.account_token, &path, cleanup).await.0,
+            StatusCode::OK
+        );
+        let (status, pull) = host(
+            &t,
+            "/execution/self/pull",
+            json!({"host_context":t.context}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        let hash = pull_intent_hash(&t, &pull, &id).unwrap();
+        assert_eq!(lease_intent(&t, &hash).await.0, StatusCode::OK);
+        let old = t.s.store.command(&old_id).unwrap();
+        assert_eq!(old.command, original);
+        assert_eq!(old.lease_count, 0);
+        assert!(old.receipt.is_none());
     }
 }

@@ -779,6 +779,9 @@ impl ModelCenterStore {
             model_ref: lease.model.config.id.clone(),
             model_revision: lease.model.revision,
             provider_revision: lease.provider.revision,
+            model_id: Some(lease.model.config.model_id.clone()),
+            model_label: Some(lease.model.config.label.clone()),
+            provider_id: Some(lease.provider.id.clone()),
             started_at: started,
             started_at_millis: now_millis(),
             duration_ms: None,
@@ -1365,6 +1368,53 @@ pub(crate) mod tests {
         assert_eq!(saved.charged_tokens, 10);
         assert_eq!(saved.cost_microusd, Some(48));
         assert!(saved.usage_known);
+    }
+    #[test]
+    fn usage_names_capture_the_session_and_legacy_rows_keep_unknown_names() {
+        let f = fixture(
+            ApiProtocol::Anthropic,
+            AuthType::ApiKey,
+            UpstreamFormat::ChatCompletions,
+            1000,
+            2,
+        );
+        let mut changed = f.lease.model.config.clone();
+        changed.model_id = "replacement-model".into();
+        changed.label = "Replacement label".into();
+        f.store
+            .put_model(&f.bot.owner_id, &id(), changed, 1)
+            .unwrap();
+        let request_id = id();
+        f.store.reserve(&f.bearer, &request_id, 10, 10).unwrap();
+        f.store
+            .settle(
+                &f.lease,
+                &request_id,
+                Some(TokenUsage {
+                    input: 3,
+                    output: 2,
+                }),
+                "success",
+            )
+            .unwrap();
+        let saved = f.store.usage(1).unwrap().remove(0);
+        assert_eq!(saved.model_id.as_deref(), Some("fixture-model"));
+        assert_eq!(saved.model_label.as_deref(), Some("Fixture model"));
+        assert_eq!(
+            saved.provider_id.as_deref(),
+            Some(f.lease.provider.id.as_str())
+        );
+        assert_eq!(saved.model_revision, 1);
+        let mut legacy = serde_json::to_value(&saved).unwrap();
+        for field in ["model_id", "model_label", "provider_id"] {
+            legacy.as_object_mut().unwrap().remove(field);
+        }
+        let legacy: UsageRecord = serde_json::from_value(legacy).unwrap();
+        assert!(
+            legacy.model_id.is_none()
+                && legacy.model_label.is_none()
+                && legacy.provider_id.is_none()
+        );
     }
     #[test]
     fn model_price_snapshot_immutable_but_authority_revocation_is_live() {

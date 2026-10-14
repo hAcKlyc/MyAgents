@@ -105,3 +105,7 @@ BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host s
 - [ ] 第二真实账号/普通Owner产品入口、共享、收费模型授权等后续范围，不能用合成403代替真实联调。
 
 验收分层与运行版本见 `../validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`；前述未发布条目仅为历史准备状态，由此记录更新。
+
+## BOTS-EXEC-QUEUE-FAIRNESS-002（后续）
+
+- [ ] 原 queued_for 最早窗口在超过 8 条旧注销 actor、catalog 正常时不推进，后排 cleanup 可长期等待。基线5315已存在；设计有界公平推进，保持原 actor 门禁、正常 FIFO、未知 lease/receipt 和 Delete 安全，不新增授权 owner。与本轮仅 catalog 故障隔离区别验收。

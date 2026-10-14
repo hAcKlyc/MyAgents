@@ -18,7 +18,7 @@ Host 通过原 supervisor → worker → SessionEngine → builtin SDK 消费限
 
 ## 调用监控与额度
 
-请求保存 Bot、owner、Session、模型/供应商版本、时间/耗时、结果和 token/费用，不保存 prompt/response。日 token、日 USD、并发、Session 累计 token 原子预占；已确认 usage 按捕获单价版本结算。第一版费用用 USD micro-units，价格或 usage 未确认则显示未知，不能显示为零。缓存 token 计费无法确认时保留保守预占。
+请求保存 Bot、owner、Session、捕获的模型名称与模型/供应商版本、时间/耗时、结果和 token/费用，不保存 prompt/response。日 token、日 USD、并发、Session 累计 token 原子预占；已确认 usage 按捕获单价版本结算。第一版费用用 USD micro-units，价格或 usage 未确认则显示未知，不能显示为零。缓存 token 计费无法确认时保留保守预占。
 
 请求 ID 重放不能再次调用。HTTP、SDK 重试均受控；上游结果未知的 Session 禁止继续调用，不能以新编号猜测重试。进程恢复保留未知请求及保守收费占用，释放悬挂并发。明确已完成但无 usage 的结果仅保留未知计费，不伪装为已确认费用。
 
@@ -26,10 +26,12 @@ Host 通过原 supervisor → worker → SessionEngine → builtin SDK 消费限
 
 - [x] core 三协议真实 loopback 传输、并发预占/回放/CAS/撤销/流中断及密钥保护独立测试。
 - [x] Host 实际已安装 native SDK 三协议隔离接入、不可变配置和全目录凭据泄漏扫描。
-- [x] HTTP 与实际 owner authority 接线、接口/会话/撤销端到端；130 Rust tests、clippy通过。
+- [x] HTTP 与实际 owner authority 接线、接口/会话/撤销端到端；135 Rust tests、clippy通过。
 - [x] 真实 Rust fixture 控制台 CRUD、模型分配、监控、普通账号拒绝及响应式独立验收，详见dev-docs/bots-model-center-review.md。
 - [ ] 合入远端 main、CI 和来源核验。
 - [ ] 云端窗口/备份/回滚/现网控制台发布和真实账号路径复验。
 - [ ] 指定平台供应商配置与单 Bot 有限 Host opt-in、费用授权后的真实收费路径。尚无本任务平台 API Key，不能复制私人 Host key 或以 mock 代替验收。
 
 当前详细任务记录 `.agent-sync/tasks/codex-bots-model-center-001-a165b438.md`；未勾选项不代表已实现或生产完成。
+
+模型停用后有界拉取保留原正常 FIFO，跳过确定的 catalog 不可用请求，使后续有限 Disable/Delete 能下发；已租约且结果未知的同 Bot 操作仍阻断 Delete，必须先核对原 receipt。基线超过 8 个旧失效 actor 的通用公平性缺口列入后续 BOTS-EXEC-QUEUE-FAIRNESS-002，本轮不宣称全部授权阻断均被清理。

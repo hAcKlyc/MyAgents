@@ -17,6 +17,9 @@ let modelFilters = { bot_id: '', owner_id: '', model_ref: '' };
 let activeModelMutationBody = null;
 let modelAccessToken = null;
 const errors = {
+  MODEL_RESOURCE_REJECTED: '所选模型已停用、未配置密钥或不在当前授权范围内。',
+  MODEL_CATALOG_UNAVAILABLE: '模型目录暂不可读，不能启动或配置模型；请核对存储状态。',
+  COMMAND_DEPENDENCY_PENDING: '同一 Bot 有更早的待执行操作，请先核对原操作回执。',
   INVALID_MODEL_CENTER_REQUEST: '请检查供应商连接、接口格式、模型名称和额度。',
   MODEL_CENTER_REVISION_CONFLICT: '配置已被其他操作更新，请刷新后重新编辑。',
   MODEL_CENTER_NOT_FOUND: '模型或供应商已不存在，请刷新目录。',
@@ -448,7 +451,7 @@ function renderModelUsage(root) {
       const cell=(label,value)=>{const td=node('td');td.append(node('span',label,'row-label'),node('span',String(value)));return td;};
       row.append(cell('时间',item.started_at ? new Date(item.started_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '未知'));
       row.append(cell('Bot / 用户',`${(data.bots.find(x=>x.id===item.bot_id)?.name)||item.bot_id} / ${userName(item.owner_id)}`));
-      row.append(cell('模型',modelLabel(item.model_ref)));
+      row.append(cell('模型',item.model_id ? `${item.model_label?`${item.model_label} · `:''}${item.model_id} · 配置 v${item.model_revision??'未知'}` : `模型名称未知 · 配置 v${item.model_revision??'未知'}`));
       row.append(cell('Tokens',`${item.input_tokens ?? '未知'} / ${item.output_tokens ?? '未知'}`));
       row.append(cell('估算费用 USD',item.cost_microusd === null || item.cost_microusd === undefined ? '未知' : `$${(item.cost_microusd/1_000_000).toFixed(6)}`));
       const elapsed = Number.isSafeInteger(item.duration_ms) && item.duration_ms >= 0 ? `${item.duration_ms} ms` : Number.isSafeInteger(item.started_at) && Number.isSafeInteger(item.completed_at) ? `${Math.max(0,item.completed_at-item.started_at)} 秒` : '未知';
@@ -494,12 +497,12 @@ function openModelEditor(kind, record = null, providerId = '') {
     const key=input('api_key','','password'); key.autocomplete='new-password'; key.placeholder=record?.has_key?'已保存密钥不回显；输入新值以轮换':'请输入 API Key'; key.required=!record;
     addField(record ? '轮换 API Key（可选）' : 'API Key',key,record?'留空表示沿用已保存密钥。':'密钥仅在当前编辑框内存留，提交或关闭后清除。');
     const advanced=node('details',undefined,'advanced-fields'); const summaryNode=node('summary','高级连接设置'); advanced.append(summaryNode);
-    const auth=node('select'); auth.name='auth_type'; [['api_key','API_KEY'],['auth_token','AUTH_TOKEN']].forEach(([v,l])=>{const o=node('option',l);o.value=v;auth.append(o);}); auth.value=record?.auth_type|| (selector.value==='openai'?'api_key':'api_key');
+    const auth=node('select'); auth.name='auth_type'; [['api_key','API_KEY'],['auth_token','AUTH_TOKEN']].forEach(([v,l])=>{const o=node('option',l);o.value=v;auth.append(o);}); auth.value=selector.value==='openai'?'api_key':(record?.auth_type||'api_key'); auth.disabled=selector.value==='openai';
     const format=node('select'); format.name='upstream_format'; [['chat_completions','Chat Completions'],['responses','Responses API']].forEach(([v,l])=>{const o=node('option',l);o.value=v;format.append(o);}); format.value=record?.upstream_format||'chat_completions';
     const param=node('select'); param.name='max_output_tokens_param_name'; [['max_tokens','max_tokens'],['max_completion_tokens','max_completion_tokens'],['max_output_tokens','max_output_tokens']].forEach(([v,l])=>{const o=node('option',l);o.value=v;param.append(o);}); param.value=record?.max_output_tokens_param_name||'max_tokens';
     const maxTokens=input('max_output_tokens',record?.max_output_tokens ?? 4096,'number'); maxTokens.min='1'; maxTokens.max='16384';
     for (const [label,control] of [['鉴权类型',auth],['OpenAI 上游格式',format],['输出 token 参数',param],['最大输出 tokens',maxTokens]]) { const wrap=node('label',undefined,'field');wrap.append(node('span',label),control);advanced.append(wrap); }
-    selector.addEventListener('change',()=>{ if(selector.value==='openai'){auth.value='api_key'; if(format.value==='responses') param.value='max_output_tokens';} else {auth.value='api_key';param.value='max_tokens';} });
+    selector.addEventListener('change',()=>{ auth.disabled=selector.value==='openai'; if(selector.value==='openai'){auth.value='api_key'; if(format.value==='responses') param.value='max_output_tokens';} else {auth.value='api_key';param.value='max_tokens';} });
     format.addEventListener('change',()=>{ if(format.value==='responses') param.value='max_output_tokens'; else if(param.value==='max_output_tokens') param.value='max_tokens'; });
     fields.append(advanced);
     const enabled=node('input'); enabled.type='checkbox'; enabled.name='enabled'; enabled.checked=record?.enabled ?? true;
@@ -584,7 +587,7 @@ async function probeProvider(provider){
 function botDesiredModel(bot){return modelCenter.data?.bindings?.find(x=>x.bot_id===bot.id)?.desired_model_ref ?? bot.model_ref ?? null;}
 function botEffectiveModel(bot){const host=executionHost(bot);const snapshot=observedSnapshot(bot,host);return snapshot?.effective_model_ref ?? snapshot?.config?.model_ref ?? null;}
 function openBotModelAssignment(bot){
-  const available=modelRows().filter(m=>m.enabled&&(m.owner_ids||[]).includes(bot.owner_id)&&modelProviders().some(p=>p.id===m.provider_id&&p.enabled));
+  const available=modelRows().filter(m=>m.enabled&&(m.owner_ids||[]).includes(bot.owner_id)&&modelProviders().some(p=>p.id===m.provider_id&&p.enabled&&p.has_key));
   if(!available.length){notice('此 Bot 所属用户当前没有可分配的已启用模型。',true);return;}
   editing={kind:'bot-model',bot};const fields=$('fields');fields.replaceChildren();$('edit-title').textContent='分配模型';$('edit-description').textContent='仅更新后台期望值；运行中的会话继续使用启动时绑定的模型。Host 有效值以最新 Host 报告为准。';$('form-error').textContent='';$('save-editor').textContent='保存分配';$('save-editor').className='primary';
   const label=node('label',undefined,'field');label.append(node('span','后台期望模型'));const select=node('select');select.name='model_ref';for(const m of available){const o=node('option',`${m.label||m.model_id} · ${m.model_id}`);o.value=m.id;select.append(o);}select.value=botDesiredModel(bot)||available[0].id;label.append(select);fields.append(label);
@@ -599,7 +602,7 @@ async function saveBotModel(form){
 function openModelAccess(bot){
   if(data.principal_id!==bot.owner_id){notice('只有 Bot 所属用户本人可以发放或撤销模型访问凭据。',true);return;}
   if(bot.deleted || bot.runtime!=='builtin'){notice('仅可为未删除的 builtin Bot 发放模型访问凭据。',true);return;}
-  const available=modelRows().filter(m=>m.enabled&&(m.owner_ids||[]).includes(bot.owner_id)&&modelProviders().some(p=>p.id===m.provider_id&&p.enabled));
+  const available=modelRows().filter(m=>m.enabled&&(m.owner_ids||[]).includes(bot.owner_id)&&modelProviders().some(p=>p.id===m.provider_id&&p.enabled&&p.has_key));
   if(!available.length){notice('当前没有此 Bot 所属用户可授权的已启用模型。',true);return;}
   editing={kind:'model-access',bot}; modelAccessToken=null;
   const fields=$('fields');fields.replaceChildren();$('form-error').textContent='';
@@ -695,7 +698,7 @@ function renderBotTable() {
       const configReg = button('配置登记', () => openEditor('configure', bot)); configReg.disabled ||= !!record && record.state !== 'revoked';
       controls.append(configReg);
       const assign = button('分配', () => openEditor('assign', bot)); assign.disabled ||= !!record && record.state !== 'revoked';
-      const modelAssign=button('分配模型', () => openBotModelAssignment(bot));modelAssign.disabled ||= !modelCenterEnabled();controls.append(modelAssign);
+      const modelAssign=button('分配模型', () => openBotModelAssignment(bot));modelAssign.disabled ||= !modelCenterEnabled() || bot.runtime!=='builtin';if(bot.runtime!=='builtin')modelAssign.title='第一版模型分配仅支持 builtin/API Runtime';controls.append(modelAssign);
       if(data.principal_id===bot.owner_id){const issue=button('发放访问凭据',()=>openModelAccess(bot));issue.disabled ||= !modelCenterEnabled();const revoke=button('撤销模型访问',()=>void revokeModelAccess(bot),'danger');revoke.disabled ||= !modelCenterEnabled();controls.append(issue,revoke);}
       const deleteReg = button('登记删除', () => openEditor('delete', bot), 'danger'); deleteReg.disabled ||= !!record && record.state !== 'revoked';
       controls.append(assign, button('Host 生命周期', () => document.getElementById(`execution-${bot.id}`)?.scrollIntoView({behavior:'smooth',block:'center'})), deleteReg);
