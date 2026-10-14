@@ -34,6 +34,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertIn("登录云后台", password_template)
             self.assertTrue((output / "web/robots.txt").is_file())
             self.assertTrue((output / "web/static/main.css").is_file())
+            self.assertIn("View basic profile information", (output / "web/templates/approval.html").read_text())
             self.assertIn('action="{{ .PostURL }}"', password_template)
             self.assertIn('name="login"', password_template)
             self.assertIn('name="password"', password_template)

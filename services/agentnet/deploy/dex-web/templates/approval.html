@@ -9,7 +9,7 @@
     <div class="dex-subtle-text">{{ .Client }} 请求以下身份信息：</div>
     <ul class="dex-list">
       {{ range $scope := .Scopes }}
-      <li>{{ if eq $scope "View your basic profile" }}基本账号信息{{ else if eq $scope "View your email address" }}邮箱地址{{ else }}{{ $scope }}{{ end }}</li>
+      <li>{{ if eq $scope "View basic profile information" }}基本账号信息{{ else if eq $scope "View your email address" }}邮箱地址{{ else if eq $scope "Have offline access" }}离线访问{{ else if eq $scope "View your groups" }}所属群组{{ else }}{{ $scope }}{{ end }}</li>
       {{ end }}
     </ul>
     {{ else }}
