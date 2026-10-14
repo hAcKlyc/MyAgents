@@ -127,8 +127,25 @@ it("keeps a valid account signed in while the network is offline and removes onl
     expiresAt: null,
   });
   mocks.registry = registry;
-  render(<OwnedAccountEntry expanded />);
-  fireEvent.click(screen.getByRole("button", { name: "MoXBots Test · principa" }));
+  render(
+    <div className="global-sidebar-account-row">
+      <OwnedAccountEntry expanded />
+    </div>,
+  );
+  const trigger = screen.getByRole("button", {
+    name: "MoXBots Test · principa",
+  });
+  expect(trigger).toHaveAttribute("data-owned-account-trigger");
+  expect(trigger).toHaveAttribute("data-global-account-trigger");
+  expect(
+    trigger.matches(
+      ".global-sidebar-account-row > [data-global-account-trigger]",
+    ),
+  ).toBe(true);
+  fireEvent.click(trigger);
+  expect(
+    screen.getByRole("dialog", { name: "MoXBots 账号" }),
+  ).toBeInTheDocument();
   expect(screen.getByText("网络暂时离线不会退出账号。")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "退出此实例" }));
   fireEvent.click(screen.getByRole("button", { name: "确认退出此实例" }));

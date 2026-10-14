@@ -267,6 +267,7 @@ export default function OwnedAccountEntry({
         aria-haspopup={state === "authenticated" ? "dialog" : undefined}
         className="global-sidebar-row relative flex h-8 min-w-0 items-center text-left text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60"
         data-owned-account-trigger
+        data-global-account-trigger
       >
         <span className="absolute left-3 flex h-4 w-4 shrink-0 items-center justify-center">
           {busy ? (
