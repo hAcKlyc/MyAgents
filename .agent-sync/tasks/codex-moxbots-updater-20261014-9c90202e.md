@@ -28,7 +28,7 @@ base main0bb3f934368860f46c8e19981feb7ab10ddf1709；start/task-init通过。上�
 
 官网HTTPS curl普通信任验证200。现有update lifecycle仅保护进程创建，不保护已运行Sidecar的新turn；worker负责复用SessionEngine权威admission与Rust执行claim。
 
-## Current delivery gates
+## Blockers and unknowns
 
 - [x] 核心更新器主干交付：PR40 / main7ec5b6d4，六项CI通过。
 - [x] 独立QA身份、数据/端口/凭据拒绝源码，Node164、typecheck与完整lint通过。
