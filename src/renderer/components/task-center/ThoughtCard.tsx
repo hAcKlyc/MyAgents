@@ -10,8 +10,10 @@
 //     `EDIT_MAX_HEIGHT_PX`, beyond which it scrolls internally. This keeps
 //     a single oversized draft from eating the whole panel.
 
+import { APP_BUILD_PROFILE } from '@/../shared/appProfile';
+import { registerComposerUpdateOwner } from '@/utils/composerUpdateCheckpoint';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ArchiveIcon,
@@ -82,9 +84,39 @@ export function ThoughtCard({
   onToggleSelect,
   onEnterSelectMode,
 }: Props) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditingState] = useState(false);
+  const editingRef = useRef(false);
+  const setEditing = useCallback((value: boolean) => {
+    editingRef.current = value;
+    setEditingState(value);
+  }, []);
   const [draft, setDraft] = useState(thought.content);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyState] = useState(false);
+  const busyRef = useRef(false);
+  const setBusy = useCallback((value: boolean) => {
+    busyRef.current = value;
+    setBusyState(value);
+  }, []);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const updateLockedRef = useRef(false);
+  const checkpointId = useId();
+  useLayoutEffect(() => {
+    if (APP_BUILD_PROFILE !== 'moxbot') return;
+    return registerComposerUpdateOwner({
+      snapshot: () => ({
+        scope: { tabId: `thought-card:${checkpointId}`, sessionId: null, workspacePath: null, mode: 'launcher' },
+        text: '', context: {}, imageCount: 0, pendingAttachments: false,
+        composing: false, sending: false, stagedWorkflow: false,
+        ...(editingRef.current || busyRef.current ? {
+          blockingReason: '任务中心文本记录仍在编辑或保存，请先保存或取消后再更新；内容已保留。',
+        } : {}),
+      }),
+      freeze: locked => {
+        updateLockedRef.current = locked;
+        if (cardRef.current) cardRef.current.inert = locked;
+      },
+    });
+  }, [checkpointId]);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
@@ -122,6 +154,7 @@ export function ThoughtCard({
   // measurement here.
 
   const handleSave = useCallback(async () => {
+    if (updateLockedRef.current || busyRef.current) return;
     if (draft.trim() === thought.content.trim()) {
       setEditing(false);
       setExpanded(false);
@@ -142,9 +175,10 @@ export function ThoughtCard({
     } finally {
       setBusy(false);
     }
-  }, [draft, thought.content, thought.id, onChanged]);
+  }, [draft, thought.content, thought.id, onChanged, setEditing, setBusy]);
 
   const handleDelete = useCallback(async () => {
+    if (updateLockedRef.current || busyRef.current) return;
     setShowMenu(false);
     setBusy(true);
     setError(null);
@@ -153,12 +187,14 @@ export function ThoughtCard({
       onChanged(null);
     } catch (e) {
       setError(String(e));
+    } finally {
       setBusy(false);
     }
-  }, [thought.id, onChanged]);
+  }, [thought.id, onChanged, setBusy]);
 
   const isArchived = thought.archived === true;
   const handleToggleArchive = useCallback(async () => {
+    if (updateLockedRef.current || busyRef.current) return;
     setShowMenu(false);
     setBusy(true);
     setError(null);
@@ -172,11 +208,11 @@ export function ThoughtCard({
     } finally {
       setBusy(false);
     }
-  }, [thought.id, isArchived, onChanged]);
+  }, [thought.id, isArchived, onChanged, setBusy]);
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (isImeComposingEvent(e)) return;
+      if (updateLockedRef.current || busyRef.current || isImeComposingEvent(e)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         setDraft(thought.content);
@@ -186,14 +222,15 @@ export function ThoughtCard({
         void handleSave();
       }
     },
-    [thought.content, handleSave],
+    [thought.content, handleSave, setEditing],
   );
 
   const enterEdit = useCallback(() => {
+    if (updateLockedRef.current || busyRef.current) return;
     setDraft(thought.content);
     setEditing(true);
     setExpanded(true); // opening edit always shows the full body
-  }, [thought.content]);
+  }, [thought.content, setEditing]);
 
   const convertedCount = thought.convertedTaskIds?.length ?? 0;
 
@@ -201,12 +238,12 @@ export function ThoughtCard({
   // normal view, selection toggle in multi-select. Nested controls keep their
   // own action and never bubble into the card action.
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (editing || isCardControl(e.target)) return;
+    if (updateLockedRef.current || busyRef.current || editing || isCardControl(e.target)) return;
     if (selectMode) onToggleSelect?.();
     else enterEdit();
   };
   const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget || editing) return;
+    if (updateLockedRef.current || busyRef.current || e.target !== e.currentTarget || editing) return;
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     if (selectMode) onToggleSelect?.();
@@ -223,6 +260,7 @@ export function ThoughtCard({
     //                  action bar) — 12px, the larger step that visually
     //                  separates "read" from "act".
     <div
+      ref={cardRef}
       role={selectMode ? 'checkbox' : editing ? undefined : 'button'}
       aria-checked={selectMode ? selected : undefined}
       aria-label={
@@ -278,7 +316,7 @@ export function ThoughtCard({
                   <button
                     ref={discussAnchorRef}
                     type="button"
-                    onClick={() => setShowWorkspacePicker((v) => !v)}
+                    onClick={() => { if (!updateLockedRef.current) setShowWorkspacePicker((v) => !v); }}
                     className="flex items-center gap-1 rounded-[var(--radius-md)] px-2 py-0.5 text-sm text-[var(--ink-muted)] hover:bg-[var(--paper-inset)] hover:text-[var(--accent-cool)]"
                   >
                     <MessageIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -295,7 +333,7 @@ export function ThoughtCard({
                 <div className="group/dispatch relative">
                   <button
                     type="button"
-                    onClick={() => onDispatch(thought)}
+                    onClick={() => { if (!updateLockedRef.current) onDispatch(thought); }}
                     className="flex items-center gap-1 rounded-[var(--radius-md)] px-2 py-0.5 text-sm text-[var(--ink-muted)] hover:bg-[var(--paper-inset)] hover:text-[var(--accent-warm)]"
                   >
                     <ZapIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -316,7 +354,7 @@ export function ThoughtCard({
                 onClose={() => setShowWorkspacePicker(false)}
                 anchorRef={discussAnchorRef}
                 tags={thought.tags}
-                onSelect={(workspaceId) => onDiscuss(thought, workspaceId)}
+                onSelect={(workspaceId) => { if (!updateLockedRef.current) onDiscuss(thought, workspaceId); }}
               />
             )}
             {/* "更多" — always visible so the user has a permanent
@@ -327,7 +365,7 @@ export function ThoughtCard({
             <button
               ref={menuAnchorRef}
               type="button"
-              onClick={() => setShowMenu((v) => !v)}
+              onClick={() => { if (!updateLockedRef.current) setShowMenu((v) => !v); }}
               disabled={busy}
               title={t('thoughts.moreActions')}
               className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-md)] text-[var(--ink-muted)]/70 transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)]"
@@ -344,6 +382,7 @@ export function ThoughtCard({
               <button
                 type="button"
                 onClick={() => {
+                  if (updateLockedRef.current) return;
                   setShowMenu(false);
                   enterEdit();
                 }}
@@ -356,6 +395,7 @@ export function ThoughtCard({
                 <button
                   type="button"
                   onClick={() => {
+                    if (updateLockedRef.current) return;
                     setShowMenu(false);
                     onEnterSelectMode();
                   }}
@@ -401,7 +441,7 @@ export function ThoughtCard({
         <textarea
           ref={editRef}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { if (!updateLockedRef.current) setDraft(e.target.value); }}
           onKeyDown={handleEditKeyDown}
           autoFocus
           rows={2}
@@ -470,6 +510,7 @@ export function ThoughtCard({
           <button
             type="button"
             onClick={() => {
+              if (updateLockedRef.current || busyRef.current) return;
               setDraft(thought.content);
               setEditing(false);
             }}

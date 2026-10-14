@@ -70,3 +70,35 @@ base main0bb3f934368860f46c8e19981feb7ab10ddf1709；start/task-init通过。上�
 Apple整合App公证49b80e6b-523a-424b-aed3-f441f8ed2a94现Accepted。另存副本 /private/tmp/moxbots-updater-20261014/B-integrated-main-notarized/MoXBots.app 已附票，stapler/codesign/Gatekeeper通过；已交付的原App与ZIP保持冻结，不能改写已交付摘要。原生UI/A→B仍未通过，不冒称完整正式验收。用户“不要备份旧包”由安装聊天处理；不要求改变更新发布内部不可变产物、原子稳定清单和回滚事务。
 
 QA追加隔离正在工作树，暂未主干交付。独立审阅初轮终端ENV/PATH、辅助模型入口、builtin恢复三项已修并复验164条，typecheck/diff通过。自身QA config初始化读取不属于用户数据探测；对应测试禁止其他目录读取及Provider IO。新的QA workspace只在/private/tmp，独立key与仅loopback HTTP，不含用户数据，运行测试不获取生产OS凭据。模型与SDK执行关闭，因此实际busy验收用真实QA终端；模型owner状态通过确定性回归，真实Provider任务更新不中断仍不能凭此冒称已验收。首次QA Cargo发现registry的已裁剪promote_account调用，已加一致cfg并在独立snapshot重建。后续须QA native build/test、独立UI/A→B、DMG及HTTPS版本发布；生产stable仍204。
+
+## Native acceptance repair 2026-10-15
+
+独立真实QA已证明：篡改签名下载被拒绝且可重试；合法342389840字节包完成签名下载并ready；取消不安装，真实PTY循环时安装busy拒绝而循环继续。主动结束并关闭测试PTY后，空闲安装因update-quiesce接口未列入production role composition而实际404：Global33415与Session33416均复现，不能把unknown当idle。已只添加exact common路由，保留internal credential及exact generation认证；260项相关回归通过。待新的修复基线A2→B2实测，旧失败结果保留，不以关Session绕过。
+
+旧QA正常退出工具后App PID退出，但两个可精确归属QA的sidecars残留；owner已移交root限定cleanup。未发送Chat草稿缺少durable checkpoint，退出前可见不等于已保存；独立实现者补主窗口composer交接，Root再做UI/重启复验。日常0.5.3/5949试用版包含旧route缺陷，需要首次手动安装修复正式包作为自动更新基线；本任务不操作日常App。私有0.5.4/17e0公证候选已标superseded，尚未任何stable发布；不能覆盖已交付0.5.3或把AppleAccepted当功能验收。
+
+源码PR43已合入远端main37279ce45e737966312271c3c88b4d6c5d195c10，六CI通过；draft/route追加修复独立追踪。模型执行本轮仍禁用，native busy仅真实QA terminal，paidProvider运行中保护仍仅owner回归证据。
+
+## Composer checkpoint source freeze 2026-10-15
+
+确认更新前新增MoxBots composer持久交接：exact Tab/Session/workspace/context，durable tmp/fsync/rename及最后复读；图片、IME、发送或导入处理中、不能恢复的Launcher草稿拒绝安装，原内容保留。损坏/未消费handoff保留并阻断，默认MyAgents不读写。独立关键123条通过；Root新增owner变更后的解冻回归，最终unit19+DOM6共25条与typecheck通过。独立复核继续，待新A2→B2原生实际恢复，未宣称生产草稿验收。当前main0c7b8e72已正常整合，PR46补路由与composer后执行六CI。
+
+## CI dependency repair 2026-10-15
+
+CI c46 head发现composer runtime导入tabPersistence→builtin UI composition的四个循环；已将serializer/parser通过App既有owner注入，checkpoint仅保留type import，没有复制协议/serializer或放宽schema。Root与独立复核相关62/62通过；bundled Node24 fullLint通过（0依赖错误，16已有orphan警告）、typecheck/diff通过。c46三份尚在编译的候选以精确本任务PGID SIGINT停止，未发布；所有最终资源及native重建用追加修复source pin，保留失败证据。
+
+## Final native candidates and CI contract maintenance
+
+正式和QA A2/B2 source pin = 3000f30fb28151ad74d393a7d99ac62dd463c404，三份assets/native成功；固定production reader复核通过。主干并发反馈PR44/d726在冻结后合入，不修改冻结包源码；最终主干同步和源码版本分别记录。Source freeze 3311 tracked-file hashes及生产key/pub配置一致性验证在project pointer work/updater-20261014/D-source-freeze-3000f30f.json。
+
+CI3000五项通过；JS唯一失败是已有AppShellChrome.contract仍找旧无参重启调用（unit5621通过，1失败，5跳过）。仅调整此既有测试：Record/file保存位置非负且早于checkpoint.persist，checkpoint早于带lease的restart；相关78/78及最终contract16/16、lint/diff通过，独立16项复跑。runtime文件未改，因此包source3000保持，不用修改/伪造实际产物来源；追加测试/文档将重新跑CI。原生A2/B2准备签名，尚未执行安装；生产stable仍204。
+
+## A3 source freeze and editor admission repairs
+
+已正常整合 remote-main1c1f3ee2 的正式RemoteSession，不移除并发成果。新增 ThoughtCard/ThoughtInput/TaskCommentTimeline 更新准入：未提交文本、编辑/IME、录音启动、保存/发送/重试中的操作拒绝安装并保留当前内容；不自动发送或编造可恢复Session。RemoteSession tab 的安全更新证明尚未接入，begin/persist/final verify明确拒绝；remote prepare/receipt/detached job IO 复用既有process admission计数直到finish完成，冻结拒绝新metadata写入。
+
+Root 9文件211项回归、composition139项、独立154项通过；full lint/typecheck/diff通过。真实独立Node QA路由1项通过：authenticated freeze拒绝prepare且sessions.json字节不变，release后恢复。不是正式Host联调。
+
+原生A2手动合法204已通过；实际TaskCenter内联编辑未覆盖被发现后停止安装。普通tab导航会卸载未保存inline编辑，是独立导航缺陷，不能当作升级已保存。退场前独立操作员重新构造ownRecord marker并UI保存，磁盘SHA f89c44737adfe6049df86dfd38bc5ef7e0730c61964aa1ce540ea2a43919671f；Chat exact3行/尾空格仅AX证据，不冒称旧版durable保存。A2正常退出后两个exact QA orphan由Root验证argv/PPID并限定TERM，qa-A2-retirement.json；未操作日常App/data/Keychain。
+
+D/3000f30f App虽然Apple Accepted且附票，因新发现编辑入口而superseded，未发布。本次重新冻结A3/B3/正式E同源，TaskCenter编辑保持mounted直接点顶栏更新验证拒绝，再执行真实signed A→B/草稿恢复/sidecar退出。最终DMG公证和HTTPS签名制品发布仍待完成；stable仍204。

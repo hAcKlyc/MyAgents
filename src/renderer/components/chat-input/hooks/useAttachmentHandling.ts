@@ -81,6 +81,7 @@ interface UseAttachmentHandlingParams {
   setShowPlusMenu: Dispatch<SetStateAction<boolean>>;
   notifyUnsupportedImageFallback: () => void;
   onWorkspaceRefresh?: () => void;
+  isDraftLocked?: () => boolean;
 }
 
 export function useAttachmentHandling({
@@ -99,10 +100,12 @@ export function useAttachmentHandling({
   setShowPlusMenu,
   notifyUnsupportedImageFallback,
   onWorkspaceRefresh,
+  isDraftLocked,
 }: UseAttachmentHandlingParams) {
   const { t } = useTranslation('chat');
   const [images, setImageState] = useState<ImageAttachment[]>([]);
   const imageCountRef = useRef(0);
+  const pendingOperationsRef = useRef(0);
   const mountedRef = useRef(true);
   const activeReadersRef = useRef<Set<FileReader>>(new Set());
   const workspaceIdentity = normalizeWorkspacePathIdentity(workspacePath ?? '');
@@ -146,6 +149,7 @@ export function useAttachmentHandling({
   }, []);
 
   const setImages = useCallback<Dispatch<SetStateAction<ImageAttachment[]>>>((next) => {
+    if (isDraftLocked?.()) return;
     if (typeof next === 'function') {
       setImageState((prev) => {
         const resolved = next(prev);
@@ -156,7 +160,7 @@ export function useAttachmentHandling({
     }
     imageCountRef.current = next.length;
     setImageState(next);
-  }, []);
+  }, [isDraftLocked]);
 
   const reserveImageSlot = useCallback(() => {
     if (imageCountRef.current >= MAX_IMAGES) {
@@ -272,7 +276,7 @@ export function useAttachmentHandling({
     });
   }, [forgetReader]);
 
-  const processDroppedFiles = useCallback(async (files: File[]) => {
+  const processDroppedFilesInner = useCallback(async (files: File[]) => {
     const importScope = currentImportScopeRef.current;
     if (isDebugMode()) {
       console.log('[SimpleChatInput] processDroppedFiles called with', files.length, 'files:', files.map(f => f.name));
@@ -384,7 +388,7 @@ export function useAttachmentHandling({
     }
   }, [fileService, workspacePath, addImage, undoStack, fileToBase64, isImportScopeCurrent, notifyUnsupportedImageFallback, onWorkspaceRefresh, provider, currentModelId, isExternalRuntime, toastRef, insertReferenceText, t]);
 
-  const processDroppedFilePaths = useCallback(async (paths: string[]) => {
+  const processDroppedFilePathsInner = useCallback(async (paths: string[]) => {
     const importScope = currentImportScopeRef.current;
     if (isDebugMode()) {
       console.log('[SimpleChatInput] processDroppedFilePaths called with', paths.length, 'paths:', paths);
@@ -527,9 +531,26 @@ export function useAttachmentHandling({
     }
   }, [fileService, workspacePath, addPreparedImageAttachment, undoStack, isImportScopeCurrent, notifyUnsupportedImageFallback, onWorkspaceRefresh, provider, currentModelId, isExternalRuntime, attachmentSessionId, toastRef, insertReferenceText, t]);
 
+  // Count the whole import, including Rust IO after FileReader has finished.
+  // Update checkpoint must reject it rather than drop a late attachment.
+  const processDroppedFiles = useCallback(async (files: File[]) => {
+    if (isDraftLocked?.()) return;
+    pendingOperationsRef.current++;
+    try { await processDroppedFilesInner(files); }
+    finally { pendingOperationsRef.current--; }
+  }, [isDraftLocked, processDroppedFilesInner]);
+  const processDroppedFilePaths = useCallback(async (paths: string[]) => {
+    if (isDraftLocked?.()) return;
+    pendingOperationsRef.current++;
+    try { await processDroppedFilePathsInner(paths); }
+    finally { pendingOperationsRef.current--; }
+  }, [isDraftLocked, processDroppedFilePathsInner]);
+
   const handleUploadButtonClick = useCallback(async () => {
+    if (isDraftLocked?.()) return;
     setShowPlusMenu(false);
     if (isTauriEnvironment()) {
+      pendingOperationsRef.current++;
       try {
         const selected = await open({
           multiple: true,
@@ -547,11 +568,11 @@ export function useAttachmentHandling({
         if (!mountedRef.current) return;
         console.error('[SimpleChatInput] File picker error:', err);
         toastRef.current.error(t('input.attachments.pickFilesFailed'));
-      }
+      } finally { pendingOperationsRef.current--; }
       return;
     }
     fileInputRef.current?.click();
-  }, [processDroppedFilePaths, setShowPlusMenu, fileInputRef, toastRef, t]);
+  }, [isDraftLocked, processDroppedFilePaths, setShowPlusMenu, fileInputRef, toastRef, t]);
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -587,7 +608,12 @@ export function useAttachmentHandling({
     }
   }, [processDroppedFiles]);
 
+  const hasPendingAttachments = useCallback(() => pendingOperationsRef.current > 0 || activeReadersRef.current.size > 0, []);
+  const getImageCount = useCallback(() => imageCountRef.current, []);
+
   return {
+    hasPendingAttachments,
+    getImageCount,
     images,
     setImages,
     removeImage,

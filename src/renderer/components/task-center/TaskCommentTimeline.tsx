@@ -1,3 +1,4 @@
+import { useUpdateEditorAdmission } from '@/hooks/useUpdateEditorAdmission';
 import {
   useCallback,
   useEffect,
@@ -73,15 +74,36 @@ export function TaskCommentTimeline({
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [loadingNewer, setLoadingNewer] = useState(false);
-  const [body, setBody] = useState("");
-  const [replyTo, setReplyTo] = useState<TaskComment | null>(null);
-  const [sending, setSending] = useState(false);
+  const [body, setBodyState] = useState("");
+  const bodyRef = useRef("");
+  const setBody = useCallback((value: string) => {
+    bodyRef.current = value;
+    setBodyState(value);
+  }, []);
+  const [replyTo, setReplyToState] = useState<TaskComment | null>(null);
+  const replyToRef = useRef<TaskComment | null>(null);
+  const setReplyTo = useCallback((value: TaskComment | null) => {
+    replyToRef.current = value;
+    setReplyToState(value);
+  }, []);
+  const [sending, setSendingState] = useState(false);
+  const sendingRef = useRef(false);
+  const setSending = useCallback((value: boolean) => {
+    sendingRef.current = value;
+    setSendingState(value);
+  }, []);
+  const retryingRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef(new Map<string, HTMLDivElement>());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isComposingRef = useRef(false);
+  const updateLockedRef = useUpdateEditorAdmission(
+    'task-comment', timelineRef, textareaRef,
+    () => !!bodyRef.current || !!replyToRef.current || isComposingRef.current || sendingRef.current || retryingRef.current > 0,
+    '任务评论尚未提交或仍在输入、发送或重试，请先处理后再更新；内容已保留。',
+  );
   const notifiedTargetRef = useRef<string | null>(null);
   const loadSequenceRef = useRef(0);
   const onTargetReadyRef = useRef(onTargetReady);
@@ -229,7 +251,7 @@ export function TaskCommentTimeline({
   );
 
   const loadEarlier = useCallback(async () => {
-    if (!nextBefore || loadingEarlier) return;
+    if (updateLockedRef.current || !nextBefore || loadingEarlier) return;
     setLoadingEarlier(true);
     const anchor = comments[0]?.id;
     try {
@@ -251,10 +273,10 @@ export function TaskCommentTimeline({
     } finally {
       setLoadingEarlier(false);
     }
-  }, [comments, loadingEarlier, nextBefore, task.id, scrollToComment]);
+  }, [comments, loadingEarlier, nextBefore, task.id, scrollToComment, updateLockedRef]);
 
   const loadNewer = useCallback(async () => {
-    if (!nextAfter || loadingNewer) return;
+    if (updateLockedRef.current || !nextAfter || loadingNewer) return;
     setLoadingNewer(true);
     try {
       const page = await taskListComments(task.id, {
@@ -271,10 +293,10 @@ export function TaskCommentTimeline({
     } finally {
       setLoadingNewer(false);
     }
-  }, [loadingNewer, nextAfter, task.id]);
+  }, [loadingNewer, nextAfter, task.id, updateLockedRef]);
 
   const submit = useCallback(async () => {
-    if (!body.trim() || sending) return;
+    if (updateLockedRef.current || sendingRef.current || !body.trim() || sending) return;
     const submitted = body;
     setSending(true);
     setError(null);
@@ -305,10 +327,12 @@ export function TaskCommentTimeline({
     } finally {
       setSending(false);
     }
-  }, [body, replyTo?.id, sending, task.id, scrollToComment]);
+  }, [body, replyTo?.id, sending, task.id, scrollToComment, setBody, setReplyTo, setSending, updateLockedRef]);
 
   const retry = useCallback(
     async (comment: TaskComment) => {
+      if (updateLockedRef.current) return;
+      retryingRef.current += 1;
       setError(null);
       try {
         const updated = await taskRetryComment(task.id, comment.id);
@@ -317,13 +341,14 @@ export function TaskCommentTimeline({
         );
       } catch (retryError) {
         setError(extractErrorMessage(retryError));
-      }
+      } finally { retryingRef.current -= 1; }
     },
-    [task.id],
+    [task.id, updateLockedRef],
   );
 
   const openCommentSession = useCallback(
     (sessionId: string) => {
+      if (updateLockedRef.current) return;
       onBeforeOpenSession?.();
       window.dispatchEvent(
         new CustomEvent(CUSTOM_EVENTS.OPEN_SESSION_IN_NEW_TAB, {
@@ -335,7 +360,7 @@ export function TaskCommentTimeline({
         }),
       );
     },
-    [onBeforeOpenSession, task.workspacePath],
+    [onBeforeOpenSession, task.workspacePath, updateLockedRef],
   );
 
   return (
@@ -491,7 +516,7 @@ export function TaskCommentTimeline({
                       <div className="mt-2 flex items-center gap-3 text-xs">
                         <button
                           type="button"
-                          onClick={() => setReplyTo(comment)}
+                          onClick={() => { if (!updateLockedRef.current) setReplyTo(comment); }}
                           className="inline-flex items-center gap-1 text-[var(--ink-muted)] hover:text-[var(--ink)]"
                         >
                           <ReplyIcon className="h-3 w-3" />{" "}
@@ -551,7 +576,7 @@ export function TaskCommentTimeline({
               </span>
               <button
                 type="button"
-                onClick={() => setReplyTo(null)}
+                onClick={() => { if (!updateLockedRef.current) setReplyTo(null); }}
                 aria-label={t("comments.cancelReply")}
               >
                 <CloseIcon className="h-3.5 w-3.5" />
@@ -562,15 +587,19 @@ export function TaskCommentTimeline({
             <textarea
               ref={textareaRef}
               value={body}
-              onChange={(event) => setBody(event.target.value)}
+              readOnly={updateLockedRef.current}
+              onChange={(event) => { if (updateLockedRef.current) { event.target.value = bodyRef.current; return; } setBody(event.target.value); }}
               onCompositionStart={() => {
+                if (updateLockedRef.current) return;
                 isComposingRef.current = true;
               }}
               onCompositionEnd={() => {
+                if (updateLockedRef.current) return;
                 isComposingRef.current = false;
                 requestAnimationFrame(resizeTextarea);
               }}
               onKeyDown={(event) => {
+                if (updateLockedRef.current) return;
                 if (event.nativeEvent.isComposing || event.keyCode === 229) {
                   return;
                 }
@@ -608,7 +637,7 @@ export function TaskCommentTimeline({
               <button
                 type="button"
                 className="shrink-0 font-medium underline underline-offset-2"
-                onClick={() => void load()}
+                onClick={() => { if (!updateLockedRef.current) void load(); }}
               >
                 {t("comments.retryLoad")}
               </button>
