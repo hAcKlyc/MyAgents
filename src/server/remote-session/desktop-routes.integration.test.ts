@@ -14,7 +14,7 @@ afterEach(async()=>{
 });
 async function freePort(){const server=createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const address=server.address();const port=typeof address==='object'&&address?address.port:0;await new Promise<void>(done=>server.close(()=>done()));return port}
 it('serves real authenticated Global routes, freezes hidden birth and keeps private Bot sessions excluded without creating a worker',async()=>{
-  dir=await mkdtemp(join(tmpdir(),'remote-desktop-routes-'));const state=join(dir,'.moxbot'),workspace=join(dir,'work');
+  dir=await mkdtemp(join(tmpdir(),'remote-desktop-routes-'));const state=join(dir,'.moxbot-updaterqa'),workspace=join(dir,'work');
   await mkdir(state,{mode:0o700});await mkdir(workspace,{mode:0o700});
   const agent={id:'agent-route',name:'Route Agent',enabled:true,projectId:'project-route',workspacePath:workspace,agentDir:workspace,runtime:'builtin',permissionMode:'plan',model:'frozen-model'};
   await writeFile(join(state,'config.json'),JSON.stringify({agents:[agent],providers:[],mcpServers:[],defaultIntegratedRuntime:'claude-agent-sdk'}));
@@ -23,7 +23,7 @@ it('serves real authenticated Global routes, freezes hidden birth and keeps priv
   await writeFile(join(state,'sessions.json'),JSON.stringify([{id:'private-bot',agentDir:workspace,title:'Private',createdAt:time,lastActiveAt:time,hostBotBinding:{botId:'bot',runGeneration:'run'}},{id:'visible',agentDir:workspace,title:'Existing',createdAt:time,lastActiveAt:time,runtime:'builtin'}]));
   const entry=join(dir,'server.mjs');
   await symlink(resolve('node_modules'),join(dir,'node_modules'));
-  await build({entryPoints:[resolve('src/server/index.ts')],outfile:entry,bundle:true,platform:'node',target:'node24',format:'esm',logLevel:'silent',define:{__MYAGENTS_BUILD_PROFILE__:'"moxbot"'},external:['@playwright/mcp','@playwright/mcp/*','playwright','playwright/*','playwright-core','playwright-core/*','fsevents','chromium-bidi/*'],banner:{js:'import {createRequire as __remoteRequire} from "node:module";const require=__remoteRequire(import.meta.url);'}});
+  await build({entryPoints:[resolve('src/server/index.ts')],outfile:entry,bundle:true,platform:'node',target:'node24',format:'esm',logLevel:'silent',define:{__MYAGENTS_BUILD_PROFILE__:'"moxbot-updaterqa"',__MYAGENTS_UPDATER_QA__:'true'},external:['@playwright/mcp','@playwright/mcp/*','playwright','playwright/*','playwright-core','playwright-core/*','fsevents','chromium-bidi/*'],banner:{js:'import {createRequire as __remoteRequire} from "node:module";const require=__remoteRequire(import.meta.url);'}});
   const token=randomUUID(),port=await freePort();
   const env={...process.env,HOME:dir,USERPROFILE:dir,MYAGENTS_SIDECAR_GENERATION:'4242',MYAGENTS_INTERNAL_CLI_TOKEN:token};
   for(const key of Object.keys(env))if(/API_KEY|AUTH_TOKEN|ACCESS_TOKEN/.test(key))delete env[key as keyof typeof env];
@@ -47,4 +47,14 @@ it('serves real authenticated Global routes, freezes hidden birth and keeps priv
   expect(await (await post('/api/remote-session/prepare',{request})).json()).toMatchObject({success:true,data:{receipt:{status:'processing',sessionId:prepared.data.sessionId}}});
   expect(await (await post('/api/remote-session',list)).json()).toMatchObject({data:{items:[{sessionId:'visible'}]}});
   expect(await (await post('/api/remote-session',{request:{kind:'send',agentId:agent.id,sessionId:'visible',operationId:randomUUID(),text:'no Global execution'},generation:'4242'})).json()).toMatchObject({success:false,code:'REMOTE_SESSION_OWNER_REQUIRED'});
+  const lifecycleToken=randomUUID();
+  const quiesce=async(action:string)=>fetch(base+'/api/process/update-quiesce',{method:'POST',headers:{'content-type':'application/json','x-myagents-internal-cli-token':token,'x-myagents-sidecar-generation':'4242'},body:JSON.stringify({action,token:lifecycleToken})});
+  expect(await (await quiesce('freeze')).json()).toEqual({success:true});
+  const beforeFrozenWrite=await readFile(join(state,'sessions.json'),'utf8');
+  const blocked={kind:'start',agentId:agent.id,operationId:randomUUID(),text:'must not write while updating'};
+  expect(await (await post('/api/remote-session/prepare',{request:blocked})).json()).toMatchObject({success:false,code:'REMOTE_SESSION_OPERATION_UNCONFIRMED'});
+  expect(await readFile(join(state,'sessions.json'),'utf8')).toBe(beforeFrozenWrite);
+  expect(await (await quiesce('release')).json()).toEqual({success:true});
+  expect(await (await post('/api/remote-session/prepare',{request:blocked})).json()).toMatchObject({success:true,data:{agentId:agent.id}});
+
 },60_000);

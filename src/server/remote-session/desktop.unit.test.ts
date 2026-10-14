@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 const f=vi.hoisted(()=>({
-  registry:vi.fn(),metadata:vi.fn(),list:vi.fn(),save:vi.fn(),publish:vi.fn(),claim:vi.fn(),snapshot:vi.fn(),begin:vi.fn(),read:vi.fn(),finish:vi.fn(),adopt:vi.fn(),stop:vi.fn(),send:vi.fn(),permission:vi.fn(),question:vi.fn(),plan:vi.fn(),ctx:vi.fn(),turn:vi.fn(),pending:vi.fn(),mcp:vi.fn(),shown:vi.fn(),materialize:vi.fn(),config:vi.fn(),visible:vi.fn(),ready:vi.fn(),interactions:vi.fn(),
+  admission:vi.fn(),registry:vi.fn(),metadata:vi.fn(),list:vi.fn(),save:vi.fn(),publish:vi.fn(),claim:vi.fn(),snapshot:vi.fn(),begin:vi.fn(),read:vi.fn(),finish:vi.fn(),adopt:vi.fn(),stop:vi.fn(),send:vi.fn(),permission:vi.fn(),question:vi.fn(),plan:vi.fn(),ctx:vi.fn(),turn:vi.fn(),pending:vi.fn(),mcp:vi.fn(),shown:vi.fn(),materialize:vi.fn(),config:vi.fn(),visible:vi.fn(),ready:vi.fn(),interactions:vi.fn(),
 }));
 vi.mock('../utils/agent-workspace-identity',()=>({resolvePersistedAgentWorkspaceRegistry:f.registry}));
 vi.mock('../utils/session-materialization',()=>({createMaterializedSessionMetadata:f.materialize}));
@@ -9,7 +9,7 @@ vi.mock('../utils/admin-config',()=>({resolveWorkspaceConfig:f.config}));
 vi.mock('../utils/managed-codex-readiness',()=>({isManagedCodexProviderReady:f.ready}));
 vi.mock('../admin-api',()=>({handleAgentShow:f.shown}));
 vi.mock('../SessionStore',()=>({getSessionMetadata:f.metadata,getSessionsByAgentDir:f.list,isHistoryVisibleSession:f.visible,saveSessionMetadata:f.save,publishSessionForHandoff:f.publish,claimPreparedSessionForTurnAdmission:f.claim}));
-vi.mock('../session-engine',()=>({stopActiveTurn:f.stop,getSessionEngine:()=>({getCurrentSessionContext:f.ctx,getExecutionTurnId:f.turn,getStreamReplaySnapshot:f.pending,sendDesktopMessage:f.send,respondPermission:f.permission,respondAskUserQuestion:f.question,respondPlanApproval:f.plan,updateMcpServers:f.mcp})}));
+vi.mock('../session-engine',()=>({runProcessUpdateAdmission:f.admission,stopActiveTurn:f.stop,getSessionEngine:()=>({getCurrentSessionContext:f.ctx,getExecutionTurnId:f.turn,getStreamReplaySnapshot:f.pending,sendDesktopMessage:f.send,respondPermission:f.permission,respondAskUserQuestion:f.question,respondPlanApproval:f.plan,updateMcpServers:f.mcp})}));
 vi.mock('./projection',()=>({buildRemoteSnapshot:f.snapshot,projectRemoteInteractions:f.interactions}));
 vi.mock('./receipts',async()=>{
   const actual=await vi.importActual<typeof import('./receipts')>('./receipts');
@@ -20,7 +20,7 @@ const agent={agentId:'agent',workspacePath:'/workspace',agent:{id:'agent',enable
 const mutation=()=>({kind:'send' as const,agentId:'agent',sessionId:'session',operationId:randomUUID(),text:'hi'});
 function receipt(request:ReturnType<typeof mutation>,status='processing'){return {kind:'receipt',agentId:request.agentId,operationId:request.operationId,sessionId:request.sessionId,status,code:null}}
 beforeEach(()=>{
-  vi.resetAllMocks();vi.stubEnv('MYAGENTS_SIDECAR_GENERATION','gen');
+  vi.resetAllMocks();f.admission.mockImplementation(async operation=>operation());vi.stubEnv('MYAGENTS_SIDECAR_GENERATION','gen');
   f.registry.mockResolvedValue({agentProjections:[agent],diagnostics:[],config:{}});
   f.metadata.mockReturnValue({id:'session',agentDir:'/workspace',title:'session'});f.visible.mockReturnValue(true);
   f.ctx.mockReturnValue({sessionId:'session',workspacePath:'/workspace'});f.turn.mockReturnValue('turn');
