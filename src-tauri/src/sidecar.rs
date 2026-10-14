@@ -231,12 +231,14 @@ fn ensure_high_file_descriptor_limit() {
 }
 
 // Configuration constants
-#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+#[cfg(all(myagents_moxbot, not(myagents_isolated_qa)))]
 const BASE_PORT: u16 = 32415;
 #[cfg(not(myagents_moxbot))]
 const BASE_PORT: u16 = 31415;
 #[cfg(myagents_updater_qa)]
 const BASE_PORT: u16 = 33415;
+#[cfg(myagents_model_qa)]
+const BASE_PORT: u16 = 34415;
 // Health check: exponential backoff 50ms → 500ms, capped. Wall-clock ceiling ≈ 5 min.
 // Node cold start is ~2s (tsx boot + module load), so the first 5 attempts at
 // 50/100/200/400/500ms (cumulative 1.25s) usually arrive before listen — cheap,
@@ -260,12 +262,14 @@ const PORT_RANGE: u16 = 500;
 pub const GLOBAL_SIDECAR_ID: &str = "__global__";
 // Process identification marker (used to identify our sidecar processes)
 // This marker is added to all sidecar commands for reliable process identification
-#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+#[cfg(all(myagents_moxbot, not(myagents_isolated_qa)))]
 const SIDECAR_MARKER: &str = "--moxbot-sidecar";
 #[cfg(not(myagents_moxbot))]
 const SIDECAR_MARKER: &str = "--myagents-sidecar";
 #[cfg(myagents_updater_qa)]
 const SIDECAR_MARKER: &str = "--moxbot-updaterqa-sidecar";
+#[cfg(myagents_model_qa)]
+const SIDECAR_MARKER: &str = "--moxbot-modelqa-sidecar";
 const SESSION_DELETE_AUTHORITY_ENV: &str = "MYAGENTS_SESSION_DELETE_AUTHORITY";
 const SESSION_DELETE_AUTHORITY_HEADER: &str = "X-MyAgents-Session-Delete-Authority";
 
@@ -309,13 +313,14 @@ fn append_sidecar_entrypoint_args(
     port: u16,
     role: SidecarProcessRole,
 ) {
-    if crate::app_dirs::IS_UPDATER_QA {
+    if crate::app_dirs::IS_ISOLATED_QA {
         // Keep even direct QA launches from forwarding credentials to Node children.
         for (name, _) in std::env::vars_os() {
             let text = name.to_string_lossy();
             if text.starts_with("ANTHROPIC_") || text.starts_with("OPENAI_")
                 || text.starts_with("CLAUDE_CODE_OAUTH") || text.starts_with("MYAGENTS_HOST_")
-                || text == "CODEX_HOME" || text == "CLAUDE_CONFIG_DIR" {
+                || text == "CODEX_HOME" || text == "CLAUDE_CONFIG_DIR"
+                || matches!(text.as_ref(), "NODE_OPTIONS" | "NODE_PATH" | "BASH_ENV" | "ENV" | "ZDOTDIR" | "LD_PRELOAD" | "DYLD_INSERT_LIBRARIES" | "DYLD_LIBRARY_PATH") {
                 cmd.env_remove(name);
             }
         }

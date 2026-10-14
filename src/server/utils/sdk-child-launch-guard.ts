@@ -1,7 +1,8 @@
 import { createHash } from 'crypto';
 import { realpathSync, statSync } from 'fs';
 import { managementApi } from './management-api-client';
-import { isUpdaterQaBuild } from '../../shared/updaterQa';
+import { isUpdaterQaBuild, isModelQaBuild } from '../../shared/updaterQa';
+import { hasModelQaUtilityAdmission } from './model-qa-utility-admission';
 import {
   diagnoseSdkSubprocessFailure,
   SdkChildLaunchCircuitOpenError,
@@ -81,9 +82,14 @@ export async function createGuardedSdkQuery<T>(
 ): Promise<T> {
   // QA update acceptance never launches a model process or its OAuth fallback.
   if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
+  if (isModelQaBuild() && !hasModelQaUtilityAdmission()) throw new Error('MODEL_QA_UTILITY_ONLY');
+  const checkedCreateQuery = (): T => {
+    if (isModelQaBuild() && !hasModelQaUtilityAdmission()) throw new Error('MODEL_QA_UTILITY_ONLY');
+    return createQuery();
+  };
   const sidecarId = options.sidecarId ?? process.env.MYAGENTS_SIDECAR_ID?.trim();
   if (!sidecarId) {
-    return continueWithoutCircuit(createQuery, 'missing sidecar identity');
+    return continueWithoutCircuit(checkedCreateQuery, 'missing sidecar identity');
   }
 
   const call = options.managementCall ?? managementApi;
@@ -98,21 +104,21 @@ export async function createGuardedSdkQuery<T>(
       requestOptions,
     );
   } catch {
-    return continueWithoutCircuit(createQuery, 'management admission failed');
+    return continueWithoutCircuit(checkedCreateQuery, 'management admission failed');
   }
   const admission = responseRecord(admissionResult);
   if (!admission) {
-    return continueWithoutCircuit(createQuery, 'invalid admission response');
+    return continueWithoutCircuit(checkedCreateQuery, 'invalid admission response');
   }
   if (admission.ok !== true) {
     const code = typeof admission.code === 'string' ? admission.code : 'invalid admission response';
-    return continueWithoutCircuit(createQuery, code);
+    return continueWithoutCircuit(checkedCreateQuery, code);
   }
 
   if (admission.admitted !== true) {
     const errorCode = deterministicErrorCode(admission.errorCode);
     if (admission.admitted !== false || !errorCode) {
-      return continueWithoutCircuit(createQuery, 'malformed circuit denial');
+      return continueWithoutCircuit(checkedCreateQuery, 'malformed circuit denial');
     }
     const retryAfterMs = finiteRetryAfter(admission.retryAfterMs);
     throw new SdkChildLaunchCircuitOpenError(errorCode, retryAfterMs);
@@ -120,7 +126,7 @@ export async function createGuardedSdkQuery<T>(
 
   const admissionEpoch = admission.admissionEpoch;
   if (typeof admissionEpoch !== 'number' || !Number.isSafeInteger(admissionEpoch) || admissionEpoch <= 0) {
-    return continueWithoutCircuit(createQuery, 'missing admission epoch');
+    return continueWithoutCircuit(checkedCreateQuery, 'missing admission epoch');
   }
 
   let settled = false;
@@ -172,7 +178,7 @@ export async function createGuardedSdkQuery<T>(
 
   let sdkQuery: T;
   try {
-    sdkQuery = createQuery();
+    sdkQuery = checkedCreateQuery();
   } catch (error) {
     settleFromError(error);
     throw error;

@@ -203,3 +203,7 @@ Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已�
 ## MOXBOTS-NEXT-PROMPT-002
 
 用户要求扩展Codex/Claude Code/DSH下一步建议、真实模型生成验收与客户端更新。仅文本utility不执行工具/不改原对话，保持Runtime身份及冻结模型。分阶段状态见.agent-sync/tasks/codex-next-prompt-runtimes-20261015-2fee4eac.md；普通0.5.4发布不代表本任务已实现。
+
+### MOXBOTS-055-UNIFIED-ACCEPTANCE
+
+Unified owner builds a distinct real-model utility acceptance environment, coordinates NEXT-PROMPT/TITLE/Host and brand/community serial native acceptance, then freezes all accepted mainline work for signed/notarized 0.5.5 and idle-only actual client update. Existing updaterqa stays model-disabled; daily work is preserved. Source/tests/runtime/production/mainline gates and ownership: `dev-docs/unified-055-acceptance.md`; task `.agent-sync/tasks/codex-unified-055-modelqa-20261015-38fa9c79.md`. Not a claim of completed 0.5.5 release.
