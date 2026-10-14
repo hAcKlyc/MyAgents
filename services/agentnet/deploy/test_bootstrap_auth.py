@@ -28,6 +28,13 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(compose["services"]["dex"]["ports"], ["127.0.0.1:15556:5556"])
             self.assertEqual(config["oauth2"]["responseTypes"], ["code"])
             self.assertNotIn("passwordConnector", config["oauth2"])
+            self.assertEqual(config["frontend"], {"dir": "/etc/dex/web", "theme": "moxbots", "issuer": "MoXBots"})
+            self.assertIn("./web:/etc/dex/web:ro", compose["services"]["dex"]["volumes"])
+            password_template = (output / "web/templates/password.html").read_text()
+            self.assertIn("登录云后台", password_template)
+            self.assertIn('action="{{ .PostURL }}"', password_template)
+            self.assertIn('name="login"', password_template)
+            self.assertIn('name="password"', password_template)
             self.assertEqual(config["staticClients"][0]["secret"],
                              (output / "oidc-client-secret").read_text())
             self.assertNotIn("test-only-long-password", (output / "dex.json").read_text())

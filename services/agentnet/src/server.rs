@@ -10,7 +10,7 @@ use axum::{
     Json, Router,
     extract::{OriginalUri, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Redirect},
     routing::{delete, get, post},
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -84,6 +84,7 @@ struct Pending {
     nonce: Zeroizing<String>,
     expires_at: i64,
     phase: Phase,
+    browser_return: bool,
 }
 type ServiceClient = CoreClient<
     EndpointSet,
@@ -173,6 +174,8 @@ struct StartRequest {
     device_id: String,
     #[serde(rename = "pkceChallenge")]
     pkce_challenge: String,
+    #[serde(default, rename = "browserReturn")]
+    browser_return: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -625,6 +628,7 @@ async fn start(
             nonce: Zeroizing::new(nonce),
             expires_at: expires,
             phase: Phase::Pending,
+            browser_return: req.browser_return,
         },
     );
     Ok((
@@ -643,7 +647,8 @@ async fn callback(
 ) -> Result<impl IntoResponse, ApiError> {
     let exchange_app = app.clone();
     let keys_app = app.clone();
-    callback_using(
+    let browser_return = callback_is_browser_return(&app, &uri);
+    let result = callback_using(
         app,
         uri,
         move |code, verifier| async move {
@@ -671,7 +676,48 @@ async fn callback(
             .map_err(|_| ApiError::Provider)
         },
     )
-    .await
+    .await;
+    if browser_return {
+        Ok(browser_return_response(result.is_ok()))
+    } else {
+        result
+    }
+}
+
+fn callback_is_browser_return(app: &App, uri: &axum::http::Uri) -> bool {
+    let Some(query) = uri.query().filter(|q| q.len() <= 8192) else {
+        return false;
+    };
+    let states: Vec<_> = url::form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key == "state")
+        .map(|(_, value)| value.into_owned())
+        .collect();
+    if states.len() != 1 {
+        return false;
+    }
+    app.flow.pending.lock().is_ok_and(|all| {
+        all.values().any(|p| {
+            p.browser_return
+                && p.expires_at > unix_now().unwrap_or(i64::MAX)
+                && ct_eq(p.state.as_bytes(), states[0].as_bytes())
+        })
+    })
+}
+
+fn browser_return_response(success: bool) -> axum::response::Response {
+    let mut response = Redirect::to(if success {
+        "/admin?login=complete"
+    } else {
+        "/admin?login=failed"
+    })
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response
+        .headers_mut()
+        .insert(header::REFERRER_POLICY, "no-referrer".parse().unwrap());
+    response
 }
 fn ensure_exchange(app: &App, txid: &str, expires: i64) -> Result<(), ApiError> {
     let all = app.flow.pending.lock().map_err(|_| ApiError::Internal)?;
@@ -1521,6 +1567,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_return_is_opt_in_state_bound_and_has_no_redirect_input() {
+        let (app, _dir) = test_app();
+        let (_, Json(started)) = start(
+            State(app.clone()),
+            Json(StartRequest {
+                device_id: "22222222-2222-4222-8222-222222222222".into(),
+                pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
+                browser_return: true,
+            }),
+        )
+        .await
+        .unwrap();
+        let url = Url::parse(&started.authorization_url).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        assert!(callback_is_browser_return(
+            &app,
+            &format!("/auth/callback?state={state}&code=test")
+                .parse()
+                .unwrap()
+        ));
+        assert!(!callback_is_browser_return(
+            &app,
+            &"/auth/callback?state=wrong".parse().unwrap()
+        ));
+        assert!(!callback_is_browser_return(
+            &app,
+            &format!("/auth/callback?state={state}&state={state}")
+                .parse()
+                .unwrap()
+        ));
+        app.flow
+            .pending
+            .lock()
+            .unwrap()
+            .get_mut(&started.transaction_id)
+            .unwrap()
+            .expires_at = 0;
+        assert!(!callback_is_browser_return(
+            &app,
+            &format!("/auth/callback?state={state}").parse().unwrap()
+        ));
+        for (success, location) in [
+            (true, "/admin?login=complete"),
+            (false, "/admin?login=failed"),
+        ] {
+            let response = browser_return_response(success);
+            assert_eq!(response.status(), StatusCode::SEE_OTHER);
+            assert_eq!(response.headers()[header::LOCATION], location);
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            assert_eq!(response.headers()[header::REFERRER_POLICY], "no-referrer");
+        }
+        assert!(serde_json::from_value::<StartRequest>(serde_json::json!({
+            "deviceId":"22222222-2222-4222-8222-222222222222", "pkceChallenge":"unused", "returnUrl":"https://other.test"
+        })).is_err());
+        let ordinary: StartRequest = serde_json::from_value(serde_json::json!({
+            "deviceId":"22222222-2222-4222-8222-222222222222", "pkceChallenge":"unused"
+        }))
+        .unwrap();
+        assert!(!ordinary.browser_return);
+    }
+
+    #[tokio::test]
     async fn login_start_is_pkce_bound_and_pending_poll_cancel_are_device_bound() {
         let (app, _dir) = test_app();
         let device = "22222222-2222-4222-8222-222222222222";
@@ -1531,6 +1644,7 @@ mod tests {
             Json(StartRequest {
                 device_id: device.into(),
                 pkce_challenge: challenge.clone(),
+                browser_return: false,
             }),
         )
         .await
@@ -1632,6 +1746,7 @@ mod tests {
             Json(StartRequest {
                 device_id: TEST_DEVICE.into(),
                 pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
+                browser_return: false,
             }),
         )
         .await
