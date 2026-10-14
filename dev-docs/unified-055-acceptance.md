@@ -29,7 +29,7 @@ Window authority: shared private `output/remote-session-20261015/OWNER-WINDOW-HA
 - [x] Utility admission/no-fallback/tool-free and existing updater/SDK regressions: 43/43 initially, final modelqa/SDK 22/22 plus selector117 and profile integration7 passed.
 - [x] TypeScript and scoped lint passed after initial implementation.
 - [x] Scoped independent code review: P1 authorization path and two launch/admission P2 issues repaired, independently retested (7 build +22 unit). See `modelqa-independent-review.md`.
-- [ ] Model QA Rust backend/namespace and native compilation. Debug Swift dependency linker failed locally; release-cache path is compiling, no native pass inferred.
+- [x] Model QA release Rust backend/namespace tests: 3/3. Debug Swift dependency linker failed locally; retained release-cache path compiled and ran these tests. This does not prove native UI/Host/model acceptance.
 - [ ] All actual model/Host/UI acceptance; synthetic context, helper proof and real business proof remain separate.
 - [ ] All related source reviewed/CI/main, exact final source frozen with version 0.5.5.
 - [ ] Formal App/DMG signed, Apple Accepted/stapled/Gatekeeper and full archive inventory verified.
