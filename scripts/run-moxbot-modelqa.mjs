@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -15,6 +16,33 @@ export function modelQaLaunchEnvironment(home, inherited = process.env) {
     NO_PROXY: 'localhost,127.0.0.1,::1', no_proxy: 'localhost,127.0.0.1,::1',
   };
 }
+/** An explicit local manifest pins only two native CLIs and a loopback proxy. */
+export function modelQaRuntimeEnvironment(data) {
+  const file = join(data, 'modelqa-runtime-policy.json');
+  let st;
+  try { st = lstatSync(file); } catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+  if (!st.isFile() || st.isSymbolicLink() || (st.mode & 0o077) || (process.getuid && st.uid !== process.getuid())) throw new Error('Model QA runtime policy must be an owned private physical file');
+  const raw = readFileSync(file, 'utf8');
+  if (Buffer.byteLength(raw) > 8192) throw new Error('Model QA runtime policy too large');
+  const policy = JSON.parse(raw);
+  if (policy.version !== 1 || !policy.executables || Object.keys(policy).some(k => !['version', 'executables', 'proxy'].includes(k))) throw new Error('Invalid model QA runtime policy');
+  const env = {};
+  const names = { codex: 'MOXBOTS_MODELQA_CODEX_EXECUTABLE', claudeCode: 'MOXBOTS_MODELQA_CLAUDE_EXECUTABLE' };
+  if (Object.keys(policy.executables).some(k => !Object.hasOwn(names, k))) throw new Error('Unexpected model QA executable');
+  for (const [name, row] of Object.entries(policy.executables)) {
+    if (!row || Object.keys(row).some(k => !['path', 'sha256'].includes(k)) || typeof row.path !== 'string' || !row.path.startsWith('/') || !/^[a-f0-9]{64}$/.test(row.sha256)) throw new Error('Unpinned model QA executable');
+    const stat = lstatSync(row.path);
+    if (!stat.isFile() || stat.isSymbolicLink() || !(stat.mode & 0o111) || realpathSync(row.path) !== row.path) throw new Error('Model QA executable must be canonical and executable');
+    if (createHash('sha256').update(readFileSync(row.path)).digest('hex') !== row.sha256) throw new Error('Model QA executable changed since approval');
+    env[names[name]] = row.path;
+  }
+  if (policy.proxy !== undefined) {
+    const url = new URL(policy.proxy);
+    if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || Number(url.port) < 1024 || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('Model QA proxy must be an explicit uncredentialed loopback HTTP proxy');
+    for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']) env[key] = url.origin;
+  }
+  return env;
+}
 export function prepareModelQaHome(home) {
   const env = modelQaLaunchEnvironment(home);
   const data = join(home, '.moxbot-modelqa');
@@ -28,7 +56,7 @@ export function prepareModelQaHome(home) {
     try { st = lstatSync(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     if (!st.isFile() || st.isSymbolicLink() || realpathSync(path) !== path || (process.getuid && st.uid !== process.getuid())) throw new Error('Model QA configuration must be an owned physical file');
   }
-  return env;
+  return { ...env, ...modelQaRuntimeEnvironment(data) };
 }
 export function launchModelQa(app, home) {
   // Validate the original input before canonicalizing; a symlink is not consent.

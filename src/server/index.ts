@@ -1,3 +1,4 @@
+import { modelQaRequest } from './modelqa/routes';
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import type { AskUserQuestionAnswers } from '../shared/types/askUserQuestion';
 import {
@@ -2589,6 +2590,8 @@ async function main() {
     {
       const url = new URL(request.url);
       const pathname = url.pathname;
+      const modelQaResponse = await modelQaRequest(request);
+      if (modelQaResponse) return modelQaResponse;
 
       // Polling/config reads only surface state changes or failures at their
       // semantic owner; a successful request line has no diagnostic value.

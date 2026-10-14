@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, chmodSync, symlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, chmodSync, symlinkSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appBuildDefines } from './app-build-profile.mjs';
 import { parseModelQaArgs, modelQaBuildEnvironment } from './build-moxbot-modelqa.mjs';
-import { modelQaLaunchEnvironment, prepareModelQaHome } from './run-moxbot-modelqa.mjs';
+import { modelQaLaunchEnvironment, prepareModelQaHome, modelQaRuntimeEnvironment } from './run-moxbot-modelqa.mjs';
 
 test('model QA has a closed fourth identity and never turns off updater QA model refusal', () => {
   for (const profile of ['myagents', 'moxbot', 'moxbot-updaterqa', 'moxbot-modelqa']) {
@@ -62,4 +63,21 @@ test('launcher preflight refuses linked data/auth/config even inside a private H
   prepareModelQaHome(home);
   symlinkSync(join(outside, 'missing-credentials.json'), join(home, '.moxbot-modelqa/codex/auth.json'));
   assert.throws(() => prepareModelQaHome(home));
+});
+
+test('runtime policy pins canonical CLI bytes and rejects broad paths, credentialed proxy or changed executables', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'modelqa-runtime-policy-')));
+  const cli = join(dir, 'synthetic-cli'); writeFileSync(cli, 'synthetic-not-executed', { mode: 0o700 });
+  const file = join(dir, 'modelqa-runtime-policy.json');
+  const policy = { version: 1, executables: { codex: { path: cli, sha256: createHash('sha256').update(readFileSync(cli)).digest('hex') } }, proxy: 'http://127.0.0.1:7897' };
+  const save = () => writeFileSync(file, JSON.stringify(policy), { mode: 0o600 });
+  save();
+  const env = modelQaRuntimeEnvironment(dir);
+  assert.equal(env.MOXBOTS_MODELQA_CODEX_EXECUTABLE, cli);
+  assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7897');
+  assert.equal(env.PATH, undefined);
+  policy.proxy = 'http://secret@127.0.0.1:7897'; save(); assert.throws(() => modelQaRuntimeEnvironment(dir));
+  policy.proxy = 'http://remote.invalid:7897'; save(); assert.throws(() => modelQaRuntimeEnvironment(dir));
+  policy.proxy = 'http://127.0.0.1:7897'; save();
+  writeFileSync(cli, 'changed-but-not-executed'); assert.throws(() => modelQaRuntimeEnvironment(dir));
 });

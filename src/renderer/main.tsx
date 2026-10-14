@@ -1,3 +1,4 @@
+import { isModelQaBuild } from '../shared/updaterQa';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -195,7 +196,15 @@ if (tauriWindowLabel === 'fb-ball') {
     </AppErrorBoundary>
   );
 } else {
-  const App = React.lazy(() => import('./App'));
+  const surface = new URLSearchParams(location.search).get('surface');
+  const App = React.lazy(() => {
+    if (isModelQaBuild()) {
+      if (surface === 'next-prompt') return import('./pages/ModelQaNextPrompt');
+      if (surface === 'title-utility') return import('./pages/ModelQaTitle');
+      if (surface !== 'app') return import('./pages/ModelQaHome');
+    }
+    return import('./App');
+  });
   // Note: React.StrictMode removed to prevent double-rendering of SSE effects in development
   // StrictMode causes useEffect to run twice, which duplicates SSE events and thinking blocks
   root.render(
