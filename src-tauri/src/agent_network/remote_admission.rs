@@ -52,7 +52,7 @@ mod tests {
         let owners = Arc::new(AtomicUsize::new(1));
         let held = owners.clone();
         let began = tokio::time::Instant::now();
-        let job = tokio::spawn(async move {
+        let job = async move {
             let (owner, state) = retain_owner(
                 Owner(held),
                 Duration::from_secs(5),
@@ -69,11 +69,13 @@ mod tests {
             assert_eq!(state, AdmissionState::Accepted);
             assert_eq!(owner.0.load(Ordering::SeqCst), 1);
             drop(owner);
-        });
+        };
         // The renderer/transport can close while Node is still configuring its MCPs.
-        tokio::time::sleep(Duration::from_millis(2100)).await;
-        assert_eq!(owners.load(Ordering::SeqCst), 1);
-        job.await.unwrap();
+        let observe = async {
+            tokio::time::sleep(Duration::from_millis(2100)).await;
+            assert_eq!(owners.load(Ordering::SeqCst), 1);
+        };
+        tokio::join!(job, observe);
         assert_eq!(owners.load(Ordering::SeqCst), 0);
     }
 }
