@@ -55,6 +55,7 @@ async fn execute() -> Result<(), NetworkError> {
             .ok_or_else(|| NetworkError::new("CLI_USAGE_INVALID"))
     };
     validate_context_option(&command, &options)?;
+    validate_renew_options(&command, &options)?;
     if command == "status" {
         if options.keys().any(|key| key.starts_with("--management-")) {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
@@ -88,6 +89,7 @@ async fn execute() -> Result<(), NetworkError> {
             "owned-auth-cancel",
             "owned-auth-logout",
             "owned-manage",
+            "owned-management-renew",
             "run",
         ]
         .contains(&command.as_str())
@@ -137,11 +139,12 @@ async fn execute() -> Result<(), NetworkError> {
         if options.contains_key("--request-file") != (command == "owned-manage") {
             return Err(NetworkError::new("CLI_USAGE_INVALID"));
         }
-        let _management_lock = if command == "owned-manage" {
-            Some(status::run_lock(&root)?)
-        } else {
-            None
-        };
+        let _management_lock =
+            if matches!(command.as_str(), "owned-manage" | "owned-management-renew") {
+                Some(status::run_lock(&root)?)
+            } else {
+                None
+            };
         let ca = options.get("--public-tls-ca-file").map(PathBuf::from);
         let connection = if matches!(command.as_str(), "owned-auth-cancel" | "owned-auth-logout") {
             owned::Connection::from_pinned(origin, ca.as_deref(), store.clone(), &device)?
@@ -158,6 +161,14 @@ async fn execute() -> Result<(), NetworkError> {
             "owned-auth-cancel" | "owned-auth-logout" => {
                 connection.cancel().await?;
                 println!("{}", serde_json::json!({"status":"signedOut"}));
+            }
+            "owned-management-renew" => {
+                let account = connection.account(false).await?;
+                let changed = crate::management_admission::renew(&connection.owner, &account)?;
+                println!(
+                    "{}",
+                    serde_json::json!({"status": if changed { "renewed" } else { "unchanged" }})
+                );
             }
             "owned-manage" => {
                 let response = crate::native_management::run(
@@ -324,5 +335,66 @@ mod context_tests {
         ] {
             assert!(validate_context_option(command, &opts).is_err());
         }
+    }
+}
+
+fn validate_renew_options(
+    command: &str,
+    options: &HashMap<String, String>,
+) -> Result<(), NetworkError> {
+    if command == "owned-management-renew"
+        && (!options.contains_key("--owned-instance")
+            || options.keys().any(|key| {
+                ![
+                    "--state-dir",
+                    "--unit",
+                    "--credential",
+                    "--device-id",
+                    "--owned-instance",
+                    "--public-tls-ca-file",
+                    "--device-name",
+                ]
+                .contains(&key.as_str())
+            }))
+    {
+        return Err(NetworkError::new("CLI_USAGE_INVALID"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod renewal_options_tests {
+    use super::*;
+    #[test]
+    fn renew_options_are_closed_and_do_not_authorize_join_or_execution() {
+        let mut options =
+            HashMap::from([("--owned-instance".into(), "https://isolated.invalid".into())]);
+        assert!(validate_renew_options("owned-management-renew", &options).is_ok());
+        for flag in [
+            "--join",
+            "--management-socket",
+            "--management-host-uid",
+            "--management-gid",
+            "--bot-execution-policy",
+            "--status-file",
+            "--request-file",
+            "--target-device-id",
+            "--owned-policy-context-file",
+        ] {
+            options.insert(flag.into(), "ignored".into());
+            assert!(validate_renew_options("owned-management-renew", &options).is_err());
+            options.remove(flag);
+        }
+        options.clear();
+        assert!(validate_renew_options("owned-management-renew", &options).is_err());
+    }
+    #[test]
+    fn renewal_and_daemon_share_the_same_exclusive_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let lock = status::run_lock(&root).unwrap();
+        assert!(status::run_lock(&root).is_err());
+        drop(lock);
+        assert!(status::run_lock(&root).is_ok());
     }
 }

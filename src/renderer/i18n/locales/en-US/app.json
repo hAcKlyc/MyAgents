@@ -22,6 +22,24 @@
     "menu": "MyAgents account",
     "editProfile": "Edit account profile"
   },
+  "ownedAccountEntry": {
+    "account": "Account",
+    "menu": "MoXBots account",
+    "instance": "MoXBots instance",
+    "signIn": "Sign in to MoXBots",
+    "signedInAs": "{{instance}} · {{account}}",
+    "accountId": "Account {{account}}",
+    "signedInOfflineSafe": "A temporary network outage does not sign you out.",
+    "restore": "Authorize and restore MoXBots account",
+    "unavailable": "MoXBots account unavailable",
+    "unconfigured": "MoXBots sign-in service is not configured",
+    "loginTitle": "Sign in to MoXBots",
+    "openNetwork": "Open AgentNet and Host management",
+    "signOut": "Sign out of this instance",
+    "confirmSignOut": "Confirm sign out",
+    "signOutMessage": "This removes the local connection for “{{name}}” on this device. It does not sign you out of the official MyAgents account.",
+    "failed": "The operation failed. Try again later."
+  },
   "globalSidebar": {
     "navigation": "Global navigation",
     "openWebsite": "Open the MyAgents website",
@@ -1425,6 +1443,7 @@
     "ownedLogin": {
       "mode": "Account sign-in",
       "hint": "Sign in through your browser. The session is stored in the operating system credential store; tokens are not shown here.",
+      "fixedServiceUrl": "This instance address is fixed. Sign-in will only be sent to this service.",
       "start": "Continue in browser",
       "started": "Sign-in request created. Complete it in your browser, then check the status here.",
       "waiting": "Waiting for browser sign-in",

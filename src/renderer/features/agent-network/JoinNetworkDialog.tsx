@@ -15,6 +15,9 @@ export function JoinNetworkDialog({
   onOwnedPoll,
   onOwnedCancel,
   onCancel,
+  accountOnly = false,
+  initialUrl = "",
+  title,
 }: {
   onConfirm: (url: string, key: string) => Promise<void>;
   onOwnedStart: (issuer: string, publicTlsCaFile?: string) => Promise<OwnedLoginAttempt>;
@@ -22,10 +25,13 @@ export function JoinNetworkDialog({
   onOwnedPoll: (attemptId: string) => Promise<"pending" | "authenticated">;
   onOwnedCancel: (attemptId: string) => Promise<void>;
   onCancel: () => void;
+  accountOnly?: boolean;
+  initialUrl?: string;
+  title?: string;
 }) {
   const { t } = useTranslation("app"),
     { t: common } = useTranslation("common");
-  const [url, setUrl] = useState(""),
+  const [url, setUrl] = useState(initialUrl),
     [publicTlsCaFile, setPublicTlsCaFile] = useState(""),
     [showAdvanced, setShowAdvanced] = useState(false),
     [key, setKey] = useState(""),
@@ -141,6 +147,7 @@ export function JoinNetworkDialog({
     }
   }
   const hasAttempt = attempt !== null;
+  const fixedServiceUrl = accountOnly && initialUrl.trim().length > 0;
   return (
     <OverlayBackdrop
       portal
@@ -164,7 +171,7 @@ export function JoinNetworkDialog({
         >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 id="join-network-title" className="text-lg font-semibold">
-              {t("agentNetwork.joinSelfhost")}
+              {title ?? t("agentNetwork.joinSelfhost")}
             </h2>
             <button
               type="button"
@@ -176,7 +183,7 @@ export function JoinNetworkDialog({
               <CloseIcon className="h-4 w-4" />
             </button>
           </div>
-          <div className="mb-4 flex rounded-lg bg-[var(--paper-inset)] p-1" role="tablist">
+          {!accountOnly && <div className="mb-4 flex rounded-lg bg-[var(--paper-inset)] p-1" role="tablist">
             {(["account", "key"] as const).map((option) => (
               <button
                 key={option}
@@ -194,7 +201,7 @@ export function JoinNetworkDialog({
                 {t(option === "account" ? "agentNetwork.ownedLogin.mode" : "agentNetwork.legacyKey.mode")}
               </button>
             ))}
-          </div>
+          </div>}
           <label htmlFor="network-url" className="mb-2 block text-sm font-medium">
             {t("agentNetwork.serviceUrl")}
           </label>
@@ -206,10 +213,19 @@ export function JoinNetworkDialog({
             placeholder="https://your-network.example"
             value={url}
             disabled={busy || hasAttempt}
-            onChange={(e) => setUrl(e.target.value)}
+            readOnly={fixedServiceUrl}
+            aria-describedby={fixedServiceUrl ? "owned-login-fixed-service-url" : undefined}
+            onChange={(e) => {
+              if (!fixedServiceUrl) setUrl(e.target.value);
+            }}
             className="mb-4 w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
           />
-          {mode === "key" ? (
+          {fixedServiceUrl && (
+            <p id="owned-login-fixed-service-url" className="-mt-3 mb-4 text-xs text-[var(--ink-muted)]">
+              {t("agentNetwork.ownedLogin.fixedServiceUrl")}
+            </p>
+          )}
+          {mode === "key" && !accountOnly ? (
             <>
               <label htmlFor="network-key" className="mb-2 block text-sm font-medium">
                 {t("agentNetwork.deviceKey")}

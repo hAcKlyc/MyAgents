@@ -1,3 +1,7 @@
+## MOXBOTS-AUTH-HOST-20261014 — current continuation
+
+Root owns the unified macOS candidate and real Host integration. Installed/public5f is an earlier package, not the new account UI. Normal same-account desktop credential recovery succeeded with both fixed-family slots persisted and no new OS prompt; controlled cold restart/update remains open. Account/sidebar code and explicit same-account Linux management renewal are implemented with focused tests and independent source review; Linux connector is currently stopped after binding mismatch until exact native artifact renewal. Signed unified package, real model-config/disabled-Agent persistence, CI/main and download refresh remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md` for ownership, authorization, checks and next step.
+
 ## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
 
 5f1a8feb 七CI、两个完整候选签名与资源验证通过；用户后来明确要求安装/官网上架，直接从a838更新5f并真实启动，84fd未运行。官网下载公开版本7/source7da419c，实际下载ZIP大小与SHA和安装原包相同。试用包未公证，公开不等于全部Native/业务验收。看板owner已完成真实受控任务与持久化路径；当前云会话 OWNED_SESSION_INVALID，凭据迁移/免提示冷启动/远程配置仍开放，UI遇用户操作冲突后停止。PR14仍草稿，未主干交付。下一步及精确证据见 `.agent-sync/tasks/feat-mah-credential-publisher-routes-20261014.md`。

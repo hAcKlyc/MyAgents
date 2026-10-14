@@ -25,6 +25,7 @@ const DSH_BUILD_SELECTION_PATH: &str = "resources/integrated-runtimes/dsh-build-
 
 fn expose_app_build_profile() {
     println!("cargo:rerun-if-env-changed=MYAGENTS_BUILD_PROFILE");
+    println!("cargo:rerun-if-env-changed=MOXBOTS_OWNED_SERVICE_URL");
     println!("cargo:rerun-if-env-changed=MOXBOTS_CREDENTIAL_WRITER_FAMILY");
     println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
     let profile = match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
