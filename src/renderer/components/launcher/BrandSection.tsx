@@ -154,6 +154,29 @@ interface BrandSectionProps {
   isActive: boolean;
 }
 
+interface LauncherHeroBrandProps {
+  profile: 'myagents' | 'moxbot';
+  websiteUrl: string;
+  websiteLabel: string;
+  title: string;
+}
+
+export function LauncherHeroBrand({ profile, websiteUrl, websiteLabel, title }: LauncherHeroBrandProps) {
+  const logotype = <MyAgentsLogotype className="launcher-hero-logotype" title={title} />;
+  if (profile !== 'moxbot') return logotype;
+
+  return (
+    <button
+      type="button"
+      onClick={() => { void openExternal(websiteUrl); }}
+      aria-label={websiteLabel}
+      className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+    >
+      {logotype}
+    </button>
+  );
+}
+
 const LAUNCHER_INPUT_DROP_ZONE_ID = 'launcher-input';
 
 export default memo(function BrandSection({
@@ -651,17 +674,12 @@ export default memo(function BrandSection({
           separates "who we are" from the input below. */}
       <div className="flex min-h-0 flex-col items-center justify-end pb-8">
         <h1 className="theme-product-wordmark theme-launcher-hero-title">
-          <button
-            type="button"
-            onClick={() => { void openExternal(APP_WEBSITE_URL); }}
-            aria-label={t('app:globalSidebar.openWebsite')}
-            className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-          >
-            <MyAgentsLogotype
-              className="launcher-hero-logotype"
-              title={APP_BUILD_PROFILE === 'moxbot' ? APP_DISPLAY_NAME : resolvedTheme.hero.productName}
-            />
-          </button>
+          <LauncherHeroBrand
+            profile={APP_BUILD_PROFILE}
+            websiteUrl={APP_WEBSITE_URL}
+            websiteLabel={t('app:globalSidebar.openWebsite')}
+            title={APP_BUILD_PROFILE === 'moxbot' ? APP_DISPLAY_NAME : resolvedTheme.hero.productName}
+          />
         </h1>
         {/* 品牌 slogan 的 15px/17px 是 DESIGN.md §3.3 立档的展示型字号（display 用途），
                     不属于正文 Type Scale；这是全仓唯一豁免点（PRD 0.2.34）。 */}

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { forwardRef, useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +10,7 @@ import { i18n } from '@/i18n';
 import { ThemeRegistry, ThemeRuntimeProvider } from '@/theme';
 import { syntheticTheme } from '@/theme/__tests__/syntheticTheme';
 import { myAgentsDefaultTheme } from '@/theme/themes/myagents-default';
-import BrandSection from './BrandSection';
+import BrandSection, { LauncherHeroBrand } from './BrandSection';
 
 const openExternalMock = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/openExternal', () => ({ openExternal: openExternalMock }));
@@ -217,18 +218,39 @@ describe('BrandSection', () => {
     taskCenterMock.available = false;
   });
 
-  it('opens the configured product website from the launcher brand', async () => {
-    renderBrandSection();
+  it('opens the MoXBots website by click or keyboard from its hero brand', async () => {
+    const user = userEvent.setup();
+    render(
+      <LauncherHeroBrand
+        profile="moxbot"
+        websiteUrl="https://140.143.183.232/"
+        websiteLabel="Open the MoXBots website"
+        title="MoXBots"
+      />,
+    );
 
-    const brand = screen.getByRole('button', {
-      name: i18n.t('app:globalSidebar.openWebsite'),
-    });
+    const brand = screen.getByRole('button', { name: 'Open the MoXBots website' });
     brand.focus();
     expect(brand).toHaveFocus();
-    brand.click();
+    await user.keyboard('{Enter}');
+    expect(openExternalMock).toHaveBeenLastCalledWith('https://140.143.183.232/');
+    await user.click(brand);
+    expect(openExternalMock).toHaveBeenCalledTimes(2);
+  });
 
-    const { APP_WEBSITE_URL } = await import('../../../shared/appProfile');
-    expect(openExternalMock).toHaveBeenCalledWith(APP_WEBSITE_URL);
+  it('keeps the MyAgents hero brand as a non-clickable logotype', () => {
+    render(
+      <LauncherHeroBrand
+        profile="myagents"
+        websiteUrl="https://140.143.183.232/"
+        websiteLabel="Open the MyAgents website"
+        title="MyAgents"
+      />,
+    );
+
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'MyAgents' })).toBeInTheDocument();
+    expect(openExternalMock).not.toHaveBeenCalled();
   });
 
   it('routes native file paths dropped on the task input to the existing input import pipeline', () => {
