@@ -29,6 +29,10 @@ function validateRelease(release) {
   }
   return release;
 }
+export function credentialWriterFamilyForRelease(release) {
+  validateRelease(release);
+  return release === 'legacy-local-v1' ? 'local-v1' : 'developer-id-v2';
+}
 export function readMoxbotCredentialReaderRelease({
   release = 'legacy-local-v1', repositoryRoot = REPO_ROOT,
 } = {}) {

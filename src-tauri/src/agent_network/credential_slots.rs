@@ -5,10 +5,11 @@ use super::crypto::{CryptoError, DevicePrivateKey, IdentityStore, KeyScope, OsId
 #[cfg(unix)]
 use crate::utils::file_lock::{with_file_lock_blocking, FileLockError, FileLockOptions};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-#[cfg(unix)]
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(unix)]
+use std::collections::BTreeMap;
+#[cfg(all(test, unix))]
 use std::collections::BTreeSet;
 #[cfg(unix)]
 use std::fs::{self, File, OpenOptions};
@@ -91,6 +92,26 @@ pub(crate) fn local_scope(scope: &KeyScope) -> Result<KeyScope, CryptoError> {
     mapped.service_id = uuid::Uuid::from_bytes(uuid).to_string();
     Ok(mapped)
 }
+/// New publisher-lineage physical identity slot. Keep `local_scope` byte-for-byte
+/// compatible with the v1 route; only the OS item namespace changes here.
+pub(crate) fn developer_id_scope(scope: &KeyScope) -> Result<KeyScope, CryptoError> {
+    let material = serde_json::to_vec(&(
+        "moxbots.fixed-reader.credential-slots.developer-id-v2",
+        ".moxbot",
+        "identity",
+        scope,
+    ))
+    .map_err(|_| CryptoError::InvalidKey)?;
+    validate_scope(scope)?;
+    let bytes = Sha256::digest(material);
+    let mut uuid = [0u8; 16];
+    uuid.copy_from_slice(&bytes[..16]);
+    uuid[6] = (uuid[6] & 0x0f) | 0x80;
+    uuid[8] = (uuid[8] & 0x3f) | 0x80;
+    let mut mapped = scope.clone();
+    mapped.service_id = uuid::Uuid::from_bytes(uuid).to_string();
+    Ok(mapped)
+}
 pub(crate) fn session_hash(legacy43: &str) -> Result<String, CryptoError> {
     if !canonical_hash(legacy43) {
         return Err(CryptoError::InvalidKey);
@@ -100,12 +121,86 @@ pub(crate) fn session_hash(legacy43: &str) -> Result<String, CryptoError> {
             .map_err(|_| CryptoError::InvalidKey)?,
     ))
 }
+pub(crate) fn developer_id_session_hash(legacy43: &str) -> Result<String, CryptoError> {
+    if !canonical_hash(legacy43) {
+        return Err(CryptoError::InvalidKey);
+    }
+    Ok(hash43(
+        &serde_json::to_vec(&(
+            "moxbots.fixed-reader.credential-slots.developer-id-v2",
+            ".moxbot",
+            "account",
+            legacy43,
+        ))
+        .map_err(|_| CryptoError::InvalidKey)?,
+    ))
+}
 #[cfg(unix)]
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LedgerData {
     version: u32,
     routes: Vec<String>,
+}
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LedgerDataV2 {
+    version: u32,
+    routes: Vec<LedgerRoute>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RouteFamily {
+    LocalV1,
+    DeveloperIdV2,
+    Deleted,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RouteSelection {
+    Legacy,
+    LocalV1,
+    DeveloperIdV2,
+    Deleted,
+}
+fn parse_writer_family(value: &str) -> Result<RouteFamily, CryptoError> {
+    match value {
+        "local-v1" => Ok(RouteFamily::LocalV1),
+        "developer-id-v2" => Ok(RouteFamily::DeveloperIdV2),
+        _ => Err(unavailable()),
+    }
+}
+fn selected_writer_family() -> Result<RouteFamily, CryptoError> {
+    match option_env!("MOXBOTS_CREDENTIAL_WRITER_FAMILY") {
+        Some(value) => parse_writer_family(value),
+        #[cfg(myagents_moxbot)]
+        None => Err(unavailable()),
+        #[cfg(all(test, not(myagents_moxbot)))]
+        None => Ok(RouteFamily::DeveloperIdV2),
+        #[cfg(all(not(test), not(myagents_moxbot)))]
+        None => Ok(RouteFamily::LocalV1),
+    }
+}
+pub(crate) fn selected_writer_selection() -> Result<RouteSelection, CryptoError> {
+    selected_writer_family().map(selection_from_family)
+}
+pub(crate) fn identity_scope_for_selection(
+    selection: RouteSelection,
+    scope: &KeyScope,
+) -> Result<KeyScope, CryptoError> {
+    match selection {
+        RouteSelection::Legacy => Ok(scope.clone()),
+        RouteSelection::LocalV1 => local_scope(scope),
+        RouteSelection::DeveloperIdV2 => developer_id_scope(scope),
+        RouteSelection::Deleted => Err(CryptoError::CredentialMissing),
+    }
+}
+#[cfg(unix)]
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LedgerRoute {
+    id: String,
+    family: RouteFamily,
 }
 #[derive(Clone)]
 struct Ledger {
@@ -299,7 +394,7 @@ impl Ledger {
         })
         .map_err(|_| unavailable())?
     }
-    fn read(&self, dir: &File) -> Result<BTreeSet<String>, CryptoError> {
+    fn read(&self, dir: &File) -> Result<BTreeMap<String, RouteFamily>, CryptoError> {
         let name = std::ffi::CString::new(NAME).map_err(|_| unavailable())?;
         let fd = unsafe {
             libc::openat(
@@ -310,7 +405,7 @@ impl Ledger {
         };
         if fd < 0 {
             return if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
-                Ok(BTreeSet::new())
+                Ok(BTreeMap::new())
             } else {
                 Err(unavailable())
             };
@@ -333,36 +428,75 @@ impl Ledger {
         if bytes.len() > MAX_BYTES {
             return Err(unavailable());
         }
-        let data: LedgerData = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
-        if data.version != 1
-            || data.routes.len() > MAX_ROUTES
-            || data.routes.iter().any(|r| !valid_route(r))
-        {
-            return Err(unavailable());
-        }
-        let routes: BTreeSet<_> = data.routes.into_iter().collect();
-        // Strict sorted unique representation; never accept an ambiguous authority.
-        let encoded = serde_json::to_vec(&LedgerData {
-            version: 1,
-            routes: routes.iter().cloned().collect(),
+        let header: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+        let version = header
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(unavailable)?;
+        let routes = match version {
+            1 => {
+                let data: LedgerData = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+                if data.version != 1
+                    || data.routes.len() > MAX_ROUTES
+                    || data.routes.iter().any(|r| !valid_route(r))
+                {
+                    return Err(unavailable());
+                }
+                let mut routes = BTreeMap::new();
+                for id in &data.routes {
+                    if routes.insert(id.clone(), RouteFamily::LocalV1).is_some() {
+                        return Err(unavailable());
+                    }
+                }
+                if data.routes.iter().ne(routes.keys()) {
+                    return Err(unavailable());
+                }
+                routes
+            }
+            2 => {
+                let data: LedgerDataV2 =
+                    serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
+                if data.version != 2
+                    || data.routes.len() > MAX_ROUTES
+                    || data.routes.iter().any(|r| !valid_route(&r.id))
+                {
+                    return Err(unavailable());
+                }
+                let mut routes = BTreeMap::new();
+                for route in &data.routes {
+                    if routes.insert(route.id.clone(), route.family).is_some() {
+                        return Err(unavailable());
+                    }
+                }
+                if data.routes.iter().map(|route| &route.id).ne(routes.keys()) {
+                    return Err(unavailable());
+                }
+                routes
+            }
+            _ => return Err(unavailable()),
+        };
+        // Decode only the exact closed v1/v2 shapes above; serialization is
+        // canonical and the route arrays must already be sorted and unique.
+        let encoded = serde_json::to_vec(&LedgerDataV2 {
+            version: 2,
+            routes: routes
+                .iter()
+                .map(|(id, family)| LedgerRoute {
+                    id: id.clone(),
+                    family: *family,
+                })
+                .collect(),
         })
         .map_err(|_| unavailable())?;
-        let original: LedgerData = serde_json::from_slice(&bytes).map_err(|_| unavailable())?;
-        if original.routes.len() != routes.len() || original.routes.iter().ne(routes.iter()) {
-            return Err(unavailable());
-        }
         if encoded.len() > MAX_BYTES {
             return Err(unavailable());
         }
         Ok(routes)
     }
-    fn write(&self, dir: &File, routes: BTreeSet<String>) -> Result<(), CryptoError> {
-        let bytes = serde_json::to_vec(&LedgerData {
-            version: 1,
-            routes: routes.into_iter().collect(),
-        })
-        .map_err(|_| unavailable())?;
-        if bytes.len() > MAX_BYTES {
+    fn write(&self, dir: &File, routes: BTreeMap<String, RouteFamily>) -> Result<(), CryptoError> {
+        let bytes = encode_routes(&routes)?;
+        if routes.len() > MAX_ROUTES || bytes.len() > MAX_BYTES {
             return Err(unavailable());
         }
         let tmp = std::ffi::CString::new(format!(
@@ -413,51 +547,87 @@ impl Ledger {
         }
         result
     }
-    fn persist_after(
+    fn ensure_route_capacity(
+        &self,
+        routes: &BTreeMap<String, RouteFamily>,
+        id: &str,
+        target: RouteFamily,
+    ) -> Result<(), CryptoError> {
+        if routes.get(id) == Some(&target) {
+            return Ok(());
+        }
+        let mut candidate = routes.clone();
+        candidate.insert(id.to_owned(), target);
+        if candidate.len() > MAX_ROUTES || encode_routes(&candidate)?.len() > MAX_BYTES {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
+    fn persist_after_family(
         &self,
         id: &str,
-        action: impl FnOnce(bool) -> Result<(), CryptoError>,
+        target: RouteFamily,
+        action: impl FnOnce(RouteSelection) -> Result<(), CryptoError>,
     ) -> Result<(), CryptoError> {
         if !valid_route(id) {
             return Err(CryptoError::InvalidKey);
         }
         self.transaction(|dir| {
             let mut routes = self.read(dir)?;
-            if !routes.contains(id) && routes.len() >= MAX_ROUTES {
-                return Err(unavailable());
-            }
-            action(routes.contains(id))?;
-            if routes.insert(id.into()) {
+            self.ensure_route_capacity(&routes, id, target)?;
+            let current = routes
+                .get(id)
+                .copied()
+                .map(selection_from_family)
+                .unwrap_or(RouteSelection::Legacy);
+            action(current)?;
+            if routes.get(id).copied() != Some(target) {
+                routes.insert(id.into(), target);
                 self.write(dir, routes)?;
             }
             Ok(())
         })
     }
+    fn persist_after(
+        &self,
+        id: &str,
+        action: impl FnOnce(bool) -> Result<(), CryptoError>,
+    ) -> Result<(), CryptoError> {
+        self.persist_after_family(id, selected_writer_family()?, |selection| {
+            action(selection != RouteSelection::Legacy)
+        })
+    }
     fn barrier_then(
         &self,
         id: &str,
-        action: impl FnOnce() -> Result<(), CryptoError>,
+        action: impl FnOnce(RouteSelection) -> Result<(), CryptoError>,
     ) -> Result<(), CryptoError> {
         if !valid_route(id) {
             return Err(CryptoError::InvalidKey);
         }
         self.transaction(|dir| {
             let mut routes = self.read(dir)?;
-            if !routes.contains(id) {
-                if routes.len() >= MAX_ROUTES {
-                    return Err(unavailable());
-                }
-                routes.insert(id.into());
+            let current = routes
+                .get(id)
+                .copied()
+                .map(selection_from_family)
+                .unwrap_or(RouteSelection::Legacy);
+            self.ensure_route_capacity(&routes, id, RouteFamily::Deleted)?;
+            if routes.get(id) != Some(&RouteFamily::Deleted) {
+                routes.insert(id.into(), RouteFamily::Deleted);
                 self.write(dir, routes)?;
             }
-            action()
+            action(current)
         })
     }
     fn route(&self, id: &str) -> Result<bool, CryptoError> {
         if !valid_route(id) {
             return Err(CryptoError::InvalidKey);
         }
-        self.transaction(|dir| Ok(self.read(dir)?.contains(id)))
+        self.transaction(|dir| Ok(self.read(dir)?.contains_key(id)))
+    }
+    fn set_selection(&self, id: &str, family: RouteFamily) -> Result<(), CryptoError> {
+        self.persist_after_family(id, family, |_| Ok(()))
     }
     fn commit(&self, id: &str) -> Result<(), CryptoError> {
         if !valid_route(id) {
@@ -465,15 +635,47 @@ impl Ledger {
         }
         self.transaction(|dir| {
             let mut routes = self.read(dir)?;
-            if routes.contains(id) {
+            if routes.contains_key(id) {
                 return Ok(());
             }
-            if routes.len() >= MAX_ROUTES {
-                return Err(unavailable());
-            }
-            routes.insert(id.into());
+            self.ensure_route_capacity(&routes, id, selected_writer_family()?)?;
+            routes.insert(id.into(), selected_writer_family()?);
             self.write(dir, routes)
         })
+    }
+    fn selection(&self, id: &str) -> Result<RouteSelection, CryptoError> {
+        if !valid_route(id) {
+            return Err(CryptoError::InvalidKey);
+        }
+        self.transaction(|dir| {
+            Ok(self
+                .read(dir)?
+                .get(id)
+                .copied()
+                .map(selection_from_family)
+                .unwrap_or(RouteSelection::Legacy))
+        })
+    }
+}
+#[cfg(unix)]
+fn encode_routes(routes: &BTreeMap<String, RouteFamily>) -> Result<Vec<u8>, CryptoError> {
+    serde_json::to_vec(&LedgerDataV2 {
+        version: 2,
+        routes: routes
+            .iter()
+            .map(|(id, family)| LedgerRoute {
+                id: id.clone(),
+                family: *family,
+            })
+            .collect(),
+    })
+    .map_err(|_| unavailable())
+}
+fn selection_from_family(family: RouteFamily) -> RouteSelection {
+    match family {
+        RouteFamily::LocalV1 => RouteSelection::LocalV1,
+        RouteFamily::DeveloperIdV2 => RouteSelection::DeveloperIdV2,
+        RouteFamily::Deleted => RouteSelection::Deleted,
     }
 }
 #[cfg(not(unix))]
@@ -482,6 +684,12 @@ impl Ledger {
         Err(CryptoError::UnsupportedPlatform)
     }
     fn route(&self, _: &str) -> Result<bool, CryptoError> {
+        Err(CryptoError::UnsupportedPlatform)
+    }
+    fn selection(&self, _: &str) -> Result<RouteSelection, CryptoError> {
+        Err(CryptoError::UnsupportedPlatform)
+    }
+    fn set_selection(&self, _: &str, _: RouteFamily) -> Result<(), CryptoError> {
         Err(CryptoError::UnsupportedPlatform)
     }
     fn commit(&self, _: &str) -> Result<(), CryptoError> {
@@ -494,16 +702,27 @@ impl Ledger {
     ) -> Result<(), CryptoError> {
         Err(CryptoError::UnsupportedPlatform)
     }
+    fn persist_after_family(
+        &self,
+        _: &str,
+        _: RouteFamily,
+        _: impl FnOnce(RouteSelection) -> Result<(), CryptoError>,
+    ) -> Result<(), CryptoError> {
+        Err(CryptoError::UnsupportedPlatform)
+    }
     fn barrier_then(
         &self,
         _: &str,
-        _: impl FnOnce() -> Result<(), CryptoError>,
+        _: impl FnOnce(RouteSelection) -> Result<(), CryptoError>,
     ) -> Result<(), CryptoError> {
         Err(CryptoError::UnsupportedPlatform)
     }
 }
 pub(crate) fn route(id: &str) -> Result<bool, CryptoError> {
     Ledger::production()?.route(id)
+}
+pub(crate) fn selection(id: &str) -> Result<RouteSelection, CryptoError> {
+    Ledger::production()?.selection(id)
 }
 pub(crate) fn commit(id: &str) -> Result<(), CryptoError> {
     Ledger::production()?.commit(id)
@@ -514,17 +733,19 @@ pub(crate) fn commit(id: &str) -> Result<(), CryptoError> {
 /// Preserve its typed error; the fixed internal carrier contains no details.
 pub(crate) fn with_committed_route<E: From<CryptoError>>(
     id: &str,
-    action: impl FnOnce(bool) -> Result<(), E>,
+    action: impl FnOnce(RouteSelection) -> Result<(), E>,
 ) -> Result<(), E> {
-    committed_route(&Ledger::production().map_err(E::from)?, id, action)
+    let target = selected_writer_family().map_err(E::from)?;
+    committed_route_selection(&Ledger::production().map_err(E::from)?, id, target, action)
 }
-fn committed_route<E: From<CryptoError>>(
+fn committed_route_selection<E: From<CryptoError>>(
     ledger: &Ledger,
     id: &str,
-    action: impl FnOnce(bool) -> Result<(), E>,
+    target: RouteFamily,
+    action: impl FnOnce(RouteSelection) -> Result<(), E>,
 ) -> Result<(), E> {
     let mut original = None;
-    let result = ledger.persist_after(id, |already_committed| match action(already_committed) {
+    let result = ledger.persist_after_family(id, target, |selection| match action(selection) {
         Ok(()) => Ok(()),
         Err(error) => {
             original = Some(error);
@@ -536,6 +757,16 @@ fn committed_route<E: From<CryptoError>>(
         None => result.map_err(E::from),
     }
 }
+#[cfg(all(test, unix))]
+fn committed_route<E: From<CryptoError>>(
+    ledger: &Ledger,
+    id: &str,
+    action: impl FnOnce(bool) -> Result<(), E>,
+) -> Result<(), E> {
+    committed_route_selection(ledger, id, selected_writer_family()?, |selection| {
+        action(selection != RouteSelection::Legacy)
+    })
+}
 
 /// Caller constructs/reads the physical slot directly from the supplied route.
 /// None/predicate error cannot commit; Some is fenced durably before deletion.
@@ -545,13 +776,24 @@ pub(crate) fn with_deleted_route<E: From<CryptoError>, T>(
     select: impl FnOnce(bool) -> Result<Option<T>, E>,
     delete: impl FnOnce(T) -> Result<(), E>,
 ) -> Result<bool, E> {
-    deleted_route(&Ledger::production().map_err(E::from)?, id, select, delete)
+    with_deleted_route_family(
+        id,
+        |selected| select(selected != RouteSelection::Legacy),
+        delete,
+    )
+}
+pub(crate) fn with_deleted_route_family<E: From<CryptoError>, T>(
+    id: &str,
+    select: impl FnOnce(RouteSelection) -> Result<Option<T>, E>,
+    delete: impl FnOnce(T) -> Result<(), E>,
+) -> Result<bool, E> {
+    deleted_route_selection(&Ledger::production().map_err(E::from)?, id, select, delete)
 }
 #[cfg(unix)]
-fn deleted_route<E: From<CryptoError>, T>(
+fn deleted_route_selection<E: From<CryptoError>, T>(
     ledger: &Ledger,
     id: &str,
-    select: impl FnOnce(bool) -> Result<Option<T>, E>,
+    select: impl FnOnce(RouteSelection) -> Result<Option<T>, E>,
     delete: impl FnOnce(T) -> Result<(), E>,
 ) -> Result<bool, E> {
     if !valid_route(id) {
@@ -560,10 +802,13 @@ fn deleted_route<E: From<CryptoError>, T>(
     let mut original = None;
     let result = ledger.transaction(|dir| {
         let mut routes = ledger.read(dir)?;
-        if !routes.contains(id) && routes.len() >= MAX_ROUTES {
-            return Err(unavailable());
-        }
-        let selected = match select(routes.contains(id)) {
+        ledger.ensure_route_capacity(&routes, id, RouteFamily::Deleted)?;
+        let current = routes
+            .get(id)
+            .copied()
+            .map(selection_from_family)
+            .unwrap_or(RouteSelection::Legacy);
+        let selected = match select(current) {
             Ok(value) => value,
             Err(error) => {
                 original = Some(error);
@@ -573,8 +818,8 @@ fn deleted_route<E: From<CryptoError>, T>(
         let Some(value) = selected else {
             return Ok(false);
         };
-        if !routes.contains(id) {
-            routes.insert(id.into());
+        if routes.get(id) != Some(&RouteFamily::Deleted) {
+            routes.insert(id.into(), RouteFamily::Deleted);
             ledger.write(dir, routes)?;
         }
         match delete(value) {
@@ -590,12 +835,26 @@ fn deleted_route<E: From<CryptoError>, T>(
         None => result.map_err(E::from),
     }
 }
+#[cfg(all(test, unix))]
+fn deleted_route<E: From<CryptoError>, T>(
+    ledger: &Ledger,
+    id: &str,
+    select: impl FnOnce(bool) -> Result<Option<T>, E>,
+    delete: impl FnOnce(T) -> Result<(), E>,
+) -> Result<bool, E> {
+    deleted_route_selection(
+        ledger,
+        id,
+        |selection| select(selection != RouteSelection::Legacy),
+        delete,
+    )
+}
 
 #[cfg(not(unix))]
-fn deleted_route<E: From<CryptoError>, T>(
+fn deleted_route_selection<E: From<CryptoError>, T>(
     _: &Ledger,
     _: &str,
-    _: impl FnOnce(bool) -> Result<Option<T>, E>,
+    _: impl FnOnce(RouteSelection) -> Result<Option<T>, E>,
     _: impl FnOnce(T) -> Result<(), E>,
 ) -> Result<bool, E> {
     Err(E::from(CryptoError::UnsupportedPlatform))
@@ -605,20 +864,29 @@ struct VersionedStore {
     ledger: Ledger,
     backend: Arc<dyn IdentityStore>,
 }
-impl IdentityStore for VersionedStore {
-    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+impl VersionedStore {
+    fn save_pending_for_family(
+        &self,
+        scope: &KeyScope,
+        key: &DevicePrivateKey,
+        target: RouteFamily,
+    ) -> Result<(), CryptoError> {
         let id = identity_route_id(scope)?;
-        let physical = if self.ledger.route(&id)? {
-            local_scope(scope)?
-        } else {
-            scope.clone()
-        };
-        self.backend.load(&physical)
-    }
-    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), CryptoError> {
-        let id = identity_route_id(scope)?;
-        let mapped = local_scope(scope)?;
-        self.ledger.persist_after(&id, |_| {
+        let mapped = identity_scope_for_selection(selection_from_family(target), scope)?;
+        self.ledger.persist_after_family(&id, target, |selection| {
+            match selection {
+                RouteSelection::Legacy => {}
+                RouteSelection::Deleted => return Err(CryptoError::CredentialMissing),
+                current if current == selection_from_family(target) => {
+                    let existing = self.backend.load(&mapped)?;
+                    return if existing.public_fingerprint()? == key.public_fingerprint()? {
+                        Ok(())
+                    } else {
+                        Err(CryptoError::CredentialConflict)
+                    };
+                }
+                _ => return Err(CryptoError::CredentialConflict),
+            }
             self.backend.save_pending(&mapped, key)?;
             let confirmed = self.backend.load(&mapped)?;
             if confirmed.public_fingerprint()? != key.public_fingerprint()? {
@@ -627,13 +895,32 @@ impl IdentityStore for VersionedStore {
             Ok(())
         })
     }
+}
+impl IdentityStore for VersionedStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+        let id = identity_route_id(scope)?;
+        let physical = match self.ledger.selection(&id)? {
+            RouteSelection::Legacy => scope.clone(),
+            RouteSelection::LocalV1 => local_scope(scope)?,
+            RouteSelection::DeveloperIdV2 => developer_id_scope(scope)?,
+            RouteSelection::Deleted => return Err(CryptoError::CredentialMissing),
+        };
+        self.backend.load(&physical)
+    }
+    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), CryptoError> {
+        self.save_pending_for_family(scope, key, selected_writer_family()?)
+    }
     fn delete(&self, scope: &KeyScope) -> Result<(), CryptoError> {
         // Commit FIRST. Partial/unconfirmed deletion can never re-enable legacy.
-        let mapped = local_scope(scope)?;
-        self.ledger.barrier_then(&identity_route_id(scope)?, || {
-            let newer = self.backend.delete(&mapped);
-            let older = self.backend.delete(scope);
-            newer.and(older)
+        let id = identity_route_id(scope)?;
+        self.ledger.barrier_then(&id, |selected| {
+            let physical = match selected {
+                RouteSelection::Legacy => scope.clone(),
+                RouteSelection::LocalV1 => local_scope(scope)?,
+                RouteSelection::DeveloperIdV2 => developer_id_scope(scope)?,
+                RouteSelection::Deleted => return Ok(()),
+            };
+            self.backend.delete(&physical)
         })
     }
 }
@@ -677,6 +964,168 @@ pub(crate) fn promote_key(
         cancelled,
     )
 }
+/// Complete an explicitly authorized source read without reading that source a
+/// second time in the background. The caller has already obtained `key` from
+/// `authorize_existing` and verified its pinned fingerprint. Route selection is
+/// rechecked while holding the ledger transaction lock before any destination
+/// write; the caller fence is checked before writing and before route commit.
+#[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+pub(crate) fn promote_authorized_key<E: From<CryptoError>>(
+    scope: &KeyScope,
+    expected_fingerprint: &str,
+    cancelled: &AtomicBool,
+    before_commit: impl Fn() -> Result<(), E>,
+) -> Result<(KeyScope, Arc<dyn IdentityStore>, RouteSelection), E> {
+    let ledger = Ledger::production().map_err(E::from)?;
+    let backend = OsIdentityStore;
+    promote_authorized_with(
+        &ledger,
+        &backend,
+        scope,
+        expected_fingerprint,
+        selected_writer_family().map_err(E::from)?,
+        cancelled,
+        |source_scope| {
+            let reader = OsIdentityStore::authorize_existing(source_scope, cancelled)?;
+            let key = reader.load(source_scope)?;
+            Ok((key, reader))
+        },
+        before_commit,
+    )
+}
+
+fn promote_authorized_with<E: From<CryptoError>>(
+    ledger: &Ledger,
+    backend: &dyn IdentityStore,
+    scope: &KeyScope,
+    expected_fingerprint: &str,
+    target: RouteFamily,
+    cancelled: &AtomicBool,
+    authorize_source: impl FnOnce(&KeyScope) -> Result<(DevicePrivateKey, Arc<dyn IdentityStore>), E>,
+    before_commit: impl Fn() -> Result<(), E>,
+) -> Result<(KeyScope, Arc<dyn IdentityStore>, RouteSelection), E> {
+    let id = identity_route_id(scope).map_err(E::from)?;
+    let target_selection = selection_from_family(target);
+    let target_scope = identity_scope_for_selection(target_selection, scope).map_err(E::from)?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(unavailable().into());
+    }
+    let mut authorize_source = Some(authorize_source);
+    let mut authorized_store = None;
+    let mut original = None;
+    let result = ledger.persist_after_family(&id, target, |selection| {
+        let mut action = || -> Result<(), E> {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(unavailable().into());
+            }
+            let source_scope = match selection {
+                RouteSelection::Legacy | RouteSelection::LocalV1 | RouteSelection::DeveloperIdV2 => {
+                    identity_scope_for_selection(selection, scope).map_err(E::from)?
+                }
+                RouteSelection::Deleted => return Err(CryptoError::CredentialMissing.into()),
+            };
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            crate::ulog_info!("[credential-migration] stage=identity-source-read outcome=start");
+            before_commit()?;
+            let source_result = authorize_source
+                .take()
+                .expect("single route transaction")(&source_scope);
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            crate::ulog_info!(
+                "[credential-migration] stage=identity-source-read outcome={}",
+                if source_result.is_ok() { "ok" } else { "failed" }
+            );
+            let (key, reader) = source_result?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(unavailable().into());
+            }
+            if key.public_fingerprint().map_err(E::from)? != expected_fingerprint {
+                return Err(CryptoError::CredentialConflict.into());
+            }
+            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+            crate::ulog_info!("[credential-migration] stage=identity-source-read outcome=validated");
+            if selection != target_selection {
+                #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                crate::ulog_info!("[credential-migration] stage=identity-destination-read outcome=start");
+                let target_read = backend.load(&target_scope);
+                match target_read {
+                    Ok(existing) if existing.public_fingerprint().map_err(E::from)? == expected_fingerprint => {
+                        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                        crate::ulog_info!("[credential-migration] stage=identity-destination-read outcome=match");
+                    }
+                    Ok(_) => return Err(CryptoError::CredentialConflict.into()),
+                    Err(CryptoError::CredentialMissing) => {
+                        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                        crate::ulog_info!("[credential-migration] stage=identity-destination-read outcome=missing");
+                        if cancelled.load(Ordering::Acquire) {
+                            return Err(unavailable().into());
+                        }
+                        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                        crate::ulog_info!("[credential-migration] stage=identity-destination-write outcome=start");
+                        let write = backend.save_pending(&target_scope, &key);
+                        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                        crate::ulog_info!(
+                            "[credential-migration] stage=identity-destination-write outcome={}",
+                            if write.is_ok() { "ok" } else { "failed" }
+                        );
+                        write.map_err(E::from)?;
+                    }
+                    Err(error) => {
+                        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                        crate::ulog_info!("[credential-migration] stage=identity-destination-read outcome=failed");
+                        return Err(E::from(error));
+                    }
+                }
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(unavailable().into());
+                }
+                #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                crate::ulog_info!("[credential-migration] stage=identity-confirm outcome=start");
+                let confirmed = backend.load(&target_scope);
+                #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                crate::ulog_info!(
+                    "[credential-migration] stage=identity-confirm outcome={}",
+                    if confirmed.is_ok() { "read" } else { "failed" }
+                );
+                let confirmed = confirmed.map_err(E::from)?;
+                if confirmed.public_fingerprint().map_err(E::from)? != expected_fingerprint {
+                    return Err(CryptoError::CredentialConflict.into());
+                }
+                #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+                crate::ulog_info!("[credential-migration] stage=identity-confirm outcome=ok");
+            }
+            if cancelled.load(Ordering::Acquire) {
+                return Err(unavailable().into());
+            }
+            before_commit()?;
+            authorized_store = Some((source_scope, reader, target_selection));
+            Ok(())
+        };
+        match action() {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                original = Some(error);
+                Err(unavailable())
+            }
+        }
+    });
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+    crate::ulog_info!(
+        "[credential-migration] stage=identity-route-commit outcome={}",
+        if original.is_none() && result.is_ok() {
+            "ok"
+        } else {
+            "failed"
+        }
+    );
+    match original {
+        Some(error) => Err(error),
+        None => {
+            result.map_err(E::from)?;
+            authorized_store.ok_or_else(|| E::from(unavailable()))
+        }
+    }
+}
 fn promote(
     ledger: &Ledger,
     backend: &dyn IdentityStore,
@@ -684,40 +1133,62 @@ fn promote(
     key: &DevicePrivateKey,
     cancelled: &AtomicBool,
 ) -> Result<(), CryptoError> {
+    promote_to_family(
+        ledger,
+        backend,
+        scope,
+        key,
+        cancelled,
+        selected_writer_family()?,
+    )
+}
+fn promote_to_family(
+    ledger: &Ledger,
+    backend: &dyn IdentityStore,
+    scope: &KeyScope,
+    key: &DevicePrivateKey,
+    cancelled: &AtomicBool,
+    target: RouteFamily,
+) -> Result<(), CryptoError> {
     let id = identity_route_id(scope)?;
-    let mapped = local_scope(scope)?;
+    let target_selection = selection_from_family(target);
+    let mapped = identity_scope_for_selection(target_selection, scope)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(unavailable());
     }
-    let result = ledger.persist_after(&id, |already_committed| {
+    let result = ledger.persist_after_family(&id, target, |selection| {
         if cancelled.load(Ordering::Acquire) {
             return Err(unavailable());
         }
-        // A committed deletion barrier cannot recreate a key from a cached
-        // legacy value. Existing current key must still confirm the fingerprint.
-        if !already_committed {
-            let saved = backend.save_pending(&mapped, key);
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
-            crate::ulog_info!(
-                "[credential-migration] stage=identity-save outcome={}",
-                saved
-                    .as_ref()
-                    .map(|_| String::from("ok"))
-                    .unwrap_or_else(|error| error.to_string())
-            );
-            saved?;
+        let source = match selection {
+            RouteSelection::Legacy => scope.clone(),
+            RouteSelection::LocalV1 => local_scope(scope)?,
+            RouteSelection::DeveloperIdV2 => developer_id_scope(scope)?,
+            RouteSelection::Deleted => return Err(CryptoError::CredentialMissing),
+        };
+        let verified_source = backend.load(&source)?;
+        let expected_fingerprint = key.public_fingerprint()?;
+        if verified_source.public_fingerprint()? != expected_fingerprint {
+            return Err(CryptoError::CredentialConflict);
+        }
+        if selection != target_selection {
+            match backend.load(&mapped) {
+                Ok(existing) if existing.public_fingerprint()? == expected_fingerprint => {}
+                Ok(_) => return Err(CryptoError::CredentialConflict),
+                Err(CryptoError::CredentialMissing) => {
+                    backend.save_pending(&mapped, &verified_source)?;
+                }
+                Err(error) => return Err(error),
+            }
         }
         let loaded = backend.load(&mapped);
         #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
         crate::ulog_info!(
             "[credential-migration] stage=identity-confirm outcome={}",
-            loaded
-                .as_ref()
-                .map(|_| String::from("ok"))
-                .unwrap_or_else(|error| error.to_string())
+            if loaded.is_ok() { "read" } else { "failed" }
         );
         let confirmed = loaded?;
-        if confirmed.public_fingerprint()? != key.public_fingerprint()? {
+        if confirmed.public_fingerprint()? != expected_fingerprint {
             return Err(CryptoError::CredentialConflict);
         }
         if cancelled.load(Ordering::Acquire) {
@@ -728,10 +1199,7 @@ fn promote(
     #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
     crate::ulog_info!(
         "[credential-migration] stage=identity-route outcome={} cancelled={}",
-        result
-            .as_ref()
-            .map(|_| String::from("ok"))
-            .unwrap_or_else(|error| error.to_string()),
+        if result.is_ok() { "ok" } else { "failed" },
         cancelled.load(Ordering::Acquire)
     );
     result
@@ -784,13 +1252,23 @@ impl IdentityStore for CachedStore {
             self.reset(&mut state);
         }
         validate_scope(s)?;
-        let physical = if let Some((_, physical)) = state.route.as_ref() {
-            physical.clone()
-        } else if self.ledger.route(&identity_route_id(s)?)? {
-            local_scope(s)?
-        } else {
-            s.clone()
+        let selection = self.ledger.selection(&identity_route_id(s)?)?;
+        let physical = match selection {
+            RouteSelection::Legacy => s.clone(),
+            RouteSelection::LocalV1 => local_scope(s)?,
+            RouteSelection::DeveloperIdV2 => developer_id_scope(s)?,
+            RouteSelection::Deleted => {
+                self.reset(&mut state);
+                return Err(CryptoError::CredentialMissing);
+            }
         };
+        if state
+            .route
+            .as_ref()
+            .is_some_and(|(_, old_physical)| !same_scope(old_physical, &physical))
+        {
+            self.reset(&mut state);
+        }
         let result = state.backend.load(&physical);
         match result {
             Ok(key) => {
@@ -852,6 +1330,7 @@ pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
 mod tests {
     use super::super::crypto::EncryptedIdentityStore;
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::AtomicUsize;
     struct Backend {
         disk: EncryptedIdentityStore,
@@ -861,6 +1340,7 @@ mod tests {
         fail_write: AtomicBool,
         fail_delete: AtomicBool,
         cancel_on_write: Mutex<Option<Arc<AtomicBool>>>,
+        deny_load_scope: Mutex<Option<KeyScope>>,
     }
     impl Backend {
         fn new(path: &Path) -> Self {
@@ -874,11 +1354,21 @@ mod tests {
                 fail_write: AtomicBool::new(false),
                 fail_delete: AtomicBool::new(false),
                 cancel_on_write: Mutex::new(None),
+                deny_load_scope: Mutex::new(None),
             }
         }
     }
     impl IdentityStore for Backend {
         fn load(&self, s: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+            if self
+                .deny_load_scope
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|denied| same_scope(denied, s))
+            {
+                return Err(CryptoError::CredentialUnavailable);
+            }
             let mut cached = self.cache.lock().unwrap();
             if cached.as_ref().is_none_or(|old| !same_scope(old, s)) {
                 self.reads.fetch_add(1, Ordering::Relaxed);
@@ -928,6 +1418,35 @@ mod tests {
         let backend = Arc::new(Backend::new(&dir.path().join("keys")));
         (dir, ledger, backend)
     }
+    fn write_ledger_fixture(ledger: &Ledger, bytes: &[u8]) {
+        let path = ledger.root.join(NAME);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(bytes).unwrap();
+        file.sync_all().unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    fn promote_dev(
+        ledger: &Ledger,
+        backend: &dyn IdentityStore,
+        scope: &KeyScope,
+        key: &DevicePrivateKey,
+        cancelled: &AtomicBool,
+    ) -> Result<(), CryptoError> {
+        promote_to_family(
+            ledger,
+            backend,
+            scope,
+            key,
+            cancelled,
+            RouteFamily::DeveloperIdV2,
+        )
+    }
     #[test]
     fn structured_mapping_is_local_validates_original_and_isolates_all_fields() {
         let original = scope();
@@ -975,7 +1494,95 @@ mod tests {
         let legacy = hash43(b"isolated session");
         assert!(canonical_hash(&session_hash(&legacy).unwrap()));
         assert_ne!(session_hash(&legacy).unwrap(), legacy);
+        assert_ne!(
+            session_hash(&legacy).unwrap(),
+            developer_id_session_hash(&legacy).unwrap()
+        );
+        assert_ne!(
+            local_scope(&scope()).unwrap().service_id,
+            developer_id_scope(&scope()).unwrap().service_id
+        );
         assert!(session_hash(&"x".repeat(43)).is_err());
+    }
+    #[test]
+    fn writer_family_parser_is_closed_and_preserves_local_v1_mapping() {
+        assert_eq!(
+            parse_writer_family("local-v1").unwrap(),
+            RouteFamily::LocalV1
+        );
+        assert_eq!(
+            parse_writer_family("developer-id-v2").unwrap(),
+            RouteFamily::DeveloperIdV2
+        );
+        for invalid in ["", "legacy", "Local-v1", "developer-id-v3", "__proto__"] {
+            assert!(parse_writer_family(invalid).is_err());
+        }
+        let logical = scope();
+        let selected = identity_scope_for_selection(RouteSelection::LocalV1, &logical).unwrap();
+        assert_eq!(
+            selected.service_id,
+            local_scope(&logical).unwrap().service_id
+        );
+        assert_eq!(selected.issuer, logical.issuer);
+    }
+
+    #[test]
+    fn strict_v1_route_selects_local_family_and_keeps_logical_id_stable() {
+        let (_dir, ledger, _) = fixture();
+        let scope = scope();
+        let id = identity_route_id(&scope).unwrap();
+        let bytes = serde_json::to_vec(&LedgerData {
+            version: 1,
+            routes: vec![id.clone()],
+        })
+        .unwrap();
+        write_ledger_fixture(&ledger, &bytes);
+        assert_eq!(ledger.selection(&id).unwrap(), RouteSelection::LocalV1);
+        ledger
+            .set_selection(&id, RouteFamily::DeveloperIdV2)
+            .unwrap();
+        assert_eq!(identity_route_id(&scope).unwrap(), id);
+        assert_eq!(
+            ledger.selection(&id).unwrap(),
+            RouteSelection::DeveloperIdV2
+        );
+        let data: LedgerDataV2 =
+            serde_json::from_slice(&fs::read(ledger.root.join(NAME)).unwrap()).unwrap();
+        assert_eq!(data.version, 2);
+        assert_eq!(data.routes.len(), 1);
+        assert_eq!(data.routes[0].id, id);
+        assert_eq!(data.routes[0].family, RouteFamily::DeveloperIdV2);
+    }
+    #[test]
+    fn missing_v1_selected_item_never_falls_back_to_legacy_material() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        backend.disk.save_pending(&s, &key).unwrap();
+        let id = identity_route_id(&s).unwrap();
+        write_ledger_fixture(
+            &ledger,
+            &serde_json::to_vec(&LedgerData {
+                version: 1,
+                routes: vec![id.clone()],
+            })
+            .unwrap(),
+        );
+        let store = VersionedStore {
+            ledger: ledger.clone(),
+            backend: backend.clone(),
+        };
+        assert_eq!(ledger.selection(&id).unwrap(), RouteSelection::LocalV1);
+        assert!(matches!(
+            store.load(&s),
+            Err(CryptoError::CredentialMissing)
+        ));
+        assert!(matches!(
+            promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)),
+            Err(CryptoError::CredentialMissing)
+        ));
+        assert!(backend.disk.load(&s).is_ok());
+        assert_eq!(ledger.selection(&id).unwrap(), RouteSelection::LocalV1);
     }
     #[test]
     fn promotion_confirmed_then_restart_uses_new_and_missing_never_falls_back() {
@@ -991,7 +1598,7 @@ mod tests {
             store.load(&s).unwrap().public_fingerprint().unwrap(),
             key.public_fingerprint().unwrap()
         );
-        promote(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)).unwrap();
+        promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)).unwrap();
         let restarted = VersionedStore {
             ledger: Ledger {
                 root: ledger.root.clone(),
@@ -1002,65 +1609,378 @@ mod tests {
             restarted.load(&s).unwrap().public_fingerprint().unwrap(),
             key.public_fingerprint().unwrap()
         );
-        backend.disk.delete(&local_scope(&s).unwrap()).unwrap();
+        let writes = backend.writes.load(Ordering::Relaxed);
+        let other = DevicePrivateKey::generate().unwrap();
+        assert!(matches!(
+            promote_dev(
+                &ledger,
+                backend.as_ref(),
+                &s,
+                &other,
+                &AtomicBool::new(false)
+            ),
+            Err(CryptoError::CredentialConflict)
+        ));
+        assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
+        backend
+            .disk
+            .delete(&developer_id_scope(&s).unwrap())
+            .unwrap();
         assert!(matches!(
             restarted.load(&s),
             Err(CryptoError::CredentialMissing)
         ));
         assert!(backend.disk.load(&s).is_ok());
-        let writes = backend.writes.load(Ordering::Relaxed);
         assert!(matches!(
-            promote(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)),
+            promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)),
             Err(CryptoError::CredentialMissing)
         ));
         assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
-        assert!(backend.disk.load(&local_scope(&s).unwrap()).is_err());
+        assert!(backend.disk.load(&developer_id_scope(&s).unwrap()).is_err());
         assert!(ledger.route(&identity_route_id(&s).unwrap()).unwrap());
-        // A different extant current key also cannot be overwritten by a stale
-        // migration. Identical confirmation performs no OS write.
-        let other = DevicePrivateKey::generate().unwrap();
-        backend
-            .disk
-            .save_pending(&local_scope(&s).unwrap(), &other)
+        assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
+    }
+    #[test]
+    fn publisher_migration_reads_selected_v1_source_and_never_touches_legacy_target_name() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        let old = local_scope(&s).unwrap();
+        backend.disk.save_pending(&old, &key).unwrap();
+        let id = identity_route_id(&s).unwrap();
+        write_ledger_fixture(
+            &ledger,
+            &serde_json::to_vec(&LedgerData {
+                version: 1,
+                routes: vec![id.clone()],
+            })
+            .unwrap(),
+        );
+        let destination = developer_id_scope(&s).unwrap();
+        assert_ne!(old.service_id, destination.service_id);
+        promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)).unwrap();
+        assert_eq!(
+            ledger.selection(&id).unwrap(),
+            RouteSelection::DeveloperIdV2
+        );
+        assert_eq!(
+            backend
+                .disk
+                .load(&destination)
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            key.public_fingerprint().unwrap()
+        );
+        assert_eq!(
+            backend
+                .disk
+                .load(&old)
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            key.public_fingerprint().unwrap()
+        );
+    }
+    #[test]
+    fn release_selected_local_family_migrates_v2_source_without_changing_logical_route() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        let id = identity_route_id(&s).unwrap();
+        let source = developer_id_scope(&s).unwrap();
+        let destination = local_scope(&s).unwrap();
+        backend.disk.save_pending(&source, &key).unwrap();
+        ledger
+            .set_selection(&id, RouteFamily::DeveloperIdV2)
             .unwrap();
-        assert!(matches!(
-            promote(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)),
-            Err(CryptoError::CredentialConflict)
-        ));
-        promote(
+
+        promote_to_family(
             &ledger,
             backend.as_ref(),
             &s,
-            &other,
+            &key,
             &AtomicBool::new(false),
+            RouteFamily::LocalV1,
         )
         .unwrap();
+
+        assert_eq!(ledger.selection(&id).unwrap(), RouteSelection::LocalV1);
+        assert_eq!(
+            VersionedStore {
+                ledger: ledger.clone(),
+                backend: backend.clone(),
+            }
+            .load(&s)
+            .unwrap()
+            .public_fingerprint()
+            .unwrap(),
+            key.public_fingerprint().unwrap()
+        );
+        assert_ne!(source.service_id, destination.service_id);
+        assert_eq!(identity_route_id(&s).unwrap(), id);
+    }
+    #[test]
+    fn fresh_save_uses_new_family_without_reading_or_overwriting_old_partial_item() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let old = local_scope(&s).unwrap();
+        let stale = DevicePrivateKey::generate().unwrap();
+        let fresh = DevicePrivateKey::generate().unwrap();
+        backend.disk.save_pending(&old, &stale).unwrap();
+        *backend.deny_load_scope.lock().unwrap() = Some(old.clone());
+        backend.reads.store(0, Ordering::Relaxed);
+        let store = VersionedStore {
+            ledger: ledger.clone(),
+            backend: backend.clone(),
+        };
+        store
+            .save_pending_for_family(&s, &fresh, RouteFamily::DeveloperIdV2)
+            .unwrap();
+        assert_eq!(
+            ledger.selection(&identity_route_id(&s).unwrap()).unwrap(),
+            RouteSelection::DeveloperIdV2
+        );
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 1); // v2 readback only
+        assert_eq!(
+            backend
+                .disk
+                .load(&old)
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            stale.public_fingerprint().unwrap()
+        );
+        assert_eq!(
+            store.load(&s).unwrap().public_fingerprint().unwrap(),
+            fresh.public_fingerprint().unwrap()
+        );
+    }
+    #[test]
+    fn save_pending_is_same_key_idempotent_but_never_crosses_family_or_tombstone() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        let other = DevicePrivateKey::generate().unwrap();
+        let store = VersionedStore {
+            ledger: ledger.clone(),
+            backend: backend.clone(),
+        };
+        store
+            .save_pending_for_family(&s, &key, RouteFamily::DeveloperIdV2)
+            .unwrap();
+        let writes = backend.writes.load(Ordering::Relaxed);
+        store
+            .save_pending_for_family(&s, &key, RouteFamily::DeveloperIdV2)
+            .unwrap();
         assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
+        assert!(matches!(
+            store.save_pending_for_family(&s, &other, RouteFamily::DeveloperIdV2),
+            Err(CryptoError::CredentialConflict)
+        ));
+        assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
+
+        store.delete(&s).unwrap();
+        assert!(matches!(
+            store.save_pending_for_family(&s, &key, RouteFamily::DeveloperIdV2),
+            Err(CryptoError::CredentialMissing)
+        ));
+        assert_eq!(
+            ledger.selection(&identity_route_id(&s).unwrap()).unwrap(),
+            RouteSelection::Deleted
+        );
+        assert_eq!(backend.writes.load(Ordering::Relaxed), writes);
+    }
+
+    #[test]
+    fn authorized_identity_migration_reads_selected_source_once_and_commits_after_target_readback()
+    {
+        let (_dir, ledger, backend) = fixture();
+        let scope = scope();
+        let source = local_scope(&scope).unwrap();
+        let key = DevicePrivateKey::generate().unwrap();
+        backend.disk.save_pending(&source, &key).unwrap();
+        let route = identity_route_id(&scope).unwrap();
+        ledger.set_selection(&route, RouteFamily::LocalV1).unwrap();
+        let expected = key.public_fingerprint().unwrap();
+        let authorized_reads = AtomicUsize::new(0);
+        let reader: Arc<dyn IdentityStore> = backend.clone();
+
+        let (authorized_scope, returned_reader, selected) = promote_authorized_with(
+            &ledger,
+            backend.as_ref(),
+            &scope,
+            &expected,
+            RouteFamily::DeveloperIdV2,
+            &AtomicBool::new(false),
+            |physical| {
+                assert!(same_scope(physical, &source));
+                authorized_reads.fetch_add(1, Ordering::Relaxed);
+                Ok((backend.load(physical)?, reader.clone()))
+            },
+            || Ok::<_, CryptoError>(()),
+        )
+        .unwrap();
+
+        assert!(same_scope(&authorized_scope, &source));
+        assert_eq!(selected, RouteSelection::DeveloperIdV2);
+        assert_eq!(authorized_reads.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            ledger.selection(&route).unwrap(),
+            RouteSelection::DeveloperIdV2
+        );
+        assert_eq!(
+            returned_reader
+                .load(&source)
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            backend
+                .disk
+                .load(&source)
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            backend
+                .disk
+                .load(&developer_id_scope(&scope).unwrap())
+                .unwrap()
+                .public_fingerprint()
+                .unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn authorized_identity_migration_fences_before_authorization_and_keeps_route_on_cancel() {
+        let (_dir, ledger, backend) = fixture();
+        let scope = scope();
+        let source = local_scope(&scope).unwrap();
+        let key = DevicePrivateKey::generate().unwrap();
+        backend.disk.save_pending(&source, &key).unwrap();
+        let route = identity_route_id(&scope).unwrap();
+        ledger.set_selection(&route, RouteFamily::LocalV1).unwrap();
+        let expected = key.public_fingerprint().unwrap();
+        let auth_reads = AtomicUsize::new(0);
+        let denied = promote_authorized_with(
+            &ledger,
+            backend.as_ref(),
+            &scope,
+            &expected,
+            RouteFamily::DeveloperIdV2,
+            &AtomicBool::new(false),
+            |_| {
+                auth_reads.fetch_add(1, Ordering::Relaxed);
+                Err(CryptoError::CredentialAuthorizationRequired)
+            },
+            || Err::<(), _>(CryptoError::CredentialUnavailable),
+        );
+        assert!(denied.is_err());
+        assert_eq!(auth_reads.load(Ordering::Relaxed), 0);
+        assert_eq!(ledger.selection(&route).unwrap(), RouteSelection::LocalV1);
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        *backend.cancel_on_write.lock().unwrap() = Some(cancelled.clone());
+        let result = promote_authorized_with(
+            &ledger,
+            backend.as_ref(),
+            &scope,
+            &expected,
+            RouteFamily::DeveloperIdV2,
+            &cancelled,
+            |physical| Ok((backend.load(physical)?, backend.clone())),
+            || Ok::<_, CryptoError>(()),
+        );
+        assert!(matches!(result, Err(CryptoError::CredentialUnavailable)));
+        assert_eq!(ledger.selection(&route).unwrap(), RouteSelection::LocalV1);
+    }
+    #[test]
+    fn concurrent_same_key_save_pending_commits_once_and_is_idempotent() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = Arc::new(DevicePrivateKey::generate().unwrap());
+        let store = Arc::new(VersionedStore {
+            ledger,
+            backend: backend.clone(),
+        });
+        let first_store = store.clone();
+        let first_scope = s.clone();
+        let first_key = key.clone();
+        let first = std::thread::spawn(move || {
+            first_store.save_pending_for_family(
+                &first_scope,
+                &first_key,
+                RouteFamily::DeveloperIdV2,
+            )
+        });
+        let second_store = store.clone();
+        let second_scope = s.clone();
+        let second_key = key.clone();
+        let second = std::thread::spawn(move || {
+            second_store.save_pending_for_family(
+                &second_scope,
+                &second_key,
+                RouteFamily::DeveloperIdV2,
+            )
+        });
+        first.join().unwrap().unwrap();
+        second.join().unwrap().unwrap();
+        assert_eq!(backend.writes.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            store.load(&s).unwrap().public_fingerprint().unwrap(),
+            key.public_fingerprint().unwrap()
+        );
     }
     #[test]
     fn cancelled_and_unconfirmed_writes_never_commit_or_adopt_new_slot() {
         let (_dir, ledger, backend) = fixture();
         let s = scope();
         let key = DevicePrivateKey::generate().unwrap();
-        assert!(promote(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(true)).is_err());
+        backend.disk.save_pending(&s, &key).unwrap();
+        assert!(promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(true)).is_err());
         assert_eq!(backend.writes.load(Ordering::Relaxed), 0);
         backend.fail_write.store(true, Ordering::Release);
-        assert!(promote(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)).is_err());
+        assert!(promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)).is_err());
         assert!(!ledger.route(&identity_route_id(&s).unwrap()).unwrap());
-        assert!(backend.disk.load(&local_scope(&s).unwrap()).is_ok());
+        assert!(backend.disk.load(&developer_id_scope(&s).unwrap()).is_ok());
         let store = VersionedStore {
             ledger: ledger.clone(),
             backend: backend.clone(),
         };
-        assert!(matches!(
-            store.load(&s),
-            Err(CryptoError::CredentialMissing)
-        ));
-        backend.fail_write.store(false, Ordering::Release);
+        assert_eq!(
+            store.load(&s).unwrap().public_fingerprint().unwrap(),
+            key.public_fingerprint().unwrap()
+        );
+        // Cancellation must happen on an actual destination write. The failed
+        // attempt above intentionally left an uncommitted orphan, so retrying
+        // the same scope would only confirm that item and never call write.
+        let (_cancel_dir, cancel_ledger, cancel_backend) = fixture();
+        let cancel_scope = scope();
+        let cancel_key = DevicePrivateKey::generate().unwrap();
+        cancel_backend
+            .disk
+            .save_pending(&cancel_scope, &cancel_key)
+            .unwrap();
         let flag = Arc::new(AtomicBool::new(false));
-        *backend.cancel_on_write.lock().unwrap() = Some(flag.clone());
-        assert!(promote(&ledger, backend.as_ref(), &s, &key, &flag).is_err());
-        assert!(!ledger.route(&identity_route_id(&s).unwrap()).unwrap());
+        *cancel_backend.cancel_on_write.lock().unwrap() = Some(flag.clone());
+        assert!(promote_dev(
+            &cancel_ledger,
+            cancel_backend.as_ref(),
+            &cancel_scope,
+            &cancel_key,
+            &flag,
+        )
+        .is_err());
+        assert!(flag.load(Ordering::Acquire));
+        assert!(!cancel_ledger
+            .route(&identity_route_id(&cancel_scope).unwrap())
+            .unwrap());
     }
     #[test]
     fn delete_barrier_survives_offline_partial_failure_and_retry() {
@@ -1085,6 +2005,39 @@ mod tests {
         assert!(ledger.route(&identity_route_id(&s).unwrap()).unwrap());
     }
     #[test]
+    fn deleting_v1_selected_item_keeps_tombstone_and_never_falls_back_to_legacy() {
+        let (_dir, ledger, backend) = fixture();
+        let s = scope();
+        let key = DevicePrivateKey::generate().unwrap();
+        let local = local_scope(&s).unwrap();
+        backend.disk.save_pending(&s, &key).unwrap();
+        backend.disk.save_pending(&local, &key).unwrap();
+        let id = identity_route_id(&s).unwrap();
+        write_ledger_fixture(
+            &ledger,
+            &serde_json::to_vec(&LedgerData {
+                version: 1,
+                routes: vec![id.clone()],
+            })
+            .unwrap(),
+        );
+        let store = VersionedStore {
+            ledger: ledger.clone(),
+            backend: backend.clone(),
+        };
+        store.delete(&s).unwrap();
+        assert_eq!(ledger.selection(&id).unwrap(), RouteSelection::Deleted);
+        assert!(matches!(
+            store.load(&s),
+            Err(CryptoError::CredentialMissing)
+        ));
+        assert!(backend.disk.load(&s).is_ok());
+        assert!(matches!(
+            promote_dev(&ledger, backend.as_ref(), &s, &key, &AtomicBool::new(false)),
+            Err(CryptoError::CredentialMissing)
+        ));
+    }
+    #[test]
     fn cached_original_scope_pins_route_and_mutations_invalidate() {
         let (_dir, ledger, backend) = fixture();
         let s = scope();
@@ -1099,21 +2052,21 @@ mod tests {
             }),
         );
         cache.load(&s).unwrap();
-        ledger.commit(&identity_route_id(&s).unwrap()).unwrap();
-        // Same actor keeps already selected legacy route, rather than alternating
-        // physical scopes and causing repeated cold backend reads.
+        let next = DevicePrivateKey::generate().unwrap();
+        backend
+            .disk
+            .save_pending(&developer_id_scope(&s).unwrap(), &next)
+            .unwrap();
+        ledger
+            .set_selection(&identity_route_id(&s).unwrap(), RouteFamily::DeveloperIdV2)
+            .unwrap();
         cache.load(&s).unwrap();
         cache.load(&s).unwrap();
-        assert_eq!(backend.reads.load(Ordering::Relaxed), 1);
-        cache.save_pending(&s, &key).unwrap();
-        cache.load(&s).unwrap();
-        // Confirmation is one cold read; mutation retires its cache, then
-        // the first subsequent load is one cold read and later loads are hot.
-        assert_eq!(backend.reads.load(Ordering::Relaxed), 3);
-        cache.load(&s).unwrap();
-        assert_eq!(backend.reads.load(Ordering::Relaxed), 3);
+        // Cache must notice family change and reload the newly selected slot.
+        assert_eq!(backend.reads.load(Ordering::Relaxed), 2);
         cache.delete(&s).unwrap();
         assert!(cache.load(&s).is_err());
+        assert!(cache.state.lock().unwrap().route.is_none());
     }
     #[test]
     fn ledger_closed_permissions_paths_duplicates_and_corruption_fail_before_store_write() {
@@ -1127,6 +2080,10 @@ mod tests {
             format!(r#"{{"version":1,"routes":["{id}","{id}"]}}"#),
             r#"{"version":1,"routes":["bad"]}"#.into(),
             r#"{"version":1,"version":1,"routes":[]}"#.into(),
+            format!(r#"{{"version":2,"routes":[{{"id":"{id}","family":"future"}}]}}"#),
+            format!(
+                r#"{{"version":2,"routes":[{{"id":"{id}","family":"developer-id-v2","extra":true}}]}}"#
+            ),
         ] {
             fs::write(&file, body).unwrap();
             assert!(ledger.route(&id).is_err());
@@ -1212,7 +2169,7 @@ mod tests {
             routes: routes.iter().cloned().collect(),
         })
         .unwrap();
-        fs::write(ledger.root.join(NAME), &bytes).unwrap();
+        write_ledger_fixture(&ledger, &bytes);
         let store = VersionedStore {
             ledger: ledger.clone(),
             backend: backend.clone(),
@@ -1345,7 +2302,7 @@ mod tests {
         ledger
             .commit(&format!("session:{}", hash43(b"initial")))
             .unwrap();
-        fs::write(ledger.root.join(NAME), b"{broken}").unwrap();
+        write_ledger_fixture(&ledger, b"{broken}");
         called.store(false, Ordering::Release);
         assert_eq!(
             committed_route(&ledger, &id, |already_committed| {
@@ -1477,9 +2434,12 @@ mod tests {
                 |_| {
                     // Direct read-only inspection avoids recursive API/lock entry. This
                     // proves the barrier file exists BEFORE the unknown delete result.
-                    let data: LedgerData =
+                    let data: LedgerDataV2 =
                         serde_json::from_slice(&fs::read(ledger.root.join(NAME)).unwrap()).unwrap();
-                    assert!(data.routes.contains(&absent));
+                    assert!(data
+                        .routes
+                        .iter()
+                        .any(|r| r.id == absent && r.family == RouteFamily::Deleted));
                     Err::<(), _>(Error::Delete)
                 }
             ),
@@ -1501,12 +2461,26 @@ mod tests {
     #[test]
     fn deletion_preflights_capacity_before_selector_side_effects() {
         let (_dir, ledger, _) = fixture();
-        let routes = (0..MAX_ROUTES)
-            .map(|i| format!("session:{}", hash43(format!("full-{i}").as_bytes())))
-            .collect();
-        ledger.transaction(|dir| ledger.write(dir, routes)).unwrap();
+        let mut routes = BTreeMap::new();
+        for i in 0..MAX_ROUTES {
+            let id = format!("session:{}", hash43(format!("full-{i}").as_bytes()));
+            let mut candidate = routes.clone();
+            candidate.insert(id, RouteFamily::DeveloperIdV2);
+            if encode_routes(&candidate).unwrap().len() > MAX_BYTES {
+                break;
+            }
+            routes = candidate;
+        }
+        assert!(routes.len() < MAX_ROUTES);
+        ledger
+            .transaction(|dir| ledger.write(dir, routes.clone()))
+            .unwrap();
         let called = AtomicBool::new(false);
         let id = format!("session:{}", hash43(b"absent-capacity"));
+        assert!(!routes.contains_key(&id));
+        assert!(ledger
+            .ensure_route_capacity(&routes, &id, RouteFamily::Deleted)
+            .is_err());
         assert!(deleted_route(
             &ledger,
             &id,
@@ -1586,9 +2560,12 @@ mod tests {
                         .join(LOCK)
                         .join("owner")
                         .is_file());
-                    let data: LedgerData =
+                    let data: LedgerDataV2 =
                         serde_json::from_slice(&fs::read(ledger.root.join(NAME)).unwrap()).unwrap();
-                    assert!(data.routes.contains(&id));
+                    assert!(data
+                        .routes
+                        .iter()
+                        .any(|route| route.id == id && route.family == RouteFamily::Deleted));
                     assert!(!fresh.exists());
                     if mode == "old-delete-error" {
                         return Err(Error::Delete);

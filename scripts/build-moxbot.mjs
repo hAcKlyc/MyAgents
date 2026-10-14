@@ -9,6 +9,7 @@ import {
   resolveMacTargetTriple,
   readMoxbotCredentialReaderRelease,
   verifyPackagedCredentialReader,
+  credentialWriterFamilyForRelease,
 } from './prepare-moxbot-credential-reader.mjs';
 
 // Fix all three product profiles (Vite, esbuild, Cargo) in the same invocation.
@@ -24,9 +25,7 @@ let cliArgs = [
   ...userArgs,
 ];
 try {
-  if (!['legacy-local-v1', 'developer-id-v2'].includes(readerRelease)) {
-    throw new Error('Unknown credential reader release');
-  }
+  const writerFamily = credentialWriterFamilyForRelease(readerRelease);
   if (process.platform === 'darwin') {
     const targetArch = resolveMacTargetArch(userArgs);
     const targetTriple = resolveMacTargetTriple(userArgs);
@@ -50,7 +49,11 @@ try {
     ...cliArgs,
   ], {
     cwd: root,
-    env: { ...process.env, MYAGENTS_BUILD_PROFILE: 'moxbot' },
+    env: {
+      ...process.env,
+      MYAGENTS_BUILD_PROFILE: 'moxbot',
+      MOXBOTS_CREDENTIAL_WRITER_FAMILY: writerFamily,
+    },
     stdio: 'inherit',
   });
   if (result.error) throw result.error;

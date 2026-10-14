@@ -26,6 +26,7 @@ import {
   resolveMacTargetArch,
   readMoxbotCredentialReaderRelease,
   verifyPackagedCredentialReader,
+  credentialWriterFamilyForRelease,
 } from './prepare-moxbot-credential-reader.mjs';
 
 const releaseLock = {
@@ -59,6 +60,14 @@ const signature = {
   cdhash: manifest.cdhash,
   signingCertificateSha256: manifest.signingCertificateSha256,
 };
+
+test('verified reader releases bind to closed credential writer families', () => {
+  assert.equal(credentialWriterFamilyForRelease('legacy-local-v1'), 'local-v1');
+  assert.equal(credentialWriterFamilyForRelease('developer-id-v2'), 'developer-id-v2');
+  for (const invalid of [undefined, '', 'local-v1', 'developer-id-v3', '__proto__']) {
+    assert.throws(() => credentialWriterFamilyForRelease(invalid), /unknown credential reader release/);
+  }
+});
 
 function canonicalManifest(value = manifest) {
   return Buffer.from(`${JSON.stringify(value)}\n`);
@@ -400,5 +409,9 @@ test('MoX wrapper defaults to Developer ID and passes one chosen lock to prepare
   assert.match(wrapper, /MOXBOTS_CREDENTIAL_READER_RELEASE \?\? 'developer-id-v2'/);
   assert.equal((wrapper.match(/lock: readerLock/g) ?? []).length, 2);
   assert.equal((wrapper.match(/release: readerRelease/g) ?? []).length, 3);
-  assert.match(wrapper, /\['legacy-local-v1', 'developer-id-v2'\]\.includes\(readerRelease\)/);
+  assert.match(wrapper, /const writerFamily = credentialWriterFamilyForRelease\(readerRelease\)/);
+  assert.match(wrapper, /MOXBOTS_CREDENTIAL_WRITER_FAMILY: writerFamily/);
+  const build = readFileSync(new URL('../src-tauri/build.rs', import.meta.url), 'utf8');
+  assert.match(build, /cargo:rerun-if-env-changed=MOXBOTS_CREDENTIAL_WRITER_FAMILY/);
+  assert.match(build, /cargo:rustc-env=MOXBOTS_CREDENTIAL_WRITER_FAMILY=\{writer_family\}/);
 });

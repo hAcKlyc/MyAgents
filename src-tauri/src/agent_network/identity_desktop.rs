@@ -35,6 +35,8 @@ pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
 #[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
 struct ReadOnlyScopeStore {
     scope: KeyScope,
+    authorized_scope: KeyScope,
+    route_selection: super::credential_slots::RouteSelection,
     inner: Arc<dyn IdentityStore>,
 }
 #[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
@@ -49,7 +51,19 @@ impl IdentityStore for ReadOnlyScopeStore {
         {
             return Err(super::crypto::CryptoError::CredentialConflict);
         }
-        self.inner.load(scope)
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        {
+            let current = super::credential_slots::selection(
+                &super::credential_slots::identity_route_id(scope)?,
+            )?;
+            if current == super::credential_slots::RouteSelection::Deleted {
+                return Err(super::crypto::CryptoError::CredentialMissing);
+            }
+            if current != self.route_selection {
+                return Err(super::crypto::CryptoError::CredentialConflict);
+            }
+        }
+        self.inner.load(&self.authorized_scope)
     }
     fn save_pending(
         &self,
@@ -82,9 +96,10 @@ pub(crate) async fn initialize_selected(
     #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
     {
         identity.account.ensure_current()?;
-        if !super::credential_slots::route(&super::credential_slots::identity_route_id(
+        if super::credential_slots::selection(&super::credential_slots::identity_route_id(
             &identity.scope,
-        )?)? {
+        )?)? != super::credential_slots::selected_writer_selection()?
+        {
             let scope = identity.scope.clone();
             let key = identity.device_key();
             tokio::task::spawn_blocking(move || {
@@ -189,50 +204,29 @@ pub(crate) async fn authorize_owned_identity(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
 
-    let authorization_cancelled = cancelled.clone();
     crate::ulog_info!("[agent-network] credential recovery stage=device-key-read");
-    let authorization_scope = scope.clone();
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
-    let authorization_scope =
-        if super::credential_slots::route(&super::credential_slots::identity_route_id(&scope)?)? {
-            super::credential_slots::local_scope(&scope)?
-        } else {
-            authorization_scope
-        };
-    let stored_scope = authorization_scope.clone();
-    let authorization = tokio::task::spawn_blocking(move || {
-        OsIdentityStore::authorize_existing(&authorization_scope, &authorization_cancelled)
-    })
-    .await;
-    let authorized_store = match authorization {
-        Ok(result) => result,
-        Err(_) if cancelled.load(Ordering::Acquire) => {
-            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-        }
-        Err(_) => return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE")),
-    };
-    let store = match authorized_store {
-        Ok(store) => store,
-        Err(_) if cancelled.load(Ordering::Acquire) => {
-            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let key = store.load(&stored_scope)?;
-    if key.public_fingerprint()? != expected_fingerprint {
-        return Err(NetworkError::new("IDENTITY_KEY_MISMATCH"));
-    }
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     account_session.ensure_current()?;
-    crate::ulog_info!("[agent-network] credential recovery stage=device-key-validated");
     #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
     {
         let migration_scope = scope.clone();
+        let migration_fingerprint = expected_fingerprint.clone();
         let migration_cancelled = cancelled.clone();
-        tokio::task::spawn_blocking(move || {
-            super::credential_slots::promote_key(&migration_scope, &key, &migration_cancelled)
+        let migration_account = account_session.clone();
+        let authorized = tokio::task::spawn_blocking(move || -> Result<_, NetworkError> {
+            super::credential_slots::promote_authorized_key(
+                &migration_scope,
+                &migration_fingerprint,
+                &migration_cancelled,
+                || {
+                    if migration_cancelled.load(Ordering::Acquire) {
+                        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+                    }
+                    migration_account.ensure_current()
+                },
+            )
         })
         .await
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
@@ -240,13 +234,39 @@ pub(crate) async fn authorize_owned_identity(
             return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
         }
         account_session.ensure_current()?;
+        let (authorized_scope, authorized_store, route_selection) = authorized;
+        crate::ulog_info!("[agent-network] credential recovery stage=device-key-validated");
         return Ok(Arc::new(ReadOnlyScopeStore {
             scope,
-            inner: connection_cache(),
+            authorized_scope,
+            route_selection,
+            inner: authorized_store,
         }));
     }
     #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test))))]
-    Ok(store)
+    {
+        let authorization_scope = scope.clone();
+        let authorization_cancelled = cancelled.clone();
+        let (store, key) = tokio::task::spawn_blocking(move || {
+            let store = OsIdentityStore::authorize_existing(
+                &authorization_scope,
+                &authorization_cancelled,
+            )?;
+            let key = store.load(&authorization_scope)?;
+            Ok::<_, super::crypto::CryptoError>((store, key))
+        })
+        .await
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+        if key.public_fingerprint()? != expected_fingerprint {
+            return Err(NetworkError::new("IDENTITY_KEY_MISMATCH"));
+        }
+        if cancelled.load(Ordering::Acquire) {
+            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+        }
+        account_session.ensure_current()?;
+        crate::ulog_info!("[agent-network] credential recovery stage=device-key-validated");
+        Ok(store)
+    }
 }
 
 #[cfg(test)]
@@ -328,6 +348,8 @@ mod authorization_tests {
         let backend = Arc::new(Counting(AtomicUsize::new(0)));
         let store = ReadOnlyScopeStore {
             scope: scope.clone(),
+            authorized_scope: scope.clone(),
+            route_selection: crate::agent_network::credential_slots::RouteSelection::Legacy,
             inner: backend.clone(),
         };
         let key = store.load(&scope).unwrap();

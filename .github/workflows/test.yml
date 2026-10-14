@@ -396,3 +396,8 @@ jobs:
           node --test scripts/prepare-moxbot-credential-reader.test.mjs
           cargo test --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store,fixed-macos-reader
           cargo clippy --manifest-path src-tauri/agent-network-crypto/Cargo.toml --locked --features os-store,fixed-macos-reader --all-targets -- -D warnings
+      - name: Check actual MoXBots desktop credential routing configuration
+        env:
+          MYAGENTS_BUILD_PROFILE: moxbot
+          MOXBOTS_CREDENTIAL_WRITER_FAMILY: developer-id-v2
+        run: cargo check --manifest-path src-tauri/Cargo.toml --locked --lib --features moxbot-credential-reader

@@ -1,4 +1,8 @@
-## MAH-CREDENTIAL-PARENT-BUDGET-20261013 — native recovery continuation
+## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
+
+a838 已获用户批准、备份安装并核对实际 sidecar 来源；旧会话与身份显式读取成功，身份目标保存失败，未切换路由。当前做 publisher 分离及锁内授权事务修复；不重复旧授权、不收密码。行为测试与最终复核开放，17项 reader 打包检查通过。新包完成后用户已明确要求官网和 GitHub 试用下载公开；页面 IAB/合成下载及独立视觉检查完成，真实安装包下载与产品验收尚未完成。记录 `.agent-sync/tasks/feat-mah-credential-publisher-routes-20261014.md`。
+
+## MAH-CREDENTIAL-PARENT-BUDGET-20261013 — native recovery continuation (historical)
 
 Root owns integration, packaging, installation and acceptance. Exact 6ac native migration validated the old account/key but failed before routing-ledger commit; cause remains unknown. a8 sidebar native moves/section persistence passed independently. Parent-only budget/closed diagnostics candidate bae611a0 retains frozen reader v1 and has been integrated with accepted main cf741f at 4a513ec7. Parent41, AgentNet148, packaging13 and default/MoX production checks passed before this latest-main combination; combined checks and native recovery are still required. Do not repeat OS authorization automatically or declare network acceptance from synthetic probes. Record: `.agent-sync/tasks/feat-mah-credential-parent-budget-20261013.md`.
 
