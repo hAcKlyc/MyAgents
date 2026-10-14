@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { serve } from '@hono/node-server';
 
 const state = vi.hoisted(() => ({
   qa: true, dir: '.moxbot-modelqa', home: '', config: {} as Record<string, unknown>,
@@ -141,6 +143,28 @@ describe('isolated model QA title HTTP owner', () => {
     const id = randomUUID(); await dispatch(request({ requestId: id }));
     const result = await dispatch(new Request(`${endpoint}?requestId=${id}`, { method: 'DELETE' }));
     expect(result.status).toBe(200); expect((await result.json()).status).toBe('completed');
+  });
+  it('accepts an empty DELETE body through the real Node HTTP adapter', async () => {
+    let finish!: (value: string | null) => void;
+    state.generate.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const server = serve({ hostname: '127.0.0.1', port: 0, fetch: async req => await modelqaTitleHandler(req) ?? new Response(null, { status: 404 }) });
+    await once(server, 'listening'); const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Fixture port unavailable');
+    const origin = `http://127.0.0.1:${address.port}/api/modelqa/title`; const id = randomUUID();
+    const pending = fetch(origin, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerId: 'qa-kimi', modelId: 'k3', fixtureId: 'expense-summary', requestId: id }) });
+    try {
+      await vi.waitFor(() => expect(state.generate).toHaveBeenCalledTimes(1));
+      const invalid = await fetch(`${origin}?requestId=${id}`, { method: 'DELETE', body: '{}' });
+      expect(invalid.status).toBe(400); expect(state.generate.mock.calls[0][4].aborted).toBe(false);
+      const cancelled = await fetch(`${origin}?requestId=${id}`, { method: 'DELETE' });
+      expect(cancelled.status).toBe(202); expect(state.generate.mock.calls[0][4].aborted).toBe(true);
+      finish(null); expect((await pending).status).toBe(499);
+    } finally {
+      finish?.(null); await pending.catch(() => {});
+      if ('closeAllConnections' in server) server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
   });
   it('refuses an escaping state directory before model execution', async () => {
     const outside = join(state.home, 'other'); mkdirSync(outside); symlinkSync(outside, join(state.home, '.moxbot-modelqa'));

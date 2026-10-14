@@ -132,6 +132,20 @@ async function boundedJson(req: Request): Promise<unknown> {
   catch { throw new Error('INVALID_REQUEST'); }
 }
 
+async function hasEmptyBody(req: Request): Promise<boolean> {
+  const length = req.headers.get('Content-Length');
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) !== 0)) return false;
+  if (!req.body) return true;
+  const reader = req.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return true;
+      if (value.byteLength > 0) { await reader.cancel(); return false; }
+    }
+  } finally { reader.releaseLock(); }
+}
+
 export async function modelqaTitleHandler(req: Request): Promise<Response | null> {
   const url = new URL(req.url);
   if (url.pathname !== PATH) return null;
@@ -140,7 +154,7 @@ export async function modelqaTitleHandler(req: Request): Promise<Response | null
   try {
     if (req.method === 'DELETE') {
       const keys = [...url.searchParams.keys()]; const id = url.searchParams.get('requestId');
-      if (keys.length !== 1 || keys[0] !== 'requestId' || !id || !UUID.test(id) || req.body !== null) return failure(400, 'INVALID_REQUEST');
+      if (keys.length !== 1 || keys[0] !== 'requestId' || !id || !UUID.test(id) || !await hasEmptyBody(req)) return failure(400, 'INVALID_REQUEST');
       if (active?.requestId === id) { active.controller.abort(); return response(202, { ok: true, status: 'cancelling', requestId: id }); }
       const receipt = readReceipt();
       return receipt?.requestId === id ? response(200, { ok: true, status: 'completed', receipt }) : failure(404, 'OPERATION_NOT_FOUND');
