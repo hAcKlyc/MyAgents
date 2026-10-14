@@ -1,3 +1,4 @@
+import { modelqaUtilityCommand } from './modelqa-utility-command';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -89,7 +90,7 @@ export async function generateClaudeTextUtility(input: ClaudeTextUtilityInput): 
     env.PWD = directory;
     delete env.MYAGENTS_SESSION_ID;
     if (signal.aborted) return null;
-    child = spawn([resolveCommand('claude', env), ...claudeTextUtilityArgs(promptPath, input.model)], {
+    child = spawn([modelqaUtilityCommand('claude-code', 'system-cli', () => resolveCommand('claude', env)), ...claudeTextUtilityArgs(promptPath, input.model)], {
       cwd: directory, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
       detached: process.platform !== 'win32', windowsHide: true,
     });
