@@ -187,3 +187,7 @@ Approved combined27 is installed; actual owned account/device recovery, k3/direc
 把MoXBots小助理并入设置下方个人菜单，通知保持原功能。新增同源云端反馈页：用户提交和查看自己的反馈，管理员回复及处理；既有账号权限/PKCE登录、幂等/CAS和私有存储。记录 `.agent-sync/tasks/codex-feedback-center-20261015-3b6a3c97.md`；代码、fixture、main、云发布和客户端真实路径独立追踪。
 
 FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管理员处理已实现，代码/本地/独立UI验证通过；CI/main、生产与安装包验收分开，状态见任务记录。
+
+### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
+
+用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。

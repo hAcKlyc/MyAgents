@@ -15,6 +15,7 @@ import {
   getAndClearLastAgentError,
   getAgents,
   getAgentState,
+  getBuiltinExecutionStartedAt,
   getBuiltinLiveSessionSnapshot,
   getBuiltinSessionCompletionTerminal,
   getCurrentMcpServers,
@@ -274,7 +275,9 @@ export function createBuiltinSessionEngine(): SessionEngine {
 
     publishTranscriptSaveStatus(status) { publishBuiltinTranscriptSaveStatus(status); },
     getLiveSessionState() {
+      const executionStartedAt = getBuiltinExecutionStartedAt();
       return {
+        ...(executionStartedAt ? { executionStartedAt } : {}),
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),

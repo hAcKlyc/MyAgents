@@ -52,6 +52,12 @@ export class ProductTranscriptContent {
     return this.turnId ? this.writer.projection.turns.get(this.turnId) : undefined;
   }
 
+  /** A completed/restored turn is not the start of current execution. */
+  get executionStartedAt(): string | undefined {
+    const turn = this.currentTurn;
+    return turn?.status === 'running' ? turn.startedAt : undefined;
+  }
+
   get currentAssistantId(): string | null { return this.assistantId; }
 
   admitUser(message: SessionMessage, turnId?: string): void {

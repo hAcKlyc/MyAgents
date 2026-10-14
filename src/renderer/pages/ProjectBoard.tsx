@@ -8,6 +8,7 @@ import { formatTime, getFolderName } from '@/utils/taskCenterUtils';
 import { useProjectBoardData } from '@/features/project-board/useProjectBoardData';
 import { projectBoardRows, filterBoardRows, freshActivity, type BoardGroup, type BoardRow } from '@/features/project-board/projection';
 import { useBoardOverlay } from '@/features/project-board/useBoardOverlay';
+import SessionExecutionTime from '@/features/project-board/SessionExecutionTime';
 import ProjectBoardDetail from '@/features/project-board/ProjectBoardDetail';
 import './ProjectBoard.css';
 
@@ -72,16 +73,24 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
   }
 
   function card(row: BoardRow) {
-    return <button type="button" key={row.id} ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }}
-      className={`pb-card ${row.id === selectedId ? 'selected' : ''}`} onClick={() => select(row)}
-      aria-label={`${row.title} · ${rowState(row)}`} aria-pressed={row.id === selectedId} data-board-row={row.id}>
-      <div className="pb-card-kind">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div>
-      <h3>{row.title}</h3>
-      <p className="pb-card-summary" title={row.summary}>{row.summary || t('projectBoard.noSummary')}</p>
-      <div className={`pb-badge ${row.group}`}>{rowState(row)}</div>
-      <div className="pb-card-bottom"><span className="pb-card-action">{t(row.group === 'verifying' ? 'projectBoard.inspect' : row.group === 'needs' ? 'projectBoard.handle' : 'projectBoard.details')} ↗</span>
-        <time>{formatTime(new Date(row.updatedAt).toISOString())}</time></div>
-    </button>;
+    return <article key={row.id} className={`pb-card ${row.id === selectedId ? 'selected' : ''}`}>
+      <button type="button" ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }}
+        className="pb-card-main" onClick={() => select(row)}
+        aria-label={`${row.title} · ${rowState(row)}`} aria-pressed={row.id === selectedId} data-board-row={row.id}>
+        <div className="pb-card-kind">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div>
+        <h3>{row.title}</h3>
+        <p className="pb-card-summary" title={row.summary}>{row.summary || t('projectBoard.noSummary')}</p>
+        <div className={`pb-badge ${row.group}`}>{rowState(row)}</div>
+      </button>
+      <SessionExecutionTime snapshot={row.activity} now={data.now} />
+      <time className="pb-card-updated" dateTime={new Date(row.updatedAt).toISOString()} title={new Date(row.updatedAt).toLocaleString()}>
+        {t('projectBoard.updated')} {formatTime(new Date(row.updatedAt).toISOString())}
+      </time>
+      <div className="pb-card-bottom">
+        <button type="button" className="pb-card-action" onClick={() => select(row)}>{t(row.group === 'verifying' ? 'projectBoard.inspect' : row.group === 'needs' ? 'projectBoard.handle' : 'projectBoard.details')} ↗</button>
+        {row.sessions.length === 1 && <button type="button" className="pb-card-action pb-enter-session" onClick={() => openSession(row.sessions[0].id)} aria-label={t('projectBoard.enterSessionFor', { title: row.sessions[0].title })}>{t('projectBoard.enterSession')} ↗</button>}
+      </div>
+    </article>;
   }
 
   const other = visible.filter(r => r.group === 'other');
@@ -113,7 +122,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
           {!!other.length && <details className="pb-other" open={otherOpen} onToggle={e => setOtherOpen(e.currentTarget.open)}><summary>{t('projectBoard.groups.other')} · {other.length}</summary>
             <p className="pb-meta">{t('projectBoard.otherHint')}</p><div className="pb-other-grid">{other.map(card)}</div></details>}
         </> : <div className="pb-table-wrap"><table className="pb-table"><thead><tr><th>{t('projectBoard.task')}</th><th>{t('projectBoard.status')}</th><th className="summary-col">{t('projectBoard.summary')}</th><th className="time-col">{t('projectBoard.updated')}</th><th>{t('projectBoard.action')}</th></tr></thead>
-          <tbody>{visible.map(row => <tr key={row.id}><td><button type="button" ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className="title-button" onClick={() => select(row)}>{row.title}</button><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div></td><td><span className={`pb-badge ${row.group}`}>{rowState(row)}</span></td><td className="summary-col summary">{row.summary}</td><td className="time-col pb-meta">{formatTime(new Date(row.updatedAt).toISOString())}</td><td><button type="button" className="pb-button" onClick={() => select(row)}>{t('projectBoard.details')}</button></td></tr>)}</tbody></table></div>}
+          <tbody>{visible.map(row => <tr key={row.id}><td><button type="button" ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className="title-button" onClick={() => select(row)}>{row.title}</button><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div></td><td><span className={`pb-badge ${row.group}`}>{rowState(row)}</span><SessionExecutionTime snapshot={row.activity} now={data.now} /></td><td className="summary-col summary">{row.summary}</td><td className="time-col pb-meta">{formatTime(new Date(row.updatedAt).toISOString())}</td><td><button type="button" className="pb-button" onClick={() => select(row)}>{t('projectBoard.details')}</button>{row.sessions.length === 1 && <button type="button" className="pb-card-action pb-enter-session" onClick={() => openSession(row.sessions[0].id)} aria-label={t('projectBoard.enterSessionFor', { title: row.sessions[0].title })}>{t('projectBoard.enterSession')} ↗</button>}</td></tr>)}</tbody></table></div>}
       </div>
       <footer className="pb-footer"><span>{data.checkedAt ? t('projectBoard.snapshotAt', { time: formatTime(new Date(data.checkedAt).toISOString()) }) : t('projectBoard.snapshotPending')}{unknownCount ? ` · ${t('projectBoard.unknownCount', { count: unknownCount })}` : ''}</span>
         <span>{data.unobservedCount ? t('projectBoard.boundedSnapshot', { count: data.unobservedCount }) : t('projectBoard.snapshotHint')}</span></footer>
