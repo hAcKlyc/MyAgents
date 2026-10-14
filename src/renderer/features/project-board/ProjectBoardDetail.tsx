@@ -1,3 +1,4 @@
+import SessionExecutionTime from './SessionExecutionTime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { taskGet, taskRun, taskRerun, taskUpdateStatus } from '@/api/taskCenter';
@@ -92,6 +93,7 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
           {task && task.executionMode !== 'once' && <div className="pb-detail-note">{t('projectBoard.scheduleHint')}</div>}
           {(task?.executionError || task?.lastExecution?.error) && <div className="pb-error">{task.executionError || task.lastExecution?.error}</div>}
         </section>
+        <SessionExecutionTime snapshot={row.activity} now={now} />
         <section className="pb-detail-section"><h3>{t('projectBoard.summary')}</h3><p>{task?.description || row.summary || t('projectBoard.noSummary')}</p></section>
         <div className="pb-detail-note">{t('projectBoard.originalHint')}</div>
       </>}

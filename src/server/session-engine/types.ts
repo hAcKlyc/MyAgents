@@ -267,6 +267,8 @@ export type SessionEngineLiveState = {
   isBusy: boolean;
   /** Actual root-blocking human interaction, not an async child question. */
   waitingForUser?: boolean;
+  /** Start of the current product transcript turn; absent during pre-warm. */
+  executionStartedAt?: string;
 };
 
 export type SessionEngineLatestResult = {

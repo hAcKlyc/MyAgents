@@ -19,6 +19,17 @@ function setup() {
 }
 
 describe('adapter product content identities', () => {
+  it.each(['complete','stopped','error','interrupted'] as const)('exposes only running turn start and clears it after %s', async status => {
+    const {content,writer,user} = setup();
+    expect(content.executionStartedAt).toBeUndefined();
+    user('u1');
+    expect(content.executionStartedAt).toBe('2026-09-12T00:00:00Z');
+    content.finishTurn(status);
+    expect(content.executionStartedAt).toBeUndefined();
+    content.admitUser({id:'u2',role:'user',content:'next',timestamp:'2026-09-12T01:00:00Z'});
+    expect(content.executionStartedAt).toBe('2026-09-12T01:00:00Z');
+    await writer.close();
+  });
   it('keeps diagnostics independent while native text, attachments and usage settle on their original targets', async () => {
     const { writer, content, user, durable } = setup();
     user('u1');

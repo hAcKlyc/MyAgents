@@ -30,3 +30,11 @@ MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/project-board-validation/run.mjs --c
 源码、远端 main、安装与真实路径分别追踪于 `.agent-sync/tasks/codex-project-board-20261014-da9bc0a5.md`。本任务不修改云服务、账号凭据或现有 Host。当前客户端更新由既有安装 owner 串行维护，未经独占窗口交接不并发换包或退出应用。安装交付需要实际冻结源码/包内 renderer与server来源、有效签名、回滚和原生看板路径复验。
 
 集成后本地验证：typecheck、完整lint、99项相关unit/DOM、12组隔离React交互与MoXBots生产web构建通过；独立审阅的产品文件未因main同步发生变化。已有dependency-cruiser warnings没有降级为新增错误，未修改无关依赖。固定源/看板bundle hash见validation/source-hashes.json。PR31等待当前头CI；已安装客户端不包含此次看板。
+
+## 会话时长与快捷入口（MOXBOTS-PROJECT-BOARD-002）
+
+卡片将“最近更新”明确标注，与“本轮已用”分开；列表和详情使用同一计时投影。本轮时长从内置/外部 Runtime 的当前 product transcript turn.startedAt 读取，由执行 owner 计算墙钟耗时（含等待答复），不以 Session 创建时间、lastActiveAt 或 Sidecar uptime 替代。未取得开始时间明确显示不可用，空闲不运行计时器。入口/刷新仍是有限只读查询；前端一秒计时不触发网络轮询，一分钟后仅显示查询当时的快照时长并提示刷新。
+
+卡片与列表有独立“进入会话”按钮，单关联会话直接使用既有 OPEN_SESSION_IN_NEW_TAB 进入准确 Session；多关联会话仍通过详情选择，避免随意打开某次历史执行。标题区域/详情按钮继续打开详情，独立按钮不嵌套；键盘可操作，返回保留看板状态。
+
+隔离验证可设置 `PROJECT_BOARD_AUDIT_OUTPUT=/tmp/board-audit`，避免重写版本管理中的旧验收截图。新增计时、快捷入口、过期/恢复检查使用实际 React 组件和合成数据，不代表原生已安装。

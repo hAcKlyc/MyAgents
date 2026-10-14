@@ -181,3 +181,7 @@ User specifically approved29 update; native owned-account recovery, bottom-left 
 ### MOXBOTS-AUTH-HOST-20261014 final native acceptance
 
 Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.
+
+### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
+
+用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；153项unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，当前PR/main交付与统一候选包原生验收分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。

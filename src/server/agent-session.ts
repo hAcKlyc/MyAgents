@@ -7719,6 +7719,10 @@ export function getAgentState(): {
   return { agentDir, sessionState, hasInitialPrompt };
 }
 
+export function getBuiltinExecutionStartedAt(): string | undefined {
+  return getBuiltinProductContent()?.executionStartedAt;
+}
+
 export function getLastBuiltinAssistantText(): string {
   const product = getBuiltinProductContent();
   if (product) {
