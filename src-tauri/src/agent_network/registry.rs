@@ -56,6 +56,34 @@ pub(crate) struct ConnectionView {
     pub url: Option<String>,
     pub removing: bool,
     pub snapshot: NetworkSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owned_account: Option<OwnedAccountView>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OwnedAccountView {
+    pub state: &'static str,
+    pub principal_id: String,
+    pub expires_at: Option<u64>,
+}
+
+fn owned_account_state(metadata: Option<(u64, bool)>, error: Option<&str>) -> &'static str {
+    match error {
+        Some("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED") => "authorizationRequired",
+        Some(
+            "OWNED_SESSION_INVALID"
+            | "OWNED_SESSION_RECORD_MISSING"
+            | "SPACE_REAUTH_REQUIRED"
+            | "ACCOUNT_BINDING_CHANGED"
+            | "OWNED_ACCOUNT_REVOKED",
+        ) => "signInRequired",
+        Some("NETWORK_CREDENTIAL_STORE_UNAVAILABLE" | "NETWORK_CREDENTIAL_STORE_INVALID") => {
+            "unavailable"
+        }
+        _ if metadata.is_some_and(|(_, live)| live) => "authenticated",
+        _ if metadata.is_some() => "signInRequired",
+        _ => "unavailable",
+    }
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +92,7 @@ pub(crate) struct RegistryView {
     pub selfhost_enabled: bool,
     pub selected: String,
     pub connections: Vec<ConnectionView>,
+    pub owned_service_url: Option<&'static str>,
 }
 pub(crate) type ManagedAgentNetwork = Arc<NetworkRegistry>;
 pub(crate) struct NetworkRegistry {
@@ -250,6 +279,7 @@ impl NetworkRegistry {
             url: None,
             removing: false,
             snapshot: self.snapshot(),
+            owned_account: None,
         }];
         for c in stored.iter().filter(|_| enabled) {
             let snapshot = self
@@ -272,6 +302,7 @@ impl NetworkRegistry {
                 url: Some(c.descriptor.issuer.clone()),
                 removing: c.removing,
                 snapshot,
+                owned_account: None,
             });
         }
         if enabled {
@@ -281,10 +312,11 @@ impl NetworkRegistry {
                 .unwrap_or_else(|e| e.into_inner())
                 .iter()
             {
-                let snapshot = self
-                    .connection(&c.id)
+                let actor = self.connection(&c.id).ok();
+                let metadata = actor.as_ref().and_then(|a| a.owned_session_metadata());
+                let snapshot = actor
                     .map(|a| a.snapshot())
-                    .unwrap_or_else(|_| NetworkSnapshot {
+                    .unwrap_or_else(|| NetworkSnapshot {
                         state: "disconnected",
                         principal_id: Some(c.principal_id.clone()),
                         network_id: Some(c.network_id.clone()),
@@ -294,6 +326,14 @@ impl NetworkRegistry {
                         auth_generation: 0,
                         connection_id: c.id.clone(),
                     });
+                let owned_account = OwnedAccountView {
+                    state: owned_account_state(
+                        metadata,
+                        snapshot.error.as_ref().map(|e| e.code.as_str()),
+                    ),
+                    principal_id: c.principal_id.clone(),
+                    expires_at: metadata.map(|(expires_at, _)| expires_at),
+                };
                 views.push(ConnectionView {
                     id: c.id.clone(),
                     name: c.descriptor.name.clone(),
@@ -301,6 +341,7 @@ impl NetworkRegistry {
                     url: Some(c.descriptor.issuer.clone()),
                     removing: c.removing,
                     snapshot,
+                    owned_account: Some(owned_account),
                 });
             }
         }
@@ -316,6 +357,11 @@ impl NetworkRegistry {
                 OFFICIAL.into()
             },
             connections: views,
+            owned_service_url: if crate::app_dirs::IS_MOXBOT {
+                Some(option_env!("MOXBOTS_OWNED_SERVICE_URL").unwrap_or("https://140.143.183.232"))
+            } else {
+                None
+            },
         }
     }
     pub(crate) async fn select(
@@ -383,7 +429,8 @@ impl NetworkRegistry {
             .unwrap_or_else(|e| e.into_inner())
             .cancel(operation_id)
     }
-    /// Restore only the saved session and existing device key. No config writes,
+    /// Restore only the saved session and existing device key. Reader migration
+    /// may create verified local credential copies; no membership/config edits,
     /// new login, identity replacement, or membership grant occur in this path.
     pub(crate) async fn owned_restore_credentials(
         self: &Arc<Self>,
@@ -430,6 +477,7 @@ impl NetworkRegistry {
             (record, previous)
         };
         let preflight = async {
+            crate::ulog_info!("[agent-network] credential recovery stage=session-read");
             let saved = record.clone();
             let token = cancelled.clone();
             let account = tokio::task::spawn_blocking(move || {
@@ -450,7 +498,9 @@ impl NetworkRegistry {
             if cancelled.load(Ordering::Acquire) {
                 return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
             }
+            crate::ulog_info!("[agent-network] credential recovery stage=session-validated");
             let store = super::identity_desktop::authorize_owned_identity(
+                // Session has passed durable scope and expiry checks.
                 account.clone(),
                 &record.device_id,
                 cancelled.clone(),
@@ -458,14 +508,19 @@ impl NetworkRegistry {
             .await?;
             Ok::<_, NetworkError>((account, store))
         };
-        let (account, store) =
-            match tokio::time::timeout(std::time::Duration::from_secs(180), preflight).await {
-                Ok(result) => result?,
-                Err(_) => {
-                    cancelled.store(true, Ordering::Release);
-                    return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
-                }
-            };
+        let (account, store) = match tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            preflight,
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                cancelled.store(true, Ordering::Release);
+                crate::ulog_warn!("[agent-network] credential recovery code=NETWORK_CREDENTIAL_STORE_UNAVAILABLE stage=deadline");
+                return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+            }
+        };
         let _mutation = self.mutation.lock().await;
         self.check_restore_boundary(expected_revision, &cancelled)?;
         if !self
@@ -478,6 +533,26 @@ impl NetworkRegistry {
             return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
         }
         (account.guard)()?;
+        // Copy only the validated session to the reader-owned slot. No old item
+        // or membership is changed; cancellation stays available during IPC.
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test)))]
+        {
+            let migration_account = account.clone();
+            let migration_record = record.clone();
+            let migration_cancelled = cancelled.clone();
+            tokio::task::spawn_blocking(move || {
+                super::owned_account_desktop::promote_account(
+                    &migration_account,
+                    &migration_record.device_id,
+                    &migration_record.binding_id,
+                    &migration_cancelled,
+                )
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            self.check_restore_boundary(expected_revision, &cancelled)?;
+            (account.guard)()?;
+        }
         // This mutex linearizes cancellation against publication. It never spans
         // OS or network reads, and an earlier Cancel always fences late results.
         let mut operations = self
@@ -519,6 +594,7 @@ impl NetworkRegistry {
         operations.finish(&operation_id, &cancelled);
         drop(operations);
         super::actor::start(app.clone(), actor, manager);
+        crate::ulog_info!("[agent-network] credential recovery stage=actor-published");
         let view = self.view();
         let _ = app.emit("agent-network:connections-changed", view.clone());
         Ok(view)
@@ -811,9 +887,11 @@ impl NetworkRegistry {
         )
         .await?;
         if let Some(scope) = stored.revoked_scope.clone() {
-            tokio::task::spawn_blocking(move || super::crypto::OsIdentityStore::delete(&scope))
-                .await
-                .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            tokio::task::spawn_blocking(move || {
+                super::identity_desktop::selected_store().delete(&scope)
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
         }
         stored.removing = false;
         stored.reenrolling = false;
@@ -1097,7 +1175,7 @@ impl NetworkRegistry {
                     if let Some(previous) =
                         previous_scope.filter(|old| old.key_generation != scope.key_generation)
                     {
-                        super::crypto::OsIdentityStore::delete(&previous)?;
+                        super::identity_desktop::selected_store().delete(&previous)?;
                     }
                     if !already_confirmed {
                         persist(checkpoint.clone(), checkpoint_selected)?;
@@ -1105,7 +1183,11 @@ impl NetworkRegistry {
                     }
                     Ok(())
                 },
-                || super::crypto::OsIdentityStore::delete(&scope).map_err(NetworkError::from),
+                || {
+                    super::identity_desktop::selected_store()
+                        .delete(&scope)
+                        .map_err(NetworkError::from)
+                },
                 || {
                     persist(next.clone(), selected.clone())?;
                     *owner.stored.lock().unwrap_or_else(|e| e.into_inner()) = next;
@@ -1297,7 +1379,7 @@ impl Drop for RestoreLease {
     }
 }
 fn selfhost_gate_enabled(config: &Value) -> bool {
-    config["agentNetworkSelfhostDevGate"].as_bool() == Some(true)
+    crate::app_dirs::IS_MOXBOT || config["agentNetworkSelfhostDevGate"].as_bool() == Some(true)
 }
 /// One removal lifecycle: durable confirmation precedes credential deletion;
 /// forgetting config is last. Any failure leaves the previous recovery point.
@@ -1825,18 +1907,63 @@ mod tests {
     }
 
     #[test]
-    fn selfhost_gate_requires_explicit_true() {
+    fn myagents_requires_explicit_gate_while_moxbot_has_product_owned_networks() {
         for config in [
             json!({}),
             json!({"agentNetworkSelfhostDevGate":false}),
             json!({"agentNetworkSelfhostDevGate":"true"}),
             json!({"agentNetworkSelfhostDevGate":1}),
         ] {
-            assert!(!selfhost_gate_enabled(&config));
+            assert_eq!(selfhost_gate_enabled(&config), crate::app_dirs::IS_MOXBOT);
         }
         assert!(selfhost_gate_enabled(
             &json!({"agentNetworkSelfhostDevGate":true})
         ));
+    }
+    #[test]
+    fn owned_account_projection_separates_transport_from_authentication() {
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("NETWORK_OFFLINE")),
+            "authenticated"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("OWNED_SESSION_INVALID")),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, false)), None),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(None, Some("CONNECTOR_NOT_READY")),
+            "unavailable"
+        );
+        assert_eq!(owned_account_state(None, None), "unavailable");
+        assert_eq!(
+            owned_account_state(None, Some("OWNED_SESSION_RECORD_MISSING")),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(
+                Some((100, true)),
+                Some("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
+            ),
+            "authorizationRequired"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("NETWORK_CREDENTIAL_STORE_INVALID")),
+            "unavailable"
+        );
+        let serialized = serde_json::to_value(OwnedAccountView {
+            state: "authenticated",
+            principal_id: "test-principal".into(),
+            expires_at: Some(100),
+        })
+        .unwrap();
+        assert_eq!(
+            serialized,
+            json!({"state":"authenticated", "principalId":"test-principal", "expiresAt":100})
+        );
     }
     #[test]
     fn developer_gate_pauses_only_selfhost_and_reactivation_rejects_retired_generations() {

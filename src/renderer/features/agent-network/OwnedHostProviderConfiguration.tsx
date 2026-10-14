@@ -256,6 +256,20 @@ export function OwnedHostProviderConfiguration({ locator, scope, snapshot, capab
         <button type="button" className={button} disabled={!online || busy || !!pending || !supports("resources.create") || !workspace.rootId || !validHostChildName(childName)} onClick={() => void createChild()}>{t("agentNetwork.ownedHost.createChildAgent")}</button>
       </div>
       <button type="button" className={button} disabled={!online || busy || !!pending || !supports("resources.register") || !workspace.rootId || !workspace.relativePath} onClick={() => void registerSelected()}>{t("agentNetwork.ownedHost.registerSelectedAgent")}</button>
+      <section className="space-y-2 border-t border-[var(--line)] pt-3" aria-label={t("agentNetwork.ownedHost.agents")}>
+        <h4 className="text-sm font-semibold text-[var(--ink)]">{t("agentNetwork.ownedHost.agents")}</h4>
+        <ul className="space-y-2 text-sm text-[var(--ink-secondary)]">
+          {snapshot.resources.agents.map(agent => (
+            <li key={agent.agentId} className="min-w-0 break-words">
+              <span>{agent.name} · {t(agent.enabled ? "agentNetwork.ownedHost.enabled" : "agentNetwork.ownedHost.disabled")}</span>
+              <span className="block text-xs text-[var(--ink-muted)]">{agent.workspacePath}</span>
+            </li>
+          ))}
+          {snapshot.resources.agents.length === 0 && (
+            <li className="text-[var(--ink-muted)]">{t("agentNetwork.ownedHost.empty")}</li>
+          )}
+        </ul>
+      </section>
       <form className="space-y-2 border-t border-[var(--line)] pt-3" onSubmit={e => { e.preventDefault(); const value = credential; setCredential(""); void saveCredential(value); }}>
         <label className="block space-y-1 text-sm text-[var(--ink)]"><span>{t("agentNetwork.ownedHost.targetKey")}</span><input type="password" autoComplete="new-password" className={input} value={credential} onChange={e => setCredential(e.target.value)} disabled={!online || snapshot.stopping || !supportsCredentialWrite || !snapshot.credentials.writeAvailable || busy || pipelineLock.current || !!pending || profileDirty || !(persistedProviderId || snapshot.settings?.providerId)} /></label>
         <p className="text-xs text-[var(--ink-muted)]">{snapshot.credentials.configured ? t("agentNetwork.ownedHost.targetKeyConfigured") : t("agentNetwork.ownedHost.credentialMissing")}</p>

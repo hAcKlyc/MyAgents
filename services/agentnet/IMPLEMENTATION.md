@@ -1,10 +1,29 @@
 # MAH-SELFHOST-SERVICE-20261012
 
+## Current acceptance checkpoint — MAH-DESKTOP-MANAGEMENT-20261013
+
+This checkpoint supersedes the incomplete-client and relay statements in the historical milestones below. Source now includes the public descriptor, owned desktop/Host account adapters, real WS relay and encrypted Host management IPC; this is independently deployed service code, separate from the official account system.
+
+- [x] Automated/native two-device identity, relay/Pairs, management persistence, receipt and restart checks.
+- [x] Real MoX bot desktop account login and automatic online recovery after desktop restart; original MyAgents remains separate.
+- [x] Installed Linux connector CA directory and public-read permission fixes, safe same-release migration, original-service preservation, and actual `owned-auth-start` success. The first Host browser request expired without authorization.
+- [x] User-authorized Host login and enrollment; the installed Linux Host is visible online in the independent cloud network.
+- [x] Real b116 desktop model configuration and disabled Agent creation, persisted server readback and own Host service restart. Model API credentials and paid execution remain unconfigured.
+- [x] Independent IP-SAN HTTPS authentication and AgentNet deployment on the authorized cloud server, preserving its existing app. Target connection details and credentials remain outside Git.
+- [ ] Fixed credential reader first migration survives cold startup and a different desktop build without repeated authorization. First reads succeeded; same-build cold startup still returned authorization required, with no automatic retry.
+- [ ] Required CI, main delivery and deployment correspondence for the accepted final artifacts.
+
+The two desktop builds preserve the same signed reader bytes. Synthetic cold-process queries also pass with hardened runtime and an App-contained helper, but do not reproduce the legacy-record rejection. Real credential reads and authorization retries remain stopped while investigating; the verified b116 desktop has been restored. Required CI passed at d30235b3; the final native/update gate is still open.
+
+Real model calls remain zero. Product-supplied credentials and any required paid-call authorization are a separate execution gate; they must not be requested through chat.
+
 ## Administrator control plane and deployed service compatibility
 
 BOTS-CLOUD-ADMIN-001 adds optional authenticated registry administration. Status and acceptance are tracked in [the implementation contract](planning/BOTS-CLOUD-ADMIN-IMPLEMENTATION.md). The four metadata/relay source files preserve the independently deployed `04faeb1d` safeguards (same-principal device address, persisted catalog preservation, raw heartbeat and private initialization locking). The Host management base from `b116404e` is integrated on an isolated branch based on current main (`e9767263`); its previously verified desktop path covered model configuration save, disabled Agent creation, and Host restart. This branch still needs CI and review before main delivery. Fixed-reader no-prompt packaging and caller changes are excluded and remain a separate draft; no new desktop package was built, signed, or installed in this stage.
 
 The historical foundation milestones below are retained as history. Current source exposes the owned descriptor and real bounded WS relay; the earlier no-relay/no-client stage statements do not describe current capability.
+
+## Historical milestones
 
 Goal: deploy an independently owned AgentNet service including browser login, device identity, zero-Agent discovery, encrypted relay, and desktop-to-Host configuration. This service does not require access to the upstream author's private server or official account credentials.
 

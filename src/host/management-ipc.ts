@@ -234,13 +234,34 @@ type ConnectionSession = {
   receiveBytes: number;
 };
 
+type PendingConnection = { socket: Socket; closed(): boolean; release(): void };
+
 async function connectOnce(
   socketPath: string,
   expectedUid: number,
   expectedGid: number,
-): Promise<Socket> {
+): Promise<PendingConnection> {
   await verifySocketPath(socketPath, expectedUid, expectedGid);
   const socket = createConnection({ path: socketPath });
+  // Observe the entire async path-validation handoff. A peer can close after
+  // connect but before the caller installs its long-lived session listeners.
+  let startupClosed = false;
+  const markClosed = () => {
+    startupClosed = true;
+  };
+  socket.on("close", markClosed);
+  socket.on("end", markClosed);
+  socket.on("error", markClosed);
+  const release = () => {
+    socket.off("close", markClosed);
+    socket.off("end", markClosed);
+    socket.off("error", markClosed);
+  };
+  const closed = () =>
+    startupClosed ||
+    socket.destroyed ||
+    socket.readableEnded ||
+    socket.writableEnded;
   try {
     await new Promise<void>((resolveConnect, reject) => {
       const timer = setTimeout(
@@ -272,8 +293,10 @@ async function connectOnce(
       socket.once("connect", onConnect);
     });
     await verifySocketPath(socketPath, expectedUid, expectedGid);
-    return socket;
+    if (closed()) throw new IpcError("MANAGEMENT_IPC_NOT_READY", true);
+    return { socket, closed, release };
   } catch (error) {
+    release();
     socket.destroy();
     if (error instanceof IpcError) throw error;
     if (retryableFilesystemError(error))
@@ -346,14 +369,21 @@ export async function connectHostManagementIpc(options: {
     reconnectTask = (async () => {
       while (!stopped && !options.isShuttingDown() && !current) {
         try {
-          const socket = await connectOnce(
+          const pending = await connectOnce(
             options.socketPath,
             options.expectedUid,
             options.expectedGid,
           );
+          const socket = pending.socket;
           if (stopped || options.isShuttingDown()) {
+            pending.release();
             socket.destroy();
             break;
+          }
+          if (pending.closed()) {
+            pending.release();
+            socket.destroy();
+            throw new IpcError("MANAGEMENT_IPC_NOT_READY", true);
           }
           const session: ConnectionSession = {
             socket,
@@ -364,8 +394,9 @@ export async function connectHostManagementIpc(options: {
           current = session;
           failures = 0;
           connectedOnce = true;
-          settleInitial();
           attachSession(session);
+          pending.release();
+          settleInitial();
           return;
         } catch (error) {
           if (!(error instanceof IpcError) || !error.retryable) {

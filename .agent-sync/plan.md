@@ -1,3 +1,14 @@
+## MOXBOTS-AUTH-HOST-20261014 — current continuation
+
+Root owns integration. Human-approved29 is installed; owned account restoration, bottom-left account entry, actual k3/model-directory save, disabled Agent creation and desktop plus both Host services restart persistence pass without a new keychain prompt. Read-only extended Agent list is repaired with three regressions. Latest main model-center source is being incorporated with cloud_models remaining disabled. Final combined tests/candidate/CI and PR14/main/public download delivery remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
+
+## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
+
+5f1a8feb 七CI、两个完整候选签名与资源验证通过；用户后来明确要求安装/官网上架，直接从a838更新5f并真实启动，84fd未运行。官网下载公开版本7/source7da419c，实际下载ZIP大小与SHA和安装原包相同。试用包未公证，公开不等于全部Native/业务验收。看板owner已完成真实受控任务与持久化路径；当前云会话 OWNED_SESSION_INVALID，凭据迁移/免提示冷启动/远程配置仍开放，UI遇用户操作冲突后停止。PR14仍草稿，未主干交付。下一步及精确证据见 `.agent-sync/tasks/feat-mah-credential-publisher-routes-20261014.md`。
+
+## MAH-CREDENTIAL-PARENT-BUDGET-20261013 — native recovery continuation (historical)
+
+Root owns integration, packaging, installation and acceptance. Exact 6ac native migration validated the old account/key but failed before routing-ledger commit; cause remains unknown. a8 sidebar native moves/section persistence passed independently. Parent-only budget/closed diagnostics candidate bae611a0 retains frozen reader v1 and has been integrated with accepted main cf741f at 4a513ec7. Parent41, AgentNet148, packaging13 and default/MoX production checks passed before this latest-main combination; combined checks and native recovery are still required. Do not repeat OS authorization automatically or declare network acceptance from synthetic probes. Record: `.agent-sync/tasks/feat-mah-credential-parent-budget-20261013.md`.
 # BOTS-MODEL-CENTER-001
 
 2026-10-14：模型中心、Bot builtin/API 模型分配和调用监控已由 PR38 合入 main 并发布现有统一 `/admin`；源码与主干七项 CI 全通过，运行二进制/资源来源以及真实管理员配置、分配、重启持久化和监控路径已复验。用户明确后续自行填写供应商，本次不导入已有配置、不调用模型，不改变实际 Host 委派权限。发布/验收与协作证据见 `dev-docs/bots-model-center-production-acceptance.md`；后续供应商/Host/付费路径与已发布的管理功能分开追踪。
@@ -132,10 +143,19 @@ User requires a single MoXBots cloud administrator console for users, Hosts, Bot
 
 当前Agent修改后端自动命名：首个成功人类问答后异步概括对象和动作，扩大有界上下文并保留尾部需求，拒绝认证错误/失败终态。手动命名不覆盖；不批量修改历史。任务记录 `.agent-sync/tasks/codex-title-summary-20261014-7b0a1e0a.md`。自动测试、真实存储重载及DOM回归通过；当前源CI/main、统一包和真实模型/原生侧栏验收分开追踪。
 
+## MAH-CREDENTIAL-OFFICIAL-PUBLISHER-20261014
+
+- [x] Closed formal-publisher reader release, source a8387448, signed/extracted desktop artifact and seven CI checks.
+- [x] Paired Linux cf741f upgrade with backup and preserved identity/config/credential/policy evidence.
+- [ ] Exact package installation confirmation and actual migration/restart/update acceptance.
+- [ ] Real desktop remote configuration and disabled Agent persistence, then PR14/main delivery.
+
+Owner: root. Record: .agent-sync/tasks/feat-mah-credential-official-publisher-20261014.md. Do not overwrite frozen package worktrees or retry old OS authorization automatically.
+
 ## MAH-HOST-DAEMON-STATUS-20261014
 
 - [x] Explicit owned boot option and additive doctor status, source79c25045; actual MoX enablement and restart/reconnect acceptance passed.
-- [ ] PR32 CI/main delivery; desktop PR14 native gates remain pending separately.
+- [x] PR32 all six checks passed; merged main d86f7505f641ecbe6d136142c11422ef063ea0e5 has the exact reviewed tree. Desktop PR14 native gates remain pending separately.
 
 Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No paid calls, other namespace or machine reboot.
 
@@ -148,3 +168,13 @@ Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No 
 ### BOTS-ADMIN-LOGIN-UX-001 最终交付（2026-10-14）
 
 已交付PR33/main1ece497d并发布现有统一云后台：当前标签页中文OIDC登录及固定后台返回替代旧弹窗/独立标签页fallback，错误/取消/过期可恢复。代码七项CI通过，Linux制品及Dex资源manifest/运行源对应已核实；真实受控管理员登录→中文确认→Bots目录→退出204，以及callback400恢复通过。仅两个既有云服务更新展示和回跳，原身份与权限不变，101 Host及模型未操作。备份标记 moxbots-login-ux-backup-20261014T101958，恢复原unit+Dex配置即可回滚且保留业务状态。详细最终验收和后续状态见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`；现网维护窗口已释放，后续无本任务云端写入。
+
+
+### MOXBOTS-AUTH-HOST-20261014 actual29 acceptance
+
+User specifically approved29 update; native owned-account recovery, bottom-left menu, remote Kimi Code/k3 save, disabled Agent creation and client+Host service restart persistence now pass without a new keychain prompt or model call. Extended Host resources had a display gap; a read-only registered-Agent list and three regressions are added. Final latest-main integration, combined candidate/CI, PR14 merge and public trial refresh remain open. Authoritative current scope/evidence/next step: `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`; old114/29 pending-approval notes are historical.
+
+
+### MOXBOTS-AUTH-HOST-20261014 final native acceptance
+
+Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.

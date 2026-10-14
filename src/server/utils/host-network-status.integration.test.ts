@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { chmod, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readNetworkStatus } from '../../host/network-status';
+import { managementNetworkStatus, readNetworkStatus } from '../../host/network-status';
 
 const hostId = '00000000-0000-4000-8000-000000000001';
 const folders: string[] = [];
@@ -19,6 +19,17 @@ describe('Host network diagnostic projection', () => {
     const path = await fixture({ ...snapshot, token: 'must-not-leave' } as typeof snapshot);
     expect(await readNetworkStatus(path, process.getuid!(), hostId, 100)).toEqual({ available: true,
       state: 'ready', ready: true, deviceId: hostId, networkId: hostId, errorCode: null, reportedAt: 100 });
+  });
+  it('projects ready and unavailable diagnostics into the strict management wire contract', async () => {
+    const path = await fixture();
+    const ready = await readNetworkStatus(path, process.getuid!(), hostId, 100);
+    // Rust AgentNetStatus denies unknown fields. Forwarding the full ready
+    // diagnostic used to close both snapshot and inspect management channels.
+    expect(managementNetworkStatus(ready)).toEqual({ available: true, reason: null });
+    expect(managementNetworkStatus(await readNetworkStatus(path, process.getuid!(), hostId, 131)))
+      .toEqual({ available: false, reason: 'connector-status-stale' });
+    expect(managementNetworkStatus(await readNetworkStatus(undefined, undefined, hostId)))
+      .toEqual({ available: false, reason: 'not-integrated' });
   });
   it('rejects stale/future status, another Host and readiness contradiction', async () => {
     const path = await fixture();

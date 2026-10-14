@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:net";
+import { createServer, type Socket, type Server } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { build } from "esbuild";
@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { connectHostManagementIpc } from "../host/management-ipc";
 import {
   configureHost,
@@ -17,12 +17,52 @@ import {
   type HostConfig,
 } from "../host/management";
 
+const observation = vi.hoisted(() => ({
+  clients: [] as import("node:net").Socket[],
+  gate: undefined as
+    | undefined
+    | { path: string; seen: number; entered(): void; wait: Promise<void> },
+}));
+// Keep the real guarded Unix transport. Capture only our client handles so the
+// test can prove close has already occurred before the filesystem await resumes.
+vi.mock("node:net", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:net")>();
+  return {
+    ...actual,
+    createConnection: (...args: Parameters<typeof actual.createConnection>) => {
+      const socket = actual.createConnection(...args);
+      observation.clients.push(socket);
+      return socket;
+    },
+  };
+});
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    realpath: async (...args: Parameters<typeof actual.realpath>) => {
+      const result = await actual.realpath(...args);
+      const gate = observation.gate;
+      if (gate && args[0] === gate.path && ++gate.seen === 2) {
+        gate.entered();
+        await gate.wait;
+      }
+      return result;
+    },
+  };
+});
+
+let releaseGate: (() => void) | undefined;
 let scratch: string | undefined;
 let listener: Server | undefined;
 let child: ChildProcess | undefined;
 let client: { close(): Promise<void> } | undefined;
 let peers: Array<import("node:net").Socket> = [];
 afterEach(async () => {
+  releaseGate?.();
+  releaseGate = undefined;
+  observation.gate = undefined;
+  observation.clients = [];
   if (child && child.exitCode === null) {
     const exited = once(child, "exit");
     child.kill("SIGTERM");
@@ -956,3 +996,91 @@ it('accepts only the closed portable extension fields and sends legal legacy upg
   const refused=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'config.provider.set',params:{...requests[2][1],provider:{...profile,env:{secret:'no'}}}}));expect((await refused).result).toEqual({kind:'error',code:'INVALID_REQUEST'});
   const legacy=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'host.snapshot',params:{}}));expect((await legacy).result).toEqual({kind:'error',code:'HOST_MANAGEMENT_UPGRADE_REQUIRED'});
 });
+
+async function within<T>(promise: Promise<T>, timeout = 3000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("IPC_HANDOFF_TEST_DEADLINE")),
+          timeout,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+it("retries a peer closed during post-connect path verification before publishing the initial session", async () => {
+  scratch = await mkdtemp(join(homedir(), ".mah-host-mgmt-hand-"));
+  await chmod(scratch, 0o700);
+  const ipcDirectory = join(scratch, "ipc");
+  await mkdir(ipcDirectory, { mode: 0o750 });
+  await chmod(ipcDirectory, 0o750);
+  const socketPath = join(ipcDirectory, "m.sock");
+  let entered!: () => void;
+  const verificationEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const wait = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  observation.gate = { path: ipcDirectory, seen: 0, entered, wait };
+  let acceptedAgain!: (socket: Socket) => void;
+  const secondAccepted = new Promise<Socket>((resolve) => {
+    acceptedAgain = resolve;
+  });
+  listener = createServer((peer) => {
+    peers.push(peer);
+    if (peers.length === 2) acceptedAgain(peer);
+  });
+  listener.listen(socketPath);
+  await once(listener, "listening");
+  await chmod(socketPath, 0o660);
+  const dispatch = vi.fn(async () => ({ kind: "snapshot", version: 1 }));
+  const onFailure = vi.fn();
+  let published = false;
+  const starting = connectHostManagementIpc({
+    socketPath,
+    expectedUid: process.getuid!(),
+    expectedGid: process.getgid!(),
+    dispatch,
+    isShuttingDown: () => false,
+    onFailure,
+  }).then((value) => {
+    published = true;
+    return value;
+  });
+  await within(verificationEntered);
+  expect(peers).toHaveLength(1);
+  const firstClient = observation.clients[0]!;
+  const closed = once(firstClient, "close");
+  peers[0]!.destroy();
+  await within(closed);
+  expect(firstClient.destroyed).toBe(true);
+  expect(published).toBe(false);
+  releaseGate!();
+  client = await within(starting);
+  const peer = await within(secondAccepted);
+  expect(observation.clients).toHaveLength(2);
+  expect(observation.clients[1]!.destroyed).toBe(false);
+  // Startup observers must hand off completely to session observers.
+  expect(observation.clients[1]!.listenerCount("error")).toBe(1);
+  expect(observation.clients[1]!.listenerCount("close")).toBe(1);
+  const requestId = "00000000-0000-4000-8000-000000000031";
+  const response = receive(peer);
+  peer.write(
+    frame({ kind: "request", requestId, method: "host.snapshot", params: {} }),
+  );
+  const result = await within(response);
+  expect(result).toEqual({
+    kind: "response",
+    requestId,
+    result: { kind: "snapshot", version: 1 },
+  });
+  expect(dispatch).toHaveBeenCalledTimes(1);
+  expect(onFailure).not.toHaveBeenCalled();
+}, 10000);

@@ -127,6 +127,48 @@ it("suppresses an obsolete inspection after its invoke was dispatched", async ()
   finish({ scope, result: { kind: "snapshot", hostId: "d" } });
   await expect(read).rejects.toMatchObject({ name: "AbortError" });
 });
+it("accepts the complete strict Rust extended-snapshot DTO and rejects unknown fields", async () => {
+  const hostId = "00000000-0000-4000-8000-000000000001";
+  const hostLocator = { ...locator, deviceId: hostId };
+  const hostScope = { ...scope, deviceId: hostId };
+  const result = {
+    kind: "extended-snapshot",
+    version: 1,
+    hostId,
+    configured: false,
+    provider: null,
+    settings: null,
+    activeSession: null,
+    stopping: false,
+    capabilities: ["local-session", "permission", "stop", "persistent-history", "local-config-receipt"],
+    agentNet: { available: true, reason: null },
+    runtime: { node: "24.14.0", sdkBinaryPresent: true },
+    credentials: { providerId: null, configured: false, revision: 0, writeAvailable: true },
+    resources: { version: 1, revision: 0, roots: [], agents: [] },
+  };
+  invoke.mockResolvedValue({ scope: hostScope, result });
+  await expect(
+    ownedHostManagement(
+      hostLocator,
+      hostScope,
+      { method: "host.inspect", params: {} },
+      new AbortController().signal,
+    ),
+  ).resolves.toMatchObject({ result });
+
+  invoke.mockResolvedValue({
+    scope: hostScope,
+    result: { ...result, agentNet: { ...result.agentNet, state: "ready" } },
+  });
+  await expect(
+    ownedHostManagement(
+      hostLocator,
+      hostScope,
+      { method: "host.inspect", params: {} },
+      new AbortController().signal,
+    ),
+  ).rejects.toMatchObject({ code: "HOST_MANAGEMENT_RESPONSE_INVALID" });
+});
 it("keeps malformed and secret-bearing write receipts unconfirmed", async () => {
   for (const malformed of [
     { status: "garbage", revision: 1, effect: "new-session" },

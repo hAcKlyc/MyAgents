@@ -284,8 +284,15 @@ export interface NetworkConnection {
   url: string | null;
   removing: boolean;
   snapshot: NetworkSnapshot;
+  /** Read-only projection of the existing Rust owned session; never a token. */
+  ownedAccount?: {
+    state: 'authenticated' | 'authorizationRequired' | 'signInRequired' | 'unavailable';
+    principalId: string;
+    expiresAt: number | null;
+  };
 }
 export interface NetworkRegistry {
+  ownedServiceUrl?: string | null;
   revision?: number;
   selfhostEnabled?: boolean;
   selected: string;
