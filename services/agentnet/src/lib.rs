@@ -7,6 +7,8 @@
 
 mod admin_http;
 mod admin_store;
+mod community_http;
+mod community_store;
 #[cfg(test)]
 mod execution_browser_fixture;
 mod execution_gate;
@@ -31,6 +33,7 @@ mod store;
 #[cfg(test)]
 mod transactions;
 
+pub use community_http::CommunityService;
 pub use feedback_http::FeedbackService;
 pub use identity_http::IdentityHttpConfig;
 pub use network_http::NetworkHttpConfig;

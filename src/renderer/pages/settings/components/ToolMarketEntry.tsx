@@ -1,10 +1,13 @@
 import { useTranslation } from 'react-i18next';
+import { APP_BUILD_PROFILE } from '../../../../shared/appProfile';
 import toolMarketZh from '@/assets/onboarding/tool-market-zh-CN.png';
 import toolMarketEn from '@/assets/onboarding/tool-market-en-US.png';
 
 /** Local bundled artwork; navigation remains owned by App. */
 export function ToolMarketEntry({ onOpen }: { onOpen: () => void }) {
   const { t, i18n } = useTranslation('settings');
+  // The owned community does not implement the upstream Space resource market.
+  if (APP_BUILD_PROFILE === 'moxbot') return null;
   return (
     <button
       type="button"

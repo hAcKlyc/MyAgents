@@ -1,0 +1,20 @@
+{
+  "src/renderer/components/global-sidebar/GlobalSidebar.tsx": "9aafa7269155858d0c98f3ff274d1c111af4a23bc03ae7f7daec54ade86598a1",
+  "src/renderer/App.tsx": "18bfbaa6d8141b18c666512674d5e5171b60939a3f3de8e50e25f8efd59b40b9",
+  "src/renderer/pages/settings/SettingsPage.tsx": "2f3975de8b61eb0bfae9d0bd2831098a7331225619024e6b283e0ea0167b40fe",
+  "src/renderer/i18n/index.ts": "c228122f9091131cea76e520516756e455b8533f7a20edd6f59c4d532a9dc70b",
+  "src/renderer/i18n/moxbotsCopy.ts": "20e30621c4eb3f9520b88d2af4514c00ca8b212e1bb8070a81c11c4dc2e79b3c",
+  "src/renderer/i18n/locales/zh-CN/app.json": "d3be78136df4cc46d8bcd1b2a6743ced3c3ef7d835ee89bd7f41a9ef8632a91f",
+  "src/renderer/utils/ownedCloud.ts": "fa639952612b654f4436a4f3121cf824ed4019201c97e071150bd8fcddcdb34d",
+  "services/agentnet/community-web/app.js": "6e3485ea2f06aa0bf0b470c20ba44b479855ecd8f1ddce117b8f49fc3c144dec",
+  "services/agentnet/community-web/index.html": "51d320fae4fb550a785e10f08706a579b777ff11a109597755d3353df724d09a",
+  "services/agentnet/community-web/styles.css": "6b6f065eb0799b58b4279d90193fccbdfab0218456ceb91caaab076e62c99955",
+  "services/agentnet/admin-web/app.js": "a50a79b25ffac3555864fffedee8edb1689629e0847862c94fa3fd038f6bf3ea",
+  "services/agentnet/admin-web/styles.css": "c6dd2618c87873ad670d94fc4aad44b3915292673e15bf1a53978ec5bdcb40be",
+  "services/agentnet/src/community_http.rs": "4a528a1a7fd3cc728a4b51e07f4c62095ad012a7a5b64a43fd19effa6ff36b79",
+  "services/agentnet/src/community_store.rs": "4101d3572ca88211fb294a9b503edc2d09560797dac2297c4ec040aa32f6faee",
+  "src/renderer/pages/AgentNetwork.tsx": "cb5b61f4c58182bd75a204ac5b53d9845e2c0268415ee881fb4cf40f61e01d56",
+  "src/renderer/i18n/locales/en-US/app.json": "838f169a679e948e0c48cbab70b09407c90d0206cd2659692b5c9455aaa08dba",
+  "src/renderer/pages/settings/components/ToolMarketEntry.tsx": "0ef1fcd7a2767f6d8fdf2d7313e31f302438aba3185a349696f92be91eae754e",
+  "src/renderer/pages/settings/components/ToolMarketEntry.profile.test.tsx": "4b30437c75253fbcc5316c1ac4f3959f152c5d2c67102dee2ed09b6114f89dcd"
+}

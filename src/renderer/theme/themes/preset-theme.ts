@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import type {
   ThemeDefinition,
   ThemeSchemeDefinition,
@@ -268,10 +269,10 @@ export function createPresetTheme(manifest: PresetThemeManifest): ThemeDefinitio
   return {
     ...manifest,
     hero: {
-      productName: 'MyAgents',
+      productName: APP_DISPLAY_NAME,
       slogans: {
-        'zh-CN': '每个人都应享受智能的推背感，欢迎来到言出法随的世界',
-        'en-US': 'Your intent, amplified',
+        'zh-CN': APP_BUILD_PROFILE === 'moxbot' ? '人定目标，Bot 团队协作执行' : '每个人都应享受智能的推背感，欢迎来到言出法随的世界',
+        'en-US': APP_BUILD_PROFILE === 'moxbot' ? 'Set goals. Let your Bot team get to work.' : 'Your intent, amplified',
       },
       backgrounds: { light: noHeroBackground, dark: noHeroBackground },
     },
