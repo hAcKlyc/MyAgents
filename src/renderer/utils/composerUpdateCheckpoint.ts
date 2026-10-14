@@ -6,7 +6,7 @@ import { join } from '@tauri-apps/api/path';
 import { exists, remove } from '@tauri-apps/plugin-fs';
 import { getConfigDir, safeLoadJson, safeWriteJson } from '@/config/services/configStore';
 import { isBrowserDevMode } from '@/utils/browserMock';
-import { serializeTabs, deserializeTabs, type PersistedTabState } from './tabPersistence';
+import type { PersistedTabState } from './tabPersistence';
 import type { Tab } from '@/types/tab';
 import { agentMentionSnapshotSchema, desktopPrimaryContextSchema, type QueryMentionContext } from '@/../shared/agentMentions';
 import { isPendingSessionId } from '@/../shared/constants';
@@ -111,7 +111,9 @@ export function registerComposerUpdateOwner(owner: ComposerOwner): () => void {
 }
 
 /** Freeze synchronously before any await: input cannot move past the snapshot. */
-export function beginComposerUpdateCheckpoint() {
+// App owns the edition composition. Accept its existing codec rather than
+// importing the UI composition root back into a leaf composer dependency.
+export function beginComposerUpdateCheckpoint(serializeTabs: (tabs: readonly Tab[], activeTabId: string | null) => PersistedTabState | null) {
   if (!handoffChecked || handoffBlocked) throw new Error('正在检查或暂时无法读取上次更新草稿，请先恢复草稿再更新。');
   if (loaded?.drafts.length) throw new Error('上次更新的草稿尚未恢复，请先恢复会话或明确关闭恢复提示。');
   if (locked) throw new Error('正在安全保存更新草稿，请稍候。');
@@ -191,7 +193,7 @@ export async function dismissLoadedComposerUpdateHandoff(): Promise<void> {
 
 /** Retain disk evidence until the exact composer owner mounts. Unlike tabs,
  * this must not be consumed just because the user hasn't clicked restore yet. */
-export async function loadComposerUpdateHandoff(): Promise<PersistedTabState | null> {
+export async function loadComposerUpdateHandoff(deserializeTabs: (raw: string | null) => PersistedTabState | null): Promise<PersistedTabState | null> {
   if (isBrowserDevMode()) return null;
   handoffChecked = false;
   return enqueue(async () => {

@@ -82,3 +82,7 @@ QA追加隔离正在工作树，暂未主干交付。独立审阅初轮终端ENV
 ## Composer checkpoint source freeze 2026-10-15
 
 确认更新前新增MoxBots composer持久交接：exact Tab/Session/workspace/context，durable tmp/fsync/rename及最后复读；图片、IME、发送或导入处理中、不能恢复的Launcher草稿拒绝安装，原内容保留。损坏/未消费handoff保留并阻断，默认MyAgents不读写。独立关键123条通过；Root新增owner变更后的解冻回归，最终unit19+DOM6共25条与typecheck通过。独立复核继续，待新A2→B2原生实际恢复，未宣称生产草稿验收。当前main0c7b8e72已正常整合，PR46补路由与composer后执行六CI。
+
+## CI dependency repair 2026-10-15
+
+CI c46 head发现composer runtime导入tabPersistence→builtin UI composition的四个循环；已将serializer/parser通过App既有owner注入，checkpoint仅保留type import，没有复制协议/serializer或放宽schema。Root与独立复核相关62/62通过；bundled Node24 fullLint通过（0依赖错误，16已有orphan警告）、typecheck/diff通过。c46三份尚在编译的候选以精确本任务PGID SIGINT停止，未发布；所有最终资源及native重建用追加修复source pin，保留失败证据。

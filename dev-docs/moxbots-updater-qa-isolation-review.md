@@ -126,3 +126,9 @@ B 就绪之前不安装、不退出 QA。后续确认/取消、busy 拒绝、签
 ### P2 解冻修复复核（关闭）
 
 主实现者将原readOnly保存在组件稳定 `updatePriorReadOnlyRef`，只有首次从未锁→锁才读取；同组件scope重注册期间 `wasLocked=true` 不再覆盖原状态。独立复跑 checkpoint unit19 + DOM6，共25/25通过；新增DOM真实 rerender Session/workspace、verify拒绝、abort/release后检查readonly消失并能重新编辑。`git diff --check`通过。本轮关闭上述P2，无产品源码修改或UI操作；保留A2→B2真实恢复未验收状态。
+
+### 循环依赖修复复核
+
+CI发现checkpoint运行时导入tabs codec引入UI composition循环。独立审阅4文件修复：checkpoint改成 `import type PersistedTabState`，begin/load接收App已有 `serializeTabs`/`deserializeTabs` 函数；App以原codec传入，测试也用原codec。没有新 serializer、schema变化、role/permission放松，移除 leaf→composition运行时反向依赖。独立复跑 checkpoint unit19 + DOM6 + tabPersistence37，共62/62通过，diff-check通过；full dependency lint/typecheck由主实现者运行，不将此局部结果冒称full CI通过。
+
+主实现者已精确停止3份旧c46构建，旧构建未生成/发布候选；本审阅未操作进程。需要从包含依赖修复的新source pin重建QA A2/B2与正式包，UI继续暂停。

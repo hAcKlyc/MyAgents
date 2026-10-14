@@ -1,3 +1,4 @@
+import { serializeTabs, deserializeTabs } from '@/utils/tabPersistence';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +24,7 @@ const tab = { id: 'tab-a', view: 'chat', agentDir: '/synthetic/workspace-a', ses
 let lease: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
 beforeEach(async () => {
   fixture.values.clear(); vi.clearAllMocks();
-  await loadComposerUpdateHandoff();
+  await loadComposerUpdateHandoff(deserializeTabs);
   fixture.service.listSlashCommands.mockResolvedValue({ success: true, commands: [] });
   fixture.service.searchFilesPage.mockResolvedValue({ items: [], complete: true, hasMore: false, nextCursor: null });
   fixture.service.addGitignore.mockResolvedValue({});
@@ -38,7 +39,7 @@ describe('SimpleChatInput update checkpoint owner', () => {
   it('unlocks after an owner scope changes while the checkpoint is frozen', async () => {
     const { textarea, rerender } = input();
     fireEvent.change(textarea, { target: { value: 'keep scoped draft' } });
-    act(() => { lease = beginComposerUpdateCheckpoint(); });
+    act(() => { lease = beginComposerUpdateCheckpoint(serializeTabs); });
     await lease!.persist([tab], tab.id);
     rerender(<ToastProvider><ImagePreviewProvider><SimpleChatInput composerTabId="tab-a" sessionId="session-b" workspacePath="/synthetic/workspace-b" runtime="codex" usesExternalRuntimeControls isLoading={false} onSend={vi.fn()} /></ImagePreviewProvider></ToastProvider>);
     expect(() => lease!.verify([tab], tab.id)).toThrow();
@@ -51,7 +52,7 @@ describe('SimpleChatInput update checkpoint owner', () => {
   it('freezes text and imperative writes, blocks send, then releases on aborted install', async () => {
     const { textarea, ref, onSend } = input();
     fireEvent.change(textarea, { target: { value: 'KEEP-AFTER-UPDATE' } });
-    act(() => { lease = beginComposerUpdateCheckpoint(); });
+    act(() => { lease = beginComposerUpdateCheckpoint(serializeTabs); });
     expect(textarea).toHaveAttribute('readonly');
     await lease!.persist([tab], tab.id);
     fireEvent.change(textarea, { target: { value: 'late change' } });
@@ -66,15 +67,15 @@ describe('SimpleChatInput update checkpoint owner', () => {
     const context = { primaryContext: { kind: 'floating-context' as const, input: { appName: 'Synthetic app', selectedText: 'source text' } }, requiredSystemSkill: TASK_ALIGNMENT_SKILL_REQUIREMENT };
     const snapshot: ComposerSnapshot = { scope: { tabId: tab.id, sessionId: 'session-a', workspacePath: '/synthetic/workspace-a', mode: 'chat' }, text: '  A @myagents_files/source.pdf\n继续  ', context, composing: false, sending: false, imageCount: 0, pendingAttachments: false, stagedWorkflow: false };
     const unregister = registerComposerUpdateOwner({ snapshot: () => snapshot, freeze: vi.fn() });
-    lease = beginComposerUpdateCheckpoint(); await lease.persist([tab], tab.id); lease.release(); unregister();
-    await loadComposerUpdateHandoff();
+    lease = beginComposerUpdateCheckpoint(serializeTabs); await lease.persist([tab], tab.id); lease.release(); unregister();
+    await loadComposerUpdateHandoff(deserializeTabs);
     const { ref, textarea, onSend } = input();
     expect(textarea).toHaveValue(snapshot.text); expect(ref.current?.getQueryContext()).toMatchObject(context);
     expect(onSend).not.toHaveBeenCalled();
   });
   it('rejects live IME without making the input readOnly or losing its draft', () => {
     const { textarea } = input(); fireEvent.change(textarea, { target: { value: '组合输入' } }); fireEvent.compositionStart(textarea);
-    expect(() => beginComposerUpdateCheckpoint()).toThrow('输入法');
+    expect(() => beginComposerUpdateCheckpoint(serializeTabs)).toThrow('输入法');
     expect(textarea).not.toHaveAttribute('readonly'); expect(textarea).toHaveValue('组合输入');
   });
   it('blocks while Rust attachment import is pending, then retains durable workspace reference', async () => {
@@ -83,18 +84,18 @@ describe('SimpleChatInput update checkpoint owner', () => {
     const { ref, textarea } = input(); fireEvent.change(textarea, { target: { value: '文件草稿 ' } });
     let pending!: Promise<void>;
     act(() => { pending = ref.current!.processDroppedFilePaths!(['/synthetic/source.pdf']); });
-    expect(() => beginComposerUpdateCheckpoint()).toThrow('处理中');
+    expect(() => beginComposerUpdateCheckpoint(serializeTabs)).toThrow('处理中');
     await act(async () => { finish({ success: true, copiedFiles: [{ targetPath: 'myagents_files/source.pdf' }] }); await pending; });
     expect((textarea as HTMLTextAreaElement).value).toContain('@myagents_files/source.pdf');
-    lease = beginComposerUpdateCheckpoint(); await lease.persist([tab], tab.id);
+    lease = beginComposerUpdateCheckpoint(serializeTabs); await lease.persist([tab], tab.id);
   });
   it('rejects in-memory File images, preserves image and text, and blocks nonempty Launcher', async () => {
     const { ref, textarea, unmount } = input(); fireEvent.change(textarea, { target: { value: 'image draft' } });
     act(() => ref.current!.setImages([{ id: 'synthetic-image', file: new File(['synthetic'], 'a.png', { type: 'image/png' }), preview: 'data:image/png;base64,c3ludGhldGlj' }]));
-    expect(() => beginComposerUpdateCheckpoint()).toThrow('图片');
+    expect(() => beginComposerUpdateCheckpoint(serializeTabs)).toThrow('图片');
     expect(ref.current!.getImages()).toHaveLength(1); expect(textarea).toHaveValue('image draft'); unmount();
     const launcher = input({ mode: 'launcher', sessionId: 'pending-tab-a' }); fireEvent.change(launcher.textarea, { target: { value: 'launcher stays' } });
-    lease = beginComposerUpdateCheckpoint(); await expect(lease.persist([{ id: 'tab-a', view: 'launcher', title: 'New' } as Tab], 'tab-a')).rejects.toThrow('可恢复');
+    lease = beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([{ id: 'tab-a', view: 'launcher', title: 'New' } as Tab], 'tab-a')).rejects.toThrow('可恢复');
     expect(launcher.textarea).toHaveValue('launcher stays');
   });
 });

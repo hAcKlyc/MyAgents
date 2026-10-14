@@ -1,3 +1,4 @@
+import { serializeTabs, deserializeTabs } from './tabPersistence';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComposerSnapshot } from './composerUpdateCheckpoint';
 import type { Tab } from '@/types/tab';
@@ -19,7 +20,7 @@ beforeEach(() => {
 });
 async function owner(patch: Partial<ComposerSnapshot> = {}) {
   const api = await import('./composerUpdateCheckpoint');
-  await api.loadComposerUpdateHandoff();
+  await api.loadComposerUpdateHandoff(deserializeTabs);
   const state = snapshot(patch); const freeze = vi.fn();
   const unregister = api.registerComposerUpdateOwner({ snapshot: () => state, freeze });
   return { api, state, freeze, unregister };
@@ -32,12 +33,12 @@ describe('MoxBots composer update checkpoint', () => {
     disk.write.mockImplementationOnce(async (path, value) => {
       await new Promise<void>(resolve => { finish = resolve; }); disk.values.set(path, value);
     });
-    const lease = api.beginComposerUpdateCheckpoint(); expect(freeze).toHaveBeenCalledWith(true);
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); expect(freeze).toHaveBeenCalledWith(true);
     let completed = false;
     const persistence = lease.persist([tab], tab.id).then(() => { completed = true; });
     await vi.waitFor(() => expect(finish).toBeDefined()); expect(completed).toBe(false);
     finish(); await persistence; lease.verify([tab], tab.id); lease.release();
-    expect(await api.loadComposerUpdateHandoff()).toMatchObject({ activeTabId: 'tab-a' });
+    expect(await api.loadComposerUpdateHandoff(deserializeTabs)).toMatchObject({ activeTabId: 'tab-a' });
     expect(api.restoreComposerUpdateDraft({ ...state.scope, tabId: 'other-tab' }, true)).toBeNull();
     expect(api.restoreComposerUpdateDraft({ ...state.scope, sessionId: 'other-session' }, true)).toBeNull();
     expect(api.restoreComposerUpdateDraft({ ...state.scope, workspacePath: '/other-workspace' }, true)).toBeNull();
@@ -48,14 +49,14 @@ describe('MoxBots composer update checkpoint', () => {
   });
   it('rejects IME before freezing to preserve uncommitted input', async () => {
     const { api, freeze } = await owner({ composing: true });
-    expect(() => api.beginComposerUpdateCheckpoint()).toThrow('输入法'); expect(freeze).not.toHaveBeenCalled();
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('输入法'); expect(freeze).not.toHaveBeenCalled();
   });
   it.each([
     { imageCount: 1 }, { pendingAttachments: true }, { sending: true }, { stagedWorkflow: true },
     { context: { primaryContext: { kind: 'floating-context' as const, input: { screenshotAttached: true } } } },
   ])('rejects unsafe material without altering the draft: %j', async patch => {
     const { api, state, freeze } = await owner(patch);
-    expect(() => api.beginComposerUpdateCheckpoint()).toThrow(); expect(state.text).toBe('KEEP-AFTER-UPDATE');
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow(); expect(state.text).toBe('KEEP-AFTER-UPDATE');
     expect(disk.write).not.toHaveBeenCalled(); expect(freeze).not.toHaveBeenCalled();
   });
   it.each([
@@ -63,52 +64,52 @@ describe('MoxBots composer update checkpoint', () => {
     { workspacePath: '/other-workspace' }, { discussionId: 'different-discussion' },
   ])('fails closed for non-restorable/unknown scope: %j', async patch => {
     const { api, state } = await owner(); state.scope = { ...state.scope, ...patch };
-    const lease = api.beginComposerUpdateCheckpoint(); await expect(lease.persist([tab], tab.id)).rejects.toThrow();
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([tab], tab.id)).rejects.toThrow();
     expect(disk.write).not.toHaveBeenCalled(); lease.release();
   });
   it('rejects disk errors and browser-only persistence', async () => {
     const { api, freeze } = await owner(); disk.write.mockRejectedValueOnce(new Error('fsync failed'));
-    let lease = api.beginComposerUpdateCheckpoint(); await expect(lease.persist([tab], tab.id)).rejects.toThrow('fsync'); lease.release();
+    let lease = api.beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([tab], tab.id)).rejects.toThrow('fsync'); lease.release();
     expect(freeze).toHaveBeenLastCalledWith(false); disk.browser = true;
-    lease = api.beginComposerUpdateCheckpoint(); await expect(lease.persist([tab], tab.id)).rejects.toThrow('环境'); lease.release();
+    lease = api.beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([tab], tab.id)).rejects.toThrow('环境'); lease.release();
   });
   it('rejects owner changes or input mutation during await and before install', async () => {
-    const { api, state, unregister } = await owner(); const lease = api.beginComposerUpdateCheckpoint();
+    const { api, state, unregister } = await owner(); const lease = api.beginComposerUpdateCheckpoint(serializeTabs);
     await lease.persist([tab], tab.id); state.text += 'late'; expect(() => lease.verify([tab], tab.id)).toThrow('变化');
     state.text = 'KEEP-AFTER-UPDATE'; unregister(); expect(() => lease.verify([tab], tab.id)).toThrow('窗口'); lease.release();
   });
   it('keeps unclaimed disk drafts across boot and refuses another update before restore', async () => {
-    const { api } = await owner(); const lease = api.beginComposerUpdateCheckpoint(); await lease.persist([tab], tab.id); lease.release();
-    await api.loadComposerUpdateHandoff(); expect(disk.remove).not.toHaveBeenCalled();
-    expect(() => api.beginComposerUpdateCheckpoint()).toThrow('尚未恢复');
-    await api.clearComposerUpdateHandoff(); expect(() => api.beginComposerUpdateCheckpoint()).not.toThrow();
+    const { api } = await owner(); const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await lease.persist([tab], tab.id); lease.release();
+    await api.loadComposerUpdateHandoff(deserializeTabs); expect(disk.remove).not.toHaveBeenCalled();
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('尚未恢复');
+    await api.clearComposerUpdateHandoff(); expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).not.toThrow();
   });
   it('does not flatten invalid structured context into plain text', async () => {
     const { api, state } = await owner(); state.context = { requiredSystemSkill: { ...TASK_ALIGNMENT_SKILL_REQUIREMENT, contentSha256: 'unknown' } };
-    const lease = api.beginComposerUpdateCheckpoint(); await expect(lease.persist([tab], tab.id)).rejects.toThrow(); expect(disk.write).not.toHaveBeenCalled(); lease.release();
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([tab], tab.id)).rejects.toThrow(); expect(disk.write).not.toHaveBeenCalled(); lease.release();
   });
   it('refuses unreadable existing files even when safeLoadJson returns null and does not let an unrelated abort delete them', async () => {
     const { api } = await owner();
-    const lease = api.beginComposerUpdateCheckpoint();
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs);
     disk.values.set('/synthetic/qa/update-composer-drafts.json.tmp', 'corrupt synthetic');
     await expect(lease.persist([tab], tab.id)).rejects.toThrow('不能覆盖');
     await lease.abort(); lease.release(); expect(disk.values.size).toBe(1);
     await api.dismissLoadedComposerUpdateHandoff(); expect(disk.values.size).toBe(1);
     disk.read.mockResolvedValue(null);
-    await expect(api.loadComposerUpdateHandoff()).rejects.toThrow('损坏');
-    expect(() => api.beginComposerUpdateCheckpoint()).toThrow('上次更新');
+    await expect(api.loadComposerUpdateHandoff(deserializeTabs)).rejects.toThrow('损坏');
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('上次更新');
   });
   it('owns and cleans a failed partial write, awaiting backup/tmp removal while preserving live text', async () => {
     const { api, state } = await owner();
     disk.write.mockImplementationOnce(async path => { disk.values.set(path + '.tmp', 'partial'); throw new Error('fsync failed'); });
-    const lease = api.beginComposerUpdateCheckpoint(); await expect(lease.persist([tab], tab.id)).rejects.toThrow('fsync');
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await expect(lease.persist([tab], tab.id)).rejects.toThrow('fsync');
     await lease.abort(); lease.release(); expect(disk.values.size).toBe(0); expect(state.text).toBe('KEEP-AFTER-UPDATE');
   });
   it('clears recoverable backups/tmp on abort and never recovers corrupted schema as another scope', async () => {
     const { api } = await owner(); const path = '/synthetic/qa/update-composer-drafts.json';
     disk.values.set(path, { version: 99, drafts: [] }); disk.values.set(path + '.bak', {}); disk.values.set(path + '.tmp', {});
-    await expect(api.loadComposerUpdateHandoff()).rejects.toThrow(); expect(disk.values.size).toBe(3);
-    expect(() => api.beginComposerUpdateCheckpoint()).toThrow('上次更新');
+    await expect(api.loadComposerUpdateHandoff(deserializeTabs)).rejects.toThrow(); expect(disk.values.size).toBe(3);
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('上次更新');
     await api.clearComposerUpdateHandoff(); expect(disk.remove.mock.calls.map(call => call[0])).toEqual([path + '.bak', path + '.tmp', path]);
   });
 });

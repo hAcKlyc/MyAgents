@@ -102,6 +102,8 @@ import { createChatTabLifecycle } from '@/features/chat/tabLifecycle';
 import { useRecordTabLifecycle } from '@/features/record/useRecordTabLifecycle';
 import { useTabCloseController } from '@/tab-workspace/useTabCloseController';
 import {
+  serializeTabs,
+  deserializeTabs,
   buildRestoredTabs,
   saveOpenTabs,
   hydratePersistedState,
@@ -648,7 +650,7 @@ export default function App() {
     void (async () => {
       const durable = await loadAndClearOpenTabsDurable();
       const composerHandoff = APP_BUILD_PROFILE === 'moxbot'
-        ? await loadComposerUpdateHandoff().catch(error => {
+        ? await loadComposerUpdateHandoff(deserializeTabs).catch(error => {
           console.error('[App] Update draft handoff could not be read:', error);
           toastRef.current?.error('更新草稿暂时无法恢复，原交接文件已保留。');
           return null;
@@ -4692,7 +4694,7 @@ export default function App() {
       let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
       let restarting = false;
       try {
-        checkpoint = beginComposerUpdateCheckpoint();
+        checkpoint = beginComposerUpdateCheckpoint(serializeTabs);
         for (const submit of pendingRecordNoteSubmittersRef.current.values()) {
           if (!(await submit())) return;
         }

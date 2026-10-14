@@ -24,3 +24,7 @@ Use only independent updater-QA roots/bundle keys and synthetic fixtures, with a
 Separately leave a nonempty Launcher, active IME, image, or delayed attachment import and verify confirmation visibly refuses installation and preserves the draft/attachment while the app stays usable. Verify cancellation and blocked Rust install remove main/bak/tmp handoff files and unlock input. Structured-context reconstruction is covered by DOM; native structured-context evidence is required before claiming that business path accepted.
 
 Known scope: no normal-quit persistence, no durable File/image serialization, no Launcher reconstruction, no model execution or production acceptance. Read/parse failure preserves the handoff file, blocks further updates and shows a recovery error; support must inspect only authorized evidence rather than delete a user's data to force acceptance.
+
+## CI composition repair
+
+The leaf checkpoint now takes the existing serializer/parser from App rather than importing the builtin UI composition at runtime. Root and independent 62/62 related cases passed; Node24 full lint (0 dependency errors; 16 existing orphan warnings), typecheck and diff check passed. The c46 compilation inputs are superseded; native candidates must be rebuilt from the repair commit.
