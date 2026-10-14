@@ -41,3 +41,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 ## 唯一后台入口（2026-10-14）
 
 `services/agentnet/admin-web/` 是唯一云管理后台，覆盖/扩展用户、Hosts、Bots、权限和审计。同一服务的AuthStore及现有OIDC组件承接普通用户与管理员认证；内部运行服务不新增管理门户。客户端用户登录入口保留，个人网络产品名后续Bots Net；账号写管理与登录策略未来也在本后台扩展。历史HTML原型仅为设计证据，不是第二套可操作生产后台。
+
+## IP website download channel
+
+User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
