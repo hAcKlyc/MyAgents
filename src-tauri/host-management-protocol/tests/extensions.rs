@@ -129,12 +129,16 @@ fn generic_receipts_never_expand_legacy_dtos() {
     assert!(!format!("{frame:?}").contains("synth-test-key"));
 }
 
-#[test]
-fn extended_snapshot_and_capabilities_are_closed_bounded_projections() {
-    let snapshot = json!({"kind":"extended-snapshot","version":1,"hostId":Uuid::new_v4(),"configured":true,"provider":provider(),
+fn extended_snapshot_fixture() -> Value {
+    json!({"kind":"extended-snapshot","version":1,"hostId":Uuid::new_v4(),"configured":true,"provider":provider(),
         "settings":{"revision":1,"providerId":"portable-api","model":"vendor/model","workspace":{"rootId":"workspaces","relativePath":"项目 A"},"executionAuthorized":false},
         "activeSession":null,"stopping":false,"capabilities":[],"agentNet":{"available":true,"reason":null},"runtime":{"node":"24.0.0","sdkBinaryPresent":true},
-        "credentials":{"providerId":"portable-api","configured":false,"revision":0,"writeAvailable":true},"resources":{"version":1,"revision":0,"roots":[],"agents":[]}});
+        "credentials":{"providerId":"portable-api","configured":false,"revision":0,"writeAvailable":true},"resources":{"version":1,"revision":0,"roots":[],"agents":[]}})
+}
+
+#[test]
+fn extended_snapshot_and_capabilities_are_closed_bounded_projections() {
+    let snapshot = extended_snapshot_fixture();
     assert!(check(response(snapshot.clone())));
     let mut bad = snapshot.clone();
     bad["credentials"]["providerId"] = json!("other");
@@ -262,4 +266,54 @@ fn hydrated_profile_preserves_versioned_origin_and_requires_safe_matching_metada
         serde_json::to_value(decoded).unwrap()["message"]["result"]["provider"],
         Value::Null
     );
+}
+
+#[test]
+fn ready_diagnostic_requires_closed_agent_net_projection_in_both_snapshots() {
+    for kind in ["snapshot", "extended-snapshot"] {
+        let mut snapshot = extended_snapshot_fixture();
+        if kind == "snapshot" {
+            snapshot["kind"] = json!(kind);
+            snapshot.as_object_mut().unwrap().remove("provider");
+            snapshot["settings"]["providerId"] = json!("moonshot-coding");
+            snapshot["settings"]["model"] = json!("kimi-for-coding");
+            snapshot["settings"]["workspace"] = json!("/tmp/isolated-workspace");
+            snapshot["credentials"]["providerId"] = json!("moonshot-coding");
+        }
+        // Actual shape produced by the local doctor reader when status.json is
+        // valid. It is diagnostic data, not the remote AgentNetStatus schema.
+        snapshot["agentNet"] = json!({
+            "available":true, "state":"ready", "ready":true,
+            "deviceId":snapshot["hostId"], "networkId":Uuid::new_v4(),
+            "errorCode":null, "reportedAt":1_792_000_000_u64,
+        });
+        let raw = response(snapshot.clone());
+        assert!(
+            serde_json::from_value::<Frame>(raw.clone()).is_err(),
+            "{kind}"
+        );
+        let body = serde_json::to_vec(&raw).unwrap();
+        let mut wire = (body.len() as u32).to_be_bytes().to_vec();
+        wire.extend_from_slice(&body);
+        assert_eq!(
+            FrameDecoder::default().push(&wire),
+            Err(CodecError::InvalidJson),
+            "{kind}"
+        );
+
+        // Projection must keep the existing closed contract; no protocol
+        // relaxation is needed to report a valid connector's availability.
+        snapshot["agentNet"] = json!({"available":true,"reason":null});
+        let raw = response(snapshot);
+        let frame: Frame = serde_json::from_value(raw.clone()).unwrap();
+        frame.validate().unwrap();
+        let body = serde_json::to_vec(&raw).unwrap();
+        let mut wire = (body.len() as u32).to_be_bytes().to_vec();
+        wire.extend_from_slice(&body);
+        let mut decoder = FrameDecoder::default();
+        let decoded = decoder.push(&wire).unwrap();
+        assert_eq!(decoded, vec![frame], "{kind}");
+        decoded[0].validate().unwrap();
+        decoder.finish().unwrap();
+    }
 }
