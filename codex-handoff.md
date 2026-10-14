@@ -248,3 +248,13 @@ Verified PR24 foundation fb92ce9c and sidebar PR25 c21e9f43 preserved in deliver
 ## 2026-10-14 Host daemon/status completion
 
 Root actual MoX deployment of operator source79c25045 adds separate network-status.conf and enables the explicitly joined connector at boot. doctor now agrees with native Ready. Actual isolated service stop/start with Node before connector passed; credentials/config/identity/finite policies and account binding/expiry preserved. Node/native binaries remain pairedcf741f. Private unit/config baseline and receipts retained. PR32 source/tests/docs and required CI/main gate are separate from pending desktopa838 installation confirmation and PR14 native credential/model/Agent acceptance; do not treat Linux closure as full goal completion. See MAH-HOST-DAEMON-STATUS-20261014.
+
+
+### BOTS-ADMIN-LOGIN-UX-001（2026-10-14）
+
+用户反馈管理员网页登录双窗口割裂。独立任务 `codex/bots-admin-login-ux-001` 基线 d86f7505，改为当前标签页 OIDC 登录、固定 /admin 返回、短期 tab-scoped PKCE 事务恢复，bearer仍只在内存。中文 Dex 品牌模板保持原 POST/同意授权语义；不改变账号、权限、客户端身份、Host或模型调用。服务端与loopback浏览器回归已通过，独立只读审阅与CI/生产真实路径待完成。详细任务见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`。此条覆盖历史弹窗/独立标签页fallback的产品方向。
+
+
+### BOTS-ADMIN-LOGIN-UX-001 最终交付（2026-10-14）
+
+已交付PR33/main1ece497d并发布现有统一云后台：当前标签页中文OIDC登录及固定后台返回替代旧弹窗/独立标签页fallback，错误/取消/过期可恢复。代码七项CI通过，Linux制品及Dex资源manifest/运行源对应已核实；真实受控管理员登录→中文确认→Bots目录→退出204，以及callback400恢复通过。仅两个既有云服务更新展示和回跳，原身份与权限不变，101 Host及模型未操作。备份标记 moxbots-login-ux-backup-20261014T101958，恢复原unit+Dex配置即可回滚且保留业务状态。详细最终验收和后续状态见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`；现网维护窗口已释放，后续无本任务云端写入。
