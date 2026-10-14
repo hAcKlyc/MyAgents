@@ -1,14 +1,34 @@
 import { isHostProviderId } from '../../shared/hostProviderConfig';
 import { constants, closeSync, fstatSync, lstatSync, openSync, readFileSync, realpathSync, type Stats } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { cloudSessionProviderId, isCloudSessionProviderId, validateCloudModelToken, type CloudModelLease } from '../../host/cloud-model';
+import type { ProviderEnv } from '../provider-types';
 
 const PREFIX = 'systemd-credential:';
 export const HOST_PROVIDER_REFERENCE = 'host-provider-credential:moonshot-coding';
 let sessionCredential: { value: string | undefined; providerId:string } | undefined;
+let cloudSessionCredential: {lease: CloudModelLease; token: string} | undefined;
+
+/** A cloud Session receives only its expiring gateway bearer, never the upstream key. */
+export function installHostCloudModelCredential(lease: CloudModelLease, token: string): void {
+  validateCloudModelToken(token);
+  if (process.env.MYAGENTS_HOST_MODE !== '1' || cloudSessionCredential || sessionCredential || lease.expires_at <= Date.now()/1000) throw new Error('BOT_MODEL_CREDENTIAL_INVALID');
+  cloudSessionCredential = {lease: Object.freeze(structuredClone(lease)), token};
+}
+export function resolveHostCloudModelProvider(providerId: string, model?: string): ProviderEnv | undefined {
+  if (!isCloudSessionProviderId(providerId)) return undefined;
+  const saved = cloudSessionCredential;
+  if (process.env.MYAGENTS_HOST_MODE !== '1' || !saved || providerId !== cloudSessionProviderId(saved.lease) ||
+    (model !== undefined && model !== saved.lease.model) || saved.lease.expires_at <= Date.now()/1000) throw new Error('BOT_MODEL_NOT_AUTHORIZED');
+  const l = saved.lease;
+  return {providerId,providerName:'Platform Session model',baseUrl:l.api_protocol==='openai'&&!l.gateway_base_url.endsWith('/v1')?`${l.gateway_base_url}/v1`:l.gateway_base_url,apiKey:saved.token,authType:'auth_token_clear_api_key',apiProtocol:l.api_protocol,
+    maxOutputTokens:l.max_output_tokens,maxOutputTokensParamName:l.max_output_tokens_param_name??(l.upstream_format==='responses'?'max_output_tokens':'max_tokens'),
+    ...(l.upstream_format ? {upstreamFormat:l.upstream_format} : {}),modelAliases:{fable:l.model,sonnet:l.model,opus:l.model,haiku:l.model}};
+}
 
 /** Private supervisor IPC installs a single worker-birth snapshot, never config. */
 export function installHostSessionCredential(value: string | undefined, providerId = 'moonshot-coding'): void {
-  if (process.env.MYAGENTS_HOST_MODE !== '1' || !isHostProviderId(providerId) || sessionCredential !== undefined
+  if (process.env.MYAGENTS_HOST_MODE !== '1' || !isHostProviderId(providerId) || sessionCredential !== undefined || cloudSessionCredential !== undefined
     || (value !== undefined && (!value.trim() || Buffer.byteLength(value, 'utf8') > 16 * 1024
       || /[\r\n\0]/.test(value)))) throw new Error('Host Session credential snapshot is invalid');
   sessionCredential = { value, providerId };

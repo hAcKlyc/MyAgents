@@ -1,3 +1,12 @@
+# 当前任务：BOTS-MODEL-CENTER-001
+
+- [x] 独立 core/Host 实际 SDK 隔离验证。
+- [ ] HTTP/原 owner authority、UI 组合与独立验收。
+- [ ] 主干/CI/现有云后台发布、真实账号路径。
+- [ ] 用户指定供应商配置与单 Bot 有限模型授权后收费路径。
+
+详见 `BOTS-MODEL-CENTER-V1.md`；以下历史清单保留。
+
 # Bots 管理与 Bots Net 规划任务清单
 
 任务：AN-SHARE-PROTOTYPE-20261013。更新：2026-10-13。仓库：https://github.com/heavenzhang/MoXBots.git ，主干 `main`。
@@ -96,3 +105,7 @@ BOTS-CLOUD-EXEC-001 continues separately: protected owner opt-in, current Host s
 - [ ] 第二真实账号/普通Owner产品入口、共享、收费模型授权等后续范围，不能用合成403代替真实联调。
 
 验收分层与运行版本见 `../validation/BOTS-CLOUD-EXEC-001-LINUX-ACCEPTANCE.md`；前述未发布条目仅为历史准备状态，由此记录更新。
+
+## BOTS-EXEC-QUEUE-FAIRNESS-002（后续）
+
+- [ ] 原 queued_for 最早窗口在超过 8 条旧注销 actor、catalog 正常时不推进，后排 cleanup 可长期等待。基线5315已存在；设计有界公平推进，保持原 actor 门禁、正常 FIFO、未知 lease/receipt 和 Delete 安全，不新增授权 owner。与本轮仅 catalog 故障隔离区别验收。

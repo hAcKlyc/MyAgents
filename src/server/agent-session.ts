@@ -1,3 +1,4 @@
+import { bootstrapFromEnvironment as hostBotBootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { desktopContextOf } from '../shared/agentMentions';
 import { buildTurnProviderAnalytics } from './session-core/turn-analytics';
@@ -6392,6 +6393,13 @@ export function buildClaudeSessionEnv(
   if (boundModelPolicy) {
     if (boundModelPolicy.maxOutputTokens) env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(boundModelPolicy.maxOutputTokens);
     else env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '';
+  } else if (effectiveProviderEnv?.providerId?.startsWith('cloud-session:') && effectiveProviderEnv.maxOutputTokens) {
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(effectiveProviderEnv.maxOutputTokens);
+  }
+  if (effectiveProviderEnv?.providerId?.startsWith('cloud-session:')) {
+    // The native CLI has an outer retry loop independent of HTTP retry headers.
+    // A scoped paid resource must report uncertainty rather than replay it.
+    env.CLAUDE_CODE_MAX_RETRIES = '0';
   }
   const modelContextLength = resolveContextLength(resolvedModel);
   if (modelContextLength && modelContextLength > 0) {
@@ -10877,6 +10885,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   // "unknown bridge token" instead of resolving to the new subprocess's
   // config (the cross-pollination class we're eliminating).
   ensureActiveSessionBridgeRegistered({ freshToken: true });
+  // Finite cloud model authority grants text inference only. Capture the
+  // validated immutable birth before async launch work; no later config or
+  // private Provider selection may widen this Query's tool surface.
+  const launchHostBotBootstrap = process.env.MYAGENTS_HOST_MODE === '1' ? hostBotBootstrapFromEnvironment() : undefined;
+  const launchModelOnlyCloudBot = launchHostBotBootstrap?.cloud_model !== undefined;
   const launchProviderId = getSessionProviderId() ?? SUBSCRIPTION_PROVIDER_ID;
   const launchAgentDefinitionsSource = configState.currentAgentDefinitions;
   const launchContextWindowSnapshot = snapshotProviderModelContextLengths([
@@ -11336,10 +11349,10 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // Load settings from project scope only (.claude/)
       // Enabled global Skills are projected into <cwd>/.claude/skills/ before Query launch.
       // CLAUDE_CONFIG_DIR is NOT set — preserves Anthropic subscription Keychain lookup
-      settingSources: buildSettingSources(),
+      settingSources: launchModelOnlyCloudBot ? [] : buildSettingSources(),
       // SDK-level allowlist is the execution gate for both project and global
       // Skills. Disk projection remains the compatibility bridge for Commands.
-      skills: [...new Set(enabledSkillAllowlist)].sort(),
+      skills: launchModelOnlyCloudBot ? [] : [...new Set(enabledSkillAllowlist)].sort(),
       settings: {
         cleanupPeriodDays: claudeTranscriptCleanupPeriodDays,
         // MyAgents does not expose Anthropic feedback submission. Keep the
@@ -11417,17 +11430,17 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         preset: 'claude_code' as const,
         // Product append changes take effect at Query replacement, including resume.
         snapshot: false,
-        append: buildSystemPromptAppend(currentScenario, {
+        append: [buildSystemPromptAppend(currentScenario, {
           // agent-session.ts is the builtin Claude Agent SDK path by definition.
           runtime: 'builtin',
           // Universal CLI capability surface (cron / IM media). Was external-runtime
           // only when builtin still had `cron-tools` / `im-cron` / `im-media` MCPs;
           // those got dropped in favour of `myagents` CLI calls so builtin needs the
           // same prompt now. Single CLI, single source of truth across all runtimes.
-          cliToolsEnabled: true,
-          userCliToolsEnabled: cliToolRegistryEnabled,
+          cliToolsEnabled: !launchModelOnlyCloudBot,
+          userCliToolsEnabled: !launchModelOnlyCloudBot && cliToolRegistryEnabled,
           enabledOfficialToolIds,
-        }),
+        }), launchHostBotBootstrap?.snapshot.config.system_prompt].filter(Boolean).join('\n\n'),
       },
       cwd: agentDir,
       includePartialMessages: true,
@@ -11436,10 +11449,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       toolConfig: {
         askUserQuestion: { previewFormat: 'html' as const },
       },
-      mcpServers: sdkMcpServersInitial,
+      mcpServers: launchModelOnlyCloudBot ? {} : sdkMcpServersInitial,
+      ...(launchModelOnlyCloudBot ? {strictMcpConfig:true} : {}),
       // Product visibility boundary. Permission policy remains separately
       // owned by allowedTools/disallowedTools/canUseTool/Hooks below.
-      tools: [...SDK_BUILTIN_TOOLS],
+      tools: launchModelOnlyCloudBot ? [] : [...SDK_BUILTIN_TOOLS],
       // PRD 0.2.17 — Claude plugin injection. SDK accepts
       // `plugins: [{ type: 'local', path }]`; it then scans each path for
       // .claude-plugin/plugin.json and wires up the contained
@@ -11448,7 +11462,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // already filters to entries that exist on disk as valid plugin roots.
       // Field omitted entirely when no plugins are enabled so empty-array
       // noise doesn't show up in SDK debug output.
-      ...(enabledPluginConfigs.length > 0 ? {
+      ...(launchModelOnlyCloudBot ? {plugins:[]} : enabledPluginConfigs.length > 0 ? {
         plugins: enabledPluginConfigs,
         // SDK/native 0.3.276 delivers paths over stdin, avoiding Windows'
         // command-line limit without changing the enabled plugin inventory.
@@ -11470,7 +11484,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // prompts for plain searches in default mode. Both are read-only tools,
       // so auto-approving matches the existing getPermissionRules() semantics.
       // 'Task' is appended when sub-agents are injected so the model can delegate.
-      allowedTools: [
+      allowedTools: launchModelOnlyCloudBot ? [] : [
         'Grep',
         'Glob',
         ...(launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
@@ -11484,7 +11498,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // model (the parent could be on a 200K model, the sub-agent on a 1M one,
       // or vice versa). The original configState.currentAgentDefinitions is left untouched
       // so config owner fingerprinting and downstream config consumers see clean names.
-      ...(launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
+      ...(launchModelOnlyCloudBot ? {agents:{}} : launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
         ? { agents: launchAgentDefinitions }
         : {}),
       // disallowedTools: group chat deny list + IM-incompatible UI-interaction tools
@@ -11493,6 +11507,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // Custom permission handling - check rules and prompt user for unknown tools
       // Effective when permissionMode is 'default' or 'acceptEdits' (not 'bypassPermissions')
       canUseTool: async (toolName: string, input: unknown, options: Parameters<CanUseTool>[2]) => {
+        if (launchModelOnlyCloudBot) return {behavior:'deny' as const,message:'Cloud model access does not authorize tools.',interrupt:true};
         console.debug(`[permission] canUseTool checking: ${toolName}, mode=${configState.currentPermissionMode}`);
 
         // First check MCP tool permission based on user's enabled MCP servers

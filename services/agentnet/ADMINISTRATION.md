@@ -69,3 +69,24 @@ Nginx在既有HTTPS入口添加精确的 `/api/bots/grants/accept`、`/api/bots/
 管理员点击登录后在当前标签页进入现有 OIDC 身份页；`browserReturn: true` 仅为既有登录事务的 UI 选项，回调按绑定 state 返回固定 `/admin?login=complete|failed`，不接受任意 return URL。客户端未传选项时保持原回调行为。
 
 仅临时事务（id/device/PKCE verifier/expiry）放入 tab-scoped sessionStorage，以跨页面完成现有单次消费；成功、取消、过期或错误时清除，会话 bearer 始终只在内存。刷新已登录页面仍需再次认证。中文 Dex 模板及部署说明见 `deploy/dex-web/README.md`；既有部署增量更新 frontend 配置，禁止用 bootstrap 重建账号、密钥或数据库。
+
+
+## 模型中心第一版（可选）
+
+在已开启 administration、identity/network/relay 的同一私有service配置加入：
+
+```json
+"model_center": { "enabled": true, "concurrency_limit": 2 }
+```
+
+默认缺省为关闭。可选 `daily_cost_microusd` 是 USD 微元日上限；开启费用额度而模型价格未知时拒绝调用，不能按免费处理。Bot日token取登记额度与平台max_daily_tokens的较小值；网关日额度按服务端UTC自然日，监控统计窗口为最近500条内符合筛选的调用（一次返回最多100条），不代表全部历史账单。部署保持原身份、管理员白名单和443入口，保留model-center.key及SQLite一致备份；独占启动锁拒绝第二实例恢复活动请求。
+
+管理员通过原 `/admin` 的模型中心按设置式表单登记Provider/Model、明确owner_ids并保存write-only API Key，再从Bots列表分配后台期望模型。Provider目录读取由用户点击触发GET；不自动推理。主机有效模型与平台期望配置独立展示。key/profile/price revision在Session启动时捕获；停用、撤销或key轮换拒绝后续请求，未知结果会隔离旧Session而不偷偷重发。
+
+所有者用Bot行的“模型访问”明确指定模型UUID和有效期领取一次性有限凭据；该接口要求当前真实owner/admin会话和原协议在线Host。Host的本地有限策略另外必须批准具体Bot/model、固定HTTPSservice_origin、expires_at、max_daily_tokens/max_output_tokens，并将 `access_credential` 指向受保护的 `systemd-credential:<name>`，不在配置、Git或Session元数据放明文。Node私有BotExecutionPolicy新增可选cloud_models；原native有限生命周期policy不新增模型调用方法。旧生命周期授权、普通Host在线或管理员角色都不自动启用模型执行，跨用户共享另行实现。
+
+Nginx在既有443服务精确代理POST `/api/bot-model/sessions` 和 `/api/bot-model/sessions/<UUID>/v1/messages`、`messages/count_tokens`、`chat/completions`、`responses` 至原loopback AgentNet服务。Body≤1MiB，stream关闭proxy_buffering/自动next_upstream并给120秒模型调用留出响应窗口；普通管理路径仍是原 `/api/admin/`。不得新增无认证公网模型代理。
+
+第一版cloud模型Bot只具备文本模型API能力。实际SDK tools、settingSources、skills、MCP、plugins和agents关闭，不继承私人文件/命令/设置；工具执行需以后独立有限scope。私人Session接口不能操纵Bot。Host使用原supervisor→worker→SessionEngine的trusted exact-owner消费入口，本轮不提供后台prompt/任务派发UI。
+
+源验收见 `dev-docs/bots-model-center-review.md`、规划 `planning/BOTS-MODEL-CENTER-V1.md` 和任务记录。真实供应商/费用验收须使用用户指定平台配置、已批准测试Bot/费用上限与新的有限Host opt-in；本地mock或合成计量数据不得导入生产冒充真实调用。

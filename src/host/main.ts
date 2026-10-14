@@ -11,6 +11,8 @@ import { readNetworkStatus } from './network-status';
 import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
 import type { BotRunIdentity } from './bot-runtime';
 import { createBotSessionAdapter } from './bot-session-adapter';
+import { createCloudModelInvoker, sameCloudModelRun } from './cloud-model-invoke';
+import { assertCloudModelAdmission, obtainCloudModelLease, cloudSessionProviderId } from './cloud-model';
 import { loadBotExecutionPolicy } from './bot-execution-policy';
 import { connectBotExecutionIpc } from './bot-execution-ipc';
 import { createHostBotManager } from './bot-management';
@@ -30,7 +32,7 @@ const configPath = join(home, '.myagents', 'config.json');
 const workspaceRoot = join(stateDir, 'workspaces');
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY = 1024 * 1024;
-type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean; bot?: BotRunIdentity };
+type Active = { child: ChildProcess; generation: string; sessionId: string; closing: boolean; bot?: BotRunIdentity; botBootstrap?: HostBotBootstrap };
 
 async function jsonFile<T>(path: string, fallback: T): Promise<T> {
   try { return JSON.parse(await readFile(path, 'utf8')) as T; }
@@ -85,6 +87,7 @@ async function serve(): Promise<void> {
   if (!identity) { identity = { hostId: randomUUID(), schemaVersion: 1 }; await atomicJson(identityPath, identity); }
   if (identity.schemaVersion !== 1 || !uuidPattern.test(identity.hostId)) throw new Error('Unsupported Host identity');
   let active: Active | null = null;
+  const cloudModelTokens = new Map<string,string>();
   const exitedBots = new Map<string,BotRunIdentity>();
   let botExecutionIpc: Awaited<ReturnType<typeof connectBotExecutionIpc>> | undefined;
   let botPolicyTimer:NodeJS.Timeout|undefined;
@@ -201,7 +204,8 @@ async function serve(): Promise<void> {
       else throw new Error('Session Provider identity is unavailable');
     }
     const hasDynamicCredential = !bot && config.providerApiKeys?.[sessionProviderId] === `host-provider-credential:${sessionProviderId}`;
-    let credential = hasDynamicCredential ? credentialOwner?.readForExecution(sessionProviderId) : undefined;
+    let credential = bot?.cloud_model ? cloudModelTokens.get(bot.cloud_model.session_id) : hasDynamicCredential ? credentialOwner?.readForExecution(sessionProviderId) : undefined;
+    if(bot?.cloud_model){cloudModelTokens.delete(bot.cloud_model.session_id);if(!credential)throw new Error('BOT_MODEL_CREDENTIAL_INVALID');}
     if (hasDynamicCredential && !credentialOwner) throw new HostProviderCredentialError('HOST_PROVIDER_CREDENTIAL_KEY_UNAVAILABLE');
     if (!bot && !hasDynamicCredential && sessionProviderId === 'moonshot-coding' && process.env.CREDENTIALS_DIRECTORY) {
       try { credential = resolveHostProviderCredential('systemd-credential:kimi'); }
@@ -219,7 +223,7 @@ async function serve(): Promise<void> {
         ...(bot ? {MYAGENTS_HOST_BOT_BOOTSTRAP:Buffer.from(JSON.stringify(bot)).toString('base64url')} : {}) },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
-    const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false };
+    const target: Active = { child, generation, sessionId: sessionId ?? '', closing: false, ...(bot ? {botBootstrap:bot}: {}) };
     let credentialDelivered = false;
     active = target;
     child.on('exit', () => {
@@ -252,7 +256,7 @@ async function serve(): Promise<void> {
     await new Promise<void>((resolveReady, reject) => {
       const timer = setTimeout(() => { target.closing = true; child.kill('SIGTERM'); reject(new Error('Session startup timed out')); }, 60000);
       const onMessage = (raw: unknown) => {
-        const value = raw as { type?: string; generation?: string; sessionId?: string; bot?: BotRunIdentity };
+        const value = raw as { type?: string; generation?: string; sessionId?: string; bot?: BotRunIdentity; botBootstrap?: HostBotBootstrap };
         if (value?.type !== 'ready' || value.generation !== generation || !value.sessionId || !uuidPattern.test(value.sessionId)) return;
         if (bot && (!value.bot || value.bot.bot_id!==bot.snapshot.bot_id || value.bot.agent_id!==bot.snapshot.agent_id ||
             value.bot.binding_generation!==bot.snapshot.binding_generation || value.bot.session_id!==value.sessionId ||
@@ -439,11 +443,26 @@ async function serve(): Promise<void> {
     const sameRun=(a:BotRunIdentity,b:BotRunIdentity)=>a.bot_id===b.bot_id && a.agent_id===b.agent_id &&
       a.binding_generation===b.binding_generation && a.run_generation===b.run_generation && a.session_id===b.session_id &&
       a.snapshot_hash===b.snapshot_hash && a.runtime===b.runtime;
+    const invokeCloudModel=createCloudModelInvoker({
+      current:()=>active?.bot&&active.botBootstrap?.cloud_model ? {
+        identity:active.bot,snapshot:active.botBootstrap.snapshot,lease:active.botBootstrap.cloud_model,
+        closing:active.closing||shuttingDown,processAlive:active.child.exitCode===null&&active.child.signalCode===null,
+      }:undefined,
+      policy:()=>policy.cloud_models,
+      assertAuthority:()=>policyPin.assertCurrent(),
+      dispatch:async(run,text)=>{
+        if(!active?.bot||!sameCloudModelRun(active.bot,run)||active.closing||shuttingDown)throw new Error('BOT_MODEL_NOT_AUTHORIZED');
+        return workerCall(active,'send',{text});
+      },
+    });
     const adapter=createBotSessionAdapter({
+      invoke:invokeCloudModel,
       async resolve(snapshot) {
         await policyPin.assertCurrent();
         const binding=snapshot.config.model_ref ? policy.model_bindings[snapshot.config.model_ref] : undefined;
-        if(snapshot.runtime!=='builtin'||!binding)throw new Error('BOT_RUNTIME_UNSUPPORTED');
+        const cloudPolicy = policy.cloud_models;
+        const useCloud = !!snapshot.config.model_ref && !!cloudPolicy?.allowed_model_refs.includes(snapshot.config.model_ref);
+        if(snapshot.runtime!=='builtin'||(!binding&&!useCloud))throw new Error('BOT_RUNTIME_UNSUPPORTED');
         const project=loadProjects({strict:true}).find(p=>p.agentId===snapshot.agent_id);
         if(!project)throw new Error('BOT_AGENT_BINDING_MISSING');
         const workspace=await workspacePath(project.path);
@@ -452,6 +471,18 @@ async function serve(): Promise<void> {
         if(!markerInfo.isFile()||markerInfo.isSymbolicLink()||markerInfo.uid!==process.geteuid?.()||markerInfo.nlink!==1||(markerInfo.mode&0o777)!==0o600||markerInfo.size>4096)throw new Error('BOT_AGENT_BINDING_MISSING');
         const marker=JSON.parse(await readFile(markerPath,'utf8')) as {host_id?:string;bot_id?:string};
         if(marker.host_id!==identity!.hostId||marker.bot_id!==snapshot.bot_id)throw new Error('BOT_AGENT_BINDING_MISSING');
+        if(useCloud){
+          if(active||shuttingDown||cloudModelTokens.size>=256)throw new Error('HOST_BUSY');
+          const cloud=assertCloudModelAdmission(cloudPolicy,snapshot.bot_id,snapshot.config.model_ref!,snapshot.config.daily_tokens);
+          const scopedAccess=resolveHostProviderCredential(cloud.access_credential);
+          if(!scopedAccess)throw new Error('BOT_MODEL_CREDENTIAL_INVALID');
+          const result=await obtainCloudModelLease({policy:cloud,bot_id:snapshot.bot_id,host_id:identity!.hostId,model_ref:snapshot.config.model_ref!,daily_tokens:snapshot.config.daily_tokens,access_token:scopedAccess});
+          await policyPin.assertCurrent();
+          cloudModelTokens.set(result.lease.session_id,result.access_token);
+          const forget=setTimeout(()=>cloudModelTokens.delete(result.lease.session_id),Math.max(1,result.lease.expires_at*1000-Date.now()));forget.unref();
+          return {workspace,provider_id:cloudSessionProviderId(result.lease),model:result.lease.model,cloud_model:result.lease};
+        }
+        if(!binding)throw new Error('BOT_RUNTIME_UNSUPPORTED');
         const route=createConcreteProviderRoute(binding.provider_id,binding.model);
         const materialized=materializeProviderRouteEnv(route,loadConfig({strict:true}));
         if(route.kind==='provider'&&(!materialized?.apiKey||materialized.apiProtocol!=='anthropic'))throw new Error('BOT_RUNTIME_UNSUPPORTED');
@@ -485,7 +516,7 @@ async function serve(): Promise<void> {
       expirationClosing=true;
       void (async()=>{
         let changed=false;
-        const expired=Date.now()/1000>=policy.local_policy.expires_at;
+        const expired=Date.now()/1000>=policy.local_policy.expires_at || (policy.cloud_models!==undefined && Date.now()/1000>=policy.cloud_models.expires_at);
         try{await policyPin.assertCurrent();}catch{changed=true;}
         if(expired||changed){
           // The protected opt-in deadline/revocation closes only this Bot's
