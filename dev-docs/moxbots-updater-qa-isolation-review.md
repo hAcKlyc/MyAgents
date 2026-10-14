@@ -67,3 +67,62 @@
 B 就绪之前不安装、不退出 QA。后续确认/取消、busy 拒绝、签名下载、A→B 版本更换与 marker 保全仍待实际执行。
 
 原生准备补充：主实现者经 QA Global 正式 `/sessions` 元数据 owner 建立空 builtin fixture `98a85638-b8be-405d-b0f7-56edd540a537`。独立验收者从项目看板实际打开其原会话，恢复 0 条消息；输入但不发送 `QA-CHAT-DRAFT-20261015-KEEP-AFTER-UPDATE`。随后通过 Chat 的“打开终端”控件创建真实 PTY，在该终端执行仅输出自身 HOME 的 `printf`：可见 `/private/tmp/moxbots-updaterqa-home-20261015/.moxbot-updaterqa/terminal-home`，提示符 `sh-3.2$`。截图 `qa-ui-terminal-isolated-home.png`。QA终端保持打开用于后续 busy 拒绝；尚未通过安装路径验证拒绝，因此本阶段仅证明实际 PTY 与自身环境路径。
+
+## 第四轮：真实签名篡改拒绝（通过）
+
+主实现者仅在 QA loopback 52831 暂置 negative manifest：0.5.4 指向 QA 独立钥匙对原始 canary 字节签名、服务内容却追加 `TAMPER` 的不可安装档；fixture 说明 `work/updater-20261014/qa-signature-tamper-fixture.json`。独立验收者未安装、未自行修改 HTTP fixture。
+
+2026-10-15 01:12:43 与 01:13:14（北京时间）两次原生设置“检查更新”实测：
+
+- Rust 获取真实200 manifest、发现0.5.4、下载进度52%→100%；随后真实 signature verification failed。QA own unified log 350–357、380–387 可复现，不是 mock 拒绝。
+- 原生 UI 显示失败 toast；按钮恢复“检查更新”，无永久 spinner、无 ready/重启安装状态。再次点击确实重新下载并再次拒绝，证明失败后可重试。截图 `qa-ui-signature-rejected.png`（工具即时截屏也记录了失败 toast）。
+- App PID 保持48497、About仍0.5.3，未调用安装或重启。Chat 草稿仍完整；同一 PTY 实际执行 `printf QA-PTY-ALIVE-AFTER-SIGNATURE-REJECT` 并回显，非仅静态旧内容。已保存 record content SHA-256仍为 `21b1ffdff484e6a3887c3075e51ab1aa431652fdaf6b3ff76a7779ea9d7789d1`。
+- 已通知主实现者撤销 negative manifest，等待真正 B archive；本项证明下载校验拒绝，尚不证明 ready 后磁盘重校验/实际安装路径。
+
+按已授权 QA 验收，在同一 QA PTY 启动系统 `/bin/date` + `/bin/sleep 5` 可控循环，输出 `QA-BUSY-HH:MM:SS`，用于后续更新拒绝前后的持续活动证明。最终仅 Ctrl+C 停止自建循环并关闭自身 PTY；不终止任何用户进程。
+
+## 第五轮：合法下载、取消与忙碌拒绝（通过）；空闲安装状态未知（阻断）
+
+主实现者提供合法独立 QA B：0.5.4 / `com.moxbot.updaterqa`；archive SHA-256 `a51c4f72d96508ed8886071ca3fc19cd27ecb37e2caa641add6e829f81ffcbfb`，342389840 bytes。2026-10-15 01:30:38–39，原生设置检查后实际下载并验签、持久化 pending、显示 ready 与目标0.5.4，App仍0.5.3/PID48497。
+
+- 设置“重启安装”弹出明确确认：显示目标0.5.4，并说明任务/其他操作进行时保留更新、完成后重试。截图 `qa-ui-confirmation.png`。点击“稍后”后保留ready、不安装、不重启。
+- 顶栏“重启更新”使用同确认；在自建PTY循环期间点击确认，01:31:09 backend拒绝 `user terminal is still open`，释放 shutdown gate。UI要求完成工作并关闭终端，保留更新包；App版本/PID不变。截图 `qa-ui-busy-retained.png`。
+- 返回 Chat，原循环继续输出01:31:15、01:31:20及之后时间，证明拒绝没有停止实际命令或终端；Chat草稿未变。截图 `qa-ui-busy-loop-survived.png`。此项是真实 native PTY owner 的不中断验收，不替代付费模型执行/审批/录音的真实验收。
+- 仅 Ctrl+C 停止自建循环，随后在其 shell 输入 `exit`。own log 461–462，01:31:53 `Shell exited` / `Self-cleaned dead session` 确认真实PTY已从owner移除。
+- **空闲 A→B 尚未通过。** 01:32:27，再次明确确认安装后，backend读取已验签pending并报 `Session owner generation=2 reason=UPDATE_ACTIVITY_UNKNOWN`，`Unable to release exact generation 2 update admission`，随后释放 Rust gate。UI显示“暂时无法确认所有操作已结束。更新包已保留，应用会继续运行，请稍后重试”。截图 `qa-ui-idle-unknown.png`。没有安装、重启或改变版本，已通知主实现者诊断；验收者没有关闭/改写该Session来绕过guard。
+
+本轮均为QA独立 App/数据/loopback。合法pending保持，当前仍 A 0.5.3；B二进制/版本/record与draft保全、升级后204修复复验仍待真正安装完成。
+
+### 根因与 QA A 退出
+
+主实现者定位 production composition common 路由白名单漏注册 `/api/process/update-quiesce`，真实 global33415/session33416均返回404；并非 owner仍忙或 token未知。需在保持原有 internal credential/exact generation 鉴权下补精确生命周期路由并重建修复A2/B，不以关闭Session绕过。
+
+按协调要求，2026-10-15 01:37:57 对唯一 QA bundle 发正常 Cmd+Q，computer_use返回 `App quit`，原 App PID48497已消失；数据未删除或替换，recordhash仍一致，退出前Chat草稿可见。随后仅查询已知QA端口，发现原 QA Node PID48719/72565 为PPID1仍监听33415/33416，其 executable、server资源路径与argv marker均确认属于本次QA。验收者未 kill；已通知主实现者处理该精确 QA 残余，不能把App关闭误写成全部owner已退出。UI暂交还主实现者，等待A2启动通知。
+
+**草稿落盘尚无证据：**退出后仅只读扫描QA自己的JSON/Markdown文件和精确 `Library/WebKit/com.moxbot.updaterqa` 的 LocalStorage数据库（5条记录，UTF-8与UTF-16解码检查），没有发现Chat/Launcher测试草稿marker。初步源码观察SimpleChatInput为内存文本，update前的registered提交器覆盖Record note/file editor，tabs checkpoint主要保存元数据。不能宣布文本草稿升级保全；已通知主实现者在A2启动后实际复看，必要时补正式draft checkpoint。未读取其他WebKit命名空间或日常数据。本项当前为证据缺口，尚未以UI复开实测判定丢失。
+
+## 第六轮：生命周期精确路由修复独立复核（通过源码/模拟）
+
+复核 `ce5c897c40e7d6af8062fcaaf9499c9d9d366630` 两个 source/test 文件：`sidecar-composition.ts` 只在 `COMMON_EXACT_PATHS` 注册 `/api/process/update-quiesce`；没有增加宽泛 prefix、development union 或跨角色额外能力。Global 与 Session 都带 common，能进入 index 的同一实际 POST handler。原有 `hasValidInternalCliCredential`、exact `MYAGENTS_SIDECAR_GENERATION`、action/token检查、`freezeSessionAdmissionsForUpdate` owner/durable保护均未修改或放松。GET等方法不会执行POST更新处理。`/api/process/update-quiesce/other` 未匹配，仍在 composition层404。
+
+独立复跑 Node24：`sidecar-composition.unit.test.ts` 139/139 与 `session-engine.unit.test.ts` 114/114，共253/253通过。新增测试经真实 composition 调用真实 credential predicate：缺caller身份响应401，并证明相邻未注册路径不会调用 handler；既有owner拒绝回归通过。未操作App/QA数据。此项仅源码/模拟通过，必须重建修复A2后再进行真实两角色生命周期握手和A→B。
+
+主实现者通知已仅对精确认定QA残余48719/72565发TERM并核实退出，证据 `qa-failed-route404-retirement.json`；旧negative/valid manifest与pending归档保留，record/userdata保留。本审阅未自行kill或改数据，等待composer checkpoint完成后的独立复核及A2运行通知。
+
+## 第七轮：composer checkpoint 独立源码/模拟审阅
+
+复核 App、Chat/Launcher wiring、SimpleChatInput/attachment hook、`composerUpdateCheckpoint.ts` 与24个新增测试。
+
+- 注册和文件读取入口限 MoxBots；MyAgents 不注册 owner，不启动 handoff读取或写入。编译QA沿用已有隔离 config root。
+- 确认后、任何await前检查IME/发送/上传/FileReader/图片/截图/staged工作流，冻结输入/send/attachment入口；文字、context和owner revision在持久化后及 native invoke前重新核对。静态审阅未发现可继续发送模型或漏写草稿的P1路径。
+- `safeWriteJson`实际helper为tmp→文件fsync→原子rename→目录fsync，不仅是localStorage保存。损坏/未能读取的旧main/bak/tmp不被新更新覆盖；failed attempt只清理自身已尝试写入内容。失败保持live草稿并释放输入。
+- handoff包括精确Tab/Session/workspace/discussion identity；加载验证后使用其tabs驱动restore pill，优先于异步WebView旧snapshot。只在空且精确scope的实际composer挂载时恢复文字与typed context，不调用onSend；已存在文字和其它owner不消费。Launcher/pending的非空草稿不能安全恢复时拒绝安装，未以仅存文件当作恢复通过。
+- 第二次更新前拒绝未认领或blocked handoff；恢复/清理IO失败保留证据。恢复后的原生可见性仍须A2→B2验证。
+
+独立Node24复跑5文件123/123：checkpoint unit19、checkpoint DOM5、tabs37、IME3、send59；`tsc --noEmit`及`git diff --check`通过。未操作UI/QA或日常数据。
+
+**P2 解冻边界待回归：**冻结中同组件的Session/workspace/discussion发生变化会重注册effect；本地 `priorReadOnly` 可能重新采到已冻结DOM的true，release后留下readonly。owner revision能正确拒绝更新，故尚无P1数据丢失证据，但可能无法继续编辑。已向主实现者提供 `rerender owner scope while frozen → abort/release` 的真实DOM回归步骤；本审阅尚未独立复现此新增场景，待确认/修复关闭。原生A2/B2仍未启动，此轮不证明真实重启恢复。
+
+### P2 解冻修复复核（关闭）
+
+主实现者将原readOnly保存在组件稳定 `updatePriorReadOnlyRef`，只有首次从未锁→锁才读取；同组件scope重注册期间 `wasLocked=true` 不再覆盖原状态。独立复跑 checkpoint unit19 + DOM6，共25/25通过；新增DOM真实 rerender Session/workspace、verify拒绝、abort/release后检查readonly消失并能重新编辑。`git diff --check`通过。本轮关闭上述P2，无产品源码修改或UI操作；保留A2→B2真实恢复未验收状态。
