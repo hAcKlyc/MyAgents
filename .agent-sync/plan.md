@@ -205,4 +205,3 @@ FEEDBACK-001阶段交付：PR44/main d7264a43已核验，7 CI通过；云端已�
 FEEDBACK-001 2026-10-15 07:14 UTC+8 接续：已安装正式0.5.4/e5a05f76包含PR44，实际binary/源码/远端main c7bab285对应通过；按新增人类授权同步给统一客户端负责人并登记FEEDBACK/TITLE原生待验队列。现有非实现者原生入口/布局证据复用；实际issuer/退出恢复及Provider标题生成待当前窗口owner明确交接，未抢占GUI或重复发布。任务保持in-progress。
 
 FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用正式0.5.4完成个人菜单/助手/正确issuer反馈入口、同账号真实Dex/PKCE退出恢复、8原标签及App/Sidecar PID保留、独立铃铛入口。实际联网状态不作为Host/通知通过。GUI已token校验释放，非秘密摘要dev-docs/feedback-native-acceptance.md。TITLE待独立modelqa，后续统一0.5.5由发布负责人处理。
-
