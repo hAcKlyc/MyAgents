@@ -1,6 +1,6 @@
 # BOTS-MODEL-CENTER-001
 
-2026-10-14 用户明确要求在现有后台实现统一模型配置/分配/监控，builtin/API第一版。隔离分支 codex/bots-model-center-001，base 3ee8aab5；代码主体本地未提交，HTTP/权限接线与组合验收进行中。状态及门槛见 `services/agentnet/planning/BOTS-MODEL-CENTER-V1.md` 和 `.agent-sync/tasks/codex-bots-model-center-001-a165b438.md`。本轮新增模型授权不等同历史生命周期授权；真实费用尚未执行。
+2026-10-14：模型中心、Bot builtin/API 模型分配和调用监控已由 PR38 合入 main 并发布现有统一 `/admin`；源码与主干七项 CI 全通过，运行二进制/资源来源以及真实管理员配置、分配、重启持久化和监控路径已复验。用户明确后续自行填写供应商，本次不导入已有配置、不调用模型，不改变实际 Host 委派权限。发布/验收与协作证据见 `dev-docs/bots-model-center-production-acceptance.md`；后续供应商/Host/付费路径与已发布的管理功能分开追踪。
 
 # Development Plan
 
