@@ -74,6 +74,7 @@ import type {
 import { useResolvedTheme } from '@/theme';
 
 interface BrandSectionProps {
+  composerTabId?: string;
   // Workspace
   projects: Project[];
   selectedProject: Project | null;
@@ -180,6 +181,7 @@ export function LauncherHeroBrand({ profile, websiteUrl, websiteLabel, title }: 
 const LAUNCHER_INPUT_DROP_ZONE_ID = 'launcher-input';
 
 export default memo(function BrandSection({
+  composerTabId,
   projects,
   selectedProject,
   defaultWorkspacePath,
@@ -710,6 +712,7 @@ export default memo(function BrandSection({
               {...(canAcceptFileDrop ? htmlFileDragHandlers : {})}
             >
               <SimpleChatInput
+                composerTabId={composerTabId}
                 ref={inputRef}
                 mode="launcher"
                 active={canAcceptFileDrop}

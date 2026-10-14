@@ -78,3 +78,7 @@ QA追加隔离正在工作树，暂未主干交付。独立审阅初轮终端ENV
 旧QA正常退出工具后App PID退出，但两个可精确归属QA的sidecars残留；owner已移交root限定cleanup。未发送Chat草稿缺少durable checkpoint，退出前可见不等于已保存；独立实现者补主窗口composer交接，Root再做UI/重启复验。日常0.5.3/5949试用版包含旧route缺陷，需要首次手动安装修复正式包作为自动更新基线；本任务不操作日常App。私有0.5.4/17e0公证候选已标superseded，尚未任何stable发布；不能覆盖已交付0.5.3或把AppleAccepted当功能验收。
 
 源码PR43已合入远端main37279ce45e737966312271c3c88b4d6c5d195c10，六CI通过；draft/route追加修复独立追踪。模型执行本轮仍禁用，native busy仅真实QA terminal，paidProvider运行中保护仍仅owner回归证据。
+
+## Composer checkpoint source freeze 2026-10-15
+
+确认更新前新增MoxBots composer持久交接：exact Tab/Session/workspace/context，durable tmp/fsync/rename及最后复读；图片、IME、发送或导入处理中、不能恢复的Launcher草稿拒绝安装，原内容保留。损坏/未消费handoff保留并阻断，默认MyAgents不读写。独立关键123条通过；Root新增owner变更后的解冻回归，最终unit19+DOM6共25条与typecheck通过。独立复核继续，待新A2→B2原生实际恢复，未宣称生产草稿验收。当前main0c7b8e72已正常整合，PR46补路由与composer后执行六CI。

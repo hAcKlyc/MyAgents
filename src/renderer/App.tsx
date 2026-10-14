@@ -114,6 +114,7 @@ import {
   loadAndClearOpenTabsDurable,
   clearOpenTabsDurable,
 } from '@/utils/tabPersistenceDurable';
+import { beginComposerUpdateCheckpoint, loadComposerUpdateHandoff, dismissLoadedComposerUpdateHandoff } from '@/utils/composerUpdateCheckpoint';
 import { consumeCleanExitMarker } from '@/utils/lastExitMarker';
 import { perfMark } from '@/utils/perfMark';
 import { RENDERER_PERF_PHASE } from '../shared/perfTrace';
@@ -646,14 +647,22 @@ export default function App() {
     bootDecisionRef.current = true;
     void (async () => {
       const durable = await loadAndClearOpenTabsDurable();
-      const override = pickDurableOverride(restoreCandidate != null, durable);
+      const composerHandoff = APP_BUILD_PROFILE === 'moxbot'
+        ? await loadComposerUpdateHandoff().catch(error => {
+          console.error('[App] Update draft handoff could not be read:', error);
+          toastRef.current?.error('更新草稿暂时无法恢复，原交接文件已保留。');
+          return null;
+        }) : null;
+      // The awaited composer handoff owns exact tab IDs and must win over a
+      // possibly stale WebView localStorage snapshot from before update.
+      const override = composerHandoff ?? pickDurableOverride(restoreCandidate != null, durable);
       const candidate = override
         ? hydratePersistedState(override)
         : restoreCandidate;
       const lastExitWasClean = await consumeCleanExitMarker();
       if (
         candidate &&
-        shouldOfferRestore(lastExitWasClean, candidate.tabs.length)
+        shouldOfferRestore(composerHandoff ? false : lastExitWasClean, candidate.tabs.length)
       ) {
         restoreCandidateRef.current = candidate;
         setRestorePillCount(candidate.tabs.length);
@@ -665,6 +674,10 @@ export default function App() {
   const handleDismissRestore = useCallback(() => {
     setRestorePillCount(0);
     restoreCandidateRef.current = null;
+    if (APP_BUILD_PROFILE === 'moxbot') void dismissLoadedComposerUpdateHandoff().catch(error => {
+      console.error('[App] Unable to dismiss update draft handoff:', error);
+      toastRef.current?.error('未能清除旧草稿交接，请稍后重试。');
+    });
   }, []);
 
   // Helper-overlay launches must hand `handleLaunchProject` a real, committed
@@ -842,7 +855,7 @@ export default function App() {
   // does nothing" reports on Windows: a flaky network would kill the install
   // verification round-trip, the JS only console.warn-ed, and the user
   // assumed the button was broken.
-  const performRestartAndUpdate = useCallback(async () => {
+  const performRestartAndUpdate = useCallback(async (checkpoint?: ReturnType<typeof beginComposerUpdateCheckpoint>) => {
     // Persist open-tab state before the install/relaunch exits the process from
     // Rust (Issue #232). flushOpenTabsNow() writes localStorage (the fast path),
     // but WebKit/WebView2 persist localStorage to disk ASYNCHRONOUSLY, so the
@@ -860,6 +873,7 @@ export default function App() {
       | Awaited<ReturnType<typeof restartAndUpdateRef.current>>
       | undefined;
     try {
+      checkpoint?.verify(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
       outcome = await restartAndUpdateRef.current();
     } finally {
       // Drop the durable handoff UNLESS the restart is actually proceeding
@@ -870,6 +884,7 @@ export default function App() {
       // fresh persist, and placed in `finally` so an uncaught throw still clears.
       if (outcome !== 'ok') {
         await clearOpenTabsDurable();
+        if (checkpoint) await checkpoint.abort();
       }
     }
     if (outcome === 'network-error') {
@@ -888,6 +903,7 @@ export default function App() {
       toastRef.current?.error(t('appChrome.updateInstallFailed'));
     }
     // 'ok' → process is exiting via NSIS/relaunch, no toast needed
+    return outcome;
   }, [flushOpenTabsNow, t, tabWorkspaceController]);
 
   // Per-tab loading state (keyed by tabId)
@@ -4673,24 +4689,38 @@ export default function App() {
     if (APP_BUILD_PROFILE === 'moxbot') {
       // Updates never offer to interrupt work; Rust rejects busy/unknown owners.
       if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
+      let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
+      let restarting = false;
       try {
+        checkpoint = beginComposerUpdateCheckpoint();
         for (const submit of pendingRecordNoteSubmittersRef.current.values()) {
           if (!(await submit())) return;
         }
         for (const submit of fileEditSubmittersRef.current.values()) {
           if (!(await submit())) return;
         }
+        await checkpoint.persist(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
+        restarting = (await performRestartAndUpdate(checkpoint)) === 'ok';
       } catch (error) {
         console.error('[App] Failed to save drafts before update:', error);
-        toastRef.current?.error(t('appChrome.updateInstallFailed'));
-        return;
+        toastRef.current?.error(error instanceof Error ? `更新已暂停：${error.message}` : t('appChrome.updateInstallFailed'));
+      } finally {
+        // Keep the input frozen until actual relaunch on success; otherwise
+        // release live drafts even when disk cleanup also fails.
+        if (checkpoint && !restarting) {
+          try { await checkpoint.abort(); }
+          catch (error) {
+            console.error('[App] Update draft cleanup failed:', error);
+            toastRef.current?.error('更新未执行；旧草稿交接暂时无法清除，当前草稿已保留。');
+          }
+          finally { checkpoint.release(); }
+        }
       }
-      await performRestartAndUpdate();
       return;
     }
     if (!(await requestLifecycleExitConfirmation())) return;
     await performRestartAndUpdate();
-  }, [performRestartAndUpdate, requestLifecycleExitConfirmation, t]);
+  }, [performRestartAndUpdate, requestLifecycleExitConfirmation, t, tabWorkspaceController]);
 
   // System tray event handling (minimize to tray, exit confirmation)
   useTrayEvents({
