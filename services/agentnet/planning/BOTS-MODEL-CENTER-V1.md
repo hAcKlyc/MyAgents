@@ -26,7 +26,7 @@ Host 通过原 supervisor → worker → SessionEngine → builtin SDK 消费限
 
 - [x] core 三协议真实 loopback 传输、并发预占/回放/CAS/撤销/流中断及密钥保护独立测试。
 - [x] Host 实际已安装 native SDK 三协议隔离接入、不可变配置和全目录凭据泄漏扫描。
-- [x] HTTP 与实际 owner authority 接线、接口/会话/撤销端到端；128 Rust tests、clippy通过。
+- [x] HTTP 与实际 owner authority 接线、接口/会话/撤销端到端；130 Rust tests、clippy通过。
 - [x] 真实 Rust fixture 控制台 CRUD、模型分配、监控、普通账号拒绝及响应式独立验收，详见dev-docs/bots-model-center-review.md。
 - [ ] 合入远端 main、CI 和来源核验。
 - [ ] 云端窗口/备份/回滚/现网控制台发布和真实账号路径复验。

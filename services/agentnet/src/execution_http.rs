@@ -110,6 +110,23 @@ impl ExecutionService {
             .ok_or(Error::new(StatusCode::NOT_FOUND, "BOT_NOT_FOUND"))
     }
     fn check_bot_grant(&self, bot: &Bot, g: &Grant) -> Result<(), Error> {
+        self.check_grant_resources(bot, g, true)
+    }
+    fn check_command_grant(
+        &self,
+        bot: &Bot,
+        g: &Grant,
+        operation: &Operation,
+    ) -> Result<(), Error> {
+        // Model availability may block execution, but must not block an already
+        // authorized reduction of admission. No other grant authority is relaxed.
+        self.check_grant_resources(
+            bot,
+            g,
+            !matches!(operation, Operation::Disable(_) | Operation::Delete(_)),
+        )
+    }
+    fn check_grant_resources(&self, bot: &Bot, g: &Grant, check_models: bool) -> Result<(), Error> {
         if bot.id != g.bot_id
             || bot.owner_id != g.scope.host_owner_id
             || bot.host_id != g.scope.host_device_id
@@ -129,6 +146,9 @@ impl ExecutionService {
             || g.max_daily_tokens > self.config.max_daily_tokens
         {
             return Err(Error::forbidden("GRANT_RESOURCE_REJECTED"));
+        }
+        if !check_models {
+            return Ok(());
         }
         let resources = self.effective_config()?;
         for id in &g.allowed_model_refs {
@@ -156,16 +176,17 @@ impl ExecutionService {
             Operation::Configure(p) => Some(p.clone()),
             _ => None,
         };
-        let resources = self.effective_config()?;
         if let Some(c) = config
             && let Some(model) = &c.model_ref
-            && !resources.model_refs.iter().any(|r| {
-                r.id == *model
-                    && r.owner_ids.contains(&bot.owner_id)
-                    && r.runtimes.contains(&c.runtime)
-            })
         {
-            return Err(Error::forbidden("MODEL_RESOURCE_REJECTED"));
+            let resources = self.effective_config()?;
+            if !resources.model_refs.iter().any(|resource| {
+                resource.id == *model
+                    && resource.owner_ids.contains(&bot.owner_id)
+                    && resource.runtimes.contains(&c.runtime)
+            }) {
+                return Err(Error::forbidden("MODEL_RESOURCE_REJECTED"));
+            }
         }
         Ok(())
     }
@@ -282,7 +303,7 @@ impl ExecutionService {
                         return Err(Error::conflict("GRANT_NOT_ACTIVE"));
                     }
                     let bot = self.bot(id)?;
-                    self.check_bot_grant(&bot, &row.grant)?;
+                    self.check_command_grant(&bot, &row.grant, &command.operation)?;
                     self.check_operation(&bot, &command.operation)?;
                     let saved = self.store.enqueue(&command, &row.grant, now)?;
                     Ok(command_projection(&saved))
@@ -435,7 +456,8 @@ impl ExecutionService {
                                 return Err(GateError("GRANT_NOT_ACTIVE"));
                             }
                             let bot = self.bot(&row.command.bot_id).map_err(error_gate)?;
-                            self.check_bot_grant(&bot, &g.grant).map_err(error_gate)?;
+                            self.check_command_grant(&bot, &g.grant, &row.command.operation)
+                                .map_err(error_gate)?;
                             self.check_operation(&bot, &row.command.operation)
                                 .map_err(error_gate)?;
                             let exp =
@@ -527,7 +549,7 @@ impl ExecutionService {
                         )
                         .map_err(error_gate)?;
                         let bot = self.bot(&intent.command.bot_id).map_err(error_gate)?;
-                        self.check_bot_grant(&bot, &intent.grant)
+                        self.check_command_grant(&bot, &intent.grant, &intent.command.operation)
                             .map_err(error_gate)?;
                         self.check_operation(&bot, &intent.command.operation)
                             .map_err(error_gate)?;
@@ -1876,5 +1898,246 @@ pub(crate) mod tests {
             )
             .is_ok()
         );
+    }
+    async fn persisted_managed_bot(t: &Setup, model_ref: &str) {
+        let bot =
+            t.s.bot(&t.bot_id)
+                .unwrap_or_else(|error| panic!("{}", error.code));
+        let request_id = Uuid::new_v4().to_string();
+        let mut body = queue(t, &request_id);
+        body["binding_generation"] = json!(1);
+        body["operation"]["params"]["name"] = json!(bot.name);
+        body["operation"]["params"]["model_ref"] = json!(model_ref);
+        body["operation"]["params"]["system_prompt"] = json!("fixture");
+        let (status, value) = human(
+            t,
+            &t.admin.account_token,
+            &format!("/api/admin/bots/{}/execution", t.bot_id),
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        let (status, pull) =
+            host(t, "/execution/self/pull", json!({"host_context":t.context})).await;
+        assert_eq!(status, StatusCode::OK, "{pull}");
+        let intent_hash = pull["data"]["intents"][0]["intent_hash"].as_str().unwrap();
+        let (status, lease) = host(
+            t,
+            "/execution/self/lease",
+            json!({"host_context":t.context,"intent_hash":intent_hash}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{lease}");
+        let command = t.s.store.command(&request_id).unwrap().command;
+        let mut snapshot = empty_snapshot(t);
+        snapshot.agent_id = Some(Uuid::new_v4().to_string());
+        snapshot.binding_generation = 1;
+        snapshot.revision = 1;
+        snapshot.config.name = bot.name;
+        snapshot.config.model_ref = Some(model_ref.into());
+        snapshot.config.system_prompt = "fixture".into();
+        snapshot.configured = true;
+        snapshot.runnable = true;
+        snapshot.unsupported_reason = None;
+        let receipt = Receipt {
+            mutation_id: request_id,
+            request_hash: command.request_hash,
+            grant_id: t.grant.id.clone(),
+            grant_generation: t.grant.generation,
+            bot_id: t.bot_id.clone(),
+            agent_id: snapshot.agent_id.clone(),
+            binding_generation: 1,
+            revision: 1,
+            status: myagents_agentnet_execution_core::ReceiptStatus::Persisted,
+            code: None,
+            snapshot: Some(snapshot),
+        };
+        let(status,value)=host(t,"/execution/self/receipt",json!({"kind":"command","host_context":t.context,"lease_id":lease["data"]["lease_id"],"receipt":receipt})).await;
+        assert_eq!(status, StatusCode::OK, "{value}");
+        assert!(
+            t.s.store
+                .known_bot_snapshot(&t.grant.scope, &t.bot_id)
+                .unwrap()
+                .is_some()
+        );
+    }
+    fn reduction_queue(t: &Setup, operation: Value) -> Value {
+        json!({"mutation_id":Uuid::new_v4().to_string(),"grant_id":t.grant.id,"grant_generation":1,"binding_generation":1,"expected_host_revision":1,"operation":operation})
+    }
+    #[tokio::test]
+    async fn reduction_disable_and_delete_remain_leasable_after_managed_catalog_disabled() {
+        for disabled in ["model", "provider"] {
+            let mut t = browser_setup().await;
+            let owner = t.owner.context.principal_id.clone();
+            let model_ref = Uuid::new_v4().to_string();
+            let store = install_managed_model(&mut t, &owner, model_ref.clone());
+            let (status, value) =
+                managed_registry_configure(&t, store.clone(), &model_ref, "builtin").await;
+            assert_eq!(status, StatusCode::OK, "{value}");
+            t.grant.allowed_model_refs = vec![model_ref.clone()];
+            accept(&t).await;
+            persisted_managed_bot(&t, &model_ref).await;
+            if disabled == "model" {
+                store
+                    .delete_model(&owner, &Uuid::new_v4().to_string(), &model_ref, 1)
+                    .unwrap();
+            } else {
+                let provider_id = store.model(&model_ref).unwrap().config.provider_id;
+                store
+                    .delete_provider(&owner, &Uuid::new_v4().to_string(), &provider_id, 1)
+                    .unwrap();
+            }
+            let path = format!("/api/admin/bots/{}/execution", t.bot_id);
+            let enable = reduction_queue(&t, json!({"method":"enable","params":{}}));
+            let (status, value) = human(&t, &t.admin.account_token, &path, enable).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{disabled}: {value}");
+            assert_eq!(value["code"], "MODEL_RESOURCE_REJECTED");
+            let (status, value) = human(
+                &t,
+                &t.owner.account_token,
+                "/api/bots/grants/accept",
+                json!({"grant":t.grant,"expected_generation":0}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{disabled}: {value}");
+            assert_eq!(value["code"], "MODEL_RESOURCE_REJECTED");
+            let (status, value) = human(
+                &t,
+                &t.admin.account_token,
+                &path,
+                reduction_queue(
+                    &t,
+                    json!({"method":"delete","params":{"confirmation":"wrong-confirmation"}}),
+                ),
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{value}");
+            let bot =
+                t.s.bot(&t.bot_id)
+                    .unwrap_or_else(|error| panic!("{}", error.code));
+            for operation in [
+                json!({"method":"disable","params":{"policy":"cancel"}}),
+                json!({"method":"delete","params":{"confirmation":bot.name}}),
+            ] {
+                let body = reduction_queue(&t, operation);
+                let request_id = body["mutation_id"].as_str().unwrap().to_owned();
+                let (status, value) = human(&t, &t.other.account_token, &path, body.clone()).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{value}");
+                let (status, value) = human(&t, &t.admin.account_token, &path, body).await;
+                assert_eq!(status, StatusCode::OK, "{disabled}: {value}");
+                let (status, pull) = host(
+                    &t,
+                    "/execution/self/pull",
+                    json!({"host_context":t.context}),
+                )
+                .await;
+                assert_eq!(status, StatusCode::OK, "{disabled}: {pull}");
+                let intent = pull["data"]["intents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|intent| {
+                        t.s.store
+                            .intent(intent["intent_hash"].as_str().unwrap())
+                            .unwrap()
+                            .command
+                            .mutation_id
+                            == request_id
+                    })
+                    .unwrap();
+                let intent_hash = intent["intent_hash"].as_str().unwrap();
+                let mut lease_context = t.context.clone();
+                lease_context.challenge_nonce = Uuid::new_v4().to_string();
+                let lease_body = json!({"host_context":lease_context,"intent_hash":intent_hash});
+                let (status, _, headers) = response(
+                    &t.s,
+                    Method::POST,
+                    "/execution/self/lease",
+                    &t.other.access,
+                    lease_body.clone(),
+                    None,
+                )
+                .await;
+                assert_ne!(status, StatusCode::OK);
+                let proof = t.f.proof(
+                    &t.other,
+                    "POST",
+                    "/execution/self/lease",
+                    Some(headers["dpop-nonce"].to_str().unwrap()),
+                );
+                assert_eq!(
+                    response(
+                        &t.s,
+                        Method::POST,
+                        "/execution/self/lease",
+                        &t.other.access,
+                        lease_body.clone(),
+                        Some(proof)
+                    )
+                    .await
+                    .0,
+                    StatusCode::FORBIDDEN
+                );
+                let (status, value) = host(&t, "/execution/self/lease", lease_body).await;
+                assert_eq!(status, StatusCode::OK, "{disabled}: {value}");
+                let saved = t.s.store.command(&request_id).unwrap();
+                assert_eq!(saved.lease_count, 1);
+                assert!(matches!(
+                    saved.command.operation,
+                    Operation::Disable(_) | Operation::Delete(_)
+                ));
+            }
+            let disable: Operation =
+                serde_json::from_value(json!({"method":"disable","params":{"policy":"cancel"}}))
+                    .unwrap();
+            let mut wrong = bot.clone();
+            wrong.owner_id = t.other.context.principal_id.clone();
+            assert_eq!(
+                t.s.check_command_grant(&wrong, &t.grant, &disable)
+                    .expect_err("owner must remain bound")
+                    .code,
+                "BOT_TARGET_MISMATCH"
+            );
+            let mut wrong = bot.clone();
+            wrong.host_id = t.other.context.device_id.clone();
+            assert_eq!(
+                t.s.check_command_grant(&wrong, &t.grant, &disable)
+                    .expect_err("Host must remain bound")
+                    .code,
+                "BOT_TARGET_MISMATCH"
+            );
+            assert!(store.usage(1).unwrap().is_empty());
+        }
+    }
+    #[tokio::test]
+    async fn reduction_and_model_less_configuration_do_not_read_managed_database() {
+        let mut t = browser_setup().await;
+        let owner = t.owner.context.principal_id.clone();
+        let model_ref = Uuid::new_v4().to_string();
+        let store = install_managed_model(&mut t, &owner, model_ref);
+        let bot =
+            t.s.bot(&t.bot_id)
+                .unwrap_or_else(|error| panic!("{}", error.code));
+        let db = t.f.dir.path().join("model-center.sqlite3");
+        std::fs::rename(&db, db.with_extension("unavailable-fixture")).unwrap();
+        let disable: Operation =
+            serde_json::from_value(json!({"method":"disable","params":{"policy":"cancel"}}))
+                .unwrap();
+        assert!(t.s.check_command_grant(&bot, &t.grant, &disable).is_ok());
+        assert!(t.s.check_operation(&bot, &disable).is_ok());
+        let mut configure = model_config_operation("ignored-fixture", "builtin");
+        if let Operation::Configure(config) = &mut configure {
+            config.model_ref = None;
+        }
+        assert!(t.s.check_operation(&bot, &configure).is_ok());
+        let enable: Operation =
+            serde_json::from_value(json!({"method":"enable","params":{}})).unwrap();
+        assert_eq!(
+            t.s.check_command_grant(&bot, &t.grant, &enable)
+                .expect_err("Enable must still validate catalog")
+                .status,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        drop(store);
     }
 }
