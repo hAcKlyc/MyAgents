@@ -856,6 +856,17 @@ fn identity_check_delay() -> Duration {
     Duration::from_secs(5 * 3600 + 1800 + jitter)
 }
 enum Work {
+    RemoteSession {
+        channel_id: String,
+        request_id: myagents_host_management_protocol::CanonicalUuid,
+        result: Result<
+            (
+                myagents_host_management_protocol::ResponseResult,
+                Allocation,
+            ),
+            NetworkError,
+        >,
+    },
     Returned {
         channel_id: String,
         op_id: String,
@@ -952,7 +963,7 @@ async fn connect(
     let mut pairs = if management_only {
         Pairs::new_management(
             owner.memory.clone(),
-            myagents_host_management_protocol::PeerRole::Controller,
+            myagents_host_management_protocol::PeerRole::Host,
         )
     } else {
         Pairs::new(owner.memory.clone())
@@ -1026,14 +1037,10 @@ async fn connect(
                             }
                             ServerMessage::ChannelOffer { channel_id, initiator, responder, initiator_connection_epoch,
                                 responder_connection_epoch, initiator_binding, responder_binding, .. } => {
-                                if management_only {
-                                    pairs.reserve_management_retirement(&channel_id,&scope,&local)?;
-                                    pairs.retire_management(&channel_id,true);
-                                    send(&mut socket, ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
-                                    continue;
-                                }
                                 if work.len() >= budget("pending") { return Err(NetworkError::new("NETWORK_REQUEST_CAPACITY")); }
+                                if management_only {pairs.reserve_management_retirement(&channel_id,&scope,&local)?;}
                                 if let Err(error) = pairs.reserve(&channel_id) {
+                                    if management_only {pairs.retire_management(&channel_id,true);}
                                     send(&mut socket, ClientMessage::Close { scope: scope.clone(), channel_id, reason: error.code }).await?;
                                     continue;
                                 }
@@ -1056,7 +1063,10 @@ async fn connect(
                             },
                             ServerMessage::ChannelReady { channel_id, .. } => pairs.ready(&channel_id)?,
                             ServerMessage::ChannelClosed { channel_id, .. } => {
-                                if management_only && !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
+                                if management_only {
+                                    if !pairs.has_channel(&channel_id) { return Err(NetworkError::new("CONTROL_UNEXPECTED")); }
+                                    pairs.note_management_closed(&channel_id);pairs.retire_management(&channel_id,true);pending_offers.remove(&channel_id);continue;
+                                }
                                 pairs.remove(&channel_id);pending_offers.remove(&channel_id);calls.channel_closed(&channel_id);target_returns.channel_closed(&channel_id);
                                 for op in incoming_calls.channel_ops(&channel_id) {
                                     prepared_targets.remove(&op);
@@ -1162,8 +1172,25 @@ async fn connect(
                         let (channel_id, payload) = myagents_agent_network_protocol::decode_tls_frame(&bytes)
                             .map_err(|_| NetworkError::new("TLS_FRAME_INVALID"))?;
                         if management_only {
-                            pairs.remove(&channel_id);
-                            send(&mut socket,ClientMessage::Close {scope:scope.clone(),channel_id,reason:"TARGET_UNAVAILABLE".into()}).await?;
+                            let (events,_allocation)=match pairs.feed_management(&channel_id,payload){Ok(decoded)=>decoded,Err(error)=>{pairs.retire_management(&channel_id,true);send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id:channel_id.clone(),reason:error.code}).await?;continue;}};
+                            let (sequence,received_bytes)=pairs.release_credit(&channel_id,bytes.len())?;
+                            send(&mut socket,ClientMessage::Credit{scope:scope.clone(),channel_id:channel_id.clone(),sequence,received_bytes}).await?;
+                            for event in events {
+                                match event {
+                                    super::channel::ManagementEvent::Ready => {},
+                                    super::channel::ManagementEvent::Request{request_id,method:myagents_host_management_protocol::ManagementMethod::RemoteSession,params:myagents_host_management_protocol::RequestParams::RemoteSession(params)} => {
+                                        if work.len()>=budget("pending") {
+                                            pairs.send_management(&channel_id,myagents_host_management_protocol::ManagementMessage::Response{request_id,result:myagents_host_management_protocol::ResponseResult::Error{code:"RESOURCE_EXHAUSTED".into()}})?;
+                                            continue;
+                                        }
+                                        let request_allocation=owner.memory.reserve(measure(&params)?.0*3)?;
+                                        let app=app.clone();let manager=manager.clone();let memory=owner.memory.clone();let channel_id=channel_id.clone();let account=identity.account.clone();let lifetime=connection_lifetime.0.clone();
+                                        work.push(async move {let _request_allocation=request_allocation;Work::RemoteSession{channel_id,request_id,result:super::remote_session_target::execute(&app,&manager,params.remote_session,memory,account,lifetime).await}}.boxed());
+                                    },
+                                    super::channel::ManagementEvent::Request{request_id,..} => {pairs.send_management(&channel_id,myagents_host_management_protocol::ManagementMessage::Response{request_id,result:myagents_host_management_protocol::ResponseResult::Error{code:"METHOD_UNSUPPORTED".into()}})?;},
+                                    super::channel::ManagementEvent::Response{..} => {pairs.remove(&channel_id);send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id:channel_id.clone(),reason:"HOST_MANAGEMENT_UNEXPECTED_RESPONSE".into()}).await?;},
+                                }
+                            }
                             continue;
                         }
                         match pairs.feed(&channel_id, payload) {
@@ -1290,6 +1317,14 @@ async fn connect(
                                 send(&mut socket, ClientMessage::Ready { scope: scope.clone(), catalog_seq }).await?;
                                 ready_requested = true;
                             }
+                        }
+                    }
+                    Work::RemoteSession{channel_id,request_id,result} => {
+                        identity.account.ensure_current()?;
+                        if owner.generation()!=generation {return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));}
+                        if pairs.has_channel(&channel_id) {
+                            let (result,_allocation)=match result {Ok((result,allocation))=>(result,Some(allocation)),Err(error)=>(myagents_host_management_protocol::ResponseResult::Error{code:error.code},None)};
+                            if let Err(error)=pairs.send_management(&channel_id,myagents_host_management_protocol::ManagementMessage::Response{request_id,result}) {pairs.remove(&channel_id);send(&mut socket,ClientMessage::Close{scope:scope.clone(),channel_id,reason:error.code}).await?;}
                         }
                     }
                     Work::Offer { channel_id, result } => {

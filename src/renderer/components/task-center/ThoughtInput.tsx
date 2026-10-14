@@ -1,3 +1,4 @@
+import { useUpdateEditorAdmission } from '@/hooks/useUpdateEditorAdmission';
 // ThoughtInput — compact freeform note input for Thought mode.
 // Writes through to ~/.myagents/thoughts/ via `cmd_thought_create`.
 //
@@ -236,8 +237,21 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
       theme.verticalPaddingPx + theme.pxPerLine * minLines;
     const textareaMaxHeightPx =
       theme.verticalPaddingPx + theme.pxPerLine * effectiveMaxLines;
-    const [value, setValue] = useState('');
-    const [busy, setBusy] = useState(false);
+    const [value, setValueState] = useState('');
+    const valueRef = useRef('');
+    const setValue = useCallback((next: string) => {
+      valueRef.current = next;
+      setValueState(next);
+    }, []);
+    const [busy, setBusyState] = useState(false);
+    const busyRef = useRef(false);
+    const setBusy = useCallback((next: boolean) => {
+      busyRef.current = next;
+      setBusyState(next);
+    }, []);
+    const recordingBusyRef = useRef(recordingBusy);
+    useLayoutEffect(() => { recordingBusyRef.current = recordingBusy; }, [recordingBusy]);
+    const startingRecordingRef = useRef(false);
     const interactionBusy = busy || recordingBusy;
     const [error, setError] = useState<string | null>(null);
 
@@ -257,6 +271,11 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
     // hazard applies here — both inputs share the launcher 想法 surface.
     const isComposingRef = useRef(false);
     const [resizeBump, setResizeBump] = useState(0);
+    const updateLockedRef = useUpdateEditorAdmission(
+      'thought-input', cardRef, textareaRef,
+      () => !!valueRef.current || isComposingRef.current || busyRef.current || recordingBusyRef.current || startingRecordingRef.current,
+      '新建文本记录尚未提交或仍在输入、保存或开始录音，请先处理后再更新；内容已保留。',
+    );
 
     // Imperative focus — exposed through the forwarded ref so parents can
     // drive focus on mode/tab switches. Matches SimpleChatInputHandle.
@@ -353,12 +372,14 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
     ]);
 
     const handleCompositionStart = useCallback(() => {
+      if (updateLockedRef.current) return;
       isComposingRef.current = true;
-    }, []);
+    }, [updateLockedRef]);
     const handleCompositionEnd = useCallback(() => {
+      if (updateLockedRef.current) return;
       isComposingRef.current = false;
       setResizeBump((b) => b + 1);
-    }, []);
+    }, [updateLockedRef]);
 
     // Consume any pending caret position after React flushes `setValue` to
     // the DOM — safer than `requestAnimationFrame`, which can run before
@@ -382,22 +403,24 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
 
     const handleChange = useCallback(
       (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        if (updateLockedRef.current) { e.target.value = valueRef.current; return; }
         const next = e.target.value;
         setValue(next);
         recomputeTagMenu(next, e.target.selectionStart ?? next.length);
       },
-      [recomputeTagMenu],
+      [recomputeTagMenu, setValue, updateLockedRef],
     );
 
     const handleSelect = useCallback(() => {
+      if (updateLockedRef.current) return;
       const ta = textareaRef.current;
       if (!ta) return;
       recomputeTagMenu(ta.value, ta.selectionStart ?? ta.value.length);
-    }, [recomputeTagMenu]);
+    }, [recomputeTagMenu, updateLockedRef]);
 
     const insertTag = useCallback(
       (tag: string) => {
-        if (!tagMenu) return;
+        if (updateLockedRef.current || !tagMenu) return;
         const { anchor } = tagMenu;
         // Replace the WHOLE tag body at the anchor — including any chars
         // after the caret that are still valid tag chars — so picking a
@@ -412,10 +435,11 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
         setValue(next);
         setTagMenu(null);
       },
-      [tagMenu, value],
+      [tagMenu, value, setValue, updateLockedRef],
     );
 
     const handleHashButton = useCallback(() => {
+      if (updateLockedRef.current) return;
       const ta = textareaRef.current;
       if (!ta) return;
       // Replace any active selection — matches standard form-input
@@ -430,9 +454,10 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
       pendingCaretRef.current = newPos;
       setValue(next);
       recomputeTagMenu(next, newPos);
-    }, [recomputeTagMenu, value]);
+    }, [recomputeTagMenu, value, setValue, updateLockedRef]);
 
     const handleSubmit = useCallback(async () => {
+      if (updateLockedRef.current || busyRef.current || startingRecordingRef.current) return;
       const content = value.trim();
       if (!content || interactionBusy) return;
       setBusy(true);
@@ -450,10 +475,11 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
       } finally {
         setBusy(false);
       }
-    }, [interactionBusy, onCreated, value, variant]);
+    }, [interactionBusy, onCreated, value, variant, setBusy, setValue, updateLockedRef]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (updateLockedRef.current) return;
         // Skip all custom key handling during IME composition — otherwise
         // pressing Enter to commit a pinyin candidate would instead pick a
         // tag suggestion (or submit).
@@ -486,8 +512,16 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
           void handleSubmit();
         }
       },
-      [tagMenu, filteredTags, tagIndex, insertTag, handleSubmit],
+      [tagMenu, filteredTags, tagIndex, insertTag, handleSubmit, updateLockedRef],
     );
+
+    const handleStartRecording = useCallback(async () => {
+      if (updateLockedRef.current || busyRef.current || recordingBusyRef.current || startingRecordingRef.current) return;
+      startingRecordingRef.current = true;
+      try { await onStartRecording?.(); }
+      catch (recordingError) { setError(String(recordingError)); }
+      finally { startingRecordingRef.current = false; }
+    }, [onStartRecording, updateLockedRef]);
 
     const canSend = value.trim().length > 0 && !interactionBusy;
 
@@ -554,6 +588,7 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
             <textarea
               ref={textareaRef}
               value={value}
+              readOnly={updateLockedRef.current}
               onChange={handleChange}
               onSelect={handleSelect}
               onClick={handleSelect}
@@ -623,7 +658,7 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
             since textarea clicks are the anchor and don't count as outside. */}
           <Popover
             open={!!tagMenu && filteredTags.length > 0}
-            onClose={() => setTagMenu(null)}
+            onClose={() => { if (!updateLockedRef.current) setTagMenu(null); }}
             anchorRef={cardRef}
             placement="bottom-start"
             closeOnEscape={false}
@@ -645,7 +680,7 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
                   e.preventDefault();
                   insertTag(tag);
                 }}
-                onMouseEnter={() => setTagIndex(i)}
+                onMouseEnter={() => { if (!updateLockedRef.current) setTagIndex(i); }}
                 className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm transition-colors ${
                   i === tagIndex
                     ? 'bg-[var(--accent-warm-subtle)] text-[var(--accent-warm)]'
@@ -676,7 +711,7 @@ export const ThoughtInput = forwardRef<ThoughtInputHandle, Props>(
               {onStartRecording && (
                 <button
                   type="button"
-                  onClick={() => void onStartRecording()}
+                  onClick={() => void handleStartRecording()}
                   disabled={interactionBusy}
                   className={`inline-flex items-center gap-1.5 rounded-lg text-sm font-medium text-[var(--ink-secondary)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--accent-warm)] disabled:cursor-wait disabled:opacity-50 ${
                     variant === 'launcher' ? 'h-8 px-2.5' : 'h-7 px-2'

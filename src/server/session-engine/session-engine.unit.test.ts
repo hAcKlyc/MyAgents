@@ -521,6 +521,7 @@ vi.mock('../sse', () => ({
 
 import {
   freezeSessionAdmissionsForUpdate,
+  runProcessUpdateAdmission,
   releaseSessionAdmissionsForUpdate,
   getAskUserQuestionResponseEngine,
   getPermissionResponseEngine,
@@ -3245,6 +3246,32 @@ describe('user-confirmed updater admission through the SessionEngine owner', () 
       expect(mocks.prewarmExternalSession).not.toHaveBeenCalled();
       expect(mocks.restoreExternalSessionState).not.toHaveBeenCalled();
     } finally { qaMode.enabled = false; }
+  });
+
+  it('keeps process receipt IO admitted through its final awaited write', async () => {
+    let finish!: () => void;
+    let completed = false;
+    const pending = runProcessUpdateAdmission(async () => {
+      await new Promise<void>(resolve => { finish = resolve; });
+      completed = true;
+    });
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    expect(completed).toBe(false);
+    finish(); await pending;
+    await freezeSessionAdmissionsForUpdate(token);
+    expect(completed).toBe(true);
+  });
+
+  it('rejects new process metadata operations while frozen without invoking IO', async () => {
+    await freezeSessionAdmissionsForUpdate(token);
+    const write = vi.fn(async () => undefined);
+    await expect(runProcessUpdateAdmission(write)).rejects.toThrow('UPDATE_BUSY');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('releases a failed process IO attempt so rejection does not leave a phantom busy owner', async () => {
+    await expect(runProcessUpdateAdmission(async () => { throw new Error('synthetic IO failure'); })).rejects.toThrow('synthetic IO failure');
+    await freezeSessionAdmissionsForUpdate(token);
   });
 
   it('does not re-freeze after a timed-out native observation was released', async () => {

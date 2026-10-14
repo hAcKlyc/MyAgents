@@ -297,6 +297,8 @@ const markdownComponents: Components = {
 };
 
 interface MarkdownProps {
+  /** Remote text cannot invoke local file/browser/image/embedded-diagram actions. */
+  remoteContent?: boolean;
   citationSources?: CitationSources;
   children: string;
   /** Document-level numbering for an editor rendering isolated fragments. */
@@ -457,7 +459,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ source, remarkPlugins, rehyp
   );
 });
 
-const Markdown = memo(function Markdown({ children, compact = false, preserveNewlines = false, allowSetextHeadings = true, raw = false, basePath = '', workspacePath, streaming = false, footnoteNumbers, citationSources }: MarkdownProps) {
+const Markdown = memo(function Markdown({ children, compact = false, preserveNewlines = false, allowSetextHeadings = true, raw = false, basePath = '', workspacePath, remoteContent = false, streaming = false, footnoteNumbers, citationSources }: MarkdownProps) {
   const { t } = useTranslation('app');
   const citationUnavailable = t('markdown.citationUnavailable');
   // Skip preprocessing for raw mode (file preview) - preprocessing is for streaming chat messages.
@@ -492,10 +494,17 @@ const Markdown = memo(function Markdown({ children, compact = false, preserveNew
   const components = useMemo(() => {
     return {
       ...markdownComponents,
+      ...(remoteContent ? {
+        img: ({ alt }: React.ImgHTMLAttributes<HTMLImageElement>) => <span>{alt || ''}</span>,
+        a: ({ children }: React.ComponentProps<'a'>) => <span>{children}</span>,
+        code: ({ children, className }: React.ComponentProps<'code'>) => <code className={className}>{children}</code>,
+        pre: ({ children }: React.ComponentProps<'pre'>) => <pre className="overflow-auto rounded-lg bg-[var(--paper-inset)] p-4">{children}</pre>,
+      } : {}),
       img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => (
-        <MarkdownImage src={props.src} alt={props.alt} basePath={basePath} workspacePath={workspacePath} />
+        remoteContent ? <span>{props.alt || ''}</span> : <MarkdownImage src={props.src} alt={props.alt} basePath={basePath} workspacePath={workspacePath} />
       ),
       a: (props: React.ComponentProps<'a'> & { node?: Element }) => {
+        if (remoteContent) return <span>{props.children}</span>;
         let number: number | undefined;
         if (props.href?.startsWith('#user-content-fn-')) {
           try { number = footnoteNumbers?.get(decodeURIComponent(props.href.slice('#user-content-fn-'.length))); } catch { /* keep the source fragment's link */ }
@@ -503,7 +512,7 @@ const Markdown = memo(function Markdown({ children, compact = false, preserveNew
         return <MarkdownLink {...props} basePath={basePath}>{number ?? props.children}</MarkdownLink>;
       },
     };
-  }, [basePath, workspacePath, footnoteNumbers]);
+  }, [basePath, workspacePath, footnoteNumbers, remoteContent]);
 
   return (
     <MarkdownDocumentDirectoryContext.Provider value={basePath}>

@@ -1735,5 +1735,63 @@
       "partialCredentialUnknown": "配置已保存，但密钥状态未确认。请查询待处理回执。",
       "partialCredentialFailed": "配置已保存，但密钥未更新。请查看 Host 密钥状态后重试。"
     }
+  },
+  "remoteSession": {
+    "remote": "远程会话",
+    "openSession": "打开会话",
+    "accountChanged": "账号已变化。请从当前账号的网络重新打开会话。",
+    "refresh": "刷新远程状态",
+    "newSession": "新会话",
+    "stop": "停止这一轮",
+    "history": "这个 Agent 的会话",
+    "empty": "暂无会话。发送第一条消息，在远端开始会话。",
+    "moreSessions": "更多会话",
+    "older": "加载更早的消息",
+    "truncated": "此消息较长，展示内容已截断。",
+    "message": "远程消息",
+    "placeholder": "交给远端 Agent 的任务…",
+    "send": "发送",
+    "snapshotHint": "实时状态 · 快照同步",
+    "closeHint": "关闭此标签不会停止远端。文件和执行环境留在远端。",
+    "processing": "远端正在处理操作。收到接纳凭据后更新会话。",
+    "unconfirmed": "操作接纳尚未确认。保留原操作编号并查询凭据，不会自动重发。凭据不存在不代表操作没有执行。",
+    "checkReceipt": "查询原操作凭据",
+    "busy": "远端正在执行其他会话，请稍后继续。",
+    "unsupported": "此设备或 Runtime 暂不支持远程会话。",
+    "failed": "无法读取远程会话，请检查连接后刷新。",
+    "incompleteInteraction": "远端请求详情不完整，暂时不能批准。可以拒绝。",
+    "allowOnce": "仅允许这一次",
+    "approvePlan": "批准计划",
+    "submitAnswers": "提交回答",
+    "deny": "拒绝",
+    "states": {
+      "offline": "离线",
+      "processing": "等待远端接纳",
+      "unconfirmed": "接纳未确认",
+      "loading": "正在读取远端…",
+      "draft": "新会话",
+      "idle": "空闲",
+      "running": "执行中",
+      "waiting_user_action": "等待你的处理",
+      "unavailable": "不可用",
+      "complete": "已完成",
+      "stopped": "已停止",
+      "error": "执行出错",
+      "interrupted": "已中断",
+      "unknown": "结果未知"
+    },
+    "toolStates": {
+      "running": "执行中",
+      "complete": "已完成",
+      "error": "出错"
+    },
+    "interactions": {
+      "permission": "远端操作授权",
+      "plan": "远端计划确认",
+      "question": "远端需要你的回答"
+    },
+    "operationUnknown": "操作记录无法读取，结果仍未知。已禁用新操作；请恢复客户端存储后重新打开会话，避免重复执行。",
+    "connectionPending": "正在恢复网络身份，连接就绪后继续此远程会话…",
+    "cachedHistory": "已加载的更早会话（缓存；打开时重新核验）"
   }
 }

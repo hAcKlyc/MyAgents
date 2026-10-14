@@ -1,0 +1,140 @@
+{
+  "requests": [
+    {
+      "kind": "capabilities",
+      "agentId": "agent-1"
+    },
+    {
+      "kind": "list",
+      "agentId": "agent-1",
+      "limit": 30
+    },
+    {
+      "kind": "get",
+      "agentId": "agent-1",
+      "sessionId": "session-1",
+      "limit": 30
+    },
+    {
+      "kind": "start",
+      "agentId": "agent-1",
+      "operationId": "00000000-0000-4000-8000-000000000003",
+      "text": "hello"
+    },
+    {
+      "kind": "send",
+      "agentId": "agent-1",
+      "sessionId": "session-1",
+      "operationId": "00000000-0000-4000-8000-000000000003",
+      "text": "hello"
+    },
+    {
+      "kind": "receipt",
+      "agentId": "agent-1",
+      "operationId": "00000000-0000-4000-8000-000000000003"
+    },
+    {
+      "kind": "respond",
+      "agentId": "agent-1",
+      "sessionId": "session-1",
+      "operationId": "00000000-0000-4000-8000-000000000003",
+      "generation": "2",
+      "turnId": "turn-1",
+      "requestId": "permission-1",
+      "interaction": "permission",
+      "approved": true,
+      "answers": {}
+    },
+    {
+      "kind": "stop",
+      "agentId": "agent-1",
+      "sessionId": "session-1",
+      "operationId": "00000000-0000-4000-8000-000000000003",
+      "generation": "2",
+      "turnId": "turn-1"
+    }
+  ],
+  "results": [
+    {
+      "kind": "capabilities",
+      "version": 1,
+      "agentId": "agent-1",
+      "runtime": "builtin",
+      "maxActiveSessions": 10,
+      "liveUpdates": "snapshot"
+    },
+    {
+      "kind": "list",
+      "agentId": "agent-1",
+      "items": [
+        {
+          "sessionId": "session-1",
+          "title": "hello",
+          "updatedAt": "2026-10-15T00:00:00Z",
+          "preview": "hello",
+          "runtime": "builtin"
+        }
+      ],
+      "hasMore": false,
+      "nextBefore": null
+    },
+    {
+      "kind": "snapshot",
+      "agentId": "agent-1",
+      "sessionId": "session-1",
+      "generation": "2",
+      "turnId": "turn-1",
+      "revision": "2:5",
+      "state": "waiting_user_action",
+      "title": "hello",
+      "runtime": "builtin",
+      "model": null,
+      "terminal": null,
+      "messages": [
+        {
+          "id": "msg-1",
+          "role": "assistant",
+          "timestamp": "2026-10-15T00:00:00Z",
+          "content": "hello",
+          "truncated": false,
+          "tools": []
+        }
+      ],
+      "interactions": [
+        {
+          "requestId": "permission-1",
+          "generation": "2",
+          "turnId": "turn-1",
+          "interaction": "permission",
+          "actionable": true,
+          "title": "Allow",
+          "description": "Read selected workspace",
+          "questions": [
+            {
+              "answerKey": "question-1",
+              "question": "Choose",
+              "options": [
+                "Yes"
+              ],
+              "multiSelect": false
+            }
+          ]
+        }
+      ],
+      "hasMoreBefore": false,
+      "nextBefore": null
+    },
+    {
+      "kind": "receipt",
+      "agentId": "agent-1",
+      "operationId": "00000000-0000-4000-8000-000000000003",
+      "sessionId": "session-1",
+      "status": "processing",
+      "code": null
+    },
+    {
+      "kind": "error",
+      "code": "TARGET_OWNER_UNAVAILABLE"
+    }
+  ]
+}

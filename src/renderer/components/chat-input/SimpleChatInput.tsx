@@ -1,3 +1,5 @@
+import { APP_BUILD_PROFILE } from '@/../shared/appProfile';
+import { registerComposerUpdateOwner, restoreComposerUpdateDraft, type ComposerSnapshot } from '@/utils/composerUpdateCheckpoint';
 import { agentMentionToken, activeAgentSnapshots, type AgentMentionSnapshot, type QueryMentionContext } from '../../../shared/agentMentions';
 import { isRuntimeBackedProvider } from '../../../shared/providerExecution';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
@@ -125,6 +127,8 @@ function ModelSelectionScrollSync({
 }
 
 const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputProps>(function SimpleChatInput({
+  composerTabId,
+  composerDiscussionId,
   value: externalValue,
   onChange: _externalOnChange,
   onSend,
@@ -277,7 +281,19 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
   // PERFORMANCE FIX: Use internal state to avoid parent re-renders on every keystroke
   // This prevents MessageList from re-rendering when typing in long conversations
-  const [inputValue, setInputValue] = useState(externalValue ?? '');
+  const [inputValue, setInputValueState] = useState(externalValue ?? '');
+  const inputValueRef = useRef(inputValue);
+  const updateLockedRef = useRef(false);
+  const updatePriorReadOnlyRef = useRef(false);
+  const isDraftLocked = useCallback(() => updateLockedRef.current, []);
+  const setInputValue = useCallback<React.Dispatch<React.SetStateAction<string>>>((next) => {
+    if (updateLockedRef.current) return;
+    setInputValueState(previous => {
+      const value = typeof next === 'function' ? next(previous) : next;
+      inputValueRef.current = value;
+      return value;
+    });
+  }, []);
   const [agentMentions,setAgentMentions]=useState<AgentMentionSnapshot[]>([]);
   const [requiredSystemSkill, setRequiredSystemSkill] = useState<QueryMentionContext["requiredSystemSkill"]>();
   const [primaryContext, setPrimaryContext] = useState<QueryMentionContext["primaryContext"]>();
@@ -370,7 +386,6 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   const undoStack = useUndoStack({ maxSize: 20 });
 
   // Ref for latest inputValue (for stable insertReferences callback)
-  const inputValueRef = useRef(inputValue);
   inputValueRef.current = inputValue;
 
   // Plus menu
@@ -732,6 +747,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     handleUploadButtonClick,
     handleFileChange,
     handlePaste,
+    hasPendingAttachments,
+    getImageCount,
   } = useAttachmentHandling({
     fileService,
     workspacePath,
@@ -748,6 +765,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     setShowPlusMenu,
     notifyUnsupportedImageFallback,
     onWorkspaceRefresh,
+    isDraftLocked,
   });
 
   // Insert @references at cursor position or end of input
@@ -779,7 +797,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
     }, 0);
-  }, [textareaRef]);
+  }, [textareaRef, setInputValue]);
 
   // Append a reference token to the END of input with leading-space padding and
   // guaranteed trailing space. Used by file-preview 「引用文件」/ 「引用」 selection.
@@ -799,7 +817,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       ta.setSelectionRange(newValue.length, newValue.length);
       ta.scrollTop = ta.scrollHeight;
     }, 0);
-  }, [textareaRef]);
+  }, [textareaRef, setInputValue]);
 
   // Insert /slash-command at cursor position or end of input
   const insertSlashCommand = useCallback((command: string) => {
@@ -818,10 +836,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(newCursorPos, newCursorPos);
     }, 0);
-  }, [textareaRef]);
+  }, [textareaRef, setInputValue]);
 
   // Set input value directly (for restoring content after cron stop)
   const setValue = useCallback((value: string, context?: QueryMentionContext) => {
+    if (updateLockedRef.current) return;
     setAgentMentions(context?.agentMentions ?? []);
     setPrimaryContext(context?.primaryContext);
     setRequiredSystemSkill(context?.requiredSystemSkill);
@@ -867,8 +886,51 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     // eslint-disable-next-line react-hooks/exhaustive-deps -- textareaRef is stable
   }), [processDroppedFiles, processDroppedFilePaths, insertReferences, appendReferenceToken, insertSlashCommand, setValue, images.length, agentMentions, primaryContext, requiredSystemSkill]);
 
+  const checkpointSnapshotRef = useRef<ComposerSnapshot | null>(null);
+  useLayoutEffect(() => {
+    checkpointSnapshotRef.current = {
+      scope: { tabId: composerTabId ?? '', sessionId, workspacePath, mode: isLauncherMode ? 'launcher' : 'chat',
+        ...(composerDiscussionId ? { discussionId: composerDiscussionId } : {}) },
+      text: inputValue,
+      context: { agentMentions: activeAgentSnapshots(inputValue, agentMentions), primaryContext, requiredSystemSkill },
+      imageCount: images.length, pendingAttachments: false, composing: false, sending: false,
+      stagedWorkflow: !!goalDraftActive || !!cronConfig,
+    };
+  });
+  useLayoutEffect(() => {
+    if (APP_BUILD_PROFILE !== 'moxbot') return;
+    const scope = { tabId: composerTabId ?? '', sessionId, workspacePath, mode: isLauncherMode ? 'launcher' as const : 'chat' as const,
+      ...(composerDiscussionId ? { discussionId: composerDiscussionId } : {}) };
+    const current = checkpointSnapshotRef.current!;
+    const restored = restoreComposerUpdateDraft(scope, !inputValueRef.current && !getImageCount()
+      && !current.context.primaryContext && !current.context.requiredSystemSkill && !current.context.agentMentions?.length);
+    if (restored) {
+      setInputValue(restored.text);
+      setAgentMentions(restored.context.agentMentions ?? []);
+      setPrimaryContext(restored.context.primaryContext);
+      setRequiredSystemSkill(restored.context.requiredSystemSkill);
+    }
+    return registerComposerUpdateOwner({
+      snapshot: () => ({ ...checkpointSnapshotRef.current!,
+        text: textareaRef.current?.value ?? inputValueRef.current,
+        imageCount: getImageCount(), pendingAttachments: hasPendingAttachments(),
+        composing: isComposingRef.current, sending: sendingRef.current,
+      }),
+      freeze: locked => {
+        const wasLocked = updateLockedRef.current;
+        updateLockedRef.current = locked;
+        if (overlayRootRef.current) overlayRootRef.current.inert = locked;
+        if (textareaRef.current) {
+          if (locked && !wasLocked) updatePriorReadOnlyRef.current = textareaRef.current.readOnly;
+          textareaRef.current.readOnly = locked || updatePriorReadOnlyRef.current;
+        }
+      },
+    });
+  }, [composerTabId, composerDiscussionId, sessionId, workspacePath, isLauncherMode, setInputValue, textareaRef, getImageCount, hasPendingAttachments]);
+
   // Handle text input change (detect @ and / and backspace)
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (updateLockedRef.current) { e.target.value = inputValueRef.current; return; }
     if (nextPromptSuggestion) setDismissedSuggestionKey(nextPromptSuggestion.key);
     const newValue = e.target.value;
     const cursorPos = e.target.selectionStart;
@@ -949,7 +1011,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     }
 
     setInputValue(newValue);
-  }, [inputValue, showFileSearch, atPosition, showSlashMenu, slashPosition, nextPromptSuggestion]);
+  }, [inputValue, showFileSearch, atPosition, showSlashMenu, slashPosition, nextPromptSuggestion, setInputValue]);
 
   // Cycle permission mode — runtime-aware:
   // Builtin: auto → plan → fullAgency → auto
@@ -998,7 +1060,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     // IME composition can lag behind React's KeyboardEvent flags on macOS
     // WebView. Do not let button-click or stale-keydown paths submit while
     // the textarea is still in an active composition.
-    if (isComposingRef.current) return;
+    if (updateLockedRef.current || isComposingRef.current) return;
 
     const text = inputValue.trim();
     if (!text && images.length === 0) return;
@@ -1074,7 +1136,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     } finally {
       sendingRef.current = false;
     }
-  }, [onSend, images, inputValue, agentMentions, primaryContext, requiredSystemSkill, provider, currentModelId, isExternalRuntime, setImages, onSlashAction, enabledClientActionCommands, showConfigLockedReason, notifyUnsupportedImageFallback]);
+  }, [onSend, images, inputValue, agentMentions, primaryContext, requiredSystemSkill, provider, currentModelId, isExternalRuntime, setImages, onSlashAction, enabledClientActionCommands, showConfigLockedReason, notifyUnsupportedImageFallback, setInputValue]);
 
   // Handle keyboard navigation in file search and slash menu
   // Handler for selecting a slash command — shared by the click path
@@ -1457,7 +1519,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
               // dialog window could mutate inputValue between detection and
               // the user's confirm click — the dialog would describe content
               // that no longer matches what handleSend reads.
-              readOnly={!!repetitionWarning}
+              readOnly={!!repetitionWarning || updateLockedRef.current}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}

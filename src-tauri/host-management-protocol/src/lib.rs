@@ -5,6 +5,8 @@
 //! request succeeded. The TLS/channel owner must perform those steps.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+mod remote_session;
+pub use remote_session::*;
 use std::fmt;
 use uuid::Uuid;
 
@@ -92,6 +94,8 @@ pub enum Owner {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ManagementMethod {
+    #[serde(rename = "session.remote")]
+    RemoteSession,
     #[serde(rename = "host.snapshot")]
     HostSnapshot,
     #[serde(rename = "config.set")]
@@ -159,6 +163,7 @@ pub enum ManagementMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RequestParams {
+    RemoteSession(RemoteSessionParams),
     Snapshot(SnapshotParams),
     ConfigSet(ConfigSetParams),
     CredentialSet(CredentialSetParams),
@@ -173,6 +178,11 @@ pub enum RequestParams {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotParams {}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteSessionParams {
+    pub remote_session: RemoteSessionRequest,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigSetParams {
@@ -418,6 +428,9 @@ fn deserialize_required_provider<'de, D: Deserializer<'de>>(
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ResponseResult {
+    RemoteSession {
+        data: RemoteSessionResult,
+    },
     Snapshot(Box<HostSnapshot>),
     Capabilities(Capabilities),
     ExtendedSnapshot(Box<ExtendedSnapshot>),
@@ -639,6 +652,9 @@ impl Frame {
                             | ManagementMethod::HostCapabilities
                             | ManagementMethod::HostInspect,
                         RequestParams::Snapshot(_)
+                    ) | (
+                        ManagementMethod::RemoteSession,
+                        RequestParams::RemoteSession(_)
                     ) | (ManagementMethod::ConfigSet, RequestParams::ConfigSet(_))
                         | (
                             ManagementMethod::CredentialSet,
@@ -691,6 +707,7 @@ impl Frame {
 
 fn validate_params(params: &RequestParams) -> Result<(), CodecError> {
     match params {
+        RequestParams::RemoteSession(p) => p.remote_session.validate(),
         RequestParams::Snapshot(_) | RequestParams::ReceiptGet(_) => Ok(()),
         RequestParams::ConfigSet(p) => {
             if !safe_revision(p.expected_revision)
@@ -763,6 +780,7 @@ fn validate_params(params: &RequestParams) -> Result<(), CodecError> {
 }
 fn validate_result(result: &ResponseResult) -> Result<(), CodecError> {
     match result {
+        ResponseResult::RemoteSession { data } => data.validate(),
         ResponseResult::Error { code } if !valid_error_code(code) => Err(CodecError::InvalidFrame),
         ResponseResult::Snapshot(snapshot) => validate_snapshot(snapshot),
         ResponseResult::Capabilities(c) => {

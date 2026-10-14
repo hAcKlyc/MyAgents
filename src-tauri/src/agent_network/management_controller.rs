@@ -43,6 +43,9 @@ pub(crate) struct ManagementRequest {
 }
 impl ManagementRequest {
     pub(crate) fn mutation(&self) -> bool {
+        if let RequestParams::RemoteSession(p) = &self.params {
+            return self.method == ManagementMethod::RemoteSession && p.remote_session.mutation();
+        }
         matches!(
             self.method,
             ManagementMethod::ConfigSet
@@ -57,7 +60,8 @@ impl ManagementRequest {
         if !matches!(
             self.method,
             ManagementMethod::HostSnapshot | ManagementMethod::HostCapabilities
-        ) && self.target_scope.is_none()
+        ) && !matches!(&self.params, RequestParams::RemoteSession(p) if self.method == ManagementMethod::RemoteSession && matches!(p.remote_session,myagents_host_management_protocol::RemoteSessionRequest::Capabilities{..}))
+            && self.target_scope.is_none()
         {
             return Err(NetworkError::new("HOST_MANAGEMENT_TARGET_REQUIRED"));
         }
@@ -150,6 +154,11 @@ fn response_matches(request: &ManagementRequest, result: &ResponseResult) -> boo
     use myagents_host_management_protocol::{Owner, ProviderConfigReceipt, ResourceReceipt};
     match (request.method, &request.params, result) {
         (
+            ManagementMethod::RemoteSession,
+            RequestParams::RemoteSession(p),
+            ResponseResult::RemoteSession { data },
+        ) => return p.remote_session.matches_result(data),
+        (
             ManagementMethod::HostCapabilities,
             RequestParams::Snapshot(_),
             ResponseResult::Capabilities(_),
@@ -221,7 +230,8 @@ fn response_matches(request: &ManagementRequest, result: &ResponseResult) -> boo
         }
         (_, _, ResponseResult::Error { .. }) => return true,
         (
-            ManagementMethod::HostCapabilities
+            ManagementMethod::RemoteSession
+            | ManagementMethod::HostCapabilities
             | ManagementMethod::HostInspect
             | ManagementMethod::ConfigProviderSet
             | ManagementMethod::CredentialProviderSet
@@ -549,7 +559,7 @@ pub(crate) async fn execute(
                                 responder_binding,
                             };
                             matches_offer(&next, &address, local, &scope.connection_epoch)?;
-                            pairs.reserve(&channel)?;
+                            pairs.reserve_management_controller(&channel)?;
                             let signed_binding = identity
                                 .peer
                                 .as_ref()
@@ -693,6 +703,34 @@ pub(crate) async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_capability_negotiates_then_every_operation_binds_target() {
+        let mut r = request();
+        r.method = ManagementMethod::RemoteSession;
+        r.params =
+            RequestParams::RemoteSession(myagents_host_management_protocol::RemoteSessionParams {
+                remote_session:
+                    myagents_host_management_protocol::RemoteSessionRequest::Capabilities {
+                        agent_id: "agent-1".into(),
+                    },
+            });
+        let id = CanonicalUuid::new(uuid::Uuid::new_v4());
+        assert!(r.message(id).is_ok());
+        assert!(!r.mutation());
+        r.params =
+            RequestParams::RemoteSession(myagents_host_management_protocol::RemoteSessionParams {
+                remote_session: myagents_host_management_protocol::RemoteSessionRequest::Start {
+                    agent_id: "agent-1".into(),
+                    operation_id: id,
+                    text: "hello".into(),
+                },
+            });
+        assert!(r.mutation());
+        assert_eq!(
+            r.message(id).unwrap_err().code,
+            "HOST_MANAGEMENT_TARGET_REQUIRED"
+        );
+    }
     #[test]
     fn unknown_write_is_not_account_change() {
         assert_eq!(lost(true, true).code, "HOST_MANAGEMENT_UNCONFIRMED");

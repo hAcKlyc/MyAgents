@@ -6781,6 +6781,8 @@ export default function Chat({
                     />
                   )}
             <SimpleChatInput
+              composerTabId={tabId}
+              composerDiscussionId={discussionId}
               ref={chatInputRef}
               onSend={handleSendMessage}
               onStop={handleStop}

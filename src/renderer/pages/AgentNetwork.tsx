@@ -67,8 +67,10 @@ function networkStatusMessage(snapshot: NetworkSnapshot, official: boolean) {
 
 export default function AgentNetwork({
   isActive = true,
+  onOpenRemoteSession,
 }: {
   isActive?: boolean;
+  onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const registry = useAgentNetworkRegistry();
   const selected =
@@ -87,6 +89,7 @@ export default function AgentNetwork({
       selector={<NetworkSelector registry={registry} />}
       isActive={isActive}
       snapshot={snapshot}
+      onOpenRemoteSession={onOpenRemoteSession}
     />
   );
 }
@@ -96,12 +99,14 @@ function AgentNetworkContent({
   connectionId,
   official,
   selector,
+  onOpenRemoteSession,
 }: {
   isActive: boolean;
   snapshot: NetworkSnapshot;
   connectionId: string;
   official: boolean;
   selector: ReactNode;
+  onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const { t } = useTranslation("app");
   const networkRequest = useCallback(
@@ -544,6 +549,7 @@ function AgentNetworkContent({
       {selectedDevice && (
         <DeviceDetails
           connectionId={connectionId}
+          onOpenRemoteSession={onOpenRemoteSession}
           authGeneration={snapshot.authGeneration}
           connectionReady={snapshot.state === "ready"}
           device={selectedDevice}
@@ -637,6 +643,7 @@ function NetworkPage({
   agentCount = null,
 }: {
   selector: ReactNode;
+  onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
   children: ReactNode;
   gated?: boolean;
   deviceCount?: number | null;

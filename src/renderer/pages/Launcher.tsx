@@ -88,6 +88,7 @@ import { speechModelPackStatus } from '@/api/recording';
 import type { RecordingSourceSelection } from '../../shared/types/record';
 
 interface LauncherProps {
+  composerTabId?: string;
   onLaunchProject: (
     project: Project,
     initialMessage?: InitialMessage,
@@ -108,6 +109,7 @@ interface LauncherProps {
 }
 
 export default function Launcher({
+  composerTabId,
   onLaunchProject,
   isStarting,
   startError: _startError,
@@ -1234,6 +1236,7 @@ export default function Launcher({
 
       <main className="flex min-h-0 flex-1 overflow-hidden">
         <BrandSection
+          composerTabId={composerTabId}
           projects={visibleProjects}
           selectedProject={selectedWorkspace}
           defaultWorkspacePath={config.defaultWorkspacePath}

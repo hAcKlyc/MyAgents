@@ -897,6 +897,7 @@ export function isLegacyPreQueryManagedCodexDraft(session: SessionMetadata): boo
 
 export function isHistoryVisibleSession(session: SessionMetadata): boolean {
     return session.materializationState !== 'prepared'
+        && !session.hostBotBinding
         && !(session.pendingDshMutation?.kind === 'dsh-delete'
             && session.pendingDshMutation.runtimeCommitted === true)
         && !isSystemMaintenanceSession(session)

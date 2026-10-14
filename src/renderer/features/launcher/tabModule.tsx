@@ -52,6 +52,7 @@ const LauncherTabRenderer = memo(function LauncherTabRenderer({
   return (
     <Suspense fallback={PAGE_FALLBACK}>
       <Launcher
+        composerTabId={tab.id}
         onLaunchProject={binding.onLaunchProject}
         isStarting={binding.isStarting(tab.id)}
         startError={binding.startError(tab.id)}

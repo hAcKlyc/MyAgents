@@ -182,6 +182,10 @@ User specifically approved29 update; native owned-account recovery, bottom-left 
 
 Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.
 
+## REMOTE-SESSION-IMPLEMENTATION-20261015
+
+同账号远程Agent直接会话；实现/验收状态和后续门禁见 `.agent-sync/tasks/codex-remote-session-20261015-bba594f8.md`。复用SessionEngine/Store与owned管理传输，首版为有界snapshot同步。生产原生包与真实双端、Provider验收单独记录，不能用组件模拟代替。
+
 ## FEEDBACK-001 — 2026-10-15
 
 把MoXBots小助理并入设置下方个人菜单，通知保持原功能。新增同源云端反馈页：用户提交和查看自己的反馈，管理员回复及处理；既有账号权限/PKCE登录、幂等/CAS和私有存储。记录 `.agent-sync/tasks/codex-feedback-center-20261015-3b6a3c97.md`；代码、fixture、main、云发布和客户端真实路径独立追踪。
@@ -190,10 +194,15 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 
 ### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
 
-用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。PR42六CI/main58b6720f、原生补验记录main80faaab7；隔离B3卡片/列表/详情与原会话/草稿、回看状态、idle过期未知及刷新通过。真实running计时无合法模型样本仍未覆盖。原生窗口已释放，后续按各owner授权串行；记录见 `.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+
+### MOXBOTS-UPDATER-20261014 final0.5.4 delivery
+
+Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已整合统一官网PR47 main16ab3dbd/看板记录80faaab7，无客户端重建。独立QA真实A3→B3、编辑/realPTY拒绝不中断、cancel、signed install/nativecleanup/exactdraft&Record恢复和Root实际UI复看通过。App/DMG AppleAccepted/stapled/Gatekeeper，ZIP/TAR/DMG全清单/签名门禁通过。Own官网stable0.5.4及独立ownkey签名生效；sameSHA TAR复用自有Repo CDN（官网URL和公钥不变，服务器原件保留），完整实际HTTPS343281849bytes/37.19s/9.23MBps、signature/range/privacy通过；网站新设计当前源hash已对齐、其它Nginxbase保全/cloudPID不变。正式文件WPS output/updater-20261014/final-e5a05f76/，最终交接 dev-docs/moxbots-updater-054-delivery.md。paidProvider/realissuer/Host/runningtimer不是本native覆盖；remote-session安全更新证明未就绪明确阻止安装。Root/children、board与unified均停止GUI，remoteowner后续只按其自己的授权安装/联调。已公开0.5.4不可变，下一源码变更发0.5.5。
 
 FEEDBACK-001阶段交付：PR44/main d7264a43已核验，7 CI通过；云端已发布并通过受控真实账号闭环5/5。统一原生候选尚未纳入该提交，收包已登记，当前安装入口不算通过；接续见任务记录及dev-docs/feedback-production-validation.md。
 
 FEEDBACK-001 2026-10-15 07:14 UTC+8 接续：已安装正式0.5.4/e5a05f76包含PR44，实际binary/源码/远端main c7bab285对应通过；按新增人类授权同步给统一客户端负责人并登记FEEDBACK/TITLE原生待验队列。现有非实现者原生入口/布局证据复用；实际issuer/退出恢复及Provider标题生成待当前窗口owner明确交接，未抢占GUI或重复发布。任务保持in-progress。
 
 FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用正式0.5.4完成个人菜单/助手/正确issuer反馈入口、同账号真实Dex/PKCE退出恢复、8原标签及App/Sidecar PID保留、独立铃铛入口。实际联网状态不作为Host/通知通过。GUI已token校验释放，非秘密摘要dev-docs/feedback-native-acceptance.md。TITLE待独立modelqa，后续统一0.5.5由发布负责人处理。
+

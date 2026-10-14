@@ -5,6 +5,7 @@ export {
   getSessionEngine,
   getSessionEngineKind,
   getSessionRuntimeType,
+  runProcessUpdateAdmission,
   prewarmExternalRuntimeAtSelector,
   restoreInitialExternalSessionAtSelector,
   retryLastExternalUserMessageAtSelector,
