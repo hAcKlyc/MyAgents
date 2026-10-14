@@ -9,8 +9,10 @@ import { i18n } from '@/i18n';
 import { ThemeRegistry, ThemeRuntimeProvider } from '@/theme';
 import { syntheticTheme } from '@/theme/__tests__/syntheticTheme';
 import { myAgentsDefaultTheme } from '@/theme/themes/myagents-default';
-
 import BrandSection from './BrandSection';
+
+const openExternalMock = vi.hoisted(() => vi.fn());
+vi.mock('@/utils/openExternal', () => ({ openExternal: openExternalMock }));
 
 const simpleInputHandle = vi.hoisted(() => ({
   processDroppedFiles: vi.fn(async () => undefined),
@@ -203,6 +205,7 @@ function renderBrandSection(
 
 describe('BrandSection', () => {
   beforeEach(() => {
+    openExternalMock.mockClear();
     simpleInputHandle.processDroppedFiles.mockClear();
     simpleInputHandle.processDroppedFilePaths.mockClear();
     nativeFileDrop.options = undefined;
@@ -212,6 +215,20 @@ describe('BrandSection', () => {
     nativeFileDrop.registerZone.mockClear();
     nativeFileDrop.unregisterZone.mockClear();
     taskCenterMock.available = false;
+  });
+
+  it('opens the configured product website from the launcher brand', async () => {
+    renderBrandSection();
+
+    const brand = screen.getByRole('button', {
+      name: i18n.t('app:globalSidebar.openWebsite'),
+    });
+    brand.focus();
+    expect(brand).toHaveFocus();
+    brand.click();
+
+    const { APP_WEBSITE_URL } = await import('../../../shared/appProfile');
+    expect(openExternalMock).toHaveBeenCalledWith(APP_WEBSITE_URL);
   });
 
   it('routes native file paths dropped on the task input to the existing input import pipeline', () => {
