@@ -57,6 +57,13 @@ pub fn find(binary_name: &str) -> Option<PathBuf> {
 /// Build an augmented PATH string that includes common system binary directories.
 /// Useful when spawning subprocesses that need the full search path.
 pub fn augmented_path() -> std::ffi::OsString {
+    // QA never evaluates user login/interactive shell startup files or scans user tool homes.
+    if crate::app_dirs::IS_UPDATER_QA {
+        let mut paths = Vec::new();
+        append_app_local_runtime_dirs(&mut paths);
+        paths.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(str::to_owned));
+        return std::env::join_paths(paths).unwrap_or_default();
+    }
     let system_path = std::env::var("PATH").unwrap_or_default();
     // mut needed on non-Windows (EXTRA_SEARCH_DIRS / USER_RELATIVE_DIRS push below)
     #[allow(unused_mut)]

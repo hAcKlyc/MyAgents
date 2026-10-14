@@ -1,3 +1,4 @@
+import { isUpdaterQaBuild } from '../shared/updaterQa';
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * Provider verification utilities
@@ -53,6 +54,7 @@ function keychainAccount(): string | null {
 }
 
 function hasClaudeCodeOAuthCredentialsStored(): boolean {
+  if (isUpdaterQaBuild()) return false;
   if (existsSync(claudeCredentialsFilePath())) return true;
   if (process.platform !== 'darwin') return false;
 
@@ -430,6 +432,7 @@ export async function verifyProviderViaSdk(
   credentialSource?: import('../shared/config-types').ManagedProviderCredential,
   managedVerification?: { expectedLineage: string },
 ): Promise<{ success: boolean; error?: string; detail?: string; retryable?: boolean }> {
+  if (isUpdaterQaBuild()) return { success: false, error: 'UPDATER_QA_MODEL_EXECUTION_DISABLED' };
   if (providerId === 'antigravity-sub') {
     return { success: false, error: '请通过 Antigravity 订阅账号卡片检查连接' };
   }
@@ -563,6 +566,7 @@ export async function verifyProviderViaSdk(
  * Uses the same SDK spawning pattern as verify, but only reads initialization data.
  */
 export async function fetchSdkSupportedModels(): Promise<Array<{ value: string; displayName: string; description: string }>> {
+  if (isUpdaterQaBuild()) return [];
   // PRD #124: this path uses default Anthropic env (subscription / Anthropic-
   // protocol providers go straight to api.anthropic.com), so no bridge token
   // is needed. `buildClaudeSessionEnv()` is now a pure function — no global
@@ -625,6 +629,7 @@ export async function fetchSdkSupportedModels(): Promise<Array<{ value: string; 
  *      `claude auth login`" case where the JSON cache hasn't been seeded yet
  */
 export function checkAnthropicSubscription(): SubscriptionStatus {
+  if (isUpdaterQaBuild()) return { available: false };
   const claudeJsonPath = join(homedir(), '.claude.json');
 
   if (existsSync(claudeJsonPath)) {
@@ -664,6 +669,7 @@ export function checkAnthropicSubscription(): SubscriptionStatus {
  * Uses the same SDK path as normal chat requests.
  */
 export async function verifySubscription(model?: string): Promise<SubscriptionVerifyResult> {
+  if (isUpdaterQaBuild()) return { success: false, error: 'UPDATER_QA_MODEL_EXECUTION_DISABLED' };
   console.log('[subscription/verify] Starting SDK verification...');
   // PRD #124: subscription path doesn't need a bridge — SDK talks to
   // api.anthropic.com directly. `buildClaudeSessionEnv()` is now pure

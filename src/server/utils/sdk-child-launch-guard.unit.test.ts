@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGuardedSdkQuery } from './sdk-child-launch-guard';
 
 const scratchDirs: string[] = [];
+const qaMode = vi.hoisted(() => ({ enabled: false }));
+vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled }));
 
 function executableFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), 'myagents-sdk-child-'));
@@ -15,12 +17,22 @@ function executableFixture(): string {
 }
 
 afterEach(async () => {
+  qaMode.enabled = false;
   vi.unstubAllEnvs();
   const { rm } = await import('fs/promises');
   await Promise.all(scratchDirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })));
 });
 
 describe('createGuardedSdkQuery', () => {
+  it.each(['', 'qa-session'])('QA refuses SDK creation before OAuth fallback or management calls (%s)', async sidecarId => {
+    qaMode.enabled = true;
+    const createQuery = vi.fn();
+    const managementCall = vi.fn();
+    await expect(createGuardedSdkQuery('/nonexistent-qa-sdk', createQuery, { sidecarId, managementCall }))
+      .rejects.toThrow('UPDATER_QA_EXECUTION_DISABLED');
+    expect(createQuery).not.toHaveBeenCalled();
+    expect(managementCall).not.toHaveBeenCalled();
+  });
   it('does not create a second SDK process while the application circuit is open', async () => {
     const executablePath = executableFixture();
     const createQuery = vi.fn();

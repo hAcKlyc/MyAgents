@@ -28,17 +28,29 @@ fn expose_app_build_profile() {
     println!("cargo:rerun-if-env-changed=MOXBOTS_OWNED_SERVICE_URL");
     println!("cargo:rerun-if-env-changed=MOXBOTS_CREDENTIAL_WRITER_FAMILY");
     println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
+    println!("cargo:rustc-check-cfg=cfg(myagents_updater_qa)");
     let profile = match env::var("MYAGENTS_BUILD_PROFILE").as_deref() {
         Err(env::VarError::NotPresent) | Ok("myagents") => "myagents",
         Ok("moxbot") => {
             println!("cargo:rustc-cfg=myagents_moxbot");
             "moxbot"
         }
-        _ => panic!("MYAGENTS_BUILD_PROFILE must be myagents or moxbot"),
+        Ok("moxbot-updaterqa") => {
+            println!("cargo:rustc-cfg=myagents_moxbot");
+            println!("cargo:rustc-cfg=myagents_updater_qa");
+            "moxbot-updaterqa"
+        }
+        _ => panic!("MYAGENTS_BUILD_PROFILE must be myagents, moxbot or moxbot-updaterqa"),
     };
     let target_os =
         env::var("CARGO_CFG_TARGET_OS").expect("Cargo must provide CARGO_CFG_TARGET_OS");
+    if env::var_os("CARGO_CFG_MYAGENTS_UPDATER_QA").is_some() && profile != "moxbot-updaterqa" {
+        panic!("Updater QA cfg cannot be added to a production profile through RUSTFLAGS");
+    }
     let reader_enabled = env::var_os("CARGO_FEATURE_MOXBOT_CREDENTIAL_READER").is_some();
+    if profile == "moxbot-updaterqa" && reader_enabled {
+        panic!("Updater QA must not link the production credential reader feature");
+    }
     if target_os == "macos" && profile == "moxbot" && !reader_enabled {
         panic!(
             "macOS MoXBots builds require the moxbot-credential-reader feature; use scripts/build-moxbot.mjs with the verified reader artifact"

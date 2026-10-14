@@ -1,0 +1,127 @@
+{
+  "productName": "MoXBots Updater QA",
+  "identifier": "com.moxbot.updaterqa",
+  "app": {
+    "security": {
+      "assetProtocol": {
+        "scope": [
+          "$HOME/.moxbot-updaterqa/**"
+        ]
+      },
+      "capabilities": [
+        {
+          "$schema": "../gen/schemas/desktop-schema.json",
+          "identifier": "moxbot-updaterqa",
+          "description": "Isolated MoXBots desktop permissions",
+          "windows": [
+            "main",
+            "fb-ball",
+            "fb-companion"
+          ],
+          "permissions": [
+            "core:default",
+            "core:window:default",
+            "core:window:allow-start-dragging",
+            "core:window:allow-minimize",
+            "core:window:allow-maximize",
+            "core:window:allow-unmaximize",
+            "core:window:allow-close",
+            "core:window:allow-hide",
+            "core:window:allow-show",
+            "core:window:allow-unminimize",
+            "core:window:allow-is-maximized",
+            "core:window:allow-is-fullscreen",
+            "core:window:allow-set-focus",
+            "core:window:allow-is-visible",
+            "core:window:allow-is-focused",
+            "core:window:allow-set-background-color",
+            "fs:default",
+            "fs:allow-app-read-recursive",
+            "fs:allow-app-write-recursive",
+            {
+              "identifier": "fs:scope",
+              "allow": [
+                {
+                  "path": "$HOME/.moxbot-updaterqa"
+                },
+                {
+                  "path": "$HOME/.moxbot-updaterqa/**"
+                }
+              ]
+            },
+            "dialog:default",
+            "dialog:allow-open",
+            "dialog:allow-save",
+            {
+              "identifier": "dialog:allow-open",
+              "allow": [
+                {
+                  "directory": true
+                }
+              ]
+            },
+            "shell:allow-open",
+            "process:allow-restart",
+            "notification:allow-is-permission-granted",
+            "autostart:default",
+            "autostart:allow-is-enabled",
+            "autostart:allow-enable",
+            "autostart:allow-disable",
+            "global-shortcut:allow-register",
+            "global-shortcut:allow-unregister",
+            "global-shortcut:allow-is-registered"
+          ]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "resources": {
+      "infoplist/en.lproj/InfoPlist.strings": null,
+      "infoplist/zh-Hans.lproj/InfoPlist.strings": null,
+      "../bundled-skills": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-skills": "bundled-skills",
+      "../bundled-agents": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-agents": "bundled-agents",
+      "../bundled-workspaces": null,
+      "../src-tauri/resources/moxbot-bundled/bundled-workspaces": "bundled-workspaces",
+      "infoplist/moxbot-updaterqa/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "infoplist/moxbot-updaterqa/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings"
+    },
+    "macOS": {
+      "infoPlist": "Info.moxbot-updaterqa.plist",
+      "signingIdentity": null
+    },
+    "icon": [
+      "icons/moxbots/32x32.png",
+      "icons/moxbots/128x128.png",
+      "icons/moxbots/128x128@2x.png",
+      "icons/moxbots/icon.icns",
+      "icons/moxbots/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/moxbots/icon.ico"
+      }
+    },
+    "targets": [
+      "app"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "moxbot-updaterqa"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "dangerousInsecureTransportProtocol": true
+    }
+  },
+  "version": "0.5.2"
+}
