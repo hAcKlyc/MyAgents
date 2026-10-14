@@ -33,7 +33,7 @@ test('native model QA config cannot address production state or register autosta
   assert.deepEqual(permissions.find(p => p.identifier === 'fs:scope').allow.map(p => p.path), ['$HOME/.moxbot-modelqa', '$HOME/.moxbot-modelqa/**']);
 });
 
-test('launch environment rejects shared/symlink/world-readable homes and poisoned inherited credentials', () => {
+test('launch environment rejects shared/symlink/world-readable homes and poisoned inherited credentials', { skip: process.platform !== 'darwin' }, () => {
   const home = mkdtempSync('/private/tmp/moxbots-modelqa-test-');
   chmodSync(home, 0o700);
   const env = modelQaLaunchEnvironment(home, { USER: 'qa', OPENAI_API_KEY: 'canary', CODEX_HOME: '/daily', NODE_OPTIONS: '--require=/daily', PATH: '/daily' });
@@ -49,7 +49,7 @@ test('launch environment rejects shared/symlink/world-readable homes and poisone
   assert.throws(() => modelQaLaunchEnvironment('/Users/qa'));
 });
 
-test('launcher preflight refuses linked data/auth/config even inside a private HOME', () => {
+test('launcher preflight refuses linked data/auth/config even inside a private HOME', { skip: process.platform !== 'darwin' }, () => {
   const outside = mkdtempSync('/private/tmp/modelqa-outside-');
   for (const child of ['.moxbot-modelqa', '.moxbot-modelqa/codex', '.moxbot-modelqa/claude', '.moxbot-modelqa/config.json']) {
     const home = mkdtempSync('/private/tmp/moxbots-modelqa-links-'); chmodSync(home, 0o700);
