@@ -535,7 +535,7 @@ impl NetworkRegistry {
         (account.guard)()?;
         // Copy only the validated session to the reader-owned slot. No old item
         // or membership is changed; cancellation stays available during IPC.
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
         {
             let migration_account = account.clone();
             let migration_record = record.clone();

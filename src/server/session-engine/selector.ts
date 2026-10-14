@@ -1,5 +1,5 @@
 import { assertSessionTranscriptsDurableForUpdate } from '../SessionStore';
-import { isUpdaterQaBuild } from '../../shared/updaterQa';
+import { isUpdaterQaBuild, isModelQaBuild } from '../../shared/updaterQa';
 import {
   interruptCurrentResponse,
   hasBuiltinActivityForUpdate,
@@ -62,6 +62,7 @@ export function runProcessUpdateAdmission<T>(operation: () => Promise<T>): Promi
 
 async function withExecutionAdmission<T>(operation: () => Promise<T>): Promise<T> {
   if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
+  if (isModelQaBuild()) throw new Error('MODEL_QA_UTILITY_ONLY');
   return withUpdateAdmission(operation);
 }
 
@@ -360,6 +361,7 @@ async function restoreInitialExternalSessionAtSelectorOwner(
 ): Promise<boolean> {
   if (!shouldUseExternalRuntime()) return false;
   if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
+  if (isModelQaBuild()) throw new Error('MODEL_QA_UTILITY_ONLY');
   const restored = await restoreExternalSessionState(sessionId, workspacePath, {
     type: "desktop",
   });

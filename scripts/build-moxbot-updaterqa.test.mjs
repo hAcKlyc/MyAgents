@@ -26,7 +26,7 @@ test('Vite/Node profile definitions agree and QA build strips production credent
   assert.equal(resolveAppBuildProfile({}), 'myagents');
   assert.throws(() => resolveAppBuildProfile({ MYAGENTS_BUILD_PROFILE: 'typo' }));
   assert.equal(appBuildDefines({ MYAGENTS_BUILD_PROFILE: 'moxbot' }).__MYAGENTS_UPDATER_QA__, 'false');
-  assert.deepEqual(appBuildDefines({ MYAGENTS_BUILD_PROFILE: 'moxbot-updaterqa' }), { __MYAGENTS_BUILD_PROFILE__: '"moxbot-updaterqa"', __MYAGENTS_UPDATER_QA__: 'true' });
+  assert.deepEqual(appBuildDefines({ MYAGENTS_BUILD_PROFILE: 'moxbot-updaterqa' }), { __MYAGENTS_BUILD_PROFILE__: '"moxbot-updaterqa"', __MYAGENTS_UPDATER_QA__: 'true', __MYAGENTS_MODEL_QA__: 'false' });
   const input = { PATH: '/usr/bin:/bin', ANTHROPIC_API_KEY: 'canary', MOXBOTS_CREDENTIAL_WRITER_FAMILY: 'developer-id-v2', TAURI_CONFIG: 'production', RUSTFLAGS: '--cfg myagents_moxbot', TAURI_SIGNING_PRIVATE_KEY: 'secret', MYAGENTS_BUILD_PROFILE: 'moxbot' };
   const env = qaBuildEnvironment(input, '/private/tmp/qa-workspace');
   assert.equal(input.ANTHROPIC_API_KEY, 'canary');
