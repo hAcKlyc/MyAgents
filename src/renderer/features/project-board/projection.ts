@@ -8,6 +8,7 @@ export type SessionActivity = 'idle' | 'running' | 'waiting_user_action';
 export interface ActivitySnapshot {
   state?: SessionActivity;
   checkedAt: number;
+  execution?: { startedAt: string; elapsedMs: number };
   error?: string;
 }
 export interface BoardRow {
@@ -26,6 +27,16 @@ export const ACTIVITY_FRESHNESS_MS = 60_000;
 export function freshActivity(snapshot: ActivitySnapshot | undefined, now: number): SessionActivity | undefined {
   if (!snapshot || snapshot.error || now - snapshot.checkedAt > ACTIVITY_FRESHNESS_MS) return undefined;
   return snapshot.state;
+}
+
+/** Fresh observations extrapolate locally. Stale ones show only the observed
+ * duration, not an assertion that a turn kept running after the last read. */
+export function sessionExecutionTime(snapshot: ActivitySnapshot | undefined, now: number) {
+  if (!snapshot || snapshot.error || snapshot.state === 'idle' || !snapshot.state || !snapshot.execution) return undefined;
+  const { elapsedMs, startedAt } = snapshot.execution;
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || !Number.isFinite(Date.parse(startedAt))) return undefined;
+  const stale = !freshActivity(snapshot, now);
+  return { elapsedMs: elapsedMs + (stale ? 0 : Math.max(0, now - snapshot.checkedAt)), stale, startedAt };
 }
 
 /** Task identity wins over a Session decoration; a shared execution Session
