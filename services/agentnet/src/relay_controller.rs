@@ -391,6 +391,56 @@ impl RelayController {
             .ok_or_else(rejected)
     }
 
+    /// A model grant identifies a resource, never authenticates a device itself.
+    /// Resolve only the actual server-owned connection and recheck its original
+    /// cryptographic admission/account/peer/catalog authority before the callback.
+    pub(crate) fn with_model_host<T>(
+        &self,
+        owner: &str,
+        host: &str,
+        actor_handle: Option<&str>,
+        operation: impl FnOnce(crate::execution_gate::LiveHost) -> crate::model_center_types::Result<T>,
+    ) -> crate::model_center_types::Result<T> {
+        use crate::model_center_types::ModelCenterError as E;
+        let access = self
+            .runtime()
+            .map_err(|_| E::Unauthorized)?
+            .connections
+            .values()
+            .find(|entry| entry.access.principal_id() == owner && entry.access.device_id() == host)
+            .map(|entry| entry.access.clone())
+            .ok_or(E::Unauthorized)?;
+        let mut handles = vec![access.session_handle()];
+        if let Some(actor) = actor_handle
+            && actor != access.session_handle()
+        {
+            handles.push(actor);
+        }
+        self.network
+            .auth
+            .with_valid_session_handles::<_, AuthError>(&handles, |sessions| {
+                let session = sessions
+                    .iter()
+                    .find(|s| s.session_handle == access.session_handle())
+                    .ok_or(AuthError::SessionRejected)?;
+                if let Some(actor) = actor_handle {
+                    let actor = sessions
+                        .iter()
+                        .find(|s| s.session_handle == actor)
+                        .ok_or(AuthError::SessionRejected)?;
+                    if actor.account.principal_id != owner {
+                        return Err(AuthError::SessionRejected);
+                    }
+                }
+                Ok(
+                    crate::execution_gate::prepare_host(&self.network, self, &access, session)
+                        .map_err(|_| E::Unauthorized)
+                        .and_then(operation),
+                )
+            })
+            .map_err(|_| E::Unauthorized)?
+    }
+
     /// Read the actual current server-owned WebSocket epoch. Callers already
     /// hold their live account gate; this method never re-enters AuthStore.
     pub(crate) fn execution_epoch(&self, access: &ValidatedAccess) -> Result<String, RelayFailure> {

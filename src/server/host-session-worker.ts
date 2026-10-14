@@ -5,8 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
 import { bootstrapFromEnvironment } from '../host/bot-session-bootstrap';
+import { rejectCloudModelRetry } from '../host/cloud-model';
 import { isHostSessionRequest, type HostSessionMessage, type HostSessionRequest } from './host-session-protocol';
-import { installHostSessionCredential } from './utils/host-credentials';
+import { installHostSessionCredential, installHostCloudModelCredential, resolveHostCloudModelProvider } from './utils/host-credentials';
 
 // The supervisor is the only process owner. This entry owns exactly one existing
 // Product Session binding, and never implements a second SDK or transcript store.
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
         if (value.type !== 'host-provider-snapshot') return;
         cleanup();
         if (Object.keys(value).length !== 4 || value.generation !== generation
-          || !isHostProviderId(value.providerId) || value.providerId !== process.env.MYAGENTS_HOST_PROVIDER_ID
+          || !(bot?.cloud_model ? value.providerId === bot.provider_id : isHostProviderId(value.providerId)) || value.providerId !== process.env.MYAGENTS_HOST_PROVIDER_ID
           || !(value.credential === null || (typeof value.credential === 'string'
             && value.credential.trim().length > 0 && Buffer.byteLength(value.credential, 'utf8') <= 16 * 1024
             && !/[\r\n\0]/.test(value.credential)))) {
@@ -45,7 +46,10 @@ async function main(): Promise<void> {
         if (error) { cleanup(); reject(new Error('Host credential initialization transport failed')); }
       });
     });
-    installHostSessionCredential(birthCredential, process.env.MYAGENTS_HOST_PROVIDER_ID);
+    if(bot?.cloud_model){
+      if(!birthCredential)throw new Error('BOT_MODEL_CREDENTIAL_INVALID');
+      installHostCloudModelCredential(bot.cloud_model,birthCredential);
+    }else installHostSessionCredential(birthCredential, process.env.MYAGENTS_HOST_PROVIDER_ID);
   }
   const credentials = new Set<string>([process.env.ANTHROPIC_API_KEY, process.env.ANTHROPIC_AUTH_TOKEN, process.env.CLAUDE_CODE_OAUTH_TOKEN].filter((value): value is string => Boolean(value)));
   if (birthCredential) credentials.add(birthCredential);
@@ -58,7 +62,7 @@ async function main(): Promise<void> {
     if (typeof value === 'string') return redactText(value);
     if (Array.isArray(value)) return value.map(redact);
     if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) =>
-      [key, /^(apiKey|apiKeys|providerApiKeys|providerEnvJson|accessToken|refreshToken|authorization)$/i.test(key) ? '[redacted]' : redact(item)]));
+      [key, /^(apiKey|apiKeys|providerApiKeys|providerEnvJson|accessToken|access_token|refreshToken|authorization)$/i.test(key) ? '[redacted]' : redact(item)]));
     return value;
   };
   // stdout is not a protocol channel; keep all upstream diagnostics on stderr.
@@ -123,9 +127,10 @@ async function main(): Promise<void> {
   if (restored.reasoningEffort) await engine.updateReasoningEffort(restored.reasoningEffort);
   const send = (message: HostSessionMessage) => { if (process.connected) process.send?.(redact(message)); };
   let loopbackBridge: Server | undefined;
+  let cloudModelOutcomeUnknown=false;
   async function ensureLoopbackBridge() {
     if (loopbackBridge) return;
-    const [{createBridgeHandler},{lookupBridge},{registerBridgeSeedFn}]=await Promise.all([import('./openai-bridge'),import('./openai-bridge/bridge-registry'),import('./bridge-cache')]);
+    const [{createBridgeHandler},{lookupBridge,hasBridge},{registerBridgeSeedFn}]=await Promise.all([import('./openai-bridge'),import('./openai-bridge/bridge-registry'),import('./bridge-cache')]);
     const handler=createBridgeHandler({workspacePath:workspace,logger:null,getUpstreamConfig:async request=> {
       const token=new URL(request.url).pathname.match(/^\/bridge\/([^/]+)\/v1\/messages(?:\/count_tokens)?$/)?.[1];
       const cfg=token ? await lookupBridge(token,request) : undefined;
@@ -145,13 +150,39 @@ async function main(): Promise<void> {
     const server=createServer(async (incoming,outgoing)=> {
       const abort=new AbortController();outgoing.once('close',()=>abort.abort());
       try {
-        if (incoming.method !== 'POST' || !/^\/bridge\/[^/]+\/v1\/messages(?:\/count_tokens)?$/.test(incoming.url ?? '')) {outgoing.writeHead(404).end();return;}
+        if (incoming.method !== 'POST' || !/^\/bridge\/[^/]+\/v1\/messages(?:\/count_tokens)?$/.test(new URL(incoming.url ?? '/', 'http://127.0.0.1').pathname)) {outgoing.writeHead(404).end();return;}
+        if (bot?.cloud_model && (cloudModelOutcomeUnknown || rejectCloudModelRetry(bot.provider_id,incoming.headers['x-stainless-retry-count']))) {
+          outgoing.writeHead(409,{'content-type':'application/json'}).end(JSON.stringify({type:'error',error:{type:'invalid_request_error',message:'BOT_MODEL_RETRY_REJECTED'}}));return;
+        }
         const buffers:Buffer[]=[];let length=0;
         for await (const chunk of incoming) {const bytes=Buffer.from(chunk);length+=bytes.length;if (length>16*1024*1024) {outgoing.writeHead(413).end();return;}buffers.push(bytes);}
         const headers=new Headers();for (const [key,value] of Object.entries(incoming.headers)) if (value !== undefined) headers.set(key,Array.isArray(value)?value.join(','):value);
         const request=new Request(`http://127.0.0.1${incoming.url}`,{method:'POST',headers,body:Buffer.concat(buffers),signal:abort.signal});
-        const response=await handler(request);outgoing.writeHead(response.status,Object.fromEntries(response.headers));
-        if (response.body) Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]).pipe(outgoing);else outgoing.end();
+        const countMatch=new URL(request.url).pathname.match(/^\/bridge\/([^/]+)\/v1\/messages\/count_tokens$/);
+        if(countMatch){
+          // Match the original sidecar count_tokens owner: OpenAI has no
+          // equivalent endpoint, so this is a local estimate, never a turn.
+          if(!hasBridge(countMatch[1])){outgoing.writeHead(400).end();return;}
+          let estimate=1024;
+          try{const value=await request.json() as {messages?:unknown[];system?:unknown;tools?:unknown[]};
+            estimate=Math.max(1,Math.ceil((JSON.stringify(value.messages??[]).length+JSON.stringify(value.system??'').length+JSON.stringify(value.tools??[]).length)/4));
+          }catch{/* The original owner uses a conservative estimate on malformed count input. */}
+          outgoing.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({input_tokens:estimate}));return;
+        }
+
+        // Native SDK has an outer retry loop which may reset the HTTP retry
+        // count. Once a sent cloud request has an uncertain outcome, close
+        // this generation's model admission rather than charging it again.
+        let response:Response;
+        try{response=await handler(request);}catch{if(bot?.cloud_model)cloudModelOutcomeUnknown=true;throw new Error('Host bridge outcome is unconfirmed');}
+        if(bot?.cloud_model&&response.status>=500)cloudModelOutcomeUnknown=true;
+        outgoing.writeHead(response.status,Object.fromEntries(response.headers));
+        if (response.body) {
+          const body=Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+          body.once('error',()=>{if(bot?.cloud_model)cloudModelOutcomeUnknown=true;outgoing.destroy();});
+          outgoing.once('close',()=>{if(bot?.cloud_model&&!outgoing.writableEnded)cloudModelOutcomeUnknown=true;});
+          body.pipe(outgoing);
+        }else outgoing.end();
       } catch {if (!outgoing.headersSent) outgoing.writeHead(502);outgoing.end();}
     });
     await new Promise<void>((yes,no)=> {server.once('error',no);server.listen(0,'127.0.0.1',()=>{server.off('error',no);yes();});});
@@ -172,16 +203,17 @@ async function main(): Promise<void> {
     const args = request.args ?? {};
     switch (request.operation) {
       case 'describe': return { sessionId, workspacePath: workspace, runtime: 'builtin',
-        executionAuthorized: process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED === '1',
+        executionAuthorized: bot?.cloud_model ? bot.cloud_model.expires_at > Date.now()/1000 : process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED === '1',
         supportedProviderProtocols: ['anthropic','openai'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
         config: engine.getSessionConfigSnapshot() };
       case 'state': return { sessionId, ...engine.getLiveSessionState(),
         queueId: engine.getExecutionTurnId(), replay: engine.getStreamReplaySnapshot(), terminal: engine.getSessionCompletionTerminal() };
       case 'result': return { ...await engine.getLatestAssistantResult(), terminal: engine.getSessionCompletionTerminal() };
       case 'send': {
-        if (bot) throw new Error('Delegated Bot v1 supports lifecycle only; model invocation is not authorized');
-        if (process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED !== '1') throw new Error('Model execution requires explicit Host execution authorization');
+        if (bot && !bot.cloud_model) throw new Error('Delegated Bot v1 supports lifecycle only; model invocation is not authorized');
+        if (!bot?.cloud_model && process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED !== '1') throw new Error('Model execution requires explicit Host execution authorization');
         if (typeof args.text !== 'string' || !args.text.trim() || args.text.length > 100_000) throw new Error('A bounded non-empty text is required');
+        if(bot?.cloud_model)resolveHostCloudModelProvider(bot.provider_id,bot.model);
         const snapshot = store.getSessionMetadata(sessionId);
         if (!routes.isConcreteProviderRoute(snapshot?.providerRoute)) throw new Error('Session Provider/model route is unavailable');
         const provider = config.materializeProviderRouteEnv(snapshot.providerRoute);
@@ -239,7 +271,7 @@ async function main(): Promise<void> {
         // Only this entry's fixed validation messages may cross IPC. Provider
         // and SDK errors may carry bearer material and remain server diagnostics.
         const message = error instanceof Error ? error.message : '';
-        const safe = /^(Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
+        const safe = /^(BOT_MODEL_NOT_AUTHORIZED$|Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
         send({ type: 'reply', generation: generation!, id: value.id, ok: false, error: safe ? message : 'Host Session operation failed; inspect worker diagnostics' });
       }
     };

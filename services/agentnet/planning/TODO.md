@@ -1,3 +1,12 @@
+# 当前任务：BOTS-MODEL-CENTER-001
+
+- [x] 独立 core/Host 实际 SDK 隔离验证。
+- [ ] HTTP/原 owner authority、UI 组合与独立验收。
+- [ ] 主干/CI/现有云后台发布、真实账号路径。
+- [ ] 用户指定供应商配置与单 Bot 有限模型授权后收费路径。
+
+详见 `BOTS-MODEL-CENTER-V1.md`；以下历史清单保留。
+
 # Bots 管理与 Bots Net 规划任务清单
 
 任务：AN-SHARE-PROTOTYPE-20261013。更新：2026-10-13。仓库：https://github.com/heavenzhang/MoXBots.git ，主干 `main`。

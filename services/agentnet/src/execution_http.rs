@@ -870,6 +870,9 @@ pub(crate) mod tests {
         pub(crate) bot_id: String,
     }
     impl Setup {
+        pub(crate) fn model_relay(&self) -> Arc<RelayController> {
+            self.s.relay.clone()
+        }
         pub(crate) fn browser_admin_service(&self) -> crate::admin_http::AdminService {
             let mut service = crate::admin_http::AdminService::open(
                 self.f.auth.clone(),

@@ -1,23 +1,36 @@
 /** The Host supervisor remains the sole process/Session owner. */
 import { randomUUID } from 'node:crypto';
 import { parseHostBotBootstrap, type HostBotBootstrap } from './bot-session-bootstrap';
+import type { CloudModelLease } from './cloud-model';
 import type { BotRunEntry, BotRunIdentity, BotRuntimeAdapter, ImmutableBotSnapshot } from './bot-runtime';
 
 export interface BotSessionSupervisor {
-  resolve(snapshot: ImmutableBotSnapshot): Promise<{workspace: string; provider_id: string; model: string}>;
+  resolve(snapshot: ImmutableBotSnapshot): Promise<{workspace: string; provider_id: string; model: string; cloud_model?: CloudModelLease}>;
   prepare(bootstrap: HostBotBootstrap): Promise<{session_id: string; run_generation: string}>;
   inspect(identity: BotRunIdentity): Promise<{status: 'running'|'stopped'|'unknown'; identity: BotRunIdentity}>;
   stop(identity: BotRunIdentity): Promise<{status: 'stopped'|'unknown'; identity: BotRunIdentity}>;
+  /** Optional trusted owner entry; lifecycle protocol never calls this method. */
+  invoke?(entry: BotRunEntry, identity: BotRunIdentity, text: string): Promise<unknown>;
 }
 const equal = (a: BotRunIdentity, b: BotRunIdentity) =>
   a.bot_id===b.bot_id && a.agent_id===b.agent_id && a.binding_generation===b.binding_generation &&
   a.run_generation===b.run_generation && a.session_id===b.session_id &&
   a.snapshot_hash===b.snapshot_hash && a.runtime===b.runtime;
 
-export function createBotSessionAdapter(owner: BotSessionSupervisor): BotRuntimeAdapter {
+export interface BotInvokingSessionAdapter extends BotRuntimeAdapter {
+  invoke(entry: BotRunEntry, identity: BotRunIdentity, text: string): Promise<unknown>;
+}
+export function createBotSessionAdapter(owner: BotSessionSupervisor): BotInvokingSessionAdapter {
   const prepared = new Map<string,{entry: BotRunEntry; identity: BotRunIdentity}>();
   return {
     runtime: 'builtin',
+    async invoke(entry,identity,text) {
+      const saved=prepared.get(entry.id);
+      if(!saved || !equal(saved.identity,identity) || entry.session_id!==saved.entry.session_id ||
+        entry.run_generation!==saved.entry.run_generation || entry.snapshot_hash!==saved.entry.snapshot_hash ||
+        entry.runtime!==saved.entry.runtime || !owner.invoke) throw new Error('BOT_MODEL_NOT_AUTHORIZED');
+      return owner.invoke(saved.entry,saved.identity,text);
+    },
     async prepare(snapshot) {
       if (prepared.size >= 256) throw new Error('BOT_RUNTIME_UNSUPPORTED');
       const route = await owner.resolve(snapshot);

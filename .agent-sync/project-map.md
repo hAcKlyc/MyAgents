@@ -19,7 +19,8 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | owned AgentNet 服务 | `services/agentnet/` | 独立登录、身份、metadata、relay及可选管理员登记控制面；部署与桌面验收另行核实 |
 | 统一管理员后台 | `services/agentnet/admin-web/`、`src/admin_http.rs`、`src/admin_store.rs`（相对服务目录） | 同源页面、实时账号校验、私有Bot登记/配置/归属与审计；可选有限Host生命周期已接线，运维见ADMINISTRATION.md |
 | 架构与设计规范 | `specs/ARCHITECTURE.md`、`specs/DESIGN.md`、`specs/tech_docs/` | 当前 owner、边界和交互规范 |
-| 有限 Bot 执行（默认关闭） | `services/agentnet/src/execution_*`、`execution-core/`、`src/host/bot-*`、`src-tauri/headless-network/src/bot_execution*` | 真实身份/原操作账本、有限 proof/lease、Host 本地策略和独立IPC；PR23/main75已发布并完成单Bot真实Linux验收；模型/共享仍关闭 |
+| 有限 Bot 执行（默认关闭） | `services/agentnet/src/execution_*`、`execution-core/`、`src/host/bot-*`、`src-tauri/headless-network/src/bot_execution*` | 真实身份/原操作账本、有限 proof/lease、Host 本地策略和独立IPC；PR23/main75已发布并完成单Bot真实Linux验收；模型接入另见BOTS-MODEL-CENTER-001；共享仍待实施 |
+| 模型中心（可选、默认关闭） | `services/agentnet/src/model_center_*`、`admin-web/`、`src/host/cloud-model*` | 同一管理台的Provider/Model、Bot期望模型、有限Host会话网关和调用计量；builtin/API三协议，源码/真实费用验收分开追踪，规划BOTS-MODEL-CENTER-V1.md |
 | 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理及有限执行控制面已发布；共享和扩展IAM仍待实现 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 项目看板 | `src/renderer/features/project-board/`、`pages/ProjectBoard.tsx`，`dev-docs/project-board.md` | 按真实Task/Session展示工作区执行概况；API、原生、生产验收分开追踪 |

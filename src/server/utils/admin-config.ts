@@ -24,7 +24,7 @@ import {
 } from 'fs';
 import { isAbsolute, resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
-import { resolveHostProviderCredential } from './host-credentials';
+import { resolveHostProviderCredential, resolveHostCloudModelProvider } from './host-credentials';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
 import { HOST_PROVIDER_LIMIT, isHostModelId, isHostProviderProfile, portableProfileToProvider } from '../../shared/hostProviderConfig';
@@ -1331,6 +1331,10 @@ export function resolveProviderEnv(
   model?: string,
 ): ResolvedProviderEnv | undefined {
   if (!providerId) return undefined;
+
+  // This reserved namespace has a Session-only authority and never falls back
+  // to a globally registered provider/key, including after expiry.
+  if (providerId.startsWith('cloud-session:')) return resolveHostCloudModelProvider(providerId, model);
 
   const c = config ?? loadConfig();
   const registeredProvider = findEffectiveProvider(providerId, c);

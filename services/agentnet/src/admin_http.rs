@@ -18,11 +18,12 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AdminService {
-    auth: Arc<AuthStore>,
-    store: Arc<AdminStore>,
-    config: Arc<AdminConfig>,
+    pub(crate) auth: Arc<AuthStore>,
+    pub(crate) store: Arc<AdminStore>,
+    pub(crate) config: Arc<AdminConfig>,
+    models: Option<Arc<crate::model_center_store::ModelCenterStore>>,
     execution: Option<Arc<crate::execution_store::ExecutionStore>>,
-    origin: String,
+    pub(crate) origin: String,
     in_flight: Arc<Semaphore>,
 }
 impl AdminService {
@@ -40,6 +41,7 @@ impl AdminService {
             store: Arc::new(store),
             config: Arc::new(config),
             execution: None,
+            models: None,
             origin,
             in_flight: Arc::new(Semaphore::new(32)),
         })
@@ -49,6 +51,35 @@ impl AdminService {
         ledger: Arc<crate::execution_store::ExecutionStore>,
     ) {
         self.execution = Some(ledger);
+    }
+    pub(crate) fn connect_models(
+        &mut self,
+        store: Arc<crate::model_center_store::ModelCenterStore>,
+    ) {
+        self.models = Some(store);
+    }
+    pub(crate) fn effective_config(&self) -> Result<AdminConfig, Err> {
+        let mut config = (*self.config).clone();
+        if let Some(store) = &self.models {
+            for model in store.models().map_err(|_| {
+                Err::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "MODEL_CENTER_STORAGE_UNAVAILABLE",
+                )
+            })? {
+                if model.config.enabled
+                    && !config.model_refs.iter().any(|r| r.id == model.config.id)
+                {
+                    config.model_refs.push(crate::admin_store::Resource {
+                        id: model.config.id,
+                        name: model.config.label,
+                        owner_ids: model.config.owner_ids,
+                        runtimes: vec!["builtin".into()],
+                    });
+                }
+            }
+        }
+        Ok(config)
     }
     pub fn router(&self) -> Router<()> {
         let s = Arc::new(self.clone());
@@ -102,7 +133,8 @@ async fn bootstrap(State(s): State<Arc<AdminService>>, h: HeaderMap) -> Result<J
     let out=blocking_admin(s.clone(),h,origin,move|actor,accounts|{
   let users=accounts.iter().map(|x|json!({"principal_id":x.principal_id,"network_id":x.network_id})).collect::<Vec<_>>();
   let hosts=s.config.hosts.iter().map(|x|json!({"id":x.id,"name":x.name,"owner_ids":x.owner_ids,"runtimes":x.runtimes,"execution_connected":false,"state":"not_connected"})).collect::<Vec<_>>();
-  let models=s.config.model_refs.iter().map(|x|json!({"id":x.id,"label":x.name,"owner_ids":x.owner_ids,"runtimes":x.runtimes})).collect::<Vec<_>>();
+  let config=s.effective_config()?;
+  let models=config.model_refs.iter().map(|x|json!({"id":x.id,"label":x.name,"owner_ids":x.owner_ids,"runtimes":x.runtimes})).collect::<Vec<_>>();
   let bots=s.store.bots().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"ADMIN_STORAGE_UNAVAILABLE"))?;
   let audit=s.store.audit().map_err(|_|Err::new(StatusCode::SERVICE_UNAVAILABLE,"ADMIN_STORAGE_UNAVAILABLE"))?;
   let execution=if let Some(exec)=&s.execution {
@@ -319,7 +351,7 @@ async fn mutate(
             }
         }
         s.store
-            .mutate(actor, a, id, &b, r, &s.config, &users)
+            .mutate(actor, a, id, &b, r, &s.effective_config()?, &users)
             .map_err(|(c, retry)| Err {
                 status: if c == "HOST_EXECUTION_NOT_CONNECTED" {
                     StatusCode::CONFLICT
@@ -359,7 +391,7 @@ async fn mutation(
     .await?;
     Ok(Json(json!({"ok":true,"data":value})))
 }
-async fn blocking_admin<T, F>(
+pub(crate) async fn blocking_admin<T, F>(
     s: Arc<AdminService>,
     headers: HeaderMap,
     origin: Option<String>,
@@ -455,23 +487,24 @@ async fn no_store(req: Request<Body>, next: Next) -> Response {
     r.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"));
     r
 }
-struct Err {
-    status: StatusCode,
-    code: &'static str,
-    retryable: bool,
+#[derive(Debug)]
+pub(crate) struct Err {
+    pub(crate) status: StatusCode,
+    pub(crate) code: &'static str,
+    pub(crate) retryable: bool,
 }
 impl Err {
-    fn new(status: StatusCode, code: &'static str) -> Self {
+    pub(crate) fn new(status: StatusCode, code: &'static str) -> Self {
         Self {
             status,
             code,
             retryable: false,
         }
     }
-    fn bad() -> Self {
+    pub(crate) fn bad() -> Self {
         Self::new(StatusCode::BAD_REQUEST, "REQUEST_INVALID")
     }
-    fn auth(e: AuthError) -> Self {
+    pub(crate) fn auth(e: AuthError) -> Self {
         match e {
             AuthError::SessionRejected => Self::new(StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
             _ => Self::new(StatusCode::SERVICE_UNAVAILABLE, "ADMIN_UNAVAILABLE"),

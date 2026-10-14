@@ -71,6 +71,8 @@ pub struct ServiceFileConfig {
     pub administration: Option<AdminConfig>,
     #[serde(default)]
     pub execution: bool,
+    #[serde(default)]
+    pub model_center: Option<crate::model_center_authority::ModelCenterConfig>,
 }
 fn default_session_ttl() -> u64 {
     86_400
@@ -348,6 +350,46 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     if let (Some(admin), Some(exec)) = (administration.as_mut(), execution.as_ref()) {
         admin.connect_execution(exec.ledger());
     }
+    let (model_center, _model_owner_lock) =
+        if let Some(settings) = config.model_center.clone().filter(|s| s.enabled) {
+            if settings.concurrency_limit == 0
+                || settings.concurrency_limit > 32
+                || settings.daily_cost_microusd == Some(0)
+            {
+                return Err(AuthError::Configuration);
+            }
+            let admin = administration.as_mut().ok_or(AuthError::Configuration)?;
+            let model_store = Arc::new(
+                crate::model_center_store::ModelCenterStore::open(
+                    &config.state_dir,
+                    &config.network_id,
+                )
+                .map_err(|_| AuthError::Storage)?,
+            );
+            // This process exclusively owns admission before the listener opens.
+            let (owner_lock, _) = model_store
+                .start_exclusive()
+                .map_err(|_| AuthError::Storage)?;
+            admin.connect_models(model_store.clone());
+            let authority = crate::model_center_authority::ModelAuthority::new(
+                admin.clone(),
+                relay.clone().ok_or(AuthError::Configuration)?,
+                model_store.clone(),
+                settings,
+            );
+            let http = crate::model_center_http::ModelCenterHttp::new(
+                admin.clone(),
+                model_store,
+                authority.validator(),
+                authority.captured_validator(),
+            );
+            (
+                Some(http.router().merge(authority.router())),
+                Some(owner_lock),
+            )
+        } else {
+            (None, None)
+        };
     let app = Arc::new(App {
         client,
         http,
@@ -375,6 +417,11 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     };
     let router = if let Some(exec) = execution {
         router.merge(exec.router())
+    } else {
+        router
+    };
+    let router = if let Some(models) = model_center {
+        router.merge(models)
     } else {
         router
     };
@@ -1523,6 +1570,7 @@ mod tests {
             network: None,
             relay: false,
             administration: None,
+            model_center: None,
             execution: false,
         };
         assert!(validate_config(&good).is_ok());
