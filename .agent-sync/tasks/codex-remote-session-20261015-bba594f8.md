@@ -67,3 +67,28 @@ Detected and reproduced a production compatibility defect: src/host/main.ts adve
 - [ ] Restore temporary execution/Agent authorization, release all task-owned GUI/control windows; retain evidence and limitations.
 
 GUI lease is temporarily released for queued feedback/title verification; root performs only CLI/source preparation and must reclaim the shared native lease before UI actions. Private receipts/screenshots remain outside Git and raw credentials are not logged or committed.
+
+
+## Objective
+
+Deliver direct same-account remote Agent conversations on the original Session owner, including continuation and exact approvals. Resume actual Linux/desktop acceptance under the user's explicit dedicated Kimi test authorization; repair discovered compatibility defects.
+
+## Acceptance criteria
+
+Code and meaningful regression gates pass, all required CI passes and remote main contains the result. A source-verified paired testHost upgrade preserves identities/state/policies; real isolated desktop open/send/continue/approvals/persistence are proven separately. The unified owner signs and installs the next immutable0.5.5 package after all owners deliver main, without interrupting user tasks.
+
+## Completed
+
+PR45 feature/main, formal0.5.4 installation/data restoration, task-local cold Swift build repair, actual SSH/Host idle/version inspection, and minimal known-capability regression fix1c534aea. Target3Agents remain disabled, executionfalse, no credential mutation or model calls yet. PR49 tracks the discovered compatibility defect.
+
+## Verification
+
+Regression failed before fix; focused38 tests pass on Node24.20, typecheck/scopedlint pass. Artifact CI38623129708 is successful; its83e48946 checkout tree equals runtimee5a05f76. Existing source/installed-client evidence stays outside Git. PR49 required run38653219767 remains pending.
+
+## Blockers and unknowns
+
+Actual target predates session.remote and needs controlled paired upgrade. Target dynamic Kimi credential is absent, existing authorized local Kimi credential is available. Host management API cannot enable the disabled registry Agent, so exact operator preparation is separate from native remote-business acceptance. GUI is queued behind feedback/title; no concurrent installation or UI interaction. New fixed signed client is owned by unified0.5.5 release coordinator.
+
+## Next step
+
+Pass PR49 CI/merge/remote-main verification. Finish verified CI Host artifact transfer and safe paired upgrade/rollback preparation; enable only the approved dedicatedAgent. Reclaim GUI only after explicit release and use the unified real-model isolation profile for few-turn Kimi/approval acceptance. Return precise receipts/source/results to the already authorized unified owner; final signing/update is centralized.
