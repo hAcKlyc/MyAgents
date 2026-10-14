@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/api/apiFetch';
+import CustomSelect from '@/components/CustomSelect';
 import { isModelQaBuild } from '../../shared/updaterQa';
 
 type Receipt = {
@@ -45,6 +46,8 @@ export default function ModelQaTitle() {
   const mounted = useRef(false);
   const epoch = useRef(0);
   const active = useRef<Active | null>(null);
+  const selection = useRef({ providerId, modelId, fixtureId });
+  selection.current = { providerId, modelId, fixtureId };
 
   const refresh = useCallback(async () => {
     const generation = ++epoch.current;
@@ -54,9 +57,10 @@ export default function ModelQaTitle() {
       if (!mounted.current || generation !== epoch.current) return;
       if (data.profile !== 'moxbot-modelqa' || !Array.isArray(data.providers) || !Array.isArray(data.fixtures)) throw new Error('标题验收配置不完整。');
       const next = data as Metadata; setMetadata(next); setReceipt(next.receipt);
-      setProviderId(previous => next.providers.some(p => p.id === previous) ? previous : next.providers[0]?.id ?? '');
-      setModelId(previous => next.providers.some(p => p.models.some(m => m.id === previous)) ? previous : next.providers[0]?.models[0]?.id ?? '');
-      setFixtureId(previous => next.fixtures.some(f => f.id === previous) ? previous : next.fixtures[0]?.id ?? '');
+      const selected = next.providers.find(p => p.id === selection.current.providerId) ?? next.providers[0];
+      setProviderId(selected?.id ?? '');
+      setModelId(selected?.models.some(m => m.id === selection.current.modelId) ? selection.current.modelId : selected?.models[0]?.id ?? '');
+      setFixtureId(next.fixtures.some(f => f.id === selection.current.fixtureId) ? selection.current.fixtureId : next.fixtures[0]?.id ?? '');
     } catch (failure) {
       if (mounted.current && generation === epoch.current) setError(failure instanceof Error ? failure.message : '无法读取标题验收配置。');
     } finally { if (mounted.current && generation === epoch.current) setLoading(false); }
@@ -122,36 +126,31 @@ export default function ModelQaTitle() {
   const provider = metadata?.providers.find(p => p.id === providerId);
   const fixture = metadata?.fixtures.find(f => f.id === fixtureId);
   const canGenerate = Boolean(provider?.models.some(m => m.id === modelId) && fixture && !busy && !loading);
-  return <main className="mx-auto flex h-full w-full max-w-3xl flex-col gap-5 overflow-y-auto p-6 text-[var(--text-primary)]">
+  return <main className="mx-auto flex h-full w-full max-w-3xl flex-col gap-5 overflow-y-auto bg-[var(--paper)] p-6 text-[var(--ink)]">
     <header>
       <h1 className="text-xl font-semibold">任务标题验收</h1>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">使用固定合成任务和已授权模型生成简短概要，结果保存于本隔离环境。</p>
+      <p className="mt-2 text-sm text-[var(--ink-muted)]">使用固定合成任务和已授权模型生成简短概要，结果保存于本隔离环境。</p>
     </header>
     {loading && <p role="status">正在读取验收配置…</p>}
-    {error && <p role="alert" className="text-red-600">{error}</p>}
+    {error && <p role="alert" className="text-[var(--error)]">{error}</p>}
     {metadata && metadata.providers.length === 0 && <p role="status">请由验收负责人配置明确授权的 Provider 与模型。</p>}
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="flex flex-col gap-1">Provider
-        <select aria-label="Provider" className="rounded border p-2" value={providerId} disabled={busy || loading} onChange={event => {
-          setProviderId(event.target.value); setModelId(metadata?.providers.find(p => p.id === event.target.value)?.models[0]?.id ?? '');
-        }}>
-          {!providerId && <option value="">未配置</option>}
-          {metadata?.providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        <CustomSelect ariaLabel="Provider" size="md" value={providerId} disabled={busy || loading} placeholder="未配置"
+          options={metadata?.providers.map(p => ({ value: p.id, label: p.name })) ?? []} onChange={value => {
+            setProviderId(value); setModelId(metadata?.providers.find(p => p.id === value)?.models[0]?.id ?? '');
+          }} />
       </label>
       <label className="flex flex-col gap-1">模型
-        <select aria-label="模型" className="rounded border p-2" value={modelId} disabled={busy || loading} onChange={event => setModelId(event.target.value)}>
-          {!modelId && <option value="">未配置</option>}
-          {provider?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        <CustomSelect ariaLabel="模型" size="md" value={modelId} disabled={busy || loading} placeholder="未配置"
+          options={provider?.models.map(m => ({ value: m.id, label: m.name })) ?? []} onChange={setModelId} />
       </label>
     </div>
     <label className="flex flex-col gap-1">验收任务
-      <select aria-label="验收任务" className="rounded border p-2" value={fixtureId} disabled={busy || loading} onChange={event => setFixtureId(event.target.value)}>
-        {metadata?.fixtures.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
-      </select>
+      <CustomSelect ariaLabel="验收任务" size="md" value={fixtureId} disabled={busy || loading}
+        options={metadata?.fixtures.map(f => ({ value: f.id, label: f.label })) ?? []} onChange={setFixtureId} />
     </label>
-    {fixture && <section className="rounded border p-4">
+    {fixture && <section className="rounded border border-[var(--line)] p-4">
       <p>任务对象：{fixture.object}</p><p>目标：{fixture.action}</p>
       <details className="mt-3"><summary>查看合成任务上下文</summary><p className="mt-2 whitespace-pre-wrap break-words text-sm">{fixture.user}</p></details>
     </section>}
@@ -161,12 +160,12 @@ export default function ModelQaTitle() {
       <button type="button" className="rounded border px-4 py-2 disabled:opacity-50" disabled={busy || loading} onClick={() => void refresh()}>重新读取记录</button>
     </div>
     {status && <p role="status">{status}</p>}
-    {receipt && <section aria-label="最近保存的标题" className="rounded border p-4">
-      <h2 className="text-sm text-[var(--text-secondary)]">最近保存的概要标题</h2>
+    {receipt && <section aria-label="最近保存的标题" className="rounded border border-[var(--line)] p-4">
+      <h2 className="text-sm text-[var(--ink-muted)]">最近保存的概要标题</h2>
       <p className="mt-2 break-words text-lg font-semibold">{receipt.title}</p>
       <p className="mt-2 text-sm">{receipt.providerId} / {receipt.modelId} / {receipt.runtime}</p>
       <p className="text-sm">{new Date(receipt.generatedAt).toLocaleString('zh-CN')}</p>
     </section>}
-    <p className="text-sm text-[var(--text-secondary)]">记录类型为隔离 utility 验收。普通会话的自动触发与标题持久化须在对应链路分别验证。</p>
+    <p className="text-sm text-[var(--ink-muted)]">记录类型为隔离 utility 验收。普通会话的自动触发与标题持久化须在对应链路分别验证。</p>
   </main>;
 }
