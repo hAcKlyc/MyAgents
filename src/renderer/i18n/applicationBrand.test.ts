@@ -16,6 +16,6 @@ describe('application branding across profiles', () => {
     expect(i18n.t('app:globalSidebar.openWebsite', { lng: 'en-US' })).toBe(`Open the ${name} website`);
     expect(i18n.t('settings:about.licensingCopyright', { lng: 'en-US' })).toContain('Ethan L. MyAgents');
     expect(i18n.t('app:space.login.title', { lng: 'en-US' })).toBe('MyAgents Community');
-    expect(APP_WEBSITE_URL).toBe(profile === 'moxbot' ? 'https://moxbot.mailxf.chatgpt.site' : 'https://myagents.io');
+    expect(APP_WEBSITE_URL).toBe(profile === 'moxbot' ? 'https://140.143.183.232/' : 'https://myagents.io');
   });
 });
