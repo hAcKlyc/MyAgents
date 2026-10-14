@@ -76,7 +76,7 @@
     }
   },
   "bundle": {
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "resources": {
       "infoplist/en.lproj/InfoPlist.strings": null,
       "infoplist/moxbot/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
@@ -113,6 +113,13 @@
           "moxbot"
         ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4NTVFQ0I0OUY3MTRENjYKUldSbVRYR2Z0T3hWeUtmUHA1aXBNbTRkQXhhOWJ2cnZEY2x6M0k1Q1pqSjBQRGRleHoyWCtVYTIK",
+      "endpoints": [
+        "https://140.143.183.232/updates/stable/{{target}}.json"
+      ]
     }
-  }
+  },
+  "version": "0.5.3"
 }

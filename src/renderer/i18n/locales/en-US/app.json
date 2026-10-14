@@ -128,7 +128,13 @@
     "newVersionTitle": "New version available",
     "newVersionMessage": "Version v{{version}} has been downloaded. Install now?",
     "install": "Install",
-    "later": "Later"
+    "later": "Later",
+    "updateRestartTitle": "Restart to update",
+    "updateRestartMessage": "Version {{version}} is downloaded. Restart MoxBots to install it? Running tasks will not be interrupted; if work is still active, the update will stay saved for you to retry later.",
+    "updateRestartConfirm": "Restart and install",
+    "updateTasksRunning": "Work is still active. Finish tasks, recording or processing, and close terminals before retrying. The update is saved.",
+    "updateActivityUnknown": "Could not confirm that all work is idle. The update is saved and the app will keep running. Try again later.",
+    "updateSignatureFailed": "The saved update failed signature verification. Check for updates again to download a verified copy."
   },
   "tabProvider": {
     "sendUnconfirmed": "Send status is unconfirmed. Check history and the queue before retrying.",

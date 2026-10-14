@@ -109,6 +109,24 @@ impl LifecycleQuiesce {
         })
     }
 
+    fn try_begin_update(self: &Arc<Self>) -> Result<UpdateShutdownGuard, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+        // Do not close admission underneath an already-admitted creator that
+        // may need to acquire another resource permit before publication.
+        if state.admission != CreationAdmission::Open || state.active_creations > 0 {
+            return Err("UPDATE_BUSY".to_string());
+        }
+        state.admission = CreationAdmission::UpdateShutdown;
+        UPDATE_SHUTDOWN_IN_PROGRESS.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(UpdateShutdownGuard {
+            gate: Arc::clone(self),
+            active: true,
+        })
+    }
+
     fn begin_app_exit(&self) -> Result<(), String> {
         let mut state = self.state.lock().map_err(|error| error.to_string())?;
         state.admission = CreationAdmission::AppExit;
@@ -146,6 +164,169 @@ pub fn begin_app_exit_shutdown() -> Result<(), String> {
 
 pub fn is_update_shutdown_in_progress() -> bool {
     UPDATE_SHUTDOWN_IN_PROGRESS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A user-confirmed update keeps the existing lifecycle gate closed and the
+/// exact Node generation's SessionEngine admissions frozen until restart.
+/// Failure drops this guard, releasing only this transaction's freeze tokens.
+pub struct UpdateRestartGuard {
+    lifecycle: Option<UpdateShutdownGuard>,
+    token: String,
+    targets: Vec<GlobalShutdownTarget>,
+}
+
+impl UpdateRestartGuard {
+    /// Installation succeeded: retain admission closure until process exit.
+    /// Do not call this until the live bundle replacement has completed.
+    pub fn commit_restart(self) {
+        std::mem::forget(self);
+    }
+
+    pub async fn release(mut self) {
+        release_update_targets(&self.targets, &self.token).await;
+        self.targets.clear();
+        self.lifecycle.take();
+    }
+}
+
+impl Drop for UpdateRestartGuard {
+    fn drop(&mut self) {
+        let targets = std::mem::take(&mut self.targets);
+        let token = self.token.clone();
+        let lifecycle = self.lifecycle.take();
+        tauri::async_runtime::spawn(async move {
+            release_update_targets(&targets, &token).await;
+            // Reopen Rust births only after every Node release was attempted.
+            drop(lifecycle);
+        });
+    }
+}
+
+async fn update_target_request(
+    target: GlobalShutdownTarget,
+    token: &str,
+    action: &str,
+) -> Result<(), String> {
+    let response = crate::local_http::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?
+        .post(format!(
+            "http://127.0.0.1:{}/api/process/update-quiesce",
+            target.port
+        ))
+        .header(
+            "x-myagents-sidecar-generation",
+            target.generation.to_string(),
+        )
+        .header(
+            crate::external_cli::INTERNAL_TOKEN_HEADER,
+            crate::external_cli::internal_token(),
+        )
+        .json(&serde_json::json!({ "action": action, "token": token }))
+        .send()
+        .await
+        .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+    let status = response.status();
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+    if status.is_success() && body.get("success").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        return Ok(());
+    }
+    Err(
+        if body.get("error").and_then(serde_json::Value::as_str) == Some("UPDATE_BUSY") {
+            "UPDATE_BUSY"
+        } else {
+            "UPDATE_ACTIVITY_UNKNOWN"
+        }
+        .to_string(),
+    )
+}
+
+async fn release_update_targets(targets: &[GlobalShutdownTarget], token: &str) {
+    for target in targets {
+        if update_target_request(*target, token, "release")
+            .await
+            .is_err()
+        {
+            ulog_warn!(
+                "[Updater] Unable to release exact generation {} update admission",
+                target.generation
+            );
+        }
+    }
+}
+
+/// Fail closed without interrupting any task. Scheduler claims use the same
+/// lifecycle birth permit, and Sidecar turn admissions atomically freeze only
+/// when the adapter and its queue/background/approval owners are idle.
+pub async fn prepare_update_restart(
+    app: &AppHandle,
+    manager: &ManagedSidecarManager,
+) -> Result<UpdateRestartGuard, String> {
+    let lifecycle = LIFECYCLE_QUIESCE.try_begin_update()?;
+    let mut guard = UpdateRestartGuard {
+        lifecycle: Some(lifecycle),
+        token: uuid::Uuid::new_v4().to_string(),
+        targets: Vec::new(),
+    };
+    if !crate::task_scheduler::get_task_scheduler()
+        .execution_projections_snapshot()
+        .await
+        .is_empty()
+    {
+        ulog_info!("[Updater] Restart deferred: task execution owner remains active");
+        return Err("UPDATE_BUSY".to_string());
+    }
+    if let Some(terminals) = app.try_state::<Arc<crate::terminal::TerminalManager>>() {
+        if terminals.has_open_sessions().await {
+            ulog_info!("[Updater] Restart deferred: user terminal is still open; finish and close it before retrying");
+            return Err("UPDATE_BUSY".to_string());
+        }
+    }
+    if let Some(recording) = app.try_state::<crate::recording::ManagedRecordingManager>() {
+        if recording.snapshot().await.is_some() {
+            ulog_info!(
+                "[Updater] Restart deferred: recording slot remains live, paused, or settling"
+            );
+            return Err("UPDATE_BUSY".to_string());
+        }
+    }
+    if let Some(documents) = crate::document_processing::global() {
+        if documents.has_pending_work()? {
+            ulog_info!("[Updater] Restart deferred: document queue or worker remains active");
+            return Err("UPDATE_BUSY".to_string());
+        }
+    }
+    if let Some(speech) = crate::speech_recognition::global() {
+        if speech.has_pending_work()? {
+            ulog_info!(
+                "[Updater] Restart deferred: speech queue, live session, or probe remains active"
+            );
+            return Err("UPDATE_BUSY".to_string());
+        }
+    }
+    let targets = manager
+        .lock()
+        .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?
+        .update_restart_targets()?;
+    for target in targets {
+        // Record before sending: lost ACK may still have frozen this owner.
+        guard.targets.push(target);
+        if let Err(error) = update_target_request(target, &guard.token, "freeze").await {
+            ulog_info!(
+                "[Updater] Restart deferred: Session owner generation={} reason={}",
+                target.generation,
+                error
+            );
+            guard.release().await;
+            return Err(error);
+        }
+    }
+    Ok(guard)
 }
 
 /// Stop all Sidecar instances through their exact birth-time process-tree authority.
@@ -432,6 +613,30 @@ fn describe_process_matches(matches: &[crate::process_cleanup::ProcessMatch]) ->
 #[cfg(test)]
 mod lifecycle_quiesce_tests {
     use super::*;
+
+    #[test]
+    fn confirmed_update_does_not_interrupt_an_admitted_creator_or_its_nested_resource() {
+        let gate = Arc::new(LifecycleQuiesce::default());
+        let creator = gate.begin_spawn().unwrap();
+        assert!(matches!(gate.try_begin_update(), Err(error) if error == "UPDATE_BUSY"));
+        let nested = gate
+            .begin_spawn()
+            .expect("the already-admitted creator can continue");
+        drop(nested);
+        drop(creator);
+        let update = gate
+            .try_begin_update()
+            .expect("idle lifecycle admits confirmed update");
+        assert!(
+            gate.begin_spawn().is_err(),
+            "new work cannot race accepted installation"
+        );
+        drop(update);
+        assert!(
+            gate.begin_spawn().is_ok(),
+            "failed update restores admission"
+        );
+    }
 
     #[test]
     fn app_exit_closes_admission_and_waits_for_inflight_creation() {

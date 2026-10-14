@@ -55,6 +55,28 @@ Renderer 的 `updateReady`、`preparing` 和启动对话框只是上述磁盘状
 
 因此 macOS 只后台下载，不后台安装。安装必须由用户点击触发，成功后立即进入 `request_restart`，旧进程不能返回普通交互状态。
 
+## 用户确认重启与活动保护
+
+macOS 的安装入口先取得已有 lifecycle update-quiesce exclusive permit，再检查
+`TaskSchedulerController.executions` 与每个 Sidecar 的精确 generation。Task 的
+`Running` 行仅表示调度已启用，不是执行证据；只有瞬时 execution 才阻止安装。
+所有新的 scheduler execution claim 与进程创建使用同一 shared permit。已准入创建尚未完成时安装直接返回 busy，保持原准入开放，不关闭 gate 后等待并误拒其后续资源创建。
+
+录音 live/paused/settling、文档及语音队列/活动/探测 reservation 由各自 owner
+检查，新提交复用同一 shared permit。Terminal 没有可靠的当前命令 idle 协议；
+任何仍打开的用户 PTY 都要求用户完成并主动关闭后重试，更新不终止终端。
+
+每个 Node Sidecar 通过具有内部 caller 凭据和 generation 校验的 lifecycle 端点，
+在既有 SessionEngine query facade 同步关闭 turn admission 并读取 adapter 活动。
+正在执行、已准入且仍等待 IO、排队、等待审批/提问、SDK 后台任务或 compaction
+均返回 `UPDATE_BUSY`。代次、网络或状态读取失败返回 `UPDATE_ACTIVITY_UNKNOWN`；
+两者都保留 pending 更新包且不停止原任务。已冻结的 idle owner 由同一事务 token
+释放，迟到 release 不能打开新事务。成功安装后保持关闭直到受管重启；安装失败
+释放冻结和 lifecycle gate。Renderer 状态不参与此安全裁决。
+
+独立 Host daemon 和远端机器的执行有自己的生命周期，不能从桌面 Session idle
+推断它们空闲，也不能为了更新桌面客户端主动停止它们。
+
 ## Windows installer handoff
 
 Windows 安装前必须证明当前安装目录不再被 MyAgents 进程树占用：
@@ -101,3 +123,11 @@ verified-clean handoff 只证明进程与锁已释放，安装资源的完整替
 - Renderer 三个事件与多入口按钮状态一致。
 
 发布前还需在对应平台的已签名安装包上验证真实更新：后台下载、退出后恢复 pending、点击安装、进程树收敛、应用重启与版本变化。构建及发布步骤以平台指南为准。
+
+## MoxBots 独立发布与任务保护
+
+Mox profile 使用独立更新地址、公钥与0.5.3发行版本，MyAgents默认地址/公钥保持原值。首个支持更新的版本必须手动安装，旧的updater-disabled 0.5.2不能自行发现此更新。当前部署仅交付macOS arm64，其他目标端点返回204，Linux保持手动deb。发布准备/验证/原子推广/回滚见scripts/moxbot-updates/README.md。
+
+确认重启不提供中断任务的覆盖选项。读任务/会话/审批、SDK后台和DSH子Agent、录音/处理队列及用户终端的真实owner；busy或unknown均保留pending并继续原工作。既有Lifecycle shared admission与nonwaiting exclusive检查保护资源出生，已准入创建导致更新暂缓；Node mutable准入与builtin delayed warm-up同步冻结，仅空闲owner可安装。必须确认active transcript writer健康且liveRevision==durableRevision，原生异步子Agent观测后再次复读，避免已完成但未落盘的回答丢失。
+
+安装和下载共享pending guard，install前用profile pinned public key复验磁盘字节，不能依赖早先download验签。签名失败清理失效pending，用户可重新检查下载。上游可下载资源继续用原资源签名根，不替换为Mox更新密钥。

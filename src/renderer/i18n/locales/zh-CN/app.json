@@ -128,7 +128,13 @@
     "newVersionTitle": "发现新版本",
     "newVersionMessage": "最新版本 v{{version}} 已下载完成，是否立即安装？",
     "install": "安装",
-    "later": "稍后"
+    "later": "稍后",
+    "updateRestartTitle": "重启并安装更新",
+    "updateRestartMessage": "新版本 {{version}} 已下载。确认重启 MoxBots 并安装？如果还有任务或其他操作正在执行，更新会保留，请完成后再重试。",
+    "updateRestartConfirm": "确认重启更新",
+    "updateTasksRunning": "仍有任务或操作正在执行。请完成任务、录音或处理工作，并关闭终端后再重试；更新包已保留。",
+    "updateActivityUnknown": "暂时无法确认所有操作已结束。更新包已保留，应用会继续运行，请稍后重试。",
+    "updateSignatureFailed": "更新包签名校验未通过。请重新检查更新，下载通过验证的更新包。"
   },
   "tabProvider": {
     "sendUnconfirmed": "发送状态未确认，请先检查历史和队列再重试。",

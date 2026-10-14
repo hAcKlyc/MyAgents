@@ -62,6 +62,12 @@ type QueryBackgroundTask = {
 // Completed runs remain here for dual-channel enrichment and late-event rejection,
 // until the exact Query finalizer releases the registry.
 const queryBackgroundTasks = new Map<Query, Map<string, QueryBackgroundTask>>();
+// The SessionEngine update transaction also fences delayed builtin launches.
+// Setting this flag never aborts or cancels an existing Query.
+let updateRestartFrozen = false;
+export function setUpdateRestartFrozen(value: boolean): void { updateRestartFrozen = value; }
+export function isUpdateRestartFrozen(): boolean { return updateRestartFrozen; }
+
 let isProcessing = false;
 let abortRequested = false;
 let sessionTerminationPromise: Promise<void> | null = null;

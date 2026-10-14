@@ -1,0 +1,10 @@
+[package]
+name = "moxbot-update-signature-verifier"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+minisign-verify = "=0.2.5"
+
+[workspace]

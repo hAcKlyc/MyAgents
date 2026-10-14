@@ -148,3 +148,7 @@ Owner root; record .agent-sync/tasks/fix-mah-host-daemon-status-20261014.md. No 
 ### BOTS-ADMIN-LOGIN-UX-001 最终交付（2026-10-14）
 
 已交付PR33/main1ece497d并发布现有统一云后台：当前标签页中文OIDC登录及固定后台返回替代旧弹窗/独立标签页fallback，错误/取消/过期可恢复。代码七项CI通过，Linux制品及Dex资源manifest/运行源对应已核实；真实受控管理员登录→中文确认→Bots目录→退出204，以及callback400恢复通过。仅两个既有云服务更新展示和回跳，原身份与权限不变，101 Host及模型未操作。备份标记 moxbots-login-ux-backup-20261014T101958，恢复原unit+Dex配置即可回滚且保留业务状态。详细最终验收和后续状态见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`；现网维护窗口已释放，后续无本任务云端写入。
+
+## MOXBOTS-UPDATER-20261014
+
+接通MoxBots独立更新地址/签名、后台检查下载、用户确认且任务安全的重启安装；官网服务器静态不可变release/原子stable，Linux及无正式包平台不自动升级。源实现/确定性测试、独立UI、真实A→B更新、Apple分发包、主干/部署各自跟踪，详见specs/tech_docs/auto_update.md与scripts/moxbot-updates/README.md和对应task record。客户端操作窗口当前临时让给MOXBOTS-MIGRATE-001迁移，保留迁移后数据。
