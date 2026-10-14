@@ -502,8 +502,17 @@ export class RuntimeConversationBranchError extends Error {
 /**
  * AgentRuntime interface — one implementation per CLI type
  */
+/** Tool-free auxiliary text generation; never a Product Session turn. */
+export interface RuntimeTextUtilityTask {
+  prompt: string;
+  systemPrompt: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export interface AgentRuntime {
   readonly type: RuntimeType;
+  runTextUtility?(process: RuntimeProcess, task: RuntimeTextUtilityTask): Promise<string | null>;
 
   /** How this runtime applies turn-scoped config changes at a safe boundary. */
   getConfigCapabilities?(): RuntimeConfigCapabilities;

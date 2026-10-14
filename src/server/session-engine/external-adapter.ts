@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { broadcast } from '../sse';
 import {
   addExternalPermissionRule,
+  runExternalTextUtility,
   publishExternalTranscriptSaveStatus,
   cancelExternalQueueItem,
   cancelExternalQueuedTurnsByOwner,
@@ -374,6 +375,14 @@ export function createExternalSessionEngine(): SessionEngine {
         providerExecutionIdentity: session?.providerExecutionIdentity ?? null,
         reasoningEffort: getExternalSessionReasoningEffort() ?? 'default',
       };
+    },
+
+    async runTextUtility(task) {
+      return runExternalTextUtility({
+        ...task, runtime: getActiveRuntimeType(), runtimeSource: getActiveRuntimeSource(),
+        model: getExternalSessionModel() ?? '',
+        workspacePath: getRuntimeWorkspacePath() || undefined,
+      });
     },
 
     getCurrentSessionContext() {
