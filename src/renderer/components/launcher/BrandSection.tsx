@@ -24,7 +24,8 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
-import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
+import { openExternal } from '@/utils/openExternal';
 import DropZoneOverlay from '@/components/DropZoneOverlay';
 import SimpleChatInput, {
   type ImageAttachment,
@@ -151,6 +152,29 @@ interface BrandSectionProps {
   activeRuntime?: RuntimeType;
   /** Only the visible Launcher tab may respond to window-wide Tauri drag events. */
   isActive: boolean;
+}
+
+interface LauncherHeroBrandProps {
+  profile: 'myagents' | 'moxbot';
+  websiteUrl: string;
+  websiteLabel: string;
+  title: string;
+}
+
+export function LauncherHeroBrand({ profile, websiteUrl, websiteLabel, title }: LauncherHeroBrandProps) {
+  const logotype = <MyAgentsLogotype className="launcher-hero-logotype" title={title} />;
+  if (profile !== 'moxbot') return logotype;
+
+  return (
+    <button
+      type="button"
+      onClick={() => { void openExternal(websiteUrl); }}
+      aria-label={websiteLabel}
+      className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+    >
+      {logotype}
+    </button>
+  );
 }
 
 const LAUNCHER_INPUT_DROP_ZONE_ID = 'launcher-input';
@@ -650,8 +674,10 @@ export default memo(function BrandSection({
           separates "who we are" from the input below. */}
       <div className="flex min-h-0 flex-col items-center justify-end pb-8">
         <h1 className="theme-product-wordmark theme-launcher-hero-title">
-          <MyAgentsLogotype
-            className="launcher-hero-logotype"
+          <LauncherHeroBrand
+            profile={APP_BUILD_PROFILE}
+            websiteUrl={APP_WEBSITE_URL}
+            websiteLabel={t('app:globalSidebar.openWebsite')}
             title={APP_BUILD_PROFILE === 'moxbot' ? APP_DISPLAY_NAME : resolvedTheme.hero.productName}
           />
         </h1>
