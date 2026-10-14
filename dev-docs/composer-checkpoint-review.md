@@ -35,3 +35,8 @@ The leaf checkpoint now takes the existing serializer/parser from App rather tha
 Mox-only local editor admission covers ThoughtCard, ThoughtInput and TaskCommentTimeline. Dirty/IME/in-flight states refuse installation without auto-save/send; remote-session tabs explicitly refuse until formal update attestation exists. Root 211 focused regressions plus composition139, independent154 and real isolated/authenticated Node route1 pass. DefaultMyAgents does not register these guards.
 
 Native A2 exposed a separate ordinary TaskCenter tab-navigation loss of unsubmitted inline state. It was not an updater installation loss (installation never ran), and is not claimed repaired here. A3 updater guard must be tested with editor still mounted via titlebar update. Chat durable handoff restore and A3/B3 native upgrade remain pending. Daily installed0.5.3 requires one manual installation of corrected0.5.4; this task cannot operate daily App/data/Keychain.
+
+
+### Final native restoration accepted
+
+A3/B3 sourcee5a05f76 actual signed update passes. Mounted inline/new-thought drafts refuse exit, remain editable; own realPTY continues during refusal. Idle confirm installs B0.5.4, real Rust RESTART_EXIT_CODE cleanup removes old App and sidecars. Restore pill brings exactTab/Session/workspace/three-line draft and @file reference back without send; actual editable keystroke/revert and durable handoff consumption pass. OwnRecord hash unchanged. Root independently observed actualB AX/screenshot/latest204 and draft after tab navigation. See isolation review tenth round and WPS work/updater-20261014/qa-native-A3.log/QA-WINDOW-RELEASED.json. This proves QA-profile native update; production user/issuer/paidProvider/Host are not claimed.
