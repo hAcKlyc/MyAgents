@@ -23,4 +23,4 @@ Website source is a separate Sites checkout. Primary IAB page/fixture behavior a
 
 Details: `specs/tech_docs/credential_publisher_routes.md`. Follow that checklist and current runtime receipts rather than interpreting old pending approval as still unanswered.
 
-First full candidate is frozen at 84fd35f8 in a detached worktree. A second full build follows this documentation-only handoff update, with unchanged functional inputs; compare both signed CodeDirectories before requesting one concrete approval for the migration/cold-start/update sequence. Native tests and source-exact ledgers are passing, while installed migration, both signed artifacts and public release remain pending.
+First full candidate is frozen at 84fd35f8 in a detached worktree. A second full build follows the handoff update and main1ece497d cloud-login synchronization, with unchanged desktop/Host functional source; compare both signed CodeDirectories before requesting one concrete approval for the migration/cold-start/update sequence. Native tests and source-exact ledgers are passing, while installed migration, both signed artifacts and public release remain pending.

@@ -115,93 +115,101 @@ async function request(path, method = 'GET', body, authenticated = true) {
   } finally { clearTimeout(timeout); }
 }
 const base64url = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-function clearLoginLink() {
-  const link = $('auth-link');
-  link.hidden = true;
-  link.removeAttribute('href');
-  $('cancel-login').hidden = true;
-}
+// Only a pending PKCE transaction survives same-tab navigation. Session bearer stays in memory.
+const loginStorageKey = 'moxbots.admin.pending-login.v1';
+function clearLoginLink() { $('cancel-login').hidden = true; }
+function forgetPendingLogin() { try { sessionStorage.removeItem(loginStorageKey); } catch { /* unavailable storage */ } }
 async function cancelLogin() {
   const current = activeLogin;
-  if (current) current.cancelled = true;
   loginAttempt++;
   activeLogin = null;
+  forgetPendingLogin();
   clearLoginLink();
   $('login-button').disabled = false;
-  $('login-status').textContent = '登录已取消。';
-  if (current?.popup && !current.popup.closed) current.popup.close();
+  $('login-status').textContent = '登录已取消，可以重新登录。';
   if (current?.tx) {
-    try {
-      await request('/auth/login/cancel', 'DELETE', { transactionId: current.tx.transactionId,
-        deviceId: current.deviceId, pkceVerifier: current.verifier }, false);
-    } catch { /* bounded best effort */ }
+    try { await request('/auth/login/cancel', 'DELETE', { transactionId: current.tx.transactionId,
+      deviceId: current.deviceId, pkceVerifier: current.verifier }, false); } catch { /* TTL also bounds cancellation */ }
   }
 }
 async function login() {
+  if (activeLogin) await cancelLogin();
   const attempt = ++loginAttempt;
-  const loginContext = { attempt, tx: null, deviceId: null, verifier: null, popup: null, cancelled: false };
-  activeLogin = loginContext;
-  clearLoginLink();
   $('login-button').disabled = true;
-  $('login-status').textContent = '正在打开账号登录…';
-  let popup = null;
-  try { popup = window.open('about:blank', 'moxbots-account-login', 'popup,width=560,height=720'); } catch { /* use the visible link below */ }
-  loginContext.popup = popup;
-  let tx = null;
-  let deviceId;
-  let verifier;
+  $('login-status').textContent = '正在前往账号登录…';
+  let context;
   try {
-    deviceId = crypto.randomUUID();
-    loginContext.deviceId = deviceId;
-    verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
-    loginContext.verifier = verifier;
+    const deviceId = crypto.randomUUID();
+    const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-    tx = await request('/auth/login/start', 'POST', { deviceId, pkceChallenge: base64url(new Uint8Array(digest)) }, false);
-    loginContext.tx = tx;
-    if (loginContext.cancelled) {
-      try { await request('/auth/login/cancel', 'DELETE', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false); } catch { /* bounded best effort */ }
-      tx = null;
-    }
-    if (attempt !== loginAttempt) throw new Error('登录已取消。');
+    const tx = await request('/auth/login/start', 'POST', { deviceId,
+      pkceChallenge: base64url(new Uint8Array(digest)), browserReturn: true }, false);
+    context = { tx, deviceId, verifier };
+    activeLogin = context;
     const url = new URL(tx.authorizationUrl);
-    if (url.username || url.password || (url.protocol !== 'https:' && url.origin !== location.origin)) throw new Error('服务端返回的登录地址无效。');
-    const link = $('auth-link');
-    link.href = url.href;
-    link.hidden = false;
-    $('cancel-login').hidden = false;
-    if (popup) {
-      try { popup.location.href = url.href; } catch { /* separate tab link remains available */ }
-    }
-    $('login-status').textContent = popup ? '请在登录窗口完成授权；若窗口未显示，可使用下方独立标签页链接。' : '请使用下方独立标签页链接完成授权。';
-    for (let i = 0; i < 150 && attempt === loginAttempt; i++) {
+    if (url.username || url.password || (url.protocol !== 'https:' && url.origin !== location.origin)) throw new Error('账号登录地址无效，请联系管理员。');
+    // Fail before leaving if tab-scoped storage is blocked; no insecure fallback or token persistence.
+    sessionStorage.setItem(loginStorageKey, JSON.stringify(context));
+    if (attempt !== loginAttempt) return;
+    location.assign(url.href);
+  } catch (error) {
+    if (context) await cancelLogin();
+    if (attempt === loginAttempt || !activeLogin) forgetSession(error.message);
+  }
+}
+async function resumeLogin() {
+  const params = new URLSearchParams(location.search);
+  const outcome = params.get('login');
+  if (outcome) history.replaceState(null, '', '/admin');
+  let context;
+  try { context = JSON.parse(sessionStorage.getItem(loginStorageKey) || 'null'); }
+  catch { forgetPendingLogin(); }
+  if (!context) {
+    if (outcome) $('login-status').textContent = '登录请求已失效，请重新登录。';
+    return;
+  }
+  const { tx, deviceId, verifier } = context;
+  if (!tx || typeof tx.transactionId !== 'string' || typeof deviceId !== 'string' ||
+      typeof verifier !== 'string' || verifier.length < 43 || verifier.length > 128 ||
+      !Number.isSafeInteger(tx.expiresAt) || tx.expiresAt <= Date.now() / 1000) {
+    forgetPendingLogin();
+    $('login-status').textContent = '登录已过期，请重新登录。';
+    return;
+  }
+  activeLogin = context;
+  if (outcome !== 'complete') {
+    await cancelLogin();
+    if (outcome === 'failed') $('login-status').textContent = '登录未完成，请重新登录。';
+    return;
+  }
+  const attempt = ++loginAttempt;
+  $('login-button').disabled = true;
+  $('cancel-login').hidden = false;
+  $('login-status').textContent = '正在完成登录…';
+  try {
+    for (let i = 0; i < 5 && attempt === loginAttempt; i++) {
       const result = await request('/auth/login/poll', 'POST', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false);
-      if (attempt !== loginAttempt) throw new Error('登录已取消。');
+      if (attempt !== loginAttempt) return;
       if (result.accessToken) {
         token = result.accessToken;
+        forgetPendingLogin();
         activeLogin = null;
         clearLoginLink();
-        if (popup && !popup.closed) popup.close();
-        tx = null;
         await refresh();
         return;
       }
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    throw new Error('登录已超时，请重新登录。');
+    throw new Error('登录未完成，请重新登录。');
   } catch (error) {
-    if (attempt === loginAttempt) forgetSession(error.message);
-    if (tx && !loginContext.cancelled) {
-      try { await request('/auth/login/cancel', 'DELETE', { transactionId: tx.transactionId, deviceId, pkceVerifier: verifier }, false); } catch { /* bounded best effort */ }
-    }
-    if (popup && !popup.closed) popup.close();
+    if (attempt === loginAttempt) { await cancelLogin(); forgetSession(error.message); }
   } finally {
-    if (attempt === loginAttempt) {
-      activeLogin = null;
-      clearLoginLink();
-      $('login-button').disabled = false;
-    }
+    if (!activeLogin) $('login-button').disabled = false;
   }
 }
+// pageshow also handles returning with the browser Back button from the identity page.
+window.addEventListener('pagehide', () => { activeLogin = null; });
+window.addEventListener('pageshow', () => { if (!token && !activeLogin) void resumeLogin(); });
 async function refresh() {
   try {
     const next = await request('/api/admin/bootstrap');

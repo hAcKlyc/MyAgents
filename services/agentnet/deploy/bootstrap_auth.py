@@ -95,14 +95,15 @@ def prepare(output, issuer, callback, email, username, password, *, tls=None,
         "storage": {"type": "sqlite3", "config": {"file": "/var/dex/dex.db"}},
         "web": web,
         "logger": {"level": "error", "format": "json"},
+        "frontend": {"dir": "/etc/dex/web", "theme": "moxbots", "issuer": "MoXBots"},
         "oauth2": {"responseTypes": ["code"], "skipApprovalScreen": False},
         "enablePasswordDB": True,
         "staticPasswords": [{"email": email, "username": username,
                              "userID": str(uuid.uuid4()), "hash": hashed}],
-        "staticClients": [{"id": "myagents-agentnet", "name": "MyAgents AgentNet",
+        "staticClients": [{"id": "myagents-agentnet", "name": "MoXBots",
                            "secret": client_secret, "redirectURIs": [callback]}],
     }
-    mounts = ["./dex.json:/etc/dex/config.json:ro", "./dex-state:/var/dex"]
+    mounts = ["./dex.json:/etc/dex/config.json:ro", "./dex-state:/var/dex", "./web:/etc/dex/web:ro"]
     if tls:
         mounts.extend(["./tls.crt:/etc/dex/tls.crt:ro", "./tls.key:/etc/dex/tls.key:ro"])
     compose = {"name": "myagents-owned-auth", "services": {"dex": {
@@ -123,6 +124,8 @@ def prepare(output, issuer, callback, email, username, password, *, tls=None,
     try:
         output.mkdir(mode=0o700)
         (output / "dex-state").mkdir(mode=0o700)
+        shutil.copytree(Path(__file__).with_name("dex-web"), output / "web")
+        (output / "web").chmod(0o700)
         write_private(output / "dex.json", (json.dumps(config, indent=2) + "\n").encode())
         write_private(output / "oidc-client-secret", client_secret.encode())
         write_private(output / "compose.json", (json.dumps(compose, indent=2) + "\n").encode())

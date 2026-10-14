@@ -544,7 +544,7 @@ pub(crate) mod tests {
         headers: HeaderMap,
         Json(body): Json<Value>,
     ) -> Result<Json<Value>, Err> {
-        ensure_keys(&body, &["deviceId", "pkceChallenge"])?;
+        ensure_keys(&body, &["deviceId", "pkceChallenge", "browserReturn"])?;
         let device = body["deviceId"].as_str().ok_or_else(Err::bad)?;
         let challenge = body["pkceChallenge"].as_str().ok_or_else(Err::bad)?;
         if Uuid::parse_str(device).is_err() || challenge.len() != 43 {
@@ -568,7 +568,7 @@ pub(crate) mod tests {
             (device.to_owned(), challenge.to_owned(), identity.to_owned()),
         );
         Ok(Json(
-            json!({"transactionId":tx,"expiresAt":i64::MAX,"authorizationUrl":s.authorization_url}),
+            json!({"transactionId":tx,"expiresAt":4102444800_i64,"authorizationUrl":s.authorization_url}),
         ))
     }
 
@@ -612,7 +612,7 @@ pub(crate) mod tests {
 
     async fn fixture_login_page() -> Response {
         asset(
-            "<!doctype html><meta charset=utf-8><title>Test fixture</title><p>Synthetic local test login completed. Return to the admin tab.</p><p>For the ordinary test account, first visit /fixture-identity/ordinary; to return to the admin account, visit /fixture-identity/admin. The default identity is admin.</p>",
+            "<!doctype html><meta charset=utf-8><title>Test fixture</title><p>Synthetic local test login completed. <a href=/admin?login=complete>返回后台</a></p><p>For the ordinary test account, first visit /fixture-identity/ordinary; to return to the admin account, visit /fixture-identity/admin. The default identity is admin.</p>",
             "text/html; charset=utf-8",
         )
     }
