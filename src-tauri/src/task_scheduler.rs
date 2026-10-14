@@ -1258,6 +1258,9 @@ async fn claim_execution_if_open(
     task_id: &str,
 ) -> Result<String, String> {
     let mut active = executions.write().await;
+    // The existing app lifecycle gate linearizes this actual execution birth
+    // with updater admission; scheduled-but-idle Task rows remain untouched.
+    let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
     if shutting_down.load(Ordering::SeqCst) {
         return Err("Task scheduler is shutting down".to_string());
     }
@@ -1286,6 +1289,9 @@ async fn claim_detector_invocation(
     task_id: &str,
 ) -> Result<(String, DetectorExecutionLifecycle), String> {
     let mut active = executions.write().await;
+    // The existing app lifecycle gate linearizes this actual execution birth
+    // with updater admission; scheduled-but-idle Task rows remain untouched.
+    let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
     if shutting_down.load(Ordering::SeqCst) {
         return Err("Task scheduler is shutting down".to_string());
     }
@@ -1316,6 +1322,9 @@ async fn claim_pending_activation(
     persisted_queue_id: Option<&str>,
 ) -> Result<PendingActivationClaim, String> {
     let mut active = executions.write().await;
+    // The existing app lifecycle gate linearizes this actual execution birth
+    // with updater admission; scheduled-but-idle Task rows remain untouched.
+    let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
     if shutting_down.load(Ordering::SeqCst) {
         return Err("Task scheduler is shutting down".to_string());
     }

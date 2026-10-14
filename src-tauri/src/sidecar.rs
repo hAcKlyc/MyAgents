@@ -111,8 +111,8 @@ pub use session_lifecycle::{
 };
 pub use shutdown::{
     begin_app_exit_shutdown, begin_lifecycle_spawn_permit, begin_update_shutdown,
-    is_update_shutdown_in_progress, shutdown_for_update_verified, stop_all_sidecars,
-    LifecycleSpawnPermit,
+    is_update_shutdown_in_progress, prepare_update_restart, shutdown_for_update_verified,
+    stop_all_sidecars, LifecycleSpawnPermit,
 };
 pub use spawn::find_node_executable_pub;
 pub(crate) use spawn::normalize_external_path;

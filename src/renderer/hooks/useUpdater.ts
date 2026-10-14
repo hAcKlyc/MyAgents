@@ -19,7 +19,7 @@ import { isTauriEnvironment } from '@/utils/browserMock';
 import { isDebugMode } from '@/utils/debug';
 import { isLinuxDesktop } from '@/utils/desktopPlatform';
 import { compareVersions } from '../../shared/utils';
-import { APP_BUILD_PROFILE } from '../../shared/appProfile';
+import { getPlatform } from '@/identity/deviceIdentity';
 
 export interface UpdateReadyInfo {
     version: string;
@@ -31,7 +31,7 @@ export type CheckUpdateResult = 'up-to-date' | 'downloading' | 'error';
 /** Result of restartAndUpdate, used by caller to show an error toast. 'ok' means
  *  install actually started (process is about to exit) — the renderer just won't
  *  see the resolution because Rust calls exit(0). */
-export type RestartUpdateResult = 'ok' | 'network-error' | 'version-mismatch' | 'blocked' | 'error';
+export type RestartUpdateResult = 'ok' | 'network-error' | 'version-mismatch' | 'blocked' | 'busy' | 'activity-unknown' | 'signature-error' | 'error';
 
 interface UseUpdaterResult {
     /** Whether an update has been downloaded and is ready to install */
@@ -61,9 +61,7 @@ interface UseUpdaterResult {
 }
 
 // Windows and macOS defer installation until the user's explicit restart action.
-const isWindows = typeof navigator !== 'undefined' && navigator.platform?.includes('Win');
-const isMac = typeof navigator !== 'undefined' && navigator.platform?.includes('Mac');
-const usesDeferredInstall = isWindows || isMac;
+const usesDeferredInstall = (): boolean => /^(darwin|windows)-/.test(getPlatform());
 
 // Periodic check interval: 30 minutes
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -73,7 +71,6 @@ function updaterText(key: string): string {
 }
 
 export function useUpdater(): UseUpdaterResult {
-    const updaterEnabled = APP_BUILD_PROFILE === 'myagents';
     const [updateReady, setUpdateReady] = useState(false);
     const [updateVersion, setUpdateVersion] = useState<string | null>(null);
     const [checking, setChecking] = useState(false);
@@ -100,7 +97,6 @@ export function useUpdater(): UseUpdaterResult {
     // Manual update check: test connectivity → compare version → download if needed
     // Returns a result string so the caller can show appropriate toast feedback.
     const checkForUpdate = useCallback(async (): Promise<CheckUpdateResult> => {
-        if (!updaterEnabled) return 'error';
         if (isLinuxDesktop()) return 'error'; // deb upgrades are installed manually.
         if (!isTauriEnvironment()) {
             console.warn('[useUpdater] Manual check not available outside Tauri');
@@ -168,7 +164,7 @@ export function useUpdater(): UseUpdaterResult {
                 setDownloading(false);
             }
         }
-    }, [updaterEnabled]); // Stable reference — all mutable state accessed via refs
+    }, []); // Stable reference — all mutable state accessed via refs
 
     // Dismiss the startup pending update dialog (keeps "Restart to Update" button visible)
     const dismissPendingUpdate = useCallback(() => {
@@ -188,7 +184,6 @@ export function useUpdater(): UseUpdaterResult {
     // root cause of the "click does nothing" reports — the user was left in
     // a broken state with the install never actually starting.
     const restartAndUpdate = useCallback(async (): Promise<RestartUpdateResult> => {
-        if (!updaterEnabled) return 'blocked';
         if (isLinuxDesktop()) return 'blocked';
         if (!isTauriEnvironment()) return 'error';
         if (installingRef.current) return 'ok';  // already in flight
@@ -206,7 +201,7 @@ export function useUpdater(): UseUpdaterResult {
         // Windows/macOS install verified bytes persisted during the background
         // download. macOS must not replace the live .app before this explicit
         // action: TCC cannot prompt a process whose executable was unlinked.
-        if (usesDeferredInstall) {
+        if (usesDeferredInstall()) {
             try {
                 await invoke('install_pending_update');
                 // Windows exits via NSIS; macOS immediately requests restart.
@@ -215,6 +210,14 @@ export function useUpdater(): UseUpdaterResult {
                 const errStr = String(err);
                 installingRef.current = false;
                 setInstalling(false);
+                if (errStr.includes('UPDATE_BUSY')) return 'busy';
+                if (errStr.includes('UPDATE_ACTIVITY_UNKNOWN')) return 'activity-unknown';
+                if (errStr.includes('UPDATE_SIGNATURE_INVALID')) {
+                    setUpdateReady(false);
+                    setUpdateVersion(null);
+                    setPendingUpdateOnStartup(null);
+                    return 'signature-error';
+                }
                 if (errStr.includes('VERSION_MISMATCH')) {
                     console.warn('[useUpdater] Pending update version mismatch, will re-download');
                     setUpdateReady(false);
@@ -268,11 +271,10 @@ export function useUpdater(): UseUpdaterResult {
                 return 'error';
             }
         }
-    }, [updateVersion, updaterEnabled]);
+    }, [updateVersion]);
 
     // Listen for update ready event from Rust
     useEffect(() => {
-        if (!updaterEnabled) return;
         if (!isTauriEnvironment() || isLinuxDesktop()) {
             if (isDebugMode()) {
                 console.log('[useUpdater] Not in Tauri environment, skipping event listener setup');
@@ -291,6 +293,7 @@ export function useUpdater(): UseUpdaterResult {
             }
             setUpdateVersion(event.payload.version);
             setUpdateReady(true);
+            downloadingRef.current = false;
             setDownloading(false);
             setPreparing(false);
         }, ac.signal);
@@ -310,17 +313,18 @@ export function useUpdater(): UseUpdaterResult {
             if (isDebugMode()) {
                 console.log('[useUpdater] Event received: updater:download-failed', event.payload);
             }
+            downloadingRef.current = false;
+            setDownloading(false);
             setPreparing(false);
         }, ac.signal);
 
         return () => ac.abort();
-    }, [updaterEnabled]);
+    }, []);
 
     // Windows/macOS: check for a pending update on disk at startup
     // If found, show a dialog prompting the user to install it
     useEffect(() => {
-        if (!updaterEnabled) return;
-        if (!isTauriEnvironment() || isLinuxDesktop() || !usesDeferredInstall) return;
+        if (!isTauriEnvironment() || isLinuxDesktop() || !usesDeferredInstall()) return;
 
         const checkPending = async () => {
             try {
@@ -339,12 +343,11 @@ export function useUpdater(): UseUpdaterResult {
         };
 
         void checkPending();
-    }, [updaterEnabled]);
+    }, []);
 
     // Periodic background check (silent - just triggers Rust to check and download)
     // Uses ref to avoid recreating interval when updateReady changes
     useEffect(() => {
-        if (!updaterEnabled) return;
         if (!isTauriEnvironment() || isLinuxDesktop()) return;
 
         const doCheck = async () => {
@@ -375,7 +378,7 @@ export function useUpdater(): UseUpdaterResult {
                 intervalRef.current = null;
             }
         };
-    }, [updaterEnabled]); // One interval per enabled app profile
+    }, []); // One interval per enabled app profile
 
     return {
         updateReady,

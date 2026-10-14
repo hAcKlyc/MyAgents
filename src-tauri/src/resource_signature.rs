@@ -3,7 +3,7 @@
 
 #[path = "resource_signature_core.rs"]
 mod core;
-pub(crate) use core::verify_minisign_bytes;
+pub(crate) use core::{verify_minisign_bytes, verify_minisign_bytes_with_key};
 use core::{public_key, signature};
 use minisign_verify::Error as MinisignError;
 use std::fs::{self, File};

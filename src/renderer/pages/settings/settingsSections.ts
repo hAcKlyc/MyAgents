@@ -1,3 +1,5 @@
+import { APP_BUILD_PROFILE, APP_WEBSITE_URL } from '../../../shared/appProfile';
+
 export type SettingsSection =
   | 'general'
   | 'proxy'
@@ -33,7 +35,9 @@ export const VALID_SECTIONS: SettingsSection[] = [
 
 export const MYAGENTS_GITHUB_URL = 'https://github.com/hAcKlyc/MyAgents';
 export const MYAGENTS_SOURCE_CODE_URL = MYAGENTS_GITHUB_URL;
-export const MYAGENTS_RELEASES_URL = `${MYAGENTS_GITHUB_URL}/releases`;
+export const MYAGENTS_RELEASES_URL = APP_BUILD_PROFILE === 'moxbot'
+  ? `${APP_WEBSITE_URL}download/`
+  : `${MYAGENTS_GITHUB_URL}/releases`;
 
 export const PLAYWRIGHT_DEVICE_PRESETS = [
   'iPhone 15 Pro',

@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE } from '../shared/appProfile';
 import { DEFAULT_SPACE_ID } from '@/api/spaceCloud';
 import { startAgentNetworkStore } from '@/features/agent-network/store';
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
@@ -380,6 +381,7 @@ export default function App() {
   } = useUpdater();
 
   // Stable callback for Settings prop — ref pattern ensures memo comparator correctness
+  const [showUpdateRestartConfirmation, setShowUpdateRestartConfirmation] = useState(false);
   const restartAndUpdateRef = useRef(restartAndUpdate);
   restartAndUpdateRef.current = restartAndUpdate;
 
@@ -874,6 +876,12 @@ export default function App() {
       toastRef.current?.error(t('appChrome.updateVerifyFailed'));
     } else if (outcome === 'version-mismatch') {
       toastRef.current?.info(t('appChrome.updateExpiredRedownloading'));
+    } else if (outcome === 'busy') {
+      toastRef.current?.info(t('appChrome.updateTasksRunning'));
+    } else if (outcome === 'activity-unknown') {
+      toastRef.current?.error(t('appChrome.updateActivityUnknown'));
+    } else if (outcome === 'signature-error') {
+      toastRef.current?.error(t('appChrome.updateSignatureFailed'));
     } else if (outcome === 'blocked') {
       toastRef.current?.info(t('appChrome.updateInstallBlocked'));
     } else if (outcome === 'error') {
@@ -4661,10 +4669,28 @@ export default function App() {
       return true;
     }, []);
 
-  const handleRestartAndUpdate = useCallback(async () => {
+  const handleRestartAndUpdate = useCallback(async (confirmed = false) => {
+    if (APP_BUILD_PROFILE === 'moxbot') {
+      // Updates never offer to interrupt work; Rust rejects busy/unknown owners.
+      if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
+      try {
+        for (const submit of pendingRecordNoteSubmittersRef.current.values()) {
+          if (!(await submit())) return;
+        }
+        for (const submit of fileEditSubmittersRef.current.values()) {
+          if (!(await submit())) return;
+        }
+      } catch (error) {
+        console.error('[App] Failed to save drafts before update:', error);
+        toastRef.current?.error(t('appChrome.updateInstallFailed'));
+        return;
+      }
+      await performRestartAndUpdate();
+      return;
+    }
     if (!(await requestLifecycleExitConfirmation())) return;
     await performRestartAndUpdate();
-  }, [performRestartAndUpdate, requestLifecycleExitConfirmation]);
+  }, [performRestartAndUpdate, requestLifecycleExitConfirmation, t]);
 
   // System tray event handling (minimize to tray, exit confirmation)
   useTrayEvents({
@@ -5077,20 +5103,34 @@ export default function App() {
           cache/disk state. Comes back into view automatically when the
           download completes (the dialog reads pendingUpdateOnStartup, which
           is unchanged; only the visibility gate is `updatePreparing`). */}
+          {showUpdateRestartConfirmation && !updatePreparing && (
+            <ConfirmDialog
+              title={t('appChrome.updateRestartTitle')}
+              message={t('appChrome.updateRestartMessage', { version: updateVersion })}
+              confirmText={t('appChrome.updateRestartConfirm')}
+              cancelText={t('appChrome.later')}
+              confirmVariant="primary"
+              onConfirm={() => {
+                setShowUpdateRestartConfirmation(false);
+                void handleRestartAndUpdate(true);
+              }}
+              onCancel={() => setShowUpdateRestartConfirmation(false)}
+            />
+          )}
           {pendingUpdateOnStartup && !updatePreparing && (
             <ConfirmDialog
               title={t('appChrome.newVersionTitle')}
-              message={t('appChrome.newVersionMessage', {
+              message={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartMessage' : 'appChrome.newVersionMessage', {
                 version: pendingUpdateOnStartup,
               })}
-              confirmText={t('appChrome.install')}
+              confirmText={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartConfirm' : 'appChrome.install')}
               cancelText={t('appChrome.later')}
               confirmVariant="primary"
               onConfirm={() => {
                 dismissPendingUpdate();
                 // Route through handleRestartAndUpdate so toast feedback fires
                 // on failure modes (network error / version mismatch).
-                void handleRestartAndUpdate();
+                void handleRestartAndUpdate(true);
               }}
               onCancel={dismissPendingUpdate}
             />

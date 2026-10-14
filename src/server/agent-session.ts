@@ -290,6 +290,7 @@ export type {
 } from './builtin-session/types';
 import type { ProviderEnv } from './provider-types';
 export { stripPlaywrightResults } from './builtin-session/transcript-persistence';
+export { hasBuiltinActivityForUpdate, setUpdateRestartFrozen } from './builtin-session/lifecycle';
 import {
   clearQueryMcpPrewarmOwner,
   completeQueryBackgroundTask,
@@ -304,6 +305,7 @@ import {
   claimQueryMcpMutation,
   forceWakeGeneratorWithNull,
   getQueryMcpMutation,
+  isUpdateRestartFrozen,
   getQueryGeneration,
   incrementPreWarmFailCount,
   getBuiltinLiveRevision,
@@ -3898,6 +3900,7 @@ function schedulePreWarm(delayMs = 500): void {
   setPreWarmTimer(setTimeout(() => {
     setPreWarmTimer(null);
     if (!agentDir) return;
+    if (isUpdateRestartFrozen()) { schedulePreWarm(); return; }
 
     // Drain deferred config restart: abort the stale session so the next
     // startStreamingSession() picks up the latest MCP/agents/provider/proxy config.
@@ -10771,10 +10774,13 @@ export function isAutoAllowedRecordCliCommand(command: string): boolean {
 }
 
 async function startStreamingSession(preWarm = false): Promise<void> {
+  if (isUpdateRestartFrozen()) return;
   const sessionMutationBarrier = getSessionMutationBarrier();
   if (sessionMutationBarrier) await sessionMutationBarrier;
   await resolvePendingBuiltinConversationMutationForActiveSession();
   await awaitSessionTermination(10_000, 'startStreamingSession');
+  // A delayed launcher may have begun awaiting before idle was frozen.
+  if (isUpdateRestartFrozen()) return;
 
   // (issue #174) Cold-start abort race: enqueueUserMessage schedules this
   // function via setTimeout(0) after pushing to queueState.messageQueue. If the user
@@ -11981,6 +11987,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       );
     }
 
+    if (isUpdateRestartFrozen()) throw new Error('UPDATE_BUSY');
     let sdkQueryResumed = Boolean(resumeFrom);
     try {
       activeQuery = await createGuardedSdkQuery(claudeCodeExecutable, () => query({

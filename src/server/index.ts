@@ -2639,6 +2639,31 @@ async function main() {
         const { status, body } = buildReadyResponseBody();
         return jsonResponse(body, status);
       }
+      if (pathname === '/api/process/update-quiesce' && request.method === 'POST') {
+        const { hasValidInternalCliCredential } = await import('./external-cli-admission');
+        if (!hasValidInternalCliCredential(request)) {
+          return jsonResponse({ success: false, error: 'INTERNAL_CALLER_REQUIRED' }, 401);
+        }
+        const generation = process.env.MYAGENTS_SIDECAR_GENERATION?.trim();
+        if (!generation || request.headers.get('x-myagents-sidecar-generation') !== generation) {
+          return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 409);
+        }
+        try {
+          const input = await request.json() as { action?: unknown; token?: unknown };
+          if (typeof input.token !== 'string' || !/^[a-f0-9-]{36}$/.test(input.token)) {
+            return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
+          }
+          const lifecycle = await import('./session-engine/selector');
+          if (input.action === 'freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token);
+          else if (input.action === 'release') lifecycle.releaseSessionAdmissionsForUpdate(input.token);
+          else return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
+          return jsonResponse({ success: true });
+        } catch (error) {
+          const code = error instanceof Error && error.message === 'UPDATE_BUSY'
+            ? 'UPDATE_BUSY' : 'UPDATE_ACTIVITY_UNKNOWN';
+          return jsonResponse({ success: false, error: code }, 409);
+        }
+      }
       // Rust owns process-tree retirement. This bounded handshake lets the
       // Global Sidecar checkpoint Browser identity before Windows closes its
       // Job Object; the generation header prevents a stale retirement from
