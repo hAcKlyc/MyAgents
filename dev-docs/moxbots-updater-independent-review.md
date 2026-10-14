@@ -100,3 +100,31 @@ src-tauri/resources/nodejs/bin/node node_modules/vitest/vitest.mjs run --project
 | src-tauri/src/updater.rs | 040217b2a8c79504d91db6b0288b138902e79e23d161bb78579d7c247d350bbc |
 
 仍未执行实际 UI、服务真实更新或正式包验收。客户端迁移协调期间，保持 `/Applications/MoXBots.app` 和 `~/.moxbot` 不启动、不退出、不操作、不安装。下一步需实现者提供独立候选及隔离数据目录，再做实际确认/取消/拒绝与 A → B 更新。
+
+## 架构与编辑保存补充复核（2026-10-14 23:58）
+
+本次读到的源码 HEAD：`f8b1dd1157d9d2cedf9122dff415d918869b7764`。迁移 owner 已释放客户端，但本独立审阅仍未操作主 App；真实更新应使用实现者安排的独立 `/tmp` 候选和隔离 HOME，保留主安装目录及其尚未合入的账号/Host 成果。
+
+- selector 现在通过既有 `agent-session` facade 引入 `hasBuiltinActivityForUpdate` 和 `setUpdateRestartFrozen`。真实 activity 判断仍留在 builtin lifecycle owner，background task、MCP mutation、prewarm/timer、processing without Query 的条件与前次一致。
+- MoxBots 确认更新后先顺序调用已注册 Record note submitters，再调用 file edit submitters；任一 false 即返回，异常显示错误后返回，不调用安装。保留同一 owner 的保存与错误处理，不调用可能结束任务/录音的 MyAgents exit confirmation。
+- 既有 Record 的 flush owner 先等待当前提交，再循环保存更新草稿；FilePreview 的 transition owner 等待 composition/import/in-flight save，发生冲突或保存失败返回 false 并保留 mounted dirty buffer。本次 App 调用的是这些既有 owner。
+- AppShellChrome 源码契约分别检查 MoxBots 与 MyAgents 分支；此契约只证明调用顺序，实际 owner 的 DOM 行为测试另行运行，仍不当作原生 UI 通过。
+
+独立复跑：
+
+```sh
+src-tauri/resources/nodejs/bin/node node_modules/vitest/vitest.mjs run --project unit src/server/session-engine/session-engine.unit.test.ts src/renderer/components/AppShellChrome.contract.test.ts --project dom src/renderer/hooks/useUpdater.moxbot.test.tsx src/renderer/pages/RecordDetail.note-input.test.tsx src/renderer/features/record/useRecordTabLifecycle.test.tsx src/renderer/components/FilePreviewModal.liveReload.test.tsx
+src-tauri/resources/nodejs/bin/node node_modules/dependency-cruiser/bin/dependency-cruise.mjs --config .dependency-cruiser.cjs src
+```
+
+225/225 用例通过：selector 111、AppShellChrome contract 16、MoxBots hook 6、Record note 51、Record lifecycle 12、FilePreview live reload 29。dependency-cruiser 退出码 0，2354 modules、9572 dependencies，0 errors、16 个既有 no-orphans warnings；没有放宽规则来跳过 selector 边界。DOM media pause 的未实现提示是 jsdom 环境限制，本次未将其计为原生录音/播放验收。
+
+本轮没有确认新的阻断缺陷，静态/确定性 gate 保持通过。仍等待独立候选，实际原生 UI、真实更新安装与公证制品验收未验证。
+
+| 本轮文件 | SHA-256 |
+|---|---|
+| src/server/session-engine/selector.ts | c272df3f178aafbcd7ed92ea92259665f1903fec33d85c9a1de8d5e0a7723225 |
+| src/server/agent-session.ts | 2deeeb47ea26085cde7abaa2cf7c0a4e58f3ca1ddb4b1b669c9f715748f2a8f8 |
+| src/server/builtin-session/lifecycle.ts | 0bc4db6f83a3714a80281f225e53bb201cfce3f5552649edc291c118b73f4f78 |
+| src/renderer/App.tsx | dc81286e489596b98da10d5212716678a3f72a949d3b0060a1089e9e999c06ec |
+| src/renderer/components/AppShellChrome.contract.test.ts | 35365b078cc77e229475ea191b2467f7e26714b2b4da8808def531968670e211 |
