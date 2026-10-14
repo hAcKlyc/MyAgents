@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   connections: vi.fn(),
   openAgentNetwork: vi.fn(),
   toastError: vi.fn(),
+  external: vi.fn(),
+  helper: vi.fn(),
 }));
 
 vi.mock("@/features/agent-network/store", () => ({
@@ -40,7 +42,14 @@ vi.mock("@/components/Toast", () => ({
   useToast: () => ({ error: mocks.toastError }),
 }));
 
+vi.mock("@/utils/openExternal", () => ({ openExternal: mocks.external }));
+
 import OwnedAccountEntry from "./OwnedAccountEntry";
+
+function accountAction(name: string) {
+  fireEvent.click(screen.getByRole("button", { name }));
+  fireEvent.click(screen.getAllByRole("button", { name }).at(-1)!);
+}
 
 const makeRegistry = (ownedAccount?: {
   state: string;
@@ -116,7 +125,11 @@ it("shows a clear unconfigured state and does not call any login or official acc
   render(<OwnedAccountEntry expanded />);
   expect(
     screen.getByRole("button", { name: "未配置 MoXBots 登录服务" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "未配置 MoXBots 登录服务" }),
+  );
+  expect(screen.getByRole("button", { name: "帮助与反馈" })).toBeDisabled();
   expect(mocks.start).not.toHaveBeenCalled();
 });
 
@@ -165,9 +178,7 @@ it("routes authorization recovery through the existing AgentNet page", async () 
   render(
     <OwnedAccountEntry expanded onOpenAgentNetwork={onOpenAgentNetwork} />,
   );
-  fireEvent.click(
-    screen.getByRole("button", { name: "授权恢复 MoXBots 账号" }),
-  );
+  accountAction("授权恢复 MoXBots 账号");
   await waitFor(() => expect(mocks.select).toHaveBeenCalledWith("owned-a"));
   expect(onOpenAgentNetwork).toHaveBeenCalledOnce();
   expect(mocks.start).not.toHaveBeenCalled();
@@ -214,7 +225,7 @@ it("uses the configured product issuer even when another owned instance is selec
   });
   mocks.select.mockResolvedValue(authenticated);
   render(<OwnedAccountEntry expanded />);
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  accountAction("登录 MoXBots");
   expect(
     screen.queryByRole("tab", { name: "设备 key（旧方式）" }),
   ).not.toBeInTheDocument();
@@ -250,13 +261,17 @@ it("shows an unauthenticated product account when only an isolated QA account ex
     ),
   } as NetworkRegistry;
   render(<OwnedAccountEntry expanded />);
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
-  expect(screen.getByLabelText("服务 URL")).toHaveValue("https://login.example.test");
+  accountAction("登录 MoXBots");
+  expect(screen.getByLabelText("服务 URL")).toHaveValue(
+    "https://login.example.test",
+  );
   expect(screen.getByLabelText("服务 URL")).toHaveAttribute("readonly");
   fireEvent.change(screen.getByLabelText("服务 URL"), {
     target: { value: "https://attacker.example.test" },
   });
-  expect(screen.getByLabelText("服务 URL")).toHaveValue("https://login.example.test");
+  expect(screen.getByLabelText("服务 URL")).toHaveValue(
+    "https://login.example.test",
+  );
   expect(mocks.start).not.toHaveBeenCalled();
 });
 
@@ -266,7 +281,9 @@ it("fails closed when the configured issuer contains a path or query", () => {
     ownedServiceUrl: "https://login.example.test/dex?tenant=qa",
   } as NetworkRegistry;
   render(<OwnedAccountEntry expanded />);
-  expect(screen.getByRole("button", { name: "未配置 MoXBots 登录服务" })).toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "未配置 MoXBots 登录服务" }),
+  ).toBeEnabled();
   expect(mocks.start).not.toHaveBeenCalled();
 });
 
@@ -288,7 +305,9 @@ it("refreshes the read-only account projection when its session expires", async 
   try {
     vi.setSystemTime(nowSeconds * 1000);
     render(<OwnedAccountEntry expanded />);
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(mocks.connections).toHaveBeenCalledOnce();
     mocks.connections.mockClear();
     await act(async () => {
@@ -331,7 +350,9 @@ it("refreshes after an authorization error changes without treating offline as s
     ),
   } as NetworkRegistry;
   mocks.registry = authenticated;
-  mocks.connections.mockResolvedValueOnce(authenticated).mockResolvedValueOnce(authorizationRequired);
+  mocks.connections
+    .mockResolvedValueOnce(authenticated)
+    .mockResolvedValueOnce(authorizationRequired);
   const view = render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
   mocks.registry = {
@@ -342,7 +363,10 @@ it("refreshes after an authorization error changes without treating offline as s
             ...connection,
             snapshot: {
               ...connection.snapshot,
-              error: { code: "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED", retryable: false },
+              error: {
+                code: "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+                retryable: false,
+              },
             },
           }
         : connection,
@@ -356,7 +380,10 @@ it("refreshes after an authorization error changes without treating offline as s
 it("ignores an account refresh that completes after unmount", async () => {
   let resolveRead!: (registry: NetworkRegistry) => void;
   mocks.connections.mockImplementationOnce(
-    () => new Promise((resolve) => { resolveRead = resolve; }),
+    () =>
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      }),
   );
   const view = render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
@@ -373,8 +400,16 @@ it("ignores an account refresh that completes after unmount", async () => {
 it("ignores an account refresh after the configured issuer boundary changes", async () => {
   let resolveOldRead!: (registry: NetworkRegistry) => void;
   mocks.connections
-    .mockImplementationOnce(() => new Promise((resolve) => { resolveOldRead = resolve; }))
-    .mockResolvedValueOnce({ ...makeRegistry(), ownedServiceUrl: "https://new.example.test" } as NetworkRegistry);
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOldRead = resolve;
+        }),
+    )
+    .mockResolvedValueOnce({
+      ...makeRegistry(),
+      ownedServiceUrl: "https://new.example.test",
+    } as NetworkRegistry);
   const view = render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
   mocks.registry = {
@@ -396,11 +431,14 @@ it("cancels a pending login when the same issuer account generation changes", as
   let resolvePoll!: (value: unknown) => void;
   mocks.cancel.mockRejectedValueOnce(new Error("cancel unavailable"));
   mocks.poll.mockImplementationOnce(
-    () => new Promise((resolve) => { resolvePoll = resolve; }),
+    () =>
+      new Promise((resolve) => {
+        resolvePoll = resolve;
+      }),
   );
   const view = render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  accountAction("登录 MoXBots");
   fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
   await screen.findByText("等待浏览器登录");
   fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
@@ -415,14 +453,17 @@ it("cancels a pending login when the same issuer account generation changes", as
     ...next,
     connections: next.connections.map((connection) =>
       connection.id === "owned-a"
-        ? { ...connection, snapshot: { ...connection.snapshot, authGeneration: 2 } }
+        ? {
+            ...connection,
+            snapshot: { ...connection.snapshot, authGeneration: 2 },
+          }
         : connection,
     ),
   } as NetworkRegistry;
   view.rerender(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith("attempt-a"));
   expect(screen.queryByText("等待浏览器登录")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  accountAction("登录 MoXBots");
   fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
   await screen.findByText("等待浏览器登录");
   expect(mocks.start).toHaveBeenCalledTimes(2);
@@ -432,7 +473,9 @@ it("cancels a pending login when the same issuer account generation changes", as
     principalId: "stale-poll",
     expiresAt: null,
   });
-  await act(async () => resolvePoll({ status: "authenticated", registry: stale }));
+  await act(async () =>
+    resolvePoll({ status: "authenticated", registry: stale }),
+  );
   expect(mocks.accept).not.toHaveBeenCalledWith(stale);
   expect(mocks.select).not.toHaveBeenCalledWith("owned-a");
 });
@@ -441,13 +484,15 @@ it("ends locally after explicit cancellation fails and permits a new login", asy
   mocks.cancel.mockRejectedValueOnce(new Error("cancel unavailable"));
   render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  accountAction("登录 MoXBots");
   fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
   await screen.findByText("等待浏览器登录");
   fireEvent.click(screen.getByRole("button", { name: "取消登录" }));
   await waitFor(() => expect(mocks.cancel).toHaveBeenCalledWith("attempt-a"));
-  await waitFor(() => expect(screen.queryByText("等待浏览器登录")).not.toBeInTheDocument());
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  await waitFor(() =>
+    expect(screen.queryByText("等待浏览器登录")).not.toBeInTheDocument(),
+  );
+  accountAction("登录 MoXBots");
   fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
   await screen.findByText("等待浏览器登录");
   expect(mocks.start).toHaveBeenCalledTimes(2);
@@ -464,7 +509,7 @@ it("does not accept a late authenticated poll after the account entry unmounts",
   const view = render(<OwnedAccountEntry expanded />);
   await waitFor(() => expect(mocks.connections).toHaveBeenCalledOnce());
   mocks.accept.mockClear();
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  accountAction("登录 MoXBots");
   fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
   await screen.findByText("等待浏览器登录");
   fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
@@ -483,4 +528,34 @@ it("does not accept a late authenticated poll after the account entry unmounts",
   });
   expect(mocks.accept).not.toHaveBeenCalled();
   expect(mocks.select).not.toHaveBeenCalled();
+});
+
+it("merges helper and cloud feedback into account menu even while signed out", async () => {
+  mocks.external.mockResolvedValue(undefined);
+  render(<OwnedAccountEntry expanded onOpenHelper={mocks.helper} />);
+  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "小助理" }));
+  expect(mocks.helper).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
+  await waitFor(() =>
+    expect(mocks.external).toHaveBeenCalledWith(
+      "https://login.example.test/feedback",
+    ),
+  );
+  expect(mocks.start).not.toHaveBeenCalled();
+});
+it("keeps help accessible from the narrow account icon without a hidden label", () => {
+  render(<OwnedAccountEntry expanded={false} onOpenHelper={mocks.helper} />);
+  fireEvent.click(screen.getByRole("button", { name: "MoXBots 账号" }));
+  fireEvent.click(screen.getByRole("button", { name: "小助理" }));
+  expect(mocks.helper).toHaveBeenCalledOnce();
+});
+it("keeps the account menu usable after cloud feedback cannot open", async () => {
+  mocks.external.mockRejectedValueOnce(new Error("failed"));
+  render(<OwnedAccountEntry expanded onOpenHelper={mocks.helper} />);
+  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
+  fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
+  await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "小助理" })).toBeInTheDocument();
 });

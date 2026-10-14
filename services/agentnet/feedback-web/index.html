@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>帮助与反馈 · MoXBots</title>
+    <link rel="stylesheet" href="/feedback/styles.css" />
+    <script src="/feedback/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a href="/feedback" class="brand">MoXBots <small>帮助与反馈</small></a
+      ><button id="logout" type="button" hidden>退出账号</button>
+    </header>
+    <main>
+      <section id="login" class="card">
+        <p class="eyebrow">MOXBOTS SUPPORT</p>
+        <h1>让 MoXBots 更好用</h1>
+        <p>提交问题、建议或使用疑问，并在这里查看处理进展。</p>
+        <button id="login-button" type="button" class="primary">
+          登录后反馈</button
+        ><button id="cancel-login" type="button" hidden>取消登录</button>
+        <p id="login-status" role="status"></p>
+      </section>
+      <div id="workspace" hidden>
+        <div class="intro">
+          <div>
+            <p class="eyebrow">帮助与反馈</p>
+            <h1>我的反馈</h1>
+            <p>问题、建议和使用疑问，都可以在这里告诉我们。</p>
+          </div>
+          <button id="refresh" type="button">刷新进展</button>
+        </div>
+        <p id="notice" role="status" hidden></p>
+        <div class="columns">
+          <section class="card">
+            <h2>提交反馈</h2>
+            <form id="feedback-form">
+              <label
+                >类型<select name="category">
+                  <option value="bug">问题反馈</option>
+                  <option value="suggestion">功能建议</option>
+                  <option value="help">使用疑问</option>
+                </select></label
+              ><label
+                >标题<input
+                  name="title"
+                  maxlength="120"
+                  required
+                  placeholder="简短说明遇到的问题或建议" /></label
+              ><label
+                >详细描述<textarea
+                  name="description"
+                  rows="7"
+                  maxlength="8000"
+                  required
+                  placeholder="描述操作步骤、预期结果和实际情况。请勿填写密码、密钥或其他敏感信息。"
+                ></textarea></label
+              ><label
+                >应用版本（可选）<input
+                  name="app_version"
+                  maxlength="64"
+                  placeholder="例如 0.5.2"
+              /></label>
+              <p class="hint">
+                提交后由平台管理员查看和处理；无需配置 AI 模型。
+              </p>
+              <button id="submit" class="primary" type="submit">
+                提交反馈
+              </button>
+              <p id="submit-status" role="status"></p>
+            </form>
+          </section>
+          <section aria-labelledby="history-title">
+            <h2 id="history-title">最近反馈</h2>
+            <div id="list"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+    <dialog id="detail">
+      <div class="dialog-head">
+        <h2 id="detail-title"></h2>
+        <button id="close-detail" type="button" aria-label="关闭反馈详情">
+          ×
+        </button>
+      </div>
+      <div id="detail-body"></div>
+    </dialog>
+  </body>
+</html>

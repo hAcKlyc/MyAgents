@@ -1,0 +1,146 @@
+[baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline data, please update: `npm i baseline-browser-mapping@latest -D`
+[BABEL] Note: The code generator has deoptimised the styling of /tmp/moxbots-feedback-ui-vite/deps/react-dom_client.js?v=2a71b876 as it exceeds the max of 500KB.
+{
+  "url": "http://127.0.0.1:5173/__sidebar_audit",
+  "logs": [],
+  "body": "MoXBots\n新对话\n自动化任务\n技能与工具\nAgentNet 局域网络\n更多\nAGENT 工作区\n产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单\n研发 Agent Alpha\n任务二：研发 Agent Alpha\n2天前\n任务一：研发 Agent Alpha\n2天前\n运营 Agent Gamma\n设置\n登录 MoXBots\n正式 GlobalSidebar 合成验收；无模型、无真实后台。",
+  "buttons": [
+    {
+      "text": "",
+      "label": "收起侧边栏"
+    },
+    {
+      "text": "MoXBots",
+      "label": "打开 MoXBots 官网"
+    },
+    {
+      "text": "新对话",
+      "label": "新对话"
+    },
+    {
+      "text": "自动化任务",
+      "label": "自动化任务"
+    },
+    {
+      "text": "",
+      "label": "创建任务"
+    },
+    {
+      "text": "技能与工具",
+      "label": "技能与工具"
+    },
+    {
+      "text": "AgentNet 局域网络",
+      "label": "AgentNet 局域网络"
+    },
+    {
+      "text": "更多",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "工作区与会话显示选项"
+    },
+    {
+      "text": "",
+      "label": "新建 Agent"
+    },
+    {
+      "text": "产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "",
+      "label": "拖动 产品 Agent Beta 极长名称用于验证侧边栏截断与提示不遮盖菜单"
+    },
+    {
+      "text": "研发 Agent Alpha",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "任务二：研发 Agent Alpha2天前",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "拖动 任务二：研发 Agent Alpha"
+    },
+    {
+      "text": "任务一：研发 Agent Alpha2天前",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "拖动 任务一：研发 Agent Alpha"
+    },
+    {
+      "text": "",
+      "label": "拖动 研发 Agent Alpha"
+    },
+    {
+      "text": "运营 Agent Gamma",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "更多"
+    },
+    {
+      "text": "",
+      "label": "在此工作区新建对话"
+    },
+    {
+      "text": "",
+      "label": "拖动 运营 Agent Gamma"
+    },
+    {
+      "text": "设置",
+      "label": "设置"
+    },
+    {
+      "text": "登录 MoXBots",
+      "label": null
+    },
+    {
+      "text": "",
+      "label": "通知"
+    }
+  ]
+}
+[
+  {
+    name: 'expanded account below settings and helper callback',
+    pass: true
+  },
+  { name: 'feedback uses owned issuer URL', pass: true },
+  { name: 'signed out uses original JoinNetworkDialog', pass: true },
+  {
+    name: 'rail account visible, bell separated, focus escape',
+    pass: true
+  },
+  { name: 'notification control preserved', pass: true }
+]

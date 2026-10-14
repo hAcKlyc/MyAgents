@@ -1,0 +1,31 @@
+{
+  "environment": "http://127.0.0.1:5197",
+  "auth": "synthetic chooser + PKCE; real AuthStore/FeedbackStore/admin HTTP; not production OIDC",
+  "cases": [
+    {
+      "name": "real user PKCE callback + create + stored list",
+      "pass": true
+    },
+    {
+      "name": "real admin PKCE feedback list + reply status",
+      "pass": true
+    },
+    {
+      "name": "real user refresh sees reply and resolved",
+      "pass": true
+    },
+    {
+      "name": "real other principal cannot see first user feedback",
+      "pass": true
+    },
+    {
+      "name": "real logout + login same principal retains stored feedback",
+      "pass": true
+    },
+    {
+      "name": "real login navigation restores same-principal draft after injected401",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

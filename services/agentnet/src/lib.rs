@@ -12,6 +12,8 @@ mod execution_browser_fixture;
 mod execution_gate;
 mod execution_http;
 mod execution_store;
+mod feedback_http;
+mod feedback_store;
 mod identity_http;
 mod instance_http;
 mod model_center_authority;
@@ -29,6 +31,7 @@ mod store;
 #[cfg(test)]
 mod transactions;
 
+pub use feedback_http::FeedbackService;
 pub use identity_http::IdentityHttpConfig;
 pub use network_http::NetworkHttpConfig;
 pub use oidc::{OidcVerifier, VerifiedSubject};

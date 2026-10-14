@@ -23,7 +23,8 @@ jobs:
   authentication:
     name: owned authentication · Linux persistence
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Full service + eight protocol crates and cache upload can exceed 15 minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

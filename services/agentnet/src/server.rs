@@ -1,6 +1,7 @@
 use crate::admin_http::AdminService;
 use crate::admin_store::AdminConfig;
 use crate::execution_http::ExecutionService;
+use crate::feedback_http::FeedbackService;
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
 use crate::network_http::{NetworkHttpConfig, NetworkService};
 use crate::relay_controller::RelayController;
@@ -86,7 +87,7 @@ struct Pending {
     nonce: Zeroizing<String>,
     expires_at: i64,
     phase: Phase,
-    browser_return: bool,
+    browser_return_path: Option<&'static str>,
 }
 type ServiceClient = CoreClient<
     EndpointSet,
@@ -178,6 +179,8 @@ struct StartRequest {
     pkce_challenge: String,
     #[serde(default, rename = "browserReturn")]
     browser_return: bool,
+    #[serde(default, rename = "browserReturnPath")]
+    browser_return_path: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -284,6 +287,16 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         session_ttl: Duration::from_secs(config.session_ttl_seconds),
     };
     let store = Arc::new(AuthStore::open(&config.state_dir, &auth)?);
+    let feedback = FeedbackService::open(
+        store.clone(),
+        &config.state_dir,
+        config.administration.clone(),
+        Url::parse(&config.callback_url)
+            .map_err(|_| AuthError::Configuration)?
+            .origin()
+            .ascii_serialization(),
+        &config.network_id,
+    )?;
     let mut administration = config
         .administration
         .clone()
@@ -412,7 +425,8 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .route("/auth/session", get(session).delete(revoke))
         .route("/health", get(health))
         .with_state(app);
-    let router = assemble_feature_routes(router, identity, network, relay, &config.issuer);
+    let router = assemble_feature_routes(router, identity, network, relay, &config.issuer)
+        .merge(feedback.router());
     let router = if let Some(admin) = administration {
         router.merge(admin.router())
     } else {
@@ -635,6 +649,12 @@ async fn start(
     State(app): State<Arc<App>>,
     Json(req): Json<StartRequest>,
 ) -> Result<(StatusCode, Json<StartResponse>), ApiError> {
+    let browser_return_path = match (req.browser_return, req.browser_return_path.as_deref()) {
+        (false, None) => None,
+        (true, None | Some("/admin")) => Some("/admin"),
+        (true, Some("/feedback")) => Some("/feedback"),
+        _ => return Err(ApiError::BadRequest),
+    };
     let device = canonical_uuid(&req.device_id).ok_or(ApiError::BadRequest)?;
     if !valid_challenge(&req.pkce_challenge) {
         return Err(ApiError::BadRequest);
@@ -678,7 +698,7 @@ async fn start(
             nonce: Zeroizing::new(nonce),
             expires_at: expires,
             phase: Phase::Pending,
-            browser_return: req.browser_return,
+            browser_return_path,
         },
     );
     Ok((
@@ -697,7 +717,7 @@ async fn callback(
 ) -> Result<impl IntoResponse, ApiError> {
     let exchange_app = app.clone();
     let keys_app = app.clone();
-    let browser_return = callback_is_browser_return(&app, &uri);
+    let browser_return = callback_browser_return_path(&app, &uri);
     let result = callback_using(
         app,
         uri,
@@ -727,8 +747,8 @@ async fn callback(
         },
     )
     .await;
-    if browser_return {
-        Ok(browser_return_response(result.is_ok()))
+    if let Some(path) = browser_return {
+        Ok(browser_return_response(path, result.is_ok()))
     } else {
         match result {
             Ok(response) => Ok(response),
@@ -752,30 +772,32 @@ fn callback_failure_page(error: ApiError) -> axum::response::Response {
         .into_response()
 }
 
-fn callback_is_browser_return(app: &App, uri: &axum::http::Uri) -> bool {
-    let Some(query) = uri.query().filter(|q| q.len() <= 8192) else {
-        return false;
-    };
+fn callback_browser_return_path(app: &App, uri: &axum::http::Uri) -> Option<&'static str> {
+    let query = uri.query().filter(|q| q.len() <= 8192)?;
     let states: Vec<_> = url::form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| key == "state")
         .map(|(_, value)| value.into_owned())
         .collect();
     if states.len() != 1 {
-        return false;
+        return None;
     }
-    app.flow.pending.lock().is_ok_and(|all| {
-        all.values()
-            .any(|p| p.browser_return && ct_eq(p.state.as_bytes(), states[0].as_bytes()))
-    })
+    app.flow
+        .pending
+        .lock()
+        .ok()?
+        .values()
+        .find(|p| ct_eq(p.state.as_bytes(), states[0].as_bytes()))
+        .and_then(|p| p.browser_return_path)
 }
 
-fn browser_return_response(success: bool) -> axum::response::Response {
-    let mut response = Redirect::to(if success {
-        "/admin?login=complete"
-    } else {
-        "/admin?login=failed"
-    })
-    .into_response();
+fn browser_return_response(path: &'static str, success: bool) -> axum::response::Response {
+    let target = match (path, success) {
+        ("/feedback", true) => "/feedback?login=complete",
+        ("/feedback", false) => "/feedback?login=failed",
+        (_, true) => "/admin?login=complete",
+        (_, false) => "/admin?login=failed",
+    };
+    let mut response = Redirect::to(target).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
@@ -1641,6 +1663,7 @@ mod tests {
                 device_id: "22222222-2222-4222-8222-222222222222".into(),
                 pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
                 browser_return: true,
+                browser_return_path: None,
             }),
         )
         .await
@@ -1652,22 +1675,28 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        assert!(callback_is_browser_return(
-            &app,
-            &format!("/auth/callback?state={state}&code=test")
-                .parse()
-                .unwrap()
-        ));
-        assert!(!callback_is_browser_return(
-            &app,
-            &"/auth/callback?state=wrong".parse().unwrap()
-        ));
-        assert!(!callback_is_browser_return(
-            &app,
-            &format!("/auth/callback?state={state}&state={state}")
-                .parse()
-                .unwrap()
-        ));
+        assert_eq!(
+            Some("/admin"),
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}&code=test")
+                    .parse()
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            None,
+            callback_browser_return_path(&app, &"/auth/callback?state=wrong".parse().unwrap())
+        );
+        assert_eq!(
+            None,
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}&state={state}")
+                    .parse()
+                    .unwrap()
+            )
+        );
         app.flow
             .pending
             .lock()
@@ -1675,15 +1704,18 @@ mod tests {
             .get_mut(&started.transaction_id)
             .unwrap()
             .expires_at = 0;
-        assert!(callback_is_browser_return(
-            &app,
-            &format!("/auth/callback?state={state}").parse().unwrap()
-        ));
+        assert_eq!(
+            Some("/admin"),
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}").parse().unwrap()
+            )
+        );
         for (success, location) in [
             (true, "/admin?login=complete"),
             (false, "/admin?login=failed"),
         ] {
-            let response = browser_return_response(success);
+            let response = browser_return_response("/admin", success);
             assert_eq!(response.status(), StatusCode::SEE_OTHER);
             assert_eq!(response.headers()[header::LOCATION], location);
             assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
@@ -1707,6 +1739,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_feedback_return_path_is_allowlisted_and_state_bound() {
+        let (app, _dir) = test_app();
+        let request = |path: Option<&str>, browser_return| StartRequest {
+            device_id: TEST_DEVICE.into(),
+            pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
+            browser_return,
+            browser_return_path: path.map(str::to_owned),
+        };
+        for path in [
+            "https://evil.test",
+            "//evil.test",
+            "/feedback?token=test",
+            "/feedback/",
+            "/other",
+            "",
+        ] {
+            assert!(matches!(
+                start(State(app.clone()), Json(request(Some(path), true))).await,
+                Err(ApiError::BadRequest)
+            ));
+        }
+        assert!(matches!(
+            start(State(app.clone()), Json(request(Some("/feedback"), false))).await,
+            Err(ApiError::BadRequest)
+        ));
+        let (_, Json(started)) = start(State(app.clone()), Json(request(Some("/feedback"), true)))
+            .await
+            .unwrap();
+        let url = Url::parse(&started.authorization_url).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}&browserReturnPath=/admin")
+                    .parse()
+                    .unwrap()
+            ),
+            Some("/feedback")
+        );
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &"/auth/callback?state=unknown&browserReturnPath=/feedback"
+                    .parse()
+                    .unwrap()
+            ),
+            None
+        );
+        for (success, target) in [
+            (true, "/feedback?login=complete"),
+            (false, "/feedback?login=failed"),
+        ] {
+            let r = browser_return_response("/feedback", success);
+            assert_eq!(r.status(), StatusCode::SEE_OTHER);
+            assert_eq!(r.headers()[header::LOCATION], target);
+            assert_eq!(r.headers()[header::REFERRER_POLICY], "no-referrer");
+        }
+        app.flow
+            .pending
+            .lock()
+            .unwrap()
+            .remove(&started.transaction_id);
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}").parse().unwrap()
+            ),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn login_start_is_pkce_bound_and_pending_poll_cancel_are_device_bound() {
         let (app, _dir) = test_app();
         let device = "22222222-2222-4222-8222-222222222222";
@@ -1718,6 +1827,7 @@ mod tests {
                 device_id: device.into(),
                 pkce_challenge: challenge.clone(),
                 browser_return: false,
+                browser_return_path: None,
             }),
         )
         .await
@@ -1820,6 +1930,7 @@ mod tests {
                 device_id: TEST_DEVICE.into(),
                 pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
                 browser_return: false,
+                browser_return_path: None,
             }),
         )
         .await

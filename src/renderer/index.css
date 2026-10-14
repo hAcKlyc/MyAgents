@@ -411,6 +411,15 @@ html[data-color-scheme='dark'] {
   pointer-events: auto;
 }
 
+/* Owned help is part of the account menu, so keep both account and bell
+   reachable in rail mode instead of letting the absolute bell cover it. */
+.global-sidebar[data-global-sidebar-mode='rail'] .global-sidebar-account-row[data-owned-account-row='true'] {
+  height: calc(2 * var(--global-sidebar-action-size) + var(--space-1));
+}
+.global-sidebar[data-global-sidebar-mode='rail'] .global-sidebar-account-row[data-owned-account-row='true'] .global-sidebar-notification-slot {
+  top: calc(var(--global-sidebar-action-size) + var(--space-1));
+}
+
 .global-sidebar-notification-slot {
   top: 0;
   left: calc(

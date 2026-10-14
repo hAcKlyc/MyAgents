@@ -89,6 +89,7 @@ function forgetSession(message = '') {
   activeModelMutationBody=null;
   modelAccessToken=null;
   const shownModelAccess=$('fields').querySelector('textarea[aria-label="一次性模型访问凭据"]'); if(shownModelAccess) shownModelAccess.value='';
+  window.FeedbackAdmin?.reset();
   token = null;
   data = null;
   editing = null;
@@ -297,7 +298,7 @@ function summary() {
 }
 function render() {
   if (!data) return;
-  const titles = { bots: 'Bots 管理', models: '模型中心', users: '用户', hosts: 'Hosts', audit: '操作审计' };
+  const titles = { bots: 'Bots 管理', models: '模型中心', users: '用户', hosts: 'Hosts', audit: '操作审计', feedback: '用户反馈' };
   $('page-title').textContent = titles[page];
   document.querySelectorAll('[data-page]').forEach(b => {
     b.classList.toggle('active', b.dataset.page === page);
@@ -315,6 +316,7 @@ function render() {
   if (page === 'users') renderUsers(content);
   if (page === 'hosts') renderHosts(content);
   if (page === 'audit') renderAudit(content);
+  if (page === 'feedback') window.FeedbackAdmin.render(content, request, () => page === 'feedback' && !!token);
   scheduleFreshnessRefresh();
 }
 function scheduleFreshnessRefresh() {
