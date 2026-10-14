@@ -37,7 +37,7 @@
 
 ## 当前交付与下一步
 
-PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已整合主干0c7b8e72。3330471e的CI五项Rust/平台检查通过；Node集成测试仅Linux旧资源列表断言失败（新增远程夹具产生第二Agent）。修正为创建receipt准确身份、完整列表/长度/roots/revision断言，本机IPC11/11通过，Linux分支须CI复验；不降低门禁。新主干d7264a43反馈中心已同步；仅plan追加记录冲突，保留双方记录。
+PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已整合主干0c7b8e72。3330471e的CI五项Rust/平台检查通过；Node集成测试仅Linux旧资源列表断言失败（新增远程夹具产生第二Agent）。修正为创建receipt准确身份、完整列表/长度/roots/revision断言，本机IPC11/11通过，Linux分支须CI复验；不降低门禁。新主干d7264a43反馈中心已同步；仅plan追加记录冲突，保留双方记录。独立复核183项组合DOM通过；发现A账号退出确认框可滞留到B的问题，最小修复为exact projectionBoundary核验并在边界变化关闭菜单/确认。新增账号切换/generation反证，与remote/store/fence合计38项通过。整合后TypeScript通过。86f候选重建已在Vite阶段仅停止本任务builder树，须按修复后HEAD重建；不将中断产物当成果。
 
 原生缓存：锁定apple-metal62、apple-cf87、screencapturekit70源码文件全匹配；APFS复制到独立target，不修改旧target/fingerprint/output，普通Cargo（无DOCS_RS）probe实际Metal/CF运行成功。证据 `/private/tmp/moxbots-remote-native-cache-probe-20261015/evidence.json`。当前无完整Xcode，fresh-cold Swift环境问题仍未修复。
 

@@ -95,6 +95,7 @@ export default function OwnedAccountEntry({
   const [loginOpen, setLoginOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const logoutBoundary = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const generation = useRef(0);
@@ -190,6 +191,9 @@ export default function OwnedAccountEntry({
     if (previousLoginBoundary.current === loginBoundary) return;
     previousLoginBoundary.current = loginBoundary;
     setLoginOpen(false);
+    setMenuOpen(false);
+    setLogoutOpen(false);
+    logoutBoundary.current = null;
     const pending = pendingAttemptId.current;
     pendingAttemptId.current = null;
     if (completedAttempt.current) {
@@ -232,6 +236,11 @@ export default function OwnedAccountEntry({
   };
   const logout = async () => {
     if (!owned || busy) return;
+    if (logoutBoundary.current !== currentProjectionBoundary.current) {
+      setLogoutOpen(false);
+      logoutBoundary.current = null;
+      return;
+    }
     setBusy(true);
     try {
       acceptNetworkRegistry(await removeNetworkConnection(owned.id));
@@ -387,6 +396,7 @@ export default function OwnedAccountEntry({
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  logoutBoundary.current = projectionBoundary;
                   setLogoutOpen(true);
                 }}
                 disabled={busy}
@@ -455,7 +465,7 @@ export default function OwnedAccountEntry({
           }}
         />
       )}
-      {logoutOpen && owned && (
+      {logoutOpen && owned && logoutBoundary.current === projectionBoundary && (
         <ConfirmDialog
           title={t("ownedAccountEntry.signOut")}
           message={t("ownedAccountEntry.signOutMessage", { name: owned.name })}
@@ -463,7 +473,10 @@ export default function OwnedAccountEntry({
           confirmVariant="danger"
           loading={busy}
           onCancel={() => {
-            if (!busy) setLogoutOpen(false);
+            if (!busy) {
+              setLogoutOpen(false);
+              logoutBoundary.current = null;
+            }
           }}
           onConfirm={() => {
             void logout();
