@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/mah-auth-host-acceptance-20261014 -->
 <!-- git-project-sync-task:base=644434fa685ee7e2ccc0d6421c95b5431aea1b0c -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=completed -->
 <!-- git-project-sync-task:scaffold=false -->
 
 # MOXBOTS-AUTH-HOST-20261014
@@ -9,7 +9,23 @@
 Repository: https://github.com/heavenzhang/MoXBots.git
 Branch: codex/mah-auth-host-acceptance-20261014
 Base: 644434fa685ee7e2ccc0d6421c95b5431aea1b0c
-Status: in-progress
+Status: completed
+
+## Current delivery receipt (2026-10-15)
+
+This section supersedes historical pending/installed-state statements below; those statements record the acceptance sequence, not current machine ownership.
+
+- [x] PR14 merged at main878ef665cb94290adbfa61bd3be7c8aec79c3afd, containing accepted task head1c21c05381a5175c6e0a805a21e75488fbc7f410. All seven final checks passed, Test38592498987 / Owned38592523424.
+- [x] Actual native29 remote model/workspace save, disabled Agent creation and client/both-Host restart persistence passed; approved combined27 account/device restoration and new Host Agent list passed. No model API key or paid inference was used; execution=false and cloud_models default-off remain.
+- [x] Public signed, unnotarized27 ZIP published under release moxbots-trial-20261014-27d6ed8c. Local whole ZIP/signature/extraction plus GitHub asset size346343830 and SHA256416bad4edaa83c210f7e5c63ef2e79481198d862a61b9e9a5a9ecd9dcc022d78 match. A separate full public network re-download was stopped; do not call that partial file verified.
+- [x] User chose the IP website, superseding the old Sites-account blocker. https://140.143.183.232/download/ now advertises27 via static overlay426f14eb on website basea5cb41f0. Primary-owned fresh-browser1440x960/390x844 checks passed: visible download/version, expanded checksum/signing, no page errors or horizontal overflow. HTML/JSON hashes and /health,/admin/negative-path checks passed; source metadata/main delivery continues in PR41.
+- [x] User subsequently reserved the daily /Applications/MoXBots.app and ~/.moxbot profile for normal use. Earlier27 install/readback is historical acceptance, not a claim that27 is still the current installed daily version. Do not replace, launch, quit, automate, re-sign or restore the daily app/profile/credentials for tests. Do not stop unknown existing processes.
+
+Future native tests require verified independent App path plus distinct bundle/single-instance identity, profile, ports and credential-service names. A development-directory App alone does not establish isolation; any test lacking these boundaries remains unaccepted. Current task has no further native test or daily-app modification pending. Preserve migrated data; pre-migration backups must never overwrite it.
+
+Non-secret final evidence remains under the project pointer output/auth-host-20261014 (PR14-MAIN-DELIVERY.json, package-27d6ed8c/ACTUAL-READBACK.json, ip-download/browser-acceptance.json and deployment-receipt.json). The active101 release is Node dd7192d4 and native114e2ac5 as documented below;140 static deployment changed no Nginx/TLS/backend bytes, reloaded no Nginx, and preserved cloudPID1021478 at deployment.
+
+## Historical acceptance sequence
 
 ## Objective and ownership
 

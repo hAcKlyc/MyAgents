@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "channel": "trial",
+  "macArm64": {
+    "status": "ready",
+    "version": "0.5.2 · 27d6ed8c",
+    "sourceCommit": "27d6ed8cb405f2ccdc905798611df218d18b4caf",
+    "bytes": 346343830,
+    "sha256": "416bad4edaa83c210f7e5c63ef2e79481198d862a61b9e9a5a9ecd9dcc022d78",
+    "signed": true,
+    "notarized": false,
+    "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-20261014-27d6ed8c/MoXBots-Trial-macos-arm64-27d6ed8c.zip"
+  }
+}

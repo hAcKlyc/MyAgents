@@ -45,3 +45,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 ## MoxBots 独立更新服务
 
 `src-tauri/tauri.moxbot.conf.json`拥有本产品endpoint/公钥/发行版本；Rust updater拥有后台检查、磁盘pending与确认安装，SessionEngine/各执行owner裁决空闲。`scripts/moxbot-updates/`是更新发布准备、完整验签、原子promote/rollback和Nginx路径runbook；私钥/备份/产物不进入Git。既有官网服务器部署仅新增/updates/，保留独立官网及其他服务；真实更新/安装/分发验收见任务记录，未通过时不得宣布正式发布。
+
+## IP website download channel
+
+User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
