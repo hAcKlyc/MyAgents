@@ -2822,6 +2822,23 @@ async function main() {
         });
       }
 
+      if ((pathname === '/api/remote-session' || pathname === '/api/remote-session/prepare') && request.method === 'POST') {
+        if(pathname==='/api/remote-session/prepare' && sidecarRole!=='global')return jsonResponse({success:false,code:'REMOTE_GLOBAL_OWNER_REQUIRED'},403);
+        const { hasValidInternalCliCredential } = await import('./external-cli-admission');
+        if (!hasValidInternalCliCredential(request)) return jsonResponse({success:false,code:'INTERNAL_CALLER_REQUIRED'},401);
+        if (Number(request.headers.get('content-length') || 0) > 48 * 1024) return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},413);
+        try {
+          const bodyText=await request.text();
+          if(Buffer.byteLength(bodyText)>48*1024)return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},413);
+          const owner=await import('./remote-session/desktop');
+          const body:unknown=JSON.parse(bodyText);
+          const result=pathname==='/api/remote-session/prepare'
+            ? await owner.prepareDesktopRemoteSession(body)
+            : await owner.handleDesktopRemoteSession(body,sidecarRole);
+          return jsonResponse(result,result.success?200:409);
+        }catch{return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},400)}
+      }
+
       // Tool attachment endpoint (PRD 0.2.15) — rich-media tool outputs (image/audio/pdf/file).
       // URL shape: GET /api/attachment/tool/<sessionId>/<turnId>/<filename>
       //

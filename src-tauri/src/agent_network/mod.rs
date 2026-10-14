@@ -18,6 +18,8 @@ mod incoming;
 mod jwt;
 mod local_owner;
 mod management_controller;
+mod remote_session_target;
+mod remote_admission;
 mod memory;
 mod owned_account_desktop;
 mod owned_admission;

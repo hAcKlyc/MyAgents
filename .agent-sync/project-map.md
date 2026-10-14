@@ -24,6 +24,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理及有限执行控制面已发布；共享和扩展IAM仍待实现 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 项目看板 | `src/renderer/features/project-board/`、`pages/ProjectBoard.tsx`，`dev-docs/project-board.md` | 按真实Task/Session展示工作区执行概况；API、原生、生产验收分开追踪 |
+| 远程 Agent 会话 | `src/renderer/features/remote-session/`、`src/server/remote-session/`、`src-tauri/src/agent_network/remote_*`、`src/host/remote-session.ts` | 同账号正式会话入口、快照同步、原Session owner/配置冻结、审批与未确认回执；机制见 `specs/tech_docs/remote_agent_session.md`，真实双端/原生发布另验 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |
 | 运维与发布 | `services/agentnet/README.md`、`specs/guides/`、`dev-docs/moxbot-trial.md` | 非秘密说明；真实账号、备份和钥匙留在原 owner 私有目录 |
 
@@ -49,3 +50,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 ## IP website download channel
 
 User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
+
+## 个人菜单与反馈中心
+
+`OwnedAccountEntry`承接设置下方个人菜单的小助理和云端反馈入口。`services/agentnet/feedback-web/`、`src/feedback_http.rs`、`src/feedback_store.rs`为普通用户同源提单及私有历史；现有admin-web追加管理员处理。API、权限、发布/回滚边界见`services/agentnet/FEEDBACK.md`，验收见`dev-docs/feedback-independent-review.md`。

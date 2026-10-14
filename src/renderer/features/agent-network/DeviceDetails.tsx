@@ -42,6 +42,7 @@ export function DeviceDetails({
   authGeneration = 0,
   connectionReady = true,
   hostAdapter,
+  onOpenRemoteSession,
 }: {
   connectionId?: string;
   device: NetworkDevice;
@@ -61,6 +62,7 @@ export function DeviceDetails({
   connectionReady?: boolean;
   /** Isolated acceptance harness seam; production never supplies a fixture. */
   hostAdapter?: HostManagementAdapter;
+  onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const { t } = useTranslation("app");
   const {
@@ -263,6 +265,8 @@ export function DeviceDetails({
                     agent={agent}
                     device={device}
                     onChanged={onChanged}
+                    onOpenSession={connectionId !== 'official' && onOpenRemoteSession ? () => { onOpenRemoteSession({ title: agent.name, locator: { connectionId, principalId: device.principalId, networkId: device.networkId, deviceId: device.deviceId, authGeneration }, agentId: agent.localAgentId, agentName: agent.name, deviceName: device.name }); onClose(); } : undefined}
+                    sessionOnline={connectionReady && device.joined && device.connectionState === 'ready'}
                   />
                 ))}
               </ul>

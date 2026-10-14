@@ -75,6 +75,7 @@ impl AdminService {
             .route("/admin", get(admin_page))
             .route("/admin/app.js", get(js))
             .route("/admin/styles.css", get(css))
+            .route("/admin/feedback.js", get(feedback_js))
             .route("/api/admin/bootstrap", get(bootstrap))
             .route("/api/admin/bots", post(create))
             .route("/api/admin/bots/{id}", patch(configure))
@@ -105,6 +106,12 @@ async fn css() -> Response {
     asset(
         include_str!("../admin-web/styles.css"),
         "text/css; charset=utf-8",
+    )
+}
+async fn feedback_js() -> Response {
+    asset(
+        include_str!("../admin-web/feedback.js"),
+        "text/javascript; charset=utf-8",
     )
 }
 fn asset(s: &'static str, kind: &'static str) -> Response {

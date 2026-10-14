@@ -1,0 +1,22 @@
+[
+  {
+    "name": "expanded account below settings and helper callback",
+    "pass": true
+  },
+  {
+    "name": "feedback uses owned issuer URL",
+    "pass": true
+  },
+  {
+    "name": "signed out uses original JoinNetworkDialog",
+    "pass": true
+  },
+  {
+    "name": "rail account visible, bell separated, focus escape",
+    "pass": true
+  },
+  {
+    "name": "notification control preserved",
+    "pass": true
+  }
+]

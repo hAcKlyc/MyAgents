@@ -4,6 +4,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { HostConfigError, HostManagementUpgradeRequired } from "./management";
 import { HostProviderCredentialError } from "./provider-credentials";
+import { remoteSessionRequestSchema } from '../shared/remoteSession';
 
 const MAX_FRAME = 64 * 1024;
 const MAX_RECEIVE = 256 * 1024;
@@ -20,6 +21,7 @@ const METHODS = new Set([
   "credential.set",
   "receipt.get",
   "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register",
+  "session.remote",
 ]);
 type Request = {
   kind: "request";
@@ -53,6 +55,7 @@ function plain(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 function validParams(method: string, params: Record<string, unknown>): boolean {
+  if (method === 'session.remote') return exactKeys(params, ['remoteSession']) && remoteSessionRequestSchema.safeParse(params.remoteSession).success;
   if (method === 'host.capabilities' || method === 'host.inspect') return exactKeys(params, []);
   if (method === 'config.provider.set') return exactKeys(params,['provider','model','workspace','executionAuthorized','expectedRevision','mutationId']) && isHostProviderProfile(params.provider) && isHostModelId(params.model) && isHostWorkspaceSelection(params.workspace) && typeof params.executionAuthorized === 'boolean' && Number.isSafeInteger(params.expectedRevision) && Number(params.expectedRevision) >= 0 && typeof params.mutationId === 'string' && UUID.test(params.mutationId);
   if (method === 'receipt.provider.get') return exactKeys(params,['owner','providerId','mutationId']) && ['config','credentials'].includes(params.owner as string) && isHostProviderId(params.providerId) && typeof params.mutationId === 'string' && UUID.test(params.mutationId);

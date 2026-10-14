@@ -1,3 +1,6 @@
+import { restoreRemoteTabForAccount } from '@/features/remote-session/accountFence';
+import { currentNetworkSnapshot } from '@/features/agent-network/store';
+import type { RemoteSessionOpenIntent } from '@/features/remote-session/tabContract';
 import { APP_BUILD_PROFILE } from '../shared/appProfile';
 import { DEFAULT_SPACE_ID } from '@/api/spaceCloud';
 import { startAgentNetworkStore } from '@/features/agent-network/store';
@@ -2836,6 +2839,7 @@ export default function App() {
           tab: RecordTab;
           releaseTransition: null;
         }
+      | { kind: 'remote-session'; tab: Extract<Tab, { view: 'remote-session' }>; releaseTransition: null }
       | {
           kind: 'record-fallback';
           tab: Extract<Tab, { view: 'taskcenter' }>;
@@ -2845,6 +2849,11 @@ export default function App() {
       await Promise.all(
         candidate.tabs.map(
           async (tab): Promise<ValidatedRestoreTarget | null> => {
+            if (tab.view === 'remote-session') {
+              const current = currentNetworkSnapshot(tab.locator.connectionId);
+              const restored = restoreRemoteTabForAccount(tab, current);
+              return restored ? { kind: 'remote-session', tab: restored, releaseTransition: null } : null;
+            }
             if (tab.view === 'record') {
               try {
                 const record = await recordGet(tab.recordId);
@@ -4964,6 +4973,29 @@ export default function App() {
       registerPendingRecordNoteSubmitter,
     ],
   );
+  const openRemoteSession = useCallback((intent: RemoteSessionOpenIntent) => {
+    const current = currentNetworkSnapshot(intent.locator.connectionId);
+    if (!current || current.state !== 'ready' || current.authGeneration !== intent.locator.authGeneration || current.principalId !== intent.locator.principalId || current.networkId !== intent.locator.networkId) return;
+    tabWorkspaceController.open('remote-session', intent);
+  }, [tabWorkspaceController]);
+  const agentNetworkBinding = useMemo<BuiltinTabBindings['agentnetwork']>(() => ({ onOpenRemoteSession: openRemoteSession }), [openRemoteSession]);
+  const remoteSessionBinding = useMemo<BuiltinTabBindings['remote-session']>(() => ({
+    onOpen: openRemoteSession,
+    onTarget: (tabId, scope) => {
+      tabWorkspaceController.update(tabId, 'remote-session', tab => {
+        const current = currentNetworkSnapshot(tab.locator.connectionId);
+        if (!current || current.state === 'signedOut' || current.principalId !== tab.locator.principalId || current.networkId !== tab.locator.networkId || scope.principalId !== tab.locator.principalId || scope.networkId !== tab.locator.networkId || scope.deviceId !== tab.locator.deviceId) return tab;
+        return { ...tab, targetScope: scope, locator: { ...tab.locator, authGeneration: current.authGeneration } };
+      });
+    },
+    onBound: (tabId, sessionId, scope, title) => {
+      tabWorkspaceController.update(tabId, 'remote-session', tab => {
+        const current = currentNetworkSnapshot(tab.locator.connectionId);
+        if (!current || current.state === 'signedOut' || current.principalId !== tab.locator.principalId || current.networkId !== tab.locator.networkId || scope.principalId !== tab.locator.principalId || scope.networkId !== tab.locator.networkId || scope.deviceId !== tab.locator.deviceId) return tab;
+        return { ...tab, sessionId, targetScope: scope, title, locator: { ...tab.locator, authGeneration: current.authGeneration } };
+      });
+    },
+  }), [openRemoteSession, tabWorkspaceController]);
   const tabBindings = useMemo<BuiltinTabBindings>(
     () => composeBuiltinTabBindings({
       launcher: launcherBinding,
@@ -4972,13 +5004,16 @@ export default function App() {
       capabilities: capabilitiesBinding,
       taskcenter: taskCenterBinding,
       space: spaceBinding,
-      agentnetwork: null,
+      agentnetwork: agentNetworkBinding,
+      'remote-session': remoteSessionBinding,
       projectboard: null,
       record: recordBinding,
     }),
     [
       capabilitiesBinding,
       chatBinding,
+      agentNetworkBinding,
+      remoteSessionBinding,
       launcherBinding,
       recordBinding,
       settingsBinding,
