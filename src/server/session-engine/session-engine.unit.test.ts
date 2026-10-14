@@ -364,6 +364,7 @@ vi.mock('../agent-session', async () => ({
   getCurrentImBridgeTurnContext: mocks.getCurrentImBridgeTurnContext,
   getDispatchedTurnIdentity: mocks.getDispatchedTurnIdentity,
   getAgentState: mocks.getAgentState,
+  isBuiltinWaitingForUser: mocks.isBuiltinWaitingForUser,
   getBuiltinLiveSessionSnapshot: mocks.getBuiltinLiveSessionSnapshot,
   getBuiltinMcpEffectiveSnapshot: mocks.getBuiltinMcpEffectiveSnapshot,
   getCurrentMcpServers: mocks.getCurrentMcpServers,
@@ -659,6 +660,21 @@ describe('session-engine selector and adapters', () => {
   });
 
 
+  it.each([false, true])('observes only the current product turn start (external=%s)', async external => {
+    mocks.state.useExternal = external;
+    const start = '2026-10-14T12:00:00.000Z';
+    const spy = external
+      ? vi.spyOn(await import('../runtimes/external-session/transcript-persistence'), 'getExternalProductContent')
+      : vi.spyOn(await import('../builtin-session/transcript'), 'getBuiltinProductContent');
+    try {
+      for (const status of ['running', 'complete', 'stopped', 'error', 'interrupted'] as const) {
+        spy.mockReturnValue({currentTurn:{status,startedAt:start}} as ReturnType<typeof import('../builtin-session/transcript').getBuiltinProductContent>);
+        expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBe(status === 'running' ? start : undefined);
+      }
+      spy.mockReturnValue(undefined);
+      expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBeUndefined();
+    } finally { spy.mockRestore(); }
+  });
   it('projects root-blocking interactions without treating child approvals as Session suspension', () => {
     mocks.state.useExternal = true;
     mocks.state.externalBusy = true;

@@ -1,3 +1,4 @@
+import { getBuiltinProductContent } from '../builtin-session/transcript';
 import { broadcast } from "../sse";
 import { applySessionModelSelection } from '../agent-session';
 import { questionAnswersAsText } from '../../shared/types/askUserQuestion';
@@ -274,7 +275,9 @@ export function createBuiltinSessionEngine(): SessionEngine {
 
     publishTranscriptSaveStatus(status) { publishBuiltinTranscriptSaveStatus(status); },
     getLiveSessionState() {
+      const turn = getBuiltinProductContent()?.currentTurn;
       return {
+        ...(turn?.status === 'running' ? { executionStartedAt: turn.startedAt } : {}),
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),

@@ -1,16 +1,21 @@
 import { z } from 'zod';
 import { getSessionEngine } from './session-engine';
-import { projectSessionActivity } from './session-engine/observation';
+import { projectSessionActivity, projectSessionExecution } from './session-engine/observation';
 import { getSessionMetadata, getSessionData, isHistoryVisibleSession } from './SessionStore';
 import { managementApi } from './utils/management-api-client';
 import { strictAssistantText } from './session-text-projection';
 
-const activitySchema = z.strictObject({ sessionId: z.string(), state: z.enum(['idle', 'running', 'waiting_user_action']) });
+const activitySchema = z.strictObject({
+  sessionId: z.string(),
+  state: z.enum(['idle', 'running', 'waiting_user_action']),
+  execution: z.strictObject({ startedAt: z.iso.datetime({ offset: true }), elapsedMs: z.number().finite().nonnegative() }).optional(),
+});
 
 export function readLocalSessionActivity(sessionId: string) {
   const engine = getSessionEngine();
   if (engine.getRuntimeIdentity().sessionId !== sessionId) throw new Error('SESSION_OWNER_SCOPE_MISMATCH');
-  return { success: true, session: activitySchema.parse({ sessionId, state: projectSessionActivity(engine.getLiveSessionState()) }) };
+  const live = engine.getLiveSessionState();
+  return { success: true, session: activitySchema.parse({ sessionId, state: projectSessionActivity(live), execution: projectSessionExecution(live, Date.now()) }) };
 }
 
 /** Same Rust owner resolver as text pages. No Sidecar creation or model turn. */
