@@ -680,8 +680,26 @@ async fn callback(
     if browser_return {
         Ok(browser_return_response(result.is_ok()))
     } else {
-        result
+        match result {
+            Ok(response) => Ok(response),
+            Err(error) => Ok(callback_failure_page(error)),
+        }
     }
+}
+
+// A browser can reach a stale callback after the transaction has already been purged.
+// Preserve the error status while giving it a safe, fixed recovery action with no provider detail.
+fn callback_failure_page(error: ApiError) -> axum::response::Response {
+    let status = error.into_response().status();
+    (
+        status,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::REFERRER_POLICY, "no-referrer"),
+        ],
+        Html(include_str!("../admin-web/auth-error.html")),
+    )
+        .into_response()
 }
 
 fn callback_is_browser_return(app: &App, uri: &axum::http::Uri) -> bool {
@@ -696,11 +714,8 @@ fn callback_is_browser_return(app: &App, uri: &axum::http::Uri) -> bool {
         return false;
     }
     app.flow.pending.lock().is_ok_and(|all| {
-        all.values().any(|p| {
-            p.browser_return
-                && p.expires_at > unix_now().unwrap_or(i64::MAX)
-                && ct_eq(p.state.as_bytes(), states[0].as_bytes())
-        })
+        all.values()
+            .any(|p| p.browser_return && ct_eq(p.state.as_bytes(), states[0].as_bytes()))
     })
 }
 
@@ -1609,7 +1624,7 @@ mod tests {
             .get_mut(&started.transaction_id)
             .unwrap()
             .expires_at = 0;
-        assert!(!callback_is_browser_return(
+        assert!(callback_is_browser_return(
             &app,
             &format!("/auth/callback?state={state}").parse().unwrap()
         ));
@@ -1626,6 +1641,13 @@ mod tests {
         assert!(serde_json::from_value::<StartRequest>(serde_json::json!({
             "deviceId":"22222222-2222-4222-8222-222222222222", "pkceChallenge":"unused", "returnUrl":"https://other.test"
         })).is_err());
+        let failed = callback_failure_page(ApiError::BadRequest);
+        assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(failed.into_body(), 4096)
+            .await
+            .unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(text.contains("登录未完成") && text.contains("href=\"/admin\""));
         let ordinary: StartRequest = serde_json::from_value(serde_json::json!({
             "deviceId":"22222222-2222-4222-8222-222222222222", "pkceChallenge":"unused"
         }))
