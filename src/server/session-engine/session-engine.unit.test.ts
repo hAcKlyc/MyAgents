@@ -1,7 +1,7 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const qaMode = vi.hoisted(() => ({ enabled: false }));
-vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled }));
+vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled, isModelQaBuild: () => false, isIsolatedQaBuild: () => qaMode.enabled }));
 
 const mocks = vi.hoisted(() => {
   const state = {

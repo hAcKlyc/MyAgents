@@ -6,7 +6,7 @@ import { createGuardedSdkQuery } from './sdk-child-launch-guard';
 
 const scratchDirs: string[] = [];
 const qaMode = vi.hoisted(() => ({ enabled: false }));
-vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled }));
+vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled, isModelQaBuild: () => false, isIsolatedQaBuild: () => qaMode.enabled }));
 
 function executableFixture(): string {
   const dir = mkdtempSync(join(tmpdir(), 'myagents-sdk-child-'));

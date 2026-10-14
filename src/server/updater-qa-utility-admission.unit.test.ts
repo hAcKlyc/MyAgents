@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 const backends = vi.hoisted(() => ({
   query: vi.fn(), runtime: vi.fn(), env: vi.fn(), bridge: vi.fn(), prepare: vi.fn(), config: vi.fn(),
 }));
-vi.mock('../shared/updaterQa', () => ({ isUpdaterQaBuild: () => true }));
+vi.mock('../shared/updaterQa', () => ({ isUpdaterQaBuild: () => true, isIsolatedQaBuild: () => true, isModelQaBuild: () => false }));
 vi.mock('../shared/appProfile', () => ({
   APP_DATA_DIR_NAME: '.moxbot-updaterqa', APP_BUILD_PROFILE: 'moxbot',
   APP_CLI_NAME: 'moxbot-updaterqa', APP_DISPLAY_NAME: 'MoXBots Updater QA',
