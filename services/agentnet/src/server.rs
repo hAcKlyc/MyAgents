@@ -334,7 +334,7 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
     } else {
         None
     };
-    let execution = if config.execution {
+    let mut execution = if config.execution {
         Some(ExecutionService::open(
             network.clone().ok_or(AuthError::Configuration)?,
             relay.clone().ok_or(AuthError::Configuration)?,
@@ -371,6 +371,9 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
                 .start_exclusive()
                 .map_err(|_| AuthError::Storage)?;
             admin.connect_models(model_store.clone());
+            if let Some(exec) = execution.as_mut() {
+                exec.connect_models(model_store.clone());
+            }
             let authority = crate::model_center_authority::ModelAuthority::new(
                 admin.clone(),
                 relay.clone().ok_or(AuthError::Configuration)?,

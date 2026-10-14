@@ -59,27 +59,15 @@ impl AdminService {
         self.models = Some(store);
     }
     pub(crate) fn effective_config(&self) -> Result<AdminConfig, Err> {
-        let mut config = (*self.config).clone();
-        if let Some(store) = &self.models {
-            for model in store.models().map_err(|_| {
+        match &self.models {
+            Some(store) => self.config.with_managed_models(store).map_err(|_| {
                 Err::new(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "MODEL_CENTER_STORAGE_UNAVAILABLE",
                 )
-            })? {
-                if model.config.enabled
-                    && !config.model_refs.iter().any(|r| r.id == model.config.id)
-                {
-                    config.model_refs.push(crate::admin_store::Resource {
-                        id: model.config.id,
-                        name: model.config.label,
-                        owner_ids: model.config.owner_ids,
-                        runtimes: vec!["builtin".into()],
-                    });
-                }
-            }
+            }),
+            None => Ok((*self.config).clone()),
         }
-        Ok(config)
     }
     pub fn router(&self) -> Router<()> {
         let s = Arc::new(self.clone());

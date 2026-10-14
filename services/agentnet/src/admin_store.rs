@@ -28,6 +28,39 @@ pub struct Resource {
     pub runtimes: Vec<String>,
 }
 impl AdminConfig {
+    /// Managed IDs shadow static references even when disabled. This projection
+    /// changes model resources only; administrator, Host and quota owners stay intact.
+    pub(crate) fn with_managed_models(
+        &self,
+        store: &crate::model_center_store::ModelCenterStore,
+    ) -> Result<Self, crate::model_center_types::ModelCenterError> {
+        let models = store.models()?;
+        let providers = store.providers()?;
+        let managed_ids = models
+            .iter()
+            .map(|model| model.config.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        let mut config = self.clone();
+        config
+            .model_refs
+            .retain(|resource| !managed_ids.contains(resource.id.as_str()));
+        for model in models {
+            if model.config.enabled
+                && !model.config.owner_ids.is_empty()
+                && providers.iter().any(|provider| {
+                    provider.id == model.config.provider_id && provider.enabled && provider.has_key
+                })
+            {
+                config.model_refs.push(Resource {
+                    id: model.config.id,
+                    name: model.config.label,
+                    owner_ids: model.config.owner_ids,
+                    runtimes: vec!["builtin".into()],
+                });
+            }
+        }
+        Ok(config)
+    }
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.admin_principal_ids.is_empty()
             || self.admin_principal_ids.len() > 128

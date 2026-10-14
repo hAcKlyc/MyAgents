@@ -39,6 +39,7 @@ pub struct ExecutionService {
     store: Arc<ExecutionStore>,
     registry: Arc<AdminStore>,
     config: Arc<AdminConfig>,
+    models: Option<Arc<crate::model_center_store::ModelCenterStore>>,
     in_flight: Arc<Semaphore>,
 }
 impl ExecutionService {
@@ -65,8 +66,24 @@ impl ExecutionService {
             network,
             relay,
             config: Arc::new(config),
+            models: None,
             in_flight: Arc::new(Semaphore::new(32)),
         })
+    }
+    pub(crate) fn connect_models(
+        &mut self,
+        store: Arc<crate::model_center_store::ModelCenterStore>,
+    ) {
+        self.models = Some(store);
+    }
+    fn effective_config(&self) -> Result<AdminConfig, Error> {
+        match &self.models {
+            Some(store) => self
+                .config
+                .with_managed_models(store)
+                .map_err(|_| Error::unavailable()),
+            None => Ok((*self.config).clone()),
+        }
     }
     pub(crate) fn ledger(&self) -> Arc<ExecutionStore> {
         self.store.clone()
@@ -113,8 +130,9 @@ impl ExecutionService {
         {
             return Err(Error::forbidden("GRANT_RESOURCE_REJECTED"));
         }
+        let resources = self.effective_config()?;
         for id in &g.allowed_model_refs {
-            if !self.config.model_refs.iter().any(|m| {
+            if !resources.model_refs.iter().any(|m| {
                 m.id == *id
                     && m.owner_ids.contains(&bot.owner_id)
                     && g.allowed_runtimes.iter().any(|r| m.runtimes.contains(r))
@@ -138,9 +156,10 @@ impl ExecutionService {
             Operation::Configure(p) => Some(p.clone()),
             _ => None,
         };
+        let resources = self.effective_config()?;
         if let Some(c) = config
             && let Some(model) = &c.model_ref
-            && !self.config.model_refs.iter().any(|r| {
+            && !resources.model_refs.iter().any(|r| {
                 r.id == *model
                     && r.owner_ids.contains(&bot.owner_id)
                     && r.runtimes.contains(&c.runtime)
@@ -1606,5 +1625,256 @@ pub(crate) mod tests {
             .query_row("SELECT COUNT(*) FROM issued_intents", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+    fn install_managed_model(
+        t: &mut Setup,
+        owner_id: &str,
+        model_id: String,
+    ) -> Arc<crate::model_center_store::ModelCenterStore> {
+        use crate::model_center_types::{
+            ApiProtocol, AuthType, ModelWrite, ProviderWrite, UpstreamFormat,
+        };
+        let store = Arc::new(
+            crate::model_center_store::ModelCenterStore::open(t.f.dir.path(), &t.f.network)
+                .unwrap(),
+        );
+        let provider_id = Uuid::new_v4().to_string();
+        store
+            .put_provider(
+                &t.admin.context.principal_id,
+                &Uuid::new_v4().to_string(),
+                ProviderWrite {
+                    id: provider_id.clone(),
+                    label: "fixture managed provider".into(),
+                    base_url: "https://fixture.example".into(),
+                    api_protocol: ApiProtocol::Anthropic,
+                    auth_type: AuthType::ApiKey,
+                    upstream_format: UpstreamFormat::ChatCompletions,
+                    max_output_tokens_param_name: "max_tokens".into(),
+                    max_output_tokens: 1024,
+                    enabled: true,
+                    api_key: Some("synthetic-fixture-no-call-key".into()),
+                },
+                0,
+            )
+            .unwrap();
+        store
+            .put_model(
+                &t.admin.context.principal_id,
+                &Uuid::new_v4().to_string(),
+                ModelWrite {
+                    id: model_id,
+                    provider_id,
+                    model_id: "fixture-managed-model".into(),
+                    label: "managed model".into(),
+                    owner_ids: vec![owner_id.to_owned()],
+                    enabled: true,
+                    input_price_microusd_per_million: None,
+                    output_price_microusd_per_million: None,
+                    price_version: None,
+                },
+                0,
+            )
+            .unwrap();
+        t.s.connect_models(store.clone());
+        store
+    }
+    async fn managed_registry_configure(
+        t: &Setup,
+        store: Arc<crate::model_center_store::ModelCenterStore>,
+        model_ref: &str,
+        runtime: &str,
+    ) -> (StatusCode, Value) {
+        let mut admin = t.browser_admin_service();
+        admin.connect_models(store);
+        let current =
+            t.s.bot(&t.bot_id)
+                .unwrap_or_else(|error| panic!("{}", error.code));
+        let body = json!({"mutation_id":Uuid::new_v4().to_string(),"expected_revision":current.revision,"runtime":runtime,"model_ref":model_ref,"system_prompt":"synthetic fixture instructions"});
+        let request = HttpRequest::builder()
+            .method(Method::PATCH)
+            .uri(format!("/api/admin/bots/{}", t.bot_id))
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}", t.admin.account_token.as_str()),
+            )
+            .header(header::ORIGIN, "http://127.0.0.1:5199")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let response = admin.router().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), MAX_OBJECT_BYTES)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+    fn model_config_operation(model_ref: &str, runtime: &str) -> Operation {
+        Operation::Configure(BotConfig {
+            name: "fixture".into(),
+            description: String::new(),
+            runtime: runtime.into(),
+            model_ref: Some(model_ref.into()),
+            system_prompt: "fixture".into(),
+            daily_tokens: 100,
+        })
+    }
+    #[tokio::test]
+    async fn managed_models_reach_existing_admin_configuration_and_execution_http() {
+        let mut t = browser_setup().await;
+        let owner = t.owner.context.principal_id.clone();
+        let model_ref = Uuid::new_v4().to_string();
+        let store = install_managed_model(&mut t, &owner, model_ref.clone());
+        let original = (*t.s.config).clone();
+        let effective =
+            t.s.effective_config()
+                .unwrap_or_else(|error| panic!("{}", error.code));
+        assert_eq!(effective.admin_principal_ids, original.admin_principal_ids);
+        assert_eq!(effective.max_daily_tokens, original.max_daily_tokens);
+        assert_eq!(effective.hosts.len(), original.hosts.len());
+        assert_eq!(effective.hosts[0].id, original.hosts[0].id);
+        assert_eq!(effective.hosts[0].owner_ids, original.hosts[0].owner_ids);
+        assert_eq!(effective.hosts[0].runtimes, original.hosts[0].runtimes);
+        assert!(
+            effective
+                .model_refs
+                .iter()
+                .any(|resource| resource.id == model_ref
+                    && resource.owner_ids == vec![owner.clone()]
+                    && resource.runtimes == vec!["builtin"])
+        );
+        let (status, body) =
+            managed_registry_configure(&t, store.clone(), &model_ref, "builtin").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            t.s.bot(&t.bot_id)
+                .unwrap_or_else(|error| panic!("{}", error.code))
+                .model_ref,
+            Some(model_ref.clone())
+        );
+        t.grant.allowed_model_refs = vec![model_ref.clone()];
+        accept(&t).await;
+        let operation = model_config_operation(&model_ref, "builtin");
+        assert!(
+            t.s.check_operation(
+                &t.s.bot(&t.bot_id)
+                    .unwrap_or_else(|error| panic!("{}", error.code)),
+                &operation
+            )
+            .is_ok()
+        );
+        let mut command = queue(&t, &Uuid::new_v4().to_string());
+        command["operation"]["params"]["model_ref"] = json!(model_ref);
+        command["operation"]["params"]["system_prompt"] = json!("fixture");
+        let (status, body) = human(
+            &t,
+            &t.admin.account_token,
+            &format!("/api/admin/bots/{}/execution", t.bot_id),
+            command,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(store.usage(1).unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn managed_shadow_rejects_wrong_owner_runtime_disabled_model_provider_and_missing_key() {
+        for failure in [
+            "owner",
+            "runtime",
+            "model_disabled",
+            "provider_disabled",
+            "missing_key",
+        ] {
+            let mut t = browser_setup().await;
+            let model_ref = t.s.config.model_refs[0].id.clone();
+            let owner = if failure == "owner" {
+                t.other.context.principal_id.clone()
+            } else {
+                t.owner.context.principal_id.clone()
+            };
+            let store = install_managed_model(&mut t, &owner, model_ref.clone());
+            let runtime = if failure == "runtime" {
+                "codex"
+            } else {
+                "builtin"
+            };
+            if failure == "runtime" {
+                let mut config = (*t.s.config).clone();
+                config.hosts[0].runtimes.push("codex".into());
+                config.model_refs[0].runtimes.push("codex".into());
+                t.s.config = Arc::new(config);
+                t.grant.allowed_runtimes = vec!["codex".into()];
+            }
+            let model = store.model(&model_ref).unwrap();
+            if failure == "model_disabled" {
+                store
+                    .delete_model(
+                        &t.admin.context.principal_id,
+                        &Uuid::new_v4().to_string(),
+                        &model_ref,
+                        1,
+                    )
+                    .unwrap();
+            }
+            if failure == "provider_disabled" {
+                store
+                    .delete_provider(
+                        &t.admin.context.principal_id,
+                        &Uuid::new_v4().to_string(),
+                        &model.config.provider_id,
+                        1,
+                    )
+                    .unwrap();
+            }
+            if failure == "missing_key" {
+                let db = rusqlite::Connection::open(t.f.dir.path().join("model-center.sqlite3"))
+                    .unwrap();
+                db.execute("UPDATE providers SET public=json_set(public,'$.has_key',json('false')) WHERE id=?1",[&model.config.provider_id]).unwrap();
+            }
+            t.grant.allowed_model_refs = vec![model_ref.clone()];
+            let (status, body) = human(
+                &t,
+                &t.owner.account_token,
+                "/api/bots/grants/accept",
+                json!({"grant":t.grant,"expected_generation":0}),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{failure}: {body}");
+            assert_eq!(body["code"], "MODEL_RESOURCE_REJECTED", "{failure}: {body}");
+            let bot =
+                t.s.bot(&t.bot_id)
+                    .unwrap_or_else(|error| panic!("{}", error.code));
+            let error =
+                t.s.check_operation(&bot, &model_config_operation(&model_ref, runtime))
+                    .expect_err("managed resource must be rejected");
+            assert_eq!(error.code, "MODEL_RESOURCE_REJECTED", "{failure}");
+            let (status, body) = managed_registry_configure(&t, store, &model_ref, runtime).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{failure}: {body}");
+            assert_eq!(
+                body["error"]["code"], "RESOURCE_ASSIGNMENT_FORBIDDEN",
+                "{failure}: {body}"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn static_legacy_model_refs_remain_valid_when_managed_store_is_connected() {
+        let mut t = browser_setup().await;
+        let store = Arc::new(
+            crate::model_center_store::ModelCenterStore::open(t.f.dir.path(), &t.f.network)
+                .unwrap(),
+        );
+        t.s.connect_models(store.clone());
+        let model_ref = t.s.config.model_refs[0].id.clone();
+        let (status, body) = managed_registry_configure(&t, store, &model_ref, "builtin").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        accept(&t).await;
+        assert!(
+            t.s.check_operation(
+                &t.s.bot(&t.bot_id)
+                    .unwrap_or_else(|error| panic!("{}", error.code)),
+                &model_config_operation(&model_ref, "builtin")
+            )
+            .is_ok()
+        );
     }
 }

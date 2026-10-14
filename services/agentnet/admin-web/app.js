@@ -530,7 +530,7 @@ function clearModelEditor() {
   $('fields').replaceChildren(); editing=null;
 }
 async function submitModelEditor(form) {
-  const {kind,record,providerId}=editing;
+  const {kind,record}=editing;
   const values=Object.fromEntries(new FormData(form));
   const mutation_id=crypto.randomUUID(); let path,method,body;
   if(kind==='model-provider') {
