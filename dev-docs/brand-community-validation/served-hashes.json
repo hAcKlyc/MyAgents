@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/community/app.js",
+    "served": "6e3485ea2f06aa0bf0b470c20ba44b479855ecd8f1ddce117b8f49fc3c144dec",
+    "disk": "6e3485ea2f06aa0bf0b470c20ba44b479855ecd8f1ddce117b8f49fc3c144dec"
+  },
+  {
+    "path": "/community/styles.css",
+    "served": "6b6f065eb0799b58b4279d90193fccbdfab0218456ceb91caaab076e62c99955",
+    "disk": "6b6f065eb0799b58b4279d90193fccbdfab0218456ceb91caaab076e62c99955"
+  },
+  {
+    "path": "/admin/app.js",
+    "served": "a50a79b25ffac3555864fffedee8edb1689629e0847862c94fa3fd038f6bf3ea",
+    "disk": "a50a79b25ffac3555864fffedee8edb1689629e0847862c94fa3fd038f6bf3ea"
+  },
+  {
+    "path": "/admin/styles.css",
+    "served": "c6dd2618c87873ad670d94fc4aad44b3915292673e15bf1a53978ec5bdcb40be",
+    "disk": "c6dd2618c87873ad670d94fc4aad44b3915292673e15bf1a53978ec5bdcb40be"
+  }
+]

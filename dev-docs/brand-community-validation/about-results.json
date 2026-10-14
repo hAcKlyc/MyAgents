@@ -1,0 +1,22 @@
+{
+  "scope": "Unchanged extracted real About JSX; Settings state and ExternalLink host wrapper stubbed; not full SettingsPage or native acceptance",
+  "cases": [
+    {
+      "name": "actual About JSX owned copy links and no upstream QR/email",
+      "pass": true
+    },
+    {
+      "name": "About fragment 1440 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "About fragment 768 no horizontal overflow",
+      "pass": true
+    },
+    {
+      "name": "About fragment 390 no horizontal overflow",
+      "pass": true
+    }
+  ],
+  "errors": []
+}
