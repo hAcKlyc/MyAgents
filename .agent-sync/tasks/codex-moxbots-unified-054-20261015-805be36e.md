@@ -25,7 +25,7 @@ User explicitly authorized contacting the unique packaging owner, combining PR44
 - [x] Confirm separate QA App/bundle/single-instance/data/ports/credential namespaces and no daily-App/profile access.
 - [x] Accept real isolated A→B, busy/unknown/unsaved-content rejection, draft recovery and restart cleanup; reuse valid owner evidence without repeating it.
 - [x] Accept native personal-menu assistant/issuer feedback link/logged-out and narrow-rail/bell separation; project-board time/original-session navigation. Distinguish synthetic registry or unsupported QA profile from real authenticated paths.
-- [ ] Publish immutable accepted artifact/channel metadata; live static overlay under existing locks/CAS/rollback, preserve auth/admin/feedback/updater service paths and other owners.
+- [x] Publish immutable accepted artifact/channel metadata; live static overlay under existing locks/CAS/rollback, preserve auth/admin/feedback/updater service paths and other owners.
 - [ ] Actual public-page desktop/mobile/version/link/signing/checksum, artifact retrieval integrity and existing-route regression; merge metadata into remote main and verify ancestry/tree.
 
 ## Completed
@@ -40,13 +40,18 @@ User's daily0.5.3/5949 App was verified only in prior coordination; this task do
 
 ## Blockers and unknowns
 
-Source e5a05f76, main0c85b571 and final signed/notarized ZIP accepted. Public release/network readback, IP overlay/browser regression and metadata main delivery remain pending. QA build intentionally disables production credentials/model execution; authenticated-menu and actual Provider behavior must be labeled accurately. Paid Provider runs are excluded. Website locks will be acquired only at final serial publication; read preflight does not claim a maintenance lease.
+Source e5a05f76, main0c85b571 and final signed/notarized ZIP accepted. Public release/full network readback and locked IP overlay/browser regression passed. Metadata PR47 main delivery remains pending. QA build intentionally disables production credentials/model execution; authenticated-menu and actual Provider behavior must be labeled accurately. Paid Provider runs are excluded. Website locks will be acquired only at final serial publication; read preflight does not claim a maintenance lease.
 
 ## Next step
 
-Commit the accepted0.5.4 metadata, publish the immutable GitHub trial, verify complete network readback, then perform the locked/CAS IP download overlay and browser checks. Merge metadata after required CI and verify remote main. Coordinator no longer needs the QA GUI; board task holds it.
+Wait for required checks on PR47, verify current main and exact reviewed head, merge without force, and verify remote ancestry/tree plus the public manifest. Coordinator no longer needs the QA GUI; board task holds it.
 
 
 ## Accepted checkpoint
 
 Final runtimee5a05f76 and binaryc16afdde9 accepted, six CI success, PR46 main0c85b571. ZIP351866393 bytes/SHA9548da2b9e4d47a6fe30db15a244adc9822893a6eaf567aa8435d6e7a6ee1ff7 independently extracted and signature/ticket/Gatekeeper verified.3351 source hashes, fixed reader and19 Cuse payload files verified. Read tenth-round updater report plus coordinator actual menu/assistant/original-session observations. Scope limits and private receipts are in `dev-docs/moxbots-unified-054-delivery.md`. Daily App/profile/processes/credentials untouched; no model calls. No new workers or external models; unique packaging owner reused, coordinator owns only source/artifact acceptance and IP download metadata/publication. Cost not measured.
+
+
+## Public publication checkpoint
+
+GitHub trial413124054 public, anonymous full ZIP size/SHA/CRC verified. IP current overlaye7e283c0-download-054-ce86cc4f changes exactly two files and retains all other static bytes; four locks/CAS/backup/rollback passed, Nginx/cloud process unchanged. Actual desktop/mobile screenshot+DOM/source/link/hash checks passed, no JS errors/overflow. Source metadata in services/website/trial-release.json matches live JSON6d6f0636e702 and accepted ZIP; PR47 tracks final main delivery. Details/route probe limits are in the delivery contract. No daily-client actions or paid calls. Remaining dependency: required CI and metadata main merge, not packaging or website authorization.
