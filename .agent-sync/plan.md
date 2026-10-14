@@ -195,3 +195,5 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 ### MOXBOTS-PROJECT-BOARD-002 会话时长与直达
 
 用户要求在项目看板看当前会话执行时长并一击打开原会话。SessionEngine当前turn只读投影、独立卡片/列表快捷入口、明确最近更新、过期冻结/刷新已实现；154项组合unit、typecheck/lint、生产web和14组合成React UI通过。首次CI越界import已改正式facade，PR42六项CI通过并合入main58b6720f；统一候选包原生验收仍受升级活动状态准入与实际owner协调授权阻断，分开追踪：`.agent-sync/tasks/codex-project-board-session-time-20261015-c5ba72da.md`。
+
+MOXBOTS-PROJECT-BOARD-002 追加授权：用户已允许联系实际统一更新负责人；冻结e5a05f76的10个看板关键文件与已验收源码哈希一致。当前仅等待A3→B3原生窗口释放/真实时长样本，新增接收方授权不再阻断。记录见本任务接续。
