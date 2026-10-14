@@ -68,7 +68,7 @@ export interface OwnedHostExtendedSnapshot extends Omit<OwnedHostSnapshot, "kind
 }
 export interface OwnedHostCapabilities {
   kind: "capabilities"; version: 1;
-  methods: Array<"host.snapshot" | "config.set" | "credential.set" | "resources.create" | "receipt.get" | "host.capabilities" | "host.inspect" | "config.provider.set" | "credential.provider.set" | "receipt.provider.get" | "resources.directory.list" | "resources.register">;
+  methods: Array<"host.snapshot" | "config.set" | "credential.set" | "resources.create" | "receipt.get" | "host.capabilities" | "host.inspect" | "config.provider.set" | "credential.provider.set" | "receipt.provider.get" | "resources.directory.list" | "resources.register" | "session.remote">;
   providerKinds: Array<"anthropic" | "openai">;
   limits: { directoryEntries: 128; pathBytes: 4096 };
 }
@@ -195,7 +195,7 @@ const extendedSnapshot = z.object({
   credentials: z.object({ providerId: providerId.nullable(), configured: z.boolean(), revision, writeAvailable: z.boolean() }).strict(),
   resources: z.object({ version: z.literal(1), revision, roots: z.array(z.object({ rootId: z.string().min(1), workspacePath: z.string().min(1) }).strict()), agents: z.array(z.object({ agentId: z.string().min(1), projectId: z.string().min(1), name: z.string().min(1), workspacePath: z.string().min(1), enabled: z.boolean(), archived: z.boolean() }).strict()) }).strict(),
 }).strict();
-const capabilities = z.object({ kind: z.literal("capabilities"), version: z.literal(1), methods: z.array(z.enum(["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register"])), providerKinds: z.array(z.enum(["anthropic", "openai"])), limits: z.object({ directoryEntries: z.literal(128), pathBytes: z.literal(4096) }).strict() }).strict();
+const capabilities = z.object({ kind: z.literal("capabilities"), version: z.literal(1), methods: z.array(z.enum(["host.snapshot", "config.set", "credential.set", "resources.create", "receipt.get", "host.capabilities", "host.inspect", "config.provider.set", "credential.provider.set", "receipt.provider.get", "resources.directory.list", "resources.register", "session.remote"])), providerKinds: z.array(z.enum(["anthropic", "openai"])), limits: z.object({ directoryEntries: z.literal(128), pathBytes: z.literal(4096) }).strict() }).strict();
 const directoryList = z.object({ kind: z.literal("directory-list"), rootId: safeText(128), relativePath: z.string().max(4096), entries: z.array(z.object({ name: safeText(255), relativePath: z.string().min(1).max(4096) }).strict()).max(128), nextCursor: z.string().max(4096).nullable() }).strict();
 const safeRelative = (value: string, allowRoot: boolean) => {
   return isHostRelativePath(value, allowRoot);
