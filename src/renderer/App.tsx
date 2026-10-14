@@ -119,7 +119,7 @@ import {
   loadAndClearOpenTabsDurable,
   clearOpenTabsDurable,
 } from '@/utils/tabPersistenceDurable';
-import { beginComposerUpdateCheckpoint, loadComposerUpdateHandoff, dismissLoadedComposerUpdateHandoff } from '@/utils/composerUpdateCheckpoint';
+import { beginComposerUpdateCheckpoint, loadComposerUpdateHandoff, dismissLoadedComposerUpdateHandoff, assertUpdateTabsSafe, isComposerUpdateCheckpointLocked } from '@/utils/composerUpdateCheckpoint';
 import { consumeCleanExitMarker } from '@/utils/lastExitMarker';
 import { perfMark } from '@/utils/perfMark';
 import { RENDERER_PERF_PHASE } from '../shared/perfTrace';
@@ -2823,6 +2823,7 @@ export default function App() {
   // A deleted Record becomes the existing Record-list surface at the same Tab
   // position instead of creating an empty detail owner.
   const handleRestoreLastSession = useCallback(async () => {
+    if (APP_BUILD_PROFILE === 'moxbot' && isComposerUpdateCheckpointLocked()) return;
     const candidate = restoreCandidateRef.current;
     setRestorePillCount(0);
     restoreCandidateRef.current = null;
@@ -2922,6 +2923,12 @@ export default function App() {
       )
     ).filter((target): target is ValidatedRestoreTarget => target !== null);
 
+    if (APP_BUILD_PROFILE === 'moxbot' && isComposerUpdateCheckpointLocked()) {
+      validated.forEach(({ releaseTransition }) => releaseTransition?.());
+      restoreCandidateRef.current = candidate;
+      setRestorePillCount(candidate.tabs.length);
+      return;
+    }
     if (validated.length === 0) return;
     const validTabs = validated.map(({ tab }) => tab);
     const validActiveTabId = validTabs.some(
@@ -4703,6 +4710,7 @@ export default function App() {
       let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
       let restarting = false;
       try {
+        assertUpdateTabsSafe(tabWorkspaceController.getSnapshot().tabs);
         checkpoint = beginComposerUpdateCheckpoint(serializeTabs);
         for (const submit of pendingRecordNoteSubmittersRef.current.values()) {
           if (!(await submit())) return;
@@ -4974,6 +4982,7 @@ export default function App() {
     ],
   );
   const openRemoteSession = useCallback((intent: RemoteSessionOpenIntent) => {
+    if (APP_BUILD_PROFILE === 'moxbot' && isComposerUpdateCheckpointLocked()) return;
     const current = currentNetworkSnapshot(intent.locator.connectionId);
     if (!current || current.state !== 'ready' || current.authGeneration !== intent.locator.authGeneration || current.principalId !== intent.locator.principalId || current.networkId !== intent.locator.networkId) return;
     tabWorkspaceController.open('remote-session', intent);

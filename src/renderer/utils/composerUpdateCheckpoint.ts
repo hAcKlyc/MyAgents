@@ -28,6 +28,8 @@ export interface ComposerSnapshot {
   composing: boolean;
   sending: boolean;
   stagedWorkflow: boolean;
+  /** A live editor which cannot yet be safely serialized must refuse exit. */
+  blockingReason?: string;
 }
 export interface ComposerOwner {
   snapshot: () => ComposerSnapshot;
@@ -54,6 +56,15 @@ let handoffChecked = false;
 let handoffBlocked = false;
 let ioTail: Promise<unknown> = Promise.resolve();
 const FILE = 'update-composer-drafts.json';
+
+export function isComposerUpdateCheckpointLocked(): boolean { return locked; }
+
+/** Remote sessions have a separate draft/RPC owner. Until its formal update
+ * attestation exists, presence cannot be treated as idle or restorable. */
+export function assertUpdateTabsSafe(tabs: readonly Pick<Tab, 'view'>[]): void {
+  if (tabs.some(tab => tab.view === 'remote-session'))
+    throw new Error('远程会话尚未接入安全更新检查，当前无法安装更新；请保留会话并稍后更新。');
+}
 
 function enqueue<T>(operation: () => Promise<T>): Promise<T> {
   const result = ioTail.then(operation, operation);
@@ -87,6 +98,7 @@ function hasDraft(snapshot: ComposerSnapshot): boolean {
     || !!snapshot.context.requiredSystemSkill || !!snapshot.context.agentMentions?.length || snapshot.stagedWorkflow;
 }
 function assertSafeSnapshot(snapshot: ComposerSnapshot): void {
+      if (snapshot.blockingReason) throw new Error(snapshot.blockingReason);
       if (snapshot.composing) throw new Error('输入法尚未完成。请完成输入后再更新；草稿已保留。');
       if (snapshot.sending || snapshot.pendingAttachments)
         throw new Error('输入或附件仍在处理中。请等待完成后再更新；草稿已保留。');
@@ -134,6 +146,7 @@ export function beginComposerUpdateCheckpoint(serializeTabs: (tabs: readonly Tab
   };
   return {
     async persist(tabs: readonly Tab[], activeTabId: string | null) {
+      assertUpdateTabsSafe(tabs);
       const drafts = collect();
       const state = serializeTabs(tabs, activeTabId);
       const keys = new Set<string>();
@@ -160,6 +173,7 @@ export function beginComposerUpdateCheckpoint(serializeTabs: (tabs: readonly Tab
       if (captured !== JSON.stringify(collect())) throw new Error('输入草稿已变化，请重新确认更新。');
     },
     verify(tabs: readonly Tab[], activeTabId: string | null) {
+      assertUpdateTabsSafe(tabs);
       const drafts = collect();
       for (const draft of drafts) assertRestorable(draft, serializeTabs(tabs, activeTabId));
       if (captured !== JSON.stringify(drafts)) throw new Error('输入草稿已变化，请重新确认更新。');

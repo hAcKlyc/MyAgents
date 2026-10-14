@@ -54,6 +54,12 @@ async function withUpdateAdmission<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Trusted process owners include metadata/receipt IO which must finish before
+ * a restart, even when no model turn is active. Reuse the same freeze counter. */
+export function runProcessUpdateAdmission<T>(operation: () => Promise<T>): Promise<T> {
+  return withUpdateAdmission(operation);
+}
+
 async function withExecutionAdmission<T>(operation: () => Promise<T>): Promise<T> {
   if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
   return withUpdateAdmission(operation);

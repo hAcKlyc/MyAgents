@@ -27,6 +27,21 @@ async function owner(patch: Partial<ComposerSnapshot> = {}) {
 }
 
 describe('MoxBots composer update checkpoint', () => {
+  it('refuses unverified remote tabs before persistence and final install, retaining live drafts', async () => {
+    const { api, state, freeze } = await owner();
+    expect(() => api.assertUpdateTabsSafe([{ view: 'remote-session' }])).toThrow('尚未接入安全更新检查');
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs);
+    const remote = { id: 'remote-unverified', view: 'remote-session' } as Tab;
+    await expect(lease.persist([tab, remote], tab.id)).rejects.toThrow('远程会话');
+    expect(disk.write).not.toHaveBeenCalled();
+    await lease.persist([tab], tab.id);
+    expect(() => lease.verify([tab, remote], tab.id)).toThrow('远程会话');
+    expect(api.isComposerUpdateCheckpointLocked()).toBe(true);
+    await lease.abort(); lease.release();
+    expect(api.isComposerUpdateCheckpointLocked()).toBe(false);
+    expect(freeze).toHaveBeenLastCalledWith(false); expect(state.text).toBe('KEEP-AFTER-UPDATE');
+  });
+
   it('awaits durable IO, restores exact scope and never consumes for another owner', async () => {
     const { api, state, freeze } = await owner({ text: '  A @myagents_files/a.pdf\n继续  ', context: { primaryContext: { kind: 'floating-context', input: { selectedText: 'selected source', appName: 'Synthetic' } }, requiredSystemSkill: TASK_ALIGNMENT_SKILL_REQUIREMENT } });
     let finish!: () => void;
@@ -53,6 +68,7 @@ describe('MoxBots composer update checkpoint', () => {
   });
   it.each([
     { imageCount: 1 }, { pendingAttachments: true }, { sending: true }, { stagedWorkflow: true },
+    { blockingReason: '文本记录尚未保存。' },
     { context: { primaryContext: { kind: 'floating-context' as const, input: { screenshotAttached: true } } } },
   ])('rejects unsafe material without altering the draft: %j', async patch => {
     const { api, state, freeze } = await owner(patch);

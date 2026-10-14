@@ -92,3 +92,13 @@ CI c46 head发现composer runtime导入tabPersistence→builtin UI composition�
 正式和QA A2/B2 source pin = 3000f30fb28151ad74d393a7d99ac62dd463c404，三份assets/native成功；固定production reader复核通过。主干并发反馈PR44/d726在冻结后合入，不修改冻结包源码；最终主干同步和源码版本分别记录。Source freeze 3311 tracked-file hashes及生产key/pub配置一致性验证在project pointer work/updater-20261014/D-source-freeze-3000f30f.json。
 
 CI3000五项通过；JS唯一失败是已有AppShellChrome.contract仍找旧无参重启调用（unit5621通过，1失败，5跳过）。仅调整此既有测试：Record/file保存位置非负且早于checkpoint.persist，checkpoint早于带lease的restart；相关78/78及最终contract16/16、lint/diff通过，独立16项复跑。runtime文件未改，因此包source3000保持，不用修改/伪造实际产物来源；追加测试/文档将重新跑CI。原生A2/B2准备签名，尚未执行安装；生产stable仍204。
+
+## A3 source freeze and editor admission repairs
+
+已正常整合 remote-main1c1f3ee2 的正式RemoteSession，不移除并发成果。新增 ThoughtCard/ThoughtInput/TaskCommentTimeline 更新准入：未提交文本、编辑/IME、录音启动、保存/发送/重试中的操作拒绝安装并保留当前内容；不自动发送或编造可恢复Session。RemoteSession tab 的安全更新证明尚未接入，begin/persist/final verify明确拒绝；remote prepare/receipt/detached job IO 复用既有process admission计数直到finish完成，冻结拒绝新metadata写入。
+
+Root 9文件211项回归、composition139项、独立154项通过；full lint/typecheck/diff通过。真实独立Node QA路由1项通过：authenticated freeze拒绝prepare且sessions.json字节不变，release后恢复。不是正式Host联调。
+
+原生A2手动合法204已通过；实际TaskCenter内联编辑未覆盖被发现后停止安装。普通tab导航会卸载未保存inline编辑，是独立导航缺陷，不能当作升级已保存。退场前独立操作员重新构造ownRecord marker并UI保存，磁盘SHA f89c44737adfe6049df86dfd38bc5ef7e0730c61964aa1ce540ea2a43919671f；Chat exact3行/尾空格仅AX证据，不冒称旧版durable保存。A2正常退出后两个exact QA orphan由Root验证argv/PPID并限定TERM，qa-A2-retirement.json；未操作日常App/data/Keychain。
+
+D/3000f30f App虽然Apple Accepted且附票，因新发现编辑入口而superseded，未发布。本次重新冻结A3/B3/正式E同源，TaskCenter编辑保持mounted直接点顶栏更新验证拒绝，再执行真实signed A→B/草稿恢复/sidecar退出。最终DMG公证和HTTPS签名制品发布仍待完成；stable仍204。

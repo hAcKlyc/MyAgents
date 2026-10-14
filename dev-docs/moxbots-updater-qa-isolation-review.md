@@ -138,3 +138,35 @@ CI发现checkpoint运行时导入tabs codec引入UI composition循环。独立�
 CI旧断言仍寻找无参 `performRestartAndUpdate()`，而MoxBots路径现传入checkpoint。独立审阅单文件测试更新：检查checkpoint调用存在并在restart(checkpoint)之前，Record/file提交仍必须先于checkpoint；MyAgents路径无参断言保留。产品runtime没有修改，不构成新候选包。独立 `AppShellChrome.contract.test.ts` 16/16通过。
 
 另已通知主实现者强化旧有Record/file `indexOf` 的存在断言：负一也满足“在checkpoint前”，应各自检查>=0再比较。此为测试覆盖严谨性建议，当前产品源码实际两类提交器仍存在；不宣称存在产品数据丢失。
+
+## 第八轮：修复 A2 原生 UI 准备与新增内联编辑风险
+
+唯一操作实例为 `/private/tmp/moxbots-updaterqa-live-A2-20261015/MoXBots Updater QA.app`，bundle `com.moxbot.updaterqa`、PID83835、About0.5.3；主实现者提供source3000f30fb28151ad74d393a7d99ac62dd463c404。窗口1200×800，独立QA HOME与数据沿用；未操作日常App、数据或凭据。
+
+- 手动 HTTP204 复验通过：Settings/About点击检查更新后显示“当前已是最新版本”，按钮恢复，没有旧A的JSON解析失败toast。
+- 在已有QA Session98a85638-b8be-405d-b0f7-56edd540a537 的实际Chat输入中，通过 Shift+Return建立多行草稿，再从真实 @ 文件候选选择update-fixture.txt。AX读取完整文本为 `QA-CHAT-DRAFT-A2-20261015\nLINE-2-KEEP-EDITABLE\n@myagents_files/update-fixture.txt `（末尾空格）。未发送模型。切换到任务中心再回来，草稿仍可见。截图 `qa-ui-A2-chat-draft.png`。
+- 在TaskCenter旧text Record5bdb9601-77c6-4bf8-a605-a9f733c57590 点击编辑，追加 ` QA-RECORD-EDIT-A2-20261015-UNSAVED`，未点保存。截图 `qa-ui-A2-text-record-unsaved.png`。
+
+**P1 待核实/阻止安装：**这不是RecordDetail note editor，而是ThoughtCard的内联文本记录编辑。源码ThoughtCard仅local draft/editing与handleSave，ThoughtPanel的text分支只渲染ThoughtCard，audio分支才onOpenRecord；没有App pendingRecordNoteSubmitter或composer owner注册。确认更新时其未保存内容目前无已验证提交/阻止路径。不能把已覆盖RecordDetail note的测试当作本编辑器已安全。已向主实现者报告，暂不安装；需补提交或fail-closed门禁，并独立复验。B2已由主实现者构建签名但manifest尚未启用，A2→B2及恢复pill仍未验收。
+
+### 第八轮后续：内联编辑门禁与主干远程会话合入审阅
+
+只读审阅53c17e2a基础上的追加diff。ThoughtCard对editing/busy使用同步ref，在任何await前置busy；Mox profile注册admission-only owner，拒绝安装而不自动保存，失败编辑原文保留。空闲冻结用inert与实际事件handler锁；MyAgents不注册。ThoughtInput与TaskCommentTimeline新增相同admission bridge，覆盖未提交文本/IME/回复意图、保存/发送/重试promise、开始录音promise，同步ref先于await；无法安全恢复的local编辑明确阻止安装。未改产品源码。
+
+新main远程会话源码：Rust remote_session_target 的Start/Send仍通过ensure_session_sidecar→begin_lifecycle_spawn_permit，更新生命周期冻结拒绝birth；desktop.ts的实际发送/配置/回应/stop全部进入getSessionEngine的既有facade，受withUpdateAdmission/withExecutionAdmission冻结及busy/queue/pending观察保护。静态未发现模型或本地进程执行绕过既有门禁的P1路径。remote prepare/receipt/job自身不归activeUpdateAdmissions，其元数据/receipt IO的中断一致性并未在本次真实验收；不冒称正式远程Host联调通过。Common保留update-quiesce和remote-session两个exactpath，remote prepare仍global-only，无prefix扩大。
+
+Mox remote-session tab在begin前、persist、最后verify均明确拒绝更新；锁期间openRemoteSession及restore的await前/后拒绝新增UI，并保留restore candidate。实际远程会话协议尚无安全更新证明，不将其视idle/restorable。
+
+独立Node24局部6文件200/200通过：ThoughtCard新9、checkpoint21、remote desktop8、composition139、既有ThoughtInput2与TaskCommentTimeline21。另刚新增LocalTaskEditors13跑到11通过2失败，已报告主实现者：按钮title应为“插入 # 标签”；existingTags fixture应嵌套[['keyword',1]]，现强转平数组导致number not iterable。两项为测试fixture错误，未计为全部通过。diff-check通过。QA窗口暂停，未操作/退出，A3 native与真实门禁仍待后续。
+
+### 远程 metadata/receipt IO gap 收口（源码/模拟通过）
+
+复核selector/index barrel/remote desktop及测试5个backend文件：新增export runProcessUpdateAdmission直接复用原withUpdateAdmission，不新建平行freeze token。prepare包住target、receipts.begin、metadata save/publication与receipts.finish完整await；handle包住adopt/begin与创建job；detached perform在调用时同步增计数，直至performOwned成功或失败的receipt.finish完成才finally减计数，外层handle返回不释放内层job保护。nested facade仍会拒绝冻结，不放松模型执行或owner鉴权。没有裸await前后检查替代实际owner。对应真实route回归使用compile-time moxbot-updaterqa/独立HOME，authenticated freeze后prepare拒绝且sessions.json字节不变，release后恢复；本审阅只读检查该新增integration源码，不冒称自己已复跑。
+
+独立Node24复跑selector117 + remote desktop8 + ThoughtCard9 + LocalTaskEditors14 + SimpleChatInput6，共154/154通过。前述2个LocalTaskEditors fixture错误已修并回归通过；同步记录/评论/重试/IME/录音开始promise及默认MyAgents不注册覆盖通过。此IO gap关闭为源码/模拟通过，不以此代替A3 native升级或正式Host联调。
+
+### A2 安全退场与现场修正
+
+按主实现者明确授权，退场前AX仍可读取Chat exact三行及最后空格，保存nonsecret证据 `/private/tmp/moxbots-updaterqa-home-20261015/qa-ui-A2-retirement-draft.json`，无模型发送。返回TaskCenter时发现旧未保存inline编辑已在切换到Chat后被组件卸载，当前无保存按钮、旧persisted内容不含marker。不能声称旧UNSAVED-A2已保存或一直留现场。这是普通tab导航本地编辑生命周期的独立缺陷/范围，不是本次真实升级丢失。A3应保持TaskCenter edit已mount，用顶栏更新直接触发保护；不能跨tab改变fixture后仍当其存在。已通知主实现者。
+
+随后按授权重新打开同一own text Record，追加完全同样marker并UI点击保存，确认卡片退出编辑且native文件实际内容为 `QA-UPDATER-20261015-PERSISTED-RECORD #updaterqa QA-RECORD-EDIT-A2-20261015-UNSAVED`。content.md SHA256为 `f89c44737adfe6049df86dfd38bc5ef7e0730c61964aa1ce540ea2a43919671f`。正常Cmd+Q唯一exactA2返回App quit，PID83835退出；只读检查已知QA子进程83907(global33415)、85770(session33416)成为PPID1仍监听，argv均exactA2资源路径与--moxbot-updaterqa-sidecar。未kill侧进程或用户进程，交root处理。未安装B2；真实A3新版门禁与A→B仍未验收。

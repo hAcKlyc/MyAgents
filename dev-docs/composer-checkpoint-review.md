@@ -28,3 +28,10 @@ Known scope: no normal-quit persistence, no durable File/image serialization, no
 ## CI composition repair
 
 The leaf checkpoint now takes the existing serializer/parser from App rather than importing the builtin UI composition at runtime. Root and independent 62/62 related cases passed; Node24 full lint (0 dependency errors; 16 existing orphan warnings), typecheck and diff check passed. The c46 compilation inputs are superseded; native candidates must be rebuilt from the repair commit.
+
+
+### A3 guard coverage and boundaries
+
+Mox-only local editor admission covers ThoughtCard, ThoughtInput and TaskCommentTimeline. Dirty/IME/in-flight states refuse installation without auto-save/send; remote-session tabs explicitly refuse until formal update attestation exists. Root 211 focused regressions plus composition139, independent154 and real isolated/authenticated Node route1 pass. DefaultMyAgents does not register these guards.
+
+Native A2 exposed a separate ordinary TaskCenter tab-navigation loss of unsubmitted inline state. It was not an updater installation loss (installation never ran), and is not claimed repaired here. A3 updater guard must be tested with editor still mounted via titlebar update. Chat durable handoff restore and A3/B3 native upgrade remain pending. Daily installed0.5.3 requires one manual installation of corrected0.5.4; this task cannot operate daily App/data/Keychain.
