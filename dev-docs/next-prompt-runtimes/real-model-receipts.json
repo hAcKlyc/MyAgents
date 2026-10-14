@@ -1,0 +1,77 @@
+{
+  "taskId": "MOXBOTS-NEXT-PROMPT-002",
+  "date": "2026-10-15",
+  "scope": "real native text utility with synthetic prior transcript; not installed-client acceptance",
+  "runs": [
+    {
+      "runtime": "codex",
+      "authSource": "system-cli native auth",
+      "model": "gpt-6.1-sol",
+      "data": "synthetic transcript",
+      "success": true,
+      "text": "请把这个流程展开成可落地的设计，说明导入前校验、导入中错误处理、结果汇总和错误报告下载，并明确部分成功时如何重试、避免重复导入。",
+      "elapsedMs": 15997,
+      "diagnostics": [
+        "discovery_start",
+        "discovery_account",
+        "discovery_config",
+        "gateway_start",
+        "gateway_ready",
+        "utility_initialize",
+        "thread_start",
+        "gateway_request_received",
+        "gateway_other_path_rejected",
+        "gateway_request_received",
+        "gateway_other_path_rejected",
+        "turn_start",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_non_post_rejected",
+        "gateway_request_received",
+        "gateway_plain_body",
+        "gateway_response_admitted",
+        "native_turn_completed"
+      ]
+    },
+    {
+      "runtime": "claude-code",
+      "authSource": "existing native CLI configured auth",
+      "data": "synthetic transcript",
+      "model": "native default",
+      "success": true,
+      "text": "那错误报告用什么格式输出比较好？给我一个包含行号、字段和错误原因的JSON结构示例。",
+      "elapsedMs": 20996
+    },
+    {
+      "runtime": "dsh",
+      "source": "integrated native utility/run",
+      "providerName": "Kimi Code",
+      "model": "k3",
+      "success": true,
+      "text": "请给出具体的报告格式示例（如JSON结构或Excel模板），并说明如何实现行号、字段、错误原因的收集逻辑。",
+      "elapsedMs": 12146,
+      "nativeSessionFilesUnchanged": true,
+      "reverseMethods": [
+        "host/credential/resolve",
+        "host/credential/resolve"
+      ],
+      "workspaceFiles": []
+    }
+  ],
+  "sourceSha256": {
+    "src/server/runtimes/codex-text-utility.ts": "982c211a08c2e92ac0b41af365cdb5ceaa85f55de1eb8dc71ca96c684f626146",
+    "src/server/runtimes/claude-text-utility.ts": "39bb49a52f83afae0a495e3cef21fbe258e0bcf4d1ef14f4ef5fc9554f27a542",
+    "src/server/integrated-runtimes/dsh/text-utility.ts": "c5bb7db7356f79ec3fee22ffa3cefd8aa6f52898bacf63dea66faaf73b588acd"
+  }
+}
