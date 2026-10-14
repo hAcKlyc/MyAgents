@@ -182,6 +182,10 @@ User specifically approved29 update; native owned-account recovery, bottom-left 
 
 Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.
 
+## REMOTE-SESSION-IMPLEMENTATION-20261015
+
+同账号远程Agent直接会话；实现/验收状态和后续门禁见 `.agent-sync/tasks/codex-remote-session-20261015-bba594f8.md`。复用SessionEngine/Store与owned管理传输，首版为有界snapshot同步。生产原生包与真实双端、Provider验收单独记录，不能用组件模拟代替。
+
 ## FEEDBACK-001 — 2026-10-15
 
 把MoXBots小助理并入设置下方个人菜单，通知保持原功能。新增同源云端反馈页：用户提交和查看自己的反馈，管理员回复及处理；既有账号权限/PKCE登录、幂等/CAS和私有存储。记录 `.agent-sync/tasks/codex-feedback-center-20261015-3b6a3c97.md`；代码、fixture、main、云发布和客户端真实路径独立追踪。

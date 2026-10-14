@@ -10,6 +10,7 @@ import {
   type NetworkSnapshot,
   type NetworkRegistry,
 } from "@/api/agentNetwork";
+import { clearRemoteDraftScope, clearRemoteDrafts } from '@/features/remote-session/drafts';
 const initialSnapshot: NetworkSnapshot = {
   state: "connecting",
   principalId: null,
@@ -41,6 +42,7 @@ function notify() {
   listeners.forEach((fn) => fn());
 }
 function clearScope(snapshot: NetworkSnapshot) {
+  clearRemoteDraftScope(snapshot.principalId, snapshot.networkId);
   clearHostManagementScope(snapshot.principalId, snapshot.networkId);
   for (const key of drafts.keys()) {
     const [principal, network] = JSON.parse(key) as string[];
@@ -62,7 +64,7 @@ function accept(next: NetworkSnapshot) {
     return;
   if (
     old &&
-    (next.authGeneration !== old.authGeneration || next.state === "signedOut")
+    (next.authGeneration !== old.authGeneration || next.principalId !== old.principalId || next.networkId !== old.networkId || next.state === "signedOut")
   )
     clearScope(old);
   pending.set(id, next);
@@ -76,6 +78,7 @@ function accept(next: NetworkSnapshot) {
   notify();
 }
 export function acceptNetworkRegistry(next: NetworkRegistry) {
+  const previousConnections = registry.connections;
   if ((next.revision ?? 0) < (registry.revision ?? 0)) return;
   const removed = registry.connections.filter(
     (c) => !next.connections.some((n) => n.id === c.id),
@@ -97,6 +100,10 @@ export function acceptNetworkRegistry(next: NetworkRegistry) {
         : c;
     }),
   };
+  for (const old of previousConnections) {
+    const current = registry.connections.find(c => c.id === old.id)?.snapshot;
+    if (current && (current.authGeneration !== old.snapshot.authGeneration || current.principalId !== old.snapshot.principalId || current.networkId !== old.snapshot.networkId || current.state === 'signedOut')) clearScope(old.snapshot);
+  }
   for (const c of registry.connections)
     setNetworkReadScope({ ...c.snapshot, connectionId: c.id });
   notify();
@@ -129,6 +136,7 @@ export function startAgentNetworkStore(): () => void {
   return () => {
     abort.abort();
     drafts.clear();
+    clearRemoteDrafts();
     clearAllHostManagementState();
     pending.clear();
     registry = initial;
@@ -182,3 +190,5 @@ export function setDescriptionDraft(key: string, value: string) {
 export function clearDescriptionDraft(key: string) {
   drafts.delete(key);
 }
+
+export const currentNetworkSnapshot = (connectionId: string): NetworkSnapshot | null => registry.connections.find(c => c.id === connectionId)?.snapshot ?? null;

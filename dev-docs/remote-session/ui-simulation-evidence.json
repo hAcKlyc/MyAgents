@@ -1,0 +1,324 @@
+{
+  "capturedAt": "2026-10-14T17:31:37.151Z",
+  "scope": "actual RemoteSession component, synthetic transport; no App shell, Tauri, remote owner, or model",
+  "results": [
+    {
+      "width": 1280,
+      "errors": [],
+      "bounds": {
+        "x": 273,
+        "y": 409.5625,
+        "width": 108,
+        "height": 37
+      },
+      "composer": {
+        "x": 269,
+        "y": 727.046875,
+        "width": 742,
+        "height": 81.5625
+      },
+      "primaryStyle": {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(17, 17, 17)",
+        "opacity": "1"
+      },
+      "firstSendStyle": {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(17, 17, 17)",
+        "opacity": "1"
+      },
+      "conditionalApprovalDisabled": true,
+      "binding": [
+        {
+          "kind": "bound",
+          "sessionId": "session-test"
+        }
+      ],
+      "calls": [
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "list",
+          "agentId": "agent-test",
+          "limit": 30
+        },
+        {
+          "kind": "start",
+          "agentId": "agent-test",
+          "operationId": "5e3806b6-a314-47fa-b103-aa883bcd2d10",
+          "text": "检查远端项目，并运行测试。"
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "respond",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "requestId": "approval-1",
+          "interaction": "permission",
+          "approved": true,
+          "operationId": "9650b91f-ea4f-4915-ac17-f90704bccd40"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "send",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "operationId": "27ee94ba-5d3b-470f-800c-1d71707fccb4",
+          "text": "继续检查测试结果。"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "respond",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "requestId": "approval-1",
+          "interaction": "permission",
+          "approved": false,
+          "operationId": "3cee5756-4f87-4509-ba10-2070e42c7418"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "stop",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "operationId": "52b7b7eb-6dea-427d-afe4-9b92ca75c1fc"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "list",
+          "agentId": "agent-test",
+          "limit": 30
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        }
+      ],
+      "raw": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280,
+        "colour": "#f9f9f7"
+      }
+    },
+    {
+      "width": 390,
+      "errors": [],
+      "bounds": {
+        "x": 41,
+        "y": 458.5625,
+        "width": 108,
+        "height": 37
+      },
+      "composer": {
+        "x": 37,
+        "y": 671.046875,
+        "width": 316,
+        "height": 81.5625
+      },
+      "primaryStyle": {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(17, 17, 17)",
+        "opacity": "1"
+      },
+      "firstSendStyle": {
+        "color": "rgb(255, 255, 255)",
+        "background": "rgb(17, 17, 17)",
+        "opacity": "1"
+      },
+      "conditionalApprovalDisabled": true,
+      "binding": [
+        {
+          "kind": "bound",
+          "sessionId": "session-test"
+        }
+      ],
+      "calls": [
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "list",
+          "agentId": "agent-test",
+          "limit": 30
+        },
+        {
+          "kind": "start",
+          "agentId": "agent-test",
+          "operationId": "1f076601-7f2a-4f82-bbcf-965b0a668d11",
+          "text": "检查远端项目，并运行测试。"
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "respond",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "requestId": "approval-1",
+          "interaction": "permission",
+          "approved": true,
+          "operationId": "97a44aea-b471-4dd0-a71b-3addb1f0c55d"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "send",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "operationId": "0dd66504-de40-4e60-8af6-e7a2491b0670",
+          "text": "继续检查测试结果。"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "respond",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "requestId": "approval-1",
+          "interaction": "permission",
+          "approved": false,
+          "operationId": "ddb60533-8cac-45a8-90bb-e6c823dafb0d"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "stop",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "generation": "1",
+          "turnId": "turn-1",
+          "operationId": "95269eed-03d4-493f-ad58-44a9b49a80f7"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "list",
+          "agentId": "agent-test",
+          "limit": 30
+        },
+        {
+          "kind": "capabilities",
+          "agentId": "agent-test"
+        },
+        {
+          "kind": "get",
+          "agentId": "agent-test",
+          "sessionId": "session-test",
+          "limit": 30
+        }
+      ],
+      "raw": {
+        "scrollWidth": 390,
+        "innerWidth": 390,
+        "colour": "#f9f9f7"
+      }
+    }
+  ],
+  "sourceHashes": {
+    "src/renderer/features/remote-session/RemoteSession.tsx": "833a126287f5ea45238ae545ecfc8272bc6c9c438acda60d84d7be46294a7029",
+    "src/renderer/api/remoteSession.ts": "876b0ebcec33ee30ddbf5ab171640ac5e99379158d6f0c89f0aa451529972814",
+    "src/shared/remoteSession.ts": "113f70aefc10d96922b258ef5732a3a6c63713649f31e66ca189b090b240ad8d",
+    "src/renderer/index.css": "54d1a199f7403b29309277d40bda2ac4406abc7da35ea5c1b21189025b0a878d",
+    "src/renderer/theme/themes/myagents-light.css": "09373de49b3e1aa098aa442f5a78c2ca45b53c74959027422bbe174ee5534e5c"
+  },
+  "browser": {
+    "engine": "independent Playwright headless Chromium",
+    "installedBuild": "1243",
+    "userChromeUsed": false
+  },
+  "captureNotes": [
+    "Initial invalid i18n/colour-scheme and stale Vite HMR runs rejected; final fresh-server capture has zero errors.",
+    "Images wait 220ms after visible DOM conditions for transition stability."
+  ]
+}

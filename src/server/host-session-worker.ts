@@ -6,6 +6,10 @@ import { isAbsolute, resolve } from 'node:path';
 import { format } from 'node:util';
 import { bootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { rejectCloudModelRetry } from '../host/cloud-model';
+import { remoteSessionRequestSchema } from '../shared/remoteSession';
+import { isProjectArchived, isProjectVisibleToUser } from '../shared/config-types';
+import { assertOrdinaryRemoteAgent } from '../host/remote-session';
+import { settleHostSessionAdmission } from '../host/remote-admission';
 import { isHostSessionRequest, type HostSessionMessage, type HostSessionRequest } from './host-session-protocol';
 import { installHostSessionCredential, installHostCloudModelCredential, resolveHostCloudModelProvider } from './utils/host-credentials';
 
@@ -94,11 +98,15 @@ async function main(): Promise<void> {
     const model = bot?.model ?? process.env.MYAGENTS_HOST_MODEL?.trim();
     const providerId = bot?.provider_id ?? process.env.MYAGENTS_HOST_PROVIDER_ID?.trim();
     if (!model || !providerId) throw new Error('New Host Session requires an explicit Provider/model route');
-    const route = routes.createConcreteProviderRoute(providerId, model);
+    const remoteBirth = process.env.MYAGENTS_HOST_REMOTE_AGENT_BIRTH === '1' ? config.resolveWorkspaceConfig(workspace):undefined;
+    const route = remoteBirth?.providerRoute ?? routes.createConcreteProviderRoute(providerId, model);
+    if (!routes.isConcreteProviderRoute(route) || route.providerId !== providerId || route.model !== model) throw new Error('Host Agent birth provider identity changed');
     const prepared = await engine.materializePendingDesktopSession({
       workspacePath: workspace, phase: 'prepare',
-      snapshotPatch: { providerRoute: route, providerId, model, permissionMode: 'custom',
-        mcpEnabledServers: [], enabledPluginIds: [], enabledOfficialToolIds: [] },
+      ...(bot ? {birthSnapshot:{hostBotBinding:{botId:bot.snapshot.bot_id,runGeneration:bot.run_generation}}}:{}),
+      snapshotPatch: { providerRoute: route, providerId, model, permissionMode: remoteBirth?.permissionMode ?? 'custom',
+        mcpEnabledServers: remoteBirth?.mcpServers.map(item=>item.id) ?? [], ...(remoteBirth ? {}:{enabledPluginIds:[]}), enabledOfficialToolIds: remoteBirth?.enabledOfficialToolIds ?? [],
+        ...(remoteBirth?.reasoningEffort ? {reasoningEffort:remoteBirth.reasoningEffort}:{}) },
     });
     if (!prepared.success || !prepared.sessionId) throw new Error('Host Session preparation failed');
     const committed = await engine.materializePendingDesktopSession({
@@ -110,6 +118,14 @@ async function main(): Promise<void> {
   if (!boundSessionId) throw new Error('Host Session binding is unavailable');
   const sessionId: string = boundSessionId;
   const workspacePath: string = workspace;
+  if (bot) {
+    const ownedMetadata=store.getSessionMetadata(sessionId);
+    if (!ownedMetadata || !routes.isConcreteProviderRoute(ownedMetadata.providerRoute) || ownedMetadata.providerRoute.providerId!==bot.provider_id || ownedMetadata.providerRoute.model!==bot.model || resolve(ownedMetadata.agentDir)!==resolve(workspace)) throw new Error('BOT_RUN_BINDING_MISMATCH');
+    if (ownedMetadata.hostBotBinding && (ownedMetadata.hostBotBinding.botId!==bot.snapshot.bot_id || ownedMetadata.hostBotBinding.runGeneration!==bot.run_generation)) throw new Error('BOT_RUN_BINDING_MISMATCH');
+    // An old exact-owner birth may lack this marker; stamp only after checking
+    // the protected bootstrap, actual engine binding, workspace and route.
+    if (!ownedMetadata.hostBotBinding) await store.saveSessionMetadata({...ownedMetadata,hostBotBinding:{botId:bot.snapshot.bot_id,runGeneration:bot.run_generation}});
+  }
   const transcript = store.getActiveSessionTranscript(sessionId);
   if (transcript && !await transcript.writer.flush()) throw new Error('Host Session birth could not be durably saved');
   // --no-pre-warm deliberately skips startup discovery. Recover configuration
@@ -202,6 +218,33 @@ async function main(): Promise<void> {
   async function operate(request: HostSessionRequest): Promise<unknown> {
     const args = request.args ?? {};
     switch (request.operation) {
+      case 'remote': {
+        if (bot) throw new Error('REMOTE_SESSION_PRIVATE');
+        const remote = remoteSessionRequestSchema.parse(args.remoteSession);
+        if (!('sessionId' in remote) || remote.sessionId !== sessionId) throw new Error('REMOTE_SESSION_TARGET_CHANGED');
+        if (remote.kind === 'get') {
+          const { buildRemoteSnapshot } = await import('./remote-session/projection');
+          return buildRemoteSnapshot(remote.agentId, sessionId, generation!, remote.limit, remote.before);
+        }
+        if (remote.kind === 'send') {
+          if (process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED !== '1') throw new Error('REMOTE_SESSION_EXECUTION_NOT_AUTHORIZED');
+          validateRemoteAgent(remote.agentId);
+          return operate({ ...request, operation: 'send', args: {text: remote.text, clientRequestId: remote.operationId,remote:true,remoteAgentId:remote.agentId} });
+        }
+        if (remote.kind === 'respond' || remote.kind === 'stop') {
+          if (remote.generation !== generation || remote.turnId !== engine.getExecutionTurnId()) throw new Error('REMOTE_SESSION_INTERACTION_EXPIRED');
+          validateRemoteAgent(remote.agentId);
+          if (remote.kind === 'stop') return operate({...request,operation:'stop',args:{queueId:remote.turnId}});
+          const { buildRemoteSnapshot } = await import('./remote-session/projection');
+          const snapshot = await buildRemoteSnapshot(remote.agentId, sessionId, generation!, 1);
+          const interaction=snapshot.interactions.find(item => item.requestId === remote.requestId && item.interaction === remote.interaction && item.generation === remote.generation && item.turnId === remote.turnId);
+          if (!interaction || (remote.approved && !interaction.actionable)) throw new Error('REMOTE_SESSION_INTERACTION_EXPIRED');
+          if (remote.interaction === 'question' && remote.approved && (!remote.answers || interaction.questions.some(question=>!remote.answers?.[question.answerKey]?.trim()) || Object.keys(remote.answers).some(key=>!interaction.questions.some(question=>question.answerKey===key)))) throw new Error('REMOTE_SESSION_ANSWERS_INVALID');
+          return operate({...request,operation:'permission',args:{requestId:remote.requestId,kind:remote.interaction,
+            approved:remote.approved,decision:remote.approved ? 'allow_once':'deny',answers:remote.approved ? remote.answers ?? {} : null}});
+        }
+        throw new Error('REMOTE_SESSION_OPERATION_UNSUPPORTED');
+      }
       case 'describe': return { sessionId, workspacePath: workspace, runtime: 'builtin',
         executionAuthorized: bot?.cloud_model ? bot.cloud_model.expires_at > Date.now()/1000 : process.env.MYAGENTS_HOST_EXECUTION_AUTHORIZED === '1',
         supportedProviderProtocols: ['anthropic','openai'], unsupportedCapabilities: ['agent-network', 'task', 'goal', 'browser-host', 'cross-session-inbox'],
@@ -222,15 +265,17 @@ async function main(): Promise<void> {
         if (snapshot.providerRoute.kind === 'provider' && !provider) throw new Error('Session Provider credential is unavailable');
         const result = await engine.sendDesktopMessage({
           text: args.text, sessionId, workspacePath, scenario: { type: 'desktop' },
-          providerRoute: snapshot.providerRoute, permissionMode: 'custom',
-          clientRequestId: randomUUID(), turnBoundaryOnly: true,
-          beforeDispatch: async () => ({ accepted: !closing, ...(closing ? { error: 'Host worker is shutting down' } : {}) }),
+          providerRoute: snapshot.providerRoute, permissionMode: args.remote === true ? snapshot.permissionMode ?? 'custom':'custom',
+          clientRequestId: typeof args.clientRequestId === 'string' ? args.clientRequestId : randomUUID(), turnBoundaryOnly: true,
+          beforeDispatch: async () => {
+            if (typeof args.remoteAgentId==='string') {
+              try {validateRemoteAgent(args.remoteAgentId);} catch {return {accepted:false,error:'REMOTE_SESSION_AGENT_UNAVAILABLE'};}
+            }
+            return { accepted: !closing, ...(closing ? { error: 'Host worker is shutting down' } : {}) };
+          },
           onTerminal: outcome => { send({ type: 'terminal', generation: generation!, sessionId, outcome }); },
         });
-        if (!result.success) throw new Error('Session message admission failed');
-        const accepted = result.dispatchAcceptance ? await result.dispatchAcceptance : undefined;
-        if (accepted && !accepted.accepted) throw new Error('Session dispatch was rejected');
-        return { accepted: true, queued: result.queued, queueId: result.queueId };
+        return settleHostSessionAdmission(args.remote===true,result);
       }
       case 'permission': {
         if (typeof args.requestId !== 'string') throw new Error('Permission requestId is required');
@@ -255,6 +300,12 @@ async function main(): Promise<void> {
       case 'shutdown': await shutdown(); return { stopped: true };
     }
   }
+  function validateRemoteAgent(agentId:string):void {
+    assertOrdinaryRemoteAgent(agentId,config.loadConfig({strict:true}).hostBotDelegationsV1);
+    const registered=config.findProjectAgentByWorkspacePath(workspace!);
+    const project=config.loadProjects({strict:true}).find(item=>item.agentId===agentId);
+    if (!registered || registered.id!==agentId || !registered.enabled || !project || !isProjectVisibleToUser(project) || isProjectArchived(project) || resolve(project.path)!==resolve(workspace!)) throw new Error('REMOTE_SESSION_AGENT_UNAVAILABLE');
+  }
   process.on('message', (value: unknown) => {
     if (!isHostSessionRequest(value)) return;
     if (value.generation !== generation) {
@@ -271,13 +322,13 @@ async function main(): Promise<void> {
         // Only this entry's fixed validation messages may cross IPC. Provider
         // and SDK errors may carry bearer material and remain server diagnostics.
         const message = error instanceof Error ? error.message : '';
-        const safe = /^(BOT_MODEL_NOT_AUTHORIZED$|Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
+        const safe = /^(REMOTE_SESSION_[A-Z_]+$|BOT_MODEL_NOT_AUTHORIZED$|Delegated Bot v1|Model execution requires|A bounded|Session Provider|OpenAI protocol requires|Session message admission|Session dispatch|Permission |Question |Plan |Interactive )/.test(message);
         send({ type: 'reply', generation: generation!, id: value.id, ok: false, error: safe ? message : 'Host Session operation failed; inspect worker diagnostics' });
       }
     };
     // Human responses and Stop must remain reachable while a send is waiting
     // for dispatch admission; serializing them behind that promise deadlocks.
-    if (value.operation === 'send') serial = serial.then(handle);
+    if (value.operation === 'send' || (value.operation === 'remote' && (value.args?.remoteSession as {kind?:unknown}|undefined)?.kind === 'send')) serial = serial.then(handle);
     else void handle();
   });
   for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { void shutdown().finally(() => process.exit(0)); });

@@ -1736,5 +1736,63 @@
       "partialCredentialUnknown": "Configuration was saved, but the key status is unconfirmed. Check the pending receipt.",
       "partialCredentialFailed": "Configuration was saved, but the key was not updated. Check the Host key status, then retry."
     }
+  },
+  "remoteSession": {
+    "remote": "Remote session",
+    "openSession": "Open session",
+    "accountChanged": "The account changed. Open this session again from the current account’s network.",
+    "refresh": "Refresh remote status",
+    "newSession": "New session",
+    "stop": "Stop this turn",
+    "history": "Sessions for this Agent",
+    "empty": "No sessions yet. Send your first message to start a remote session.",
+    "moreSessions": "More sessions",
+    "older": "Load earlier messages",
+    "truncated": "This long message has been truncated for display.",
+    "message": "Remote message",
+    "placeholder": "A task for the remote Agent…",
+    "send": "Send",
+    "snapshotHint": "Live status · Snapshot sync",
+    "closeHint": "Closing this tab keeps the remote session running. Files and execution remain on the remote device.",
+    "processing": "The remote device is processing this operation. The session updates once acceptance is confirmed.",
+    "unconfirmed": "Acceptance is unconfirmed. The original operation ID is retained for receipt checks and will not be resent automatically. A missing receipt does not prove the operation was not executed.",
+    "checkReceipt": "Check original receipt",
+    "busy": "The remote device is running another session. Try again later.",
+    "unsupported": "This device or Runtime does not support remote sessions yet.",
+    "failed": "Could not read the remote session. Check the connection and refresh.",
+    "incompleteInteraction": "The request details are incomplete. Approval is unavailable; you may deny the request.",
+    "allowOnce": "Allow once",
+    "approvePlan": "Approve plan",
+    "submitAnswers": "Submit answers",
+    "deny": "Deny",
+    "states": {
+      "offline": "Offline",
+      "processing": "Awaiting remote acceptance",
+      "unconfirmed": "Acceptance unconfirmed",
+      "loading": "Reading remote session…",
+      "draft": "New session",
+      "idle": "Idle",
+      "running": "Running",
+      "waiting_user_action": "Awaiting your action",
+      "unavailable": "Unavailable",
+      "complete": "Completed",
+      "stopped": "Stopped",
+      "error": "Execution failed",
+      "interrupted": "Interrupted",
+      "unknown": "Outcome unknown"
+    },
+    "toolStates": {
+      "running": "Running",
+      "complete": "Completed",
+      "error": "Failed"
+    },
+    "interactions": {
+      "permission": "Remote permission request",
+      "plan": "Remote plan approval",
+      "question": "Remote question"
+    },
+    "operationUnknown": "The operation record cannot be read; its outcome remains unknown. New operations are disabled. Restore client storage and reopen the session to avoid duplicate execution.",
+    "connectionPending": "Restoring the network identity. This remote session will resume once the connection is ready…",
+    "cachedHistory": "Previously loaded older sessions (cached; verified again when opened)"
   }
 }

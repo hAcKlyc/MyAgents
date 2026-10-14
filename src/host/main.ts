@@ -17,13 +17,18 @@ import { loadBotExecutionPolicy } from './bot-execution-policy';
 import { connectBotExecutionIpc } from './bot-execution-ipc';
 import { createHostBotManager } from './bot-management';
 import { stopBotChild } from './bot-child-stop';
-import { atomicModifyConfig, loadConfig, loadProjects, materializeProviderRouteEnv } from '../server/utils/admin-config';
-import { createConcreteProviderRoute } from '../shared/providerRoute';
+import { atomicModifyConfig, loadConfig, loadProjects, materializeProviderRouteEnv, resolveWorkspaceConfig } from '../server/utils/admin-config';
+import { createConcreteProviderRoute, isConcreteProviderRoute } from '../shared/providerRoute';
 import { createHostResourceOwner, HostResourceError, type HostResourceRequest } from './resources';
 import { connectHostManagementIpc } from './management-ipc';
 import { createHostProviderCredentialOwner, HostProviderCredentialError, type ProviderCredentialInput } from './provider-credentials';
 import { HOST_PROVIDER_REFERENCE, readHostSystemdCredential, resolveHostProviderCredential } from '../server/utils/host-credentials';
 import { withWorkspaceAgentRegistrationIntent } from '../server/utils/agent-workspace-identity';
+import { createHostRemoteSessionService, HostRemoteError, assertOrdinaryRemoteAgent } from './remote-session';
+import { createRemoteReceiptOwner } from '../server/remote-session/receipts';
+import { workspacePathsEqual } from '../shared/workspacePath';
+import { resolveAgentRuntimePreference, runtimeTypeForAgentRuntimePreference } from '../shared/integrated-runtimes/identity';
+import { REMOTE_SESSION_BYTES } from '../shared/remoteSession';
 
 const stateDir = resolve(process.env.MYAGENTS_HOST_STATE_DIR ?? '/var/lib/myagents-host-test');
 const socket = process.env.MYAGENTS_HOST_SOCKET ?? '/run/myagents-host-test/control.sock';
@@ -174,7 +179,7 @@ async function serve(): Promise<void> {
     });
   }
 
-  async function ensureSession(sessionId?: string, botBootstrap?: HostBotBootstrap): Promise<Active> {
+  async function ensureSession(sessionId?: string, botBootstrap?: HostBotBootstrap, remoteWorkspace?: string): Promise<Active> {
     if (shuttingDown) throw new Error('Host is stopping');
     if (active) {
       if (sessionId && active.sessionId === sessionId && !active.closing) return active;
@@ -185,7 +190,7 @@ async function serve(): Promise<void> {
     const config = await jsonFile<HostConfig>(configPath, {});
     const settings = bot ? undefined : config.hostSettings;
     if (!bot && !settings) throw new Error('Configure the Host before creating a Session');
-    let workspace = await workspacePath(bot?.workspace ?? settings!.workspace);
+    let workspace = await workspacePath(bot?.workspace ?? remoteWorkspace ?? settings!.workspace);
     if (sessionId) {
       if (!uuidPattern.test(sessionId)) throw new Error('Invalid Session ID');
       const rows = await jsonFile<Array<{ id: string; agentDir: string; runtime?: string }>>(join(home, '.myagents', 'sessions.json'), []);
@@ -193,9 +198,13 @@ async function serve(): Promise<void> {
       if (!row || (row.runtime && row.runtime !== 'builtin')) throw new Error('Unknown or unsupported Session');
       workspace = await workspacePath(row.agentDir);
     }
+    const remoteBirth = remoteWorkspace && !sessionId ? resolveWorkspaceConfig(workspace,undefined,{includeMcp:false}):undefined;
+    if (remoteBirth && !isConcreteProviderRoute(remoteBirth.providerRoute)) throw new HostRemoteError('REMOTE_SESSION_AGENT_PROVIDER_UNAVAILABLE');
+    const remoteRouteCandidate=remoteBirth?.providerRoute;
+    const remoteRoute=isConcreteProviderRoute(remoteRouteCandidate) ? remoteRouteCandidate:undefined;
     const generation = bot?.run_generation ?? randomUUID();
     const childEnvironment: NodeJS.ProcessEnv = bot ? {PATH:process.env.PATH,LANG:process.env.LANG,TMPDIR:process.env.TMPDIR,USERPROFILE:home} : {...process.env};
-    let sessionProviderId = bot?.provider_id ?? settings!.providerId;
+    let sessionProviderId = remoteRoute?.providerId ?? bot?.provider_id ?? settings!.providerId;
     if (sessionId) {
       const rows=await jsonFile<Array<{id:string;providerId?:string;providerRoute?:{kind:string;providerId:string}}>>(join(home,'.myagents','sessions.json'),[]);
       const meta=rows.find(row=>row.id===sessionId);
@@ -218,7 +227,8 @@ async function serve(): Promise<void> {
       env: { ...childEnvironment, HOME: home, MYAGENTS_HOST_MODE: '1', MYAGENTS_HOST_WORKSPACE: workspace,
         MYAGENTS_HOST_CREDENTIAL_SOURCE: 'supervisor-ipc',
         MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_PROVIDER_ID: sessionProviderId,
-        MYAGENTS_HOST_MODEL: bot?.model ?? settings!.model, MYAGENTS_HOST_GENERATION: generation,
+        MYAGENTS_HOST_MODEL: remoteRoute?.model ?? bot?.model ?? settings!.model, MYAGENTS_HOST_GENERATION: generation,
+        MYAGENTS_HOST_REMOTE_AGENT_BIRTH: remoteBirth ? '1':'0',
         MYAGENTS_HOST_EXECUTION_AUTHORIZED: !bot && settings?.executionAuthorized ? '1' : '0',
         ...(bot ? {MYAGENTS_HOST_BOT_BOOTSTRAP:Buffer.from(JSON.stringify(bot)).toString('base64url')} : {}) },
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
@@ -251,7 +261,7 @@ async function serve(): Promise<void> {
       const entry = pending.get(reply.id);
       if (!entry || entry.active !== target) return;
       clearTimeout(entry.timer); pending.delete(reply.id);
-      if (reply.ok) entry.resolve(reply.data); else entry.reject(new Error(reply.error ?? 'Session request failed'));
+      if (reply.ok) entry.resolve(reply.data); else entry.reject(/^REMOTE_[A-Z_]+$/.test(reply.error??'') ? new HostRemoteError(reply.error!):new Error(reply.error ?? 'Session request failed'));
     });
     await new Promise<void>((resolveReady, reject) => {
       const timer = setTimeout(() => { target.closing = true; child.kill('SIGTERM'); reject(new Error('Session startup timed out')); }, 60000);
@@ -273,6 +283,66 @@ async function serve(): Promise<void> {
     });
     return target;
   }
+
+  const remoteReceipts = createRemoteReceiptOwner(`host:${identity.hostId}`,join(home,'.myagents','remote-session-receipts'));
+  const remoteSessions = createHostRemoteSessionService({
+    async resolveAgent(agentId) {
+      const resources=await resourceOwner.inspect();
+      const selected=resources.agents.find(item=>item.agentId===agentId);
+      if (!selected || !selected.enabled || selected.archived) throw new HostRemoteError('REMOTE_SESSION_AGENT_UNAVAILABLE');
+      const config=loadConfig({strict:true});
+      assertOrdinaryRemoteAgent(agentId,config.hostBotDelegationsV1);
+      const agent=config.agents?.find(item=>item.id===agentId);
+      if (!agent || !agent.enabled) throw new HostRemoteError('REMOTE_SESSION_AGENT_UNAVAILABLE');
+      const runtimeConfig=agent.runtimeConfig;
+      const runtimeSource=runtimeConfig && typeof runtimeConfig==='object' && 'source' in runtimeConfig ? runtimeConfig.source:undefined;
+      const preference=resolveAgentRuntimePreference({runtimePreference:agent.runtimePreference,runtime:agent.runtime,runtimeSource,providerId:agent.providerId});
+      if (agent.runtimePreference !== undefined && !preference) throw new HostRemoteError('REMOTE_SESSION_RUNTIME_UNSUPPORTED');
+      return {workspacePath:await workspacePath(selected.workspacePath),runtime:preference ? runtimeTypeForAgentRuntimePreference(preference):'builtin'};
+    },
+    async validateSession(sessionId,workspace) {
+      const store=await import('../server/SessionStore');
+      const metadata=store.getSessionMetadata(sessionId);
+      if (!metadata || !store.isHistoryVisibleSession(metadata) || !workspacePathsEqual(metadata.agentDir,workspace)) throw new HostRemoteError('REMOTE_SESSION_TARGET_CHANGED');
+      if ((active?.sessionId===sessionId && active.bot) || [...exitedBots.values()].some(run=>run.session_id===sessionId)) throw new HostRemoteError('REMOTE_SESSION_PRIVATE');
+    },
+    async list(request,agent) {
+      const store=await import('../server/SessionStore');
+      const rows=store.getSessionsByAgentDir(agent.workspacePath).filter(row=>store.isHistoryVisibleSession(row) && !(active?.sessionId===row.id && active.bot) && ![...exitedBots.values()].some(run=>run.session_id===row.id));
+      const index=request.before ? rows.findIndex(item=>item.id===request.before)+1:0;
+      if (request.before && index===0) throw new HostRemoteError('REMOTE_SESSION_CURSOR_INVALID');
+      const page=rows.slice(index,index+request.limit);
+      const items=page.map(item=>({sessionId:item.id,title:item.title.slice(0,256),updatedAt:item.lastActiveAt,preview:(item.lastMessagePreview??'').slice(0,512),runtime:item.runtime??'builtin'}));
+      while (items.length>1 && Buffer.byteLength(JSON.stringify(items))>REMOTE_SESSION_BYTES-1024) items.pop();
+      const hasMore=rows.length>index+items.length;
+      return {kind:'list',agentId:request.agentId,items,hasMore,nextBefore:hasMore ? items.at(-1)!.sessionId:null};
+    },
+    async snapshot(request) {
+      if (active?.sessionId===request.sessionId && !active.bot && !active.closing) return await workerCall(active,'remote',{remoteSession:request}) as import('../shared/remoteSession').RemoteSnapshot;
+      const {buildRemoteSnapshot}=await import('../server/remote-session/projection');
+      return buildRemoteSnapshot(request.agentId,request.sessionId,null,request.limit,request.before);
+    },
+    async ensure(workspace,sessionId) {
+      return exclusive(async()=>{
+        if (active && (!sessionId || active.sessionId!==sessionId)) {
+          if (active.bot || active.closing) throw new HostRemoteError('REMOTE_SESSION_HOST_BUSY');
+          const previous=active;
+          if ([...pending.values()].some(entry=>entry.active===previous)) throw new HostRemoteError('REMOTE_SESSION_HOST_BUSY');
+          const state=await workerCall(previous,'state') as {isBusy?:unknown;replay?:{pendingInteractiveRequests?:unknown[]}};
+          if ([...pending.values()].some(entry=>entry.active===previous) || state.isBusy !== false || !Array.isArray(state.replay?.pendingInteractiveRequests) || state.replay.pendingInteractiveRequests.length) throw new HostRemoteError('REMOTE_SESSION_HOST_BUSY');
+          await release(previous);
+        }
+        if (active?.bot || active?.closing) throw new HostRemoteError('REMOTE_SESSION_HOST_BUSY');
+        return ensureSession(sessionId,undefined,workspace);
+      });
+    },
+    active:()=>active && !active.bot && !active.closing ? {sessionId:active.sessionId,generation:active.generation}:null,
+    async execute(request,target) {
+      if (!active || active.sessionId!==target.sessionId || active.generation!==target.generation || active.bot || active.closing) throw new HostRemoteError('REMOTE_SESSION_TARGET_CHANGED');
+      return workerCall(active,'remote',{remoteSession:request});
+    },
+    receipts:{begin:remoteReceipts.begin,read:remoteReceipts.read,update:remoteReceipts.finish},
+  });
 
   async function release(target: Active): Promise<void> {
     target.closing = true;
@@ -321,7 +391,8 @@ async function serve(): Promise<void> {
 
   async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (shuttingDown) throw new Error('Host is stopping');
-    if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['host.snapshot','config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
+    if (method === 'session.remote') return {kind:'remote-session',data:await remoteSessions.request(params.remoteSession)};
+    if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['host.snapshot','config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register','session.remote'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
     if (method === 'host.snapshot' || method === 'host.inspect') return withHostSnapshotLocks(
       ()=>resourceOwner.inspect(),exclusive,async resources=> {
         if (shuttingDown) throw new Error('Host is stopping');

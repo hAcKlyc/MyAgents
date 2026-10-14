@@ -559,3 +559,91 @@ it("keeps the account menu usable after cloud feedback cannot open", async () =>
   await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
   expect(screen.getByRole("button", { name: "小助理" })).toBeInTheDocument();
 });
+it("closes an old sign-out confirmation and account menu after switching from account A to B without removing B", async () => {
+  mocks.registry = makeRegistry({
+    state: "authenticated",
+    principalId: "account-A-original",
+    expiresAt: null,
+  });
+  const view = render(
+    <OwnedAccountEntry expanded onOpenAgentNetwork={mocks.openAgentNetwork} />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "MoXBots Test · account-" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "退出此实例" }));
+  const oldConfirm = screen.getByRole("button", { name: "确认退出此实例" });
+  const accountB = makeRegistry({
+    state: "authenticated",
+    principalId: "account-B-current",
+    expiresAt: null,
+  });
+  mocks.registry = {
+    ...accountB,
+    revision: 3,
+    selected: "owned-b",
+    connections: accountB.connections.map((connection) =>
+      connection.official
+        ? connection
+        : {
+            ...connection,
+            id: "owned-b",
+            snapshot: {
+              ...connection.snapshot,
+              connectionId: "owned-b",
+              authGeneration: 2,
+            },
+          },
+    ),
+  };
+  view.rerender(
+    <OwnedAccountEntry expanded onOpenAgentNetwork={mocks.openAgentNetwork} />,
+  );
+  expect(
+    screen.queryByRole("button", { name: "确认退出此实例" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "MoXBots 账号" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(oldConfirm);
+  expect(mocks.remove).not.toHaveBeenCalled();
+  expect(mocks.remove).not.toHaveBeenCalledWith("owned-b");
+  // A newly requested confirmation still works for the newly visible account.
+  fireEvent.click(
+    screen.getByRole("button", { name: "MoXBots Test · account-" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "退出此实例" }));
+  fireEvent.click(screen.getByRole("button", { name: "确认退出此实例" }));
+  await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith("owned-b"));
+});
+it("closes an already open account menu when its account generation changes", () => {
+  mocks.registry = makeRegistry({
+    state: "authenticated",
+    principalId: "account-A-original",
+    expiresAt: null,
+  });
+  const view = render(<OwnedAccountEntry expanded />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "MoXBots Test · account-" }),
+  );
+  expect(
+    screen.getByRole("dialog", { name: "MoXBots 账号" }),
+  ).toBeInTheDocument();
+  mocks.registry = {
+    ...mocks.registry,
+    revision: 3,
+    connections: mocks.registry.connections.map((connection) =>
+      connection.official
+        ? connection
+        : {
+            ...connection,
+            snapshot: { ...connection.snapshot, authGeneration: 2 },
+          },
+    ),
+  };
+  view.rerender(<OwnedAccountEntry expanded />);
+  expect(
+    screen.queryByRole("dialog", { name: "MoXBots 账号" }),
+  ).not.toBeInTheDocument();
+  expect(mocks.remove).not.toHaveBeenCalled();
+});

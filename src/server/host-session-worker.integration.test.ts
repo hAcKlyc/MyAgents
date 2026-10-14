@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function start(home: string, workspace: string, sessionId?: string, credential?: string, portable?: {id:string;model:string}) {
+async function start(home: string, workspace: string, sessionId?: string, credential?: string, portable?: {id:string;model:string},remoteAgentBirth=false) {
   const generation = `generation-${Math.random()}`;
   const child = fork(fileURLToPath(new URL('./host-session-worker.ts', import.meta.url)), [], {
     execArgv: ['--import', 'tsx', '--import', join(home, 'no-egress.mjs')],
@@ -24,6 +24,7 @@ async function start(home: string, workspace: string, sessionId?: string, creden
       MYAGENTS_HOST_SESSION_ID: sessionId ?? '', MYAGENTS_HOST_MODEL: portable?.model ?? (credential ? 'k3' : 'claude-sonnet-4-6'),
       MYAGENTS_HOST_PROVIDER_ID: portable?.id ?? (credential ? 'moonshot-coding' : 'anthropic-sub'), MYAGENTS_HOST_EXECUTION_AUTHORIZED: '0',
       MYAGENTS_HOST_CREDENTIAL_SOURCE: credential ? 'supervisor-ipc' : 'systemd',
+      MYAGENTS_HOST_REMOTE_AGENT_BIRTH:remoteAgentBirth ? '1':'0',
       ANTHROPIC_API_KEY: '', ANTHROPIC_AUTH_TOKEN: '', CLAUDE_CODE_OAUTH_TOKEN: '',
       MYAGENTS_MANAGEMENT_PORT: '' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -138,6 +139,11 @@ describe('headless Host Session worker bootstrap', () => {
     expect(await first.request('stop', undefined, 'old-generation')).toMatchObject({ ok: false, error: 'Stale Host generation' });
     expect(await first.request('state')).toMatchObject({ ok: true, data: { sessionId: first.ready.sessionId, isBusy: false, terminal: null } });
     expect(await first.request('permission', { requestId: 'not-pending', decision: 'allow_once' })).toMatchObject({ ok: false });
+    const remoteBound={agentId:'agent',sessionId:first.ready.sessionId};
+    expect(await first.request('remote',{remoteSession:{...remoteBound,kind:'send',operationId:randomUUID(),text:'must remain unauthorized'}})).toMatchObject({ok:false,error:'REMOTE_SESSION_EXECUTION_NOT_AUTHORIZED'});
+    expect(await first.request('remote',{remoteSession:{...remoteBound,sessionId:randomUUID(),kind:'get',limit:1}})).toMatchObject({ok:false,error:'REMOTE_SESSION_TARGET_CHANGED'});
+    expect(await first.request('remote',{remoteSession:{...remoteBound,kind:'respond',operationId:randomUUID(),generation:'old-generation',turnId:'old-turn',requestId:'not-pending',interaction:'permission',approved:true}})).toMatchObject({ok:false,error:'REMOTE_SESSION_INTERACTION_EXPIRED'});
+    expect(await first.request('remote',{remoteSession:{...remoteBound,kind:'stop',operationId:randomUUID(),generation:'old-generation',turnId:'old-turn'}})).toMatchObject({ok:false,error:'REMOTE_SESSION_INTERACTION_EXPIRED'});
     expect(await first.request('shutdown')).toMatchObject({ ok: true });
     const resumed = await start(home, workspace, first.ready.sessionId);
     expect(resumed.ready.sessionId).toBe(first.ready.sessionId);
@@ -149,6 +155,15 @@ describe('headless Host Session worker bootstrap', () => {
     const afterConfig = JSON.parse(await readFile(configPath, 'utf8'));
     expect(afterConfig.hostSettings).toEqual(hostConfig.hostSettings);
     expect(afterConfig.hostConfigReceipts).toEqual(hostConfig.hostConfigReceipts);
+    afterConfig.agents=[{id:'remote-birth-agent',name:'Remote birth',enabled:true,channels:[],providerId:'anthropic-sub',model:'claude-sonnet-4-6',permissionMode:'plan',runtime:'builtin'}];
+    await writeFile(configPath,JSON.stringify(afterConfig),{mode:0o600});
+    await writeFile(join(home,'.myagents','projects.json'),JSON.stringify([{id:'remote-birth-project',name:'Remote birth',path:workspace,agentId:'remote-birth-agent'}]),{mode:0o600});
+    const remote=await start(home,workspace,undefined,undefined,undefined,true);
+    expect(await remote.request('describe')).toMatchObject({ok:true,data:{config:{providerId:'anthropic-sub',model:'claude-sonnet-4-6',permissionMode:'plan'}}});
+    const remoteSnapshot=await remote.request('remote',{remoteSession:{kind:'get',agentId:'remote-birth-agent',sessionId:remote.ready.sessionId,limit:3}});
+    expect(remoteSnapshot).toMatchObject({ok:true,data:{kind:'snapshot',sessionId:remote.ready.sessionId,state:'idle',interactions:[]}});
+    await remote.request('shutdown');
+    expect(JSON.parse(await readFile(configPath,'utf8')).hostSettings).toEqual(hostConfig.hostSettings);
   });
 });
 
