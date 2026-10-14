@@ -6,16 +6,17 @@ const AgentNetwork = lazy(() => import("@/pages/AgentNetwork"));
 const Renderer = memo(function AgentNetworkTabRenderer({
   isActive,
   isDeferred,
+  binding,
 }: {
   tab: AgentNetworkTab;
   isActive: boolean;
   isDeferred: boolean;
-  binding: null;
+  binding: { onOpenRemoteSession: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'] };
 }) {
   if (isDeferred) return PAGE_FALLBACK;
   return (
     <Suspense fallback={PAGE_FALLBACK}>
-      <AgentNetwork isActive={isActive} />
+      <AgentNetwork isActive={isActive} onOpenRemoteSession={binding.onOpenRemoteSession} />
     </Suspense>
   );
 });
@@ -36,4 +37,4 @@ export const agentNetworkTabModule = {
     }),
   },
   initialMount: () => "deferred-content",
-} satisfies TabModuleDefinition<AgentNetworkTab, { title: string }, null>;
+} satisfies TabModuleDefinition<AgentNetworkTab, { title: string }, { onOpenRemoteSession: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'] }>;

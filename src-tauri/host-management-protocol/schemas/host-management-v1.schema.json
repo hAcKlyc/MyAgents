@@ -131,7 +131,8 @@
             "credential.provider.set",
             "receipt.provider.get",
             "resources.directory.list",
-            "resources.register"
+            "resources.register",
+            "session.remote"
           ]
         },
         "params": {
@@ -165,6 +166,9 @@
             },
             {
               "$ref": "#/$defs/resourcesRegister"
+            },
+            {
+              "$ref": "#/$defs/remoteSessionParams"
             }
           ]
         }
@@ -361,6 +365,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "session.remote"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/remoteSessionParams"
+              }
+            }
+          }
         }
       ]
     },
@@ -511,6 +531,9 @@
             },
             {
               "$ref": "#/$defs/directoryList"
+            },
+            {
+              "$ref": "#/$defs/remoteSessionResponse"
             }
           ]
         }
@@ -1777,6 +1800,816 @@
           ]
         }
       }
+    },
+    "remoteSessionRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "capabilities"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "list"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "before": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "limit"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "get"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "before": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "limit"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "start"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "send"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "receipt"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "respond"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "generation": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "turnId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "requestId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "interaction": {
+              "enum": [
+                "permission",
+                "plan",
+                "question"
+              ]
+            },
+            "approved": {
+              "type": "boolean"
+            },
+            "answers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "generation",
+            "turnId",
+            "requestId",
+            "interaction",
+            "approved"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "stop"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "generation": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "turnId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "generation",
+            "turnId"
+          ]
+        }
+      ]
+    },
+    "remoteSessionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteSession": {
+          "$ref": "#/$defs/remoteSessionRequest"
+        }
+      },
+      "required": [
+        "remoteSession"
+      ]
+    },
+    "remoteSessionResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "capabilities"
+            },
+            "version": {
+              "const": 1
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "runtime": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxActiveSessions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "liveUpdates": {
+              "const": "snapshot"
+            }
+          },
+          "required": [
+            "kind",
+            "version",
+            "agentId",
+            "runtime",
+            "maxActiveSessions",
+            "liveUpdates"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "list"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 99,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9-]+$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "preview": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "title",
+                  "updatedAt",
+                  "preview",
+                  "runtime"
+                ]
+              },
+              "maxItems": 30
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "nextBefore": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "items",
+            "hasMore",
+            "nextBefore"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "snapshot"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "generation": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "state": {
+              "enum": [
+                "idle",
+                "running",
+                "waiting_user_action",
+                "unavailable"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "runtime": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "terminal": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "complete",
+                    "stopped",
+                    "error",
+                    "interrupted"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "role": {
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 16000
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9._:-]+$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 160
+                        },
+                        "status": {
+                          "enum": [
+                            "running",
+                            "complete",
+                            "error"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "status",
+                        "summary"
+                      ]
+                    },
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "id",
+                  "role",
+                  "timestamp",
+                  "content",
+                  "truncated",
+                  "tools"
+                ]
+              },
+              "maxItems": 30
+            },
+            "interactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "requestId": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "generation": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "turnId": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "interaction": {
+                    "enum": [
+                      "permission",
+                      "plan",
+                      "question"
+                    ]
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "answerKey": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "question": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 256
+                          },
+                          "maxItems": 8
+                        },
+                        "multiSelect": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "answerKey",
+                        "question",
+                        "options",
+                        "multiSelect"
+                      ]
+                    },
+                    "maxItems": 6
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "generation",
+                  "turnId",
+                  "interaction",
+                  "actionable",
+                  "title",
+                  "description",
+                  "questions"
+                ]
+              },
+              "maxItems": 8
+            },
+            "hasMoreBefore": {
+              "type": "boolean"
+            },
+            "nextBefore": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "generation",
+            "turnId",
+            "revision",
+            "state",
+            "title",
+            "runtime",
+            "model",
+            "terminal",
+            "messages",
+            "interactions",
+            "hasMoreBefore",
+            "nextBefore"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "receipt"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "sessionId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 99,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "enum": [
+                "processing",
+                "accepted",
+                "rejected",
+                "unconfirmed",
+                "not-found"
+              ]
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[A-Z0-9_]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId",
+            "sessionId",
+            "status",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "error"
+            },
+            "code": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Z0-9_]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "code"
+          ]
+        }
+      ]
+    },
+    "remoteSessionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "remote-session"
+        },
+        "data": {
+          "$ref": "#/$defs/remoteSessionResult"
+        }
+      },
+      "required": [
+        "kind",
+        "data"
+      ]
     }
   }
 }

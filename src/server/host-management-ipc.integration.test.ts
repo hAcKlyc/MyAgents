@@ -845,6 +845,32 @@ it.skipIf(process.getuid?.() === 0)(
     });
     expect(await sendRequest('host.inspect',{})).toMatchObject({kind:'extended-snapshot',provider:null,settings:null});
     expect(await sendRequest('host.snapshot',{})).not.toHaveProperty('provider');
+    // Use controlled fixture registry bytes, not an implicit remote enable.
+    const remoteConfigPath=join(home,'.myagents','config.json');
+    await mkdir(join(home,'.myagents'),{recursive:true,mode:0o700});
+    const remoteFixtureConfig=JSON.parse(await readFile(remoteConfigPath,'utf8').catch(error=>{if(error.code==='ENOENT')return '{}';throw error;}));
+    remoteFixtureConfig.agents=[...(remoteFixtureConfig.agents??[]),{id:'remote-fixture-agent',name:'Remote fixture',enabled:true,channels:[],runtime:'builtin'}];
+    await writeFile(remoteConfigPath,JSON.stringify(remoteFixtureConfig),{mode:0o600});
+    await writeFile(join(home,'.myagents','projects.json'),JSON.stringify([{id:'remote-fixture-project',name:'Remote fixture',path:join(state,'workspaces','default'),agentId:'remote-fixture-agent'}]),{mode:0o600});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'capabilities',agentId:'remote-fixture-agent'}})).toMatchObject({kind:'remote-session',data:{kind:'capabilities',maxActiveSessions:1,liveUpdates:'snapshot'}});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'list',agentId:'remote-fixture-agent',limit:3}})).toMatchObject({kind:'remote-session',data:{kind:'list',items:[]}});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'get',agentId:'remote-fixture-agent',sessionId:randomUUID(),limit:3}})).toMatchObject({kind:'remote-session',data:{kind:'error',code:'REMOTE_SESSION_TARGET_CHANGED'}});
+    expect(await sendRequest('host.snapshot',{})).toMatchObject({activeSession:null});
+    remoteFixtureConfig.agents[remoteFixtureConfig.agents.length-1].enabled=false;
+    await writeFile(remoteConfigPath,JSON.stringify(remoteFixtureConfig),{mode:0o600});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'capabilities',agentId:'remote-fixture-agent'}})).toMatchObject({kind:'remote-session',data:{kind:'error',code:'REMOTE_SESSION_AGENT_UNAVAILABLE'}});
+    remoteFixtureConfig.agents[remoteFixtureConfig.agents.length-1].enabled=true;
+    remoteFixtureConfig.hostBotDelegationsV1={bots:[{snapshot:{agent_id:'remote-fixture-agent'}}]};
+    await writeFile(remoteConfigPath,JSON.stringify(remoteFixtureConfig),{mode:0o600});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'capabilities',agentId:'remote-fixture-agent'}})).toMatchObject({kind:'remote-session',data:{kind:'error',code:'REMOTE_SESSION_PRIVATE'}});
+    delete remoteFixtureConfig.hostBotDelegationsV1;
+    await writeFile(remoteConfigPath,JSON.stringify(remoteFixtureConfig),{mode:0o600});
+    const privateSessionId=randomUUID();
+    await writeFile(join(home,'.myagents','sessions.json'),JSON.stringify([{id:privateSessionId,agentDir:join(state,'workspaces','default'),title:'Private Bot',createdAt:new Date().toISOString(),lastActiveAt:new Date().toISOString(),runtime:'builtin',hostBotBinding:{botId:randomUUID(),runGeneration:randomUUID()}}]),{mode:0o600});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'list',agentId:'remote-fixture-agent',limit:3}})).toMatchObject({kind:'remote-session',data:{kind:'list',items:[]}});
+    expect(await sendRequest('session.remote',{remoteSession:{kind:'get',agentId:'remote-fixture-agent',sessionId:privateSessionId,limit:3}})).toMatchObject({kind:'remote-session',data:{kind:'error',code:'REMOTE_SESSION_TARGET_CHANGED'}});
+    remoteFixtureConfig.agents[remoteFixtureConfig.agents.length-1].enabled=false;
+    await writeFile(remoteConfigPath,JSON.stringify(remoteFixtureConfig),{mode:0o600});
     const credentialId = randomUUID();
     const syntheticSecret = 'ipc-test-only-provider-secret-never-use-for-network';
     const credentialRequest = { providerId: 'moonshot-coding', credential: syntheticSecret,
@@ -1013,6 +1039,18 @@ async function within<T>(promise: Promise<T>, timeout = 3000): Promise<T> {
     if (timer) clearTimeout(timer);
   }
 }
+
+it('admits only the closed remote Session envelope, rejecting caller/path and generation forgery fields',async()=>{
+  const calls:Array<Record<string,unknown>>=[];
+  const {peer}=await setup(async(method,params)=>{calls.push(params);return {kind:'remote-session',data:{kind:'error',code:'REMOTE_SESSION_AGENT_UNAVAILABLE'}};});
+  const remoteSession={kind:'capabilities',agentId:'agent'};
+  const valid=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'session.remote',params:{remoteSession}}));
+  expect((await valid).result?.kind).toBe('remote-session');expect(calls).toEqual([{remoteSession}]);
+  for(const params of [{remoteSession:{...remoteSession,caller:'forged'}},{remoteSession,scope:'forged'},{remoteSession:{kind:'get',agentId:'agent',sessionId:'session',limit:31}},{remoteSession:{kind:'start',agentId:'agent',operationId:randomUUID(),text:'hello',workspace:'/another'}}]){
+    const invalid=receive(peer);peer.write(frame({kind:'request',requestId:randomUUID(),method:'session.remote',params}));expect((await invalid).result).toEqual({kind:'error',code:'INVALID_REQUEST'});
+  }
+  expect(calls).toHaveLength(1);
+});
 
 it("retries a peer closed during post-connect path verification before publishing the initial session", async () => {
   scratch = await mkdtemp(join(homedir(), ".mah-host-mgmt-hand-"));

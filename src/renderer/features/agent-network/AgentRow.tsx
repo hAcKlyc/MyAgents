@@ -28,11 +28,15 @@ export function AgentRow({
   agent,
   device,
   onChanged,
+  onOpenSession,
+  sessionOnline = true,
 }: {
   connectionId?: string;
   agent: NetworkAgent;
   device: NetworkDevice;
   onChanged: () => void;
+  onOpenSession?: () => void;
+  sessionOnline?: boolean;
 }) {
   const { t } = useTranslation("app");
   const networkRequest = (request: Parameters<typeof requestNetwork>[0]) =>
@@ -282,6 +286,7 @@ export function AgentRow({
           </button>
         </Tip>
       </div>
+      {onOpenSession && <button type="button" onClick={onOpenSession} disabled={!sessionOnline} className="mt-2 rounded-lg px-2.5 py-1.5 text-sm text-[var(--accent)] hover:bg-[var(--hover-bg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--focus-border)] disabled:opacity-50">{t('remoteSession.openSession')}</button>}
       {descriptionLine && <div className="mt-2.5">{descriptionLine}</div>}
       {error && (
         <p className="mt-1.5 text-xs text-[var(--error)]" role="alert">

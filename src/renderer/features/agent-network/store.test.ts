@@ -1,3 +1,5 @@
+import { readRemoteDraft, writeRemoteDraft, readRemoteOperation, writeRemoteOperation } from '@/features/remote-session/drafts';
+import type { RemoteSessionTab } from '@/features/remote-session/tabContract';
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NetworkSnapshot, NetworkRegistry } from "@/api/agentNetwork";
 import {
@@ -160,4 +162,18 @@ describe("App network projection", () => {
     await flush();
     expect(mocks.read).not.toHaveBeenCalled();
   });
+});
+
+it('registry-only account change clears remote drafts and pending IDs before the next render', () => {
+  const data = new Map<string, string>();
+  vi.stubGlobal('localStorage', { get length() { return data.size; }, key: (index: number) => [...data.keys()][index] ?? null, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value), removeItem: (key: string) => data.delete(key) });
+  const owned = { ...base, connectionId: 'owned:test' };
+  acceptNetworkRegistry(registry([owned]));
+  const tab: RemoteSessionTab = { id: 'tab', view: 'remote-session', title: 'draft', locator: { connectionId: 'owned:test', principalId: 'account', networkId: 'network', authGeneration: 1, deviceId: 'device' }, agentId: 'agent', agentName: 'Agent', deviceName: 'Host', sessionId: null, targetScope: null };
+  writeRemoteDraft(tab, 'private draft');
+  writeRemoteOperation(tab, { operationId: '11111111-1111-4111-8111-111111111111', kind: 'start', status: 'unconfirmed' });
+  acceptNetworkRegistry(registry([{ ...owned, principalId: 'different-account', authGeneration: 2, revision: 2 }]));
+  expect(readRemoteDraft(tab)).toBe('');
+  expect(readRemoteOperation(tab)).toBeNull();
+  vi.unstubAllGlobals();
 });

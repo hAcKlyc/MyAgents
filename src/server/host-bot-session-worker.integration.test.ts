@@ -84,13 +84,16 @@ describe('Host Session worker Bot bootstrap integration',()=>{
       config:{mcpServerIds:[],enabledOfficialToolIds:[]}}});
     const metadata=JSON.parse(await readFile(join(home,'.myagents','sessions.json'),'utf8')) as Array<Record<string,unknown>>;
     expect(metadata).toHaveLength(1);
-    expect(metadata[0]).toMatchObject({id:worker.ready.sessionId,mcpEnabledServers:[],enabledPluginIds:[],enabledOfficialToolIds:[]});
+    expect(metadata[0]).toMatchObject({id:worker.ready.sessionId,mcpEnabledServers:[],enabledPluginIds:[],enabledOfficialToolIds:[],hostBotBinding:{botId:snapshot.bot_id,runGeneration:worker.ready.bot?.run_generation}});
+    expect(await worker.request('remote',{remoteSession:{kind:'get',agentId:snapshot.agent_id,sessionId:worker.ready.sessionId,limit:1}})).toMatchObject({ok:false,error:'REMOTE_SESSION_PRIVATE'});
 
     expect(await worker.request('send',{text:'This must never reach a model'})).toMatchObject({ok:false,
       error:'Delegated Bot v1 supports lifecycle only; model invocation is not authorized'});
     expect(await worker.request('stop')).toMatchObject({ok:true});
     expect(await worker.request('shutdown')).toMatchObject({ok:true});
     await expect(worker.exit).resolves.toEqual({code:0,signal:null});
+    const afterExit=JSON.parse(await readFile(join(home,'.myagents','sessions.json'),'utf8')) as Array<Record<string,unknown>>;
+    expect(afterExit[0].hostBotBinding).toEqual({botId:snapshot.bot_id,runGeneration:worker.ready.bot?.run_generation});
     await expect(readFile(networkAttemptFile,'utf8')).rejects.toMatchObject({code:'ENOENT'});
   });
 });

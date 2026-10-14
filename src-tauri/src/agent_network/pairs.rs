@@ -124,6 +124,7 @@ struct Entry {
     management_ready_announced: bool,
 }
 struct PendingOffer {
+    management_role: Option<PeerRole>,
     accepted: bool,
     bytes: Vec<u8>,
     created_at: Instant,
@@ -238,11 +239,21 @@ impl Pairs {
         self.pending.insert(
             id.into(),
             PendingOffer {
+                management_role: self.management_role,
                 accepted: false,
                 bytes: Vec::new(),
                 created_at: Instant::now(),
             },
         );
+        Ok(())
+    }
+    /// Business role comes from the request source, never canonical TLS ordering.
+    pub(crate) fn reserve_management_controller(&mut self, id: &str) -> Result<(), NetworkError> {
+        if self.management_role.is_none() {
+            return Err(NetworkError::new("CHANNEL_MODE_MISMATCH"));
+        }
+        self.reserve(id)?;
+        self.pending.get_mut(id).expect("reserved").management_role = Some(PeerRole::Controller);
         Ok(())
     }
     pub(crate) fn install(
@@ -292,7 +303,7 @@ impl Pairs {
         }
         self.sequences.entry(pair.clone()).or_default();
         let roots = private_roots(&verified.root_certificate)?;
-        let mut channel = match self.management_role {
+        let mut channel = match pending.management_role {
             Some(role) => Channel::new_management(
                 offer.channel_id.clone(),
                 local.clone(),
@@ -1056,7 +1067,7 @@ pub(crate) mod tests {
             PeerRole::Controller,
         );
         a.reserve(&channel_id).unwrap();
-        b.reserve(&channel_id).unwrap();
+        b.reserve_management_controller(&channel_id).unwrap();
         a.accepted(&channel_id).unwrap();
         b.accepted(&channel_id).unwrap();
         a.install(first_offer, &first, "00000000-0000-0000-0000-000000000007")
@@ -1123,6 +1134,35 @@ pub(crate) mod tests {
             assert!(moved || !a.channels[id].channel.ready() || !b.channels[id].channel.ready());
         }
         panic!("management pair did not reach ready")
+    }
+
+    #[test]
+    fn management_role_is_reserved_by_business_source_and_remote_dto_crosses_tls() {
+        let mut actor = Pairs::new_management(
+            super::super::memory::MemoryBudget::default(),
+            PeerRole::Host,
+        );
+        actor.reserve("inbound").unwrap();
+        actor.reserve_management_controller("outbound").unwrap();
+        assert_eq!(
+            actor.pending["inbound"].management_role,
+            Some(PeerRole::Host)
+        );
+        assert_eq!(
+            actor.pending["outbound"].management_role,
+            Some(PeerRole::Controller)
+        );
+        let (mut host, mut controller, _, _, id) = installed_management_pair();
+        exchange_management(&mut host, &mut controller, &id);
+        let request_id = CanonicalUuid::new(uuid::Uuid::new_v4());
+        controller.send_management(&id,ManagementMessage::Request{request_id,method:ManagementMethod::RemoteSession,params:RequestParams::RemoteSession(myagents_host_management_protocol::RemoteSessionParams{remote_session:myagents_host_management_protocol::RemoteSessionRequest::Capabilities{agent_id:"agent-1".into()}})}).unwrap();
+        let mut got = false;
+        while let Some(frame) = controller.next_frame().unwrap() {
+            let (_, payload) = decode_tls_frame(&frame).unwrap();
+            let (events, _) = host.feed_management(&id, payload).unwrap();
+            got|=events.iter().any(|e|matches!(e,ManagementEvent::Request{request_id:id,method:ManagementMethod::RemoteSession,..} if *id==request_id));
+        }
+        assert!(got);
     }
 
     #[test]

@@ -64,6 +64,9 @@ export interface SessionMetadata {
   cronTaskId?: string;
   /** Product-owned hidden maintenance marker. Ordinary automation sessions leave this unset. */
   systemMaintenanceKind?: SystemMaintenanceSessionKind;
+  /** Host Bot owner birth fact. Private delegated execution is never a public
+   * interactive Session, even after the Bot run or delegation is removed. */
+  hostBotBinding?: { botId: string; runGeneration: string };
   /** Legacy channel/source metadata; use `origin` for product/statistics origin. */
   source?: SessionSource;
   /** Stable product/statistics origin. This is the session birth fact; legacy `source` is channel metadata. */

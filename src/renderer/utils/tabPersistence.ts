@@ -224,6 +224,7 @@ export function shouldOfferRestore(lastExitWasClean: boolean, restorableTabCount
 }
 
 function restoreResourceIdentity(tab: Tab): string | null {
+  if (tab.view === 'remote-session') return builtinTabModules['remote-session'].identity(tab);
   if (tab.view === 'chat' && tab.sessionId) return `chat:${tab.sessionId}`;
   if (tab.view === 'record' && tab.recordId) return `record:${tab.recordId}`;
   // App may replace a missing persisted Record with the existing Record-list

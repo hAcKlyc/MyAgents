@@ -181,3 +181,7 @@ User specifically approved29 update; native owned-account recovery, bottom-left 
 ### MOXBOTS-AUTH-HOST-20261014 final native acceptance
 
 Approved combined27 is installed; actual owned account/device recovery, k3/directory and registered-disabled-Agent list readback passed. Final Linux dd7192d4 upgrade preserved config/projects/unit bytes and finite permissions; all seven exact source checks passed. Task final evidence is updated; PR14 merge/public release remain, original mailxf Site update separately awaits restored connector access (404 in current zshedu account). Migration owner completed local8-project/34-history merge; never restore pre-migration data backups.
+
+## REMOTE-SESSION-IMPLEMENTATION-20261015
+
+同账号远程Agent直接会话；实现/验收状态和后续门禁见 `.agent-sync/tasks/codex-remote-session-20261015-bba594f8.md`。复用SessionEngine/Store与owned管理传输，首版为有界snapshot同步。生产原生包与真实双端、Provider验收单独记录，不能用组件模拟代替。

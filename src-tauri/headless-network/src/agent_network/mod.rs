@@ -96,3 +96,7 @@ pub(crate) mod calls;
 pub(crate) mod incoming;
 #[path = "../../../src/agent_network/management_controller.rs"]
 pub(crate) mod management_controller;
+
+#[cfg(test)]
+#[path = "../../../src/agent_network/remote_admission.rs"]
+pub(crate) mod remote_admission;
