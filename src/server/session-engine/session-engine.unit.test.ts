@@ -1,5 +1,7 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+const qaMode = vi.hoisted(() => ({ enabled: false }));
+vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled }));
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -3217,6 +3219,32 @@ describe('user-confirmed updater admission through the SessionEngine owner', () 
     vi.spyOn(engine as Required<SessionEngine>, 'listAgentWork').mockResolvedValue({ items: [{ status: 'running' }] } as never);
     await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
     expect(mocks.interruptCurrentResponse).not.toHaveBeenCalled();
+  });
+
+  it('QA refuses model work and external restoration before invoking an execution owner', async () => {
+    qaMode.enabled = true;
+    try {
+      const engine = getSessionEngine();
+      for (const request of [
+        engine.sendDesktopMessage({} as never),
+        engine.enqueueImMessage({} as never),
+        engine.enqueueBackgroundMessage({} as never),
+        engine.enqueueInboxMessage({} as never),
+        engine.prepareScheduledTurn({} as never),
+        engine.runInjectedTurn({} as never),
+        engine.compactContext(),
+        engine.retryUserMessage('qa-message'),
+        engine.forceQueuedMessage('qa-queue'),
+        prewarmExternalRuntimeAtSelector({ sessionId: 'qa', workspacePath: '/qa' }),
+        retryLastExternalUserMessageAtSelector('qa-message'),
+      ]) await expect(request).rejects.toThrow('UPDATER_QA_EXECUTION_DISABLED');
+      expect(mocks.enqueueUserMessage).not.toHaveBeenCalled();
+      await expect(restoreInitialExternalSessionAtSelector('qa', '/qa')).resolves.toBe(false);
+      mocks.state.useExternal = true;
+      await expect(restoreInitialExternalSessionAtSelector('qa', '/qa')).rejects.toThrow('UPDATER_QA_EXECUTION_DISABLED');
+      expect(mocks.prewarmExternalSession).not.toHaveBeenCalled();
+      expect(mocks.restoreExternalSessionState).not.toHaveBeenCalled();
+    } finally { qaMode.enabled = false; }
   });
 
   it('does not re-freeze after a timed-out native observation was released', async () => {

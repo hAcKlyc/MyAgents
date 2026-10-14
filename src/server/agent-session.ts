@@ -60,6 +60,7 @@ import { planRetraction } from './utils/message-retraction';
 import type { TransientProviderTextRetryDecision } from './session-core/turn-result-policy';
 import { diagnoseSdkSubprocessFailure } from './utils/sdk-subprocess-diagnostics';
 import { createGuardedSdkQuery } from './utils/sdk-child-launch-guard';
+import { isUpdaterQaBuild } from '../shared/updaterQa';
 import { hostExecutionLimits } from './utils/host-execution-limits';
 import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyError, prepareProviderBinding, type PreparedProvider } from './utils/managed-proxy-binding';
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
@@ -3884,6 +3885,7 @@ export function forceReloadActiveSession(reason: RestartReason = 'mcp'): void {
 }
 
 function schedulePreWarm(delayMs = 500): void {
+  if (isUpdaterQaBuild()) return;
   if (lifecycleState.preWarmTimer) clearTimeout(lifecycleState.preWarmTimer);
   if (!agentDir) return;
   if (lifecycleState.preWarmDisabled) return;
@@ -8166,6 +8168,7 @@ export async function initializeAgent(
   // and a large JSONL can cost ~30-100ms. Read once, reuse.
   let initMeta = initialSessionId ? getSessionMetadata(initialSessionId) : null;
   if (initialSessionId && initMeta?.pendingConversationMutation) {
+    if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
     const resolved = await resolvePendingConversationMutation(initialSessionId);
     if (!resolved.success) {
       throw new Error(
@@ -8187,7 +8190,7 @@ export async function initializeAgent(
     // sdkSessionId is missing, only recover the rare crash-before-metadata-update
     // case when the SDK transcript probe finds real persisted transcriptState.messages.
     const meta = initMeta;
-    if (meta) {
+    if (meta && !isUpdaterQaBuild()) {
       const currentRuntimeType = getCurrentRuntimeType();
       const resumeDecision = await decideBuiltinSessionResume({
         meta,
