@@ -43,10 +43,14 @@ describe('App Shell chrome contract', () => {
     expect(exitConfirm.indexOf('flushPendingRecordNote')).toBeLessThan(
       exitConfirm.indexOf('pending.resolve(true)'),
     );
-    expect(updateGuard).toContain('requestLifecycleExitConfirmation()');
+    const myagentsUpdateGuard = updateGuard.slice(updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
     expect(
-      updateGuard.indexOf('requestLifecycleExitConfirmation()'),
-    ).toBeLessThan(updateGuard.indexOf('performRestartAndUpdate()'));
+      myagentsUpdateGuard.indexOf('requestLifecycleExitConfirmation()'),
+    ).toBeLessThan(myagentsUpdateGuard.indexOf('performRestartAndUpdate()'));
+    const moxbotUpdateGuard = updateGuard.slice(0, updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
+    expect(moxbotUpdateGuard).not.toContain('requestLifecycleExitConfirmation()');
+    expect(moxbotUpdateGuard.indexOf('pendingRecordNoteSubmittersRef.current.values()')).toBeLessThan(moxbotUpdateGuard.indexOf('performRestartAndUpdate()'));
+    expect(moxbotUpdateGuard.indexOf('fileEditSubmittersRef.current.values()')).toBeLessThan(moxbotUpdateGuard.indexOf('performRestartAndUpdate()'));
     expect(app).toContain('onExitRequested: requestLifecycleExitConfirmation');
   });
 

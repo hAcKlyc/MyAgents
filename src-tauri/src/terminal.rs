@@ -58,6 +58,11 @@ impl TerminalManager {
             sessions: Mutex::new(HashMap::new()),
         })
     }
+    /// PTY owner has no authoritative idle-command protocol. An open terminal
+    /// therefore requires the user to finish/close it before confirmed update.
+    pub(crate) async fn has_open_sessions(&self) -> bool {
+        !self.sessions.lock().await.is_empty()
+    }
 }
 
 /// Create a new terminal instance. Returns `terminal_id`.

@@ -1,5 +1,5 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -350,7 +350,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../agent-session', () => ({
+vi.mock('../agent-session', async () => ({
+  hasBuiltinActivityForUpdate: (await import('../builtin-session/lifecycle')).hasBuiltinActivityForUpdate,
+  setUpdateRestartFrozen: (await import('../builtin-session/lifecycle')).setUpdateRestartFrozen,
   applyMcpOverrideAndAwaitReady: mocks.applyMcpOverrideAndAwaitReady,
   cancelImRequest: mocks.cancelBuiltinImRequest,
   cancelQueueItem: mocks.cancelQueueItem,
@@ -495,6 +497,7 @@ vi.mock('../utils/management-api-client', () => ({
 }));
 
 vi.mock('../SessionStore', () => ({
+  assertSessionTranscriptsDurableForUpdate: vi.fn(),
   releaseSessionTranscriptForBinding: vi.fn(async () => undefined),
   getActiveSessionTranscript: vi.fn(() => undefined),
   deleteSession: mocks.deleteSession,
@@ -510,6 +513,8 @@ vi.mock('../sse', () => ({
 }));
 
 import {
+  freezeSessionAdmissionsForUpdate,
+  releaseSessionAdmissionsForUpdate,
   getAskUserQuestionResponseEngine,
   getPermissionResponseEngine,
   getPlanApprovalResponseEngine,
@@ -522,7 +527,7 @@ import {
   stopOwnedTurnByQueueId,
   updateExternalRuntimeConfigAtSelector,
 } from './selector';
-import type { InjectedTurnRequest } from './types';
+import type { InjectedTurnRequest, SessionEngine } from './types';
 import {
   getCurrentProductSessionId,
   resetProductSessionBinding,
@@ -3050,5 +3055,167 @@ describe('session-engine selector and adapters', () => {
       if (previousRuntime === undefined) delete process.env.MYAGENTS_RUNTIME;
       else process.env.MYAGENTS_RUNTIME = previousRuntime;
     }
+  });
+});
+
+
+describe('user-confirmed updater admission through the SessionEngine owner', () => {
+  const token = '00000000-0000-4000-8000-000000000001';
+  const other = '00000000-0000-4000-8000-000000000002';
+  function idleOwnerFixture() {
+    const engine = getSessionEngine();
+    vi.spyOn(engine, 'isBusy').mockReturnValue(false);
+    vi.spyOn(engine, 'getLiveSessionState').mockReturnValue({ sessionState: 'idle', isBusy: false, waitingForUser: false });
+    vi.spyOn(engine, 'getQueueStatus').mockReturnValue([]);
+    vi.spyOn(engine, 'getStreamReplaySnapshot').mockReturnValue({ pendingInteractiveRequests: [] } as never);
+    return engine;
+  }
+  beforeEach(() => {
+    vi.clearAllMocks();
+    releaseSessionAdmissionsForUpdate(token);
+    releaseSessionAdmissionsForUpdate(other);
+    mocks.state.useExternal = false;
+    mocks.state.externalBusy = false;
+    mocks.isSessionBusy.mockReturnValue(false);
+    mocks.getQueueStatus.mockReturnValue([]);
+    mocks.getPendingInteractiveRequests.mockReturnValue([]);
+    mocks.getAgentState.mockReturnValue({ sessionState: 'idle', agentDir: '/workspace' });
+    mocks.getActiveRuntimeType.mockReturnValue('codex');
+    idleOwnerFixture();
+  });
+  afterEach(() => {
+    releaseSessionAdmissionsForUpdate(token);
+    releaseSessionAdmissionsForUpdate(other);
+    vi.restoreAllMocks();
+  });
+
+  it('refuses running/queued/approval owners without invoking stop or cancellation', async () => {
+    vi.mocked(getSessionEngine().isBusy).mockReturnValue(true);
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    vi.mocked(getSessionEngine().isBusy).mockReturnValue(false);
+    vi.mocked(getSessionEngine().getQueueStatus).mockReturnValue([{ id: 'queued-work', messagePreview: 'keep me' }]);
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    vi.mocked(getSessionEngine().getQueueStatus).mockReturnValue([]);
+    vi.mocked(getSessionEngine().getStreamReplaySnapshot).mockReturnValue({ pendingInteractiveRequests: [{ type: 'chat:permission-request', data: { requestId: 'approval' } }] } as never);
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    expect(mocks.interruptCurrentResponse).not.toHaveBeenCalled();
+    expect(mocks.cancelBuiltinImRequest).not.toHaveBeenCalled();
+  });
+
+  it('refuses an admitted compaction even before the adapter publishes busy, then lets it finish', async () => {
+    mocks.state.useExternal = true;
+    idleOwnerFixture();
+    let finish!: (result: { success: boolean }) => void;
+    mocks.compactExternalContext.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const compact = getSessionEngine().compactContext();
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    finish({ success: true });
+    await expect(compact).resolves.toEqual({ success: true });
+    await freezeSessionAdmissionsForUpdate(token);
+    await expect(getSessionEngine().compactContext()).rejects.toThrow('UPDATE_BUSY');
+  });
+
+  it('closes all existing turn admission paths and restores them only for the exact transaction', async () => {
+    await freezeSessionAdmissionsForUpdate(token);
+    const engine = getSessionEngine();
+    for (const request of [
+      engine.sendDesktopMessage({} as never), engine.enqueueImMessage({} as never),
+      engine.enqueueBackgroundMessage({} as never), engine.enqueueInboxMessage({} as never),
+      engine.prepareScheduledTurn({} as never), engine.runInjectedTurn({} as never),
+      engine.compactContext(), engine.retryUserMessage('user'), engine.forceQueuedMessage('queue'),
+    ]) await expect(request).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(other);
+    await expect(engine.sendDesktopMessage({} as never)).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(token);
+    await freezeSessionAdmissionsForUpdate(other);
+    releaseSessionAdmissionsForUpdate(token);
+    await expect(engine.sendDesktopMessage({} as never)).rejects.toThrow('UPDATE_BUSY');
+  });
+
+  it('closes the direct external selectors and runtime creation capabilities as well', async () => {
+    await freezeSessionAdmissionsForUpdate(token);
+    const engine = getSessionEngine();
+    await expect(prewarmExternalRuntimeAtSelector({ sessionId: 'idle', workspacePath: '/workspace' })).rejects.toThrow('UPDATE_BUSY');
+    await expect(restoreInitialExternalSessionAtSelector('idle', '/workspace')).rejects.toThrow('UPDATE_BUSY');
+    await expect(retryLastExternalUserMessageAtSelector('user')).rejects.toThrow('UPDATE_BUSY');
+    await expect(updateExternalRuntimeConfigAtSelector({ runtimeConfig: {} })).rejects.toThrow('UPDATE_BUSY');
+    await expect(engine.resetForNewDesktopSession('/workspace')).rejects.toThrow('UPDATE_BUSY');
+    await expect(engine.retryMcpServer('server')).rejects.toThrow('UPDATE_BUSY');
+    expect(mocks.prewarmExternalSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects mutable runtime and conversation operations after idle is frozen', async () => {
+    await freezeSessionAdmissionsForUpdate(token);
+    const engine = getSessionEngine();
+    for (const request of [
+      engine.updateProxyConfig(null), engine.updateOfficialToolIds(null),
+      engine.updateDesktopInteractionScenario({ type: 'desktop' } as never),
+      engine.rewindToUserMessage('user'), engine.forkAtAssistantMessage('assistant'),
+      engine.stopTurn(), engine.cancelQueuedMessage('queue'),
+      engine.respondAskUserQuestion('request', null), engine.respondPermission('request', 'allow_once'),
+    ]) await expect(request).rejects.toThrow('UPDATE_BUSY');
+    expect(mocks.interruptCurrentResponse).not.toHaveBeenCalled();
+  });
+
+  it('preserves a previously scheduled builtin warm-up instead of freezing across its delayed launch', async () => {
+    const lifecycle = await import('../builtin-session/lifecycle');
+    const timer = setTimeout(() => undefined, 10000);
+    lifecycle.setPreWarmTimer(timer);
+    try {
+      await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+      expect(lifecycle.lifecycleState.preWarmTimer).toBe(timer);
+      expect(lifecycle.isUpdateRestartFrozen()).toBe(false);
+    } finally { lifecycle.clearPreWarmTimer(); }
+    await freezeSessionAdmissionsForUpdate(token);
+    expect(lifecycle.isUpdateRestartFrozen()).toBe(true);
+    releaseSessionAdmissionsForUpdate(other);
+    expect(lifecycle.isUpdateRestartFrozen()).toBe(true);
+    releaseSessionAdmissionsForUpdate(token);
+    expect(lifecycle.isUpdateRestartFrozen()).toBe(false);
+  });
+
+  it('reports observation errors as unknown and does not leave a freeze behind', async () => {
+    vi.mocked(getSessionEngine().getLiveSessionState).mockImplementationOnce(() => { throw new Error('adapter unavailable'); });
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    await freezeSessionAdmissionsForUpdate(other);
+  });
+
+  it('preserves an SDK background task after its root has become idle', async () => {
+    const lifecycle = await import('../builtin-session/lifecycle');
+    const query = {} as never;
+    lifecycle.setQuerySession(query);
+    lifecycle.recordQueryBackgroundTask(query, 'background-owner', { runId: 'run-updater' });
+    try {
+      await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+      expect(lifecycle.hasQueryBackgroundTasks(query)).toBe(true);
+    } finally {
+      lifecycle.takeQueryBackgroundTasks(query);
+      lifecycle.setQuerySession(null);
+    }
+  });
+
+  it('refuses native DSH child activity while its root is idle', async () => {
+    mocks.state.useExternal = true;
+    mocks.getActiveRuntimeType.mockReturnValue('dsh');
+    const engine = idleOwnerFixture();
+    vi.spyOn(engine, 'getRuntimeIdentity').mockReturnValue({ runtime: 'dsh' } as never);
+    vi.spyOn(engine as Required<SessionEngine>, 'listAgentWork').mockResolvedValue({ items: [{ status: 'running' }] } as never);
+    await expect(freezeSessionAdmissionsForUpdate(token)).rejects.toThrow('UPDATE_BUSY');
+    expect(mocks.interruptCurrentResponse).not.toHaveBeenCalled();
+  });
+
+  it('does not re-freeze after a timed-out native observation was released', async () => {
+    mocks.state.useExternal = true;
+    mocks.getActiveRuntimeType.mockReturnValue('dsh');
+    const engine = idleOwnerFixture();
+    vi.spyOn(engine, 'getRuntimeIdentity').mockReturnValue({ runtime: 'dsh' } as never);
+    let finish!: (result: never) => void;
+    vi.spyOn(engine as Required<SessionEngine>, 'listAgentWork').mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = freezeSessionAdmissionsForUpdate(token);
+    await expect(engine.compactContext()).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(token);
+    finish({ items: [] } as never);
+    await expect(pending).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    await expect(engine.compactContext()).resolves.toMatchObject({ success: true });
   });
 });

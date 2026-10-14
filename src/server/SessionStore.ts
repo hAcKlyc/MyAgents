@@ -75,6 +75,18 @@ const activeTranscripts = new Map<string, SessionTranscript>();
 const transcriptBindings = new Map<string, Promise<SessionTranscript>>();
 const transcriptStatusListeners = new Set<(status: TranscriptSaveStatus) => void>();
 
+/** Update admission must not turn a completed but unsaved answer into data loss.
+ * This is a read of the existing writer owner; it neither flushes nor revokes it. */
+export function assertSessionTranscriptsDurableForUpdate(): void {
+    if (transcriptBindings.size > 0) throw new Error('UPDATE_BUSY');
+    for (const transcript of activeTranscripts.values()) {
+        if (transcript.isRevoked) continue;
+        const status = transcript.writer.status;
+        if (status.state !== 'healthy') throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+        if (status.liveRevision !== status.durableRevision) throw new Error('UPDATE_BUSY');
+    }
+}
+
 export function getActiveSessionTranscript(sessionId: string): SessionTranscript | undefined {
     const active = activeTranscripts.get(sessionId);
     return active?.isRevoked ? undefined : active;

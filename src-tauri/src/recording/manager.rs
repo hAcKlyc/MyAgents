@@ -526,6 +526,7 @@ impl RecordingManager {
         self: &Arc<Self>,
         input: RecordingStartInput,
     ) -> Result<RecordingStartResult, String> {
+        let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
         let selection = input.selection;
         let result = self.start_inner(input).await;
         if let Err(error) = &result {
@@ -3180,6 +3181,13 @@ mod tests {
             .await
             .unwrap();
 
+        // Paused capture remains slot-owned; a confirmed update must not
+        // mistake lack of advancing media time for completion.
+        assert_eq!(
+            manager.snapshot().await.unwrap().capture_status,
+            CaptureStatus::Paused
+        );
+
         let stopped = manager
             .stop(RecordingCommandInput {
                 record_id: paused.record_id,
@@ -3499,6 +3507,11 @@ mod tests {
             warnings: Vec::new(),
         };
         manager.state.lock().await.slot = Some(RecordingSlot::Settling(snapshot));
+
+        assert_eq!(
+            manager.snapshot().await.unwrap().capture_status,
+            CaptureStatus::Finalizing
+        );
 
         manager
             .release_failed_settlement(7, "failed-settlement", "injected failure")

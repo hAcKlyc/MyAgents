@@ -1,7 +1,7 @@
 //! Shared verification for first-party downloadable resource manifests.
 //!
-//! The public key is intentionally the same trust root used by the Tauri app
-//! updater. Resource owners may reuse this verifier, but they still own their
+//! Upstream downloadable resources retain the MyAgents trust root. MoXBots
+//! app updates use their independent configured key. Resource owners still own their
 //! manifest schema, download allowlist, staging, and activation lifecycle.
 
 use base64::{engine::general_purpose, Engine as _};
@@ -18,7 +18,11 @@ fn decode_base64_text(value: &str, label: &str) -> Result<String, String> {
 }
 
 pub(super) fn public_key() -> Result<PublicKey, String> {
-    let decoded = decode_base64_text(MYAGENTS_MINISIGN_PUBKEY, "public key")?;
+    decode_public_key(MYAGENTS_MINISIGN_PUBKEY)
+}
+
+fn decode_public_key(value: &str) -> Result<PublicKey, String> {
+    let decoded = decode_base64_text(value, "public key")?;
     PublicKey::decode(&decoded).map_err(|error| format!("invalid minisign public key: {error}"))
 }
 
@@ -32,7 +36,16 @@ pub(crate) fn verify_minisign_bytes(
     signature_value: &str,
     label: &str,
 ) -> Result<(), String> {
-    let public_key = public_key()?;
+    verify_minisign_bytes_with_key(bytes, signature_value, MYAGENTS_MINISIGN_PUBKEY, label)
+}
+
+pub(crate) fn verify_minisign_bytes_with_key(
+    bytes: &[u8],
+    signature_value: &str,
+    public_key_value: &str,
+    label: &str,
+) -> Result<(), String> {
+    let public_key = decode_public_key(public_key_value)?;
     let signature = signature(signature_value, label)?;
     public_key
         .verify(bytes, &signature, true)
@@ -43,6 +56,27 @@ pub(crate) fn verify_minisign_bytes(
 mod tests {
     use super::*;
     use std::{fs, path::Path};
+
+    #[test]
+    fn moxbots_update_key_verifies_final_bytes_and_rejects_tampering() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../test-fixtures/moxbots-updater-signature.json"
+        )).unwrap();
+        let bytes = fixture["bytes"].as_str().unwrap().as_bytes();
+        let key = fixture["pubkey"].as_str().unwrap();
+        let signature_value = fixture["signature"].as_str().unwrap();
+        let profile: serde_json::Value = serde_json::from_str(include_str!(
+            "../tauri.moxbot.conf.json"
+        )).unwrap();
+        assert_eq!(profile["plugins"]["updater"]["pubkey"], key);
+        verify_minisign_bytes_with_key(bytes, signature_value, key, "app update").unwrap();
+        assert!(verify_minisign_bytes_with_key(b"changed bytes", signature_value, key, "app update").is_err());
+        assert!(verify_minisign_bytes_with_key(bytes, signature_value, MYAGENTS_MINISIGN_PUBKEY, "app update").is_err());
+        let decoded = decode_base64_text(signature_value, "signature").unwrap();
+        let changed = decoded.replace("trusted comment:", "trusted comment: altered");
+        let changed = general_purpose::STANDARD.encode(changed);
+        assert!(verify_minisign_bytes_with_key(bytes, &changed, key, "app update").is_err());
+    }
 
     #[test]
     fn shared_pubkey_matches_tauri_updater_pubkey() {

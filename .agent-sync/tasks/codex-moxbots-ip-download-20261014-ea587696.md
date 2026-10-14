@@ -26,7 +26,7 @@ Continue the explicitly public trial delivery through the user's chosen IP websi
 
 ## Current acceptance and daily-app boundary (2026-10-15)
 
-PR14 merged main878ef665 after seven final checks. This branch deliberately incorporated that main; its remaining delta is download metadata and handoff records only. Public ZIP asset640822013 matches local verified size/SHA. Static overlay426f14eb remains an ancestor and exact source of deployed metadata; later commits only synchronize records/main.
+PR14 merged main878ef665 after seven final checks. This branch deliberately incorporated that main and subsequent updater main7ec5b6d4; its remaining delta is download metadata and handoff records only. Public ZIP asset640822013 matches local verified size/SHA. Static overlay426f14eb remains an ancestor and exact source of deployed metadata; later commits only synchronize records/main.
 
 Live pointer: releases/a5cb41f0-download-27d6ed8c-426f14eb. Server backup/manifest/selective rollback: /root/moxbot-ip-download-426f14eb. HTML SHA256cb155326c3ad5bda0b27f3b29a35167fd4df5b73187c1bfe86f7963f28318f29; JSON aa1b8b9858ca34195f7258d9c2e8ecc1cdcd0d93b70f270a13c464bb1981c2fc. Existing four maintenance locks were acquired. Nginx config bytes unchanged, no reload, cloudPID1021478 unchanged. Existing design/layout/JS preserved.
 
@@ -48,4 +48,4 @@ Parent PR14 and IP deployment/actual browser gates are passed. Only this final s
 
 ## Next step
 
-Push this final metadata/record checkpoint; wait for required CI, compare latest-main merge tree and merge PR41, verify remote main contains both PR14 and overlay426f14eb. No additional App update, profile access, server restart or Sites account action is needed.
+Shared project-map append conflict was resolved by preserving both the updater and IP sections. Push this final metadata/record checkpoint; wait for required CI, compare latest-main merge tree and merge PR41, verify remote main contains both PR14 and overlay426f14eb. No additional App update, profile access, server restart or Sites account action is needed.
