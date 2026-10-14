@@ -2,10 +2,12 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 import { canonicalBytes, validateConfig } from '../../services/agentnet/execution-core/js/index.mjs';
+import { parseCloudModelLease, cloudSessionProviderId, type CloudModelLease } from './cloud-model';
 import type { ImmutableBotSnapshot } from './bot-runtime';
 
 export interface HostBotBootstrap {
   version: 1;
+  cloud_model?: CloudModelLease;
   snapshot: ImmutableBotSnapshot;
   workspace: string;
   provider_id: string;
@@ -19,7 +21,9 @@ const text = (v: unknown, max: number): v is string => typeof v === 'string' && 
   v === v.trim() && Buffer.byteLength(v) <= max && [...v].every(c=>c.charCodeAt(0)>=32 && c.charCodeAt(0)!==127);
 
 export function parseHostBotBootstrap(raw: unknown): HostBotBootstrap {
-  if (!exact(raw, ['version','snapshot','workspace','provider_id','model','run_generation']) || raw.version !== 1 ||
+  const candidate=raw && typeof raw==='object' && !Array.isArray(raw) ? raw as Record<string,unknown> : {};
+  const fields=['version','snapshot','workspace','provider_id','model','run_generation',...(Object.hasOwn(candidate,'cloud_model')?['cloud_model']:[])];
+  if (!exact(raw, fields) || raw.version !== 1 ||
       !text(raw.workspace, 4096) || !isAbsolute(raw.workspace) || resolve(raw.workspace) !== raw.workspace ||
       !text(raw.provider_id, 256) || !text(raw.model, 256) || typeof raw.run_generation !== 'string' || !uuid.test(raw.run_generation) ||
       !exact(raw.snapshot, ['bot_id','agent_id','binding_generation','revision','runtime','config','snapshot_hash'])) throw new Error('BOT_BOOTSTRAP_INVALID');
@@ -33,7 +37,13 @@ export function parseHostBotBootstrap(raw: unknown): HostBotBootstrap {
   if (config.runtime !== 'builtin' || !config.model_ref || !config.system_prompt.trim()) throw new Error('BOT_BOOTSTRAP_INVALID');
   const {snapshot_hash, ...payload} = s;
   if (createHash('sha256').update(canonicalBytes(payload)).digest('hex') !== snapshot_hash) throw new Error('BOT_BOOTSTRAP_HASH_MISMATCH');
+  if(raw.cloud_model!==undefined){
+    const origin=new URL((raw.cloud_model as CloudModelLease).gateway_base_url).origin;
+    const lease=parseCloudModelLease(raw.cloud_model,origin);
+    if(lease.model_ref!==config.model_ref||raw.provider_id!==cloudSessionProviderId(lease)||raw.model!==lease.model)throw new Error('BOT_BOOTSTRAP_INVALID');
+  }
   const value = structuredClone(raw) as unknown as HostBotBootstrap;
+  if(value.cloud_model)Object.freeze(value.cloud_model);
   Object.freeze(value.snapshot.config); Object.freeze(value.snapshot); return Object.freeze(value);
 }
 

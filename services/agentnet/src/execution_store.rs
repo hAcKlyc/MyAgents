@@ -2,7 +2,7 @@
 //! store never interprets an HTTP bearer or self-reported device identity.
 use myagents_agentnet_execution_core::{
     Activity, Admission, BotSnapshot, Command, ExecutionScope, Grant, HostContext, HostObservation,
-    IntentClaims, LeaseClaims, Receipt, ReceiptStatus, intent_hash,
+    IntentClaims, LeaseClaims, Operation, Receipt, ReceiptStatus, intent_hash,
 };
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -584,19 +584,31 @@ impl ExecutionStore {
     }
     pub fn queued_for(&self, scope: &ExecutionScope) -> Result<Vec<CommandRow>> {
         let c = self.connection()?;
-        let mut q=c.prepare("SELECT id FROM commands WHERE device=?1 AND status IN ('queued','issued','leased','unconfirmed') AND receipt IS NULL ORDER BY rowid LIMIT 8").map_err(|_|storage())?;
-        let ids = q
-            .query_map([&scope.host_device_id], |r| r.get::<_, String>(0))
+        // Reserve bounded candidate slots for reductions beyond the oldest
+        // blocked normal window, but preserve row order for executable work.
+        let mut query=c.prepare("WITH reductions AS (SELECT rowid AS position,id FROM commands WHERE device=?1 AND scope=?2 AND status IN ('queued','issued','leased','unconfirmed') AND receipt IS NULL AND json_extract(payload,'$.operation.method') IN ('disable','delete') ORDER BY rowid LIMIT 8),normal AS (SELECT rowid AS position,id FROM commands WHERE device=?1 AND scope=?2 AND status IN ('queued','issued','leased','unconfirmed') AND receipt IS NULL AND COALESCE(json_extract(payload,'$.operation.method'),'') NOT IN ('disable','delete') ORDER BY rowid LIMIT 8) SELECT id FROM (SELECT position,id FROM reductions UNION ALL SELECT position,id FROM normal) ORDER BY position").map_err(|_|storage())?;
+        let ids = query
+            .query_map(params![scope.host_device_id, json(scope)?], |row| {
+                row.get::<_, String>(0)
+            })
             .map_err(|_| storage())?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|_| storage())?;
         ids.iter()
             .map(|id| read_command(&c, id)?.ok_or_else(storage))
-            .filter(|r| match r {
-                Ok(row) => row.scope == *scope,
-                Err(_) => true,
-            })
             .collect()
+    }
+    pub(crate) fn has_prior_noncleanup(
+        &self,
+        scope: &ExecutionScope,
+        command: &Command,
+        now: u64,
+        evaluated_ids: &[String],
+    ) -> Result<bool> {
+        if evaluated_ids.len() > 16 {
+            return Err(LedgerError("EXECUTION_INVALID"));
+        }
+        self.connection()?.query_row("SELECT EXISTS(SELECT 1 FROM commands AS command JOIN grants AS grant ON grant.id=command.grant_id WHERE command.device=?1 AND command.scope=?2 AND command.bot_id=?3 AND command.receipt IS NULL AND command.status IN ('queued','issued','leased','unconfirmed') AND grant.state='active' AND CAST(json_extract(grant.payload,'$.expires_at') AS INTEGER)>?5 AND COALESCE(json_extract(command.payload,'$.operation.method'),'') NOT IN ('disable','delete') AND command.rowid<(SELECT rowid FROM commands WHERE id=?4) AND command.id NOT IN (SELECT value FROM json_each(?6)))",params![scope.host_device_id,json(scope)?,command.bot_id,command.mutation_id,i(now)?,json(&evaluated_ids)?],|row|row.get(0)).map_err(|_|storage())
     }
     pub fn issue_intent(&self, intent: &IntentClaims, now: u64) -> Result<String> {
         intent
@@ -619,6 +631,7 @@ impl ExecutionStore {
         {
             return Err(LedgerError("COMMAND_NOT_PENDING"));
         }
+        check_delete_dependencies(&tx, &intent.scope, &cmd.command)?;
         active_grant(&tx, &intent.grant, now)?;
         tx.execute("DELETE FROM issued_intents WHERE expires_at<=?1", [i(now)?])
             .map_err(|_| storage())?;
@@ -729,6 +742,7 @@ impl ExecutionStore {
         {
             return Err(LedgerError("COMMAND_NOT_PENDING"));
         }
+        check_delete_dependencies(&tx, &intent.scope, &cmd.command)?;
         let saved: Option<String> = tx
             .query_row(
                 "SELECT payload FROM leases WHERE device=?1 AND nonce=?2",
@@ -884,6 +898,23 @@ fn active_grant(c: &Connection, grant: &Grant, now: u64) -> Result<()> {
     let (p, s) = row.ok_or(LedgerError("GRANT_NOT_FOUND"))?;
     if p != json(grant)? || s != "active" || grant.expires_at <= now {
         return Err(LedgerError("GRANT_NOT_ACTIVE"));
+    }
+    Ok(())
+}
+fn check_delete_dependencies(
+    c: &Connection,
+    scope: &ExecutionScope,
+    command: &Command,
+) -> Result<()> {
+    if !matches!(command.operation, Operation::Delete(_)) {
+        return Ok(());
+    }
+    // Expiry or actor logout never establishes the outcome of an earlier lease.
+    // The original command/receipt owner remains authoritative; exclude this
+    // mutation so a Delete lease can replay its own nonce normally.
+    let unknown:bool=c.query_row("SELECT EXISTS(SELECT 1 FROM commands WHERE device=?1 AND scope=?2 AND bot_id=?3 AND id!=?4 AND rowid<(SELECT rowid FROM commands WHERE id=?4) AND lease_count>0 AND receipt IS NULL)",params![scope.host_device_id,json(scope)?,command.bot_id,command.mutation_id],|row|row.get(0)).map_err(|_|storage())?;
+    if unknown {
+        return Err(LedgerError("HOST_COMMAND_OUTCOME_UNCONFIRMED"));
     }
     Ok(())
 }

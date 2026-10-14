@@ -301,3 +301,17 @@ PR32 is merged at remote main d86f7505f641ecbe6d136142c11422ef063ea0e5 after all
 ### BOTS-ADMIN-LOGIN-UX-001 最终交付（2026-10-14）
 
 已交付PR33/main1ece497d并发布现有统一云后台：当前标签页中文OIDC登录及固定后台返回替代旧弹窗/独立标签页fallback，错误/取消/过期可恢复。代码七项CI通过，Linux制品及Dex资源manifest/运行源对应已核实；真实受控管理员登录→中文确认→Bots目录→退出204，以及callback400恢复通过。仅两个既有云服务更新展示和回跳，原身份与权限不变，101 Host及模型未操作。备份标记 moxbots-login-ux-backup-20261014T101958，恢复原unit+Dex配置即可回滚且保留业务状态。详细最终验收和后续状态见 `.agent-sync/tasks/codex-bots-admin-login-ux-001-2ebc1db3.md`；现网维护窗口已释放，后续无本任务云端写入。
+
+
+## 2026-10-14 · BOTS-MODEL-CENTER-001
+
+用户明确授权现有管理台增加模型中心、Bot模型分配和调用监控，第一版 builtin/API 且复用设置交互。实际工作树 `/Users/zhangshaohua/Documents/Codex/2026-10-14/moxbots-model-center`，分支 `codex/bots-model-center-001`，base3ee8aab5。本地主体与HTTP/原账号/在线Host authority已接通；125 Rust tests/0failed、clippy、TypeScript、ESLint、Host targeted和真实nativeSDK三协议隔离mock通过。第一轮独立审查assignment原mutation响应丢失P1已修且route回放/receipt测试通过；最终UI独立验收通过（390/768/1440、真实store合成计量、CRUD/CAS/回放与权限）。cloud模型Bot的native工具/settings/MCP/plugin/skills/agents关闭，并经真实SDK恶意tool_use/hooks隔离复验。源码未合main、现网未发布、真实模型没有调用。
+
+API Key云端加密write-only；Host只能持有限Bot/Session bearer。已有生命周期授权不开放模型执行，须新的本地cloud_models opt-in。收费路径需用户指定平台配置及测试Bot/上限；不可复制私人Host key。下一步见任务记录 `.agent-sync/tasks/codex-bots-model-center-001-a165b438.md` 与规划 `services/agentnet/planning/BOTS-MODEL-CENTER-V1.md`；云140服务仍原loginux7c30，101维护留给原Host聊天，不擅自重启或更新它。外部证据私有目录 `/Users/zhangshaohua/Documents/Codex/2026-10-14/moxbots-model-center-private`，不提交凭据、包、原生profile或数据库。
+
+
+### 2026-10-14 · BOTS-MODEL-CENTER-001 发布接续
+
+覆盖上方开发阶段状态：PR38 已合入 main，源码/主干七项 CI 全成功；模型中心、builtin/API 分配与调用监控已发布既有云 `/admin`。实际发布整树、二进制/网页 hash、备份与管理员真实路径见 `dev-docs/bots-model-center-production-acceptance.md`。测试 supplier/model 已停用、Bot 软删除，无供应商调用，101 Host/桌面及本地 cloud_models 未变。
+
+用户最终明确“复用功能，后面自己配置”，不再请求配置文件；供应商及密钥由用户后续在模型中心填写。真实 Bot 推理还需实际 Host 的限定接入和联合升级，不能用已保存的 model_ref 表示 Host 已应用。当前任务的实现/管理发布关闭，后续供应商计量路径另验收。通用旧失效 actor 队列公平性 BOTS-EXEC-QUEUE-FAIRNESS-002 仍在 TODO，未扩大本次修复声明。

@@ -1,6 +1,6 @@
 ## MOXBOTS-AUTH-HOST-20261014 — current continuation
 
-Root owns integration. Human-approved114 is installed and update/start plus controlled cold start restored owned account/two devices without keychain prompts. Corrected candidate29e0f05a includes main5315, footer-click/full-DTO/strict-wire/IPC-handoff repairs;83 focused tests and20 Rust protocol tests pass, independent reviews pass, signed macOS ZIP/resources/extraction verified and copied to Downloads. Linux29 Node is deployed with backups and actual0.46s automatic IPC recovery with NodePID unchanged. New29 concrete update answer is pending and Mac is now locked; actual29 model save/disabled-Agent persistence remains open. Final CI/main and public download refresh follow required real acceptance. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
+Root owns integration. Human-approved29 is installed; owned account restoration, bottom-left account entry, actual k3/model-directory save, disabled Agent creation and desktop plus both Host services restart persistence pass without a new keychain prompt. Read-only extended Agent list is repaired with three regressions. Latest main model-center source is being incorporated with cloud_models remaining disabled. Final combined tests/candidate/CI and PR14/main/public download delivery remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
 
 ## MAH-CREDENTIAL-PUBLISHER-ROUTES-20261014 — current desktop gate
 
@@ -9,6 +9,9 @@ Root owns integration. Human-approved114 is installed and update/start plus cont
 ## MAH-CREDENTIAL-PARENT-BUDGET-20261013 — native recovery continuation (historical)
 
 Root owns integration, packaging, installation and acceptance. Exact 6ac native migration validated the old account/key but failed before routing-ledger commit; cause remains unknown. a8 sidebar native moves/section persistence passed independently. Parent-only budget/closed diagnostics candidate bae611a0 retains frozen reader v1 and has been integrated with accepted main cf741f at 4a513ec7. Parent41, AgentNet148, packaging13 and default/MoX production checks passed before this latest-main combination; combined checks and native recovery are still required. Do not repeat OS authorization automatically or declare network acceptance from synthetic probes. Record: `.agent-sync/tasks/feat-mah-credential-parent-budget-20261013.md`.
+# BOTS-MODEL-CENTER-001
+
+2026-10-14：模型中心、Bot builtin/API 模型分配和调用监控已由 PR38 合入 main 并发布现有统一 `/admin`；源码与主干七项 CI 全通过，运行二进制/资源来源以及真实管理员配置、分配、重启持久化和监控路径已复验。用户明确后续自行填写供应商，本次不导入已有配置、不调用模型，不改变实际 Host 委派权限。发布/验收与协作证据见 `dev-docs/bots-model-center-production-acceptance.md`；后续供应商/Host/付费路径与已发布的管理功能分开追踪。
 
 # Development Plan
 

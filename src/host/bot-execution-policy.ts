@@ -4,8 +4,10 @@ import { lstat, open, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { canonicalBytes, validateScope, type ExecutionScope } from '../../services/agentnet/execution-core/js/index.mjs';
+import { validateCloudModelPolicy, type CloudModelPolicy } from './cloud-model';
 import type { HostBotLocalPolicy } from './bot-management';
 export interface BotExecutionPolicy {
+  cloud_models?: CloudModelPolicy;
   version: 1; host_id: string; scope: ExecutionScope; jwks: Record<string,unknown>;
   ipc_socket: string; network_uid: number; management_gid: number; roots: Record<string,string>;
   local_policy: HostBotLocalPolicy; model_bindings: Record<string,{provider_id:string;model:string}>;
@@ -24,15 +26,19 @@ export async function loadBotExecutionPolicy(path:string,hostId:string) {
   try{await lstat(path);}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}
   const bytes=await protectedBytes(path);
   const digest=createHash('sha256').update(bytes).digest('hex');const raw:unknown=JSON.parse(bytes.toString('utf8'));
-  if(!exact(raw,['version','host_id','scope','jwks','ipc_socket','network_uid','management_gid','roots','local_policy','model_bindings'])||raw.version!==1||raw.host_id!==hostId||
-     typeof raw.ipc_socket!=='string'||!isAbsolute(raw.ipc_socket)||!Number.isSafeInteger(raw.network_uid)||(raw.network_uid as number)<=0||
-     !Number.isSafeInteger(raw.management_gid)||(raw.management_gid as number)<=0 ||
-     !exact(raw.local_policy,['host_id','owner_principal_id','scope','allowed_bot_ids','allowed_root_ids','allowed_runtimes','allowed_model_refs','allowed_operations','max_daily_tokens','expires_at'])||
-     !raw.roots||typeof raw.roots!=='object'||Array.isArray(raw.roots)||!raw.model_bindings||typeof raw.model_bindings!=='object'||Array.isArray(raw.model_bindings)||
-     !raw.jwks||typeof raw.jwks!=='object'||Array.isArray(raw.jwks))throw new Error('BOT_LOCAL_POLICY_INVALID');
-  validateScope(raw.scope);validateScope(raw.local_policy.scope);
-  const policy=raw as unknown as BotExecutionPolicy;
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('BOT_LOCAL_POLICY_INVALID');
+  const publicRaw = Object.fromEntries(Object.entries(raw).filter(([key])=>key!=='cloud_models'));
+  const value=raw as Record<string,unknown>;
+  if(!exact(publicRaw,['version','host_id','scope','jwks','ipc_socket','network_uid','management_gid','roots','local_policy','model_bindings'])||value.version!==1||value.host_id!==hostId||
+     typeof value.ipc_socket!=='string'||!isAbsolute(value.ipc_socket)||!Number.isSafeInteger(value.network_uid)||(value.network_uid as number)<=0||
+     !Number.isSafeInteger(value.management_gid)||(value.management_gid as number)<=0 ||
+     !exact(value.local_policy,['host_id','owner_principal_id','scope','allowed_bot_ids','allowed_root_ids','allowed_runtimes','allowed_model_refs','allowed_operations','max_daily_tokens','expires_at'])||
+     !value.roots||typeof value.roots!=='object'||Array.isArray(value.roots)||!value.model_bindings||typeof value.model_bindings!=='object'||Array.isArray(value.model_bindings)||
+     !value.jwks||typeof value.jwks!=='object'||Array.isArray(value.jwks))throw new Error('BOT_LOCAL_POLICY_INVALID');
+  validateScope(value.scope);validateScope(value.local_policy.scope);
+  const policy=value as unknown as BotExecutionPolicy;
   if(policy.local_policy.host_id!==hostId||policy.local_policy.owner_principal_id!==policy.scope.host_owner_id||!canonicalBytes(policy.local_policy.scope).equals(canonicalBytes(policy.scope))) throw new Error('BOT_LOCAL_POLICY_INVALID');
+  if(policy.cloud_models!==undefined)validateCloudModelPolicy(policy.cloud_models,policy.local_policy);
   if(Object.keys(policy.model_bindings).length>128)throw new Error('BOT_LOCAL_POLICY_INVALID');
   for(const [id,binding] of Object.entries(policy.model_bindings)) {
     if(!uuid.test(id)||!policy.local_policy.allowed_model_refs.includes(id)||!exact(binding,['provider_id','model'])||
