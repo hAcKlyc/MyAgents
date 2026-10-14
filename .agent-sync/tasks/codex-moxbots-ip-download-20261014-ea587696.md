@@ -34,7 +34,7 @@ Primary owns this small metadata-only UI check; no new workers or external calls
 
 The user's daily /Applications/MoXBots.app and ~/.moxbot data/credentials are protected. Do not launch/quit/automate/update or borrow this profile for testing. Historical27 acceptance does not assert the current daily installed version. Further native tests require verified independent bundle/single-instance identity, profile/ports and credential-service names; none are needed for this website metadata delivery.
 
-## Historical checkpoint
+## Completed
 
 Parent task real29 configuration/disabled-Agent creation and client+Host restart persistence passed. Combined27 package is installed/actually read back; final parent PR14 documentation CI is pending. User corrected the delivery target to the existing IP website, making the old Sites404 irrelevant to this self-hosted publication. Current140 cloudPID1021478 remains untouched.
 
