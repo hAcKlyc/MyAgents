@@ -113,7 +113,7 @@ SIDEBAR-ORG原生更新：a8具体包已由用户许可并串行安装；主Agen
 
 ## MOXBOTS-PROJECT-BOARD-001
 
-用户已确认MoXBots仓库并批准PB-002实现。当前Agent负责隔离分支codex/project-board-20261014及集成/主干交付；TaskStore/Session owner不变，工作区看板只读投影真实数据，有限activity快照明确新鲜度。原生更新与既有owner串行；无需新增付费模型任务。进度/门禁见`.agent-sync/tasks/codex-project-board-20261014-da9bc0a5.md`。 2026-10-14：PR31已入远端main；统一包5f1a8feb已安装，CUA原生看板关键路径验收通过，官网公开完整下载件大小/SHA与候选ZIP一致，ZIP完整性通过。未公证及未覆盖路径见任务记录与`dev-docs/project-board-native-acceptance.md`。
+用户已确认MoXBots仓库并批准PB-002实现。当前Agent负责隔离分支codex/project-board-20261014及集成/主干交付；TaskStore/Session owner不变，工作区看板只读投影真实数据，有限activity快照明确新鲜度。原生更新与既有owner串行；无需新增付费模型任务。进度/门禁见`.agent-sync/tasks/codex-project-board-20261014-da9bc0a5.md`。 2026-10-14：PR31已入远端main；统一包5f1a8feb已安装，CUA原生看板关键路径验收通过，官网公开完整下载件大小/SHA与候选ZIP一致，ZIP完整性通过。PR35已修复NSIS供应门禁并以6项CI合main；受控冷启动、Task恢复/历史/文档hash保留、最终再次归档及原生800 CSS px/键盘补验通过。原生≤700/第二工作窗口不在客户端支持范围，未公证及范围外路径见任务记录与`dev-docs/project-board-native-acceptance.md`。
 ### 2026-10-14 — finite lifecycle release gate
 
 BOTS-CLOUD-EXEC-001 source is delivered by PR23/main75bb0269 with all required CI successful. Linux Node/native default-off upgrade is accepted, preserving prior management/credential/source ownership. The user has now authorized the concrete single-Bot finite whitelist; it is installed with account-capped expiry. Cloud runtime switch and real owner/admin lifecycle acceptance are still pending; no model inference or shared usage is claimed. Current gate/evidence are maintained in `.agent-sync/tasks/codex-bots-cloud-execution-v1-b0a0c425.md`.
