@@ -13,6 +13,8 @@ export default function ModelQaNextPrompt() {
   const [choices, setChoices] = useState<Choice[]>([]);
   const [selection, setSelection] = useState(0);
   const [result, setResult] = useState<Result>();
+  const [sendAttempts, setSendAttempts] = useState(0);
+  const [composerEpoch, setComposerEpoch] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null);
@@ -32,7 +34,7 @@ export default function ModelQaNextPrompt() {
   async function run() {
     if (!choice || busy) return;
     const abort = new AbortController(); controller.current = abort;
-    setBusy(true); setResult(undefined); setError('');
+    setBusy(true); setResult(undefined); setSendAttempts(0); setComposerEpoch(0); setError('');
     try {
       const { runtime, runtimeSource, model, providerId } = choice;
       const response = await apiFetch('/api/modelqa/next-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runtime, runtimeSource, model, ...(providerId ? { providerId } : {}) }), signal: abort.signal });
@@ -55,8 +57,13 @@ export default function ModelQaNextPrompt() {
     </div>
     {error && <p role="alert">{error}</p>}
     {result && <>
-      <SimpleChatInput key={result.anchorMessageId} runtime={choice?.runtime} isLoading={false} sessionState="idle" providerAvailable sessionId={result.sessionId} nextPromptSuggestion={draft} onSend={() => false} />
+      <SimpleChatInput key={`${result.anchorMessageId}:${composerEpoch}`} runtime={choice?.runtime} isLoading={false} sessionState="idle" providerAvailable sessionId={result.sessionId} nextPromptSuggestion={draft} onSend={() => { setSendAttempts(count => count + 1); return false; }} />
       <p>Enter 采纳为草稿，Escape 忽略；再次发送也不会执行任务。</p>
+      <p role="status" aria-live="polite" data-testid="intercepted-send-attempts">已拦截发送尝试：{sendAttempts}</p>
+      {result.suggestion && <div>
+        <button type="button" onClick={() => { setComposerEpoch(epoch => epoch + 1); setSendAttempts(0); }}>重置草稿与建议（复用本次结果）</button>
+        <p>仅复用本次生成的建议，清空验收草稿与计数；不重新请求模型，回执保持不变。</p>
+      </div>}
       <pre data-testid="generation-receipt" className="whitespace-pre-wrap break-all text-xs">{JSON.stringify(result.receipt, null, 2)}</pre>
     </>}
   </main>;
