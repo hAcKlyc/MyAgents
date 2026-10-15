@@ -2072,6 +2072,64 @@ describe('TabProvider session activity ownership', () => {
     expect(transitions.claims.size).toBe(0);
   });
 
+  it('keeps a legacy turn streaming through a deduplicated backup-switch diagnostic until its real completion', async () => {
+    const sessionId = 'pending-legacy-model-failover';
+    let snapshot: ReturnType<typeof useTabState>;
+    function SnapshotProbe() {
+      const value = useTabState();
+      useEffect(() => { snapshot = value; }, [value]);
+      return null;
+    }
+    render(<TabProvider tabId="legacy-model-failover" agentDir="/tmp/workspace" sessionId={sessionId} claimSessionOpeningTransition={allowSessionOpening}>
+      <Probe /><SnapshotProbe />
+    </TabProvider>);
+    await waitFor(() => expect(sseHarness.state.connected).toBe(true));
+    emit('chat:init', {
+      sessionId,
+      transcriptFormat: 1,
+      sessionState: 'running',
+      liveStreamingMessage: {
+        id: 'assistant-before-switch',
+        role: 'assistant',
+        content: 'Work already completed. ',
+        timestamp: '2026-10-16T00:00:00.000Z',
+      },
+    });
+    expect(readActivity()).toMatchObject({ isLoading: true, sessionState: 'running', historyCount: 0 });
+    expect(readStreamingContent()).toBe('Work already completed. ');
+    const diagnostic: Message & { messageKind: 'diagnostic' } = {
+      id: 'backup-switch-diagnostic',
+      role: 'assistant',
+      messageKind: 'diagnostic',
+      content: 'The primary model is unavailable. Continuing with the backup model.',
+      timestamp: new Date('2026-10-16T00:00:01.000Z'),
+    };
+    const replay = { sessionId, replayKind: 'live-user-echo', message: { ...diagnostic, timestamp: diagnostic.timestamp.toISOString() } };
+    for (let repeat = 0; repeat < 2; repeat++) {
+      emit('chat:message-replay', replay, { sessionId });
+      expect(snapshot!.historyMessages).toHaveLength(1);
+      expect(snapshot!.historyMessages[0]).toMatchObject({
+        id: diagnostic.id, role: 'assistant', content: diagnostic.content,
+      });
+      expect(readActivity()).toMatchObject({ isLoading: true, sessionState: 'running', historyCount: 1 });
+      expect(snapshot!.streamingMessage).toMatchObject({ id: 'assistant-before-switch', content: 'Work already completed. ' });
+    }
+
+    emit('chat:message-chunk', 'The backup finished the remaining work.');
+    expect(readStreamingContent()).toBe('Work already completed. The backup finished the remaining work.');
+    expect(readActivity()).toMatchObject({ isLoading: true, sessionState: 'running', historyCount: 1 });
+    expect(snapshot!.streamingMessage?.id).toBe('assistant-before-switch');
+
+    emit('chat:message-complete', { assistant_message_id: 'assistant-final-answer' }, { sessionId });
+    emit('chat:status', { sessionState: 'idle' }, { sessionId });
+    expect(readActivity()).toMatchObject({ isLoading: false, sessionState: 'idle', historyCount: 2 });
+    expect(snapshot!.streamingMessage).toBeNull();
+    expect(snapshot!.historyMessages).toEqual([
+      expect.objectContaining({ id: diagnostic.id, role: 'assistant', content: diagnostic.content }),
+      expect.objectContaining({ id: 'assistant-final-answer', role: 'assistant', content: 'Work already completed. The backup finished the remaining work.' }),
+    ]);
+  });
+
   it('reconciles chat-init assistant snapshots instead of appending them as deltas', async () => {
     tauriHarness.proxyFetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url.includes('/sessions/session-stream-snapshot?') && !init?.method) {

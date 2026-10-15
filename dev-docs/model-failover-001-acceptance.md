@@ -9,6 +9,7 @@
 - 错误正文悬挂/超大正文在有限时间/体积内停止，保留原HTTP事实；429结构化/中文欠费不换备；备用禁用/删除/撤key/更换后不偷偷回primary；key轮换采用新凭据；人工steering不重开预算，root terminal后下一轮恢复主。
 - 较早组合回归247项通过，覆盖SessionEngine127、turn-result与providerHistory策略、既有bridge超时与prompt cache39、设置26；本轮后续修复重点35项重新验证，无unhandled rejection。
 - TypeScript检查通过；web构建与theme8项通过；server bundle通过。完整lint（ESLint、依赖边界、文档路由）通过，现有依赖warning未新增；合入项目背景接续后的组合55项及typecheck通过。PR73与最终CI/远端main状态见Git记录及本机交付回执。
+- 旧格式会话的切换提示使用普通消息replay，不触发完成事件；104项活动状态回归通过，包括重复提示去重、原流继续拼接及真正结束后提交完整回答。renderer既有Message投影不含diagnostic类型，显示普通assistant提示；服务端保留类型以隔离后续正文合并。
 
 ## 真实 SDK、模拟上游
 

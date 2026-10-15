@@ -1813,7 +1813,7 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
             const message = { id: `diagnostic-${randomUUID()}`, role: 'assistant' as const,
               content: text, timestamp: new Date().toISOString(), messageKind: 'diagnostic' as const };
             appendMessage(message);
-            broadcast('chat:message-complete', message);
+            broadcast('chat:message-replay', createLiveUserMessageReplay(sessionId, message));
           }
         },
       });

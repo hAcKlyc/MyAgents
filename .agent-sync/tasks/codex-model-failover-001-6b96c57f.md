@@ -28,6 +28,8 @@ MOXBOTS-MODEL-FAILOVER-001：为 MoXBots 内置 Runtime 的 API 模型实现一�
 
 重点35项、此前组合247项和UI26项通过；真实SDK正常接管/断流停止两个fixture通过且counter均1；typecheck、web/server构建通过。完整证据见`dev-docs/model-failover-001-acceptance.md`。完整lint通过，合并最新main项目背景接续后55项和typecheck通过。PR https://github.com/heavenzhang/MoXBots/pull/73；CI/main验收正在推进。模拟上游不代表供应商联调；真实 SDK loopback 也不代表已安装版本包含成果。
 
+旧格式会话新增接管提示不会终结运行状态的回归；TabProvider活动状态104项通过。服务端改用已有普通消息replay，重复提示去重，继续同一partial流，真实complete/idle才结束。
+
 ## Blockers and unknowns
 
 - 订阅专属/managed/cloud-scoped 凭据和 external/DSH Runtime 不借用 API failover；明确支持范围。
