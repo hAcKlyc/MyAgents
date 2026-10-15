@@ -242,4 +242,4 @@ FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用�
 
 ## MOXBOTS-PROJECT-BOARD-006 — Goal-aware grouping
 
-截图反馈由独立任务`codex/project-board-goal-20261015`修复：看板只读Rust Goal lifecycle，active覆盖旧done Task及turn idle；未知/暂停/阻塞保留待确认，归档重新核对Goal。实现/合成React/43回归/typecheck/lint/web已通过；CI/main及客户端发布/真实任务复验分开追踪。记录`.agent-sync/tasks/codex-project-board-goal-20261015-0d453018.md`。不碰现有统一0.5.5冻结源或执行中的日常App。
+截图反馈由独立任务`codex/project-board-goal-20261015`修复：看板只读Rust Goal lifecycle，active覆盖旧done Task及turn idle；未知/暂停/阻塞保留待确认，归档重新核对Goal。实现/合成React/44回归/typecheck/lint/web已通过；CI/main及客户端发布/真实任务复验分开追踪。记录`.agent-sync/tasks/codex-project-board-goal-20261015-0d453018.md`。不碰现有统一0.5.5冻结源或执行中的日常App。

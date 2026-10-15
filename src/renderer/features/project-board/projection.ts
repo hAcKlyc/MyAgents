@@ -90,8 +90,8 @@ export function projectBoardRows(
     const confirmationReason: ConfirmationReason | undefined = task.executionState === 'stop_failed' ? 'stopFailed'
       : waitingSessionId ? 'waiting' : runningSessionId || goalRunning ? undefined
       : task.sessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
-      : goalReason ? goalReason
       : task.executionState ? undefined
+      : goalReason ? goalReason
       : lastKnownActive ? 'unknown' : task.status === 'verifying' ? 'verification' : task.status === 'blocked' ? 'blocked'
       : task.status === 'stopped' ? 'stopped'
       : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' ? 'unknown' : undefined;

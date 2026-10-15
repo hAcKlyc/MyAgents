@@ -21,9 +21,13 @@
 
 ## Verification
 
-43项相关unit/DOM通过；Node24 npm run typecheck、完整lint（既存depcruise16warnings/0errors）与生产web build通过。实际React UI见dev-docs/project-board-validation/goal/；隔离合成API只验证分组和交互，不等于原生业务验收。UI由主Agent亲验（有限状态修复，无布局变动）；无独立审阅或模型用量测量。
+44项相关unit/DOM通过；Node24 npm run typecheck、完整lint（既存depcruise16warnings/0errors）与生产web build通过。实际React UI见dev-docs/project-board-validation/goal/；隔离合成API只验证分组和交互，不等于原生业务验收。UI由主Agent亲验（有限状态修复，无布局变动）；无独立审阅或模型用量测量。
 
-## Release boundary / unknowns
+## Completed
+
+Goal只读投影、分组优先级、归档重读、事件刷新、缺metadata关联观察与回归已实现。Task独立执行owner的checking/running状态仍优先于Goal暂停/查询失败；人工审批始终需要处理。没有修改真实Task/Goal、调用模型、操作日常App或发布服务。
+
+## Blockers and unknowns
 
 只读检查共享work/unified-055-20261015/STATUS.json：统一0.5.5由现有owner冻结52bf6160构建；日常客户端记录存在running/isBusy任务，禁止busy时退出安装。本任务不修改该owner工作树、不退出/安装日常App，不变更服务器stable。此记录是既有证据，不冒充本轮实时执行探测。补丁需后续正式候选纳入及安装后的同一任务只读复验，未完成前不称客户端已修复。
 
@@ -33,4 +37,4 @@
 
 ## Integration submission
 
-PR https://github.com/heavenzhang/MoXBots/pull/60 。自查补充无metadata但等待审批的Session必须优先待确认（不能被active Goal遮住）；43项unit/DOM复跑通过。实际React七条旅程通过，截图已目视检查，无布局改动。CI和主干结果以远端实际检查为准。
+PR https://github.com/heavenzhang/MoXBots/pull/60 。自查补充无metadata但等待审批的Session必须优先待确认（不能被active Goal遮住）；44项unit/DOM复跑通过。实际React七条旅程通过，截图已目视检查，无布局改动。CI和主干结果以远端实际检查为准。

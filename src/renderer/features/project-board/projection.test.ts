@@ -6,6 +6,12 @@ const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
 describe('project board authority projection', () => {
+  it('preserves trusted Task execution when the independent Goal read fails or is paused',()=>{
+    for(const goal of [{checkedAt:now,error:'unavailable'},{checkedAt:now,value:{status:'paused' as const,isExecuting:false}}]){
+      const row=projectBoardRows({path:'/work/p'},[task({status:'done',executionState:'running'})],[session()],new Map([['s1',{state:'idle',checkedAt:now,goal}]]),now)[0];
+      expect(row.group).toBe('running');
+    }
+  });
   it('keeps a missing-metadata Session waiting for approval even while its Goal is active',()=>{
     const row=projectBoardRows({path:'/work/p'},[task({status:'done'})],[],new Map([['s1',{state:'waiting_user_action',checkedAt:now,goal:{checkedAt:now,value:{status:'active',isExecuting:true}}}]]),now)[0];
     expect(row).toMatchObject({group:'needs',confirmationReason:'waiting',activitySessionId:'s1'});
