@@ -1,0 +1,209 @@
+{
+  "task": "MOXBOTS-PROJECT-CONTEXT-001",
+  "targetRelease": "0.5.7",
+  "kind": "real-provider-project-context",
+  "testedSource": "c225acd830513eb50736f75718f559a9ebda17bc",
+  "at": "2026-10-15T17:17:03.782Z",
+  "passed": true,
+  "provider": "Kimi Coding",
+  "model": "k3",
+  "suiteRealUpstreamRequests": 4,
+  "allAttemptsRealUpstreamRequests": 6,
+  "cases": [
+    {
+      "name": "source",
+      "sessionId": "8197b835-a2ed-4ac9-8eb1-e0cc8ae01b4b",
+      "terminal": "complete",
+      "response": "确认采用方案编号PCD-f39189a8be336d08；进展编号：C7A3F9E2；设计评审通过，尚未发布；0.5.7由统一发布会话发布。",
+      "contextSources": 0,
+      "contextSourceSessionIds": [],
+      "init": {
+        "tools": [],
+        "mcp_servers": [],
+        "model": "k3"
+      },
+      "wire": {
+        "bodySha256": "52499d21377569364bef1fc98279f30369cc4f4e94c5adc6b7f540c7543fab2f",
+        "hasContext": false,
+        "hasDecision": true,
+        "hasProgress": false,
+        "forwarded": true,
+        "status": 200,
+        "elapsedMs": 18867
+      },
+      "finalProviderUsage": {
+        "input_tokens": 4163,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 512,
+        "output_tokens": 540,
+        "service_tier": "standard",
+        "inference_geo": "not_available",
+        "output_tokens_details": {
+          "thinking_tokens": 479
+        }
+      },
+      "totalInputIncludingCache": 4675
+    },
+    {
+      "name": "same-project",
+      "sessionId": "a1183685-3a9c-4f9e-8ba1-d44e883f84ee",
+      "terminal": "complete",
+      "response": "{\"decision\":\"PCD-f39189a8be336d08\",\"progressCode\":\"C7A3F9E2\",\"status\":\"设计评审通过，尚未发布\",\"release\":\"0.5.7\",\"owner\":\"统一发布会话\"}",
+      "contextSources": 2,
+      "contextSourceSessionIds": [
+        "8197b835-a2ed-4ac9-8eb1-e0cc8ae01b4b"
+      ],
+      "init": {
+        "tools": [],
+        "mcp_servers": [],
+        "model": "k3"
+      },
+      "wire": {
+        "bodySha256": "bd07d5d577a937a6ce50c6a70d9f07b345fe63bcdf20afea4c786c609b080e48",
+        "hasContext": true,
+        "hasDecision": true,
+        "hasProgress": true,
+        "forwarded": true,
+        "status": 200,
+        "elapsedMs": 17505
+      },
+      "finalProviderUsage": {
+        "input_tokens": 2160,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 3072,
+        "output_tokens": 198,
+        "service_tier": "standard",
+        "inference_geo": "not_available",
+        "output_tokens_details": {
+          "thinking_tokens": 134
+        }
+      },
+      "totalInputIncludingCache": 5232
+    },
+    {
+      "name": "other-project",
+      "sessionId": "b7f00600-3b91-4c13-a74b-0c1f6bfc5ae1",
+      "terminal": "complete",
+      "response": "```json\n{\n  \"decision\": null,\n  \"progressCode\": null,\n  \"status\": null,\n  \"release\": null,\n  \"owner\": null\n}\n```",
+      "contextSources": 0,
+      "contextSourceSessionIds": [],
+      "init": {
+        "tools": [],
+        "mcp_servers": [],
+        "model": "k3"
+      },
+      "wire": {
+        "bodySha256": "90fa8d9e5e7805854d586c0c6b6953ae8377aa29cf040f0bcb8a7a3a33f3d68d",
+        "hasContext": false,
+        "hasDecision": false,
+        "hasProgress": false,
+        "forwarded": true,
+        "status": 200,
+        "elapsedMs": 11133
+      },
+      "finalProviderUsage": {
+        "input_tokens": 4079,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 512,
+        "output_tokens": 315,
+        "service_tier": "standard",
+        "inference_geo": "not_available",
+        "output_tokens_details": {
+          "thinking_tokens": 264
+        }
+      },
+      "totalInputIncludingCache": 4591
+    },
+    {
+      "name": "disabled",
+      "sessionId": "5dd8a59e-904c-49cc-9421-82f1a1be6c6d",
+      "terminal": "complete",
+      "response": "```json\n{\n  \"decision\": null,\n  \"progressCode\": null,\n  \"status\": null,\n  \"release\": null,\n  \"owner\": null\n}\n```",
+      "contextSources": 0,
+      "contextSourceSessionIds": [],
+      "init": {
+        "tools": [],
+        "mcp_servers": [],
+        "model": "k3"
+      },
+      "wire": {
+        "bodySha256": "171e25ebb0ae5820feeeb85953c36ef49372094f3dc2183f08fa122cda8d43a3",
+        "hasContext": false,
+        "hasDecision": false,
+        "hasProgress": false,
+        "forwarded": true,
+        "status": 200,
+        "elapsedMs": 9657
+      },
+      "finalProviderUsage": {
+        "input_tokens": 1519,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 3072,
+        "output_tokens": 284,
+        "service_tier": "standard",
+        "inference_geo": "not_available",
+        "output_tokens_details": {
+          "thinking_tokens": 233
+        }
+      },
+      "totalInputIncludingCache": 4591
+    }
+  ],
+  "additionalInputSameQuestionEnabledVsDisabled": 641,
+  "inputMetric": "Final provider input_tokens + cache_read_input_tokens + cache_creation_input_tokens; not monetary cost. One source/example only.",
+  "allOwnedGroupsEmpty": true,
+  "cleanupEvidenceSha256": {
+    "disabled-cleanup.json": "44ca34a0116003926e4dafb7075b3bc252e6ed9b5bbe397335481290c9276c0e",
+    "other-project-cleanup.json": "f5f8d53784d119eb00ad124faab553d1b02ad14c4e6526c3f447e18abcd94a3f",
+    "same-project-cleanup.json": "3939372875926a4b4b49fdb6862f4dc790d16c8f6bf59cc9bbf1e17170bee742",
+    "source-cleanup.json": "7e2ec8b464073a413d7b0bc4595164095be3c6758b289ec5f92fd952bca2ec75"
+  },
+  "privateReceipt": {
+    "directoryBasename": "moxbots-project-context-provider-Wp6pyu",
+    "file": "receipt.json",
+    "sha256": "8af95e91e349975510b4c27c36c204c046da71b3d15ac034c105b988b0b7fca3",
+    "bundleSha256": "a4bdab6d5499b5d5ddd09de20031de151d95266eb27ce5698555aaba0e39c742"
+  },
+  "preflight": {
+    "runSuffix": "qxCEYF",
+    "passed": true,
+    "realUpstreamRequests": 0,
+    "receiptSha256": "f46edf1f7486ee976059ff965bfdfa48e46bd1f3f547a975307755190539fcbd"
+  },
+  "priorFailures": [
+    {
+      "runSuffix": "fOr9VJ",
+      "receiptSha256": "c39a19f1bb782dff8e55b053cb2ba15235066f55a1f3099a1498522f623adb9b",
+      "passed": false,
+      "actualUpstreamRequests": 1,
+      "reason": "Provider source succeeded; harness revoked writer before readback",
+      "countCorrection": null
+    },
+    {
+      "runSuffix": "hbop5H",
+      "receiptSha256": "2df1cbc3863db14b25219ffcfa6e7d3e2dc5a400eb6a4b5315d73423fe012593",
+      "passed": false,
+      "actualUpstreamRequests": 1,
+      "reason": "Provider source succeeded in fenced JSON; code excerpts intentionally omitted; target rejected locally before upstream",
+      "countCorrection": "Old realUpstreamRequests included a local rejected request; only the status=200 source was forwarded."
+    }
+  ],
+  "boundary": "Real SessionEngine facade + builtin adapter + SDK + persisted SessionStore + real Provider; synthetic project facts. No HTTP/renderer/native lifecycle/other runtimes or production release acceptance.",
+  "limitations": [
+    "Only builtin SDK with real Kimi k3; other runtimes retain previous adapter mock coverage.",
+    "Fenced code blocks are intentionally omitted; tested source progress is ordinary prose.",
+    "Flag persisted with production atomicModifyProjects; fresh process observed disabled. Native UI click/installation not tested.",
+    "Synthetic facts, no daily client or production business writes. No HTTP/Rust SDK circuit/native lifecycle acceptance."
+  ],
+  "sdk": {
+    "packageVersion": "0.3.296",
+    "nativeSha256": "c9b5341637becbd423ddffc5b254afb645682a3868cb708bbc6cc0e7bb419937",
+    "allFourResolvedSameBinary": true
+  },
+  "testedProductionFilesSha256": {
+    "src/shared/projectContext.ts": "1fff193f57e1526df1d9bbba7a7a4463616f7c73bba6c523d6a2cf13d25afdea",
+    "src/server/session-engine/project-context.ts": "ce23319e8d0c0cbda09fb7af6b57c42b17863aa8d2b314dd749b7444a6e17220",
+    "src/server/session-engine/selector.ts": "d80d2676421e6e5486af0503c864035dd2ad1ff0fcce2723e485c2f71b431933",
+    "src/server/session-engine/builtin-adapter.ts": "7162cc411d89f35f82763ee9f09843c180df3d20c706dfd30e9e1d46ef225270"
+  }
+}
