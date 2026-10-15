@@ -23,7 +23,7 @@ MOXBOTS-055-UNIFIED-ACCEPTANCE：隔离真实模型原生验收环境、跨聊�
 ## Verification
 
 - git-project-sync start/task-init PASS，base c7bab28594a03dfba7167200a90ae73ad0a6b5aa。
-- 7 build、最终22 modelqa/SDK unit、selector117、profile integration7与类型/scopedlint通过；独立P1/P2修复后复验通过。Rustrelease编译仍进行中。
+- 7 build、最终22 modelqa/SDK unit、selector117、profile integration7与类型/scopedlint通过；独立P1/P2修复后复验通过。Rustrelease namespace/backend 3/3通过；debug SwiftPM链接失败保留为本机构建限制，不能扩大为全部native通过。
 
 ## Blockers and unknowns
 

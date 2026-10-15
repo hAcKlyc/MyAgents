@@ -51,6 +51,9 @@ export async function buildModelQa(args) {
     run('/bin/cp', ['-cR', join(root, 'src-tauri', item.name), join(options.workspace, 'src-tauri', item.name)], root, process.env);
   }
   run('/bin/cp', ['-cR', join(root, 'node_modules'), join(options.workspace, 'node_modules')], root, process.env);
+  // APFS-clone existing Cargo dependencies when available; Cargo still owns
+  // source/feature/profile invalidation and rebuilds the isolated app identity.
+  if (existsSync(join(root, 'src-tauri/target'))) run('/bin/cp', ['-cR', join(root, 'src-tauri/target'), join(options.workspace, 'src-tauri/target')], root, process.env);
   const configPath = join(options.workspace, 'src-tauri/tauri.moxbot-modelqa.conf.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
   config.version = options.version;
