@@ -1,5 +1,5 @@
 import { ChevronDownIcon } from '@/components/icons';
-import { memo, useId, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ContentBlock } from '@/types/chat';
 import { useNotifyRowLayoutChanged } from '@/context/ChatRowLayoutContext';
@@ -20,6 +20,12 @@ function ProcessPhaseCard({ phase, live, totalBlocks }: { phase: ProcessPhase; l
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
   const notify = useNotifyRowLayoutChanged();
+  // Opening a surfaced active/failure row is an explicit request to keep it
+  // mounted, including when completion removes its automatic visibility.
+  const handleChildExpand = useCallback(() => {
+    notify('block-group-expand');
+    setExpanded(true);
+  }, [notify]);
   const { counts, outcome } = summarizeProcessPhase(phase.entries);
   const latest = phase.entries.at(-1)?.block;
   const latestAction = latest?.tool ? getToolActionLabel(latest.tool, t) : undefined;
@@ -75,7 +81,7 @@ function ProcessPhaseCard({ phase, live, totalBlocks }: { phase: ProcessPhase; l
     <div id={detailsId}>
       {phase.entries.map(entry => expanded || important(entry) ? <ProcessRow
         key={entry.block.id ?? entry.block.tool?.id ?? entry.index}
-        block={entry.block} index={entry.index} totalBlocks={totalBlocks} isStreaming={live}
+        block={entry.block} index={entry.index} totalBlocks={totalBlocks} isStreaming={live} onUserExpand={handleChildExpand}
       /> : null)}
     </div>
   </section>;

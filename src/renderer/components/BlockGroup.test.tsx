@@ -91,4 +91,16 @@ describe('BlockGroup stage summaries and folding', () => {
     expect(notify).toHaveBeenCalledWith('message', 'block-group-collapse');
   });
 
+  it('keeps a directly opened active tool mounted after it completes', () => {
+    const input = { file_path: '/tmp/live.ts' };
+    const { rerender } = render(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, result: undefined, isLoading: true })]} isStreaming />);
+    const row = screen.getByRole('button', { name: /读取 live.ts/ });
+    fireEvent.click(row);
+    expect(details()).toHaveAttribute('aria-expanded', 'true');
+    rerender(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, isLoading: false })]} />);
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('OUTPUT_active')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /读取 live.ts/ })).toBe(row);
+  });
+
 });
