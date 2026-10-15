@@ -123,7 +123,7 @@ describe('backup model settings', () => {
     await i18n.changeLanguage('zh-CN');
     render(<ModelFailoverSettings value={undefined} providers={[]} apiKeys={{}} updateConfig={vi.fn()} />);
     fireEvent.click(screen.getByText('切换规则与适用范围'));
-    expect(screen.getByText(/支持内置运行环境的 API 模型/)).toBeVisible();
+    expect(screen.getByText(/仅支持 Claude Agent SDK 运行环境的 API 模型；DSH、订阅模型和外部 CLI 暂不支持/)).toBeVisible();
     expect(screen.getByText(/保留进度并停止，避免自动重复执行操作/)).toBeVisible();
     expect(screen.getByRole('switch', { name: '启用模型自动切换' })).toBeDisabled();
   });
