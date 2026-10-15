@@ -267,3 +267,12 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 ## MOXBOTS-BOARD-DEDUP-001 — shared Session presentation
 
 多个Task复用同一Session时只选一个当前进度代表卡片，历史任务按自身状态保留，不再把同一TODO/计时/Goal复制成多个执行。renderer限定修复，零业务数据写入；代码/React合成验证/main与056原生发布分别追踪于 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。
+
+## Deployment coordination
+
+- **Deployment chat:** `01a12bc2-907a-7702-b6dd-788225c5dfe4`，MoxBots桌面端统一打包负责人。
+- **Designation:** 用户于2026-10-16在「合并重复任务」聊天 `01a14001-8f98-7fb2-9964-2a4465a55e55`要求“打一个5.6的远程更新并推送”，并明确选择“交给现有统一打包聊天执行，并授权我发送本次发布要求”。本记录由指定聊天实际核读两条用户原文后写入；不把开发者消息本身当作新增授权。
+- **Targets and runbook:** 当前授权目标仅既有macOS arm64 MoXBots own updater：`https://140.143.183.232/updates/stable/darwin-aarch64.json`，既有`/srv/moxbots/updates`、同源不可变归档和原子stable；流程`scripts/moxbot-updates/README.md`及`release.mjs`。复用既有Developer ID、公证profile、正式Reader及自己的签名根；不扩展路径/端口，不部署auth/Host/网站服务，不安装或停止日常客户端。
+- **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.6.md`及任务记录维护状态；使用既有`.release-lock`及owner核验。Git计划不是原子锁。既有Release workflow已禁用，Test CI只做验证；开发聊天继续独立源码/CI/main交付，不能并发发布或切换本目标。
+- **Current release:** `MOXBOTS-056-REMOTE-RELEASE-20261016`，`preparing`。版本0.5.6；固定源码候选main `a81d2509fa92968ddaaed63416a2478d21b8a373`（包含PR59/60/62/63/65/66），制品digest待构建；后续提交不自动加入。当前055不可变包、原清单和签名作为回滚目标保留。先完成此记录的main集成、源码/CI、活动publisher/备份检查，再正式签名公证、真实完整公网字节与签名验证、同锁CAS发布。
+- **Acceptance boundary:** 服务器发布、后台发现/下载、用户确认安装、实际版本/数据及真实薪资看板分别报告。本次不强退、不停止或安装日常客户端；原生/真实业务未验项如实保留。其他既有服务不因本次指定而获得新的发布授权；如涉及它们，先协调授权/活动job/目标租约。
