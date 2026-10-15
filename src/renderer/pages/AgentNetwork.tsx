@@ -484,7 +484,7 @@ function AgentNetworkContent({
             >
               {APP_BUILD_PROFILE === 'moxbot' ? (
                 <div className="bg-[var(--paper-inset)] p-5 text-left">
-                  <h2 className="text-lg font-semibold text-[var(--ink)]">Bots Net</h2>
+                  <h2 className="text-lg font-semibold text-[var(--ink)]">{t("agentNetwork.onboardingTitle")}</h2>
                   <p className="mt-2 text-sm text-[var(--ink-secondary)]">{t('agentNetwork.infoIntro')}</p>
                 </div>
               ) : (
