@@ -9,7 +9,7 @@
 - [x] 核实 origin=heavenzhang/MoXBots、main=178b8047、独立工作树 codex/host-onboarding-001；不改已有工作树。
 - [x] 核实制品：Linux 只有 unsigned 测试发布，无已验证的 MoX owned 网络一键安装；不得展示猜测命令。
 - [x] 完成四步向导与中英文本。
-- [x] 相关DOM 63项与unit 35项通过；类型检查、MoXBots Web构建及Theme 8项通过。全量lint正在运行。
+- [x] 相关DOM 63项与unit 35项通过；类型检查、MoXBots Web构建及Theme 8项通过。全量lint（含依赖边界和agent-docs）通过。
 - [x] 主Agent IAB真实页面交互通过；独立源码/5张截图审阅通过。1280×720/900、760×760和390×844，无页面水平溢出。
 - [ ] 同步主干、CI/PR、合入并验证远端 main。
 
@@ -25,3 +25,10 @@
 主Agent IAB已执行：页面入口、桌面/Linux分支、安装/登录显式确认、网络名称/地址、CustomSelect真实点击、在线空目录、可调用但执行待验证、Escape与焦点返回入口。760和390视口的页面宽度分别为760和390；长命令横向滚动只在代码框内，弹窗内容纵向滚动且页脚固定。截图位于 `dev-docs/host-onboarding-validation/`。独立审查者未获得IAB访问，故不把主Agent交互冒充独立验收；独立源码和截图审查无P1/P2遗留，syncing文案P3已修复复核。
 
 相关测试还验证：offline/syncing即使有旧callable也不能完成；失败重试恢复、部分目录不等于零Agent、跨账号响应拒绝、断线与迟到响应失效、复制失败可重试。此处是隔离验证，非真实新机安装/账号入网/模型执行验收。
+
+
+## 主干交付进度
+
+已在保持原工作树不变的情况下同步最新 main c225acd830513eb50736f75718f559a9ebda17bc；功能提交 rebased 为548a6cbb。PR：https://github.com/heavenzhang/MoXBots/pull/69 。分支已推送，等待 CI 后合并，不绕过检查。最终远端main SHA/CI/合并验证会保存在当前任务的本地交付回执。
+
+协作复盘：共主Agent与1名独立审阅者；选择依据是新多步交互及账号/网络状态误报风险，审阅者请求Sol medium、无升级；不调用外部原因：明确采用ai-yaoren-local纯内置模式。独立者发现syncing文案不一致后已修复；其IAB不可用，由主Agent完成交互、独立者审查实际截图。用量与费用未提供，未估算节省。后续同类向导沿用已有安装入口与固定协议，先核实制品可用性再写安装文案。
