@@ -5,7 +5,11 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+export function assertModelQaHomePath(home) {
+  if (typeof home !== 'string' || !/^\/private\/tmp\/moxbots-modelqa-[A-Za-z0-9_-]+$/.test(home)) throw new Error('Model QA HOME must be an explicit direct private temporary directory');
+}
 export function modelQaLaunchEnvironment(home, inherited = process.env) {
+  assertModelQaHomePath(home);
   if (!home.startsWith('/private/tmp/moxbots-modelqa-') || realpathSync(home) !== home || !lstatSync(home).isDirectory() || (lstatSync(home).mode & 0o077)) throw new Error('Model QA requires a physical private 0700 HOME under /private/tmp/moxbots-modelqa-*');
   const data = join(home, '.moxbot-modelqa');
   return {
@@ -66,6 +70,7 @@ export function launchModelQa(app, home) {
   const plist = join(app, 'Contents/Info.plist');
   const read = key => execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :' + key, plist], { encoding: 'utf8' }).trim();
   if (read('CFBundleIdentifier') !== 'com.moxbot.modelqa') throw new Error('Unexpected model QA bundle identity');
+  if (read('MoXBotsModelQaHome') !== home) throw new Error('Model QA app is compiled for a different private HOME');
   const executable = read('CFBundleExecutable');
   if (executable.includes('/') || executable.includes('..')) throw new Error('Invalid model QA executable');
   const data = join(home, '.moxbot-modelqa');

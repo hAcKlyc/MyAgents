@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appBuildDefines } from './app-build-profile.mjs';
 import { parseModelQaArgs, modelQaBuildEnvironment } from './build-moxbot-modelqa.mjs';
-import { modelQaLaunchEnvironment, prepareModelQaHome, modelQaRuntimeEnvironment } from './run-moxbot-modelqa.mjs';
+import { assertModelQaHomePath, modelQaLaunchEnvironment, prepareModelQaHome, modelQaRuntimeEnvironment } from './run-moxbot-modelqa.mjs';
 
 test('model QA has a closed fourth identity and never turns off updater QA model refusal', () => {
   for (const profile of ['myagents', 'moxbot', 'moxbot-updaterqa', 'moxbot-modelqa']) {
@@ -14,13 +14,23 @@ test('model QA has a closed fourth identity and never turns off updater QA model
     assert.equal(d.__MYAGENTS_UPDATER_QA__, String(profile === 'moxbot-updaterqa'));
     assert.equal(d.__MYAGENTS_MODEL_QA__, String(profile === 'moxbot-modelqa'));
   }
-  const args = ['--qa-workspace', '/private/tmp/modelqa-build-fixture-' + process.pid, '--qa-version', '0.5.5'];
+  const boundHome = '/private/tmp/moxbots-modelqa-bound-' + process.pid;
+  const args = ['--qa-workspace', '/private/tmp/modelqa-build-fixture-' + process.pid, '--qa-version', '0.5.5', '--qa-home', boundHome];
   assert.equal(parseModelQaArgs(args).version, '0.5.5');
   for (const flag of ['--config', '--features', '--runner', '--debug', '--target=x86_64-apple-darwin']) assert.throws(() => parseModelQaArgs([...args, '--', flag]));
   assert.throws(() => parseModelQaArgs(['--qa-workspace', '/Applications/MoXBots.app', '--qa-version', '0.5.5']));
-  const env = modelQaBuildEnvironment({ OPENAI_API_KEY: 'canary', CLAUDE_CONFIG_DIR: '/daily', NODE_OPTIONS: '--require=/daily', RUSTFLAGS: '--cfg myagents_updater_qa' }, '/private/tmp/test');
+  const env = modelQaBuildEnvironment({ OPENAI_API_KEY: 'canary', CLAUDE_CONFIG_DIR: '/daily', NODE_OPTIONS: '--require=/daily', RUSTFLAGS: '--cfg myagents_updater_qa', MOXBOTS_MODELQA_HOME: '/Users/daily' }, '/private/tmp/test', boundHome);
   assert.equal(env.MYAGENTS_BUILD_PROFILE, 'moxbot-modelqa');
+  assert.equal(env.MOXBOTS_MODELQA_HOME, boundHome);
   for (const key of ['OPENAI_API_KEY', 'CLAUDE_CONFIG_DIR', 'NODE_OPTIONS', 'RUSTFLAGS']) assert.equal(env[key], undefined);
+});
+
+test('compiled private HOME is mandatory and cannot inject Cargo instructions or escape its direct directory', () => {
+  assert.throws(() => parseModelQaArgs(['--qa-workspace', '/private/tmp/modelqa-missing-' + process.pid, '--qa-version', '0.5.5']));
+  for (const value of ['', '/Users/daily', '/private/tmp/moxbots-modelqa-a/child', '/private/tmp/moxbots-modelqa-a/../b', '/private/tmp/moxbots-modelqa-a\ncargo:injected', '/private/tmp/moxbots-modelqa-a\0']) {
+    assert.throws(() => assertModelQaHomePath(value));
+    assert.throws(() => modelQaBuildEnvironment({}, '/private/tmp/work', value));
+  }
 });
 
 test('native model QA config cannot address production state or register autostart/hotkeys', () => {

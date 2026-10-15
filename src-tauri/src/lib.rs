@@ -51,6 +51,8 @@ mod credential_permissions;
 pub mod memory_auto_update;
 pub mod memory_evolution;
 mod network_diagnostics;
+#[cfg(all(target_os = "macos", myagents_model_qa))]
+pub mod modelqa_home;
 pub mod notification;
 pub mod notification_badge;
 pub mod perf_trace;

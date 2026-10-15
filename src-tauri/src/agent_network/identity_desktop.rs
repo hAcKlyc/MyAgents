@@ -466,9 +466,21 @@ fn model_qa_physical_scope(scope: &KeyScope) -> Result<KeyScope, super::crypto::
 }
 #[cfg(myagents_model_qa)]
 impl IdentityStore for ModelQaIdentityStore {
-    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> { self.inner.load(&model_qa_physical_scope(scope)?) }
-    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), super::crypto::CryptoError> { self.inner.save_pending(&model_qa_physical_scope(scope)?, key) }
-    fn delete(&self, scope: &KeyScope) -> Result<(), super::crypto::CryptoError> { self.inner.delete(&model_qa_physical_scope(scope)?) }
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.load(&model_qa_physical_scope(scope)?)
+    }
+    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.save_pending(&model_qa_physical_scope(scope)?, key)
+    }
+    fn delete(&self, scope: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.delete(&model_qa_physical_scope(scope)?)
+    }
 }
 #[cfg(all(test, myagents_model_qa))]
 mod model_qa_scope_tests {

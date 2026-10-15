@@ -51,3 +51,22 @@ PR54 contains the actual final feature heads/records: NEXT58c819b4, TITLE9ff0ba2
 - [ ] PR54 final CI/native gates/main; formal0.5.5/source freeze, signing/notary/own updater/client installation still open.
 
 Private receipts are under the pointer workspace `work/unified-055-20261015/`; A4-native-candidate.json, A4-source-snapshot.json and independent private UI evidence distinguish source/build/model/native/install gates. Do not commit private HOME/auth/PKCE or business logs.
+
+
+## A5 account / Host handoff checkpoint
+
+- [x] A4 independent native report committed: Codex/CC suggestions, editable adoption, two real Title fixtures and actual SDK cancellation/receipt/reload passed. DSH failed before model; IME/Escape not accepted.
+- [x] DSH supported permission fix integrated as daf46d48; affected17 tests passed. A5 release/signature/3381-source closure passed; it is never the formal distribution.
+- [x] A5 normal-login closed error identified missing private default Keychain. New fixed-private-HOME user Keychain prepared; daily default/search-list/prefs bytes unchanged; same-principal normal PKCE/native restoration passed without copied tokens or changed TLS/trust.
+- [ ] Dedicated Host3–5 real model/approval/persistence rounds: sole GUI lease handed to remote-session owner; Root no GUI.
+- [ ] A6 QA-only send-attempt counter, explicit same-result reset and layout; one genuine DSH result plus native keyboard/IME/Escape independent acceptance.
+- [ ] HRM live owner gate/backup, final CI/main and formal0.5.5/actual update still open. No production package published or installed by this unified task.
+
+## A6 HOME binding checkpoint
+
+- [x] A5 PKCE passed but relay failed: existing env-cleared helper had no private HOME; zero Host model/credential writes. Sole GUI lease returned.
+- [x] QA-only fixed build HOME and actual private-default-Keychain guards added; shared crypto/Reader/pins unchanged. Independent source review accepted fixed-Mac scope; Node9, synthetic Rust3, fixture DOM5 passed.
+- [x] Fresh A6 private HOME/Keychain prepared without A5 owned/session/device migration; daily Keychain metadata unchanged.
+- [ ] Build/sign A6 with required --qa-home, normal fresh PKCE, helper cold-read/restart and relay readiness.
+- [ ] Serial independent DSH/Enter/Escape/IME and dedicated Host business acceptance.
+- [ ] HRM was live running/isBusy at09:21; actual installation forbidden until authoritative idle plus final generation admission check. No running work stopped.

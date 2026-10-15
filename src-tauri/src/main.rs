@@ -4,6 +4,14 @@
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    // Only this test artifact has a compiled HOME. Restore it for the existing
+    // env-cleared same-binary reader before any Security/CLI/GUI initialization.
+    #[cfg(all(target_os = "macos", myagents_model_qa))]
+    if app_lib::modelqa_home::prepare_startup(&args).is_err() {
+        eprintln!("MODEL_QA_HOME_OR_KEYCHAIN_INVALID");
+        std::process::exit(1);
+    }
+
     // Private, authenticated read-only helper. It must exit before any CLI or
     // GUI initialization, including sidecar cleanup and single-instance setup.
     #[cfg(target_os = "macos")]

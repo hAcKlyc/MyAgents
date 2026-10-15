@@ -19,10 +19,9 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-#[cfg(not(myagents_model_qa))]
+// QA uses the same closed reader protocol inside its separately verified private
+// Keychain. The account hash also includes APP_DATA_DIR_NAME; no slot migration.
 const SERVICE: &str = "com.myagents.owned-agentnet.v1";
-#[cfg(myagents_model_qa)]
-const SERVICE: &str = "com.moxbot.modelqa.owned-agentnet.v1";
 const VERSION: u8 = 1;
 const SESSION_GUARD_LIMIT: usize = 128;
 
@@ -554,6 +553,9 @@ fn write_unlocked(entry: &Entry, secret: &SecretRecord) -> Result<(), NetworkErr
     write_encoded_unlocked(entry, json.as_bytes())
 }
 fn write_encoded_unlocked(entry: &Entry, bytes: &[u8]) -> Result<(), NetworkError> {
+    #[cfg(all(target_os = "macos", myagents_model_qa, not(test)))]
+    crate::modelqa_home::assert_private_default()
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     #[cfg(all(target_os = "macos", not(test)))]
     let result = super::crypto::write_secret_noninteractive(entry, bytes);
     #[cfg(any(not(target_os = "macos"), test))]
@@ -589,6 +591,9 @@ thread_local! {
     static KEYRING_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 fn read_unlocked(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
+    #[cfg(all(target_os = "macos", myagents_model_qa, not(test)))]
+    crate::modelqa_home::assert_private_default()
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     #[cfg(test)]
     KEYRING_READS.with(|reads| reads.set(reads.get().saturating_add(1)));
     #[cfg(all(target_os = "macos", not(test)))]
@@ -612,6 +617,9 @@ fn read_authorized_unlocked(
     entry: &Entry,
     cancelled: &AtomicBool,
 ) -> Result<Option<SecretRecord>, NetworkError> {
+    #[cfg(all(target_os = "macos", myagents_model_qa, not(test)))]
+    crate::modelqa_home::assert_private_default()
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
@@ -655,6 +663,9 @@ fn read(entry: &Entry) -> Result<Option<SecretRecord>, NetworkError> {
     read_unlocked(entry)
 }
 fn delete_unlocked(entry: &Entry) -> Result<(), NetworkError> {
+    #[cfg(all(target_os = "macos", myagents_model_qa, not(test)))]
+    crate::modelqa_home::assert_private_default()
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     #[cfg(all(target_os = "macos", not(test)))]
     let result = super::crypto::delete_secret_noninteractive(entry);
     #[cfg(any(not(target_os = "macos"), test))]

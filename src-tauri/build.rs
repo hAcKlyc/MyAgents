@@ -27,6 +27,7 @@ fn expose_app_build_profile() {
     println!("cargo:rerun-if-env-changed=MYAGENTS_BUILD_PROFILE");
     println!("cargo:rerun-if-env-changed=MOXBOTS_OWNED_SERVICE_URL");
     println!("cargo:rerun-if-env-changed=MOXBOTS_CREDENTIAL_WRITER_FAMILY");
+    println!("cargo:rerun-if-env-changed=MOXBOTS_MODELQA_HOME");
     println!("cargo:rustc-check-cfg=cfg(myagents_moxbot)");
     println!("cargo:rustc-check-cfg=cfg(myagents_updater_qa)");
     println!("cargo:rustc-check-cfg=cfg(myagents_model_qa)");
@@ -53,6 +54,16 @@ fn expose_app_build_profile() {
     };
     let target_os =
         env::var("CARGO_CFG_TARGET_OS").expect("Cargo must provide CARGO_CFG_TARGET_OS");
+    if profile == "moxbot-modelqa" {
+        let home = env::var("MOXBOTS_MODELQA_HOME").expect("Model QA requires an explicit compiled private HOME");
+        let suffix = home.strip_prefix("/private/tmp/moxbots-modelqa-").unwrap_or("");
+        if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')) {
+            panic!("Model QA HOME must be a direct private temporary directory");
+        }
+        println!("cargo:rustc-env=MOXBOTS_MODELQA_HOME={home}");
+    } else if env::var_os("MOXBOTS_MODELQA_HOME").is_some() {
+        panic!("A compiled Model QA HOME cannot be supplied to another profile");
+    }
     if env::var_os("CARGO_CFG_MYAGENTS_UPDATER_QA").is_some() && profile != "moxbot-updaterqa" {
         panic!("Updater QA cfg cannot be added to a production profile through RUSTFLAGS");
     }
