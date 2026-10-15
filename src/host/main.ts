@@ -392,7 +392,10 @@ async function serve(): Promise<void> {
   async function dispatchManagement(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (shuttingDown) throw new Error('Host is stopping');
     if (method === 'session.remote') return {kind:'remote-session',data:await remoteSessions.request(params.remoteSession)};
-    if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['host.snapshot','config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register','session.remote'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
+    // Existing v1 controllers cap this advertisement at 12 methods. Legacy
+    // host.snapshot remains callable below, but extension-aware controllers use
+    // host.inspect; do not spend a slot advertising both snapshot forms.
+    if (method === 'host.capabilities') return {kind:'capabilities',version:1,methods:['config.set','credential.set','resources.create','receipt.get','host.capabilities','host.inspect','config.provider.set','credential.provider.set','receipt.provider.get','resources.directory.list','resources.register','session.remote'],providerKinds:['anthropic','openai'],limits:{directoryEntries:128,pathBytes:4096}};
     if (method === 'host.snapshot' || method === 'host.inspect') return withHostSnapshotLocks(
       ()=>resourceOwner.inspect(),exclusive,async resources=> {
         if (shuttingDown) throw new Error('Host is stopping');
