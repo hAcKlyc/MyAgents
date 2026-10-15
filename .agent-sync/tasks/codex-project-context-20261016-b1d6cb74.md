@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/project-context-20261016 -->
 <!-- git-project-sync-task:base=a81d2509fa92968ddaaed63416a2478d21b8a373 -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=complete -->
 
 # Task: MOXBOTS-PROJECT-CONTEXT-001 自动接续项目进展与决策
 
@@ -17,8 +17,8 @@
 - [x] 首轮有预算；后续不重复；重试/rewind/重启重新由原对话裁决。
 - [x] 并发读取无覆盖；源删除/损坏不使用陈旧缓存；开关有效。
 - [x] 相关单元、隔离持久化/链路集成、类型/lint/build。
-- [ ] 最终提交的必需 CI（合并前由 GitHub PR 门禁核验）。
-- [ ] 远端main包含成果；固定SHA/用量边界交给发布owner。
+- [x] 最终提交的必需CI六项通过（run38771666288）。
+- [x] PR68/main c225acd8远端包含、tree一致；固定SHA/用量已发统一发布会话。
 
 ## Completed
 
@@ -26,7 +26,7 @@
 
 ## Blockers and unknowns
 
-目前无源码/本地测试阻断。必需CI和main合入待完成；真实Provider/签名包/安装后Native路径属于统一发布会话的后续门槛，不将未执行项当作通过。
+源码main交付完成。真实Provider后台三路径已补验通过，见provider-057任务；签名包/安装后Native仍由统一发布会话验收，不将未执行项当作通过。
 
 ## Verification
 
@@ -38,11 +38,11 @@
 
 ## Deployment request
 
-- 需要后续桌面客户端发布；状态 queued，目标为统一发布 owner 管理的既有 macOS arm64 更新渠道。用户可见变化：普通项目的新桌面会话首次发送时自动带入有限来源背景，设置中可关闭。
-- 远端分支 `codex/project-context-20261016`，PR #68；合入后不可变main SHA由交接回执提供。不得自动加入当前冻结056候选，owner在当前批次结束后选择独立批次及版本。
+- 用户后续明确指定0.5.7；状态 queued，目标为统一发布 owner 管理的既有 macOS arm64 更新渠道。用户可见变化：普通项目的新桌面会话首次发送时自动带入有限来源背景，设置中可关闭。
+- 远端分支 `codex/project-context-20261016`，PR #68；合入后不可变main SHA由交接回执提供。不得加入冻结056候选；由owner按用户指定0.5.7安排独立批次。
 - 依赖：最终候选必需CI、main远端核验；发布前用安全测试身份完成真实Provider及签名客户端新会话/开关持久化验收。无新增服务、外网端点、凭据、数据库迁移或模型依赖；新配置 `Project.projectContextEnabled` 缺省开启，false关闭未来注入。
 - 风险及回滚：关键词只能选择原文，不能保证穷尽决策或替代真实验收；历史范围/授权提示需保留。关闭开关可停止未来注入，已发送上下文不会被删除；包回滚由统一发布owner按既有备份/签名流程处理。不得以本地测试替代原生和生产验收。
 
 ## Next step
 
-等待最终候选的必需CI、合入并核验远端main；固定main SHA和证据交统一发布会话。最终交接回执记录于统一发布会话和PR #68，避免为勾选状态再改变已测源码。
+源码交付完成；真实Provider证据见 `.agent-sync/tasks/codex-project-context-provider-057-20261016-44d995ec.md` 与 `dev-docs/project-context-validation/provider-acceptance.md`。统一发布owner按用户指定0.5.7完成原生验收与正式发布。

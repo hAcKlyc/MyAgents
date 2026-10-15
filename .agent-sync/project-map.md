@@ -59,6 +59,10 @@ User chose https://140.143.183.232/ directly. Preserve the current static design
 
 `services/agentnet/community-web/`、`src/community_http.rs`、`src/community_store.rs`（后两者相对服务目录）提供同源、需登录的话题/回复；`admin-web`同后台管理置顶、锁定与隐藏。使用现有AuthStore/AdminConfig及固定`/community` OIDC回跳，社区不使用上游Space账号/API，不迁移上游内容。合同及备份/回滚见`services/agentnet/COMMUNITY.md`。桌面导航经`utils/ownedCloud.ts`只取已配置owned issuer。MoXBots介绍由`i18n/moxbotsCopy.ts`及build profile拥有；内部兼容标识和许可/版权不全局替换。
 
+## 内置 API 主备模型
+
+`src/shared/modelFailover.ts`/`AppConfig.modelFailover`定义非秘密配置；设置组件`ModelFailoverSettings`复用原writer。`src/server/builtin-session/model-failover.ts`从原catalog/credential resolver选择兼容备用，`openai-bridge/model-failover.ts`在既有Query token上做有限HTTP恢复和防重放；原turn-lifecycle释放root。合同`specs/tech_docs/model_failover.md`，验收`dev-docs/model-failover-001-acceptance.md`。不新增Session/工具执行/持久化owner。
+
 ## 项目背景自动接续
 
 `src/shared/projectContext.ts` 为有限来源/预算纯投影，`src/server/session-engine/project-context.ts` 经原SessionStore读取并在首轮query preparation注入，设置位于ProjectContextSection。合同 `specs/tech_docs/project_context.md`；合成/独立审阅与Token计数 `dev-docs/project-context-validation/`。不新增模型调用、存储writer或发布owner。

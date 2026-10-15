@@ -274,13 +274,23 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 - **Designation:** 用户于2026-10-16在「合并重复任务」聊天 `01a14001-8f98-7fb2-9964-2a4465a55e55`要求“打一个5.6的远程更新并推送”，并明确选择“交给现有统一打包聊天执行，并授权我发送本次发布要求”。本记录由指定聊天实际核读两条用户原文后写入；不把开发者消息本身当作新增授权。
 - **Targets and runbook:** 当前授权目标仅既有macOS arm64 MoXBots own updater：`https://140.143.183.232/updates/stable/darwin-aarch64.json`，既有`/srv/moxbots/updates`、同源不可变归档和原子stable；流程`scripts/moxbot-updates/README.md`及`release.mjs`。复用既有Developer ID、公证profile、正式Reader及自己的签名根；不扩展路径/端口，不部署auth/Host/网站服务，不安装或停止日常客户端。
 - **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.6.md`及任务记录维护状态；使用既有`.release-lock`及owner核验。Git计划不是原子锁。既有Release workflow已禁用，Test CI只做验证；开发聊天继续独立源码/CI/main交付，不能并发发布或切换本目标。
-- **Current release:** `MOXBOTS-056-REMOTE-RELEASE-20261016`，`preparing`。版本0.5.6；固定源码候选main `a81d2509fa92968ddaaed63416a2478d21b8a373`（包含PR59/60/62/63/65/66），制品digest待构建；后续提交不自动加入。当前055不可变包、原清单和签名作为回滚目标保留。先完成此记录的main集成、源码/CI、活动publisher/备份检查，再正式签名公证、真实完整公网字节与签名验证、同锁CAS发布。
+- **Current release:** `MOXBOTS-056-REMOTE-RELEASE-20261016`，`accepted`（服务器分发范围）。正式源码main `a81d2509fa92968ddaaed63416a2478d21b8a373`/tag `v0.5.6`，TAR SHA `685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549`/336158365B；stable已原子切056并经真实完整GET/签名独审、公开接口和055回滚复核，自有锁释放。详见`dev-docs/releases/moxbots-0.5.6.md`及evidence JSON；未停止/安装/重启日常客户端，原生业务验收仍另列。
 - **Acceptance boundary:** 服务器发布、后台发现/下载、用户确认安装、实际版本/数据及真实薪资看板分别报告。本次不强退、不停止或安装日常客户端；原生/真实业务未验项如实保留。其他既有服务不因本次指定而获得新的发布授权；如涉及它们，先协调授权/活动job/目标租约。
+
+## MOXBOTS-MODEL-FAILOVER-001 — 2026-10-16
+
+内置API模型一主一备，当前Session主模型不变，在原Query token推理请求边界有限重试/备用接管，保留native历史及工具结果，指纹/SSE终态防止隐式重放。默认关闭，设置复用原配置writer；订阅/DSH/external与真实供应商另验。合同`specs/tech_docs/model_failover.md`、验收`dev-docs/model-failover-001-acceptance.md`，任务`.agent-sync/tasks/codex-model-failover-001-6b96c57f.md`。当前Agent负责源码/CI/main，发行请求排入统一owner下一未冻结批次，不改变已有056冻结源码或操作日常客户端；代码、模拟/真实SDK loopback与原生/生产分别追踪。
 
 ## MOXBOTS-PROJECT-CONTEXT-001 — 2026-10-16
 
 用户授权同项目新会话自动带入近期重要进展/决策，测试并main交付，发布交统一发布会话。只读原对话摘录、零新增模型请求、6000 UTF-8 bytes body；typed来源、独立开关和首轮重试刷新。开发/main/发布分别追踪于 `.agent-sync/tasks/codex-project-context-20261016-b1d6cb74.md`。不自动加入已冻结056候选，不操作日常App或生产。
 
+### PROJECT-CONTEXT-001 / 0.5.7真实Provider补验（2026-10-16）
+
+用户明确指定纳入0.5.7。已有功能PR68/main c225acd8；本轮真实Kimi/k3源会话+同项目/异项目/关闭开关4请求200/complete、wire/持久化/回答三层与独立复核通过。全部合成数据，不操作日常App。普通文本摘录，代码块仍省略；Native/HTTP/Rust circuit及其他Runtime真实Provider不在通过范围。脱敏证据dev-docs/project-context-validation/provider-acceptance.md与provider-results.json；当前分支task为codex-project-context-provider-057-20261016-44d995ec.md。功能及材料queued给既定统一发布owner的0.5.7，冻结056不变，无并发发布或版本推进。
+
 ## MOXBOTS-HOST-INSTALL-82-20261016 — Host capability compatibility
 
 User requested the new Linux Host reuse of current desktop main-Agent model and actual task execution. A real desktop/Host probe exposed a 13-method advertisement against the deployed v1 12-method limit. Task branch `codex/host-capabilities-compat-20261016` removes only the redundant host.snapshot advertisement while preserving its callable fallback and modern model/remote Session methods. Code/IPC regression, CI/main, controlled target-only Host package update, source-model/credential application and real task acceptance remain individually tracked in `.agent-sync/tasks/codex-host-capabilities-compat-20261016-cfb52e68.md`. No daily desktop restart/replacement or shared cloud release.
+
+后续独立批次0.5.7（来源聊天最新用户要求，由该聊天报告）：`MOXBOTS-PROJECT-CONTEXT-001`源码已由PR68交main c225acd8，来源聊天报告真实Kimi Provider隔离补验通过（PR71，最终main及边界以其任务记录为准），签名原生与下一版本冻结仍待验；Token与预算接续在原任务记录；未纳入冻结056，不因排队信息获得新的部署授权。

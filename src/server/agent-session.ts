@@ -28,6 +28,7 @@ import {
   type BackgroundAgentPermissionMode,
 } from './utils/background-agent-permission';
 import { registerBridge as registerBridgeInRegistry, unregisterBridge as unregisterBridgeInRegistry, type UpstreamBridgeConfig } from './openai-bridge/bridge-registry';
+import { createSessionModelFailover, sessionApiFailoverEligible } from './builtin-session/model-failover';
 import { getScriptDir } from './utils/runtime';
 import { getSidecarPort } from './session-core/sidecar-port';
 import { buildMcpStdioLaunchConfig } from './utils/mcp-command';
@@ -1677,6 +1678,7 @@ export { getSidecarPort, setSidecarPort } from './session-core/sidecar-port';
 //     `configState.currentProviderEnv`
 
 let activeSessionBridgeToken: string | null = null;
+let activeSessionModelFailover: ReturnType<typeof createSessionModelFailover> | undefined;
 
 /**
  * Build the upstream config that the bridge handler will see for the
@@ -1702,6 +1704,10 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
     : undefined;
   return {
     providerId: activeProviderEnv?.providerId ?? SUBSCRIPTION_PROVIDER_ID,
+    apiProtocol: activeProviderEnv?.apiProtocol ?? 'anthropic',
+    authType: activeProviderEnv?.authType,
+    modelFailover: activeSessionModelFailover,
+    headersTimeoutMs: activeSessionModelFailover ? 30_000 : undefined,
     baseUrl: activeProviderEnv?.baseUrl ?? '',
     apiKey: managedCredential?.accessToken ?? activeProviderEnv?.apiKey ?? '',
     credentialVersion: managedCredential?.credentialVersion,
@@ -1766,13 +1772,17 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
  * subprocess that will see a (possibly different) URL.
  */
 function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): void {
-  if (configState.currentProviderEnv?.apiProtocol !== 'openai') {
+  const failoverEnabled = (loadAdminConfig().modelFailover as { enabled?: boolean } | undefined)?.enabled === true
+    && sessionApiFailoverEligible(configState.currentProviderEnv);
+  if (configState.currentProviderEnv?.apiProtocol !== 'openai'
+    && !failoverEnabled) {
     // Provider is not OpenAI-protocol — no bridge needed. If a stale token
     // is registered (e.g., from a previous OpenAI provider before a switch),
     // tear it down here so subsequent SDK launches don't route through it.
     if (activeSessionBridgeToken) {
       unregisterBridgeInRegistry(activeSessionBridgeToken);
       activeSessionBridgeToken = null;
+      activeSessionModelFailover = undefined;
     }
     return;
   }
@@ -1783,9 +1793,31 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
     // the cross-pollination class.
     unregisterBridgeInRegistry(activeSessionBridgeToken);
     activeSessionBridgeToken = null;
+    activeSessionModelFailover = undefined;
   }
   if (!activeSessionBridgeToken) {
     activeSessionBridgeToken = randomUUID();
+    const token = activeSessionBridgeToken;
+    if (failoverEnabled) {
+      activeSessionModelFailover = createSessionModelFailover({
+        isLive: () => activeSessionBridgeToken === token && !lifecycleState.abortRequested
+          && (sessionState === 'running' || sessionState === 'starting'),
+        canSwitch: () => !hasBuiltinBackgroundWork(),
+        current: () => ({ env: configState.currentProviderEnv, model: configState.currentModel ?? '',
+          turnId: getCurrentTurnSourceItem()?.id }),
+        onSwitch: (target, status) => {
+          const text = `主模型暂时不可用（HTTP ${status}），已切换备用模型 ${target.providerId} / ${target.model}，沿用当前进度继续执行。`;
+          const product = getBuiltinProductContent();
+          if (product) product.appendDiagnostic(text);
+          else {
+            const message = { id: `diagnostic-${randomUUID()}`, role: 'assistant' as const,
+              content: text, timestamp: new Date().toISOString(), messageKind: 'diagnostic' as const };
+            appendMessage(message);
+            broadcast('chat:message-replay', createLiveUserMessageReplay(sessionId, message));
+          }
+        },
+      });
+    }
   }
   registerBridgeInRegistry(
     activeSessionBridgeToken,
@@ -1803,6 +1835,7 @@ function unregisterActiveSessionBridge(): void {
   if (!activeSessionBridgeToken) return;
   unregisterBridgeInRegistry(activeSessionBridgeToken);
   activeSessionBridgeToken = null;
+  activeSessionModelFailover = undefined;
 }
 
 /** Returns true if the active session has a registered OpenAI bridge token. */
@@ -6448,7 +6481,8 @@ export function buildClaudeSessionEnv(
   // unique token in `bridge-registry`; the URL path lets the route
   // handler look up that subprocess's specific upstream without any
   // shared global state. No more `currentOpenAiBridgeConfig` mutation.
-  if (effectiveProviderEnv?.apiProtocol === 'openai' && sidecarPort > 0) {
+  if (effectiveProviderEnv && (effectiveProviderEnv.apiProtocol === 'openai'
+    || (opts?.bridgeToken && sessionApiFailoverEligible(effectiveProviderEnv))) && sidecarPort > 0) {
     const bridgeToken = opts?.bridgeToken;
     if (!bridgeToken) {
       // This is a programming error: caller built env for an OpenAI-protocol
@@ -6468,6 +6502,11 @@ export function buildClaudeSessionEnv(
       ? 'myagents-managed-oauth'
       : (effectiveProviderEnv.apiKey ?? '');
     delete env.ANTHROPIC_AUTH_TOKEN;
+    if (opts?.bridgeToken === activeSessionBridgeToken && activeSessionModelFailover) {
+      // The bridge owns the bounded retry budget. Native retries must not
+      // silently start another chain after partial output or exhaustion.
+      env.CLAUDE_CODE_MAX_RETRIES = '0';
+    }
     // CRITICAL: Strip proxy env vars from subprocess environment.
     // The Claude Code CLI's MA6() unconditionally sets fetchOptions.proxy for the Anthropic
     // SDK client when any proxy env var is present, WITHOUT checking no_proxy. This causes
@@ -6767,7 +6806,7 @@ function ensureAssistantMessage(): MessageWire {
     return product.assistant(product.currentAssistantId ?? allocateMessageId()) as unknown as MessageWire;
   }
   const lastMessage = transcriptState.messages[transcriptState.messages.length - 1];
-  if (lastMessage && lastMessage.role === 'assistant' && isStreamingMessage) {
+  if (lastMessage && lastMessage.role === 'assistant' && lastMessage.messageKind !== 'diagnostic' && isStreamingMessage) {
     return lastMessage;
   }
   // (v0.2.11 cross-bugfix) The previous `flushPendingMidTurnQueue()` call here
@@ -7266,6 +7305,7 @@ function handleToolResultComplete(toolUseId: string, content: string, isError?: 
 }
 
 const builtinTurnLifecycle = createBuiltinTurnLifecycle({
+  endModelFailoverTurn: () => activeSessionModelFailover?.endTurn(),
   getSessionId: () => sessionId,
   getWorkspacePath: () => agentDir,
   getCurrentScenario: () => currentScenario,
@@ -9243,6 +9283,11 @@ export async function enqueueUserMessage(
   );
   const nextModel = model ?? configState.currentModel;
   const modelChanged = !isSessionBusy && model !== undefined && model !== configState.currentModel;
+  // Apply a global opt-in change only at this existing idle configuration
+  // boundary. A pre-warmed Anthropic Query has its endpoint baked into env.
+  const failoverBridgeChanged = !isSessionBusy && !hasBuiltinBackgroundWork()
+    && ((loadAdminConfig().modelFailover as { enabled?: boolean } | undefined)?.enabled === true
+      && sessionApiFailoverEligible(effectiveProviderEnv)) !== !!activeSessionModelFailover;
   const crossesProviderHistoryBoundary = !isSessionBusy
     && (providerChanged || modelChanged)
     && !canResumeAcrossBuiltinProviderHistory({
@@ -9252,7 +9297,7 @@ export async function enqueueUserMessage(
       nextModel,
     });
 
-  if ((providerChanged || crossesProviderHistoryBoundary) && lifecycleState.query) {
+  if ((providerChanged || crossesProviderHistoryBoundary || failoverBridgeChanged) && lifecycleState.query) {
     const fromLabel = configState.currentProviderEnv?.baseUrl ?? 'anthropic';
     const toLabel = effectiveProviderEnv?.baseUrl ?? 'anthropic';
     if (isDebugMode) console.log(`[agent] provider/history changed from ${fromLabel} to ${toLabel}, restarting session`);

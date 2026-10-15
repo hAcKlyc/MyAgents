@@ -2,6 +2,7 @@ import { isProjectActiveForUser } from '@/config/types';
 import WorkspaceSelector, { resolveDefaultWorkspaceProject } from '@/components/launcher/WorkspaceSelector';
 import AgentFunctionSettings from './sections/AgentFunctionSettings';
 import { DshCollaborationSettings } from './DshCollaborationSettings';
+import { ModelFailoverSettings } from './ModelFailoverSettings';
 import { getPlatformHiddenProviderIds, isLinuxDesktop } from '@/utils/desktopPlatform';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import {
@@ -5061,6 +5062,15 @@ export default function Settings({
             <p className="mb-6 text-sm text-[var(--ink-muted)]">
               {tSettings('providers.description')}
             </p>
+
+            <div className="mb-6">
+              <ModelFailoverSettings
+                value={config.modelFailover}
+                providers={providers}
+                apiKeys={apiKeys}
+                updateConfig={updateConfig}
+              />
+            </div>
 
             {/* Provider list */}
             <div className="grid grid-cols-2 gap-4">

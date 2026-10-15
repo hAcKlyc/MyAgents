@@ -33,6 +33,16 @@ export interface BridgeConfig {
 }
 
 export interface UpstreamConfig {
+  /** Missing retains the existing OpenAI translator. */
+  apiProtocol?: 'anthropic' | 'openai';
+  authType?: 'auth_token' | 'api_key' | 'both' | 'auth_token_clear_api_key';
+  headersTimeoutMs?: number;
+  /** Only interactive Session bridges opt in, never utility/probe bridges. */
+  modelFailover?: import('../model-failover').BridgeModelFailover;
+  /** App-owned continuation guidance, only set on an elected backup. */
+  continuationInstruction?: string;
+  /** Effective backup identity for SDK usage projection; never changes desired model. */
+  responseModel?: string;
   /** Provider owner for provider-scoped proxy policy. */
   providerId: string;
   /** OpenAI-compatible endpoint base URL, e.g. "https://api.openai.com/v1" */

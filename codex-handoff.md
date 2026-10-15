@@ -325,3 +325,9 @@ API Key云端加密write-only；Host只能持有限Bot/Session bearer。已有�
 MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS/完整GET/实际stat+SHA/签名独审/CAS/公开路由/054回滚核验；源main52bf6160及远端tag v0.5.5不可变。055整包平均119030B/s、全GET约47分钟，不证明云带宽上限。本机054未安装或重启：HRM16:26仍busy，须fresh完整代次准入、有效一致备份及用户确认。未把Host/IME/带数据原生UI算通过；测试network服务ACCOUNT_SESSION_EXPIRED失败明确留056。
 
 开发主干已056（版本PR61/main6d1f8912），包含之后的PR59缩放/PR60 Goal/PR62输出/PR63 Bots Ready；均不回写055。源码交付/验收边界见dev-docs/releases/moxbots-0.5.5.md、moxbots-0.5.6-handoff.md，私有制品与README/DELIVERY/SHA256SUMS在指针output/updater-055-20261015/final-52bf6160。官网下载手动ZIP由原官网owner在其新增授权下串行发布，Root不操作该asset或日常客户端。
+
+## 2026-10-16：056正式更新已发布（服务器范围）
+
+固定源码maina81d2509fa92968ddaaed63416a2478d21b8a373/tag v0.5.6，own updater stable056及不可变TAR 685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549/336158365B已正式签名、公证、独立验包和真实完整GET/stat+SHA/签名独审，通过同锁055回滚前置/CAS/备份/fsync/公开接口复验后发布，自有锁释放。详见dev-docs/releases/moxbots-0.5.6.md及evidence JSON；制品位于项目指针output/updater-056-20261016/final-a81d2509/。055保留且不可变，不自动降级。
+
+本任务没有退出、停止、安装或重启日常客户端。发布前只读观察它已是正式055；旧054/PID记录为历史，安装事务与完整活动/generation无本轮证明。真实Host、薪资/有数据原生、精确IME及签名包下有任务/录音/草稿保存恢复另验，不因分发通过而关闭。后续Project Context按来源聊天接续排入0.5.7；禁止后来main静默加入或同版本替换056。
