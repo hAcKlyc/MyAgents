@@ -1,4 +1,5 @@
 import { APP_BUILD_PROFILE } from '../../shared/appProfile';
+import { createHash } from 'node:crypto';
 // Bridge HTTP handler: receives Anthropic requests, translates to OpenAI, forwards, translates back
 
 // MUST import `fetch` from undici (not use global fetch). Node 24's built-in
@@ -32,6 +33,7 @@ import { TOKENDANCE_APP_URL, TOKENDANCE_PROVIDER_ID } from '../../shared/tokenda
 import { resolveProviderPromptCacheCapabilities } from '../../shared/provider-prompt-cache';
 import { resolveBridgeModel } from './translate/model';
 import { opencodeGoHeaders } from '../opencode-go-request';
+import { readBoundedErrorBody } from './read-error-body';
 
 const DEFAULT_TIMEOUT = 300_000; // 5 minutes
 const THOUGHT_SIG_CACHE_MAX = 500; // Max cached thought_signatures to prevent unbounded growth
@@ -356,6 +358,62 @@ export interface BridgeHandler {
   seedThoughtSignatures(entries: Array<{ id: string; thought_signature: string }>): void;
 }
 
+/** Same token boundary as OpenAI translation; SDK transcript stays native. */
+async function forwardAnthropicRequest(request: Request, body: AnthropicRequest,
+  upstream: UpstreamConfig, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  if (request.signal.aborted) abort();
+  else request.signal.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  const cleanup = () => { clearTimeout(timer); request.signal.removeEventListener('abort', abort); };
+  try {
+    const url = `${upstream.baseUrl.replace(/\/+$/, '')}/v1/messages`;
+    const headers: Record<string, string> = { 'content-type': 'application/json',
+      'anthropic-version': request.headers.get('anthropic-version') ?? '2023-06-01' };
+    const beta = request.headers.get('anthropic-beta');
+    if (beta) headers['anthropic-beta'] = beta;
+    if (upstream.authType !== 'api_key') headers.authorization = `Bearer ${upstream.apiKey ?? ''}`;
+    if (upstream.authType !== 'auth_token_clear_api_key') {
+      headers['x-api-key'] = upstream.apiKey ?? '';
+    }
+    const proxy = getProxyForProviderUrl(upstream.providerId, url);
+    const response = await fetch(url, {
+      method: 'POST', headers,
+      body: JSON.stringify({ ...body, model: upstream.model ?? body.model }),
+      signal: controller.signal, redirect: 'error',
+      ...(proxy ? { dispatcher: getDispatcherForProxy(proxy) } : {}),
+    });
+    clearTimeout(timer);
+    const reader = response.body?.getReader();
+    const stream = reader ? new ReadableStream<Uint8Array>({
+      async pull(output) {
+        try {
+          const next = await reader.read();
+          if (next.done) { cleanup(); output.close(); }
+          else output.enqueue(next.value);
+        } catch (error) { cleanup(); output.error(error); }
+      },
+      async cancel() {
+        cleanup();
+        try { await reader.cancel(); } catch { /* already aborted by the downstream request */ }
+        finally { controller.abort(); }
+      },
+    }) : null;
+    if (!reader) cleanup();
+    // Transport errors after this response is returned are never replayed.
+    return new Response(stream, { status: response.status, headers: {
+      'content-type': response.headers.get('content-type') ?? 'application/json',
+      'x-should-retry': 'false',
+    } });
+  } catch {
+    cleanup();
+    return jsonError(request.signal.aborted ? 499 : timedOut ? 408 : 502,
+      'api_error', request.signal.aborted ? 'Request cancelled' : timedOut ? 'Upstream request timed out' : 'Upstream connection error');
+  }
+}
+
 /** Create a bridge handler that translates Anthropic → OpenAI → Anthropic */
 export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
   const log = config.logger === null ? () => {} : (config.logger ?? console.log);
@@ -372,7 +430,7 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
   // Capped at THOUGHT_SIG_CACHE_MAX to prevent unbounded growth in long-lived sessions.
   const thoughtSignatureCache = new Map<string, string>();
 
-  const handler = async (request: Request): Promise<Response> => {
+  const handler = async (request: Request, resolvedUpstream?: UpstreamConfig): Promise<Response> => {
     // 1. Extract API key from request headers
     const apiKey = request.headers.get('x-api-key') || request.headers.get('authorization')?.replace('Bearer ', '') || '';
 
@@ -387,7 +445,7 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
     // 3. Get upstream config
     let upstream: UpstreamConfig;
     try {
-      upstream = await config.getUpstreamConfig(request);
+      upstream = resolvedUpstream ?? await config.getUpstreamConfig(request);
     } catch (err) {
       // PRD #124: distinguish "client routing error" (unknown token) from
       // "configuration error". The former MUST be 400 so SDK clients see
@@ -403,6 +461,22 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
       }
       log(`[bridge] Failed to get upstream config: ${err}`);
       return jsonError(500, 'api_error', 'Bridge configuration error');
+    }
+
+    if (upstream.modelFailover) {
+      return upstream.modelFailover.run(request, upstream, target => handler(new Request(request.url, {
+        method: 'POST', headers: request.headers, body: JSON.stringify(anthropicReq), signal: request.signal,
+      }), { ...target, modelFailover: undefined }), createHash('sha256').update(JSON.stringify({
+        model: anthropicReq.model, system: anthropicReq.system, messages: anthropicReq.messages, tools: anthropicReq.tools,
+      }, (key, value) => key === 'cache_control' ? undefined : value)).digest('hex'));
+    }
+    if (upstream.continuationInstruction) {
+      anthropicReq = { ...anthropicReq, system: typeof anthropicReq.system === 'string'
+        ? `${anthropicReq.system}\n\n${upstream.continuationInstruction}`
+        : [...(anthropicReq.system ?? []), { type: 'text', text: upstream.continuationInstruction }] };
+    }
+    if (upstream.apiProtocol === 'anthropic') {
+      return forwardAnthropicRequest(request, anthropicReq, upstream, upstream.headersTimeoutMs ?? upstreamHeadersTimeoutMs);
     }
 
     let effectiveApiKey = upstream.apiKey || apiKey;
@@ -575,9 +649,9 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
       const headersTimer = setTimeout(
         () => {
           didHeadersTimeout = true;
-          controller.abort(new Error(`Upstream headers timeout after ${upstreamHeadersTimeoutMs}ms`));
+          controller.abort(new Error(`Upstream headers timeout after ${upstream.headersTimeoutMs ?? upstreamHeadersTimeoutMs}ms`));
         },
-        upstreamHeadersTimeoutMs,
+        upstream.headersTimeoutMs ?? upstreamHeadersTimeoutMs,
       );
 
       const onDownstreamAbort = (): void => {
@@ -666,7 +740,16 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
         const status = attempt.upstreamResp.status;
         let errBody: string;
         try {
-          errBody = await attempt.upstreamResp.text();
+          const bounded = upstream.headersTimeoutMs
+            ? await readBoundedErrorBody(attempt.upstreamResp.body)
+            : await attempt.upstreamResp.text();
+          if (bounded === undefined) {
+            attempt.controller.abort();
+            return { ok: false, response: new Response(JSON.stringify({ type: 'error', error: {
+              type: 'api_error', message: 'Upstream error response was incomplete; automatic recovery stopped.' } }),
+            { status, headers: { 'content-type': 'application/json', 'x-should-retry': 'false', 'x-moxbots-recovery': 'blocked' } }) };
+          }
+          errBody = bounded;
         } finally {
           cleanupAttempt(attempt);
         }
@@ -775,6 +858,7 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
     })();
     if (!finalAttempt.ok) return finalAttempt.response;
     const { upstreamResp, controller, onDownstreamAbort } = finalAttempt.attempt;
+    const responseModel = upstream.responseModel ?? anthropicReq.model;
 
     // The headers-only timer ended inside fetchUpstreamAttempt as soon as
     // fetch() returned this Response. The controller stays live for downstream
@@ -796,8 +880,8 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
       // Stream-body liveness is intentionally not inferred from byte cadence;
       // the Session inactivity watchdog owns true turn liveness.
       return isResponses
-        ? handleResponsesStreamResponse(upstreamResp, anthropicReq.model, log, controller, request.signal, onDownstreamAbort)
-        : handleStreamResponse(upstreamResp, anthropicReq.model, translateReasoning, log, thoughtSignatureCache, controller, request.signal, onDownstreamAbort);
+        ? handleResponsesStreamResponse(upstreamResp, responseModel, log, controller, request.signal, onDownstreamAbort)
+        : handleStreamResponse(upstreamResp, responseModel, translateReasoning, log, thoughtSignatureCache, controller, request.signal, onDownstreamAbort);
     } else {
       // Non-stream branch: response body is read with a single await; the
       // request.signal listener can be detached now (controller lives only
@@ -806,8 +890,8 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
         request.signal.removeEventListener('abort', onDownstreamAbort);
       }
       return isResponses
-        ? handleResponsesNonStreamResponse(upstreamResp, anthropicReq.model, log)
-        : handleNonStreamResponse(upstreamResp, anthropicReq.model, translateReasoning, log, thoughtSignatureCache);
+        ? handleResponsesNonStreamResponse(upstreamResp, responseModel, log)
+        : handleNonStreamResponse(upstreamResp, responseModel, translateReasoning, log, thoughtSignatureCache);
     }
   };
 

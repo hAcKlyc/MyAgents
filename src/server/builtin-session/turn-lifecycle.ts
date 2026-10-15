@@ -153,6 +153,7 @@ export type BuiltinTurnLifecycleDeps = {
   ) => boolean;
   retractTransientProviderTextOutput: (resultText: string) => Promise<void>;
   clearApiRetryStatus: () => void;
+  endModelFailoverTurn?: () => void;
   trackServer?: typeof defaultTrackServer;
   firePostTurnTitleHook: (
     sessionId: string,
@@ -202,6 +203,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
   };
 
   const finishTerminalCleanup = (terminal: 'complete' | 'stopped' | 'error', continuingTurn = false): void => {
+    if (!continuingTurn) deps.endModelFailoverTurn?.();
     deps.schedulePostTerminalQueueDrain(terminal);
     const sid = deps.getSessionId();
     if (sid) {

@@ -62,6 +62,10 @@ export interface BridgeCacheAffinity {
 }
 
 export interface UpstreamBridgeConfig {
+  apiProtocol?: 'anthropic' | 'openai';
+  authType?: 'auth_token' | 'api_key' | 'both' | 'auth_token_clear_api_key';
+  headersTimeoutMs?: number;
+  modelFailover?: import('./model-failover').BridgeModelFailover;
   /** Provider owner for provider-scoped proxy policy. */
   providerId: string;
   baseUrl: string;

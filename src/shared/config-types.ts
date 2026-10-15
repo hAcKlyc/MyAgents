@@ -923,6 +923,8 @@ export interface DshCollaborationSettings {
 }
 
 export interface AppConfig {
+  /** Optional builtin API-model failover. Main selection remains Session-owned. */
+  modelFailover?: import('./modelFailover').ModelFailoverSettings;
   // Default settings for new projects
   defaultProviderId?: string;
   defaultPermissionMode: PermissionMode;

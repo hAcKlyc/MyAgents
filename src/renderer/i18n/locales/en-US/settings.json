@@ -2310,5 +2310,24 @@
     "timing": "Collaboration message timing",
     "timingHint": "Controls messages between agents and completion reports. Realtime delivers after the current model or tool step. The chat queue setting above controls user input.",
     "unavailable": "Model unavailable"
+  },
+  "modelFailover": {
+    "title": "Backup model",
+    "enable": "Enable automatic model failover",
+    "description": "Keep the conversation’s selected model as primary. If it remains unavailable after retries, use one backup to continue the current turn when safe. The next turn starts with the primary model.",
+    "backup": "Backup provider and model",
+    "none": "Select a backup model",
+    "unavailable": "Unavailable",
+    "chooseHint": "Select a backup model before enabling automatic failover.",
+    "unavailableHint": "The saved backup is unavailable. Choose an enabled API provider and model. Automatic failover cannot use this backup.",
+    "keyHint": "Add this provider’s API key in the provider settings before enabling automatic failover.",
+    "readyHint": "The backup is configured. Model compatibility is checked before each switch.",
+    "empty": "Configure and enable an API provider below to choose a backup.",
+    "details": "How switching works",
+    "scope": "Available for API models in the built-in runtime. Subscriptions and external CLI runtimes are not supported.",
+    "safety": "Completed work is preserved. If a response is interrupted after it has started reaching the agent, the turn stops with its progress preserved instead of automatically repeating actions.",
+    "compatibility": "The backup must support the conversation’s content and tools. If it is the same as the primary or is incompatible, no switch occurs. Authentication, billing and permission failures require attention.",
+    "saving": "Saving…",
+    "saveFailed": "Could not save. Your previous settings are unchanged. Try again."
   }
 }
