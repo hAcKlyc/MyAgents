@@ -315,3 +315,7 @@ API Key云端加密write-only；Host只能持有限Bot/Session bearer。已有�
 覆盖上方开发阶段状态：PR38 已合入 main，源码/主干七项 CI 全成功；模型中心、builtin/API 分配与调用监控已发布既有云 `/admin`。实际发布整树、二进制/网页 hash、备份与管理员真实路径见 `dev-docs/bots-model-center-production-acceptance.md`。测试 supplier/model 已停用、Bot 软删除，无供应商调用，101 Host/桌面及本地 cloud_models 未变。
 
 用户最终明确“复用功能，后面自己配置”，不再请求配置文件；供应商及密钥由用户后续在模型中心填写。真实 Bot 推理还需实际 Host 的限定接入和联合升级，不能用已保存的 model_ref 表示 Host 已应用。当前任务的实现/管理发布关闭，后续供应商计量路径另验收。通用旧失效 actor 队列公平性 BOTS-EXEC-QUEUE-FAIRNESS-002 仍在 TODO，未扩大本次修复声明。
+
+## 2026-10-15：MOXBOTS-055-RELEASE-FREEZE / 056-CONTINUATION
+
+用户最新明确要求先发布055服务器更新、以后改动进056。055正式源码固定main52bf61602522fb28715edf620d98ad8e3deee842，精确六CI及App/TAR/ZIP/DMG签名、公证、票据、Gatekeeper和ownsig验证通过；055不可变归档全传且服务端SHA一致。公网全量GET/原子stable和客户端实际安装仍单独追踪，不中断busy任务。冻结后字体缩放PR59/main5ebf属于056；下一开发版本元数据同步056，不重发055。权威接续文件见dev-docs/releases/moxbots-0.5.5.md和moxbots-0.5.6-handoff.md，以及.agent-sync/tasks/codex-release-055-handoff-056-20261015-5ebf2979.md。保留真实Host/精确IME/有数据原生UI等未完成边界和已有QA失败记录。
