@@ -1,0 +1,158 @@
+{
+  "task": "MOXBOTS-056-REMOTE-RELEASE-20261016",
+  "status": "SERVER_PUBLISHED_AND_VERIFIED",
+  "version": "0.5.6",
+  "sourceMain": "a81d2509fa92968ddaaed63416a2478d21b8a373",
+  "sourceTag": "v0.5.6",
+  "archiveSha256": "685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549",
+  "archiveBytes": 336158365,
+  "manifestSha256": "af8b16c122bce9e470f5792345c6623ef97623a0ebaf17d65fa6131e0a83b504",
+  "appleSubmission": "24390592-089c-4557-a0d8-7e7b46ba5204",
+  "publicDownload": {
+    "bytes": 336158365,
+    "sha256": "685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549",
+    "seconds": 2859.270112,
+    "averageBytesPerSecond": 117567,
+    "sourceLocation": "external-linux",
+    "normalTLS": true,
+    "ownSignatureVerified": true,
+    "actualFileHashOriginReviewed": true,
+    "independentPublicDownloadReview": "PASS"
+  },
+  "rollback055PreservedAndVerified": true,
+  "releaseLockReleased": true,
+  "clientInstall": "NOT_EXECUTED_BY_THIS_TASK",
+  "evidenceRoot": "MoxBot/work/release-056-20261016/owner/",
+  "evidence": [
+    {
+      "file": "source-main-ci.json",
+      "sha256": "a668709b08eaa92ee77f0e2d4ea2f63011995e62b28bcb9df90a8c304ca2b931",
+      "bytes": 25337
+    },
+    {
+      "file": "coordination-main.json",
+      "sha256": "1db83a771e4396b7a6152fb2d4ce88baedf12b2711467c995bdf887e9a69447d",
+      "bytes": 414
+    },
+    {
+      "file": "formal-build.json",
+      "sha256": "b8796ca3128516335b4f90a6cb926443e9633eef309dddbe40dc3eaf02a67515",
+      "bytes": 424
+    },
+    {
+      "file": "signed-app.json",
+      "sha256": "7749f36787ac03de2a31085ce6776a8d2bdb37d2f3ccf53c9afc388ad0f0ee62",
+      "bytes": 34331
+    },
+    {
+      "file": "app-final-gates.json",
+      "sha256": "2dc68780a62e3314b2a7196547dc1094553518e862889b40429797cba79e18b8",
+      "bytes": 1430
+    },
+    {
+      "file": "archives.json",
+      "sha256": "92e98c6d0fd792454ab4391e8d5b43c778c3326f94e578f0e730e2e238c83283",
+      "bytes": 3733
+    },
+    {
+      "file": "independent-package-audit.json",
+      "sha256": "6845f462aa40aace09dd92e9e512028a187cfe018b49c2171b38286f2ae60085",
+      "bytes": 71260
+    },
+    {
+      "file": "independent-publication-script-review.json",
+      "sha256": "68ea6e73acb1b57fc28bb41e7d1cf86777b45beef06f2199b474cff6b8948283",
+      "bytes": 3523
+    },
+    {
+      "file": "local-publication-gates.json",
+      "sha256": "107fa5363ffcb344932a21cb9fea056b7b3bd5f6d93426fc95ef0702343a799b",
+      "bytes": 530
+    },
+    {
+      "file": "rollback055-crypto.json",
+      "sha256": "2f2798b4ac6b9e55e8fdd7ec089813002759c74101039733b786c092393852ce",
+      "bytes": 1747
+    },
+    {
+      "file": "server-stage-verified.json",
+      "sha256": "1b1931d46fb1cedfb7a6e08fb8faaf3b0b83990cbd18f2d1686adc519cb1f998",
+      "bytes": 522
+    },
+    {
+      "file": "public-archive-gates.json",
+      "sha256": "bb648f26f95676d00a9b1524d4d09160cada318a4f4794738dee6fae3e11bda5",
+      "bytes": 7595
+    },
+    {
+      "file": "independent-public-download-review.json",
+      "sha256": "b2a272edd92ac7b625d73e773c6943072dc5e2fdc2c50379a71e8055a53f23a6",
+      "bytes": 6797
+    },
+    {
+      "file": "server-promote.json",
+      "sha256": "4daa16b841e70b443eec768f4db779c1cf32984b0e3e0f1385fa8ad7389692a4",
+      "bytes": 444
+    },
+    {
+      "file": "public-final-gates.json",
+      "sha256": "80f32f4f41fe11f6f78307e58e530d166c7c41242da1fa3bc64b14722d948049",
+      "bytes": 813
+    },
+    {
+      "file": "server-finish.json",
+      "sha256": "01974e969ffa9c3341af5bb9baea98ae8fe0c341cad26ece88d2b1bf8b9e50f4",
+      "bytes": 117
+    },
+    {
+      "file": "independent-published-stable-verification.json",
+      "sha256": "a670aa96bea249e56050748a85d5c1c44dc07c951098f67444bdde36e84a3dae",
+      "bytes": 22740
+    },
+    {
+      "file": "client-before-readonly.json",
+      "sha256": "0d52cd41228f6e8b516ddbfd70f00d0bc350032e8c77b6e6cd9ea60e0cc55228",
+      "bytes": 475
+    },
+    {
+      "file": "client-after-readonly.json",
+      "sha256": "aea77c4a49d1808ac805cc92391deb1b593d130593e9124ce47d13925ae5bcf6",
+      "bytes": 475
+    },
+    {
+      "file": "source-tag.json",
+      "sha256": "bcb1a354c6222019d18c1049344565c0fa152bae67d6555dd9cc0e187f759726",
+      "bytes": 371
+    },
+    {
+      "file": "independent-ui/INDEPENDENT-UI-REVIEW.md",
+      "sha256": "39f1b9b4f9df2be61ce3f323178ab90a1f5dc5c08d5130efedef688f00c4339a",
+      "bytes": 2480
+    },
+    {
+      "file": "transfer-diagnosis-server.json",
+      "sha256": "c7c629ea7125d0377bc4611748bdd012a10664abe1ab91c1024bcbef103cd6c9",
+      "bytes": 2063
+    },
+    {
+      "file": "transfer-diagnosis-limit-rate-inclusive.json",
+      "sha256": "c8c90b8bbe9264bc112ce1e80843322004e38f7f6338397d81870176a5f87bb3",
+      "bytes": 86
+    },
+    {
+      "file": "server-update-transfer-directives.json",
+      "sha256": "80541514e851feac080afb2a6067d962c9aef5aea43c4e35679c18cdac812294",
+      "bytes": 113
+    }
+  ],
+  "transferDiagnosis": {
+    "externalLinuxDirectBytesPerSecond": 117567,
+    "seconds": 2859.270112,
+    "activeNginxByteRateLimitFound": false,
+    "serverLoad": "low",
+    "tcpRetransmissionsObserved": true,
+    "cloudPurchasedBandwidth": "UNVERIFIED",
+    "exitOrLinkBottleneck": "INFERENCE_NOT_CONFIRMED_CAUSE",
+    "networkConfigurationChanged": false
+  }
+}
