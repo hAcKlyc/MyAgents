@@ -208,3 +208,6 @@ Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已�
 - [x] 相关161项unit/DOM，web/server构建。
 - [x] 完整类型/lint、Rust Task82/owner2及独立UI审阅。
 - [ ] main同步/CI/合并、统一0.5.5 intake与真实客户端复验。
+## MOXBOTS-BRAND-COMMUNITY-001 — 2026-10-15
+
+用户要求清理可见MyAgents名称/介绍，并重建社区到现有云服务体系。隔离分支`codex/brand-community-20261015`，基线c7bab285；桌面品牌/导航、同云账号社区及后台管理已实现，回归和独立UI验收进行中。合同`services/agentnet/COMMUNITY.md`，任务`.agent-sync/tasks/codex-brand-community-20261015-5872226e.md`。云服务和桌面分别追踪发布；统一桌面0.5.5打包owner正在工作，本任务不并发安装或重启日常应用。不得把合成OIDC、本地fixture或主干合入称为生产/原生完成。

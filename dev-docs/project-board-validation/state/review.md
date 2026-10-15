@@ -42,7 +42,7 @@
 
 - 已发现并复核修复：30 秒 tick 取消慢速 50 会话整轮导致饥饿/重叠；归档记录最后已知活跃但读失败/过期时隐藏；归档漏查未出现在 metadata 列表中的 Task.sessionIds；waiting/unknown/stop_failed 时错误展示 rerun；organizing 与其他动作并发；人工 executor=`user` 的 running 进度；历史页头混用工作台待确认数。
 - 原三项修复采用单一观察 Promise 串行排空旧 generation、保留最后活跃证据并投影为待核实、按完整 Task.sessionIds 重新读取。没有新增 Session owner 或启动 Session。
-- 失败码链路已只读核对：local observation → internal route → Rust business error → management observation → admin route → renderer activity error.code → hook.errorCode → needs/blocked。最后复核发现 Task.executionState=running 可能先于已知 execution_failed，已交主 Agent 修正优先级；该项关闭情况需随后补记。
+- 失败码链路已只读核对：local observation → internal route → Rust business error → management observation → admin route → renderer activity error.code → hook.errorCode → needs/blocked。最后复核发现 Task.executionState=running 先于已知 execution_failed 的问题也已修复：fresh runningSession 优先，明确失败优先于仅 Task.executionState；对应组合回归覆盖 done/archived 与 running executionState。
 - 本审阅者使用 Node 24 实跑 backend observation/engine/owner 162 项通过；最后独立实跑 projection/activity/hook/Page 28 项通过，其中 50 个慢请求、隐藏/返回、迟到结果和缺失 metadata 的归档拒绝回归均通过。
 - 本审阅者最初的 Rust 测试尝试在 apple-cf Swift manifest 链接阶段失败，未进入测试；不能记作通过。主 Agent 后续 Rust 测试的实际结果以其记录为准。
 
