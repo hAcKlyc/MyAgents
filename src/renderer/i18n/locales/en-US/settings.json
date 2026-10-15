@@ -2324,7 +2324,7 @@
     "readyHint": "The backup is configured. Model compatibility is checked before each switch.",
     "empty": "Configure and enable an API provider below to choose a backup.",
     "details": "How switching works",
-    "scope": "Available for API models in the built-in runtime. Subscriptions and external CLI runtimes are not supported.",
+    "scope": "Supports API models in the Claude Agent SDK runtime. DSH, subscription models and external CLI runtimes are not supported yet.",
     "safety": "Completed work is preserved. If a response is interrupted after it has started reaching the agent, the turn stops with its progress preserved instead of automatically repeating actions.",
     "compatibility": "The backup must support the conversation’s content and tools. If it is the same as the primary or is incompatible, no switch occurs. Authentication, billing and permission failures require attention.",
     "saving": "Saving…",
