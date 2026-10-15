@@ -355,6 +355,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock('../agent-session', async () => ({
+  hasBuiltinBackgroundWork: (await import('../builtin-session/lifecycle')).hasQueryBackgroundTasks,
   hasBuiltinActivityForUpdate: (await import('../builtin-session/lifecycle')).hasBuiltinActivityForUpdate,
   setUpdateRestartFrozen: (await import('../builtin-session/lifecycle')).setUpdateRestartFrozen,
   applyMcpOverrideAndAwaitReady: mocks.applyMcpOverrideAndAwaitReady,
@@ -536,6 +537,9 @@ import {
   updateExternalRuntimeConfigAtSelector,
 } from './selector';
 import type { InjectedTurnRequest, SessionEngine } from './types';
+import { projectSessionActivity } from './observation';
+import { completeQueryBackgroundTask, recordQueryBackgroundTask, resetLifecycleForTest,
+  setPreWarmInProgress, setQuerySession } from '../builtin-session/lifecycle';
 import {
   getCurrentProductSessionId,
   resetProductSessionBinding,
@@ -676,6 +680,39 @@ describe('session-engine selector and adapters', () => {
         expect(getSessionEngine().getLiveSessionState().executionStartedAt).toBe(start);
       }
     } finally { getter.mockReturnValue(undefined); }
+  });
+  it('observes exact Query children after the root ends without changing root busy policy', () => {
+    const firstQuery = {} as never;
+    const replacementQuery = {} as never;
+    const engine = getSessionEngine();
+    mocks.getAgentState.mockReturnValue({ sessionState: 'idle', agentDir: '/workspace' });
+    mocks.isSessionBusy.mockReturnValue(false);
+    resetLifecycleForTest();
+    try {
+      setPreWarmInProgress(true);
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('idle');
+      setPreWarmInProgress(false);
+      setQuerySession(firstQuery);
+      recordQueryBackgroundTask(firstQuery, 'agent', { runId: 'run-1' });
+      recordQueryBackgroundTask(firstQuery, 'bash', { runId: 'run-1' });
+      expect(engine.isBusy()).toBe(false);
+      expect(engine.getLiveSessionState()).toMatchObject({ sessionState: 'idle', isBusy: false, backgroundWorkActive: true });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('running');
+      completeQueryBackgroundTask(firstQuery, 'agent', { runId: 'run-1' });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('running');
+      completeQueryBackgroundTask(firstQuery, 'bash', { runId: 'run-1' });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('idle');
+      recordQueryBackgroundTask(firstQuery, 'agent', { runId: 'run-1' });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('idle');
+      recordQueryBackgroundTask(firstQuery, 'agent', { runId: 'run-2' });
+      completeQueryBackgroundTask(firstQuery, 'agent', { runId: 'run-1' });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('running');
+      setQuerySession(replacementQuery);
+      recordQueryBackgroundTask(firstQuery, 'late-agent', { runId: 'run-3' });
+      expect(projectSessionActivity(engine.getLiveSessionState())).toBe('idle');
+    } finally {
+      resetLifecycleForTest();
+    }
   });
   it('projects root-blocking interactions without treating child approvals as Session suspension', () => {
     mocks.state.useExternal = true;

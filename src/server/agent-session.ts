@@ -1987,6 +1987,12 @@ export function isSessionBusy(): boolean {
     || queueState.promotedItemInFlight;
 }
 
+/** Observation only: background work can outlive its parent product turn.
+ * Keep this separate from the root admission/stop/auto-injection busy policy. */
+export function hasBuiltinBackgroundWork(): boolean {
+  return hasQueryBackgroundTasks(lifecycleState.query);
+}
+
 /**
  * Rescue pending mid-turn items back to queueState.messageQueue front when the SDK subprocess
  * is about to die (abortPersistentSession or interruptCurrentResponse hard-kill).

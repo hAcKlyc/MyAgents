@@ -15,6 +15,8 @@ describe('Session observation truth', () => {
     expect(projectSessionActivity({ sessionState: 'running', isBusy: true })).toBe('running');
     expect(projectSessionActivity({ sessionState: 'running', isBusy: true, waitingForUser: true })).toBe('waiting_user_action');
     expect(projectSessionActivity({ sessionState: 'idle', isBusy: false, waitingForUser: true })).toBe('idle');
+    expect(projectSessionActivity({ sessionState: 'idle', isBusy: false, backgroundWorkActive: true })).toBe('running');
+    expect(projectSessionActivity({ sessionState: 'running', isBusy: true, backgroundWorkActive: true, waitingForUser: true })).toBe('waiting_user_action');
   });
   it('uses only the active turn start and includes root waiting wall time', () => {
     const startedAt = '2026-10-14T12:00:00.000Z';
@@ -36,6 +38,26 @@ describe('Session observation truth', () => {
     mocks.management.mockResolvedValue({ok:true,active:true,result:response});
     expect(await readSessionActivity('s')).toEqual(response.session);
     expect(() => readLocalSessionActivity('other')).toThrow('SESSION_OWNER_SCOPE_MISMATCH');
+  });
+  it('reports children still executing after a parent terminal without inventing a root timer', () => {
+    mocks.identity.mockReturnValue({ sessionId: 's' });
+    mocks.live.mockReturnValue({ sessionState: 'idle', isBusy: false, backgroundWorkActive: true });
+    expect(readLocalSessionActivity('s')).toEqual({ success: true, session: { sessionId: 's', state: 'running' } });
+    mocks.live.mockReturnValue({ sessionState: 'idle', isBusy: false, backgroundWorkActive: false });
+    expect(readLocalSessionActivity('s')).toEqual({ success: true, session: { sessionId: 's', state: 'idle' } });
+  });
+  it('reports a sticky root error as failed execution even when root busy policy stays true', async () => {
+    mocks.identity.mockReturnValue({ sessionId: 's' });
+    mocks.live.mockReturnValue({ sessionState: 'error', isBusy: true });
+    expect(() => readLocalSessionActivity('s')).toThrow('SESSION_EXECUTION_FAILED');
+    mocks.management.mockResolvedValue({ ok: false, code: 'SESSION_EXECUTION_FAILED' });
+    await expect(readSessionActivity('s')).rejects.toMatchObject({ code: 'SESSION_EXECUTION_FAILED' });
+    expect(mocks.metadata).not.toHaveBeenCalled();
+  });
+  it('preserves independently observed children after a root error', () => {
+    mocks.identity.mockReturnValue({ sessionId: 's' });
+    mocks.live.mockReturnValue({ sessionState: 'error', isBusy: true, backgroundWorkActive: true });
+    expect(readLocalSessionActivity('s')).toEqual({ success: true, session: { sessionId: 's', state: 'running' } });
   });
   it('uses real live partial output without replacing it with an older successful answer', async () => {
     expect(await readLatestSessionResult('s', { latestResult: 'partial', terminalStatus: 'stopped', turnId: 't' }))
@@ -80,5 +102,11 @@ describe('Session observation truth', () => {
     mocks.management.mockResolvedValue({ ok: true, active: false });
     mocks.metadata.mockReturnValue({ id: 's' });
     expect(await readSessionActivity('s')).toEqual({ sessionId: 's', state: 'idle' });
+  });
+  it.each(['starting', 'recovering', 'dead', 'draining'])('does not reinterpret an unobservable %s owner as idle history', async phase => {
+    mocks.management.mockResolvedValue({ ok: false, code: 'session_owner_unavailable', error: phase });
+    mocks.metadata.mockReturnValue({ id: 's' });
+    await expect(readSessionActivity('s')).rejects.toThrow('SESSION_STATE_UNAVAILABLE');
+    expect(mocks.metadata).not.toHaveBeenCalled();
   });
 });
