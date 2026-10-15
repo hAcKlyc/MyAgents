@@ -33,3 +33,11 @@
 ## Verification / execution record
 
 当前主Agent单独实现与UI验收，零子Agent，零外部模型；无用量或成本节省测量。48项相关unit/DOM、full typecheck/full lint（既有16 dependency warnings/0 errors）、MoXBots production web build通过。React light/dark1440与540窄窗、列表、共享原会话入口、详情超时/Escape、Goal暂停刷新共六条旅程通过；合成数据和结果见 `dev-docs/project-board-validation/dedup/README.md`。自查覆盖representative选择的稳定性和历史Task状态/入口完整；首轮浏览器fixture selector与snapshot稳定性问题修复后复验通过，无产品验收标准降低。
+
+## Completed
+
+共享Session代表选择与所有观察消费路径已实现；旧Task的状态、历史和会话入口保全。48项unit/DOM、类型/lint/构建与六条React合成旅程通过，证据已提交。PR https://github.com/heavenzhang/MoXBots/pull/66 ，当前等待六项CI/main。
+
+## Blockers and unknowns
+
+源码无未解决失败；PR CI尚在运行。056正式包/签名/安装/真实薪资路径需既有发布窗口，冻结055不重写；当前任务不抢占日常App，不声称已发布或原生验收。展示代表规则不是精确Query归属证明。无独立审阅、未测量模型用量及费用。
