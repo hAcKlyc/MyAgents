@@ -44,7 +44,7 @@ export default function ModelQaNextPrompt() {
     } catch { if (!abort.signal.aborted) setError('真实生成失败，请查看受控验收记录'); }
     finally { if (!abort.signal.aborted) setBusy(false); }
   }
-  return <main className="mx-auto max-w-3xl p-8 space-y-6" data-testid="modelqa-next-prompt">
+  return <main className="mx-auto h-screen max-w-3xl overflow-y-auto p-8 pb-64 space-y-6" data-testid="modelqa-next-prompt">
     <h1 className="text-xl font-semibold">下一步任务建议 · 独立模型验收</h1>
     <p>下面的前序对话为合成测试数据。建议由所选 Runtime 真实生成；此页面只验收可编辑草稿，发送已禁用。</p>
     <section aria-label="合成前序对话" className="space-y-2 rounded border p-4">
