@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentBlock } from '@/types/chat';
+import { applySubagentLifecycleToContent } from '@/components/tools/subagentActivity';
+import type { SubagentLifecycle } from '../../shared/types/subagent-lifecycle';
 import { buildProcessPhases, getProcessOutcome, getProcessPhaseKind, summarizeProcessPhase } from './processPresentation';
 
 function tool(name = 'Read', patch: Record<string, unknown> = {}): ContentBlock {
@@ -43,6 +45,17 @@ describe('process status evidence', () => {
     const child = tool('Task', { result: '{}', subagentCalls: [{ isLoading: true }] });
     expect(getProcessOutcome(child, false)).toBe('unknown');
     expect(getProcessOutcome(child, true)).toBe('running');
+  });
+  it('uses the current child activation over retained parent history interruption flags', () => {
+    const stopped = tool('Agent', { isStopped: true, isFailed: true, isLoading: false,
+      subagentLifecycle: { status: 'interrupted', startedAt: 1, activation: { id: 'old', ordinal: 1, state: 'aborted' } },
+    });
+    const running: SubagentLifecycle = { status: 'running', startedAt: 2, activation: { id: 'new', ordinal: 2, state: 'running' } };
+    const next = applySubagentLifecycleToContent([stopped], 'call', running)!;
+    expect(next[0].tool?.isStopped).toBe(true); // Real owner intentionally retains legacy flags.
+    expect(getProcessOutcome(next[0], false)).toBe('running');
+    const completed = applySubagentLifecycleToContent(next, 'call', { ...running, status: 'completed', finishedAt: 3 })!;
+    expect(getProcessOutcome(completed[0], false)).toBe('succeeded');
   });
   it('honors completed child lifecycle even when handle remains open', () => {
     expect(getProcessOutcome(tool('Agent', { isLoading: true, subagentLifecycle: { status: 'completed', handleState: 'open' } }), false)).toBe('succeeded');

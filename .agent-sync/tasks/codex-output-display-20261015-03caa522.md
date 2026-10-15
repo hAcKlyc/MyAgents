@@ -25,7 +25,7 @@
 
 ## Verification
 
-90项unit、169项DOM通过；完整类型/lint及MoXBots web构建通过，最终小修后类型/lint/web构建复验通过。实际React主审及独立380浅深色/默认英文交互通过。一轮摘要结果归属歧义已修复并复验。证据`dev-docs/output-display/acceptance.md`及合成截图；不代替原生/真实Provider路径。
+91项unit、169项DOM通过；完整类型/lint及MoXBots web构建通过，最终小修后类型/lint/web构建复验通过。实际React主审及独立380浅深色/默认英文交互通过。一轮摘要结果归属歧义已修复并复验。证据`dev-docs/output-display/acceptance.md`及合成截图；不代替原生/真实Provider路径。
 
 ## Execution record
 

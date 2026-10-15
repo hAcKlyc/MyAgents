@@ -16,7 +16,7 @@
 
 | 层级 | 结果与边界 |
 | --- | --- |
-| 单元 | 90项通过：过程状态36、Shell transcript46、正文分组2、子Agent activity6 |
+| 单元 | 91项通过：过程状态37、Shell transcript46、正文分组2、子Agent activity6 |
 | DOM/回归 | 169项通过：阶段/工具行、Message/MessageList、引用/正文/媒体接线、Task/CollabAgent、聊天滚动 |
 | 类型/lint | 完整typecheck、lint（含依赖边界与文档）最终复验通过 |
 | 构建 | MoXBots profile web生产构建及8项主题registry/preset最终复验通过 |
@@ -24,7 +24,7 @@
 | 独立审阅 | output_review（未实现源码）代码及UI通过；380×800浅/深色无横向溢出，默认视窗英文、动作换行、状态可辨、回折后失败仍常显通过。viewport已恢复 |
 | 原生/真实业务 | 未验证；未启动/退出/替换日常App，未调用Provider或操作真实业务 |
 
-第一轮独立复核修复：失败阶段与成功追加命令的无归属exitCode0可能混淆；已加动作归属，并用DOM及实际UI复验。阶段开合及重要行终态收起通知原聊天布局owner。第二轮主审补查：直接打开常显的执行中工具，完成时不能因阶段默认折叠而消失；现已由onUserExpand固定阶段展开，169项DOM中包含此回归，独立静态+focused DOM通过，主审IAB真实点击running→直接展开Bash→completed确认原行与输出保持可见。独立focused浏览器受IAB不可用限制，未冒称通过。主审另实测Space展开、Enter收起及焦点保留。
+第一轮独立复核修复：失败阶段与成功追加命令的无归属exitCode0可能混淆；已加动作归属，并用DOM及实际UI复验。阶段开合及重要行终态收起通知原聊天布局owner。第二轮主审补查：直接打开常显的执行中工具，完成时不能因阶段默认折叠而消失；现已由onUserExpand固定阶段展开，169项DOM中包含此回归，独立静态+focused DOM通过，主审IAB真实点击running→直接展开Bash→completed确认原行与输出保持可见。独立focused浏览器受IAB不可用限制，未冒称通过。最后独立源核查发现旧父工具isStopped/isFailed可与新child activation并存，现统一投影优先采用明确subagentLifecycle，新增测试通过真实applySubagentLifecycleToContent验证保留旧标志时新activation的running/completed显示正确；没有更改owner或持久化。主审另实测Space展开、Enter收起及焦点保留。
 
 证据：[执行中](evidence/running.png)、[失败与结果归属](evidence/failed.png)、[已打开工具完成后仍保留](evidence/opened-tool-completed.png)。截图只含合成数据。DOM证明所有子Agent锚点常驻；UI样例无真实子Agent，不声称真实跳转通过。
 

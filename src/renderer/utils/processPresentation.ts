@@ -21,16 +21,18 @@ export function processInput(tool: ToolUseSimple): Record<string, unknown> {
 
 export function getProcessOutcome(block: ContentBlock, live: boolean): ProcessOutcome {
   const tool = block.tool;
+  // A continuable child owns later activations even when its original parent
+  // tool retained stopped/failed flags during history finalization.
+  if (tool && isSubagentContainerTool(tool.name) && tool.subagentLifecycle) {
+    const status = tool.subagentLifecycle.status;
+    return status === 'completed' ? 'succeeded' : status === 'interrupted' ? 'stopped' : status;
+  }
   if (block.isStopped || tool?.isStopped) return 'stopped';
   if (block.isFailed || tool?.isFailed || tool?.isError) return 'failed';
   if (block.type === 'thinking') return block.isComplete ? 'succeeded' : live ? 'running' : 'unknown';
   if (!tool) return 'unknown';
   if (isSubagentContainerTool(tool.name)) {
-    const lifecycle = tool.subagentLifecycle?.status;
-    if (lifecycle === 'failed') return 'failed';
-    if (lifecycle === 'interrupted') return 'stopped';
-    if (isSubagentContainerRunning(tool)) return lifecycle === 'running' || live ? 'running' : 'unknown';
-    if (lifecycle === 'completed') return 'succeeded';
+    if (isSubagentContainerRunning(tool)) return live ? 'running' : 'unknown';
   }
   if (['Bash', 'bash', 'pwsh', 'PowerShell'].includes(tool.name)) {
     const status = resolveBashTranscriptStatus(tool);
