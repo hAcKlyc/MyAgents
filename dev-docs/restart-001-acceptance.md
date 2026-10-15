@@ -17,7 +17,8 @@
 - [x] TypeScript、相关eslint、MoXBots web/server构建。
 - [x] 实际浏览器：1280×720测试环境，确认框视觉、稍后取消、显式确认回调；独立真实组件DOM验证误按Enter/Escape。桌面任务不扩展移动设备认证。
 - [x] 初版Rust release cargo check、生命周期3项、Task-only进程lease回归。
-- [x] 最终Rust更新相关50项、Task scheduler39项和独立复审通过；扩大筛选另有CLIProxy旧签名fixture的provider_disabled失败，正在基线核对，不声称全量通过。
+- [x] 最终Rust更新相关50项、Task scheduler39项和独立复审通过；CLIProxy旧签名fixture在ae26aa7f未修改基线的release profile下同样provider_disabled：其internal fixture要求debug profile，不改无关provider策略，不声称全量Rust通过。
+- [x] 首轮CI的5824项单元测试通过，1项AppShell源码契约仍匹配旧调用参数而失败；更新为显式中断参数并保留确认/笔记/文件/草稿先于重启的顺序断言，本地该文件16项通过。最终全套以新head的CI为准。
 - [ ] CI与远端main：PR65执行中，以后续记录为准。
 - [ ] 已签名056包：有活动任务/PTY、录音保存、失败恢复、草稿/会话恢复及真实更新全过程。没有把测试进程/HTTP/截图称原生发布验收。
 
