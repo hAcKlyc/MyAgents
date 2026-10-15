@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-10-15T17:38:42.064497+00:00",
+  "finishedAt": "2026-10-15T17:39:16.557009+00:00",
+  "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.5-52bf6160/MoxBots-0.5.5-macOS-arm64.zip",
+  "curlExit": 0,
+  "anonymous": true,
+  "usedRange": false,
+  "bytes": 344623193,
+  "metadata": {
+    "http_code": 200,
+    "http_version": "2",
+    "ssl_verify_result": 0,
+    "num_redirects": 1,
+    "size_download": 344623193,
+    "speed_download": 9997925,
+    "time_total": 34.469471,
+    "exitcode": 0
+  },
+  "fullDownload": true,
+  "dailyOperated": false,
+  "sha256": "b2bf83f464e7311869eb31a51db5427d67b7baf9099b6ab91de9672f53f8f4be",
+  "zipEntries": 14830,
+  "crcPassed": true,
+  "strictTLS": true
+}

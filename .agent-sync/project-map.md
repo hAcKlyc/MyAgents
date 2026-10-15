@@ -49,7 +49,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 
 ## IP website download channel
 
-User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
+User chose https://140.143.183.232/ directly. Preserve the current static design and reread its live release pointer before each overlay; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
 
 ## 个人菜单与反馈中心
 
