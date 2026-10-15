@@ -55,8 +55,8 @@ describe('Session API failover authority', () => {
     const controller = createSessionModelFailover({ current: () => ({ env: primary, model: 'a', turnId: 'root' }),
       isLive: () => reason !== 'inactive', onSwitch: switched });
     const execute = vi.fn(async () => new Response('{}', { status: 503 }));
-    expect((await controller.run(request(), { providerId: 'primary', baseUrl: primary.baseUrl! }, execute)).status).toBe(503);
-    expect(execute).toHaveBeenCalledTimes(1);
+    expect((await controller.run(request(), { providerId: 'primary', baseUrl: primary.baseUrl! }, execute)).status).toBe(reason === 'inactive' ? 499 : 503);
+    expect(execute).toHaveBeenCalledTimes(reason === 'inactive' ? 0 : 1);
     expect(switched).not.toHaveBeenCalled();
   });
   it('rejects managed or scoped credentials even when a matching API catalog entry exists', () => {
@@ -98,5 +98,22 @@ describe('Session API failover authority', () => {
     expect((await controller.run(request(), upstream, execute, 'first')).status).toBe(503);
     expect((await controller.run(request(), upstream, execute, 'first')).status).toBe(409);
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+  it.each([false, true])('does not deliver late backup output after root cancellation (already pinned=%s)', async pinned => {
+    let alive = true;
+    let cancelOnBackup = !pinned;
+    const controller = createSessionModelFailover({ current: () => ({ env: primary, model: 'a', turnId: 'root' }),
+      isLive: () => alive, onSwitch: vi.fn() });
+    const execute = vi.fn(async target => {
+      if (target.providerId === 'primary') return new Response('{}', { status: 503 });
+      if (cancelOnBackup) alive = false;
+      return new Response('late unsafe tool output');
+    });
+    const upstream = { providerId: 'primary', baseUrl: primary.baseUrl! };
+    if (pinned) { await controller.run(request(), upstream, execute, 'first'); cancelOnBackup = true; }
+    const response = await controller.run(request(), upstream, execute, 'next');
+    expect(response.status).toBe(499);
+    expect(await response.text()).not.toContain('unsafe tool');
+    expect(execute).toHaveBeenCalledTimes(pinned ? 4 : 3);
   });
 });

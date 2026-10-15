@@ -26,7 +26,7 @@ MOXBOTS-MODEL-FAILOVER-001：为 MoXBots 内置 Runtime 的 API 模型实现一�
 
 ## Verification
 
-重点33项、此前组合247项和UI26项通过；真实SDK正常接管/断流停止两个fixture通过且counter均1；typecheck、web/server构建通过。完整证据见`dev-docs/model-failover-001-acceptance.md`。最终lint/CI/main另追加。模拟上游不代表供应商联调；真实 SDK loopback 也不代表已安装版本包含成果。
+重点35项、此前组合247项和UI26项通过；真实SDK正常接管/断流停止两个fixture通过且counter均1；typecheck、web/server构建通过。完整证据见`dev-docs/model-failover-001-acceptance.md`。完整lint通过，合并最新main项目背景接续后55项和typecheck通过。PR https://github.com/heavenzhang/MoXBots/pull/73；CI/main验收正在推进。模拟上游不代表供应商联调；真实 SDK loopback 也不代表已安装版本包含成果。
 
 ## Blockers and unknowns
 

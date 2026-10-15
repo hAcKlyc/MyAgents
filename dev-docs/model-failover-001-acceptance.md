@@ -5,10 +5,10 @@
 ## 已验证的行为
 
 - 设置默认关闭、精确Provider/model单备选择、缺key/失效状态、保存失败与并发保存锁：组件10项、邻接界面合计26项DOM测试通过。
-- 真实loopback HTTP +策略33项重点回归通过：已完成工具结果传递至Anthropic/Chat Completions/Responses备用；主重试一次/备用一次；同体并发/重发409，不同推理并发只切一次；完整SSE terminal后正常关闭不封root；部分流断裂、缺终态、迟到成功及取消/撤scope不继续交付或重放。
+- 真实loopback HTTP +策略35项重点回归通过：已完成工具结果传递至Anthropic/Chat Completions/Responses备用；主重试一次/备用一次；同体并发/重发409，不同推理并发只切一次；完整SSE terminal后正常关闭不封root；部分流断裂、缺终态、迟到成功及取消/撤scope不继续交付或重放。
 - 错误正文悬挂/超大正文在有限时间/体积内停止，保留原HTTP事实；429结构化/中文欠费不换备；备用禁用/删除/撤key/更换后不偷偷回primary；key轮换采用新凭据；人工steering不重开预算，root terminal后下一轮恢复主。
-- 较早组合回归247项通过，覆盖SessionEngine127、turn-result与providerHistory策略、既有bridge超时与prompt cache39、设置26；本轮后续修复重点33项重新验证，无unhandled rejection。
-- TypeScript检查通过；web构建与theme8项通过；server bundle通过。最终提交/CI/远端main另由task record追加。
+- 较早组合回归247项通过，覆盖SessionEngine127、turn-result与providerHistory策略、既有bridge超时与prompt cache39、设置26；本轮后续修复重点35项重新验证，无unhandled rejection。
+- TypeScript检查通过；web构建与theme8项通过；server bundle通过。完整lint（ESLint、依赖边界、文档路由）通过，现有依赖warning未新增；合入项目背景接续后的组合55项及typecheck通过。PR73与最终CI/远端main状态见Git记录及本机交付回执。
 
 ## 真实 SDK、模拟上游
 

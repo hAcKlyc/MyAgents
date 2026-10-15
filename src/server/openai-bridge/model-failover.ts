@@ -20,6 +20,7 @@ export class ModelFailoverController implements BridgeModelFailover {
     onSwitch: (target: UpstreamConfig, status: number) => void;
     onTurnEnd?: () => void;
     canSwitch?: () => boolean;
+    isActive?: () => boolean;
   }) {}
 
   endTurn(): void {
@@ -30,7 +31,7 @@ export class ModelFailoverController implements BridgeModelFailover {
   async run(request: Request, primary: UpstreamConfig,
     execute: (target: UpstreamConfig) => Promise<Response>, requestKey?: string): Promise<Response> {
     const scope = this.options.scope();
-    if (request.signal.aborted || (!scope && this.state)) return cancelled();
+    if (request.signal.aborted || this.options.isActive?.() === false || (!scope && this.state)) return cancelled();
     if (!scope) return execute(primary);
     if (scope !== this.state?.scope) this.state = { scope, delivered: new Set(), inFlight: new Set() };
     const state = this.state!;
@@ -78,6 +79,7 @@ export class ModelFailoverController implements BridgeModelFailover {
     };
     try {
       const response = await recover();
+      if (!live()) { void response.body?.cancel().catch(() => undefined); return cancelled(); }
       if (!response.ok || !response.body || !response.headers.get('content-type')?.includes('text/event-stream')) return response;
       const reader = response.body.getReader();
       const parser = new SSEParser();

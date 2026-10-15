@@ -1800,7 +1800,8 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
     const token = activeSessionBridgeToken;
     if (failoverEnabled) {
       activeSessionModelFailover = createSessionModelFailover({
-        isLive: () => activeSessionBridgeToken === token && sessionState === 'running',
+        isLive: () => activeSessionBridgeToken === token && !lifecycleState.abortRequested
+          && (sessionState === 'running' || sessionState === 'starting'),
         canSwitch: () => !hasBuiltinBackgroundWork(),
         current: () => ({ env: configState.currentProviderEnv, model: configState.currentModel ?? '',
           turnId: getCurrentTurnSourceItem()?.id }),

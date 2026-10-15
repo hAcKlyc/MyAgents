@@ -64,6 +64,7 @@ export function createSessionModelFailover(options: {
     },
     resolveBackup: () => root ? resolveBackup(root.backup) : undefined,
     canSwitch: options.canSwitch,
+    isActive: options.isLive,
     onSwitch: options.onSwitch,
     onTurnEnd: () => { root = undefined; },
   });
