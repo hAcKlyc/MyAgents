@@ -34,7 +34,7 @@ export class SessionUserTagApiError extends Error {}
 const stamp=Date.now();
 export const tasks=['running','blocked','verifying','done','todo'].map((status,i)=>({id:'task-'+status,name:['目标方案调整：费用包预算校验','员工绩效回显异常','项目管理任务错误修复','费用包审批查询支持','销售目标拆分'][i],executor:'agent',workspaceId:'alpha',workspacePath:'/synthetic/alpha',executionMode:'once',sessionIds:status==='blocked'?['alpha-1']:[],status,tags:['销售'],createdAt:stamp,updatedAt:stamp-i*1000,statusHistory:[{from:'todo',to:status,at:stamp,actor:'agent',message:'本地验收合成数据'}],description:'这条记录只用于隔离的界面验收，不代表真实业务执行或发布。',dispatchOrigin:'direct',docs:{dir:'/synthetic/docs',taskMd:'/synthetic/docs/task.md'}}));
 tasks.push({...tasks[0],id:'schedule',name:'定时任务等待触发',executionMode:'recurring',sessionIds:[]});
-const snapshot={sessions,workspaceSessionStates:new Map(),isSessionsLoading:false,sessionsError:null};
+let snapshot={sessions,workspaceSessionStates:new Map(),isSessionsLoading:false,sessionsError:null};
 export const getSnapshot=()=>snapshot;
 export const subscribePassive=()=>noop;
 export const registerPassiveWorkspaceSessionDemand=()=>noop;
@@ -47,3 +47,10 @@ export const taskUpdateStatus=async(input)=>{window.boardCalls.push({kind:'statu
 export const taskRun=async(id)=>{window.boardCalls.push({kind:'run',id});if(window.boardFailAction)throw new Error('执行失败（模拟）');const task=tasks.find(t=>t.id===id);Object.assign(task,{status:'running',executionState:'running'});return {task,attemptOrdinal:1}};
 export const taskRerun=async(id)=>{window.boardCalls.push({kind:'rerun',id});if(window.boardFailAction)throw new Error('重新执行失败（模拟）');const task=tasks.find(t=>t.id===id);Object.assign(task,{status:'running',executionState:'running'});return {task,attemptOrdinal:1}};
 export const apiPostJson=async(path,body)=>{window.boardCalls.push({kind:'observe',path,id:body.sessionId});return {success:true,session:{sessionId:body.sessionId,state:body.sessionId==='alpha-1'?'waiting_user_action':window.boardTimedSession&&body.sessionId==='alpha-2'?'running':'idle',...(window.boardTimedSession&&body.sessionId==='alpha-2'?{execution:{startedAt:new Date(Date.now()-750000).toISOString(),elapsedMs:750000}}:{})}}};
+
+// Four-stage board validation: archive only changes organization; restore does not run.
+export const actions={beginSessionMetadataMutation:()=>1,applySessionMetadata:(session)=>{Object.assign(sessions.find(s=>s.id===session.id),session);snapshot={...snapshot,sessions:[...sessions]};emit();return true}};
+export const taskArchive=async(id)=>{window.boardCalls.push({kind:'archive',id});if(window.boardFailAction)throw new Error('归档失败（模拟）');const task=tasks.find(t=>t.id===id);Object.assign(task,{status:'archived',updatedAt:Date.now()});return task};
+tasks.push({...tasks.find(t=>t.status==='done'),id:'task-archived',name:'已归档的合成任务',status:'archived'});
+sessions.push({...sessions[1],id:'alpha-archived',title:'已归档的合成会话',archived:true});
+snapshot={...snapshot,sessions:[...sessions]};

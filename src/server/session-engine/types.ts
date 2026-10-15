@@ -265,6 +265,8 @@ export type SessionEngineRuntimeIdentity = {
 export type SessionEngineLiveState = {
   sessionState: string;
   isBusy: boolean;
+  /** Work owned by the current Query that can outlive its root product turn. */
+  backgroundWorkActive?: boolean;
   /** Actual root-blocking human interaction, not an async child question. */
   waitingForUser?: boolean;
   /** Start of the current product transcript turn; absent during pre-warm. */

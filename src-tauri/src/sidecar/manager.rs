@@ -973,6 +973,24 @@ impl SidecarManager {
         }))
     }
 
+    /// Activity reads must distinguish an absent owner from one whose current
+    /// generation cannot be observed. Text reads may fall back to history;
+    /// activity must never turn a recovery/drain/readiness gap into idle.
+    pub(crate) fn acquire_session_activity_dispatch(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<SidecarHttpDispatch>, String> {
+        if self.recovering_sidecars.contains_key(session_id) {
+            return Err("Session owner is recovering".to_string());
+        }
+        if !self.sidecars.contains_key(session_id) {
+            return Ok(None);
+        }
+        self.acquire_session_dispatch(session_id)?
+            .map(Some)
+            .ok_or_else(|| "Session owner is not ready for activity observation".to_string())
+    }
+
     /// Resolve the current ready Sidecar process for a renderer-owned
     /// long-lived subscription. The Session hint gives an exact match during normal
     /// operation; the stable owner is the fallback after pending -> real key
@@ -2327,6 +2345,87 @@ pub fn create_sidecar_state() -> ManagedSidecar {
 #[cfg(test)]
 mod completion_claim_tests {
     use super::*;
+
+    #[test]
+    fn activity_dispatch_only_reports_absent_for_a_truly_unowned_session() {
+        let mut manager = SidecarManager::new();
+        assert!(manager
+            .acquire_session_activity_dispatch("absent")
+            .unwrap()
+            .is_none());
+        manager.insert_test_ready_frontend_sidecar(
+            "session-a",
+            32001,
+            SidecarOwner::Tab("tab-a".to_string()),
+        );
+        let generation = manager.generation_for("session-a").unwrap();
+        let dispatch = manager
+            .acquire_session_activity_dispatch("session-a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dispatch.generation(), generation);
+        assert_eq!(
+            dispatch
+                .url_for_path("/api/internal/session/text-page")
+                .unwrap(),
+            "http://127.0.0.1:32001/api/internal/session/text-page"
+        );
+        drop(dispatch);
+
+        for state in [SidecarState::Starting, SidecarState::Dead] {
+            manager.sidecars.get_mut("session-a").unwrap().state = state;
+            assert!(manager
+                .acquire_session_activity_dispatch("session-a")
+                .is_err());
+            // Historical text remains readable through the existing fallback.
+            assert!(manager
+                .acquire_session_dispatch("session-a")
+                .unwrap()
+                .is_none());
+        }
+        manager.sidecars.get_mut("session-a").unwrap().state = SidecarState::Healthy;
+        let gate = manager
+            .sidecars
+            .get("session-a")
+            .unwrap()
+            .dispatch_gate
+            .clone();
+        let _drain = DispatchGate::close(&gate);
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+    }
+
+    #[test]
+    fn activity_dispatch_refuses_recovery_until_the_ready_generation_commits() {
+        let mut manager = SidecarManager::new();
+        let owner = SidecarOwner::Tab("tab-a".to_string());
+        manager.insert_test_ready_frontend_sidecar("session-a", 32001, owner.clone());
+        let old_generation = manager.generation_for("session-a").unwrap();
+        manager.begin_session_sidecar_replacement("session-a");
+        assert!(manager.sidecars.get("session-a").is_none());
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+
+        manager.insert_test_ready_frontend_sidecar("session-a", 32002, owner);
+        let generation = manager.generation_for("session-a").unwrap();
+        assert_ne!(generation, old_generation);
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+        manager
+            .recovering_sidecars
+            .get_mut("session-a")
+            .unwrap()
+            .candidate_generation = Some(generation);
+        assert!(manager.commit_ready_session_sidecar("session-a").is_some());
+        let dispatch = manager
+            .acquire_session_activity_dispatch("session-a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dispatch.generation(), generation);
+    }
 
     #[test]
     fn update_restart_snapshot_keeps_exact_generations_and_rejects_unready_owners() {

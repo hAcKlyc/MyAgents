@@ -456,24 +456,19 @@ async fn session_text_page_handler(
             "error": "Sidecar manager is not initialized",
         }));
     };
-    if matches!(request.projection, SessionReadProjection::Activity) {
-        let state = manager.lock().unwrap();
-        if state
-            .get_session_sidecar(&request.session_id)
-            .is_some_and(|sidecar| sidecar.state == crate::sidecar::SidecarState::Starting)
-        {
-            return no_store_json(serde_json::json!({"ok":false,"code":"session_owner_starting"}));
-        }
-    }
     for attempt in 1..=SESSION_OWNER_READ_ATTEMPTS {
         // Re-resolve the owner for each attempt. A failed request may have
         // raced a generation replacement; retrying the captured URL would
         // only pin the stale owner for longer.
-        let dispatch = match manager
-            .lock()
-            .unwrap()
-            .acquire_session_dispatch(&request.session_id)
-        {
+        let dispatch = {
+            let mut state = manager.lock().unwrap();
+            if matches!(request.projection, SessionReadProjection::Activity) {
+                state.acquire_session_activity_dispatch(&request.session_id)
+            } else {
+                state.acquire_session_dispatch(&request.session_id)
+            }
+        };
+        let dispatch = match dispatch {
             Ok(dispatch) => dispatch,
             Err(error) => {
                 return no_store_json(serde_json::json!({

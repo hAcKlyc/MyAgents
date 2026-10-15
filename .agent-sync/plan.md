@@ -199,3 +199,12 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 ### MOXBOTS-UPDATER-20261014 final0.5.4 delivery
 
 Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已整合统一官网PR47 main16ab3dbd/看板记录80faaab7，无客户端重建。独立QA真实A3→B3、编辑/realPTY拒绝不中断、cancel、signed install/nativecleanup/exactdraft&Record恢复和Root实际UI复看通过。App/DMG AppleAccepted/stapled/Gatekeeper，ZIP/TAR/DMG全清单/签名门禁通过。Own官网stable0.5.4及独立ownkey签名生效；sameSHA TAR复用自有Repo CDN（官网URL和公钥不变，服务器原件保留），完整实际HTTPS343281849bytes/37.19s/9.23MBps、signature/range/privacy通过；网站新设计当前源hash已对齐、其它Nginxbase保全/cloudPID不变。正式文件WPS output/updater-20261014/final-e5a05f76/，最终交接 dev-docs/moxbots-updater-054-delivery.md。paidProvider/realissuer/Host/runningtimer不是本native覆盖；remote-session安全更新证明未就绪明确阻止安装。Root/children、board与unified均停止GUI，remoteowner后续只按其自己的授权安装/联调。已公开0.5.4不可变，下一源码变更发0.5.5。
+
+## MOXBOTS-PROJECT-BOARD-004 — 四阶段与可信执行状态
+
+用户批准PB-003 v3落实际看板：待开始→执行中→待确认→已完成；历史仅主动归档，恢复不执行。当前分支codex/project-board-state-20261015，任务记录 `.agent-sync/tasks/codex-project-board-state-20261015-5b2d05d2.md`。实现renderer与现有owner观察链路，SDK当前Query后台子任务纳入running；Sidecar非健康/恢复不可伪idle。主Agent负责集成，state_review独立检查UI；不碰统一0.5.5工作区，不并发退出/换包。代码、CI/main与统一原生安装/真实HRM复验分开记录。
+
+- [x] 四阶段/细原因、历史归档恢复、可见页有界刷新与失败保留快照。
+- [x] 相关161项unit/DOM，web/server构建。
+- [x] 完整类型/lint、Rust Task82/owner2及独立UI审阅。
+- [ ] main同步/CI/合并、统一0.5.5 intake与真实客户端复验。

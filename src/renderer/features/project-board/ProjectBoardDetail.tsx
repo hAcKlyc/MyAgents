@@ -10,15 +10,16 @@ import { formatTime } from '@/utils/taskCenterUtils';
 import { workspacePathsEqual } from '@/../shared/workspacePath';
 import type { Task } from '@/../shared/types/task';
 import { useBoardOverlay } from './useBoardOverlay';
-import { freshActivity, type BoardRow } from './projection';
+import { boardRowStateKey, type BoardRow } from './projection';
 
 interface Props {
   row: BoardRow; workspacePath: string; isActive: boolean; now: number;
   draft: string; onDraftChange: (value: string) => void;
   onClose: () => void; onOpenSession: (id: string) => void; onChanged: () => void;
+  onOrganize?: () => void; organizing?: boolean;
 }
 
-export default function ProjectBoardDetail({ row, workspacePath, isActive, now, draft, onDraftChange, onClose, onOpenSession, onChanged }: Props) {
+export default function ProjectBoardDetail({ row, workspacePath, isActive, now, draft, onDraftChange, onClose, onOpenSession, onChanged, onOrganize, organizing = false }: Props) {
   const overlay = useBoardOverlay();
   const panel = useRef<HTMLElement>(null);
   const { t } = useTranslation('task');
@@ -63,7 +64,7 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
   }, [isActive, busy, onClose, overlay]);
   const onDocError = useCallback((message: string) => setError(message), []);
   async function act(kind: 'run' | 'rerun' | 'done') {
-    if (!task || busy || !loaded || task.executionState) return;
+    if (!task || busy || organizing || !loaded || task.executionState) return;
     readGeneration.current += 1;
     setBusy(true); setError(null);
     try {
@@ -77,8 +78,7 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
     finally { if (mounted.current) setBusy(false); }
   }
   const sessionIds = task ? task.sessionIds : row.sessions.map(s => s.id);
-  const activity = freshActivity(row.activity, now);
-  const canRerun = task && task.executor === 'agent' && ['blocked', 'stopped', 'done'].includes(task.status);
+  const canRerun = row.group !== 'running' && (!row.confirmationReason || ['blocked', 'stopped'].includes(row.confirmationReason)) && task && task.executor === 'agent' && ['blocked', 'stopped', 'done'].includes(task.status);
   return <aside ref={panel} className="pb-detail" aria-label={t('projectBoard.details')}>
     <div className="pb-detail-head"><div><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div><h2>{row.title}</h2></div>
       <button ref={closeButton} type="button" className="pb-button" aria-label={t('projectBoard.close')} onClick={onClose} disabled={busy}><CloseIcon className="h-4 w-4" /></button></div>
@@ -88,7 +88,7 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
     <div className="pb-detail-scroll">
       {taskId && !loaded && !error && <div role="status" className="pb-meta">{t('projectBoard.loading')}</div>}
       {section === 'overview' && <>
-        <section className="pb-detail-section"><h3>{t('projectBoard.status')}</h3><p>{task ? t(`badges.status.${task.status}`) : t(activity === 'idle' ? 'projectBoard.idle' : activity === 'running' ? 'projectBoard.running' : activity === 'waiting_user_action' ? 'projectBoard.waiting' : 'projectBoard.unknown')}</p>
+        <section className="pb-detail-section"><h3>{t('projectBoard.status')}</h3><p>{t(boardRowStateKey(row, now))}</p>
           {task?.executionState && <p>{t(`badges.execution.${task.executionState}`)}</p>}
           {task && task.executionMode !== 'once' && <div className="pb-detail-note">{t('projectBoard.scheduleHint')}</div>}
           {(task?.executionError || task?.lastExecution?.error) && <div className="pb-error">{task.executionError || task.lastExecution?.error}</div>}
@@ -110,10 +110,11 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
       </>}
       <section className="pb-detail-section"><h3>{t('projectBoard.originalSession')}</h3>{sessionIds.length ? sessionIds.map(id => <button type="button" className="pb-session-link" key={id} onClick={() => onOpenSession(id)}>{row.sessions.find(s => s.id === id)?.title || t('projectBoard.originalSession')}<small>{t('projectBoard.openSession')}</small></button>) : <p className="pb-detail-note">{t('projectBoard.noSession')}</p>}</section>
     </div>
-    {task && <div className="pb-detail-actions">
-      {task.executor === 'agent' && task.status === 'todo' && <button className="pb-button primary" type="button" disabled={busy || !loaded || !!task.executionState} onClick={() => { void act('run'); }}>{t('projectBoard.run')}</button>}
-      {canRerun && <button className="pb-button" type="button" disabled={busy || !loaded || !!task.executionState} onClick={() => { void act('rerun'); }}>{t('projectBoard.rerun')}</button>}
-      {task.status === 'verifying' && <button className="pb-button primary" type="button" disabled={busy || !loaded || !!task.executionState} onClick={() => { if (section !== 'artifacts') setSection('artifacts'); else void act('done'); }}>{t(section === 'artifacts' ? 'projectBoard.accept' : 'projectBoard.inspect')}</button>}
+    {(task || onOrganize) && <div className="pb-detail-actions">
+      {onOrganize && <button className="pb-button" type="button" disabled={busy || !loaded || organizing} onClick={onOrganize}>{t(row.group === 'archived' ? 'projectBoard.restore' : 'projectBoard.archive')}</button>}
+      {task?.executor === 'agent' && task.status === 'todo' && row.group === 'todo' && <button className="pb-button primary" type="button" disabled={busy || organizing || !loaded || !!task.executionState} onClick={() => { void act('run'); }}>{t('projectBoard.run')}</button>}
+      {canRerun && <button className="pb-button" type="button" disabled={busy || organizing || !loaded || !!task.executionState} onClick={() => { void act('rerun'); }}>{t('projectBoard.rerun')}</button>}
+      {task?.status === 'verifying' && row.confirmationReason === 'verification' && <button className="pb-button primary" type="button" disabled={busy || organizing || !loaded || !!task.executionState} onClick={() => { if (section !== 'artifacts') setSection('artifacts'); else void act('done'); }}>{t(section === 'artifacts' ? 'projectBoard.accept' : 'projectBoard.inspect')}</button>}
       {busy && <span className="pb-meta" role="status">{t('projectBoard.processing')}</span>}
     </div>}
   </aside>;
