@@ -77,3 +77,6 @@ Private receipts are under the pointer workspace `work/unified-055-20261015/`; A
 - [x] Human explicitly confirmed: after formal packaging, publish latest0.5.5 to existing updater server for client discovery/download; retain exact-byte/signature/rollback checks and idle-only confirmed restart.
 
 - [ ] Added direct-human ordinary Session automatic-title gate: owner01a1361b prepares isolated normal Session sidecar; actual empty-tool SDK init required before at most2 model calls. Backend hook/persist/SSE/reload and later native sidebar/Tab remain separate; no modelqa bypass/daily GUI.
+
+- [x] Root accepted normal Session backend auto-title: one actual /chat/send, two Kimi200, auto hook/titleSource:auto/attempt1, SSE+V2/index+same-ID restart/reload; exact two process groups empty. Capped custom Provider/network sandbox; real Goal GET only; IM403 not forwarded. Temporary capability projection removed.
+- [ ] Native sidebar/Tab/manual-title protection and normal desktop lifecycle remain unaccepted; backend result does not close original native/Host/release/install gates. Prior invalid-local-token direct attempts unknown retained honestly.
