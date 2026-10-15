@@ -1,4 +1,5 @@
 import { APP_CLI_NAME } from './appProfile';
+import { renderProjectContext } from './projectContext';
 import type { ProductSystemSkillRequirement } from "./systemSkills";
 import { z } from "zod";
 import {
@@ -106,6 +107,7 @@ export type QueryPrimaryContext =
 /** Immutable non-secret query annotation owned by the original Session message.
  * Retry uses visible text plus typed context, never reparses arbitrary XML. */
 export interface DesktopQueryDraft {
+  projectContext?: import('./projectContext').ProjectContextSnapshot;
   requiredSystemSkill?: ProductSystemSkillRequirement;
   visibleText: string;
   agentMentions?: AgentMentionSnapshot[];
@@ -147,6 +149,7 @@ function primaryReminder(
     : `${buildFloatingBallContextReminder(primary.input)}\n${visibleText}`;
 }
 export function composeQueryReminder(input: {
+  projectContext?: import('./projectContext').ProjectContextSnapshot;
   visibleText: string;
   primaryContext?: QueryPrimaryContext;
   agentMentions?: PreparedAgentMention[];
@@ -159,7 +162,11 @@ export function composeQueryReminder(input: {
     ? parseLeadingSystemReminder(primaryMessage).body
     : "";
   const mentions = input.agentMentions ?? [];
-  if (!mentions.length) return primaryMessage ?? input.visibleText;
+  const projectBody = input.projectContext ? renderProjectContext(input.projectContext) : '';
+  if (!mentions.length) {
+    if (!projectBody) return primaryMessage ?? input.visibleText;
+    return `<system-reminder>\n${primaryBody ? `${primaryBody}\n` : ''}${projectBody}\n</system-reminder>\n${input.visibleText}`;
+  }
   const parts = mentions
     .map(({ agent, availability }) => {
       validateMentionAgent(agent);
@@ -179,5 +186,5 @@ export function composeQueryReminder(input: {
       return `<AgentInfo>${escapeSystemReminderText(JSON.stringify(data))}</AgentInfo>`;
     })
     .join("\n");
-  return `<system-reminder>\n${primaryBody ? `${primaryBody}\n` : ""}<${AGENT_MENTIONS_TAG}>\n${parts}\n<instruction>${INSTRUCTION}</instruction>\n</${AGENT_MENTIONS_TAG}>\n</system-reminder>\n${input.visibleText}`;
+  return `<system-reminder>\n${primaryBody ? `${primaryBody}\n` : ""}${projectBody ? `${projectBody}\n` : ''}<${AGENT_MENTIONS_TAG}>\n${parts}\n<instruction>${INSTRUCTION}</instruction>\n</${AGENT_MENTIONS_TAG}>\n</system-reminder>\n${input.visibleText}`;
 }

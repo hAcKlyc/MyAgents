@@ -7,6 +7,7 @@ import {
 } from "../../shared/agentMentions";
 import type { DesktopMessageRequest } from "./types";
 const mocks = vi.hoisted(() => ({ discovery: vi.fn() }));
+vi.mock('./project-context', () => ({ optionalProjectContext: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../agent-network/discovery", () => ({
   getAgentDiscovery: mocks.discovery,
 }));

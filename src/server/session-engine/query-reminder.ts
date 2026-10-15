@@ -16,6 +16,7 @@ import {
   discoveryContext,
 } from "../../shared/agentDiscovery";
 import type { DesktopMessageRequest } from "./types";
+import { optionalProjectContext } from './project-context';
 
 /** Query metadata is prepared once by the common facade. Text that resembles
  * XML is never promoted into a trusted product context. Discovery grants no
@@ -33,22 +34,25 @@ export async function prepareDesktopQuery(
   if (requiredSystemSkill)
     assertKnownProductSystemSkillRequirement(requiredSystemSkill);
   request = { ...request, requiredSystemSkill };
+  const projectContext = await optionalProjectContext(request);
   const selectors = queryAgentSelectors(request.text);
   if (!selectors.length)
     return {
       request: {
         ...request,
         desktopQuery:
-          request.queryPrimaryContext || requiredSystemSkill
+          request.queryPrimaryContext || requiredSystemSkill || projectContext
             ? {
                 visibleText: request.text,
                 requiredSystemSkill,
                 primaryContext: request.queryPrimaryContext,
+                projectContext,
               }
             : undefined,
         text: composeQueryReminder({
           visibleText: request.text,
           primaryContext: request.queryPrimaryContext,
+          projectContext,
         }),
       },
       needsReselect: false,
@@ -104,6 +108,7 @@ export async function prepareDesktopQuery(
     request: {
       ...request,
       desktopQuery: {
+        projectContext,
         visibleText: request.text,
         requiredSystemSkill,
         agentMentions: mentions.map(({ agent }) => {
@@ -118,6 +123,7 @@ export async function prepareDesktopQuery(
         primaryContext: request.queryPrimaryContext,
       },
       text: composeQueryReminder({
+        projectContext,
         visibleText: request.text,
         primaryContext: request.queryPrimaryContext,
         agentMentions: mentions,

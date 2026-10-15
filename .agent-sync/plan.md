@@ -267,3 +267,7 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 ## MOXBOTS-BOARD-DEDUP-001 — shared Session presentation
 
 多个Task复用同一Session时只选一个当前进度代表卡片，历史任务按自身状态保留，不再把同一TODO/计时/Goal复制成多个执行。renderer限定修复，零业务数据写入；代码/React合成验证/main与056原生发布分别追踪于 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。
+
+## MOXBOTS-PROJECT-CONTEXT-001 — 2026-10-16
+
+用户授权同项目新会话自动带入近期重要进展/决策，测试并main交付，发布交统一发布会话。只读原对话摘录、零新增模型请求、6000 UTF-8 bytes body；typed来源、独立开关和首轮重试刷新。开发/main/发布分别追踪于 `.agent-sync/tasks/codex-project-context-20261016-b1d6cb74.md`。不自动加入已冻结056候选，不操作日常App或生产。

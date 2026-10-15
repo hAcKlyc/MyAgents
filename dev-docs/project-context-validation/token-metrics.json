@@ -1,0 +1,30 @@
+{
+  "kind": "synthetic full added envelope tokenizer measurement; not billed model usage",
+  "tiktokenVersion": "0.12.0",
+  "maxContextBodyUtf8Bytes": 6000,
+  "additionalModelCalls": 0,
+  "samples": [
+    {
+      "name": "one-session",
+      "contextBodyUtf8Bytes": 1764,
+      "addedUtf8Bytes": 1802,
+      "o200k_base": 510,
+      "cl100k_base": 606
+    },
+    {
+      "name": "three-sessions",
+      "contextBodyUtf8Bytes": 3312,
+      "addedUtf8Bytes": 3350,
+      "o200k_base": 1008,
+      "cl100k_base": 1132
+    },
+    {
+      "name": "budget-pressure-24-sessions",
+      "contextBodyUtf8Bytes": 5972,
+      "addedUtf8Bytes": 6010,
+      "o200k_base": 1585,
+      "cl100k_base": 1951
+    }
+  ],
+  "caveat": "Other tokenizers differ. Background remains model context on later turns until compaction. Provider caching and prices determine cost."
+}

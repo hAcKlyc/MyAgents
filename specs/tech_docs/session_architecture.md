@@ -344,3 +344,7 @@ Sidecar ready 而 External/DSH Product Session 尚未绑定 workspace owner 时�
 ### 4.4.1 Fork 中的旧 user UUID 失配
 
 native UUID 优先按 SDK-to-SDK 的精确映射复制。仅当旧 Product user UUID 在 SDK 源链完全不存在、纯文本正文在整个源链唯一且 native user 只含这一完整文本、并且匹配条目在被保留的 prefix 内时，新分支可使用该实际 native user 的新 UUID；原 Product/source 不写回。重复正文、附件、缺失正文、未知 assistant、正文混合其它 native blocks、源 UUID 仍存在但落在 prefix 外、或其它 Product 行已占该条目，均拒绝 Fork。该规则只修正复制快照的旧 stamp，不判断原回溯边界的 native resumability，也不允许移动边界或直接完整 resume 原会话。
+
+## 项目背景自动接续
+
+新桌面会话在实际 query preparation 时读取同项目近期来源，首轮重试沿同一入口刷新；后续轮次不重复注入。Scope、原文保真与Token预算见 [项目背景](project_context.md)。固定 pre-warm prompt 不拥有动态项目状态。
