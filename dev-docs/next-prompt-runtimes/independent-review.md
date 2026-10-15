@@ -95,3 +95,19 @@
 | `src/server/runtimes/modelqa-utility-command.unit.test.ts` | `2a8812f3b66c5f9a0673c684e90b68a14348a6ba2edae1a536fddc8d34d4ec99` |
 | `src/server/runtimes/claude-text-utility.ts` | `bc29ff21de3d86fceea40cb792f1d9e8b4a76d2e1fb937abeca08281e71b652f` |
 | `src/server/runtimes/codex-text-utility.ts` | `bc741096b0eb7f2f290452681e2f4ff0431a9bd0289c6e3643f4ce7495a19630` |
+
+## DSH QA admission 修复增量复核（08:53:33 +08）
+
+基于 HEAD `58c819b4bb256f647b2d7aedcfbb5a42902abee2` 后三文件增量，结论通过，可提交。产品差异仅 fixture prepare 的 `permissionMode: 'plan'` 改为 DSH 支持的 `approval-required`；未修改 native utility、认证来源、原会话或全局权限策略。
+
+- 已读实际 `compileConfiguration()`：`productPermissionMode()` 在 `resolveProviderEnv()` 前判定。旧 CLI `plan` 不属于 `DSH_PERMISSION_MODES`；新值属于 DSH 正式枚举，与实际 Kimi/k3 配置编译一致。fixture 仍不传 initialTurn/扩展，不发普通 turn；`approval-required` 不赋予工具自动执行权限。
+- 仅独立运行新 2 个 actual-compileConfiguration case 及 route DSH case，3/3 通过，其余 14 项跳过。旧 plan 回归证明在凭据解析前拒绝；新 approval-required 使用 synthetic credential 编译成功，未启动进程或发送模型请求。route case 引用真实 `DSH_PERMISSION_MODES` 验证传参，并验证 native utility 文本返回与 stop。
+- 测试 mock SessionStore/admin-config/managed-binding，未读写真实 config/auth 文件，未使用 GUI/Task/原生自动化。审阅者没有仍存活的原生动作或后台原生循环。`git diff --check` 无错误。
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `src/server/modelqa/next-prompt.ts` | `d4e5c229847444c6ff40f44c3556f59f2d91504987103e5a2b2afdcd61e4bfff` |
+| `src/server/modelqa/next-prompt.unit.test.ts` | `0ba86aab5b4db38e8aa6b633b4fd28931b526d78e2525b48f7da305c79d8cb2e` |
+| `src/server/modelqa/dsh-admission.unit.test.ts` | `2d8f00c2f39061953b7409025cf0eac9a11e6c276bc4ec5a8405e3fdc342ef77` |
+
+本次通过只证明 admission 修复及 fixture 合同；A4/DSH 实际原生模型成功、统一包更新由原验收 owner 单独复验。

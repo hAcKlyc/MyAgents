@@ -125,7 +125,7 @@ export async function modelqaNextPromptHandler(req: Request): Promise<Response |
       const runtime = dsh;
       const preparing = trackNative(runtime.startSession({ sessionId, workspacePath, model: option.model,
         runtimeSource: 'integrated', providerRoute: { kind: 'provider', providerId: option.providerId!, model: option.model },
-        permissionMode: 'plan', scenario: { type: 'desktop' }, maxTurns: 1,
+        permissionMode: 'approval-required', scenario: { type: 'desktop' }, maxTurns: 1,
         // Deliberately no initialTurn, no Product extensions/MCP, no normal send.
       }, event => {
         if (['turn_started', 'text_delta', 'tool_use_start', 'permission_request'].includes(event.kind)) { boundaryViolation = true; controller.abort(); }

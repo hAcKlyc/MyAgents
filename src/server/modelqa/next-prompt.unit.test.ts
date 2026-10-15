@@ -1,3 +1,4 @@
+import { DSH_PERMISSION_MODES } from '../../shared/types/runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ modelqa: true, config: {} as Record<string, unknown>,
   codex: vi.fn(async () => '请细化空文件的测试样例。'), claude: vi.fn(async () => '请细化缺失列的测试样例。'),
@@ -69,7 +70,10 @@ describe('isolated modelqa next-prompt acceptance route', () => {
     const response = await modelqaNextPromptHandler(req(choices[2]));
     expect(response?.status).toBe(200);
     expect(mocks.dshStart).toHaveBeenCalledWith(expect.objectContaining({ runtimeSource: 'integrated', providerRoute: { kind: 'provider', providerId: 'qa-provider', model: 'qa-model' } }), expect.any(Function));
-    expect(mocks.dshStart.mock.calls[0]![0]).not.toHaveProperty('initialTurn');
+    const admitted = mocks.dshStart.mock.calls[0]![0];
+    expect(DSH_PERMISSION_MODES.map(mode => mode.value)).toContain(admitted.permissionMode);
+    expect((await response!.json()).suggestion).toBe('请细化重复数据的预期结果。');
+    expect(admitted).not.toHaveProperty('initialTurn');
     expect(mocks.dshStart.mock.calls[0]![0]).not.toHaveProperty('dshExtensions');
     expect(mocks.dshRun).toHaveBeenCalledTimes(1); expect(mocks.dshStop).toHaveBeenCalledTimes(1);
   });

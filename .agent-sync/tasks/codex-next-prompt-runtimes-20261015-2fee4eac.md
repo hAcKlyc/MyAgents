@@ -32,3 +32,7 @@
 ## Next step
 
 合并已推送profile依赖，完整tsc/build及精确HEAD CI通过后交统一owner排main；随后实际modelqa输入框Enter/IME/Escape验证并跟进0.5.5更新。DSH modelqa准备产生独立profile合成native工件可保留，utility自身前后原会话文件hash不变。
+
+## A4 native follow-up (2026-10-15)
+
+Aggregate PR54 owns final mainline and0.5.5; feature58 CI六项全绿且冻结，native仅发现缺陷时精确追加。A4真实Codex/CC灰字与可编辑草稿通过，DSH10ms空失败。QA handler错误使用plan权限，已最小改为DSH approval-required；actual configuration contract回归旧拒绝/新接受，99unit/DOM+现有DSH配置/tsc/lint/独立3case通过。新版本DSH原生补验和正式更新仍待Root，当前Agent没有GUI/配置写入/付费模型动作。

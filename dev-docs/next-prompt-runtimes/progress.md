@@ -27,3 +27,5 @@ DSH modelqa准备本身创建独立profile随机native session/attachment工件�
 统一owner要求的隔离CLI路径增量：只在compile-time modelqa且system-cli utility读取两条受控完整executable env；要求absolute/canonical/regular/X_OK，launcher另校验SHA。普通prod/updaterqa/managed不读取override，模型/auth/home不变。新增8项独立测试及39项聚焦回归、tsc/scopedlint通过；此增量不重复计作真实模型调用。首轮PR53 JS CI被af6 profile的Mac-only /private/tmp测试在Linux拒绝，准备同步owner ab935修复后精确HEAD重跑。
 
 已同步ab935 profile跨平台修复；route unit因mock编译开关与真实profile宏不匹配触发guard，已只在unit固定同一隔离profile常量，未改production一致性检查。最终9文件89项组合测试通过，4项modelqa构建脚本测试通过；native helper未因测试修订变化。
+
+A4原生非实现者验收：Codex15.039s、Claude Code4.725s真实灰字与草稿通过；DSH10ms空值失败不计通过。已只读核对PNG，未操作窗口。确定接线错误：QA handler传入CLI plan权限名，但actual DSH compileConfiguration仅接受本Runtime权限；旧值在credential resolution之前拒绝，早期unit mock未验证该跨Runtime契约。最小产品变化只把QA准备权限改为approval-required，仍无initialTurn/扩展，utility tools[]/无普通任务约束不变。回归先红（真实公开权限契约拒plan），后99项组合通过；新增actual compileConfiguration仅synthetic mocks验证旧plan拒绝/新Kimi k3审批模式接受，不读真实配置或发请求。tsc/lint通过，独立增量review3项通过。等待Root新候选仅补DSH原生真实生成验收；不重复付费helper，不把源码修复算成native通过。
