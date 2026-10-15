@@ -1036,6 +1036,7 @@
     "idleHint": "当前没有执行，可进入原会话继续；空闲不代表目标已完成。",
     "scheduledHint": "等待触发的自动任务独立展示；启用状态不表示此刻正在执行。",
     "reasons": {
+      "paused": "Goal 已暂停",
       "waiting": "等待答复或授权",
       "verification": "成果待确认",
       "blocked": "执行受阻",

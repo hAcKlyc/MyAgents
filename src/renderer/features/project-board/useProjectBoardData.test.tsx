@@ -18,6 +18,20 @@ beforeEach(()=>{
 });
 afterEach(()=>{vi.useRealTimers();Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});});
 describe('visible workspace execution observations',()=>{
+ it('reads Goal owners linked to workspace Tasks even when Session metadata is missing',async()=>{
+  mocks.snapshot.sessions=[];
+  mocks.list.mockResolvedValue([{id:'task',workspacePath:'/work',sessionIds:['linked']}]);
+  const {unmount}=renderHook(()=>useProjectBoardData('/work',true));await flush();
+  expect(mocks.read).toHaveBeenCalledWith('linked','/work');unmount();
+ });
+ it('publishes new Goal lifecycle even if a later turn observation fails',async()=>{
+  mocks.read.mockResolvedValueOnce({state:'idle',checkedAt:100000,goal:{checkedAt:100000,value:null}})
+    .mockResolvedValue({checkedAt:130000,error:'unavailable',goal:{checkedAt:130000,value:{status:'active',isExecuting:false}}});
+  const {result,unmount}=renderHook(()=>useProjectBoardData('/work',true));await flush();
+  await act(async()=>{vi.advanceTimersByTime(BOARD_REFRESH_MS);});await flush();
+  expect(result.current.activity.get('s')).toMatchObject({error:'unavailable',goal:{checkedAt:130000,value:{status:'active'}}});unmount();
+ });
+
  it('distinguishes execution failures from unreadable owners and clears them after recovery',async()=>{
   mocks.read.mockRejectedValueOnce(Object.assign(new Error('Execution failed'),{code:'SESSION_EXECUTION_FAILED'}))
     .mockResolvedValue({state:'idle',checkedAt:130000});

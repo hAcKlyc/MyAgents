@@ -239,3 +239,7 @@ FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用�
 ## MOXBOTS-PROJECT-BOARD-TODO-001
 
 在四阶段看板增量接入原会话TODO和子Agent真实进度。卡片/列表摘要、详情三态清单/子Agent状态，复用共享reducer与既有只读activity owner；历史/过期不冒充实时，TODO全勾不推导Task完成。代码、251项相关unit/DOM、类型/lint、MoXBots web/server构建、6组合成UI及独立代码/视觉审阅已通过；PR58六项CI通过并合入main7346499b（产品树与CI head一致），统一原生纳入仍待负责人队列。验收 `dev-docs/project-board-todo-acceptance.md`，任务 `.agent-sync/tasks/codex-project-board-todo-20261015-06d8ff2b.md`。
+
+## MOXBOTS-PROJECT-BOARD-006 — Goal-aware grouping
+
+截图反馈由独立任务`codex/project-board-goal-20261015`修复：看板只读Rust Goal lifecycle，active覆盖旧done Task及turn idle；未知/暂停/阻塞保留待确认，归档重新核对Goal。实现/合成React/44回归/typecheck/lint/web已通过；CI/main及客户端发布/真实任务复验分开追踪。记录`.agent-sync/tasks/codex-project-board-goal-20261015-0d453018.md`。不碰现有统一0.5.5冻结源或执行中的日常App。

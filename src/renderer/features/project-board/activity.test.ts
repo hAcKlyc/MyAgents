@@ -1,8 +1,35 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readBoardSessionActivity } from './activity';
-const { post } = vi.hoisted(() => ({post:vi.fn()}));
+const { post, goal, desktop } = vi.hoisted(() => ({post:vi.fn(),goal:vi.fn(),desktop:vi.fn()}));
+vi.mock('@/api/sessionGoalClient',()=>({getSessionGoal:goal}));
+vi.mock('@/utils/browserMock',()=>({isTauriEnvironment:desktop}));
+beforeEach(()=>{goal.mockReset();desktop.mockReturnValue(true);});
 vi.mock('@/api/apiFetch',()=>({apiPostJson:post}));
 describe('project board session observations',()=>{
+  it('reads the durable Goal even when the Session turn is idle or unavailable',async()=>{
+    goal.mockResolvedValue({sessionId:'s',workspacePath:'/work',status:'active',isExecuting:false});
+    post.mockResolvedValue({success:true,session:{sessionId:'s',state:'idle'}});
+    expect(await readBoardSessionActivity('s','/work')).toMatchObject({state:'idle',goal:{value:{status:'active',isExecuting:false}}});
+    expect(goal).toHaveBeenCalledWith('s','/work',true);
+    post.mockRejectedValue(new Error('Sidecar unavailable'));
+    expect(await readBoardSessionActivity('s','/work')).toMatchObject({error:expect.any(String),goal:{value:{status:'active'}}});
+  });
+  it('distinguishes absent, unreadable and wrong-owner Goals',async()=>{
+    post.mockResolvedValue({success:true,session:{sessionId:'s',state:'idle'}});
+    goal.mockResolvedValue(null);
+    expect((await readBoardSessionActivity('s','/work')).goal).toMatchObject({value:null});
+    goal.mockRejectedValue(new Error('Goal unavailable'));
+    expect((await readBoardSessionActivity('s','/work')).goal).toMatchObject({error:expect.any(String)});
+    goal.mockResolvedValue({sessionId:'other',workspacePath:'/work',status:'active'});
+    expect((await readBoardSessionActivity('s','/work')).goal).toMatchObject({error:'Goal owner mismatch'});
+  });
+  it('keeps web-only observation compatible without invoking a desktop command',async()=>{
+    desktop.mockReturnValue(false);
+    post.mockResolvedValue({success:true,session:{sessionId:'s',state:'idle'}});
+    expect((await readBoardSessionActivity('s','/work')).state).toBe('idle');
+    expect(goal).not.toHaveBeenCalled();
+  });
+
   it('accepts optional validated work progress without trusting malformed counts',async()=>{
     const progress={source:'live',todoSource:'tools',todos:[],todoTotal:0,todoCompleted:0,agents:[],agentTotal:0,agentRunning:0};
     post.mockResolvedValue({success:true,session:{sessionId:'s',state:'running',progress}});
