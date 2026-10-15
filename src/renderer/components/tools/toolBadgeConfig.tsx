@@ -23,6 +23,7 @@ import type { ReactNode } from 'react';
 import { i18n } from '@/i18n';
 import type { SubagentToolCall, ToolInput, ToolUseSimple } from '@/types/chat';
 
+import { processInput } from '@/utils/processPresentation';
 import { getEffectiveTodoWriteTodos } from '@/utils/todoWriteState';
 import { getTaskListSnapshot } from '@/utils/taskTodoState';
 import {
@@ -619,6 +620,23 @@ function getCollabAgentLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): str
   const model = getStringProp(tool.parsedInput, 'model');
   const base = action ? getCollabActionLabel(action, t) : tc(t, 'labels.subAgent');
   return model ? `${base} · ${model}` : base;
+}
+
+/** Action first, with full filenames. The original tool label remains metadata. */
+export function getToolActionLabel(tool: ToolUseSimple, t: ToolChromeTranslator): string {
+  const input = processInput(tool);
+  if (typeof input.description === 'string' && input.description.trim()) return input.description;
+  const name = dshToolDisplayName(tool.name);
+  const file = typeof input.file_path === 'string' ? input.file_path.split(/[/\\]/).pop() : undefined;
+  if (file && ['Read', 'Write', 'Edit', 'MultiEdit'].includes(name)) {
+    return t(`process.action.${name}`, { target: file });
+  }
+  if ((name === 'Grep' || name === 'Glob') && typeof input.pattern === 'string') {
+    return t(`process.action.${name}`, { target: input.pattern });
+  }
+  if (name === 'WebSearch' && typeof input.query === 'string') return t('process.action.WebSearch', { target: input.query });
+  if (['Bash', 'bash', 'pwsh', 'PowerShell'].includes(name)) return t('process.action.command');
+  return getToolLabel(tool, t);
 }
 
 export function getToolMainLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): string {
