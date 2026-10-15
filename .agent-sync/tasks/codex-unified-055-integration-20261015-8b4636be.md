@@ -70,3 +70,6 @@ Private receipts are under the pointer workspace `work/unified-055-20261015/`; A
 - [ ] Build/sign A6 with required --qa-home, normal fresh PKCE, helper cold-read/restart and relay readiness.
 - [ ] Serial independent DSH/Enter/Escape/IME and dedicated Host business acceptance.
 - [ ] HRM was live running/isBusy at09:21; actual installation forbidden until authoritative idle plus final generation admission check. No running work stopped.
+
+- [x] A6 native d0ab7087 release/signature/3382-source closure PASS; new private HOME startup PASS; binary f335dbf8.
+- [ ] A6 normal login waits in Security write IPC before PKCE. Normal QA restart/private unlock retry performed once. System SecurityAgent app exists but tool forbids access; human prompt text requested. No claim helper/relay/Host passed, no system-service or daily changes.
