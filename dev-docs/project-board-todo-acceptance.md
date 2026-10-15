@@ -18,7 +18,7 @@
 | 类型/lint/构建 | 通过 | Node24类型、完整lint（16已有orphan warning/0errors），MoXBots profile web/server生产构建 |
 | 实际React合成UI | 通过 | 6组journeys，1440深浅、540窄窗、17TODO/3子Agent、回原会话/返回、全部勾完Task仍等待、失败观察保留旧进度和stale子Agent；0pageerror |
 | 独立审阅 | 通过 | todo_review只读代码/视觉审阅；准确Session/Query、nativeplan reset、冷历史/完成权威通过。未亲自操作原生GUI，不冒称独立原生验收 |
-| main/CI | 待提交核实 | 以PR真实head与远端main为准 |
+| main/CI | PR58运行中 | feature3992d3bf已推远端，CI38684226016；以最新PR head和远端main为准 |
 | 原生安装/Provider/发布 | 未执行 | 当前日常客户端不包含新增feature；统一包owner串行纳入，不退出、重启或发送现有业务会话 |
 
 精选合成截图、原始journey输出、图像hash和可复现脚本在 `project-board-validation/todo/`。临时完整命令输出 `/tmp/board-todo-*.log`。全部截图使用隔离合成数据，不是生产账号或真实模型执行证据。

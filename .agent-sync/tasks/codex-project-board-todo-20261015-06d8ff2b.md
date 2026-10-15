@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/project-board-todo-20261015 -->
 <!-- git-project-sync-task:base=8f7ebc21c3f342b0c6e65474127560da71f0ed4c -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=ready-for-review -->
 <!-- git-project-sync-task:scaffold=false -->
 
 # Task: MOXBOTS-PROJECT-BOARD-TODO-001
@@ -19,6 +19,12 @@
 
 ## Execution record
 主Agent实现；todo_review只读核对同源数据及独立UI，要求gpt-6-luna/medium，例行有边界审阅。实际型号/用量未独立暴露。不调用外部原因：用户沿用ai-yaoren-local纯内置模式。未动旧任务或统一打包工作区。
+
+## Completed
+
+- 共享Chat/Board TODO reducer、只读owner progress、卡片/列表/详情及中英文本均实现；exact Query active后台、native plan换Session/reset和历史/过期展示分别处理。
+- feature commit3992d3bf已推远端任务分支，PR https://github.com/heavenzhang/MoXBots/pull/58；CI38684226016运行中，最终以最新head checks为准。
+- 251项相关测试、类型/lint、MoXBots profile web/server、6组实际React合成UI与独立review通过；验收文档和证据随版本保存。
 
 ## Verification
 observe/start/task-init gate通过，明确remote https://github.com/heavenzhang/MoXBots.git。原图为需求依据，不是状态数据。
