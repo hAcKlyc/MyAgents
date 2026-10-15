@@ -2083,7 +2083,11 @@ async function routeAdminApi(
       const { readSessionActivity } = await import('./session-observation');
       if (typeof payload.sessionId !== 'string' || !payload.sessionId) return { success: false, code: 'ARGUMENT_INVALID', error: 'sessionId required' };
       return { success: true, session: await readSessionActivity(payload.sessionId) };
-    } catch { return { success: false, code: 'SESSION_STATE_UNAVAILABLE', error: 'Session state could not be read; retry the query.' }; }
+    } catch (error) {
+      const failed = error instanceof Error && error.message === 'SESSION_EXECUTION_FAILED';
+      return { success: false, code: failed ? 'SESSION_EXECUTION_FAILED' : 'SESSION_STATE_UNAVAILABLE',
+        error: failed ? 'Session execution failed; inspect the original conversation.' : 'Session state could not be read; retry the query.' };
+    }
   }
   if (route === 'session/watches' || route === 'session/unwatch') {
     if (caller.kind === 'external-cli') return { success: false, code: 'EXTERNAL_CLI_CAPABILITY_NOT_OPEN', error: 'A real caller Session is required.' };

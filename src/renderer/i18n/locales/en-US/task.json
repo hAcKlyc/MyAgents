@@ -947,21 +947,24 @@
       "todo": "Not started"
     },
     "groups": {
-      "running": "Executing",
-      "needs": "Needs attention / blocked",
+      "running": "Running",
+      "needs": "Needs confirmation",
       "verifying": "To review",
       "done": "Completed",
-      "todo": "Not started",
-      "other": "Other tasks and conversations"
+      "todo": "To start",
+      "other": "Other tasks and conversations",
+      "idle": "Conversations to continue",
+      "scheduled": "Automations",
+      "archived": "Archived"
     },
     "waiting": "Waiting for reply or approval",
-    "idle": "Currently idle",
+    "idle": "No current execution",
     "running": "Executing",
-    "unknown": "Execution state unknown",
+    "unknown": "Status needs verification",
     "task": "Task",
     "conversation": "Conversation",
     "noSummary": "No summary yet",
-    "inspect": "Review delivery",
+    "inspect": "Review results",
     "handle": "Handle",
     "enterSession": "Open chat",
     "enterSessionFor": "Open chat: {{title}}",
@@ -990,7 +993,7 @@
     "snapshotPending": "Conversation execution states not yet checked",
     "unknownCount": "{{count}} conversation states unknown",
     "boundedSnapshot": "{{count}} more conversations not checked; open their original conversations",
-    "snapshotHint": "Conversation states are snapshots; refresh after one minute",
+    "snapshotHint": "Session status refreshes every 30 seconds while this page is visible. Expired or failed reads require verification.",
     "close": "Close details",
     "unavailable": "Task unavailable or no longer in this project. Refresh the board.",
     "detailTabs": {
@@ -1008,16 +1011,38 @@
     "taskDocument": "Task document",
     "noDocument": "No document yet",
     "sessionArtifactsHint": "This conversation is not linked to a formal task. Review delivery in the original conversation.",
-    "acceptanceNote": "Review note (optional)",
+    "acceptanceNote": "Confirmation note (optional)",
     "originalSession": "Original conversation",
     "openSession": "Open conversation; board filters and selection stay intact",
     "noSession": "No linked conversations yet. They appear here after execution starts.",
     "run": "Start execution",
     "rerun": "Rerun",
-    "accept": "Confirm review completed",
+    "accept": "Confirm completion",
     "processing": "Processing…",
     "awaitingTrigger": "Waiting to trigger (enabled)",
     "observationFailed": "Execution state queries failed for {{count}} conversations. Refresh to retry or open the original conversation.",
-    "observationError": "Failed to read execution state:"
+    "observationError": "Failed to read execution state:",
+    "scopeLabel": "Project views",
+    "scopes": {
+      "work": "Board",
+      "history": "History"
+    },
+    "archive": "Archive",
+    "restore": "Restore",
+    "archiveBusy": "A linked session is active or waiting for input. Resolve or explicitly stop it before archiving.",
+    "historyOverview": "{{total}} archived records",
+    "historyHint": "History contains archived records only. Restore preserves the previous state and does not start a run; completed tasks return to the last column.",
+    "historyEmpty": "No matching archived records",
+    "idleHint": "No current execution. Continue in the original conversation; idle does not mean the goal is complete.",
+    "scheduledHint": "Automations awaiting a trigger are separate; enabled does not mean currently executing.",
+    "reasons": {
+      "waiting": "Waiting for an answer or permission",
+      "verification": "Results need confirmation",
+      "blocked": "Execution blocked",
+      "stopped": "Stopped; action needed",
+      "unknown": "Status needs verification",
+      "stopFailed": "Stop not confirmed"
+    },
+    "lastKnown": "Last observed: {{state}}"
   }
 }

@@ -3,6 +3,10 @@ import { readBoardSessionActivity } from './activity';
 const { post } = vi.hoisted(() => ({post:vi.fn()}));
 vi.mock('@/api/apiFetch',()=>({apiPostJson:post}));
 describe('project board session observations',()=>{
+  it('preserves an explicit execution failure without inventing idle',async()=>{
+    post.mockResolvedValue({success:false,code:'SESSION_EXECUTION_FAILED',error:'Execution failed'});
+    await expect(readBoardSessionActivity('s')).rejects.toMatchObject({code:'SESSION_EXECUTION_FAILED'});
+  });
   it('reads existing owner without creating or executing a session',async()=>{
     post.mockResolvedValue({success:true,session:{sessionId:'s',state:'running'}});
     expect((await readBoardSessionActivity('s')).state).toBe('running');

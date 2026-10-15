@@ -11,10 +11,17 @@ const activitySchema = z.strictObject({
   execution: z.strictObject({ startedAt: z.iso.datetime({ offset: true }), elapsedMs: z.number().finite().nonnegative() }).optional(),
 });
 
+function sessionExecutionFailed(): Error & { code: string } {
+  return Object.assign(new Error('SESSION_EXECUTION_FAILED'), { code: 'SESSION_EXECUTION_FAILED' });
+}
+
 export function readLocalSessionActivity(sessionId: string) {
   const engine = getSessionEngine();
   if (engine.getRuntimeIdentity().sessionId !== sessionId) throw new Error('SESSION_OWNER_SCOPE_MISMATCH');
   const live = engine.getLiveSessionState();
+  // Root busy policy includes the sticky error state. It cannot establish
+  // execution, while exact-Query children can still be independently active.
+  if (live.sessionState === 'error' && !live.backgroundWorkActive) throw sessionExecutionFailed();
   return { success: true, session: activitySchema.parse({ sessionId, state: projectSessionActivity(live), execution: projectSessionExecution(live, Date.now()) }) };
 }
 
@@ -23,7 +30,10 @@ export async function readSessionActivity(sessionId: string) {
   const result = await managementApi('/api/session/text-page', 'POST', {
     sessionId, projection: 'activity',
   }, { timeoutMs: 18_000 });
-  if (result.ok !== true) throw new Error('SESSION_STATE_UNAVAILABLE');
+  if (result.ok !== true) {
+    if (result.code === 'SESSION_EXECUTION_FAILED') throw sessionExecutionFailed();
+    throw new Error('SESSION_STATE_UNAVAILABLE');
+  }
   if (result.active === true) {
     const response = result.result as { success?: boolean; session?: unknown } | undefined;
     if (response?.success !== true) throw new Error('SESSION_STATE_UNAVAILABLE');

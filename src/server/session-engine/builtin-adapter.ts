@@ -44,6 +44,7 @@ import {
   handlePermissionResponse,
   interruptCurrentResponse,
   isSessionBusy,
+  hasBuiltinBackgroundWork,
   freezeCurrentSessionMetadataForImDetach,
   materializeCurrentSessionMetadataForPublishedReset,
   materializePendingDesktopSession as materializeBuiltinPendingDesktopSession,
@@ -278,6 +279,7 @@ export function createBuiltinSessionEngine(): SessionEngine {
       const executionStartedAt = getBuiltinExecutionStartedAt();
       return {
         ...(executionStartedAt ? { executionStartedAt } : {}),
+        ...(hasBuiltinBackgroundWork() ? { backgroundWorkActive: true } : {}),
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),
