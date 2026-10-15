@@ -1,3 +1,4 @@
+import { isModelQaBuild } from '../shared/updaterQa';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -195,7 +196,18 @@ if (tauriWindowLabel === 'fb-ball') {
     </AppErrorBoundary>
   );
 } else {
-  const App = React.lazy(() => import('./App'));
+  const surface = new URLSearchParams(location.search).get('surface');
+  const App = React.lazy(async () => {
+    if (isModelQaBuild()) {
+      if (surface !== 'app') {
+        await (await import('./api/tauriClient')).startGlobalSidecar();
+      }
+      if (surface === 'next-prompt') return import('./pages/ModelQaNextPrompt');
+      if (surface === 'title-utility') return import('./pages/ModelQaTitle');
+      if (surface !== 'app') return import('./pages/ModelQaHome');
+    }
+    return import('./App');
+  });
   // Note: React.StrictMode removed to prevent double-rendering of SSE effects in development
   // StrictMode causes useEffect to run twice, which duplicates SSE events and thinking blocks
   root.render(
@@ -209,6 +221,12 @@ if (tauriWindowLabel === 'fb-ball') {
               <React.Suspense fallback={null}>
                 <App />
               </React.Suspense>
+              {isModelQaBuild() && <nav aria-label="独立验收导航" className="fixed bottom-2 right-2 z-[9999] flex gap-3 rounded border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-xs text-[var(--ink)]">
+                <a href="?">验收首页</a>
+                <a href="?surface=next-prompt">建议</a>
+                <a href="?surface=title-utility">标题</a>
+                <a href="?surface=app">隔离客户端</a>
+              </nav>}
             </ImagePreviewProvider>
           </ToastProvider>
         </ConfiguredThemeRuntime>

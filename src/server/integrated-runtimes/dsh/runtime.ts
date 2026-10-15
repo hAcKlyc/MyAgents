@@ -1,3 +1,4 @@
+import { runDshTextUtility } from './text-utility';
 import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import { buildTurnProviderAnalytics, type TurnProviderAnalytics } from '../../session-core/turn-analytics';
 import type { AskUserQuestionAnswers } from '../../../shared/types/askUserQuestion';
@@ -49,6 +50,7 @@ import type {
   ResolvedImagePayload,
   RuntimeConfigCapabilities,
   RuntimeProcess,
+  RuntimeTextUtilityTask,
   SessionStartOptions,
   UnifiedEvent,
   UnifiedEventCallback,
@@ -814,6 +816,10 @@ export async function createDshForkTargetFacts(
 }
 
 export class DshRuntime implements AgentRuntime {
+  runTextUtility(handle: RuntimeProcess, task: RuntimeTextUtilityTask): Promise<string | null> {
+    return runDshTextUtility(dshProcess(handle), task);
+  }
+
   readonly type: RuntimeType = 'dsh';
 
   getTurnProviderAnalytics(process: RuntimeProcess): TurnProviderAnalytics {

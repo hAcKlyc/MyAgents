@@ -1082,7 +1082,7 @@ fn configured_space_environment(dev_available: bool) -> SpaceEnvironment {
 }
 
 pub fn space_build_capability() -> SpaceBuildCapability {
-    if crate::app_dirs::IS_UPDATER_QA {
+    if crate::app_dirs::IS_ISOLATED_QA {
         return SpaceBuildCapability {
             available: false, base_url: None, public_client_id: None,
             reason: Some("UPDATER_QA_CREDENTIALS_DISABLED".to_string()),

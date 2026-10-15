@@ -1,5 +1,5 @@
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
-import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { isIsolatedQaBuild } from '../shared/updaterQa';
 import { randomUUID } from 'crypto';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -196,7 +196,7 @@ async function waitForLoginCompletion(attempt: ActiveLoginAttempt): Promise<void
 }
 
 export async function startSubscriptionLogin(): Promise<SubscriptionLoginState> {
-  if (isUpdaterQaBuild()) return { ...EMPTY_LOGIN_STATE, status: 'error', error: 'UPDATER_QA_EXECUTION_DISABLED' };
+  if (isIsolatedQaBuild()) return { ...EMPTY_LOGIN_STATE, status: 'error', error: 'UPDATER_QA_EXECUTION_DISABLED' };
   if (activeAttempt && isActiveStatus(currentState.status)) {
     return getSubscriptionLoginState();
   }
@@ -302,7 +302,7 @@ export async function startSubscriptionLogin(): Promise<SubscriptionLoginState> 
 }
 
 export async function submitSubscriptionLoginCode(input: string): Promise<SubscriptionLoginState> {
-  if (isUpdaterQaBuild()) return { ...EMPTY_LOGIN_STATE, status: 'error', error: 'UPDATER_QA_EXECUTION_DISABLED' };
+  if (isIsolatedQaBuild()) return { ...EMPTY_LOGIN_STATE, status: 'error', error: 'UPDATER_QA_EXECUTION_DISABLED' };
   const attempt = activeAttempt;
   if (!attempt || !isActiveStatus(currentState.status)) {
     return setState({

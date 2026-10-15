@@ -1,0 +1,7 @@
+/* English localization */
+CFBundleDisplayName = "MoXBots Model QA";
+CFBundleName = "MoXBots Model QA";
+NSAppleEventsUsageDescription = "MoXBots Model QA needs to control other apps so the AI can activate windows, run AppleScript, and perform desktop automation on your behalf.";
+NSMicrophoneUsageDescription = "MoXBots Model QA uses the microphone when you record a meeting and stores the recording locally.";
+NSAudioCaptureUsageDescription = "MoXBots Model QA captures system audio when you record a meeting and stores the recording locally.";
+NSScreenCaptureUsageDescription = "MoXBots Model QA uses Screen Recording permission to capture screen content when you request a screenshot, or to capture system audio with ScreenCaptureKit when you record a meeting; meeting recording doesn't save screen video.";

@@ -61,7 +61,7 @@ import { planRetraction } from './utils/message-retraction';
 import type { TransientProviderTextRetryDecision } from './session-core/turn-result-policy';
 import { diagnoseSdkSubprocessFailure } from './utils/sdk-subprocess-diagnostics';
 import { createGuardedSdkQuery } from './utils/sdk-child-launch-guard';
-import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { isUpdaterQaBuild, isIsolatedQaBuild, isModelQaBuild } from '../shared/updaterQa';
 import { hostExecutionLimits } from './utils/host-execution-limits';
 import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyError, prepareProviderBinding, type PreparedProvider } from './utils/managed-proxy-binding';
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
@@ -3895,7 +3895,7 @@ export function forceReloadActiveSession(reason: RestartReason = 'mcp'): void {
 }
 
 function schedulePreWarm(delayMs = 500): void {
-  if (isUpdaterQaBuild()) return;
+  if (isIsolatedQaBuild()) return;
   if (lifecycleState.preWarmTimer) clearTimeout(lifecycleState.preWarmTimer);
   if (!agentDir) return;
   if (lifecycleState.preWarmDisabled) return;
@@ -8176,7 +8176,7 @@ export async function initializeAgent(
   initialSessionId?: string,
   options?: { preWarmDisabled?: boolean },
 ): Promise<void> {
-  if (options?.preWarmDisabled) {
+  if (isModelQaBuild() || options?.preWarmDisabled) {
     setPreWarmDisabled(true);
     console.log('[agent] pre-warm disabled via --no-pre-warm');
   }
@@ -8214,7 +8214,7 @@ export async function initializeAgent(
     // sdkSessionId is missing, only recover the rare crash-before-metadata-update
     // case when the SDK transcript probe finds real persisted transcriptState.messages.
     const meta = initMeta;
-    if (meta && !isUpdaterQaBuild()) {
+    if (meta && !isIsolatedQaBuild()) {
       const currentRuntimeType = getCurrentRuntimeType();
       const resumeDecision = await decideBuiltinSessionResume({
         meta,

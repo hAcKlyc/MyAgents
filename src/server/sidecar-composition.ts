@@ -1,3 +1,4 @@
+import { isModelQaRoute } from './modelqa/routes';
 import { parseSidecarRole, type SidecarRole } from './sidecar-role';
 
 export type SidecarCapability = 'common' | 'global' | 'session';
@@ -244,6 +245,7 @@ export function classifySidecarRequest(request: Request): SidecarCapability | nu
   const method = request.method.toUpperCase();
 
   if (method === 'OPTIONS') return 'common';
+  if (isModelQaRoute(pathname, method)) return 'common';
 
   const sessionsCapability = classifySessionsRoute(pathname, method);
   if (sessionsCapability) return sessionsCapability;
