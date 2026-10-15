@@ -131,3 +131,9 @@ This checkpoint supersedes the current-state statements in earlier chronological
 - [ ] Dedicated Host model/approval/persistence, native populated board, native ordinary title display/manual protection, and native SDK plan-file/full-card/scroll/revision/synthetic approval remain open. The ModelQA ordinary-task guard is unchanged; no HRM business plan is approved or rejected for release.
 
 Actual remote main remains `06baeb83702c52cf89437ef244feed5cea597adc`; integration PR54 is still separate from main delivery. Formal0.5.5 is not built, published or installed. The last daily owner check was busy and is not future admission evidence. Final delivery still requires main/CI, signed/notarized formal archives, own stable manifest and downloaded-byte verification, then fresh full idle/generation admission plus consistent backup and user-confirmed restart. The human's explicit latest-update publication authorization is retained.
+
+## 2026-10-15：按最新用户范围完成055服务器发行，后续056
+
+用户最新要求先发055更新服务器，后续改动进056。冻结main52bf6160/tag v0.5.5已完成正式签名、公证、staple、Gatekeeper、ownsig、独立外部Linux完整HTTPS字节/实际文件hash及公开stable CAS复验；stable055 exact SHA2cd4fcea767da9802ed531db996a66e73a1f0b5166c995e8cd353d53258fda66，054回滚归档和原清单完整保留，Root发布锁已释放。此最新状态覆盖本文旧时间点的未构建/未main/未发布说明，不改写其失败与边界。
+
+后续主干已由PR61进入056（main6d1f8912，六CI/同树），并保留PR59/60/62/63。日常054未安装或重启，HRM16:26仍running/isBusy；children/pending unknown不能视为空闲。Host完整业务、精确IME、带数据原生UI等不算055通过，测试network服务ACCOUNT_SESSION_EXPIRED失败留056。权威当前交付及接续见`dev-docs/releases/moxbots-0.5.5.md`和`moxbots-0.5.6-handoff.md`；私有交付README/DELIVERY/SHA256SUMS在指针output/updater-055-20261015/final-52bf6160。
