@@ -15,8 +15,8 @@
 - [x] 指定仓库https://github.com/heavenzhang/MoXBots.git、clean分支/base/remote和start/task-init已核实；沿用自有metadata worktree，不改其他工作区。
 - [x] 用户授权的唯一负责人已收到接续消息，确认本任务负责IP网站串行overlay；尚未开始网络大包传输或拿服务器写锁。
 - [x] 冻结055源码52bf61602522fb28715edf620d98ad8e3deee842已在远端main历史；正式ZIP本地size/SHA/CRC与发布回执一致，formal App签名/票据/Gatekeeper独立只读复验通过，未启动App。
-- [ ] 负责人完成唯一Linux完整HTTPS GET，读取完整原始回执确认336038989-byte TAR/SHA31ee2b5eb9a4afb846dc3b4e211fb153290bc06cd700a69a914734d0a232f731和自身更新签名，不能用partial或server磁盘hash代替。
-- [ ] 负责人完成stable CAS0.5.5，核原始promote/rollback回执和实际 https://140.143.183.232/updates/stable/darwin-aarch64.json version/URL/signature与冻结055一致；等其释放冲突维护锁。
+- [x] 负责人完成唯一Linux完整HTTPS GET，读取完整原始回执确认336038989-byte TAR/SHA31ee2b5eb9a4afb846dc3b4e211fb153290bc06cd700a69a914734d0a232f731和自身更新签名，不能用partial或server磁盘hash代替。
+- [x] 负责人完成stable CAS0.5.5，核原始promote/rollback回执和实际 https://140.143.183.232/updates/stable/darwin-aarch64.json version/URL/signature与冻结055一致；等其释放冲突维护锁。
 - [ ] 门槛通过后发布或复用匹配的immutable公开GitHub ZIP，完整匿名网络下载/SHA/CRC、签名公证及制品对应关系通过；禁止覆盖旧055/054资产。
 - [ ] 更新services/website/trial-release.json及必要记录；最新main只作metadata集成基础，不重新构建055。现有静态设计不改。
 - [ ] 重新读取live symlink/HTML，四把既有锁、backup/ownership-checked rollback、CAS覆层仅新content-addressed JSON及HTML引用；不改Nginx/TLS/auth/cloud/updates或其他服务路径。
@@ -47,3 +47,7 @@
 ## 已启用的接续
 
 本聊天heartbeat moxbots-0-5-5-2已由App确认ACTIVE，每10分钟执行上述受限跟进；状态不变时静默，满足两项负责人门槛后才进行已授权的网站交付。现有其他聊天的moxbots-0-5-5自动化未改。最终完成后只暂停moxbots-0-5-5-2，不暂停他人任务或任何Goal。
+
+## 2026-10-15 发布门槛已解除
+
+已逐项核对public-archive-gates及其原始curl、stat前后、sha256sum输出，所有evidenceHashes一致；完整336038989-byte TAR通过正常TLS，非Range和partial。stable实际小JSON的SHA2cd4fcea767da9802ed531db996a66e73a1f0b5166c995e8cd353d53258fda66、version055、URL和signature与冻结回执一致；server-promote/server-finish确认CAS及Root租约释放。当前正发布手动ZIP，网站尚为054；不操作updates或客户端。
