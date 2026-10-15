@@ -1,6 +1,6 @@
 # MOXBOTS-UNIFIED-055-DOWNLOAD-20261015 接续
 
-本任务以分支记录.agent-sync/tasks/codex-moxbots-055-download-20261015-18d63ba5.md为验收清单。用户授权只在统一负责人完成完整HTTPS下载校验及stable0.5.5切换后，更新既有公开IP官网下载页。当前正式055ZIP已公开且完整匿名GET/SHA/CRC通过；网页仍054，等待唯一负责人当前发布租约释放后做两文件静态覆层。以私有execution-status.json的phase为最新状态，不重复上传/下载。
+本任务以分支记录.agent-sync/tasks/codex-moxbots-055-download-20261015-18d63ba5.md为验收清单。用户授权只在统一负责人完成完整HTTPS下载校验及stable0.5.5切换后，更新既有公开IP官网下载页。当前正式055ZIP已公开且完整匿名GET/SHA/CRC通过；收到Root056窗口交回后，官网两文件覆层及真实桌面/手机页面、13条路由已通过。接续仅完成CI/PR/main与最终live对应核验，随后停本任务heartbeat。以私有execution-status.json的phase为最新状态，不再上传/下载大包或重复部署。
 
 ## 权威输入与排除
 
