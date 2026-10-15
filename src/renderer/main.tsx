@@ -218,6 +218,12 @@ if (tauriWindowLabel === 'fb-ball') {
               <React.Suspense fallback={null}>
                 <App />
               </React.Suspense>
+              {isModelQaBuild() && <nav aria-label="独立验收导航" className="fixed bottom-2 right-2 z-[9999] flex gap-3 rounded border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2 text-xs text-[var(--ink)]">
+                <a href="?">验收首页</a>
+                <a href="?surface=next-prompt">建议</a>
+                <a href="?surface=title-utility">标题</a>
+                <a href="?surface=app">隔离客户端</a>
+              </nav>}
             </ImagePreviewProvider>
           </ToastProvider>
         </ConfiguredThemeRuntime>
