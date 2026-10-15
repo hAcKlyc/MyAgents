@@ -1,3 +1,4 @@
+import type { GoalStatus } from '@/types/sessionGoal';
 import type { SessionWorkProgress } from '@/../shared/sessionWorkProgress';
 import type { SessionMetadata } from '@/api/sessionClient';
 import type { Task } from '@/../shared/types/task';
@@ -5,9 +6,10 @@ import { workspacePathsEqual } from '@/../shared/workspacePath';
 import { isManagedScheduledJob } from '@/../shared/managedScheduledJob';
 
 export type BoardGroup = 'todo' | 'running' | 'needs' | 'done' | 'idle' | 'scheduled' | 'archived';
-export type ConfirmationReason = 'waiting' | 'verification' | 'blocked' | 'stopped' | 'unknown' | 'stopFailed';
+export type ConfirmationReason = 'waiting' | 'paused' | 'verification' | 'blocked' | 'stopped' | 'unknown' | 'stopFailed';
 export type SessionActivity = 'idle' | 'running' | 'waiting_user_action';
 export interface ActivitySnapshot {
+  goal?: { checkedAt: number; value?: { status: GoalStatus; isExecuting: boolean } | null; error?: string };
   state?: SessionActivity;
   checkedAt: number;
   execution?: { startedAt: string; elapsedMs: number };
@@ -46,6 +48,16 @@ export function sessionExecutionTime(snapshot: ActivitySnapshot | undefined, now
   return { elapsedMs: elapsedMs + (stale ? 0 : Math.max(0, now - snapshot.checkedAt)), stale, startedAt };
 }
 
+/** Goal and Session report different lifecycles; an idle turn cannot settle a Goal. */
+export function boardGoalState(snapshot: ActivitySnapshot | undefined, now: number): 'running' | 'paused' | 'blocked' | 'stopped' | 'complete' | 'unknown' | undefined {
+  const goal = snapshot?.goal;
+  if (!goal) return undefined;
+  if (goal.error || now - goal.checkedAt > ACTIVITY_FRESHNESS_MS || goal.value === undefined) return 'unknown';
+  if (!goal.value) return undefined;
+  if (goal.value.isExecuting || goal.value.status === 'active') return 'running';
+  return goal.value.status === 'canceled' ? 'stopped' : goal.value.status;
+}
+
 /** Task identity wins over a Session decoration; a shared execution Session
  * may appear under several real Tasks but never also becomes a standalone row. */
 export function projectBoardRows(
@@ -62,9 +74,12 @@ export function projectBoardRows(
   const linked = new Set(visibleTasks.flatMap(t => t.sessionIds));
   const rows: BoardRow[] = visibleTasks.map(task => {
     const executionSessions = sessions.filter(s => task.sessionIds.includes(s.id));
+    const goals = task.sessionIds.map(id => boardGoalState(activity.get(id), now));
+    const goalReason = goals.includes('blocked') ? 'blocked' : goals.includes('paused') ? 'paused' : goals.includes('stopped') ? 'stopped' : goals.includes('unknown') ? 'unknown' : undefined;
+    const goalRunning = goals.includes('running');
     const waitingSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'waiting_user_action');
     const runningSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'running');
-    const snapshot = activity.get((waitingSession ?? runningSession)?.id ?? '')
+    const snapshot = activity.get((waitingSession ?? runningSession)?.id ?? task.sessionIds.find(id => boardGoalState(activity.get(id), now) === 'running') ?? '')
       ?? executionSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now))
       ?? [...executionSessions].sort((a,b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)).map(s => activity.get(s.id)).find(a => !!a);
     const lastKnownActive = executionSessions.some(s => {
@@ -73,14 +88,15 @@ export function projectBoardRows(
         && (observation.state === 'running' || observation.state === 'waiting_user_action');
     });
     const confirmationReason: ConfirmationReason | undefined = task.executionState === 'stop_failed' ? 'stopFailed'
-      : waitingSession ? 'waiting' : runningSession ? undefined
-      : executionSessions.some(s => activity.get(s.id)?.errorCode === 'execution_failed') ? 'blocked'
+      : waitingSession ? 'waiting' : runningSession || goalRunning ? undefined
+      : task.sessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
+      : goalReason ? goalReason
       : task.executionState ? undefined
       : lastKnownActive ? 'unknown' : task.status === 'verifying' ? 'verification' : task.status === 'blocked' ? 'blocked'
       : task.status === 'stopped' ? 'stopped'
       : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' ? 'unknown' : undefined;
     const group: BoardGroup = confirmationReason ? 'needs'
-      : runningSession || task.executionState || task.executor === 'user' && task.status === 'running' ? 'running'
+      : runningSession || goalRunning || task.executionState || task.executor === 'user' && task.status === 'running' ? 'running'
       : task.status === 'archived' ? 'archived' : task.status === 'done' ? 'done'
       : task.status === 'todo' ? 'todo' : 'scheduled';
     return {
@@ -96,10 +112,12 @@ export function projectBoardRows(
     const state = freshActivity(snapshot, now);
     const lastKnownActive = !state && (snapshot?.state === 'running' || snapshot?.state === 'waiting_user_action');
     const executionFailed = snapshot?.errorCode === 'execution_failed';
-    const group = state === 'running' ? 'running' : state === 'waiting_user_action' || lastKnownActive || executionFailed ? 'needs'
-      : session.archived ? 'archived' : !state ? 'needs' : 'idle';
+    const goal = boardGoalState(snapshot, now);
+    const group = state === 'waiting_user_action' ? 'needs' : state === 'running' || goal === 'running' ? 'running'
+      : goal && goal !== 'complete' || lastKnownActive || executionFailed ? 'needs'
+      : session.archived ? 'archived' : !state ? 'needs' : goal === 'complete' ? 'done' : 'idle';
     rows.push({ id: `session:${session.id}`, title: session.title, sessions: [session], group,
-      confirmationReason: group === 'needs' ? executionFailed ? 'blocked' : state === 'waiting_user_action' ? 'waiting' : 'unknown' : undefined,
+      confirmationReason: group === 'needs' ? executionFailed || goal === 'blocked' ? 'blocked' : state === 'waiting_user_action' ? 'waiting' : goal === 'paused' ? 'paused' : goal === 'stopped' ? 'stopped' : 'unknown' : undefined,
       archived: Boolean(session.archived),
       summary: session.lastMessagePreview || '', updatedAt: Date.parse(session.lastActiveAt) || 0, activity: snapshot, activitySessionId: session.id });
   }
@@ -116,6 +134,7 @@ export function filterBoardRows(rows: readonly BoardRow[], filter: 'all' | 'need
 export function boardRowStateKey(row: BoardRow, now: number): string {
   if (row.confirmationReason) return `projectBoard.reasons.${row.confirmationReason}`;
   if (row.group === 'running') return 'projectBoard.running';
+  if (row.group === 'done') return 'badges.status.done';
   if (row.group === 'idle') return 'projectBoard.idle';
   if (row.group === 'scheduled') return 'projectBoard.awaitingTrigger';
   if (row.group === 'archived') return 'projectBoard.groups.archived';

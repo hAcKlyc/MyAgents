@@ -6,6 +6,34 @@ const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
 describe('project board authority projection', () => {
+  it('keeps active Goals running across idle turns, stale done labels and absent Session metadata',()=>{
+    for(const status of ['done','archived'] as const) for(const isExecuting of [true,false]) for(const metadata of [[],[session()]]) {
+      const observation={state:'idle' as const,checkedAt:now,goal:{checkedAt:now,value:{status:'active' as const,isExecuting}}};
+      const rows=projectBoardRows({path:'/work/p'},[task({status})],metadata,new Map([['s1',observation]]),now);
+      expect(rows[0].group).toBe('running');
+      expect(rows[0].task?.status).toBe(status);
+    }
+  });
+  it('uses Goal lifecycle for unlinked Sessions without inferring completion from idle',()=>{
+    for(const [status,group,reason] of [['active','running',undefined],['paused','needs','paused'],['blocked','needs','blocked'],['canceled','needs','stopped'],['complete','done',undefined]] as const){
+      const snapshot={state:'idle' as const,checkedAt:now,goal:{checkedAt:now,value:{status,isExecuting:false}}};
+      const row=projectBoardRows({path:'/work/p'},[],[session()],new Map([['s1',snapshot]]),now)[0];
+      expect(row).toMatchObject({group,confirmationReason:reason});
+    }
+  });
+  it('does not let a failed or expired Goal lookup report an idle done Task as completed',()=>{
+    for(const goal of [{checkedAt:now,error:'unavailable'},{checkedAt:now-61000,value:{status:'active' as const,isExecuting:false}}]){
+      const row=projectBoardRows({path:'/work/p'},[task({status:'done'})],[session()],new Map([['s1',{state:'idle',checkedAt:now,goal}]]),now)[0];
+      expect(row).toMatchObject({group:'needs',confirmationReason:'unknown'});
+    }
+  });
+  it('preserves required human action and executing turns even after a Goal terminal commit',()=>{
+    for(const [state,group] of [['waiting_user_action','needs'],['running','running']] as const){
+      const row=projectBoardRows({path:'/work/p'},[task({status:'done'})],[session()],new Map([['s1',{state,checkedAt:now,goal:{checkedAt:now,value:{status:'complete',isExecuting:false}}}]]),now)[0];
+      expect(row.group).toBe(group);
+    }
+  });
+
   it('attributes idle progress to the latest linked Session without completing its Task', () => {
     const progress={source:'history' as const,todoSource:'tools' as const,todos:[],todoTotal:3,todoCompleted:3,agents:[],agentTotal:0,agentRunning:0};
     const latest={state:'idle' as const,checkedAt:now,progress};

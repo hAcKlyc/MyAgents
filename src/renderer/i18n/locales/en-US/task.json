@@ -1036,6 +1036,7 @@
     "idleHint": "No current execution. Continue in the original conversation; idle does not mean the goal is complete.",
     "scheduledHint": "Automations awaiting a trigger are separate; enabled does not mean currently executing.",
     "reasons": {
+      "paused": "Goal paused",
       "waiting": "Waiting for an answer or permission",
       "verification": "Results need confirmation",
       "blocked": "Execution blocked",

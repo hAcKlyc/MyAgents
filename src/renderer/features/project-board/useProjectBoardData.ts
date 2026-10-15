@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { taskList } from '@/api/taskCenter';
 import { getSnapshot, subscribePassive, registerPassiveWorkspaceSessionDemand, ensureWorkspaceSessions } from '@/hooks/taskCenterStore';
 import { normalizeWorkspacePathIdentity, workspacePathsEqual } from '@/../shared/workspacePath';
+import type { GoalChangedPayload } from '@/types/sessionGoal';
 import type { Task } from '@/../shared/types/task';
 import { listenWithCleanup } from '@/utils/tauriListen';
 import { readBoardSessionActivity } from './activity';
@@ -27,7 +28,9 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
   useEffect(() => registerPassiveWorkspaceSessionDemand(workspacePath), [workspacePath]);
   const sessions = useMemo(() => store.sessions.filter(s => workspacePathsEqual(s.agentDir, workspacePath)), [store.sessions, workspacePath]);
   const observedSessions = [...sessions].sort((a, b) => Number(Boolean(a.archived)) - Number(Boolean(b.archived))).slice(0, SESSION_SNAPSHOT_LIMIT);
-  const sessionKey = observedSessions.map(s => s.id).join('\n');
+  const linkedIds = (tasks ?? []).filter(t => !t.deleted && (t.workspacePath ? workspacePathsEqual(t.workspacePath, workspacePath) : false)).flatMap(t => t.sessionIds);
+  const candidateIds = [...new Set([...linkedIds, ...observedSessions.map(s => s.id)])];
+  const sessionKey = candidateIds.slice(0, SESSION_SNAPSHOT_LIMIT).join('\n');
   const sessionRevision = observedSessions.map(s => `${s.id}:${s.lastActiveAt}:${Boolean(s.archived)}`).join('\n');
   const sessionState = store.workspaceSessionStates.get(normalizeWorkspacePathIdentity(workspacePath));
 
@@ -70,6 +73,15 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
   }, [isActive, reloadTasks]);
 
   useEffect(() => {
+    if (!isActive || !documentVisible) return;
+    const controller = new AbortController();
+    void listenWithCleanup<GoalChangedPayload>('goal:changed', event => {
+      if (workspacePathsEqual(event.payload.workspacePath, workspacePath)) setRefreshNonce(n => n + 1);
+    }, controller.signal);
+    return () => controller.abort();
+  }, [isActive, documentVisible, workspacePath]);
+
+  useEffect(() => {
     if (!isActive || !documentVisible || !sessionKey) { setChecking(false); return; }
     let cancelled = false;
     const ids = sessionKey.split('\n');
@@ -87,7 +99,7 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
       await Promise.all(Array.from({ length: Math.min(SNAPSHOT_CONCURRENCY, ids.length) }, async () => {
         while (!cancelled && cursor < ids.length) {
           const id = ids[cursor++];
-          try { results.set(id, await readBoardSessionActivity(id)); }
+          try { results.set(id, await readBoardSessionActivity(id, workspacePath)); }
           catch (error) { results.set(id, { checkedAt: Date.now(), error: String(error),
             ...(error instanceof Error && 'code' in error && error.code === 'SESSION_EXECUTION_FAILED'
               ? { errorCode: 'execution_failed' as const } : {}),
@@ -96,7 +108,7 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
       }));
       if (cancelled) return;
       setActivity(previous => new Map([...results].map(([id, result]) => [id,
-        result.error && previous.has(id) ? { ...previous.get(id)!, error: result.error, errorCode: result.errorCode } : result,
+        result.error && previous.has(id) ? { ...previous.get(id)!, error: result.error, errorCode: result.errorCode, ...(result.goal ? { goal: result.goal } : {}) } : result,
       ])));
       setCheckedAt(Date.now());
       setNow(Date.now());
@@ -106,7 +118,7 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
     const release = () => { if (observationRun.current === run) observationRun.current = null; };
     void run.then(release, release);
     return () => { cancelled = true; };
-  }, [isActive, documentVisible, sessionKey, sessionRevision, refreshNonce]);
+  }, [isActive, documentVisible, sessionKey, sessionRevision, refreshNonce, workspacePath]);
 
   useEffect(() => {
     if (!isActive || !documentVisible) return;
@@ -123,5 +135,5 @@ export function useProjectBoardData(workspacePath: string, isActive: boolean) {
   return { tasks: tasks ?? [], tasksLoading: tasks === null && !taskError, taskError,
     sessions, sessionsLoading: sessionState?.isLoading ?? store.isSessionsLoading,
     sessionError: sessionState?.error ?? store.sessionsError, activity, checking: Boolean(sessionKey) && checking, checkedAt, now, refresh,
-    unobservedCount: Math.max(0, sessions.length - SESSION_SNAPSHOT_LIMIT) };
+    unobservedCount: Math.max(0, Math.max(sessions.length, candidateIds.length) - SESSION_SNAPSHOT_LIMIT) };
 }

@@ -1,0 +1,17 @@
+{
+  "environment": "isolated synthetic React + mocked read-only APIs",
+  "viewports": [
+    1440,
+    540
+  ],
+  "results": [
+    "done Task + idle turn + active Goal renders in running",
+    "list view reports running",
+    "paused Goal moves to confirmation with explicit paused badge",
+    "completed Goal and done Task returns to done",
+    "fresh Goal recheck rejects archive during idle turn",
+    "Goal lookup failure cannot leave the Task completed",
+    "540px detail opens and Escape closes"
+  ],
+  "pageErrors": []
+}

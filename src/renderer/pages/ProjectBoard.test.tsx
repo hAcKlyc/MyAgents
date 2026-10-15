@@ -26,6 +26,28 @@ beforeEach(()=>{
  mocks.status.mockImplementation(async({id,status}:{id:string,status:Task['status']})=>{mocks.data={...mocks.data,tasks:mocks.data.tasks.map(t=>t.id===id?{...t,status}:t)};});
 });
 describe('project board stages and archive history',()=>{
+ it('moves a done Task into running for an active Goal and back only after the Goal completes',()=>{
+  mocks.data.tasks=[{...task('goal-task','done'),sessionIds:['goal-session']}];
+  mocks.data.sessions=[session('goal-session')];
+  const goal={checkedAt:100000,value:{status:'active' as const,isExecuting:false}};
+  mocks.data.activity=new Map([['goal-session',{state:'idle',checkedAt:100000,goal}]]);
+  const {container,rerender}=render(<ProjectBoard workspacePath='/work'/>);
+  expect(container.querySelector('[data-group="running"] [data-board-row="task:goal-task"]')).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'projectBoard.archive'})).toBeNull();
+  mocks.data.activity=new Map([['goal-session',{state:'idle',checkedAt:100000,goal:{...goal,value:{status:'complete',isExecuting:false}}}]]);
+  rerender(<ProjectBoard workspacePath='/work'/>);
+  expect(container.querySelector('[data-group="done"] [data-board-row="task:goal-task"]')).toBeTruthy();
+ });
+ it('rejects archive when an idle Session has an active Goal',async()=>{
+  mocks.data.tasks=[{...task('done','done'),sessionIds:['s']}];
+  mocks.observe.mockResolvedValue({state:'idle',checkedAt:Date.now(),goal:{checkedAt:Date.now(),value:{status:'active',isExecuting:false}}});
+  const {container}=render(<ProjectBoard workspacePath='/work'/>);
+  fireEvent.click(within(container.querySelector('[data-board-row="task:done"]')!.closest('article')!).getByRole('button',{name:'projectBoard.archive'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('projectBoard.archiveBusy');
+  expect(mocks.archive).not.toHaveBeenCalled();
+  expect(mocks.observe).toHaveBeenCalledWith('s','/work');
+ });
+
  it('shows ordered stages and keeps completion on the board while history contains archives only',()=>{
   const {container}=render(<ProjectBoard workspacePath='/work'/>);
   expect([...container.querySelectorAll('.pb-columns>[data-group]')].map(e=>e.getAttribute('data-group'))).toEqual(['todo','running','needs','done']);
