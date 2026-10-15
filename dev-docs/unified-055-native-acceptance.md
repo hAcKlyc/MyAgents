@@ -72,3 +72,31 @@ Provider/model/runtime 均为 `moonshot-coding / k3 / builtin`，输入只使用
 本轮 NEXT 三次请求：两次真实 CLI 成功、一次 DSH 早退失败；Title 四次请求：两 fixture 各一次成功、一次完成赢取消竞态、一次真实取消。费用/token 未获得可核验统计，记录未知，不估算成本。没有重试 DSH，没有普通任务执行。
 
 验收结束时无进行中调用，保留 A4 App 和 Global；最后页面为重载后的 Title，旧 receipt 保全。**2026-10-15 08:54:38（Asia/Shanghai）已停止并释放 GUI**，共享 FileLock 内自身 lease token 比对成功，pointer/lease 均标记 `windowReleased:true`；非秘密回执见私有 `A4-window-release.json`，释放后未再操作 GUI。接续应优先 A5 修正 DSH、真实候选 IME 与 Escape；已通过的 A4 Title 范围可以保留复核，不因 DSH 单点修复泛化为整包生产通过。
+
+
+## A7 独立补验：DSH 与键盘交互
+
+本节追加 A7 结果，不改写或抹除 A4 的 DSH 失败。Root 通过共享 flock/token 转移唯一 GUI lease；审阅者先核对 token、owner 和 active 状态，按准确已运行 App 完整路径绑定，随后只读 ps 确认 App **31990** / Global **32043** 都来自 A7 路径。未按同名或 bundle 解析旧注册项。
+
+- App：`/private/tmp/moxbots-modelqa-055-20261015-A7/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/MoXBots Model QA.app`。
+- Root 提供 source `f44fc7c3479fb4844793cd73889500b80a66557d`、binary 前缀 `9de1ca37`、Developer ID strict/deep 与 CI 六项通过；这些为 Root 制品证据，本节不声称重新执行该审计。
+- HOME：`/private/tmp/moxbots-modelqa-home-055-v2-4tv4sn5d`；原始 AX、截图与安全 receipt 仅保存在 `native-independent-A7/`（目录 0700，文件 0600）。
+- 仅点击一次“生成真实建议”，其后全部复用该结果；没有再次调用付费生成。没有登录、Keychain API/UI、配置/凭据内容读取、Host、日常 App 或普通任务操作，没有权限提示/意外普通 turn/tool_use。
+
+真实 DSH 返回：`请把空文件、缺失列和重复数据这三类场景展开成具体的测试用例表，包含用例编号、输入样例（示例CSV内容）、前置条件、预期结果和优先级。`
+
+UI receipt：`runtime:dsh`、`runtimeSource:integrated`、`providerId:moonshot-coding`、`model:k3`、`elapsedMs:6203`、`syntheticPriorTranscript:true`、`normalTurnStarted:false`、`noTools:true`。该 receipt 没有 provider requestId/token/费用字段，不虚构这些信息；完整可见 JSON 保存为 `A7-next-dsh-receipt.json`。固定合成 CSV 对话未换成用户真实数据。
+
+| 项目 | A7 原生结果 | 证据与限制 |
+| --- | --- | --- |
+| DSH integrated k3 生成 | 通过 | 一次真实生成、有效灰字，`A7-next-dsh-result.*` |
+| 首次 Enter 与 held Return | 通过 | native Return 保持 1300ms，灰字只接纳一次成为正文，拦截计数仍 0；`A7-enter-held.*` |
+| 可编辑草稿与第二独立 Enter | 通过限定页交互 | 追加 ` QA-EDIT-A7` 可见，再独立 Return，计数精确变为 1 且草稿保留；`A7-second-enter.*`。页面 onSend=false，不证明普通任务执行 |
+| Escape 忽略 | 通过 | reset 复用同一结果，Escape 后灰字消失/输入为空/发送禁用，计数 0；`A7-escape.*` |
+| 中文 IME 组合/候选提交 | **仍未验收** | 现有 ctrl+space 与 ctrl+alt+space 后分别真实按 w，仅见 Latin w，无候选或下划线；`A7-ime-first-source.*`、`A7-ime-next-source.*`。未按 Return 冒充 composition 证明，未伪造事件、未新增输入源/修改安全设置 |
+
+本轮未获准其它 GUI，因此没有自行进入 SystemUIServer 输入源菜单诊断。最后仅用 BackSpace 删除自建 Latin w，保留该真实结果/receipt、空稿及计数 0（`A7-final.*`），没有退出 A7。普通任务、真实 Host、owned 冷读/relay、生产发布仍不属于本页验收；private HOME/进程配置不等于 OS sandbox。Root 另有旧注册项解析触发真实 HOME 空记录/两条加载日志的冷启动记录，本节不宣称全流程零真实 HOME 写入，也没有尝试删除该证据。
+
+补充 IME 诊断与停手：Root 随后明确授权仅检查/选择现有输入源菜单、结束恢复原源。尝试 CUA `getApp(com.apple.TextInputMenuAgent)` 及 `getApp(com.apple.systemuiserver)` 均返回 `-10005 timeoutReached`，未取得菜单或原输入源状态，因而没有选择源/进入设置/继续 Return。已有快捷键是否实际切换输入源不可确认，不宣称已确认或恢复原源。真实 IME 继续 open。
+
+**2026-10-15T13:00:52.062693+08:00 已停止所有 GUI 操作**；在共享 flock 下再次核对自身 token/owner 后，将 lease/pointer 标记 guiStopped/stopped，保留 owner/token/released:false，交 Root 收回，不自行清租约给他人。原 App/Global 保留，安全收据 `native-independent-A7/A7-window-stopped.json`。停止后不再操作 GUI。
