@@ -72,3 +72,21 @@ Provider 授权只从 `.moxbot-modelqa` 的显式 allowlist 选择 API provider/
 第四轮的 Request/DOM/静态检查未发现其他 P1/P2。随后 TITLE owner 的真实 `@hono/node-server` wire 复现揭示一个此前未覆盖的取消阻断：没有 payload 的 DELETE 仍可能有空 ReadableStream，`req.body !== null` 会误拒绝 400。**当前不能关闭 wire cancellation 缺口或作完整阶段通过结论**；等待精确修复 SHA，补实际空 body 与真实 payload 区分及对应 wire 回归。A1 不能用于最终取消验收，Root 准备 A2。
 
 此前 193 项和组合探针只证明各自 Request/DOM/mock 层，未经过 Hono wire，不倒填真实取消通过。完整 typecheck/lint/build 仍按 Root 实际结果记录；原生 App、真实模型/Host、收费任务、Keychain 和生产发布没有由本审阅执行或扩展为通过。
+
+## 第四轮增补：a3e51fd7 wire 修复
+
+精确修复 `a3e51fd720c877d098699a690b4bcfc968b2ec44`，检查时 integration HEAD `bba35f57fb11dc7d313cb5488b478022bc9db0b2`，已合远端 main `b5b9c9c4`。本轮只查 patch 和对应回归，不重复已通过的其他测试。
+
+`hasEmptyBody()` 允许无 body 或读到 EOF 的空流；Content-Length 非零/无效即拒绝，流中第一个非空 chunk 即取消读取并拒绝，不接受任何非空 payload。DELETE 只有在精确 requestId 和空体确认后才影响 active controller。原先直接用 `req.body !== null` 的 wire 误拒绝已移除。
+
+独立实跑：TITLE integration **29/29**（含真实 `@hono/node-server` 空 DELETE 202、非空 DELETE 400），Root routes **3/3**、composition **139/139**，合计 **171 项**。
+
+另在合成临时 HOME 上，用实际 `Global composition + routes + title handler`，经真实 Hono loopback server/fetch 完成组合 wire 探针；仅 config/generator 为 synthetic：
+
+- 无内部 token GET 401。
+- 合法 POST 进入固定 fixture 的挂起生成器。
+- 带 `{}` 的 DELETE 400，生成 signal 保持未 aborted。
+- 无 payload DELETE 202，同一生成 signal 确实 aborted。
+- 模型模拟晚到成功仍令 POST 499，GET receipt 为 null，无取消后持久化。
+
+**空 DELETE 的源码与本地真实 HTTP wire 阻断已关闭；在本次 scoped 代码审阅范围无遗留 P1/P2，可用于阶段提交。** 这仍不是 Rust IPC/原生 App 到真实 SDK/模型进程的端到端取消验收；最终必须使用包含新源码的 A2，不能沿用 A1 作为最终取消证据。既有原生/真实模型/Host/发布待验边界继续保留。
