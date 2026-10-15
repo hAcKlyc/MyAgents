@@ -3,6 +3,13 @@ import { readBoardSessionActivity } from './activity';
 const { post } = vi.hoisted(() => ({post:vi.fn()}));
 vi.mock('@/api/apiFetch',()=>({apiPostJson:post}));
 describe('project board session observations',()=>{
+  it('accepts optional validated work progress without trusting malformed counts',async()=>{
+    const progress={source:'live',todoSource:'tools',todos:[],todoTotal:0,todoCompleted:0,agents:[],agentTotal:0,agentRunning:0};
+    post.mockResolvedValue({success:true,session:{sessionId:'s',state:'running',progress}});
+    expect((await readBoardSessionActivity('s')).progress).toEqual(progress);
+    post.mockResolvedValue({success:true,session:{sessionId:'s',state:'running',progress:{...progress,todoTotal:-1}}});
+    expect((await readBoardSessionActivity('s')).progress).toBeUndefined();
+  });
   it('preserves an explicit execution failure without inventing idle',async()=>{
     post.mockResolvedValue({success:false,code:'SESSION_EXECUTION_FAILED',error:'Execution failed'});
     await expect(readBoardSessionActivity('s')).rejects.toMatchObject({code:'SESSION_EXECUTION_FAILED'});

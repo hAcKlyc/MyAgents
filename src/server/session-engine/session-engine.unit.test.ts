@@ -107,6 +107,7 @@ const mocks = vi.hoisted(() => {
         ? { queueId: state.builtinDispatchedQueueId }
         : state.builtinTurnIdentity
     )),
+    getBuiltinWorkProgressSnapshot: vi.fn(),
     getBuiltinExecutionStartedAt: vi.fn<() => string | undefined>(() => undefined),
     getAgentState: vi.fn<() => Record<string, unknown>>(() => ({ sessionState: 'idle', agentDir: '/workspace' })),
     getBuiltinLiveSessionSnapshot: vi.fn<() => Record<string, unknown> | null>(() => null),
@@ -201,6 +202,7 @@ const mocks = vi.hoisted(() => {
     getExternalSessionModel: vi.fn(() => 'gpt-5'),
     getExternalSessionPermissionMode: vi.fn(() => 'no-restrictions'),
     getExternalSessionReasoningEffort: vi.fn(() => 'medium'),
+    getExternalWorkProgressSnapshot: vi.fn(),
     getExternalExecutionStartedAt: vi.fn<() => string | undefined>(() => undefined),
     getExternalSessionState: vi.fn(() => 'idle'),
     getExternalSessionWorkspacePath: vi.fn(() => '/workspace'),
@@ -370,6 +372,7 @@ vi.mock('../agent-session', async () => ({
   getDispatchedTurnIdentity: mocks.getDispatchedTurnIdentity,
   getAgentState: mocks.getAgentState,
   getBuiltinExecutionStartedAt: mocks.getBuiltinExecutionStartedAt,
+  getBuiltinWorkProgressSnapshot: mocks.getBuiltinWorkProgressSnapshot,
   isBuiltinWaitingForUser: mocks.isBuiltinWaitingForUser,
   getBuiltinLiveSessionSnapshot: mocks.getBuiltinLiveSessionSnapshot,
   getBuiltinMcpEffectiveSnapshot: mocks.getBuiltinMcpEffectiveSnapshot,
@@ -447,6 +450,7 @@ vi.mock('../runtimes/external-session', () => ({
   getExternalSessionReasoningEffort: mocks.getExternalSessionReasoningEffort,
   getExternalSessionState: mocks.getExternalSessionState,
   getExternalExecutionStartedAt: mocks.getExternalExecutionStartedAt,
+  getExternalWorkProgressSnapshot: mocks.getExternalWorkProgressSnapshot,
   getExternalSessionWorkspacePath: mocks.getExternalSessionWorkspacePath,
   getExternalSystemInitPayload: mocks.getExternalSystemInitPayload,
   getLastExternalAssistantText: mocks.getLastExternalAssistantText,
@@ -671,6 +675,14 @@ describe('session-engine selector and adapters', () => {
   });
 
 
+  it.each([false,true])('reads progress through the formal facade (external=%s)', external => {
+    mocks.state.useExternal=external;
+    const snapshot={source:'live',todoSource:'runtime',todos:[],todoTotal:0,todoCompleted:0,agents:[],agentTotal:0,agentRunning:0};
+    const getter=external?mocks.getExternalWorkProgressSnapshot:mocks.getBuiltinWorkProgressSnapshot;
+    getter.mockReturnValue(snapshot);
+    expect(getSessionEngine().getWorkProgressSnapshot?.()).toEqual(snapshot);
+    expect(getter).toHaveBeenCalled();
+  });
   it.each([false, true])('reads current turn start through the runtime facade (external=%s)', external => {
     mocks.state.useExternal = external;
     const getter = external ? mocks.getExternalExecutionStartedAt : mocks.getBuiltinExecutionStartedAt;

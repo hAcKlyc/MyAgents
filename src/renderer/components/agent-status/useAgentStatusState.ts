@@ -14,8 +14,8 @@ import {
   isSubagentContainerRunning,
   isSubagentContainerTool,
 } from '@/components/tools/subagentActivity';
-import { getEffectiveTodoWriteTodos } from '@/utils/todoWriteState';
-import { accumulateTaskTodos, isTaskTodoTool, type TaskToolCall } from '@/utils/taskTodoState';
+import { deriveSessionTodos } from '@/../shared/sessionWorkProgress';
+import { isTaskTodoTool } from '@/utils/taskTodoState';
 import {
   BACKGROUND_TASK_STATUS_EVENT,
   collectCompletedBackgroundToolIdsFromHistory,
@@ -66,7 +66,7 @@ export function useAgentStatusState(
 
   return useMemo<AgentStatusState>(() => {
     void bgEpoch;
-    let todos: TodoItem[] = [];
+    const todos: TodoItem[] = deriveSessionTodos(messages, runtimePlanTodos).todos;
     const subagents: SubagentStatus[] = [];
     let latestLifecycleMessageIndex = -1;
     let latestLifecycleSubagents: SubagentStatus[] = [];
@@ -74,7 +74,7 @@ export function useAgentStatusState(
     // SDK 0.3.142+ Task tools (TaskCreate/Update/Get/List), collected in order for
     // the task-id accumulator. Used in preference to the legacy TodoWrite snapshot
     // when present (a session uses one or the other, never both).
-    const taskCalls: TaskToolCall[] = [];
+
 
     // B1 兜底：历史里所有 task-notification 消息里的 toolUseId 都视为已完成。
     const completedBgFromHistory = collectCompletedBackgroundToolIdsFromHistory(messages, sessionId);
@@ -90,24 +90,7 @@ export function useAgentStatusState(
         if (block.type !== 'tool_use' || !block.tool) continue;
         const tool = block.tool;
 
-        if (tool.name === 'TodoWrite') {
-          // result 优先，input 作为 streaming-period fallback。
-          const source = getEffectiveTodoWriteTodos(tool);
-          if (source && Array.isArray(source)) {
-            todos = source.map((t, idx) => ({
-              content: t.content,
-              status: t.status,
-              activeForm: t.activeForm,
-              key: `${tool.id}-${idx}`,
-            }));
-          }
-          continue;
-        }
-
-        if (isTaskTodoTool(tool.name)) {
-          taskCalls.push({ name: tool.name, parsedInput: tool.parsedInput, result: tool.result });
-          continue;
-        }
+        if (tool.name === 'TodoWrite' || isTaskTodoTool(tool.name)) continue;
 
         if (isSubagentContainerTool(tool.name)) {
           seenSubagentToolIds.add(tool.id);
@@ -173,32 +156,6 @@ export function useAgentStatusState(
     }
 
     subagents.push(...latestLifecycleSubagents);
-
-    // SDK 0.3.142+ Task tools take precedence over the legacy TodoWrite snapshot.
-    // A session resumed across the upgrade can contain BOTH (old TodoWrite turns +
-    // new Task turns), so only override when the accumulator actually yields tasks
-    // — a lone TaskGet or a still-streaming TaskCreate must not blank out a prior
-    // TodoWrite list.
-    if (taskCalls.length > 0) {
-      const taskTodos = accumulateTaskTodos(taskCalls);
-      if (taskTodos.length > 0) {
-        todos = taskTodos.map(t => ({
-          content: t.content,
-          status: t.status,
-          activeForm: t.activeForm,
-          key: t.id,
-        }));
-      }
-    }
-
-    if (runtimePlanTodos !== null) {
-      todos = runtimePlanTodos.map((t, idx) => ({
-        content: t.content,
-        status: t.status,
-        activeForm: t.activeForm,
-        key: t.key || `runtime-plan-${idx}`,
-      }));
-    }
 
     // 排序：同步在前（按 startedAt 升序），后台在后（按 startedAt 升序）。
     subagents.sort((a, b) => {

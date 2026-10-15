@@ -1,0 +1,12 @@
+{
+  "kind": "actual React with synthetic isolated data, not native Provider acceptance",
+  "results": [
+    "card progress / detail 17 todos / 3 agents with failure",
+    "return retains selected detail and original Session navigation",
+    "540 detail / list progress remains visible without overflow",
+    "all TODO complete does not complete root Task",
+    "failed observation preserves plan and labels stale child state",
+    "light theme plan and subagent detail"
+  ],
+  "errors": []
+}

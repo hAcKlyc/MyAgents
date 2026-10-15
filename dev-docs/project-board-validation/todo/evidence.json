@@ -1,0 +1,26 @@
+{
+  "scope": "Actual React with synthetic isolated data; no native model execution",
+  "base": "8f7ebc21c3f342b0c6e65474127560da71f0ed4c",
+  "images": [
+    {
+      "file": "todo-dark-1440.png",
+      "sha256": "ca38bc54009ae6db7b73de4411191828d1047e6e7f70023ef2bff4496067450f"
+    },
+    {
+      "file": "todo-light-1440.png",
+      "sha256": "04a8f6b4b1c3bf2cbf89005e3a41a2978ca5e8ec8c78328512f46d506f7add10"
+    },
+    {
+      "file": "todo-stale-1440.png",
+      "sha256": "7c1473a928de39dd1a412bf33da32d4da1b41d8d859be096f3804097646a2ee7"
+    },
+    {
+      "file": "todo-card-dark-1440.png",
+      "sha256": "75ecf24378db2d0bf48f3855748ba91d2943f7e246edba2b1f18ebc689f3100e"
+    },
+    {
+      "file": "todo-dark-540.png",
+      "sha256": "7a81318df2bc9bf36543e58bd31f088f8cd79fdd58cc3f7bfb36eb1b34b24bf1"
+    }
+  ]
+}

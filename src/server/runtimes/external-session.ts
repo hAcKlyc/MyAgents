@@ -1,3 +1,4 @@
+import { deriveSessionWorkProgress } from '../../shared/sessionWorkProgress';
 import { desktopContextOf } from '../../shared/agentMentions';
 import { runtimeProviderAnalytics } from '../session-core/turn-analytics';
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
@@ -360,6 +361,8 @@ import {
   nextExternalLiveRevision,
   resetExternalUserRequestedStop,
   resetExternalLifecycleState,
+  getExternalAgentPlan,
+  setExternalAgentPlan,
   setExternalActiveProcess,
   setExternalActiveRuntime,
   setExternalLifecycleAnalyticsOrigin,
@@ -3611,6 +3614,13 @@ function persistExternalPartialAssistantProjection(
   });
   trackExternalTurnFinalization(persistence);
   return persistence;
+}
+
+export function getExternalWorkProgressSnapshot() {
+  const messages = getExternalTranscriptSessionId() === getCurrentExternalBoundSessionId() ? getExternalSessionMessagesSnapshot() : [];
+  const streaming = getExternalLiveAssistantMessage();
+  return deriveSessionWorkProgress(streaming ? [...messages.filter(message => message.id !== streaming.id), streaming] : messages,
+    { live: true, runtimePlan: getExternalAgentPlan() });
 }
 
 export function getExternalLiveSessionSnapshot(targetSessionId: string): {
@@ -11213,6 +11223,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
     }
 
     case 'agent_plan_update': {
+      setExternalAgentPlan(event.todos);
       broadcast('chat:agent-plan-update', {
         sessionId: getExternalLifecycleSessionId() || null,
         todos: event.todos,

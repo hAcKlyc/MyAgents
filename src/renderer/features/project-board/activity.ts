@@ -1,3 +1,4 @@
+import { workProgressSchema } from '@/../shared/sessionWorkProgress';
 import { apiPostJson } from '@/api/apiFetch';
 import type { ActivitySnapshot, SessionActivity } from './projection';
 
@@ -6,7 +7,7 @@ import type { ActivitySnapshot, SessionActivity } from './projection';
 export async function readBoardSessionActivity(sessionId: string): Promise<ActivitySnapshot> {
   const response = await apiPostJson<{
     success: boolean;
-    session?: { sessionId: string; state: SessionActivity; execution?: ActivitySnapshot['execution'] };
+    session?: { sessionId: string; state: SessionActivity; execution?: ActivitySnapshot['execution']; progress?: unknown };
     error?: string;
     code?: string;
   }>('/api/admin/session/state', { sessionId });
@@ -19,5 +20,6 @@ export async function readBoardSessionActivity(sessionId: string): Promise<Activ
   const timing = response.session.execution;
   const execution = timing && typeof timing.startedAt === 'string' && Number.isFinite(Date.parse(timing.startedAt))
     && Number.isFinite(timing.elapsedMs) && timing.elapsedMs >= 0 ? timing : undefined;
-  return { state: response.session.state, checkedAt: Date.now(), ...(execution ? { execution } : {}) };
+  const progress = workProgressSchema.safeParse(response.session.progress);
+  return { ...(progress.success ? { progress: progress.data } : {}), state: response.session.state, checkedAt: Date.now(), ...(execution ? { execution } : {}) };
 }
