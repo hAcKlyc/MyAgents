@@ -48,3 +48,10 @@ MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/project-board-validation/run.mjs --c
 归档前对canonical Task.sessionIds去重复核owner。此读写不是原子执行锁；并发新执行仍可能发生，投影会保持活跃记录可见。本次不改变既有Session metadata归档/Task scheduler停止语义，不增加伪原子锁。
 
 实际组件隔离页面：`node dev-docs/project-board-validation/state/serve.mjs`，仅绑定127.0.0.1:8879，合成数据，不执行模型、不读写业务记录。相关测试、独立审阅和发布门槛见 `project-board-validation/state/README.md` 与分支任务记录。
+
+
+## 会话TODO与子Agent进度
+
+看板卡片/列表显示原会话TODO完成数、当前/待续步骤和子Agent简报，详情展开三态清单与子Agent状态、后台标记及耗时。此信息为同源只读投影，不能编辑勾选或推导TaskStore完成；需继续沟通或处理审批时进入原会话。一个Task关联多个Session时优先正在等待/运行的观察，否则展示最近活动Session的观察，详情标明来源。
+
+HTTP activity字段progress可选，旧版state-only仍兼容。过期/失败标明快照，不继续宣称实时运行；历史TODO保留为计划记录，历史loading不能判子Agent活跃。Native plan只在活跃Session内从原事件同步，冷历史未记录的原生计划明确不可用。细节与证据 `project-board-todo-acceptance.md`。

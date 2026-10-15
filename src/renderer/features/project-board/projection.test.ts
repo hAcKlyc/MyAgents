@@ -6,6 +6,16 @@ const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
 describe('project board authority projection', () => {
+  it('attributes idle progress to the latest linked Session without completing its Task', () => {
+    const progress={source:'history' as const,todoSource:'tools' as const,todos:[],todoTotal:3,todoCompleted:3,agents:[],agentTotal:0,agentRunning:0};
+    const latest={state:'idle' as const,checkedAt:now,progress};
+    const older={state:'idle' as const,checkedAt:now};
+    const rows=projectBoardRows({path:'/work/p'},[task({status:'verifying',sessionIds:['s1','s2']})],
+      [session({id:'s2',lastActiveAt:new Date(now+100).toISOString()}),session()],new Map([['s1',older],['s2',latest]]),now);
+    expect(rows[0]).toMatchObject({group:'needs',confirmationReason:'verification',activitySessionId:'s2',activity:latest});
+    expect(rows[0].task?.status).toBe('verifying');
+    expect(rows).toHaveLength(1);
+  });
   it('keeps failed executions visible for confirmation even with stale archived metadata', () => {
     const activity = new Map([['s1', {checkedAt:now,error:'Execution failed',errorCode:'execution_failed' as const}]]);
     for (const tasks of [[],[task({status:'archived'})],[task({executionState:'running'})]]) {

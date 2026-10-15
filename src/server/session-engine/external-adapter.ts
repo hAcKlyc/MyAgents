@@ -33,6 +33,7 @@ import {
   getExternalSessionReasoningEffort,
   getExternalSessionState,
   getExternalExecutionStartedAt,
+  getExternalWorkProgressSnapshot,
   getExternalSessionWorkspacePath,
   getExternalSystemInitPayload,
   getExternalMcpEffectiveSnapshot,
@@ -296,6 +297,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     publishTranscriptSaveStatus(status) { publishExternalTranscriptSaveStatus(status); },
+    getWorkProgressSnapshot() { return getExternalWorkProgressSnapshot(); },
     getLiveSessionState() {
       const executionStartedAt = getExternalExecutionStartedAt();
       return {

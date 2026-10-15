@@ -1,3 +1,4 @@
+import { deriveSessionWorkProgress, workProgressSchema } from '../shared/sessionWorkProgress';
 import { z } from 'zod';
 import { getSessionEngine } from './session-engine';
 import { projectSessionActivity, projectSessionExecution } from './session-engine/observation';
@@ -8,6 +9,7 @@ import { strictAssistantText } from './session-text-projection';
 const activitySchema = z.strictObject({
   sessionId: z.string(),
   state: z.enum(['idle', 'running', 'waiting_user_action']),
+  progress: workProgressSchema.optional(),
   execution: z.strictObject({ startedAt: z.iso.datetime({ offset: true }), elapsedMs: z.number().finite().nonnegative() }).optional(),
 });
 
@@ -22,7 +24,7 @@ export function readLocalSessionActivity(sessionId: string) {
   // Root busy policy includes the sticky error state. It cannot establish
   // execution, while exact-Query children can still be independently active.
   if (live.sessionState === 'error' && !live.backgroundWorkActive) throw sessionExecutionFailed();
-  return { success: true, session: activitySchema.parse({ sessionId, state: projectSessionActivity(live), execution: projectSessionExecution(live, Date.now()) }) };
+  return { success: true, session: activitySchema.parse({ sessionId, state: projectSessionActivity(live), progress: engine.getWorkProgressSnapshot?.(), execution: projectSessionExecution(live, Date.now()) }) };
 }
 
 /** Same Rust owner resolver as text pages. No Sidecar creation or model turn. */
@@ -44,6 +46,13 @@ export async function readSessionActivity(sessionId: string) {
   if (result.active !== false) throw new Error('SESSION_STATE_UNAVAILABLE');
   const metadata = getSessionMetadata(sessionId);
   if (!metadata || !isHistoryVisibleSession(metadata)) throw new Error('SESSION_NOT_FOUND');
+  // Inactive owner: durable tool todos are still useful, while historical
+  // loading flags can never establish a running child. No Session is started.
+  try {
+    const data = await getSessionData(sessionId);
+    if (data && !data.transcriptRecovery) return { sessionId, state: 'idle' as const,
+      progress: deriveSessionWorkProgress(data.messages, { live: false }) };
+  } catch { /* Optional progress failure must not invent activity or clear a prior plan. */ }
   return { sessionId, state: 'idle' as const };
 }
 

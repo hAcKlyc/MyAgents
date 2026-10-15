@@ -420,6 +420,7 @@ export interface SessionEngine {
   isBusy(): boolean;
   getRuntimeIdentity(): SessionEngineRuntimeIdentity;
   getLiveSessionState(): SessionEngineLiveState;
+  getWorkProgressSnapshot?(): import("../../shared/sessionWorkProgress").SessionWorkProgress;
   getLatestAssistantResult(): Promise<SessionEngineLatestResult>;
   getStreamReplaySnapshot(): SessionEngineStreamReplaySnapshot;
   getSessionConfigSnapshot(): SessionEngineConfigSnapshot;
