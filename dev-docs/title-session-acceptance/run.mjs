@@ -8,13 +8,15 @@ import { createWriteStream } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
+import { networkProfile } from './sandbox.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const frozenSource = '01deb0b1adc8970389ab2e79553cfab4a521ab3b';
 execFileSync('git', ['merge-base', '--is-ancestor', frozenSource, 'HEAD'], { cwd: root });
 execFileSync('git', ['diff', '--exit-code', frozenSource, '--', 'src', 'scripts', 'src-tauri', 'package.json', 'package-lock.json', 'vendor', 'bundled-agents', 'bundled-workspaces'],
   { cwd: root, stdio: 'pipe' }); // Later commits may record evidence, never alter runtime source.
-assert.equal(process.argv[2], '--approved-real-session-once');
+const diagnostic = process.argv[2] === '--local-diagnostic';
+assert.ok(diagnostic || process.argv[2] === '--approved-real-session-once');
 assert.equal(process.argv[3], '--qa-goal-token-file');
 assert.equal(process.argv.length, 5);
 const goalTokenFile = await realpath(process.argv[4]);
@@ -26,12 +28,15 @@ assert.ok(qaGoalToken.length >= 32);
 const qaGoalPort = 53050;
 const qaPid = 94448;
 const listeners = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${qaGoalPort}`, '-sTCP:LISTEN', '-Fp'], { encoding: 'utf8' });
-assert.equal(listeners.trim(), `p${qaPid}`, 'only the Root-designated isolated Rust owner may serve goals');
+assert.deepEqual([...new Set(listeners.split('\n').filter(line => /^p\d+$/.test(line)))],
+  [`p${qaPid}`], 'only the Root-designated isolated Rust owner may serve goals');
 const sourceConfig = '/private/tmp/moxbots-modelqa-home-055-v2-4tv4sn5d/.moxbot-modelqa/config.json';
-assert.equal((await stat(sourceConfig)).mode & 0o777, 0o600);
-const source = JSON.parse(await readFile(sourceConfig, 'utf8'));
-const upstreamKey = source.providerApiKeys?.['moonshot-coding'];
-assert.ok(typeof upstreamKey === 'string' && upstreamKey.trim());
+let upstreamKey;
+if (!diagnostic) {
+  assert.equal((await stat(sourceConfig)).mode & 0o777, 0o600);
+  upstreamKey = JSON.parse(await readFile(sourceConfig, 'utf8')).providerApiKeys?.['moonshot-coding'];
+  assert.ok(typeof upstreamKey === 'string' && upstreamKey.trim());
+}
 const preflight = JSON.parse(await readFile('/var/folders/34/45h5k_sd5z134tmnzl7499n00000gn/T/moxbots-title-permission-IIqCFE/receipt.json', 'utf8'));
 assert.equal(preflight.passed, true);
 assert.deepEqual(preflight.init.tools, []);
@@ -44,9 +49,12 @@ for (const dir of [join(cwd, '.claude'), data, join(home, '.claude')]) await mkd
 await writeFile(join(cwd, '.claude/settings.json'), JSON.stringify({ permissions: preflight.settings.permissions }), { mode: 0o600 });
 const localToken = randomBytes(32).toString('hex');
 const attempts = [];
+const localWire = [];
 const violations = [];
 const events = [];
 const goalReads = [];
+const deniedManagement = [];
+const expectedManagementDenials = [];
 let allowedGoalSessionId;
 let sessionId;
 let title;
@@ -65,6 +73,12 @@ const goalLocalToken = randomBytes(32).toString('hex');
 const goalAdapter = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'POST' && url.pathname === '/api/im/mirror') {
+      expectedManagementDenials.push({ method: 'POST', path: '/api/im/mirror', status: 403, forwarded: false });
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'QA_EXTERNAL_MIRROR_FORBIDDEN' }));
+      return; // Real failure response, never a fake mirrored:false/success.
+    }
     assert.equal(req.method, 'GET');
     assert.equal(url.pathname, '/api/goal/get');
     assert.equal(req.headers['x-myagents-internal-cli-token'], goalLocalToken);
@@ -85,6 +99,8 @@ const goalAdapter = createServer(async (req, res) => {
     res.writeHead(reply.status, { 'Content-Type': reply.headers.get('content-type') || 'application/json' });
     res.end(bytes); // Exact real GoalStore response, never a synthesized null.
   } catch (e) {
+    const deniedUrl = new URL(req.url, 'http://127.0.0.1');
+    deniedManagement.push({ method: req.method, path: deniedUrl.pathname });
     violations.push(`goal adapter:${String(e)}`);
     res.writeHead(403, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: false, error: 'QA_GOAL_READ_SCOPE_REFUSED' }));
@@ -105,6 +121,12 @@ const proxy = createServer(async (req, res) => {
     const parsed = JSON.parse(body.toString());
     assert.equal(parsed.model, 'k3');
     assert.deepEqual(parsed.tools ?? [], []);
+    if (diagnostic) {
+      localWire.push({ model: parsed.model, toolCount: (parsed.tools ?? []).length, path: u.pathname });
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'LOCAL_DIAGNOSTIC_ONLY' } }));
+      return;
+    }
     assert.ok(attempts.length < 2, 'upstream attempt limit');
     const entry = { sequence: attempts.length + 1, method: 'POST', model: 'k3', toolCount: 0, status: null, elapsedMs: null };
     attempts.push(entry); // Failed attempts consume the same quota.
@@ -129,12 +151,15 @@ const proxy = createServer(async (req, res) => {
 });
 await new Promise(r => proxy.listen(0, '127.0.0.1', r));
 const baseUrl = `http://127.0.0.1:${proxy.address().port}`;
-const provider = { id: 'moonshot-coding', name: 'Kimi bounded title acceptance', type: 'api',
-  enabled: true, isBuiltin: false, baseUrl, authType: 'api_key', apiProtocol: 'anthropic',
+const providerId = 'qa-kimi-title-055';
+const provider = { id: providerId, name: 'Kimi bounded title acceptance', type: 'api',
+  enabled: true, isBuiltin: false, config: { baseUrl }, authType: 'api_key', apiProtocol: 'anthropic',
   primaryModel: 'k3', models: [{ model: 'k3', modelName: 'Kimi K3' }] };
+await mkdir(join(data, 'providers'), { mode: 0o700 });
+await writeFile(join(data, 'providers', `${providerId}.json`), JSON.stringify(provider), { mode: 0o600 });
 await writeFile(join(data, 'config.json'), JSON.stringify({
-  availableProvidersJson: JSON.stringify([provider]), providerApiKeys: { 'moonshot-coding': localToken },
-  defaultProviderId: 'moonshot-coding', defaultModel: 'k3', providerPrimaryModels: { 'moonshot-coding': 'k3' },
+  availableProvidersJson: JSON.stringify([provider]), providerApiKeys: { [providerId]: localToken },
+  defaultProviderId: providerId, defaultModel: 'k3', providerPrimaryModels: { [providerId]: 'k3' },
   agents: [], cliToolRegistryEnabled: false, defaultPermissionMode: 'plan',
   backgroundAgentPermissionMode: 'inherit', workspacesDir: cwd, defaultWorkspacePath: cwd,
   autoStart: false, floatingBallEnabled: false, liteLLMModelDataRefresh: false,
@@ -167,10 +192,13 @@ async function start(id) {
   await new Promise(r => reservation.close(r));
   const args = [bundle, '--agent-dir', cwd, '--port', String(sidecarPort), '--sidecar-role', 'session', '--no-pre-warm',
     ...(id ? ['--session-id', id] : [])];
-  sidecar = spawn(node, args, { env, cwd: join(root, 'src-tauri/resources'), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const profile = networkProfile(sidecarPort, [proxy.address().port, goalAdapter.address().port]);
+  sidecar = spawn('/usr/bin/sandbox-exec', ['-p', profile, node, ...args], {
+    env, cwd: join(root, 'src-tauri/resources'), detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+  });
   const log = createWriteStream(join(home, id ? 'reload.log' : 'sidecar.log'), { mode: 0o600 });
   sidecar.stdout.pipe(log); sidecar.stderr.pipe(log);
-  await writeFile(join(home, id ? 'reload-owner.json' : 'owner.json'), JSON.stringify({ pid: sidecar.pid, args, port: sidecarPort }), { mode: 0o600 });
+  await writeFile(join(home, id ? 'reload-owner.json' : 'owner.json'), JSON.stringify({ pid: sidecar.pid, args, port: sidecarPort, networkProfile: profile }), { mode: 0o600 });
   for (let i = 0; i < 150; i++) {
     assert.ok(sidecar.exitCode === null && sidecar.signalCode === null, 'own sidecar exited during startup');
     try { await api('/health/ready'); return; } catch { await wait(200); }
@@ -178,14 +206,22 @@ async function start(id) {
   throw new Error('sidecar not ready');
 }
 async function stop() {
-  if (!sidecar || sidecar.exitCode !== null || sidecar.signalCode !== null) return;
+  if (!sidecar) return;
   // This is a new detached process group owned solely by this harness.
   const pid = sidecar.pid;
-  process.kill(-pid, 'SIGTERM');
-  await Promise.race([new Promise(r => sidecar.once('exit', r)), wait(5000)]);
+  const members = () => execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,stat=,comm='], { encoding: 'utf8' })
+    .split('\n').filter(line => line.trim().split(/\s+/)[2] === String(pid));
+  if (sidecar.exitCode === null && sidecar.signalCode === null) {
+    try { process.kill(-pid, 'SIGTERM'); }
+    catch (e) { if (members().length) throw e; }
+    await Promise.race([new Promise(r => sidecar.once('exit', r)), wait(5000)]);
+  }
   assert.ok(sidecar.exitCode !== null || sidecar.signalCode !== null, 'own sidecar group did not exit');
   for (let i = 0; i < 50; i++) {
-    try { process.kill(-pid, 0); } catch (e) { if (e.code === 'ESRCH') return; throw e; }
+    if (!members().length) {
+      await writeFile(join(home, `group-${pid}-exited.json`), JSON.stringify({ pid, pgid: pid, members: [], at: new Date().toISOString() }), { mode: 0o600 });
+      return;
+    }
     await wait(100);
   }
   throw new Error('SDK/process group remains');
@@ -210,7 +246,9 @@ try {
         const name = frame.match(/^event: *(.*)$/m)?.[1];
         const raw = frame.match(/^data: *(.*)$/m)?.[1];
         if (!name || !raw) continue;
-        const value = JSON.parse(raw);
+        if (!['chat:system-init', 'chat:session-title-changed', 'chat:status', 'chat:complete', 'chat:agent-error'].includes(name)) continue;
+        const envelope = JSON.parse(raw);
+        const value = envelope.payload ?? envelope;
         if (name === 'chat:system-init') {
           init = { tools: value.info?.tools, mcp_servers: value.info?.mcp_servers, model: value.info?.model };
           assert.deepEqual(init.tools, []); assert.deepEqual(init.mcp_servers, []); assert.equal(init.model, 'k3');
@@ -226,12 +264,17 @@ try {
   ordinaryChatSendAttemptCount++;
   const sent = await api('/chat/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
     clientRequestId: randomUUID(), text, model: 'k3', permissionMode: 'plan',
-    providerRoute: { kind: 'provider', providerId: 'moonshot-coding', model: 'k3' },
-    providerEnv: { providerId: 'moonshot-coding', baseUrl, apiKey: localToken, authType: 'api_key', apiProtocol: 'anthropic' },
+    providerRoute: { kind: 'provider', providerId, model: 'k3' },
+    providerEnv: { providerId, baseUrl, apiKey: localToken, authType: 'api_key', apiProtocol: 'anthropic' },
   }) });
   assert.equal(sent.success, true);
   ordinaryChatSendCount++;
-  for (let i = 0; i < 450 && !title; i++) { if (failure) throw new Error(failure); assert.equal(violations.length, 0); await wait(200); }
+  for (let i = 0; i < (diagnostic ? 150 : 450) && !(diagnostic ? localWire.length && init : title); i++) {
+    if (failure) throw new Error(failure);
+    if (!diagnostic) assert.equal(violations.length, 0);
+    await wait(200);
+  }
+  if (diagnostic) throw new Error('LOCAL_DIAGNOSTIC_COMPLETE_NO_REAL_MODEL_ACCEPTANCE');
   assert.ok(init && title && sessionId, 'real automatic title SSE required');
   assert.equal(sessionId, allowedGoalSessionId, 'fresh canonical identity must stay unchanged');
   assert.ok([...title].length <= 30 && [...title].length >= 6);
@@ -274,14 +317,20 @@ finally {
   proxy.closeAllConnections(); await new Promise(r => proxy.close(r));
   goalAdapter.closeAllConnections(); await new Promise(r => goalAdapter.close(r));
 }
-const receipt = { kind: 'ordinary-session-auto-title-backend', startedAt, endedAt: new Date().toISOString(),
+const normalLog = await readFile(join(home, 'sidecar.log'), 'utf8').catch(() => '');
+const actualBaseUrls = [...normalLog.matchAll(/ANTHROPIC_BASE_URL set to: ([^\s]+)/g)].map(m => m[1]);
+const receipt = { kind: diagnostic ? 'ordinary-session-local-diagnostic' : 'ordinary-session-auto-title-backend', startedAt, endedAt: new Date().toISOString(),
   source: '01deb0b1adc8970389ab2e79553cfab4a521ab3b', home, bundleSha, sessionId, title,
   profile: 'moxbot', sidecarRole: 'session', ordinaryChatSendCount, ordinaryChatSendAttemptCount, terminal,
-  manualTitleEndpointCalls: 0, init, actualSdk, attempts, violations, events,
+  sourceSdkNetwork: 'OS sandbox: only provider-proxy and goal-adapter loopback ports; child-inherited; no direct Internet',
+  manualTitleEndpointCalls: 0, providerId, init, actualSdk, attempts, localWire, actualBaseUrls, violations, events,
   managementDependency: { isolatedQaPid: qaPid, role: 'actual read-only A6 GoalStore', reads: goalReads,
-    allowedPaths: ['GET /api/goal/get'], mutations: 0, executionForwarded: false, normalDesktopSdkCircuitAccepted: false },
+    denied: deniedManagement, expectedManagementDenials, allowedPaths: ['GET /api/goal/get'], mutations: 0, executionForwarded: false, normalDesktopSdkCircuitAccepted: false },
   persistedTitleSource: title ? 'auto' : null, reloaded: !!reloaded,
-  passed: !failure && !!title && !!reloaded, failure: failure ?? null,
+  passed: !diagnostic && !failure && !!title && !!reloaded, failure: failure ?? null,
+  diagnosticEvidence: diagnostic ? { usedRealCredential: false, realUpstreamRequests: 0,
+    toolSurfaceEmpty: !!init && init.tools.length === 0 && localWire.length > 0,
+    allResolvedEndpointsLoopback: actualBaseUrls.length > 0 && actualBaseUrls.every(url => url === baseUrl) } : undefined,
   nativeSidebarAccepted: false, manualTitleRaceAccepted: false, formal055Published: false,
 };
 await writeFile(join(home, 'receipt.json'), JSON.stringify(receipt, null, 2), { mode: 0o600 });
