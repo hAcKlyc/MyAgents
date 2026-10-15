@@ -252,3 +252,9 @@ FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用�
 ## 2026-10-15：055冻结发行 / 056接续
 
 用户要求先发布冻结0.5.5，后续改动进入0.5.6。055源码main52bf6160已正式签名、公证并完成不可变服务器归档；公网完整GET/原子stable门禁和实际客户端安装分别追踪。main5ebf字体缩放PR59及以后改动属于056；各开发版本元数据推进056。当前发行与精确验收边界见 `dev-docs/releases/moxbots-0.5.5.md`、`dev-docs/releases/moxbots-0.5.6-handoff.md`，后续记录覆盖旧统一055任务的历史状态。
+
+## 2026-10-15 16:39：055正式更新已发布，056继续开发
+
+MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS/完整GET/实际stat+SHA/签名独审/CAS/公开路由/054回滚核验；源main52bf6160及远端tag v0.5.5不可变。055整包平均119030B/s、全GET约47分钟，不证明云带宽上限。本机054未安装或重启：HRM16:26仍busy，须fresh完整代次准入、有效一致备份及用户确认。未把Host/IME/带数据原生UI算通过；测试network服务ACCOUNT_SESSION_EXPIRED失败明确留056。
+
+开发主干已056（版本PR61/main6d1f8912），包含之后的PR59缩放/PR60 Goal/PR62输出/PR63 Bots Ready；均不回写055。源码交付/验收边界见dev-docs/releases/moxbots-0.5.5.md、moxbots-0.5.6-handoff.md，私有制品与README/DELIVERY/SHA256SUMS在指针output/updater-055-20261015/final-52bf6160。官网下载手动ZIP由原官网owner在其新增授权下串行发布，Root不操作该asset或日常客户端。
