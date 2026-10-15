@@ -11940,3 +11940,12 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       break;
   }
 }
+
+/** Preserve the active generation's frozen proxy/env policy for auxiliary inference. */
+export async function runExternalTextUtility(input: import('./types').RuntimeTextUtilityTask & {
+  runtime: RuntimeType; runtimeSource?: import('../../shared/types/runtime').RuntimeSource;
+  model: string; workspacePath?: string;
+}): Promise<string | null> {
+  const { runExternalTextUtility: run } = await import('./external-session/text-utility');
+  return run({ ...input, envPolicy: activeExternalEnvPolicy });
+}

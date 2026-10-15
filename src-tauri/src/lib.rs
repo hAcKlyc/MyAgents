@@ -51,6 +51,8 @@ mod credential_permissions;
 pub mod memory_auto_update;
 pub mod memory_evolution;
 mod network_diagnostics;
+#[cfg(all(target_os = "macos", myagents_model_qa))]
+pub mod modelqa_home;
 pub mod notification;
 pub mod notification_badge;
 pub mod perf_trace;
@@ -247,6 +249,9 @@ fn app_context() -> tauri::Context<tauri::Wry> {
     if crate::app_dirs::IS_UPDATER_QA {
         assert_eq!(context.config().identifier, "com.moxbot.updaterqa", "QA requires its isolated bundle configuration");
         assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Updater QA"));
+    } else if crate::app_dirs::IS_MODEL_QA {
+        assert_eq!(context.config().identifier, "com.moxbot.modelqa", "Model QA requires its isolated bundle configuration");
+        assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Model QA"));
     } else if crate::app_dirs::IS_MOXBOT {
         assert_eq!(context.config().identifier, "com.moxbot.app", "MoX bot requires its isolated bundle configuration");
     }

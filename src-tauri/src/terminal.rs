@@ -110,7 +110,7 @@ pub async fn cmd_terminal_create(
     // and prevents the zsh PROMPT_EOL_MARK (%) on the first line.
     let shell = default_shell();
     let mut cmd = CommandBuilder::new(&shell);
-    #[cfg(all(unix, not(myagents_updater_qa)))]
+    #[cfg(all(unix, not(myagents_isolated_qa)))]
     cmd.args(&["-l"]);
     cmd.cwd(&workspace_path);
 
@@ -381,12 +381,12 @@ fn terminal_read_loop(
 
 /// Select the default shell for the current platform.
 fn default_shell() -> String {
-    #[cfg(all(unix, myagents_updater_qa))]
+    #[cfg(all(unix, myagents_isolated_qa))]
     {
         // QA terminals must never source the user's login shell configuration.
         "/bin/sh".into()
     }
-    #[cfg(all(unix, not(myagents_updater_qa)))]
+    #[cfg(all(unix, not(myagents_isolated_qa)))]
     {
         std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into())
     }
@@ -413,7 +413,7 @@ fn default_shell() -> String {
 /// 2. Proxy configuration (NO_PROXY protects localhost)
 /// 3. Bundled Bun and Node.js (same PATH as SDK subprocesses)
 fn inject_terminal_env(cmd: &mut CommandBuilder, app: &AppHandle, sidecar_port: Option<u16>) {
-    if crate::app_dirs::IS_UPDATER_QA {
+    if crate::app_dirs::IS_ISOLATED_QA {
         if let Some(root) = crate::app_dirs::myagents_data_dir() {
             let home = root.join("terminal-home");
             let _ = std::fs::create_dir_all(&home);

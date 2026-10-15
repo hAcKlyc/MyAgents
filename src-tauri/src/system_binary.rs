@@ -58,7 +58,7 @@ pub fn find(binary_name: &str) -> Option<PathBuf> {
 /// Useful when spawning subprocesses that need the full search path.
 pub fn augmented_path() -> std::ffi::OsString {
     // QA never evaluates user login/interactive shell startup files or scans user tool homes.
-    if crate::app_dirs::IS_UPDATER_QA {
+    if crate::app_dirs::IS_ISOLATED_QA {
         let mut paths = Vec::new();
         append_app_local_runtime_dirs(&mut paths);
         paths.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(str::to_owned));

@@ -12,25 +12,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 /// The versioned route is a local credential lookup only; protocol Scope is unchanged.
 pub(crate) fn selected_store() -> Arc<dyn IdentityStore> {
+    #[cfg(myagents_model_qa)]
+    { return Arc::new(ModelQaIdentityStore { inner: Arc::new(OsIdentityStore) }); }
     #[cfg(myagents_updater_qa)]
     { return Arc::new(UpdaterQaDeniedIdentityStore); }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         super::credential_slots::desktop_store()
     }
-    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
+    #[cfg(all(not(myagents_isolated_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         Arc::new(OsIdentityStore)
     }
 }
 pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
+    #[cfg(myagents_model_qa)]
+    { return Arc::new(ModelQaIdentityStore { inner: OsIdentityStore::connection_cache() }); }
     #[cfg(myagents_updater_qa)]
     { return Arc::new(UpdaterQaDeniedIdentityStore); }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         super::credential_slots::connection_cache()
     }
-    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
+    #[cfg(all(not(myagents_isolated_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         OsIdentityStore::connection_cache()
     }
@@ -55,7 +59,7 @@ impl IdentityStore for ReadOnlyScopeStore {
         {
             return Err(super::crypto::CryptoError::CredentialConflict);
         }
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
         {
             let current = super::credential_slots::selection(
                 &super::credential_slots::identity_route_id(scope)?,
@@ -98,7 +102,7 @@ pub(crate) async fn initialize_selected(
     if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
     let identity =
         NetworkIdentity::initialize_with_store(account, retired_generation, store).await?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         identity.account.ensure_current()?;
         if super::credential_slots::selection(&super::credential_slots::identity_route_id(
@@ -215,7 +219,7 @@ pub(crate) async fn authorize_owned_identity(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     account_session.ensure_current()?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         let migration_scope = scope.clone();
         let migration_fingerprint = expected_fingerprint.clone();
@@ -249,17 +253,19 @@ pub(crate) async fn authorize_owned_identity(
             inner: authorized_store,
         }));
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
     {
         let authorization_scope = scope.clone();
         let authorization_cancelled = cancelled.clone();
         let (store, key) = tokio::task::spawn_blocking(move || {
-            let store = OsIdentityStore::authorize_existing(
-                &authorization_scope,
-                &authorization_cancelled,
-            )?;
-            let key = store.load(&authorization_scope)?;
-            Ok::<_, super::crypto::CryptoError>((store, key))
+            #[cfg(myagents_model_qa)]
+            { authorize_model_qa_with(&authorization_scope, &authorization_cancelled, OsIdentityStore::authorize_existing) }
+            #[cfg(not(myagents_model_qa))]
+            {
+                let store = OsIdentityStore::authorize_existing(&authorization_scope, &authorization_cancelled)?;
+                let key = store.load(&authorization_scope)?;
+                Ok::<_, super::crypto::CryptoError>((store, key))
+            }
         })
         .await
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
@@ -438,5 +444,109 @@ mod updater_qa_identity_tests {
             assert!(matches!(store.save_pending(&scope, &DevicePrivateKey::generate().unwrap()), Err(CryptoError::CredentialUnavailable)));
             assert!(matches!(store.delete(&scope), Err(CryptoError::CredentialUnavailable)));
         }
+    }
+}
+
+/// Model QA changes physical OS slots only. TLS/wire scopes remain the issuer's scope.
+#[cfg(myagents_model_qa)]
+struct ModelQaIdentityStore { inner: Arc<dyn IdentityStore> }
+#[cfg(myagents_model_qa)]
+fn model_qa_physical_scope(scope: &KeyScope) -> Result<KeyScope, super::crypto::CryptoError> {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(&("com.moxbot.modelqa.identity.v1", scope))
+        .map_err(|_| super::crypto::CryptoError::InvalidKey)?;
+    let digest = Sha256::digest(bytes);
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&digest[..16]);
+    id[6] = (id[6] & 0x0f) | 0x80;
+    id[8] = (id[8] & 0x3f) | 0x80;
+    let mut physical = scope.clone();
+    physical.service_id = uuid::Uuid::from_bytes(id).to_string();
+    Ok(physical)
+}
+#[cfg(myagents_model_qa)]
+impl IdentityStore for ModelQaIdentityStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.load(&model_qa_physical_scope(scope)?)
+    }
+    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.save_pending(&model_qa_physical_scope(scope)?, key)
+    }
+    fn delete(&self, scope: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.delete(&model_qa_physical_scope(scope)?)
+    }
+}
+#[cfg(all(test, myagents_model_qa))]
+mod model_qa_scope_tests {
+    #[test]
+    fn physical_namespace_is_distinct_and_never_mutates_wire_scope() {
+        let wire = super::KeyScope { issuer: "https://fixture.invalid".into(), environment: "production".into(), service_id: "98b5376a-4750-49e6-ae82-c5de39b7afef".into(), principal_id: "qa".into(), device_id: "cc8fc885-529b-43e9-8a58-ee7c5f2a4c58".into(), key_generation: 1 };
+        let physical = super::model_qa_physical_scope(&wire).unwrap();
+        assert_ne!(physical.service_id, wire.service_id);
+        assert_eq!(physical.service_id, super::model_qa_physical_scope(&wire).unwrap().service_id);
+        assert_eq!(physical.issuer, wire.issuer);
+        assert_eq!(wire.service_id, "98b5376a-4750-49e6-ae82-c5de39b7afef");
+        let mut next = wire.clone(); next.key_generation += 1;
+        assert_ne!(super::model_qa_physical_scope(&next).unwrap().service_id, physical.service_id);
+    }
+}
+
+#[cfg(myagents_model_qa)]
+fn authorize_model_qa_with(
+    scope: &KeyScope,
+    cancelled: &AtomicBool,
+    authorize: impl FnOnce(&KeyScope, &AtomicBool) -> Result<Arc<dyn IdentityStore>, super::crypto::CryptoError>,
+) -> Result<(Arc<dyn IdentityStore>, DevicePrivateKey), super::crypto::CryptoError> {
+    let physical = model_qa_physical_scope(scope)?;
+    let inner = authorize(&physical, cancelled)?;
+    let key = inner.load(&physical)?;
+    Ok((Arc::new(ModelQaIdentityStore { inner }), key))
+}
+#[cfg(all(test, myagents_model_qa))]
+mod model_qa_backend_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use super::super::crypto::CryptoError;
+    struct Spy { calls: Arc<Mutex<Vec<(String, String)>>>, missing: bool }
+    impl IdentityStore for Spy {
+        fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+            self.calls.lock().unwrap().push(("load".into(), scope.service_id.clone()));
+            if self.missing { Err(CryptoError::CredentialMissing) } else { DevicePrivateKey::generate() }
+        }
+        fn save_pending(&self, scope: &KeyScope, _: &DevicePrivateKey) -> Result<(), CryptoError> { self.calls.lock().unwrap().push(("save".into(), scope.service_id.clone())); Ok(()) }
+        fn delete(&self, scope: &KeyScope) -> Result<(), CryptoError> { self.calls.lock().unwrap().push(("delete".into(), scope.service_id.clone())); Ok(()) }
+    }
+    fn scope() -> KeyScope { KeyScope { issuer: "https://fixture.invalid".into(), environment: "production".into(), service_id: "98b5376a-4750-49e6-ae82-c5de39b7afef".into(), principal_id: "qa".into(), device_id: "cc8fc885-529b-43e9-8a58-ee7c5f2a4c58".into(), key_generation: 1 } }
+    #[test]
+    fn all_operations_and_authorization_use_only_qa_physical_scope() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let wire = scope();
+        let physical = model_qa_physical_scope(&wire).unwrap();
+        let store = ModelQaIdentityStore { inner: Arc::new(Spy { calls: calls.clone(), missing: false }) };
+        store.load(&wire).unwrap();
+        store.save_pending(&wire, &DevicePrivateKey::generate().unwrap()).unwrap();
+        store.delete(&wire).unwrap();
+        let (authorized, _) = authorize_model_qa_with(&wire, &AtomicBool::new(false), |s, _| {
+            calls.lock().unwrap().push(("authorize".into(), s.service_id.clone()));
+            Ok(Arc::new(Spy { calls: calls.clone(), missing: false }))
+        }).unwrap();
+        authorized.load(&wire).unwrap();
+        let seen = calls.lock().unwrap();
+        assert_eq!(seen.len(), 6);
+        assert!(seen.iter().all(|(_, id)| id == &physical.service_id && id != &wire.service_id));
+    }
+    #[test]
+    fn missing_qa_slot_never_falls_back_to_daily_slot() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let store = ModelQaIdentityStore { inner: Arc::new(Spy { calls: calls.clone(), missing: true }) };
+        assert!(matches!(store.load(&scope()), Err(CryptoError::CredentialMissing)));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_ne!(calls.lock().unwrap()[0].1, scope().service_id);
     }
 }

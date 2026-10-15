@@ -4,7 +4,7 @@ const guards = vi.hoisted(() => ({
   exec: vi.fn(() => { throw new Error('QA must not probe OS credentials'); }),
   query: vi.fn(() => { throw new Error('QA must not launch SDK'); }),
 }));
-vi.mock('../shared/updaterQa', () => ({ isUpdaterQaBuild: () => true }));
+vi.mock('../shared/updaterQa', () => ({ isUpdaterQaBuild: () => true, isIsolatedQaBuild: () => true, isModelQaBuild: () => false }));
 vi.mock('fs', () => ({ existsSync: guards.fs, readFileSync: guards.fs }));
 vi.mock('../shared/appProfile', () => ({ APP_DATA_DIR_NAME: '.moxbot-updaterqa', APP_BUILD_PROFILE: 'moxbot', APP_CLI_NAME: 'moxbot-updaterqa', APP_DISPLAY_NAME: 'MoXBots Updater QA', APP_URL_SCHEME: 'moxbot-updaterqa', APP_WEBSITE_URL: 'https://140.143.183.232/', IS_UPDATER_QA: true }));
 vi.mock('child_process', () => ({ execFileSync: guards.exec, execSync: guards.exec }));

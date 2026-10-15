@@ -204,6 +204,19 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 
 Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已整合统一官网PR47 main16ab3dbd/看板记录80faaab7，无客户端重建。独立QA真实A3→B3、编辑/realPTY拒绝不中断、cancel、signed install/nativecleanup/exactdraft&Record恢复和Root实际UI复看通过。App/DMG AppleAccepted/stapled/Gatekeeper，ZIP/TAR/DMG全清单/签名门禁通过。Own官网stable0.5.4及独立ownkey签名生效；sameSHA TAR复用自有Repo CDN（官网URL和公钥不变，服务器原件保留），完整实际HTTPS343281849bytes/37.19s/9.23MBps、signature/range/privacy通过；网站新设计当前源hash已对齐、其它Nginxbase保全/cloudPID不变。正式文件WPS output/updater-20261014/final-e5a05f76/，最终交接 dev-docs/moxbots-updater-054-delivery.md。paidProvider/realissuer/Host/runningtimer不是本native覆盖；remote-session安全更新证明未就绪明确阻止安装。Root/children、board与unified均停止GUI，remoteowner后续只按其自己的授权安装/联调。已公开0.5.4不可变，下一源码变更发0.5.5。
 
+## MOXBOTS-NEXT-PROMPT-002
+
+用户要求扩展Codex/Claude Code/DSH下一步建议、真实模型生成验收与客户端更新。仅文本utility不执行工具/不改原对话，保持Runtime身份及冻结模型。分阶段状态见.agent-sync/tasks/codex-next-prompt-runtimes-20261015-2fee4eac.md；普通0.5.4发布不代表本任务已实现。
+
+### MOXBOTS-055-UNIFIED-ACCEPTANCE
+
+Unified owner builds a distinct real-model utility acceptance environment, coordinates NEXT-PROMPT/TITLE/Host and brand/community serial native acceptance, then freezes all accepted mainline work for signed/notarized 0.5.5 and idle-only actual client update. Existing updaterqa stays model-disabled; daily work is preserved. Source/tests/runtime/production/mainline gates and ownership: `dev-docs/unified-055-acceptance.md`; task `.agent-sync/tasks/codex-unified-055-modelqa-20261015-38fa9c79.md`. Not a claim of completed 0.5.5 release.
+FEEDBACK-001阶段交付：PR44/main d7264a43已核验，7 CI通过；云端已发布并通过受控真实账号闭环5/5。统一原生候选尚未纳入该提交，收包已登记，当前安装入口不算通过；接续见任务记录及dev-docs/feedback-production-validation.md。
+
+FEEDBACK-001 2026-10-15 07:14 UTC+8 接续：已安装正式0.5.4/e5a05f76包含PR44，实际binary/源码/远端main c7bab285对应通过；按新增人类授权同步给统一客户端负责人并登记FEEDBACK/TITLE原生待验队列。现有非实现者原生入口/布局证据复用；实际issuer/退出恢复及Provider标题生成待当前窗口owner明确交接，未抢占GUI或重复发布。任务保持in-progress。
+
+FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用正式0.5.4完成个人菜单/助手/正确issuer反馈入口、同账号真实Dex/PKCE退出恢复、8原标签及App/Sidecar PID保留、独立铃铛入口。实际联网状态不作为Host/通知通过。GUI已token校验释放，非秘密摘要dev-docs/feedback-native-acceptance.md。TITLE待独立modelqa，后续统一0.5.5由发布负责人处理。
+
 ## MOXBOTS-PROJECT-BOARD-004 — 四阶段与可信执行状态
 
 用户批准PB-003 v3落实际看板：待开始→执行中→待确认→已完成；历史仅主动归档，恢复不执行。当前分支codex/project-board-state-20261015，任务记录 `.agent-sync/tasks/codex-project-board-state-20261015-5b2d05d2.md`。实现renderer与现有owner观察链路，SDK当前Query后台子任务纳入running；Sidecar非健康/恢复不可伪idle。主Agent负责集成，state_review独立检查UI；不碰统一0.5.5工作区，不并发退出/换包。代码、CI/main与统一原生安装/真实HRM复验分开记录。
@@ -211,10 +224,11 @@ Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已�
 - [x] 四阶段/细原因、历史归档恢复、可见页有界刷新与失败保留快照。
 - [x] 相关161项unit/DOM，web/server构建。
 - [x] 完整类型/lint、Rust Task82/owner2及独立UI审阅。
-- [ ] main同步/CI/合并、统一0.5.5 intake与真实客户端复验。
+- [x] main20593924/PR56已交付六CI通过，用户直接授权纳入统一0.5.5。
+- [ ] 统一原生安装与真实HRM复验；由统一负责人串行处理，不另起安装或付费模型任务。
 ## MOXBOTS-BRAND-COMMUNITY-001 — 2026-10-15
 
-用户要求清理可见MyAgents名称/介绍，并重建社区到现有云服务体系。隔离分支`codex/brand-community-20261015`，基线c7bab285；桌面品牌/导航、同云账号社区及后台管理已实现，回归和独立UI验收进行中。合同`services/agentnet/COMMUNITY.md`，任务`.agent-sync/tasks/codex-brand-community-20261015-5872226e.md`。云服务和桌面分别追踪发布；统一桌面0.5.5打包owner正在工作，本任务不并发安装或重启日常应用。不得把合成OIDC、本地fixture或主干合入称为生产/原生完成。
+用户要求清理可见MyAgents名称/介绍，并重建社区到现有云服务体系。隔离分支`codex/brand-community-20261015`，基线c7bab285；桌面品牌/导航、同云账号社区及后台管理已由PR50交main b5b9c9c4；7CI、151云回归、独立UI和生产真实OIDC/只读路径通过。云已安全发布并释放维护hold，原生0.5.5由统一负责人继续。最终证据见`dev-docs/brand-community-delivery.md`。合同`services/agentnet/COMMUNITY.md`，任务`.agent-sync/tasks/codex-brand-community-20261015-5872226e.md`。云服务和桌面分别追踪发布；统一桌面0.5.5打包owner正在工作，本任务不并发安装或重启日常应用。不得把合成OIDC、本地fixture或主干合入称为生产/原生完成。
 
 
 ## MOXBOTS-PLAN-REVIEW-001
