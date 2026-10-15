@@ -77,18 +77,18 @@ export function projectBoardRows(
     const goals = task.sessionIds.map(id => boardGoalState(activity.get(id), now));
     const goalReason = goals.includes('blocked') ? 'blocked' : goals.includes('paused') ? 'paused' : goals.includes('stopped') ? 'stopped' : goals.includes('unknown') ? 'unknown' : undefined;
     const goalRunning = goals.includes('running');
-    const waitingSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'waiting_user_action');
-    const runningSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'running');
-    const snapshot = activity.get((waitingSession ?? runningSession)?.id ?? task.sessionIds.find(id => boardGoalState(activity.get(id), now) === 'running') ?? '')
+    const waitingSessionId = task.sessionIds.find(id => freshActivity(activity.get(id), now) === 'waiting_user_action');
+    const runningSessionId = task.sessionIds.find(id => freshActivity(activity.get(id), now) === 'running');
+    const snapshot = activity.get((waitingSessionId ?? runningSessionId) ?? task.sessionIds.find(id => boardGoalState(activity.get(id), now) === 'running') ?? '')
       ?? executionSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now))
       ?? [...executionSessions].sort((a,b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)).map(s => activity.get(s.id)).find(a => !!a);
-    const lastKnownActive = executionSessions.some(s => {
-      const observation = activity.get(s.id);
+    const lastKnownActive = task.sessionIds.some(id => {
+      const observation = activity.get(id);
       return observation && !freshActivity(observation, now)
         && (observation.state === 'running' || observation.state === 'waiting_user_action');
     });
     const confirmationReason: ConfirmationReason | undefined = task.executionState === 'stop_failed' ? 'stopFailed'
-      : waitingSession ? 'waiting' : runningSession || goalRunning ? undefined
+      : waitingSessionId ? 'waiting' : runningSessionId || goalRunning ? undefined
       : task.sessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
       : goalReason ? goalReason
       : task.executionState ? undefined
@@ -96,14 +96,14 @@ export function projectBoardRows(
       : task.status === 'stopped' ? 'stopped'
       : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' ? 'unknown' : undefined;
     const group: BoardGroup = confirmationReason ? 'needs'
-      : runningSession || goalRunning || task.executionState || task.executor === 'user' && task.status === 'running' ? 'running'
+      : runningSessionId || goalRunning || task.executionState || task.executor === 'user' && task.status === 'running' ? 'running'
       : task.status === 'archived' ? 'archived' : task.status === 'done' ? 'done'
       : task.status === 'todo' ? 'todo' : 'scheduled';
     return {
       id: `task:${task.id}`, title: task.name, group, task, sessions: executionSessions,
       summary: task.executionError || task.lastExecution?.error || task.description || '',
       updatedAt: task.updatedAt,
-      activity: snapshot, activitySessionId: executionSessions.find(s => activity.get(s.id) === snapshot)?.id, confirmationReason, archived: task.status === 'archived',
+      activity: snapshot, activitySessionId: task.sessionIds.find(id => activity.get(id) === snapshot), confirmationReason, archived: task.status === 'archived',
     };
   });
   for (const session of visibleSessions) {

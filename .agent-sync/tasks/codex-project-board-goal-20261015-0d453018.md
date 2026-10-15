@@ -21,7 +21,7 @@
 
 ## Verification
 
-42项相关unit/DOM通过；Node24 npm run typecheck、完整lint（既存depcruise16warnings/0errors）与生产web build通过。实际React UI见dev-docs/project-board-validation/goal/；隔离合成API只验证分组和交互，不等于原生业务验收。UI由主Agent亲验（有限状态修复，无布局变动）；无独立审阅或模型用量测量。
+43项相关unit/DOM通过；Node24 npm run typecheck、完整lint（既存depcruise16warnings/0errors）与生产web build通过。实际React UI见dev-docs/project-board-validation/goal/；隔离合成API只验证分组和交互，不等于原生业务验收。UI由主Agent亲验（有限状态修复，无布局变动）；无独立审阅或模型用量测量。
 
 ## Release boundary / unknowns
 
@@ -30,3 +30,7 @@
 ## Next step
 
 完成PR/main交付后，在独占原生窗口和有效发布/回滚门禁下将本补丁纳入后续正式包，核对同一真实Task/Session/Goal分组。
+
+## Integration submission
+
+PR https://github.com/heavenzhang/MoXBots/pull/60 。自查补充无metadata但等待审批的Session必须优先待确认（不能被active Goal遮住）；43项unit/DOM复跑通过。实际React七条旅程通过，截图已目视检查，无布局改动。CI和主干结果以远端实际检查为准。

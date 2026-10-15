@@ -6,6 +6,10 @@ const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
 describe('project board authority projection', () => {
+  it('keeps a missing-metadata Session waiting for approval even while its Goal is active',()=>{
+    const row=projectBoardRows({path:'/work/p'},[task({status:'done'})],[],new Map([['s1',{state:'waiting_user_action',checkedAt:now,goal:{checkedAt:now,value:{status:'active',isExecuting:true}}}]]),now)[0];
+    expect(row).toMatchObject({group:'needs',confirmationReason:'waiting',activitySessionId:'s1'});
+  });
   it('keeps active Goals running across idle turns, stale done labels and absent Session metadata',()=>{
     for(const status of ['done','archived'] as const) for(const isExecuting of [true,false]) for(const metadata of [[],[session()]]) {
       const observation={state:'idle' as const,checkedAt:now,goal:{checkedAt:now,value:{status:'active' as const,isExecuting}}};
