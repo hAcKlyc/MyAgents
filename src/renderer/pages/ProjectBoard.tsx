@@ -10,7 +10,7 @@ import { actions as sessionActions } from '@/hooks/taskCenterStore';
 import { readBoardSessionActivity } from '@/features/project-board/activity';
 import { formatTime, getFolderName } from '@/utils/taskCenterUtils';
 import { useProjectBoardData } from '@/features/project-board/useProjectBoardData';
-import { projectBoardRows, filterBoardRows, boardRowStateKey, type BoardGroup, type BoardRow } from '@/features/project-board/projection';
+import { projectBoardRows, filterBoardRows, boardGoalState, boardRowStateKey, type BoardGroup, type BoardRow } from '@/features/project-board/projection';
 import { useBoardOverlay } from '@/features/project-board/useBoardOverlay';
 import SessionWorkProgress from '@/features/project-board/SessionWorkProgress';
 import SessionExecutionTime from '@/features/project-board/SessionExecutionTime';
@@ -87,8 +87,8 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
         // visible even if an archived record receives a new run afterwards.
         const sessionIds = [...new Set(row.task?.sessionIds ?? row.sessions.map(s => s.id))];
         for (let start = 0; start < sessionIds.length; start += 4) {
-          const observations = await Promise.all(sessionIds.slice(start, start + 4).map(id => readBoardSessionActivity(id)));
-          if (observations.some(a => a.state !== 'idle')) throw new Error(t('projectBoard.archiveBusy'));
+          const observations = await Promise.all(sessionIds.slice(start, start + 4).map(id => readBoardSessionActivity(id, workspacePath)));
+          if (observations.some(a => a.state !== 'idle' || a.error || (boardGoalState(a, Date.now()) !== undefined && boardGoalState(a, Date.now()) !== 'complete'))) throw new Error(t('projectBoard.archiveBusy'));
         }
       }
       if (row.task) {
