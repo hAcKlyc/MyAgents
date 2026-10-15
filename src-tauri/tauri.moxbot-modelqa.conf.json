@@ -64,7 +64,8 @@
             "process:allow-restart",
             "notification:allow-is-permission-granted"
           ]
-        }
+        },
+        "ui-zoom"
       ]
     }
   },

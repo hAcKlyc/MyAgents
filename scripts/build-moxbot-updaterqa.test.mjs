@@ -7,6 +7,15 @@ import { parseQaBuildArgs, qaBuildEnvironment } from './build-moxbot-updaterqa.m
 function args(extra = []) {
   return ['--qa-workspace', `/private/tmp/moxbots-qa-fixture-${process.pid}`, '--qa-public-key', '/private/tmp/fixture.key.pub', '--qa-endpoint', 'http://127.0.0.1:54321/updates/{{target}}.json', '--qa-version', '0.5.2', ...extra];
 }
+test('all explicit MoXBots capability lists include main-window zoom without granting it to floating windows', () => {
+  const zoom = JSON.parse(readFileSync(new URL('../src-tauri/capabilities/ui-zoom.json', import.meta.url)));
+  assert.deepEqual(zoom.windows, ['main']);
+  assert.deepEqual(zoom.permissions, ['core:webview:allow-set-webview-zoom']);
+  for (const profile of ['moxbot', 'moxbot-updaterqa', 'moxbot-modelqa']) {
+    const config = JSON.parse(readFileSync(new URL(`../src-tauri/tauri.${profile}.conf.json`, import.meta.url)));
+    assert.ok(config.app.security.capabilities.includes(zoom.identifier), `${profile} must load the zoom capability`);
+  }
+});
 test('QA requires independent endpoint/config/features/workspace and never accepts production options', () => {
   const plan = parseQaBuildArgs(args(['--', '--target', 'aarch64-apple-darwin', '--no-bundle']));
   assert.equal(plan.endpoint, 'http://127.0.0.1:54321/updates/{{target}}.json');

@@ -71,7 +71,8 @@
             "global-shortcut:allow-unregister",
             "global-shortcut:allow-is-registered"
           ]
-        }
+        },
+        "ui-zoom"
       ]
     }
   },
