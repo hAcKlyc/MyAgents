@@ -1,0 +1,47 @@
+{
+  "environment": "http://127.0.0.1:5198",
+  "auth": "real AuthStore/CommunityStore/admin HTTP; synthetic local OIDC chooser; explicit response-loss and401 injected only final recovery case",
+  "cases": [
+    {
+      "name": "compiled served assets match disk final source",
+      "pass": true
+    },
+    {
+      "name": "user real PKCE and stored topic create",
+      "pass": true
+    },
+    {
+      "name": "other principal sees shared topic and persists reply",
+      "pass": true
+    },
+    {
+      "name": "full admin actual login and navigation sees persisted discussion",
+      "pass": true
+    },
+    {
+      "name": "admin lock pin CAS persists and normal user blocked from replying",
+      "pass": true
+    },
+    {
+      "name": "admin hide removes topic for other principals but remains admin readable",
+      "pass": true
+    },
+    {
+      "name": "admin restore visibility unlock retains stored reply",
+      "pass": true
+    },
+    {
+      "name": "ordinary account denied full administrator console",
+      "pass": true
+    },
+    {
+      "name": "logout reauthentication sees persisted topic and reply",
+      "pass": true
+    },
+    {
+      "name": "real commit response loss then401 login retries original operation once",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

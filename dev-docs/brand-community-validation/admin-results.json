@@ -1,0 +1,30 @@
+{
+  "scope": "Unchanged extracted CommunityAdmin module + actual stylesheet; bounded mock request/session owner; full admin verified separately in loopback integration",
+  "cases": [
+    {
+      "name": "admin 1440 escaped text responsive moderation",
+      "pass": true
+    },
+    {
+      "name": "admin 768 escaped text responsive moderation",
+      "pass": true
+    },
+    {
+      "name": "admin 390 escaped text responsive moderation",
+      "pass": true
+    },
+    {
+      "name": "403 retains selection and editable controls",
+      "pass": true
+    },
+    {
+      "name": "uncertain moderation freezes and retains mutation through page navigation",
+      "pass": true
+    },
+    {
+      "name": "successful moderation carries expected revision",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

@@ -42,6 +42,9 @@
     "failed": "The operation failed. Try again later."
   },
   "globalSidebar": {
+    "legacySpaceUnavailable": "This link belongs to the legacy collaboration space. Its resources are not available in this community. Open More → Community to continue.",
+    "community": "Community",
+    "cloudUnavailable": "No MoXBots cloud service is configured. Check the cloud connection in the account menu.",
     "navigation": "Global navigation",
     "openWebsite": "Open the MyAgents website",
     "collapse": "Collapse sidebar",

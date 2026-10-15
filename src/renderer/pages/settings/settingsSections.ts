@@ -33,7 +33,9 @@ export const VALID_SECTIONS: SettingsSection[] = [
   'developer',
 ];
 
-export const MYAGENTS_GITHUB_URL = 'https://github.com/hAcKlyc/MyAgents';
+export const MYAGENTS_GITHUB_URL = APP_BUILD_PROFILE === 'moxbot'
+  ? 'https://github.com/heavenzhang/MoXBots'
+  : 'https://github.com/hAcKlyc/MyAgents';
 export const MYAGENTS_SOURCE_CODE_URL = MYAGENTS_GITHUB_URL;
 export const MYAGENTS_RELEASES_URL = APP_BUILD_PROFILE === 'moxbot'
   ? `${APP_WEBSITE_URL}download/`
