@@ -558,7 +558,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
       // Local tools can predate the explicit loading bit, so retain the legacy
       // result fallback for history compatibility.
       const subagentRunning = block.tool?.subagentCalls?.some((call) => call.isLoading);
-      return Boolean(block.tool?.isLoading) || Boolean(subagentRunning) || !block.tool?.result;
+      return Boolean(block.tool?.isLoading) || Boolean(subagentRunning) || block.tool?.result === undefined;
     }
     return false;
   });

@@ -21,12 +21,20 @@ import {
 } from "@/api/agentNetwork";
 import { acceptNetworkRegistry } from "./store";
 import { JoinNetworkDialog } from "./JoinNetworkDialog";
+import { APP_BUILD_PROFILE } from "../../../shared/appProfile";
+
+// The owned edition's page heading belongs to NetworkHeader; this label keeps
+// the actual connection identity and switching controls separate from branding.
+const NetworkLabel = APP_BUILD_PROFILE === "moxbot" ? "div" : "h1";
+const networkLabelClass = APP_BUILD_PROFILE === "moxbot"
+  ? "min-w-0 text-sm font-medium"
+  : "min-w-0 text-2xl font-semibold";
 export function NetworkSelector({ registry }: { registry: NetworkRegistry }) {
   const { t } = useTranslation("app");
   return registry.selfhostEnabled === true ? (
     <NetworkSwitcher registry={registry} />
   ) : (
-    <h1 className="min-w-0 text-2xl font-semibold">{t("agentNetwork.networkName")}</h1>
+    <NetworkLabel className={networkLabelClass}>{t("agentNetwork.networkName")}</NetworkLabel>
   );
 }
 function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
@@ -304,7 +312,7 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
   }
   return (
     <>
-      <h1 className="min-w-0 text-2xl font-semibold">
+      <NetworkLabel className={networkLabelClass}>
         <button
           ref={anchor}
           type="button"
@@ -316,7 +324,7 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
           <span className="truncate">{name}</span>
           <ChevronDownIcon className="h-4 w-4 shrink-0" />
         </button>
-      </h1>
+      </NetworkLabel>
       <Popover
         open={open}
         onClose={() => setOpen(false)}

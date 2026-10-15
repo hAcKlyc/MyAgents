@@ -23,6 +23,14 @@ describe('application branding across profiles', () => {
       expect(i18n.t('settings:about.developerParagraph1', { lng: 'zh-CN' })).not.toContain('MyAgents');
       expect(i18n.t('settings:about.communityTitle', { lng: 'en-US' })).toBe('MoXBots Community');
     }
+    for (const lng of ['zh-CN', 'en-US'] as const) {
+      const originalNetwork = lng === 'zh-CN' ? 'AgentNet 局域网络' : 'AgentNet Local Network';
+      const ownedPage = lng === 'zh-CN' ? 'Bots 网络' : 'Bots Network';
+      expect(i18n.t('app:globalSidebar.agentNetwork', { lng })).toBe(profile === 'moxbot' ? 'Bots Ready' : originalNetwork);
+      expect(i18n.t('app:tabs.agentNetwork', { lng })).toBe(profile === 'moxbot' ? ownedPage : originalNetwork);
+      // Product navigation must not rename the upstream connection identity.
+      expect(i18n.t('app:agentNetwork.networkName', { lng })).toBe(originalNetwork);
+    }
     expect(APP_WEBSITE_URL).toBe(profile === 'moxbot' ? 'https://140.143.183.232/' : 'https://myagents.io');
   });
 });
