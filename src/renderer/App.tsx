@@ -1,3 +1,4 @@
+import UpdateRestartConfirmation from '@/components/UpdateRestartConfirmation';
 import { restoreRemoteTabForAccount } from '@/features/remote-session/accountFence';
 import { currentNetworkSnapshot } from '@/features/agent-network/store';
 import type { RemoteSessionOpenIntent } from '@/features/remote-session/tabContract';
@@ -863,7 +864,7 @@ export default function App() {
   // does nothing" reports on Windows: a flaky network would kill the install
   // verification round-trip, the JS only console.warn-ed, and the user
   // assumed the button was broken.
-  const performRestartAndUpdate = useCallback(async (checkpoint?: ReturnType<typeof beginComposerUpdateCheckpoint>) => {
+  const performRestartAndUpdate = useCallback(async (checkpoint?: ReturnType<typeof beginComposerUpdateCheckpoint>, interruptWork = false) => {
     // Persist open-tab state before the install/relaunch exits the process from
     // Rust (Issue #232). flushOpenTabsNow() writes localStorage (the fast path),
     // but WebKit/WebView2 persist localStorage to disk ASYNCHRONOUSLY, so the
@@ -882,7 +883,7 @@ export default function App() {
       | undefined;
     try {
       checkpoint?.verify(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
-      outcome = await restartAndUpdateRef.current();
+      outcome = await restartAndUpdateRef.current(interruptWork ? { interruptWork: true } : undefined);
     } finally {
       // Drop the durable handoff UNLESS the restart is actually proceeding
       // (outcome 'ok' → the process is exiting and boot will consume it). Any
@@ -4725,7 +4726,8 @@ export default function App() {
 
   const handleRestartAndUpdate = useCallback(async (confirmed = false) => {
     if (APP_BUILD_PROFILE === 'moxbot') {
-      // Updates never offer to interrupt work; Rust rejects busy/unknown owners.
+      // Only this explicit confirmation permits local work to stop. Saving and
+      // process settlement still belong to Rust/SessionEngine, not UI busy flags.
       if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
       let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
       let restarting = false;
@@ -4739,7 +4741,7 @@ export default function App() {
           if (!(await submit())) return;
         }
         await checkpoint.persist(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
-        restarting = (await performRestartAndUpdate(checkpoint)) === 'ok';
+        restarting = (await performRestartAndUpdate(checkpoint, true)) === 'ok';
       } catch (error) {
         console.error('[App] Failed to save drafts before update:', error);
         toastRef.current?.error(error instanceof Error ? `更新已暂停：${error.message}` : t('appChrome.updateInstallFailed'));
@@ -5200,12 +5202,8 @@ export default function App() {
           download completes (the dialog reads pendingUpdateOnStartup, which
           is unchanged; only the visibility gate is `updatePreparing`). */}
           {showUpdateRestartConfirmation && !updatePreparing && (
-            <ConfirmDialog
-              title={t('appChrome.updateRestartTitle')}
-              message={t('appChrome.updateRestartMessage', { version: updateVersion })}
-              confirmText={t('appChrome.updateRestartConfirm')}
-              cancelText={t('appChrome.later')}
-              confirmVariant="primary"
+            <UpdateRestartConfirmation
+              version={updateVersion}
               onConfirm={() => {
                 setShowUpdateRestartConfirmation(false);
                 void handleRestartAndUpdate(true);
@@ -5214,22 +5212,29 @@ export default function App() {
             />
           )}
           {pendingUpdateOnStartup && !updatePreparing && (
-            <ConfirmDialog
-              title={t('appChrome.newVersionTitle')}
-              message={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartMessage' : 'appChrome.newVersionMessage', {
-                version: pendingUpdateOnStartup,
-              })}
-              confirmText={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartConfirm' : 'appChrome.install')}
-              cancelText={t('appChrome.later')}
-              confirmVariant="primary"
-              onConfirm={() => {
-                dismissPendingUpdate();
-                // Route through handleRestartAndUpdate so toast feedback fires
-                // on failure modes (network error / version mismatch).
-                void handleRestartAndUpdate(true);
-              }}
-              onCancel={dismissPendingUpdate}
-            />
+            APP_BUILD_PROFILE === 'moxbot' ? (
+              <UpdateRestartConfirmation
+                version={pendingUpdateOnStartup}
+                onConfirm={() => {
+                  dismissPendingUpdate();
+                  void handleRestartAndUpdate(true);
+                }}
+                onCancel={dismissPendingUpdate}
+              />
+            ) : (
+              <ConfirmDialog
+                title={t('appChrome.newVersionTitle')}
+                message={t('appChrome.newVersionMessage', { version: pendingUpdateOnStartup })}
+                confirmText={t('appChrome.install')}
+                cancelText={t('appChrome.later')}
+                confirmVariant="primary"
+                onConfirm={() => {
+                  dismissPendingUpdate();
+                  void handleRestartAndUpdate(true);
+                }}
+                onCancel={dismissPendingUpdate}
+              />
+            )
           )}
 
           {/* Bug report overlay triggered from titlebar feedback button */}

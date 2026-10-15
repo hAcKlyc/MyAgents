@@ -152,10 +152,10 @@
     "install": "Install",
     "later": "Later",
     "updateRestartTitle": "Restart to update",
-    "updateRestartMessage": "Version {{version}} is downloaded. Restart MoxBots to install it? Running tasks will not be interrupted; if work is still active, the update will stay saved for you to retry later.",
-    "updateRestartConfirm": "Restart and install",
-    "updateTasksRunning": "Work is still active. Finish tasks, recording or processing, and close terminals before retrying. The update is saved.",
-    "updateActivityUnknown": "Could not confirm that all work is idle. The update is saved and the app will keep running. Try again later.",
+    "updateRestartMessage": "Version {{version}} is downloaded. Restarting will interrupt local tasks and terminal commands, and stop and save recordings. Conversation history and drafts will be saved first. Check or continue unfinished tasks after restart. Restart and install?",
+    "updateRestartConfirm": "Stop tasks and restart update",
+    "updateTasksRunning": "An operation is still starting or saving. Restart preparation could not finish. Try again shortly; the update is saved.",
+    "updateActivityUnknown": "Could not confirm that work stopped or content was saved safely. The update was not installed. Some work may have stopped; check and retry. The update is saved.",
     "updateSignatureFailed": "The saved update failed signature verification. Check for updates again to download a verified copy."
   },
   "tabProvider": {

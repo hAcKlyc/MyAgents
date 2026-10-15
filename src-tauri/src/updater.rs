@@ -935,6 +935,7 @@ pub async fn install_pending_update(
     agent_state: State<'_, crate::im::ManagedAgents>,
     terminal_state: State<'_, std::sync::Arc<crate::terminal::TerminalManager>>,
     browser_state: State<'_, std::sync::Arc<crate::browser::BrowserManager>>,
+    interrupt_work: Option<bool>,
 ) -> Result<(), String> {
     if let Some(reason) = update_disabled_reason(cfg!(debug_assertions), std::env::consts::OS) {
         return Err(reason.to_string());
@@ -948,6 +949,7 @@ pub async fn install_pending_update(
         let _ = agent_state;
         let _ = terminal_state;
         let _ = browser_state;
+        let _ = interrupt_work;
         return Err("install_pending_update is unsupported on this platform".to_string());
     }
 
@@ -1034,9 +1036,10 @@ pub async fn install_pending_update(
             clear_pending_update_from_disk();
             return Err("UPDATE_SIGNATURE_INVALID".to_string());
         }
-        // Freeze only idle execution owners and release admission on failure.
+        // Only a confirmed manual action may stop work. Omitted/false preserves
+        // the previous non-interrupting contract for other callers.
         let guard = if crate::app_dirs::IS_MOXBOT {
-            Some(crate::sidecar::prepare_update_restart(&app, state.inner()).await?)
+            Some(crate::sidecar::prepare_update_restart(&app, state.inner(), interrupt_work == Some(true)).await?)
         } else { None };
 
         #[cfg(target_os = "macos")]

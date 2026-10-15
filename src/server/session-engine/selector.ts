@@ -1,9 +1,10 @@
-import { assertSessionTranscriptsDurableForUpdate } from '../SessionStore';
+import { assertSessionTranscriptsDurableForUpdate, flushSessionTranscriptsForUpdate } from '../SessionStore';
 import { isUpdaterQaBuild, isModelQaBuild } from '../../shared/updaterQa';
 import {
   interruptCurrentResponse,
   hasBuiltinActivityForUpdate,
   setUpdateRestartFrozen,
+  stopBuiltinSessionForUpdate,
 } from "../agent-session";
 import {
   getActiveRuntimeSource,
@@ -42,6 +43,7 @@ import { cancelTaskSessionBirth } from "./task-session-birth";
 // updater closes it synchronously with its adapter observation, so a prompt
 // cannot race an idle read while an earlier admission is still awaiting IO.
 let updateRestartToken: string | null = null;
+let updateInterruptionSettled = false;
 let activeUpdateAdmissions = 0;
 
 async function withUpdateAdmission<T>(operation: () => Promise<T>): Promise<T> {
@@ -198,9 +200,12 @@ function queryFacade(engine: SessionEngine): SessionEngine {
       : {}),
   };
 }
-const builtinEngine = queryFacade(createBuiltinSessionEngine());
-const dshEngine = queryFacade(createDshSessionEngine());
-const externalEngine = queryFacade(createExternalSessionEngine());
+const builtinLifecycleEngine = createBuiltinSessionEngine();
+const dshLifecycleEngine = createDshSessionEngine();
+const externalLifecycleEngine = createExternalSessionEngine();
+const builtinEngine = queryFacade(builtinLifecycleEngine);
+const dshEngine = queryFacade(dshLifecycleEngine);
+const externalEngine = queryFacade(externalLifecycleEngine);
 
 function selectedNonBuiltinEngine(): SessionEngine {
   return isDshRuntime(getCurrentRuntimeType()) ? dshEngine : externalEngine;
@@ -398,18 +403,44 @@ export function getSessionEngine(): SessionEngine {
     : builtinEngine;
 }
 
-/** Called only by Rust's authenticated exact-generation lifecycle endpoint.
- * Never waits for or stops work. Rejection preserves every existing owner. */
+/** Rust's authenticated exact-generation lifecycle endpoint. The default is
+ * non-interrupting; only an explicit user-confirmed restart may stop work. */
 export async function freezeSessionAdmissionsForUpdate(
   token: string,
+  interruptWork = false,
 ): Promise<void> {
   if (updateRestartToken !== null && updateRestartToken !== token)
     throw new Error("UPDATE_BUSY");
-  if (activeUpdateAdmissions > 0) throw new Error("UPDATE_BUSY");
+  if (!interruptWork && activeUpdateAdmissions > 0) throw new Error("UPDATE_BUSY");
+  const assertCurrent = () => {
+    if (updateRestartToken !== token) throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+  };
   try {
     updateRestartToken = token;
-    assertSessionTranscriptsDurableForUpdate();
+    updateInterruptionSettled = false;
     setUpdateRestartFrozen(true);
+    if (interruptWork) {
+      // Bypass only the external-call admission wrapper, inside its owner and
+      // while its transaction is closed. No public stop operation gains bypass.
+      if (shouldUseExternalRuntime()) {
+        const owner = isDshRuntime(getCurrentRuntimeType()) ? dshLifecycleEngine : externalLifecycleEngine;
+        const stopped = await owner.stopTurn({ wholeSession: true });
+        assertCurrent();
+        if (!stopped.success) throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+      }
+      // Also retire any builtin Query left by a previous runtime selection.
+      await stopBuiltinSessionForUpdate(assertCurrent);
+      assertCurrent();
+      const deadline = Date.now() + 10_000;
+      while (activeUpdateAdmissions > 0 && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        assertCurrent();
+      }
+      if (activeUpdateAdmissions > 0) throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+      await flushSessionTranscriptsForUpdate();
+      assertCurrent();
+    }
+    assertSessionTranscriptsDurableForUpdate();
     const engine = getSessionEngine();
     const live = engine.getLiveSessionState();
     if (
@@ -423,10 +454,9 @@ export async function freezeSessionAdmissionsForUpdate(
       hasBuiltinActivityForUpdate()
     )
       throw new Error("UPDATE_BUSY");
-    updateRestartToken = token;
     // DSH child handles can continue after the root turn is idle. Read their
     // native owner while admission is closed, rather than trusting root/UI idle.
-    if (engine.getRuntimeIdentity().runtime === "dsh") {
+    if (!interruptWork && engine.getRuntimeIdentity().runtime === "dsh") {
       if (!engine.listAgentWork) throw new Error("UPDATE_ACTIVITY_UNKNOWN");
       const work = await engine.listAgentWork();
       if (
@@ -451,9 +481,11 @@ export async function freezeSessionAdmissionsForUpdate(
     if (updateRestartToken !== token)
       throw new Error("UPDATE_ACTIVITY_UNKNOWN");
     assertSessionTranscriptsDurableForUpdate();
+    updateInterruptionSettled = interruptWork;
   } catch (error) {
     if (updateRestartToken === token) {
       updateRestartToken = null;
+      updateInterruptionSettled = false;
       setUpdateRestartFrozen(false);
     }
     if (error instanceof Error && error.message === "UPDATE_BUSY") throw error;
@@ -465,6 +497,7 @@ export function releaseSessionAdmissionsForUpdate(token: string): void {
   // Late cleanup cannot reopen a newer install's admission lease.
   if (updateRestartToken === token) {
     updateRestartToken = null;
+    updateInterruptionSettled = false;
     setUpdateRestartFrozen(false);
   }
 }
@@ -573,12 +606,25 @@ export async function stopOwnedTurnByQueueId(
   owner: TurnOwner,
   queueId: string,
 ): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }> {
+  const engine = getSessionEngine();
+  // Rust retires Task owners only AFTER every Session has stopped and flushed.
+  // Acknowledge that already-settled turn without reopening mutable admission
+  // or cancelling a second queue item after its durable checkpoint.
+  if (updateRestartToken !== null && updateInterruptionSettled
+    && activeUpdateAdmissions === 0 && !engine.getCurrentTurnIdentity()
+    && engine.getQueueStatus().length === 0 && !engine.isBusy()) {
+    const stopToken = updateRestartToken;
+    if (owner.kind === 'task') await cancelTaskSessionBirth(owner.id, queueId);
+    if (updateRestartToken !== stopToken) throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+    await flushSessionTranscriptsForUpdate();
+    if (updateRestartToken !== stopToken) throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+    return { success: true, alreadyStopped: true };
+  }
   // A Task stop must also settle a `/cron/execute-sync` request that reached
   // Node but has not published Session metadata or registered a runtime queue
   // item yet. `not_found` is authoritative only after this barrier.
   const sessionBirthSettlement =
     owner.kind === "task" ? cancelTaskSessionBirth(owner.id, queueId) : null;
-  const engine = getSessionEngine();
   const canceled = await engine.cancelQueuedMessage(queueId);
   let result: { success: boolean; alreadyStopped?: boolean; error?: string };
   if (canceled.status === "cancelled") {

@@ -44,6 +44,7 @@ import {
   handleExitPlanModeResponse,
   handlePermissionResponse,
   interruptCurrentResponse,
+  stopBuiltinSessionForUpdate,
   isSessionBusy,
   hasBuiltinBackgroundWork,
   freezeCurrentSessionMetadataForImDetach,
@@ -868,7 +869,11 @@ export function createBuiltinSessionEngine(): SessionEngine {
       return { ...decideBuiltinInjectedTurnResult({ idleCompleted: true, outcome }), enqueued: true };
     },
 
-    async stopTurn() {
+    async stopTurn(options) {
+      if (options?.wholeSession) {
+        await stopBuiltinSessionForUpdate();
+        return { success: true };
+      }
       const stopped = await interruptCurrentResponse();
       return stopped ? { success: true } : { success: true, alreadyStopped: true };
     },

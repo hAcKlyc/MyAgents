@@ -2662,6 +2662,7 @@ async function main() {
           }
           const lifecycle = await import('./session-engine/selector');
           if (input.action === 'freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token);
+          else if (input.action === 'interrupt-and-freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token, true);
           else if (input.action === 'release') lifecycle.releaseSessionAdmissionsForUpdate(input.token);
           else return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
           return jsonResponse({ success: true });

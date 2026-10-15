@@ -3897,6 +3897,7 @@ export function forceReloadActiveSession(reason: RestartReason = 'mcp'): void {
 function schedulePreWarm(delayMs = 500): void {
   if (isIsolatedQaBuild()) return;
   if (lifecycleState.preWarmTimer) clearTimeout(lifecycleState.preWarmTimer);
+  if (isUpdateRestartFrozen()) { setPreWarmTimer(null); return; }
   if (!agentDir) return;
   if (lifecycleState.preWarmDisabled) return;
   // Only the SDK adapter owns this pre-warm. Integrated DSH also owns its
@@ -10059,6 +10060,45 @@ function settleCancelledInputActivity(): boolean {
     || getCommittingTurnAdmissionQueueId() !== null || transientProviderRetryTimer) return false;
   if (sessionState === 'running' || sessionState === 'starting') setSessionState('idle');
   return true;
+}
+
+/** Explicit app restart owns the whole local Query, including idle background
+ * work and delayed warm-up. Stop-button semantics only own the current turn. */
+export async function stopBuiltinSessionForUpdate(assertCurrent: () => void = () => undefined): Promise<void> {
+  assertCurrent();
+  if (lifecycleState.preWarmTimer) {
+    clearTimeout(lifecycleState.preWarmTimer);
+    setPreWarmTimer(null);
+  }
+  if (lifecycleState.query || lifecycleState.processing || lifecycleState.preWarming || isSessionBusy()) {
+    abortPersistentSession();
+    drainQueueWithCancellation();
+  }
+  drainPendingInteractiveRequests('session-end');
+  const termination = lifecycleState.termination;
+  if (termination) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        termination,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('UPDATE_ACTIVITY_UNKNOWN')), 10_000);
+        }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  // Await domain reservation rollback too; never pretend an unconfirmed Query
+  // terminated by clearing its flags at a timeout.
+  assertCurrent();
+  await awaitBuiltinSessionTermination();
+  assertCurrent();
+  if (lifecycleState.query || lifecycleState.processing || lifecycleState.preWarming) {
+    throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+  }
+  isStreamingMessage = false;
+  setSessionState('idle');
+  if (transcriptState.messages.length > 0) await persistMessagesToStorage();
+  assertCurrent();
 }
 
 export async function interruptCurrentResponse(reason: CancelReason = 'user'): Promise<boolean> {

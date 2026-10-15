@@ -173,6 +173,20 @@ pub struct UpdateRestartGuard {
     lifecycle: Option<UpdateShutdownGuard>,
     token: String,
     targets: Vec<GlobalShutdownTarget>,
+    interrupted_owners: bool,
+}
+
+fn reopen_interrupted_owner_admission() {
+    if let Some(documents) = crate::document_processing::global() {
+        if let Err(error) = documents.reopen_after_update_failure() {
+            ulog_warn!("[Updater] Unable to reopen document admission: {}", error);
+        }
+    }
+    if let Some(speech) = crate::speech_recognition::global() {
+        if let Err(error) = speech.reopen_after_update_failure() {
+            ulog_warn!("[Updater] Unable to reopen speech admission: {}", error);
+        }
+    }
 }
 
 impl UpdateRestartGuard {
@@ -185,6 +199,8 @@ impl UpdateRestartGuard {
     pub async fn release(mut self) {
         release_update_targets(&self.targets, &self.token).await;
         self.targets.clear();
+        if self.interrupted_owners { reopen_interrupted_owner_admission(); }
+        self.interrupted_owners = false;
         self.lifecycle.take();
     }
 }
@@ -194,8 +210,10 @@ impl Drop for UpdateRestartGuard {
         let targets = std::mem::take(&mut self.targets);
         let token = self.token.clone();
         let lifecycle = self.lifecycle.take();
+        let interrupted_owners = std::mem::take(&mut self.interrupted_owners);
         tauri::async_runtime::spawn(async move {
             release_update_targets(&targets, &token).await;
+            if interrupted_owners { reopen_interrupted_owner_admission(); }
             // Reopen Rust births only after every Node release was attempted.
             drop(lifecycle);
         });
@@ -208,7 +226,7 @@ async fn update_target_request(
     action: &str,
 ) -> Result<(), String> {
     let response = crate::local_http::builder()
-        .timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(if action == "interrupt-and-freeze" { 45 } else { 5 }))
         .build()
         .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?
         .post(format!(
@@ -260,63 +278,87 @@ async fn release_update_targets(targets: &[GlobalShutdownTarget], token: &str) {
     }
 }
 
-/// Fail closed without interrupting any task. Scheduler claims use the same
-/// lifecycle birth permit, and Sidecar turn admissions atomically freeze only
-/// when the adapter and its queue/background/approval owners are idle.
+/// Non-interrupting by default. Explicit confirmation permits the normal owner
+/// stop/save paths; it never bypasses durability or exact-generation checks.
 pub async fn prepare_update_restart(
     app: &AppHandle,
     manager: &ManagedSidecarManager,
+    interrupt_work: bool,
 ) -> Result<UpdateRestartGuard, String> {
     let lifecycle = LIFECYCLE_QUIESCE.try_begin_update()?;
     let mut guard = UpdateRestartGuard {
         lifecycle: Some(lifecycle),
         token: uuid::Uuid::new_v4().to_string(),
         targets: Vec::new(),
+        interrupted_owners: interrupt_work,
     };
-    if !crate::task_scheduler::get_task_scheduler()
-        .execution_projections_snapshot()
-        .await
-        .is_empty()
-    {
-        ulog_info!("[Updater] Restart deferred: task execution owner remains active");
-        return Err("UPDATE_BUSY".to_string());
-    }
-    if let Some(terminals) = app.try_state::<Arc<crate::terminal::TerminalManager>>() {
-        if terminals.has_open_sessions().await {
-            ulog_info!("[Updater] Restart deferred: user terminal is still open; finish and close it before retrying");
+    if interrupt_work {
+        ulog_info!("[Updater] User confirmed interruption; stopping local work and saving before restart");
+        if let Some(recording) = app.try_state::<crate::recording::ManagedRecordingManager>() {
+            recording.stop_for_app_exit().await.map_err(|error| {
+                ulog_warn!("[Updater] Recording could not be saved before restart: {}", error);
+                "UPDATE_ACTIVITY_UNKNOWN".to_string()
+            })?;
+        }
+        if let Some(terminals) = app.try_state::<Arc<crate::terminal::TerminalManager>>() {
+            let report = crate::terminal::close_all_terminals(terminals.inner()).await;
+            if !report.residual.is_empty() {
+                return Err("UPDATE_TERMINALS_STILL_RUNNING".to_string());
+            }
+        }
+        if let Some(documents) = crate::document_processing::global() {
+            documents.shutdown_for_update()?;
+        }
+        if let Some(speech) = crate::speech_recognition::global() {
+            speech.shutdown_for_update()?;
+        }
+    } else {
+        if !crate::task_scheduler::get_task_scheduler()
+            .execution_projections_snapshot()
+            .await
+            .is_empty()
+        {
+            ulog_info!("[Updater] Restart deferred: task execution owner remains active");
             return Err("UPDATE_BUSY".to_string());
         }
-    }
-    if let Some(recording) = app.try_state::<crate::recording::ManagedRecordingManager>() {
-        if recording.snapshot().await.is_some() {
-            ulog_info!(
-                "[Updater] Restart deferred: recording slot remains live, paused, or settling"
-            );
-            return Err("UPDATE_BUSY".to_string());
+        if let Some(terminals) = app.try_state::<Arc<crate::terminal::TerminalManager>>() {
+            if terminals.has_open_sessions().await {
+                ulog_info!("[Updater] Restart deferred: user terminal is still open; finish and close it before retrying");
+                return Err("UPDATE_BUSY".to_string());
+            }
         }
-    }
-    if let Some(documents) = crate::document_processing::global() {
-        if documents.has_pending_work()? {
-            ulog_info!("[Updater] Restart deferred: document queue or worker remains active");
-            return Err("UPDATE_BUSY".to_string());
+        if let Some(recording) = app.try_state::<crate::recording::ManagedRecordingManager>() {
+            if recording.snapshot().await.is_some() {
+                ulog_info!(
+                    "[Updater] Restart deferred: recording slot remains live, paused, or settling"
+                );
+                return Err("UPDATE_BUSY".to_string());
+            }
         }
-    }
-    if let Some(speech) = crate::speech_recognition::global() {
-        if speech.has_pending_work()? {
-            ulog_info!(
-                "[Updater] Restart deferred: speech queue, live session, or probe remains active"
-            );
-            return Err("UPDATE_BUSY".to_string());
+        if let Some(documents) = crate::document_processing::global() {
+            if documents.has_pending_work()? {
+                ulog_info!("[Updater] Restart deferred: document queue or worker remains active");
+                return Err("UPDATE_BUSY".to_string());
+            }
+        }
+        if let Some(speech) = crate::speech_recognition::global() {
+            if speech.has_pending_work()? {
+                ulog_info!(
+                    "[Updater] Restart deferred: speech queue, live session, or probe remains active"
+                );
+                return Err("UPDATE_BUSY".to_string());
+            }
         }
     }
     let targets = manager
         .lock()
         .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?
-        .update_restart_targets()?;
-    for target in targets {
+        .acquire_update_restart_targets()?;
+    for (target, _checkpoint_lease) in targets {
         // Record before sending: lost ACK may still have frozen this owner.
         guard.targets.push(target);
-        if let Err(error) = update_target_request(target, &guard.token, "freeze").await {
+        let action = if interrupt_work { "interrupt-and-freeze" } else { "freeze" };
+        if let Err(error) = update_target_request(target, &guard.token, action).await {
             ulog_info!(
                 "[Updater] Restart deferred: Session owner generation={} reason={}",
                 target.generation,
@@ -324,6 +366,17 @@ pub async fn prepare_update_restart(
             );
             guard.release().await;
             return Err(error);
+        }
+    }
+    if interrupt_work {
+        // The lifecycle gate already forbids new scheduler claims. Keep Task
+        // Sidecars alive until their stopped streams are durable; only then may
+        // shutdown release their final owner and retire the process tree.
+        let scheduler = crate::task_scheduler::get_task_scheduler();
+        let shutdown = tokio::time::timeout(Duration::from_secs(30), scheduler.interrupt_for_update()).await;
+        if !matches!(shutdown, Ok(Ok(()))) || !scheduler.execution_projections_snapshot().await.is_empty() {
+            guard.release().await;
+            return Err("UPDATE_ACTIVITY_UNKNOWN".to_string());
         }
     }
     Ok(guard)

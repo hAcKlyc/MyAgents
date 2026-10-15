@@ -152,10 +152,10 @@
     "install": "安装",
     "later": "稍后",
     "updateRestartTitle": "重启并安装更新",
-    "updateRestartMessage": "新版本 {{version}} 已下载。确认重启 MoxBots 并安装？如果还有任务或其他操作正在执行，更新会保留，请完成后再重试。",
-    "updateRestartConfirm": "确认重启更新",
-    "updateTasksRunning": "仍有任务或操作正在执行。请完成任务、录音或处理工作，并关闭终端后再重试；更新包已保留。",
-    "updateActivityUnknown": "暂时无法确认所有操作已结束。更新包已保留，应用会继续运行，请稍后重试。",
+    "updateRestartMessage": "新版本 {{version}} 已下载。重启会中断本机正在执行的任务和终端命令，并停止、保存录音。会话记录和输入草稿将先保存；未完成的任务需重启后检查或继续。确认重启并安装？",
+    "updateRestartConfirm": "停止任务并重启更新",
+    "updateTasksRunning": "有操作正在创建或保存，暂时无法完成重启准备。请稍后重试；更新包已保留。",
+    "updateActivityUnknown": "无法确认任务已停止或内容已安全保存，尚未安装更新。部分操作可能已停止，更新包已保留，请检查后重试。",
     "updateSignatureFailed": "更新包签名校验未通过。请重新检查更新，下载通过验证的更新包。"
   },
   "tabProvider": {

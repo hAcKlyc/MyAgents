@@ -882,6 +882,19 @@ impl DocumentProcessingManager {
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
+        self.shutdown_inner(false)
+    }
+
+    pub(crate) fn shutdown_for_update(&self) -> Result<(), String> {
+        self.shutdown_inner(true)
+    }
+
+    pub(crate) fn reopen_after_update_failure(&self) -> Result<(), String> {
+        self.state.lock().map_err(|_| "document manager lock poisoned".to_string())?.accepting = true;
+        Ok(())
+    }
+
+    fn shutdown_inner(&self, verified: bool) -> Result<(), String> {
         let (pending, running, interrupted) = {
             let mut state = self
                 .state
@@ -926,7 +939,14 @@ impl DocumentProcessingManager {
         }
         if let Some(running) = running {
             let _ = send_cancel(&running.stdin, &running.job_id, running.generation);
-            let _ = process_cmd::settle_tree(&running.child, WORKER_SHUTDOWN_GRACE);
+            if let Err(error) = process_cmd::settle_tree(&running.child, WORKER_SHUTDOWN_GRACE) {
+                if verified {
+                    let mut state = self.state.lock().map_err(|_| "document manager lock poisoned".to_string())?;
+                    state.active_job = Some((running.job_id.clone(), running.generation));
+                    state.running = Some(running);
+                    return Err(format!("UPDATE_WORKER_STILL_RUNNING: document: {error}"));
+                }
+            }
         }
         match persistence_error {
             Some(error) => Err(error),
@@ -3723,6 +3743,41 @@ mod tests {
             }),
             wake: Notify::new(),
         })
+    }
+
+    #[test]
+    fn failed_update_reopens_document_admission_without_replaying_interrupted_jobs() {
+        let root = tempfile::tempdir().unwrap();
+        let job = test_job("update-job", root.path(), DocumentJobState::Running);
+        let manager = test_manager(root.path(), job, 1);
+        manager.shutdown_for_update().unwrap();
+        assert!(!manager.state.lock().unwrap().accepting);
+        manager.reopen_after_update_failure().unwrap();
+        let state = manager.state.lock().unwrap();
+        assert!(state.accepting);
+        assert!(state.queue.is_empty());
+        assert_eq!(state.jobs.get("update-job").unwrap().state, DocumentJobState::Interrupted);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_document_stop_failure_retains_the_exact_worker_for_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let job = test_job("update-worker", root.path(), DocumentJobState::Running);
+        let manager = test_manager(root.path(), job, 1);
+        let mut command = process_cmd::new("sh");
+        command.args(["-c", "exit 0"]).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut tree = process_cmd::spawn_tree(&mut command).unwrap();
+        let stdin = Arc::new(Mutex::new(tree.stdin.take().unwrap()));
+        let child = Arc::new(Mutex::new(tree));
+        let poisoned = child.clone();
+        let _ = std::thread::spawn(move || { let _guard = poisoned.lock().unwrap(); panic!("synthetic worker lock failure"); }).join();
+        manager.state.lock().unwrap().running = Some(RunningWorker { job_id: "update-worker".into(), generation: 1, child: child.clone(), stdin });
+        assert!(manager.shutdown_for_update().unwrap_err().contains("UPDATE_WORKER_STILL_RUNNING"));
+        assert!(manager.state.lock().unwrap().running.is_some());
+        child.clear_poison();
+        manager.shutdown_for_update().unwrap();
+        assert!(manager.state.lock().unwrap().running.is_none());
     }
 
     #[test]
