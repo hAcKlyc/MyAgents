@@ -11,3 +11,5 @@ browser-acceptance.json包含4组实际浏览器用例：1280x900/900x700/640x80
 本任务不改变网络协议、账户/连接持久化或Host能力，不运行模型，不读凭据/Keychain，不启动或安装App。MyAgents profile、上游连接及版权/许可名称保留；MoXBots当前网络自定义名称保留。0.5.5冻结制品、stable和官网下载更新由原发布任务继续；本次只交付0.5.6源码，原生包/安装需统一负责人另行交付。
 
 检查：applicationBrand2 unit、NetworkHeader3 DOM、NetworkSelector19 DOM、AgentNetwork29 DOM、GlobalSidebar66 DOM，总计119；tsc和changed-file ESLint通过。初次header品牌测试继承了setup默认profile缓存，增加每case独立module reset后通过。浏览器命令/日志和完整可复现私有runner位于WPS项目pointer output/bots-ready-056-20261015/browser-check.mjs及/tmp/moxbots-bots-ready-*.log。
+
+组合main2151822f（056版本及输出显示）后119项相关回归、tsc和依赖边界复核通过；browser覆盖的产品源码及Theme/CSS与此前版本完全一致，无需为无关模块重复截图。CI和main以对应PR最终状态为准。

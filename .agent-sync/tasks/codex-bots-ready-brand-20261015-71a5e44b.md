@@ -33,4 +33,8 @@ moxbotsCopy拥有新文案与owned网络说明；i18n对owned profile覆盖tabs/
 
 ## Next step
 
-本地与浏览器验收通过；同步最新main（包含056版本及已接受输出显示改动），核组合回归后提交本任务文件并走CI/PR/main。主Agent是UI质量owner，本次是小范围文案及页头层级回归，不安排额外reviewer或原生窗口。
+已同步main2151822f，包含056版本接续和已接受输出显示；组合119项回归、tsc及依赖边界0 errors通过，浏览器涉及源码/CSS与验收版本字节一致。提交接续后走CI/PR/main，并核远端合并树；不等待/打断055下载。主Agent是UI质量owner，本次是小范围文案及页头层级回归，不安排额外reviewer或原生窗口。
+
+## 组合验收
+
+main2151822f合入无冲突，版本已0.5.6；本轮7个renderer源码/测试文件与browser验收源在merge前后未变化，CSS/Theme亦相同。组合2 unit+117 DOM通过，tsc通过，dependency-cruiser0 errors/16既有no-orphans warnings；changed-file ESLint通过。四张最终样式截图已人工复看，中英文/深浅/窄宽/说明及网络弹层/Escape/长名/未知计数通过。待required CI及PR/main；不把此源码交付说成已安装客户端。
