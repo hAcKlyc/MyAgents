@@ -276,3 +276,7 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 - **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.6.md`及任务记录维护状态；使用既有`.release-lock`及owner核验。Git计划不是原子锁。既有Release workflow已禁用，Test CI只做验证；开发聊天继续独立源码/CI/main交付，不能并发发布或切换本目标。
 - **Current release:** `MOXBOTS-056-REMOTE-RELEASE-20261016`，`preparing`。版本0.5.6；固定源码候选main `a81d2509fa92968ddaaed63416a2478d21b8a373`（包含PR59/60/62/63/65/66），制品digest待构建；后续提交不自动加入。当前055不可变包、原清单和签名作为回滚目标保留。先完成此记录的main集成、源码/CI、活动publisher/备份检查，再正式签名公证、真实完整公网字节与签名验证、同锁CAS发布。
 - **Acceptance boundary:** 服务器发布、后台发现/下载、用户确认安装、实际版本/数据及真实薪资看板分别报告。本次不强退、不停止或安装日常客户端；原生/真实业务未验项如实保留。其他既有服务不因本次指定而获得新的发布授权；如涉及它们，先协调授权/活动job/目标租约。
+
+## MOXBOTS-PROJECT-CONTEXT-001 — 2026-10-16
+
+用户授权同项目新会话自动带入近期重要进展/决策，测试并main交付，发布交统一发布会话。只读原对话摘录、零新增模型请求、6000 UTF-8 bytes body；typed来源、独立开关和首轮重试刷新。开发/main/发布分别追踪于 `.agent-sync/tasks/codex-project-context-20261016-b1d6cb74.md`。不自动加入已冻结056候选，不操作日常App或生产。
