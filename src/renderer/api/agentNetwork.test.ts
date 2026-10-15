@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import {
+  allCallableAgents,
   networkErrorKey,
   networkRequest,
   restoreOwnedCredentials,
@@ -305,5 +306,36 @@ it("keeps uncertain mutation receipt queries on their original network", async (
   expect(invoke).toHaveBeenLastCalledWith("cmd_agent_network_request", {
     connectionId: "self-a",
     request: { kind: "receipt", mutationId: "same-id" },
+  });
+});
+
+
+describe("callable directory pagination", () => {
+  const networkId = "11111111-1111-4111-8111-111111111111";
+  const cursor = "22222222-2222-4222-8222-222222222222";
+  const mountId = "33333333-3333-4333-8333-333333333333";
+  const callable = { mountId, localAgentId: "agent", name: "Agent", description: null,
+    deviceId: cursor, deviceName: "Host", platform: "linux", membershipRevision: 1,
+    enableRevision: 1, selector: "agent", isLocal: false,
+    source: { serviceId: "44444444-4444-4444-8444-444444444444", networkId },
+    connectionEpoch: "55555555-5555-4555-8555-555555555555", keyGeneration: 1, signedBinding: null };
+  it("collects validated pages in the requested network and connection", async () => {
+    invoke.mockResolvedValueOnce({ items: [], nextCursor: cursor, complete: false })
+      .mockResolvedValueOnce({ items: [callable], nextCursor: null, complete: true });
+    await expect(allCallableAgents(networkId, "owned")).resolves.toEqual({ items: [callable], complete: true });
+    expect(invoke.mock.calls[1][1]).toMatchObject({ connectionId: "owned", request: { kind: "callable", networkId, cursor } });
+  });
+  it("rejects duplicate mounts", async () => {
+    invoke.mockResolvedValue({ items: [callable, callable], nextCursor: null, complete: true });
+    await expect(allCallableAgents(networkId)).rejects.toThrow("NETWORK_PAGE_INVALID");
+  });
+  it("rejects a response from another network", async () => {
+    invoke.mockResolvedValue({ items: [{ ...callable, source: { ...callable.source, networkId: cursor } }], nextCursor: null, complete: true });
+    await expect(allCallableAgents(networkId)).rejects.toThrow("NETWORK_PAGE_INVALID");
+  });
+  it("rejects a repeating cursor instead of looping", async () => {
+    invoke.mockResolvedValue({ items: [], nextCursor: cursor, complete: false });
+    await expect(allCallableAgents(networkId)).rejects.toThrow("NETWORK_PAGE_INVALID");
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });
