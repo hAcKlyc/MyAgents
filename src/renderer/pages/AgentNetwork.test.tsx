@@ -130,6 +130,16 @@ beforeEach(() => {
   );
 });
 describe("Agent network account and device management", () => {
+  it("opens Add Host from the network page and closes without sending mutations", async () => {
+    render(<AgentNetwork />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ 添加 Host" }));
+    const dialog = screen.getByRole("dialog", { name: "添加 Host" });
+    expect(within(dialog).getByRole("radio", { name: /桌面电脑/ })).toBeChecked();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "添加 Host" })).not.toBeInTheDocument();
+    expect(mocks.request.mock.calls.every(([request]) => request.kind === "network")).toBe(true);
+  });
+
   it.each([false, true])(
     "renames an offline remote device from its card, joined=%s",
     async (joined) => {

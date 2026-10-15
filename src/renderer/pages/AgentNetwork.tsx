@@ -40,6 +40,7 @@ import {
   useAgentNetworkSnapshot,
 } from "@/features/agent-network/store";
 
+import { HostOnboarding } from "@/features/agent-network/HostOnboarding";
 import { NetworkHeader } from "@/features/agent-network/NetworkHeader";
 import { NetworkSelector } from "@/features/agent-network/NetworkSelector";
 
@@ -87,6 +88,8 @@ export default function AgentNetwork({
       key={`${connection?.id}:${snapshot.authGeneration}`}
       connectionId={connection?.id ?? "official"}
       official={connection?.official ?? true}
+      networkName={connection?.name ?? ""}
+      serviceUrl={connection?.url ?? null}
       selector={<NetworkSelector registry={registry} />}
       isActive={isActive}
       snapshot={snapshot}
@@ -99,6 +102,8 @@ function AgentNetworkContent({
   snapshot,
   connectionId,
   official,
+  networkName,
+  serviceUrl,
   selector,
   onOpenRemoteSession,
 }: {
@@ -106,6 +111,8 @@ function AgentNetworkContent({
   snapshot: NetworkSnapshot;
   connectionId: string;
   official: boolean;
+  networkName: string;
+  serviceUrl: string | null;
   selector: ReactNode;
   onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
@@ -114,6 +121,7 @@ function AgentNetworkContent({
     (request: NetworkRequest) => requestNetwork(request, connectionId),
     [connectionId],
   );
+  const [addingHost, setAddingHost] = useState(false);
   const [session, setSession] = useState<SpaceSessionView | null>(null),
     [authLoading, setAuthLoading] = useState(true);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -450,6 +458,11 @@ function AgentNetworkContent({
       agentCount={directoryKnown && catalogsKnown ? openAgents : null}
     >
       <>
+        <div className="mb-5 flex justify-end">
+          <button type="button" onClick={() => setAddingHost(true)} className="rounded-lg bg-[var(--button-primary-bg)] px-4 py-2 text-sm font-semibold text-[var(--button-primary-text)] hover:bg-[var(--button-primary-bg-hover)]">
+            + {t("agentNetwork.hostOnboarding.add")}
+          </button>
+        </div>
         {(loadError || accountError) && (
           <p role="alert" className="mb-4 text-sm text-[var(--error)]">
             {loadError || accountError}{" "}
@@ -554,6 +567,26 @@ function AgentNetworkContent({
           </p>
         )}
       </>
+      {addingHost && (
+        <HostOnboarding
+          key={`${connectionId}:${snapshot.authGeneration}:${snapshot.principalId}:${snapshot.networkId}`}
+          connectionId={connectionId}
+          snapshot={snapshot}
+          networkName={networkName}
+          serviceUrl={serviceUrl}
+          official={official}
+          localDeviceId={localId}
+          onClose={() => setAddingHost(false)}
+          onManage={(device) => {
+            setDevices((current) => current.some((item) => item.deviceId === device.deviceId)
+              ? current.map((item) => item.deviceId === device.deviceId ? device : item)
+              : [...current, device]);
+            setAddingHost(false);
+            setSelected(device.deviceId);
+            setRefresh((value) => value + 1);
+          }}
+        />
+      )}
       {selectedDevice && (
         <DeviceDetails
           connectionId={connectionId}

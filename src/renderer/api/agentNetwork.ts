@@ -227,6 +227,32 @@ export async function allDeviceAgents(
     cursor = page.nextCursor;
   }
 }
+/** Read the actual callable directory; enabled catalog entries alone are insufficient. */
+export async function allCallableAgents(networkId: string, connectionId = "official"): Promise<{
+  items: CallableAgent[];
+  complete: boolean;
+}> {
+  const items: CallableAgent[] = [];
+  const seen = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const page = metadataSchemas.callable.parse(await networkRequest({
+      kind: "callable", networkId, cursor, limit: NETWORK_BUDGETS.pageMax,
+    }, connectionId));
+    for (const agent of page.items) {
+      if (agent.source.networkId !== networkId || seen.has(agent.mountId)) throw new Error("NETWORK_PAGE_INVALID");
+      seen.add(agent.mountId);
+      items.push(agent);
+    }
+    if (page.complete) return { items, complete: true };
+    if (!page.nextCursor || cursors.has(page.nextCursor)) throw new Error("NETWORK_PAGE_INVALID");
+    cursors.add(page.nextCursor);
+    if (items.length >= NETWORK_BUDGETS.catalogItems) return { items, complete: false };
+    cursor = page.nextCursor;
+  }
+}
+
 export function networkErrorKey(
   error: unknown,
   operation: "read" | "mutation" = "read",
