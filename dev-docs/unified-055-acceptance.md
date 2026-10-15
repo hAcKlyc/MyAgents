@@ -109,3 +109,14 @@ This used the product-supported custom Provider `qa-kimi-title-055` with the aut
 Earlier harness failures are retained: incorrect catalog parsing, no-input init timeout, config mode/schema/permissions, SSE envelope and listener/liveness checks. An earlier builtin-provider run ignored the intended base URL; real key use/proxy forwarding were zero but direct invalid-local-token attempts are **unknown**, so it is not accepted and is not relabeled as zero-network. The successful run used the real custom-provider authority and kernel network restrictions.
 
 Accepted: normal Session backend automatic trigger, two real model results, terminal completion, event delivery, persistence and process restore. **Still unaccepted:** native sidebar/Tab display, manual-title race protection, normal desktop SDK circuit/lifecycle, DSH/IME/Escape, real Host, formal055 publication and actual idle-only update. Backend evidence is separate from package/production acceptance.
+
+## A7 build-only freeze checkpoint
+
+- [x] Synced actual main `8f7ebc21` (PR57 plan-review/SDK plan-file changes) into `6c48e25c`; only the shared plan record conflicted and both completed feature records were retained. Title service/generator/post-turn hook and production composer bytes match the accepted `01deb0b1` backend source.
+- [x] Merged plan/title/composer regression: 243 tests across11 files and TypeScript noEmit passed. Node QA build/launcher combination10/10 passed; independent launcher review separately passed7/7.
+- [x] QA launcher now gives only future new child processes umask077, restoring its own previous mask on successful or synchronous failed spawn. Existing A6/daily processes and OS settings are unchanged; this is not a sandbox or a fix for existing files.
+- [x] Ordinary title owner harness/source records integrated as `3f90dca5`, `38f32ead`, `8f84dd9f`; real backend evidence remains scoped as above. No additional model calls were made for this merge.
+- [ ] Build and sign a fresh A7 snapshot, with the existing compiled A6 private HOME; source closure must include newly added main files. Build only while the human system-prompt inspection is pending. No GUI launch, no SecurityAgent operation, no daily client update.
+- [ ] Native DSH/Enter/Escape/actual IME, native ordinary title display/manual protection, cold helper/relay and dedicated Host gates remain open. At10:40 board owner again confirmed daily HRM running/isBusy, queue0; children/pending unknown. No installation or restart while busy.
+
+Evidence: pointer `work/unified-055-20261015/merged-plan-title-composer-tests.log`, `merged-plan-title-tsc.log`, `qa-private-umask-tests.log`; independent scope in `dev-docs/unified-055-home-binding-review.md`. Formal0.5.5 remains unbuilt/unpublished/uninstalled; stable endpoint still0.5.4. The user's failed Mac-password attempt does not identify the system prompt or authorize guessing other passwords.

@@ -62,6 +62,12 @@ export function prepareModelQaHome(home) {
   }
   return { ...env, ...modelQaRuntimeEnvironment(data) };
 }
+/** The CLI's single-threaded spawn gives only its child a private creation mask. */
+export function spawnPrivateModelQaProcess(executable, args, options) {
+  const previous = process.umask(0o077);
+  try { return spawn(executable, args, options); }
+  finally { process.umask(previous); }
+}
 export function launchModelQa(app, home) {
   // Validate the original input before canonicalizing; a symlink is not consent.
   const env = prepareModelQaHome(home);
@@ -82,7 +88,7 @@ export function launchModelQa(app, home) {
       catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const child = spawn(join(app, 'Contents/MacOS', executable), [], { env, stdio: 'ignore', detached: true });
+  const child = spawnPrivateModelQaProcess(join(app, 'Contents/MacOS', executable), [], { env, stdio: 'ignore', detached: true });
   child.unref();
   writeFileSync(join(home, 'modelqa-launch.json'), JSON.stringify({ app, home, pid: child.pid, bundleId: 'com.moxbot.modelqa', credentialContents: 'not captured', policy: 'utility only; dedicated account namespace; not an OS sandbox' }, null, 2) + '\n', { mode: 0o600 });
   return child.pid;

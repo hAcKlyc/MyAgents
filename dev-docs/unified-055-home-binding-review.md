@@ -37,3 +37,11 @@ Rust guard 三项覆盖 HOME 选择、路径/UID/mode/symlink/hardlink/default e
 实现未额外比较 getpwuid 返回的 OS account home。审阅者只读核对 OS 账号路径元数据，确认本机真实 HOME 位于所有允许 QA 根之外，real/effective UID 一致；故本任务没有当前路径混同证据。若该 profile 将来用于非标准 OS home 配置，应增加显式拒绝与纯负例，不能把临时目录前缀当作所有机器的普遍证明。
 
 这是进程配置与私有目录隔离，不是对同 UID 恶意修改的 OS 沙盒；不因此授权扩大普通模型工具权限或借用日常身份。正式 production build/OS default 不在本次变更和验收范围内。
+
+## A7 launcher umask 有界追加审阅
+
+在 HEAD `6c48e25ca7939c41da8af2b432d4b026180f020f` 上，仅独立审阅未提交的 `run-moxbot-modelqa.mjs` 与 `build-moxbot-modelqa.test.mjs` 两份 diff。新 wrapper 在同步 `spawn` 前将本 CLI 的 mask 临时设为 `077`，并在 `finally` 恢复；正常返回和同步参数校验抛错均恢复。调用仅替换 QA App 的 spawn，未增加异步间隔、凭据读取或生产入口。未发现本次改动的 P1/P2 阻断。
+
+独立使用 bundled Node 24 运行 `node --test scripts/build-moxbot-modelqa.test.mjs`，**7/7 通过、无跳过**；新增用例实际启动纯合成子 Node、写入合成文件并验证 `0600`，同时检查成功及同步失败后的父进程 mask 恢复。Root 报告的组合 10 项未由本次审阅重复运行，不与独立 7 项混同。
+
+作用仅限此 launcher 未来新建 QA 子进程及其后续继承者的创建 mask，不改变现有 A6、日常 App 进程或 OS 设置，也不修复已有文件权限。mask 对显式 chmod 或修改已有文件权限没有禁止作用；同 UID、私有目录隔离仍不构成 OS sandbox。本次没有 GUI、模型、真实 Keychain API 或凭据内容读取，也没有修改两份实现/测试脚本。

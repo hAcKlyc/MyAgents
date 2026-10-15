@@ -1,12 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, chmodSync, symlinkSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, chmodSync, symlinkSync, mkdirSync, writeFileSync, realpathSync, statSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appBuildDefines } from './app-build-profile.mjs';
 import { parseModelQaArgs, modelQaBuildEnvironment } from './build-moxbot-modelqa.mjs';
-import { assertModelQaHomePath, modelQaLaunchEnvironment, prepareModelQaHome, modelQaRuntimeEnvironment } from './run-moxbot-modelqa.mjs';
+import { assertModelQaHomePath, modelQaLaunchEnvironment, prepareModelQaHome, modelQaRuntimeEnvironment, spawnPrivateModelQaProcess } from './run-moxbot-modelqa.mjs';
+
+test('QA child creates private files while parent umask survives successful and failed spawn', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'modelqa-private-create-'));
+  const previous = process.umask();
+  try {
+    const script = join(dir, 'write.mjs');
+    const output = join(dir, 'synthetic-config.json');
+    writeFileSync(script, "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], '{}');\n", { mode: 0o600 });
+    const child = spawnPrivateModelQaProcess(process.execPath, [script, output], { env: {}, stdio: 'ignore' });
+    assert.equal(process.umask(), previous);
+    const [code] = await once(child, 'exit');
+    assert.equal(code, 0);
+    assert.equal(statSync(output).mode & 0o777, 0o600);
+    assert.throws(() => spawnPrivateModelQaProcess('\0', [], {}));
+    assert.equal(process.umask(), previous);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('model QA has a closed fourth identity and never turns off updater QA model refusal', () => {
   for (const profile of ['myagents', 'moxbot', 'moxbot-updaterqa', 'moxbot-modelqa']) {
