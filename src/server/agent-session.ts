@@ -66,6 +66,8 @@ import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyErro
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
 import {
   SESSION_PLANS_GITIGNORE_PATTERN,
+  MAX_PLAN_BYTES,
+  isSessionPlanFileTool,
   clearSessionPlanMarkdown,
   getSessionPlansDirectoryPath,
   getSessionPlansDirectorySetting,
@@ -4687,7 +4689,7 @@ const pendingAskUserQuestions = new Map<string, {
 // `feedback` carries the user's optional 「修改意见」 — when present on a
 // rejection, canUseTool sends it back to the model via deny.message so the
 // AI can revise the plan in the same turn (issue #182).
-type ExitPlanModeResolution = { approved: boolean; feedback?: string };
+type ExitPlanModeResolution = { approved: boolean; feedback?: string; error?: string };
 const pendingExitPlanMode = new Map<string, {
   resolve: (result: ExitPlanModeResolution) => void;
   plan?: string;
@@ -4853,7 +4855,7 @@ async function handleExitPlanMode(
   console.log('[ExitPlanMode] Requesting user approval');
 
   const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const explicitPlan = typeof obj.plan === 'string' ? obj.plan : undefined;
+  const explicitPlan = typeof obj.plan === 'string' && obj.plan.trim() ? obj.plan : undefined;
   const allowedPrompts = Array.isArray(obj.allowedPrompts)
     ? (obj.allowedPrompts as ExitPlanModeAllowedPrompt[])
     : undefined;
@@ -4872,6 +4874,9 @@ async function handleExitPlanMode(
         getSessionPlansDirectoryPath(agentDir, sessionId),
         { minMtimeMs: turnState.currentPlanFileMinMtimeMs ?? turnState.currentTurnStartTime ?? undefined, expectedRoot: agentDir, signal },
       );
+      if (latest?.truncated) {
+        return { approved: false, error: `方案超过 ${MAX_PLAN_BYTES} bytes，无法完整展示。请精简当前会话的方案文件后再次调用 ExitPlanMode；尚未请求用户审批。` };
+      }
       if (latest) {
         plan = latest.content;
         console.log(`[ExitPlanMode] Loaded plan from ${latest.path}${latest.truncated ? ' (truncated)' : ''}`);
@@ -4885,6 +4890,11 @@ async function handleExitPlanMode(
 
   if (signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
+  }
+
+  if (!plan?.trim() || Buffer.byteLength(plan, 'utf8') > MAX_PLAN_BYTES) {
+    const plansDir = agentDir ? getSessionPlansDirectoryPath(agentDir, sessionId) : '当前会话专用方案目录';
+    return { approved: false, error: `无法提交方案审核：没有可完整展示的方案正文。请先用 Write/Edit 将完整方案保存到规划提示中指定的方案文件（位于 ${plansDir}，沿用 SDK 指定文件名），再调用 ExitPlanMode。不要修改项目 .agent-sync/plan.md；尚未请求用户审批，也没有获得执行授权。` };
   }
 
   // No wall-clock timeout — see pendingExitPlanMode Map declaration.
@@ -4929,6 +4939,7 @@ export function handleExitPlanModeResponse(
     console.warn(`[ExitPlanMode] Unknown request: ${requestId}`);
     return false;
   }
+  if (approved && !pending.plan?.trim()) return false;
   pendingExitPlanMode.delete(requestId);
   // Restore configState.currentPermissionMode so the hard gate + applySessionConfig stop
   // treating the session as plan. Runs on ANY approval (no longer gated on
@@ -11755,6 +11766,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         if (toolName === 'ExitPlanMode') {
           console.log('[canUseTool] ExitPlanMode detected, requesting user approval');
           const result = await handleExitPlanMode(input, options.signal, !options.agentID);
+          if (result.error) {
+            return { behavior: 'deny' as const, message: result.error, interrupt: false };
+          }
           if (!result.approved) {
             const hasFeedback = !!result.feedback;
             // Cap feedback length before splicing into the wrapper.
@@ -11807,6 +11821,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
             behavior: 'allow' as const,
             updatedInput: input as Record<string, unknown>
           };
+        }
+
+        if (configState.currentPermissionMode === 'plan'
+          && await isSessionPlanFileTool(toolName, input, agentDir, sessionId)) {
+          return { behavior: 'allow' as const, updatedInput: input as Record<string, unknown> };
         }
 
         const decision = await checkToolPermission(
@@ -11867,12 +11886,15 @@ async function startStreamingSession(preWarm = false): Promise<void> {
               if (!shouldBlockToolInPlanMode(pre.tool_name, effectiveMode)) {
                 return {}; // not plan mode, or a read-only / control-transfer tool → normal flow
               }
+              if (await isSessionPlanFileTool(pre.tool_name, pre.tool_input, agentDir, sessionId)) {
+                return {}; // SDK's normal plan-file permission check still runs.
+              }
               console.log(`[permission] plan-mode hard gate denied: ${pre.tool_name} (local=${configState.currentPermissionMode}, hook=${pre.permission_mode ?? 'n/a'})`);
               return {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse' as const,
                   permissionDecision: 'deny' as const,
-                  permissionDecisionReason: planModeDenyMessage(pre.tool_name),
+                  permissionDecisionReason: planModeDenyMessage(pre.tool_name, agentDir ? getSessionPlansDirectoryPath(agentDir, sessionId) : undefined),
                 },
               };
             },

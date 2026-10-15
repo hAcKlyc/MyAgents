@@ -2190,3 +2190,67 @@ it.each(['capabilities', 'provider-draining'] as const)('does not resurrect canc
   expect(terminal).toHaveBeenCalledOnce();
   expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'stopped' }));
 });
+
+
+it('rejects missing/blank plans through the real SDK callback without empty review or permission change', async () => {
+  const options = await startSdkContractSession();
+  const { configState } = await import('../builtin-session/config');
+  configState.currentPermissionMode = 'plan';
+  const args = { signal: new AbortController().signal, toolUseID: 'exit-empty', requestId: 'exit-empty' };
+  for (const input of [{}, { plan: '  \n ' }]) {
+    await expect(options.canUseTool!('ExitPlanMode', input, args)).resolves.toMatchObject({
+      behavior: 'deny', interrupt: false, message: expect.stringContaining('没有可完整展示的方案正文'),
+    });
+  }
+  expect(agent.getPendingInteractiveRequests().filter(row => row.type === 'exit-plan-mode:request')).toHaveLength(0);
+  expect(state.events.filter(([event]) => event === 'exit-plan-mode:request')).toHaveLength(0);
+  expect(configState.currentPermissionMode).toBe('plan');
+});
+
+it('lets the current session write its plan, review it, revise after feedback, and approve that exact content', async () => {
+  const options = await startSdkContractSession();
+  const { configState } = await import('../builtin-session/config');
+  const { getSessionPlansDirectoryPath } = await import('../utils/plan-files');
+  configState.currentPermissionMode = 'plan';
+  const workspace = options.cwd!;
+  const dir = getSessionPlansDirectoryPath(workspace, agent.getSessionId()!);
+  const file = join(dir, 'plan.md');
+  const signal = new AbortController().signal;
+  const args = { signal, toolUseID: 'plan-file', requestId: 'plan-file' };
+  const pre = options.hooks!.PreToolUse![0].hooks[0];
+  const hook = { hook_event_name: 'PreToolUse' as const, session_id: agent.getSessionId(), transcript_path: '',
+    cwd: workspace, tool_name: 'Write', tool_input: { file_path: file, content: '# Plan v1' },
+    tool_use_id: 'plan-file', permission_mode: 'plan' };
+  expect(await pre(hook, undefined, { signal })).toEqual({});
+  await expect(options.canUseTool!('Write', hook.tool_input, args)).resolves.toMatchObject({ behavior: 'allow' });
+  expect(await pre({ ...hook, tool_input: { file_path: join(workspace, '.agent-sync/plan.md') } }, undefined, { signal }))
+    .toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny', permissionDecisionReason: expect.stringContaining(dir) } });
+  await expect(options.canUseTool!('Write', { file_path: join(workspace, 'source.ts') }, args)).resolves.toMatchObject({ behavior: 'deny' });
+  await mkdir(dir, { recursive: true });
+  await writeFile(file, '# Plan v1\nInspect, implement, test.');
+  const pending = () => agent.getPendingInteractiveRequests().find(row => row.type === 'exit-plan-mode:request')?.data as { requestId: string; plan: string } | undefined;
+  const first = options.canUseTool!('ExitPlanMode', {}, args);
+  await vi.waitFor(() => expect(pending()?.plan).toContain('# Plan v1'));
+  expect(agent.handleExitPlanModeResponse(pending()!.requestId, false, 'Add rollback')).toBe(true);
+  await expect(first).resolves.toMatchObject({ behavior: 'deny', interrupt: false, message: expect.stringContaining('Add rollback') });
+  expect(configState.currentPermissionMode).toBe('plan');
+  await writeFile(file, '# Plan v2\nInspect, implement, test, rollback.');
+  const second = options.canUseTool!('ExitPlanMode', {}, args);
+  await vi.waitFor(() => expect(pending()?.plan).toContain('# Plan v2'));
+  expect(state.events.filter(([event]) => event === 'exit-plan-mode:request').at(-1)?.[1]).toMatchObject({ plan: pending()!.plan });
+  expect(agent.handleExitPlanModeResponse(pending()!.requestId, true)).toBe(true);
+  await expect(second).resolves.toMatchObject({ behavior: 'allow' });
+  expect(configState.currentPermissionMode).toBe('auto');
+});
+
+it('refuses a truncated plan instead of approving a partial display', async () => {
+  const options = await startSdkContractSession();
+  const { getSessionPlansDirectoryPath, MAX_PLAN_BYTES } = await import('../utils/plan-files');
+  const dir = getSessionPlansDirectoryPath(options.cwd!, agent.getSessionId()!);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, 'plan.md'), 'a'.repeat(MAX_PLAN_BYTES + 1));
+  await expect(options.canUseTool!('ExitPlanMode', {}, {
+    signal: new AbortController().signal, toolUseID: 'big-plan', requestId: 'big-plan',
+  })).resolves.toMatchObject({ behavior: 'deny', interrupt: false, message: expect.stringContaining('无法完整展示') });
+  expect(agent.getPendingInteractiveRequests().filter(row => row.type === 'exit-plan-mode:request')).toHaveLength(0);
+});

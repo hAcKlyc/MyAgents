@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   SESSION_PLANS_GITIGNORE_PATTERN,
+  isSessionPlanFileTool,
   clearSessionPlanMarkdown,
   getSessionPlansDirectoryPath,
   getSessionPlansDirectorySetting,
@@ -152,5 +153,55 @@ describe('session plan files', () => {
     await clearSessionPlanMarkdown(dir, { expectedRoot: root });
 
     expect(existsSync(outsidePlan)).toBe(true);
+  });
+});
+
+
+describe('plan-mode file exception', () => {
+  it('allows only direct current-session Markdown Write/Edit, including missing parents', async () => {
+    const root = makeRoot();
+    const plan = join(getSessionPlansDirectoryPath(root, 'session-1'), 'plan.md');
+    for (const tool of ['Write', 'Edit']) {
+      expect(await isSessionPlanFileTool(tool, { file_path: plan }, root, 'session-1')).toBe(true);
+    }
+    for (const path of ['.agent-sync/plan.md', 'src/plan.md',
+      getSessionPlansDirectoryPath(root, 'session-2') + '/plan.md',
+      plan + '/nested.md', plan.replace('plan.md', 'script.ts')]) {
+      expect(await isSessionPlanFileTool('Write', { file_path: path }, root, 'session-1')).toBe(false);
+    }
+    expect(await isSessionPlanFileTool('MultiEdit', { file_path: plan }, root, 'session-1')).toBe(false);
+    expect(await isSessionPlanFileTool('Bash', { file_path: plan }, root, 'session-1')).toBe(false);
+    expect(await isSessionPlanFileTool('Write', {}, root, 'session-1')).toBe(false);
+    expect(await isSessionPlanFileTool('Write', { file_path: plan }, null, 'session-1')).toBe(false);
+    mkdirSync(getSessionPlansDirectoryPath(root, 'session-1'), { recursive: true });
+    writeFileSync(plan, '# Plan');
+    expect(await isSessionPlanFileTool('Edit', { file_path: plan }, root, 'session-1')).toBe(true);
+  });
+
+  it.each(['.claude', '.claude/plans', '.claude/plans/myagents', '.claude/plans/myagents/session-1'])(
+    'rejects symlink directory %s, including links staying inside the project', async segment => {
+      const root = makeRoot();
+      const target = join(root, 'linked');
+      mkdirSync(target);
+      const link = join(root, segment);
+      mkdirSync(join(link, '..'), { recursive: true });
+      symlinkSync(target, link, 'dir');
+      const plan = join(getSessionPlansDirectoryPath(root, 'session-1'), 'plan.md');
+      expect(await isSessionPlanFileTool('Write', { file_path: plan }, root, 'session-1')).toBe(false);
+    },
+  );
+
+  it('rejects symlink and hardlink files, directories, and traversal to other sessions', async () => {
+    const root = makeRoot();
+    const dir = getSessionPlansDirectoryPath(root, 'session-1');
+    mkdirSync(dir, { recursive: true });
+    const target = join(root, 'source.md');
+    writeFileSync(target, 'source');
+    symlinkSync(target, join(dir, 'link.md'));
+    linkSync(target, join(dir, 'hard.md'));
+    mkdirSync(join(dir, 'directory.md'));
+    for (const name of ['link.md', 'hard.md', 'directory.md', '../session-2/plan.md']) {
+      expect(await isSessionPlanFileTool('Edit', { file_path: join(dir, name) }, root, 'session-1')).toBe(false);
+    }
   });
 });
