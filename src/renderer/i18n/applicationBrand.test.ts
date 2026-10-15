@@ -16,6 +16,13 @@ describe('application branding across profiles', () => {
     expect(i18n.t('app:globalSidebar.openWebsite', { lng: 'en-US' })).toBe(`Open the ${name} website`);
     expect(i18n.t('settings:about.licensingCopyright', { lng: 'en-US' })).toContain('Ethan L. MyAgents');
     expect(i18n.t('app:space.login.title', { lng: 'en-US' })).toBe('MyAgents Community');
+    expect(i18n.t('app:globalSidebar.community', { lng: 'zh-CN' })).toBe('协作社区');
+    expect(i18n.t('app:globalSidebar.cloudUnavailable', { lng: 'zh-CN' })).not.toContain('globalSidebar.');
+    if (profile === 'moxbot') {
+      expect(i18n.t('settings:about.developerParagraph1', { lng: 'zh-CN' })).toContain('Bot 团队');
+      expect(i18n.t('settings:about.developerParagraph1', { lng: 'zh-CN' })).not.toContain('MyAgents');
+      expect(i18n.t('settings:about.communityTitle', { lng: 'en-US' })).toBe('MoXBots Community');
+    }
     expect(APP_WEBSITE_URL).toBe(profile === 'moxbot' ? 'https://140.143.183.232/' : 'https://myagents.io');
   });
 });

@@ -1,5 +1,6 @@
 use crate::admin_http::AdminService;
 use crate::admin_store::AdminConfig;
+use crate::community_http::CommunityService;
 use crate::execution_http::ExecutionService;
 use crate::feedback_http::FeedbackService;
 use crate::identity_http::{IdentityHttpConfig, IdentityService};
@@ -297,6 +298,16 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
             .ascii_serialization(),
         &config.network_id,
     )?;
+    let community = CommunityService::open(
+        store.clone(),
+        &config.state_dir,
+        config.administration.clone(),
+        Url::parse(&config.callback_url)
+            .map_err(|_| AuthError::Configuration)?
+            .origin()
+            .ascii_serialization(),
+        &config.network_id,
+    )?;
     let mut administration = config
         .administration
         .clone()
@@ -426,7 +437,8 @@ pub async fn serve_from_config(path: impl AsRef<Path>) -> Result<(), AuthError> 
         .route("/health", get(health))
         .with_state(app);
     let router = assemble_feature_routes(router, identity, network, relay, &config.issuer)
-        .merge(feedback.router());
+        .merge(feedback.router())
+        .merge(community.router());
     let router = if let Some(admin) = administration {
         router.merge(admin.router())
     } else {
@@ -653,6 +665,7 @@ async fn start(
         (false, None) => None,
         (true, None | Some("/admin")) => Some("/admin"),
         (true, Some("/feedback")) => Some("/feedback"),
+        (true, Some("/community")) => Some("/community"),
         _ => return Err(ApiError::BadRequest),
     };
     let device = canonical_uuid(&req.device_id).ok_or(ApiError::BadRequest)?;
@@ -792,6 +805,8 @@ fn callback_browser_return_path(app: &App, uri: &axum::http::Uri) -> Option<&'st
 
 fn browser_return_response(path: &'static str, success: bool) -> axum::response::Response {
     let target = match (path, success) {
+        ("/community", true) => "/community?login=complete",
+        ("/community", false) => "/community?login=failed",
         ("/feedback", true) => "/feedback?login=complete",
         ("/feedback", false) => "/feedback?login=failed",
         (_, true) => "/admin?login=complete",
@@ -1797,6 +1812,83 @@ mod tests {
             (false, "/feedback?login=failed"),
         ] {
             let r = browser_return_response("/feedback", success);
+            assert_eq!(r.status(), StatusCode::SEE_OTHER);
+            assert_eq!(r.headers()[header::LOCATION], target);
+            assert_eq!(r.headers()[header::REFERRER_POLICY], "no-referrer");
+        }
+        app.flow
+            .pending
+            .lock()
+            .unwrap()
+            .remove(&started.transaction_id);
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}").parse().unwrap()
+            ),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_community_return_path_is_allowlisted_and_state_bound() {
+        let (app, _dir) = test_app();
+        let request = |path: Option<&str>, browser_return| StartRequest {
+            device_id: TEST_DEVICE.into(),
+            pkce_challenge: URL_SAFE_NO_PAD.encode(Sha256::digest(TEST_VERIFIER.as_bytes())),
+            browser_return,
+            browser_return_path: path.map(str::to_owned),
+        };
+        for path in [
+            "https://evil.test",
+            "//evil.test",
+            "/community?token=test",
+            "/community/",
+            "/other",
+            "",
+        ] {
+            assert!(matches!(
+                start(State(app.clone()), Json(request(Some(path), true))).await,
+                Err(ApiError::BadRequest)
+            ));
+        }
+        assert!(matches!(
+            start(State(app.clone()), Json(request(Some("/community"), false))).await,
+            Err(ApiError::BadRequest)
+        ));
+        let (_, Json(started)) = start(State(app.clone()), Json(request(Some("/community"), true)))
+            .await
+            .unwrap();
+        let url = Url::parse(&started.authorization_url).unwrap();
+        let state = url
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &format!("/auth/callback?state={state}&browserReturnPath=/admin")
+                    .parse()
+                    .unwrap()
+            ),
+            Some("/community")
+        );
+        assert_eq!(
+            callback_browser_return_path(
+                &app,
+                &"/auth/callback?state=unknown&browserReturnPath=/community"
+                    .parse()
+                    .unwrap()
+            ),
+            None
+        );
+        for (success, target) in [
+            (true, "/community?login=complete"),
+            (false, "/community?login=failed"),
+        ] {
+            let r = browser_return_response("/community", success);
             assert_eq!(r.status(), StatusCode::SEE_OTHER);
             assert_eq!(r.headers()[header::LOCATION], target);
             assert_eq!(r.headers()[header::REFERRER_POLICY], "no-referrer");
