@@ -29,6 +29,7 @@ export interface ProjectContextSnapshot {
 }
 
 const DECISION = /决定|决策|确定|确认|采用|选择|就选|改为|改成|以后|后续|不要|必须|保留|取消|同意|按.{0,20}(方案|版本|执行)|\b(decid(?:e[ds]?|ing)|agreed?|choose|chosen|instead|must|do not|use|keep|cancel)\b/i;
+const PROGRESS = /完成|通过|失败|验证|验收|发布|部署|合入|修复|阻断|下一步|尚未|未完成|\b(done|passed?|failed?|verified|released?|deploy|merged?|blocked?|next)\b/i;
 
 /** Bounded verbatim excerpts, never a model-generated statement of truth. */
 function excerpt(text: string, limit: number): { text: string; truncated?: true } {
@@ -111,8 +112,12 @@ export function renderProjectContext(snapshot: ProjectContextSnapshot): string {
     unavailableSessions: snapshot.unavailableSessions }));
   const closing = `\n</${PROJECT_CONTEXT_TAG}>`;
   let result = opening + coverage;
-  // Input is ordered newest session first, source order within a session retained.
-  for (const source of snapshot.sources) {
+  // Important statements precede low-signal recent chatter. Stable sorting
+  // retains session recency within each class; this only ranks whole excerpts,
+  // never removes non-keyword scope/negation from their text.
+  const priority = (source: ProjectContextSource) => source.role === 'user' && DECISION.test(source.text)
+    ? 2 : source.role === 'assistant' && PROGRESS.test(source.text) ? 1 : 0;
+  for (const source of [...snapshot.sources].sort((a, b) => priority(b) - priority(a))) {
     const row = `\n<source>${escapeSystemReminderText(JSON.stringify(source))}</source>`;
     if (bytes(result + row + closing) <= PROJECT_CONTEXT_MAX_BYTES) result += row;
   }

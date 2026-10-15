@@ -16,12 +16,13 @@
 - [x] 同项目隔离，群聊/自动维护/私有委派排除；失败历史不伪装成功。
 - [x] 首轮有预算；后续不重复；重试/rewind/重启重新由原对话裁决。
 - [x] 并发读取无覆盖；源删除/损坏不使用陈旧缓存；开关有效。
-- [ ] 相关单元、隔离持久化/链路集成、类型/lint/build 与 CI。
+- [x] 相关单元、隔离持久化/链路集成、类型/lint/build。
+- [ ] 最终提交的必需 CI（合并前由 GitHub PR 门禁核验）。
 - [ ] 远端main包含成果；固定SHA/用量边界交给发布owner。
 
 ## Completed
 
-已实现共享安全文本投影、原SessionStore只读提取、首轮/重试动态注入、默认独立项目开关、来源/预算与故障过滤。189项相关回归+10项持久化集成、独立复审、设置浏览器检查和构建通过。初始实现提交e5d1d6c2；最新main发布协调已合并且无代码冲突。
+已实现共享安全文本投影、原SessionStore只读提取、首轮/重试动态注入、默认独立项目开关、来源/预算与故障过滤。190项相关回归+10项持久化集成、独立复审、设置浏览器检查和构建通过。预算不足时优先完整决策/进展摘录，已增加防闲聊挤占用例并独立复审12项通过。PR #68 为合并与最终CI的追溯入口。初始实现提交e5d1d6c2；最新main发布协调已合并且无代码冲突。
 
 ## Blockers and unknowns
 
@@ -29,7 +30,7 @@
 
 ## Verification
 
-相关unit/DOM189项、SessionStore集成10项通过；独立复审5文件162项通过。类型/完整lint/server和Web build通过。设置实际React/IAB 1024浅色及540深色、开关/键盘/失败恢复通过。证据 `dev-docs/project-context-validation/README.md` 与token-metrics.json。无日常App或生产数据写入。模型真实语义/安装后的原生验收由统一发布owner按隔离身份进行，不拿合成测试冒充。
+相关unit/DOM190项、SessionStore集成10项通过；独立复审5文件162项通过。类型/完整lint/server和Web build通过。设置实际React/IAB 1024浅色及540深色、开关/键盘/失败恢复通过。证据 `dev-docs/project-context-validation/README.md` 与token-metrics.json。无日常App或生产数据写入。模型真实语义/安装后的原生验收由统一发布owner按隔离身份进行，不拿合成测试冒充。
 
 ## Token contract
 
@@ -37,4 +38,4 @@
 
 ## Next step
 
-提交候选、合并最新main并跑必需CI；固定main SHA和证据交统一发布会话。
+等待最终候选的必需CI、合入并核验远端main；固定main SHA和证据交统一发布会话。最终交接回执记录于统一发布会话和PR #68，避免为勾选状态再改变已测源码。

@@ -96,4 +96,12 @@ describe('bounded, attributed project background', () => {
     expect(text).toContain('仅覆盖下列来源');
     expect(text).toContain('&quot;totalSessions&quot;:500');
   });
+  it('does not let recent low-signal chatter crowd an important earlier decision out of the budget', () => {
+    const chatter = Array.from({ length: 23 }, (_, i) => ({ sessionId: `chatter-${i}`, messageId: `m-${i}`,
+      timestamp: '2026-10-16T02:00:00Z', role: 'assistant' as const, state: 'reported' as const, text: '你好！'.repeat(100) }));
+    const decision = projectSessionContextSources('decision', [message('important', 'user', '确定采用方案B，仅原型生效。')]);
+    const text = renderProjectContext({ projectId: 'p', scannedSessions: 24, totalSessions: 24, unavailableSessions: 0, sources: [...chatter, ...decision] });
+    expect(text).toContain('确定采用方案B，仅原型生效。');
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(PROJECT_CONTEXT_MAX_BYTES);
+  });
 });

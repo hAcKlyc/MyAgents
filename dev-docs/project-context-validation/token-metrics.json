@@ -20,10 +20,10 @@
     },
     {
       "name": "budget-pressure-24-sessions",
-      "contextBodyUtf8Bytes": 5972,
-      "addedUtf8Bytes": 6010,
-      "o200k_base": 1585,
-      "cl100k_base": 1951
+      "contextBodyUtf8Bytes": 5687,
+      "addedUtf8Bytes": 5725,
+      "o200k_base": 1451,
+      "cl100k_base": 1938
     }
   ],
   "caveat": "Other tokenizers differ. Background remains model context on later turns until compaction. Provider caching and prices determine cost."
