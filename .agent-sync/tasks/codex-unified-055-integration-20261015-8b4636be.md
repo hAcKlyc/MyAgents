@@ -19,7 +19,7 @@ MOXBOTS-055-UNIFIED-ACCEPTANCE integration owner: combine accepted profile/runti
 
 - Base main afa7d819 includes PR49 compatibility. Locally merged profile ab935 and NEXT772f preserving ancestry; not proof of their main delivery.
 - Locally merged brand 11894a8d and Title 7f4a1b97; exact modelqa endpoint authorization and renderer entry wiring implemented. These are candidate merges, not mainline delivery.
-- Prepared private HOME/minimum authorized CLI auth/Kimi key, canonical executable SHA pins and loopback proxy. No GUI/model started. Native A1 snapshot build is running; final A2 will include the repaired Hono wire cancellation and coherent 0.5.5 package/Cargo/Tauri versions. A1 is not final Title-cancellation evidence.
+- Prepared private HOME/minimum authorized CLI auth/Kimi key, canonical executable SHA pins and loopback proxy. No GUI/model started. Native A1/A2 release bundles passed; final fresh A3 also includes compile-gated QA navigation. None launched yet; A1/A2 are not final native UI acceptance evidence.
 
 ## Verification
 
@@ -33,4 +33,8 @@ MOXBOTS-055-UNIFIED-ACCEPTANCE integration owner: combine accepted profile/runti
 
 ## Next step
 
-- Native A2 must use Title wire-cancellation fix a3e51fd7 and coherent 0.5.5 versions; independent review and fresh native snapshot with verified local SwiftPM overlay, then exclusive GUI lease for serial NEXT/TITLE/Host acceptance. Wait cloud publisher recovery before new remote calls. Merge all accepted sources with CI, freeze 0.5.5, sign/notarize/publish and idle-only update.
+- Use fresh A3 with Title wire-cancellation fix a3e51fd7, coherent 0.5.5 versions and QA-only navigation; independent review and fresh native snapshot with verified local SwiftPM overlay, then exclusive GUI lease for serial NEXT/TITLE/Host acceptance. Wait cloud publisher recovery before new remote calls. Merge all accepted sources with CI, freeze 0.5.5, sign/notarize/publish and idle-only update.
+
+## Unified merge queue
+
+PR54 contains the actual final feature heads/records: NEXT58c819b4, TITLE9ff0ba28, FEEDBACKbc5ebb71, profiled97449c2, brand recordad3b0bb3. Final review/CI/native acceptance, one main merge and source hash verification precede formal 0.5.5 packaging. No feature branch is delivered merely by its own PR. Production community is already deployed by its sole publisher; cloud maintenance hold was explicitly released, dedicated Host CLI preparation resumed, GUI/model business acceptance still awaits A3.

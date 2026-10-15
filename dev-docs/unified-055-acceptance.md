@@ -37,3 +37,15 @@ Window authority: shared private `output/remote-session-20261015/OWNER-WINDOW-HA
 - [ ] Production signed endpoint/bytes/rollback and actual client installation verified, without interrupting running tasks.
 
 Current state: implementation and independent review in progress; formal 0.5.5 not built/published/installed. Large outputs and secret-bearing evidence remain outside Git. Public 0.5.4/source e5a05f76 is immutable.
+
+## Integration candidate and remaining runtime boundary (2026-10-15)
+
+PR54 is the single final mainline integration queue. It preserves actual feature ancestry: NEXT 58c819b4, TITLE 9ff0ba28 (wire repair a3e51fd7), FEEDBACK record bc5ebb71, profile d97449c2, and brand production record ad3b0bb3. Brand code is already main b5b9c9c4 with publisher-reported production PKCE/readonly/account/DB acceptance; its exclusive cloud hold was released before the dedicated Host CLI preparation resumed. No second publisher changes that service. Feature PRs retain scoped review/CI evidence; their branches alone are not main delivery.
+
+All package/lock/Cargo/Tauri release versions are aligned to 0.5.5; license and locked Cargo metadata checks passed. The final isolated native candidate also has compile-time-only navigation across QA Home/NEXT/TITLE/App; production has neither these pages nor utility endpoints. A1 native release/bundle passed with task-local SwiftPM overlay; A2 includes wire repair and coherent version. Neither is final UI evidence: fresh A3 includes the final navigation. No QA App has been launched yet. The first invocation lacked Cargo PATH after assets passed; the corrected explicit Cargo path built A1 without a stub or system-toolchain mutation.
+
+Source/wire checks passed: Root integrated typecheck/scoped lint/classification, 178 initial route/composition/Title tests and 18 NEXT tests; final real Hono cancellation 29 plus Root routes3. Independent review separately ran actual Hono/composition/routes/handler with synthetic generator/config, rejecting unauthenticated callers and nonempty DELETE, accepting empty DELETE cancellation, and preventing late receipt writes. See unified-055-integration-review.md for exact scope. This does not replace native Rust IPC/SDK/model proof.
+
+The TITLE page validates a real builtin utility and its separate modelqa receipt, not ordinary Session automatic-title persistence. The real remote Host source currently has no automatic-title hook and its remote DTO/UI does not expose durationMs. Those extra observations are outside this release acceptance scope, and no existing title or timestamp difference will be reported as either feature passing. No extra model rounds or product changes are authorized by those observations.
+
+Final native, dedicated Host business, formal distribution, production updater and idle-only actual install gates remain open. The user's running tasks and daily client have not been stopped by this unified task.
