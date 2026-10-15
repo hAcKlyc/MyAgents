@@ -29,9 +29,9 @@ vi.mock('../sse', async importOriginal => ({
   broadcastLive: vi.fn(),
 }));
 
-import { cancelImRequest, cancelQueueItem, forceExecuteQueueItem, getAgentState, interruptCurrentResponse } from '../agent-session';
+import { cancelImRequest, cancelQueueItem, forceExecuteQueueItem, getAgentState, interruptCurrentResponse, stopBuiltinSessionForUpdate } from '../agent-session';
 import { broadcast } from '../sse';
-import { getQuerySession, resetLifecycleForTest, setQuerySession, waitForMessage } from '../builtin-session/lifecycle';
+import { getQuerySession, resetLifecycleForTest, setQuerySession, waitForMessage, setSessionTerminationPromise, lifecycleState, setUpdateRestartFrozen } from '../builtin-session/lifecycle';
 import { beginPromotedItem, getInFlightQueueId, getMessageQueue, getPendingMidTurnQueue, getTurnAdmissionTicket, getTurnBoundaryQueue, isPromotedItemCanceled, pushMessage, pushPendingMidTurn, pushTurnBoundary, resetQueueForTest, setInFlightQueueItem, setTurnAdmissionTicket } from '../builtin-session/queue';
 import { resetTurnForTest } from '../builtin-session/turn';
 import { resetTranscriptForTest } from '../builtin-session/transcript';
@@ -58,6 +58,65 @@ describe('builtin interrupt facade terminal ownership', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('stops an idle background Query and waits for its real termination before restarting', async () => {
+    setUpdateRestartFrozen(true);
+    const terminated = deferred<void>();
+    const query = { interrupt: vi.fn(async () => undefined), close: vi.fn() };
+    setQuerySession(query as unknown as Query);
+    setSessionTerminationPromise(terminated.promise);
+    lifecycleState.processing = true;
+    const stopping = stopBuiltinSessionForUpdate();
+    expect(query.interrupt).toHaveBeenCalledOnce();
+    let settled = false;
+    void stopping.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    setQuerySession(null);
+    lifecycleState.processing = false;
+    terminated.resolve();
+    await stopping;
+    expect(getAgentState().sessionState).toBe('idle');
+    expect(lifecycleState.preWarmTimer).toBeNull();
+  });
+
+  it('does not clear a newer Query when an old restart is released while stopping', async () => {
+    let current = true;
+    const terminated = deferred<void>();
+    const old = { interrupt: vi.fn(async () => undefined), close: vi.fn() };
+    const newer = { interrupt: vi.fn(async () => undefined), close: vi.fn() };
+    setQuerySession(old as unknown as Query);
+    setSessionTerminationPromise(terminated.promise);
+    const stopping = stopBuiltinSessionForUpdate(() => { if (!current) throw new Error('UPDATE_ACTIVITY_UNKNOWN'); });
+    current = false;
+    setQuerySession(newer as unknown as Query);
+    captured.deps!.setSessionState('running');
+    terminated.resolve();
+    await expect(stopping).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    expect(getQuerySession()).toBe(newer);
+    expect(getAgentState().sessionState).toBe('running');
+    expect(newer.interrupt).not.toHaveBeenCalled();
+  });
+
+  it('rejects a restart timeout without pretending the live Query has disappeared', async () => {
+    const query = { interrupt: vi.fn(async () => undefined), close: vi.fn() };
+    setQuerySession(query as unknown as Query);
+    setSessionTerminationPromise(new Promise(() => undefined));
+    const stopping = stopBuiltinSessionForUpdate();
+    const rejection = expect(stopping).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await rejection;
+    expect(getQuerySession()).toBe(query);
+  });
+
+  it('clears an idle warm-up timer without launching any model', async () => {
+    const launch = vi.fn();
+    lifecycleState.preWarmTimer = setTimeout(launch, 500) as unknown as NodeJS.Timeout;
+    await stopBuiltinSessionForUpdate();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(launch).not.toHaveBeenCalled();
+    expect(lifecycleState.preWarmTimer).toBeNull();
   });
 
   it('sends Stop for B after A terminal even while A receipt is pending', async () => {

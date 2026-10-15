@@ -1,5 +1,6 @@
 import { updateExternalRuntimeConfig } from '../runtimes/external-session';
 import { retryDesktopRequest } from './retry';
+import { prepareDesktopQuery } from './query-reminder';
 import { randomUUID } from 'node:crypto';
 import { broadcast } from '../sse';
 import {
@@ -859,7 +860,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     async stopTurn(options) {
-      if (!isExternalSessionActive()) {
+      if (!isExternalSessionActive() && !(options?.wholeSession && (hasExternalRuntimeProcess() || isExternalSessionBusy()))) {
         return { success: true, alreadyStopped: true };
       }
       const stopped = options?.preserveQueue
@@ -1069,7 +1070,8 @@ export function createExternalSessionEngine(): SessionEngine {
           return { ...rewound, success: false, conversationCommitted: true, retryQueued: false };
         }
         try {
-          const sent = await this.sendDesktopMessage(retryDesktopRequest(context, rewound, options));
+          const prepared = await prepareDesktopQuery(retryDesktopRequest(context, rewound, options));
+          const sent = await this.sendDesktopMessage(prepared.request);
           if (sent.success && sent.queueId) await forceExecuteExternalQueueItem(sent.queueId);
           return { ...rewound, success: sent.success, conversationCommitted: true, retryQueued: sent.success, error: sent.error };
         } catch (error) {

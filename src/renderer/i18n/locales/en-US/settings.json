@@ -2310,5 +2310,9 @@
     "timing": "Collaboration message timing",
     "timingHint": "Controls messages between agents and completion reports. Realtime delivers after the current model or tool step. The chat queue setting above controls user input.",
     "unavailable": "Model unavailable"
+  },
+  "projectContext": {
+      "title": "Project context in new chats",
+      "description": "At first send, include bounded progress and decision excerpts from other desktop chats in this project, with sources. No extra model calls; adds limited input context. Turning this off affects future chats and does not erase context already sent."
   }
 }

@@ -534,6 +534,31 @@ impl TaskSchedulerController {
         self.wakeups.write().await.clear();
     }
 
+    /// Interrupt only currently executing tasks through the existing explicit
+    /// Stop transition. Idle schedules remain armed if installation fails.
+    pub(crate) async fn interrupt_for_update(&self) -> Result<(), String> {
+        let task_ids: Vec<String> = self.executions.read().await.keys().cloned().collect();
+        for task_id in task_ids {
+            let control = acquire_task_control(&task_id).await;
+            let store = crate::task::get_task_store();
+            if let Some(store) = store {
+                if store.get(&task_id).await.is_some_and(|task| task.status == TaskStatus::Running) {
+                    store.update_status_with_task_control_held(TaskUpdateStatusInput {
+                        id: task_id,
+                        status: TaskStatus::Stopped,
+                        message: Some("Stopped by user-confirmed app update; unfinished work can be resumed after restart".into()),
+                        actor: TransitionActor::User,
+                        source: Some(TransitionSource::Ui),
+                    }, &control).await?;
+                    continue;
+                }
+            }
+            // Draft Detector requests have no durable Task row.
+            self.stop_with_control_held(&task_id, &control).await?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn stop_with_control_held(
         &self,
         task_id: &str,
@@ -1904,6 +1929,10 @@ async fn run_scheduler_loop(
                         {
                             Ok(RunDisposition::Continue) => continue,
                             Ok(RunDisposition::Stop) => return,
+                            Err(error) if error == "UPDATE_SHUTDOWN_IN_PROGRESS" => {
+                                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                                continue;
+                            }
                             Err(error) => {
                                 let transition = block_task(
                                     store,
@@ -1998,6 +2027,10 @@ async fn run_scheduler_loop(
         match result {
             Ok(RunDisposition::Continue) => {}
             Ok(RunDisposition::Stop) => return,
+            Err(error) if error == "UPDATE_SHUTDOWN_IN_PROGRESS" => {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                continue;
+            }
             Err(error) => {
                 ulog_error!("[task-scheduler] task={} run failed: {}", task_id, error);
                 let transition = if let Some(current) = store
@@ -3357,6 +3390,23 @@ mod tests {
         .unwrap();
         let store = crate::task::TaskStore::new(data_dir);
         (dir, store)
+    }
+
+    #[tokio::test]
+    async fn update_interruption_preserves_future_idle_schedules() {
+        let controller = TaskSchedulerController::new();
+        let wake = Arc::new(tokio::sync::Notify::new());
+        let waiter = wake.clone();
+        let (send, received) = tokio::sync::oneshot::channel();
+        let handle = tauri::async_runtime::spawn(async move { waiter.notified().await; let _ = send.send(()); });
+        controller.handles.write().await.insert("update-idle-schedule".into(), handle);
+        controller.wakeups.write().await.insert("update-idle-schedule".into(), wake.clone());
+        controller.interrupt_for_update().await.unwrap();
+        assert!(!controller.shutting_down.load(Ordering::SeqCst));
+        assert!(controller.handles.read().await.contains_key("update-idle-schedule"));
+        assert!(controller.wakeups.read().await.contains_key("update-idle-schedule"));
+        wake.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(1), received).await.unwrap().unwrap();
     }
 
     #[tokio::test]

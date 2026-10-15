@@ -56,5 +56,10 @@ it('serves real authenticated Global routes, freezes hidden birth and keeps priv
   expect(await readFile(join(state,'sessions.json'),'utf8')).toBe(beforeFrozenWrite);
   expect(await (await quiesce('release')).json()).toEqual({success:true});
   expect(await (await post('/api/remote-session/prepare',{request:blocked})).json()).toMatchObject({success:true,data:{agentId:agent.id}});
+  const unauthorized = await fetch(base+'/api/process/update-quiesce', {method:'POST',headers:{'content-type':'application/json','x-myagents-sidecar-generation':'4242'},body:JSON.stringify({action:'interrupt-and-freeze',token:lifecycleToken})});
+  expect(unauthorized.status).toBe(401);
+  expect(await (await quiesce('interrupt-and-freeze')).json()).toEqual({success:true});
+  expect(await (await quiesce('release')).json()).toEqual({success:true});
+
 
 },60_000);

@@ -1,5 +1,9 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseLeadingSystemReminder } from '../../shared/systemReminder';
+import type { ProjectContextSnapshot } from '../../shared/projectContext';
+const projectBackground = vi.hoisted(() => vi.fn<() => Promise<ProjectContextSnapshot | undefined>>(async () => undefined));
+vi.mock('./project-context', () => ({ optionalProjectContext: projectBackground }));
 const qaMode = vi.hoisted(() => ({ enabled: false }));
 vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled, isModelQaBuild: () => false, isIsolatedQaBuild: () => qaMode.enabled }));
 
@@ -360,6 +364,7 @@ vi.mock('../agent-session', async () => ({
   hasBuiltinBackgroundWork: (await import('../builtin-session/lifecycle')).hasQueryBackgroundTasks,
   hasBuiltinActivityForUpdate: (await import('../builtin-session/lifecycle')).hasBuiltinActivityForUpdate,
   setUpdateRestartFrozen: (await import('../builtin-session/lifecycle')).setUpdateRestartFrozen,
+  stopBuiltinSessionForUpdate: vi.fn(async () => undefined),
   applyMcpOverrideAndAwaitReady: mocks.applyMcpOverrideAndAwaitReady,
   cancelImRequest: mocks.cancelBuiltinImRequest,
   cancelQueueItem: mocks.cancelQueueItem,
@@ -405,6 +410,7 @@ vi.mock('../agent-session', async () => ({
   resetInteractionScenario: mocks.resetInteractionScenario,
   requireCurrentBuiltinSkill: mocks.requireCurrentBuiltinSkill,
   rewindSession: mocks.rewindSession,
+  retryBuiltinUserMessage: async (_id: string, replay: (result: { success: boolean; content: string }) => unknown) => replay({ success: true, content: 'retry' }),
   setAgents: mocks.setAgents,
   forceReloadActiveSession: mocks.forceReloadActiveSession,
   setBackgroundAgentPermissionMode: mocks.setBackgroundAgentPermissionMode,
@@ -470,6 +476,9 @@ vi.mock('../runtimes/external-session', () => ({
   isExternalTurnCurrent: mocks.isExternalTurnCurrent,
   popLastUserMessageForRetry: mocks.popLastUserMessageForRetry,
   retryLastExternalUserMessage: mocks.retryLastExternalUserMessage,
+  rewindExternalConversation: async (_id: string, replay?: (result: { success: boolean; content: string }) => unknown) => replay
+    ? replay({ success: true, content: 'retry' }) : { success: true, content: 'retry' },
+  retryDshConversation: async (_id: string, replay: (result: { success: boolean; content: string }) => unknown) => replay({ success: true, content: 'retry' }),
   prewarmExternalSession: mocks.prewarmExternalSession,
   respondExternalAskUserQuestion: mocks.respondExternalAskUserQuestion,
   respondExternalPlanApproval: mocks.respondExternalPlanApproval,
@@ -510,6 +519,7 @@ vi.mock('../utils/management-api-client', () => ({
 
 vi.mock('../SessionStore', () => ({
   assertSessionTranscriptsDurableForUpdate: vi.fn(),
+  flushSessionTranscriptsForUpdate: vi.fn(async () => undefined),
   releaseSessionTranscriptForBinding: vi.fn(async () => undefined),
   getActiveSessionTranscript: vi.fn(() => undefined),
   deleteSession: mocks.deleteSession,
@@ -564,6 +574,7 @@ function runInjectedTurn(request: TestInjectedTurnRequest) {
 describe('session-engine selector and adapters', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    projectBackground.mockReset().mockResolvedValue(undefined);
     mocks.state.useExternal = false;
     mocks.state.externalActive = false;
     mocks.state.externalBusy = false;
@@ -612,6 +623,38 @@ describe('session-engine selector and adapters', () => {
 
     await engine.updateAgents(agents, { forceReload: true });
     expect(mocks.forceReloadActiveSession).toHaveBeenCalledExactlyOnceWith('agents');
+  });
+
+  it.each(['builtin', 'codex', 'claude-code', 'dsh'])('passes first-send project context through the real %s adapter', async (runtime) => {
+    mocks.state.useExternal = runtime !== 'builtin';
+    mocks.getActiveRuntimeType.mockReturnValue(runtime);
+    const previous = process.env.MYAGENTS_RUNTIME;
+    process.env.MYAGENTS_RUNTIME = runtime;
+    projectBackground.mockResolvedValueOnce({ projectId: 'p', totalSessions: 1, scannedSessions: 1,
+      unavailableSessions: 0, sources: [{ sessionId: 'other', messageId: 'decision', role: 'user',
+        timestamp: '2026-10-16T01:00:00Z', text: '确定采用方案B', state: 'reported' }] });
+    try {
+      const result = await getSessionEngine().sendDesktopMessage({ text: '继续项目', sessionId: 'external-session',
+        workspacePath: '/workspace', scenario: desktopScenario });
+      expect(result.success).toBe(true);
+      const received = runtime === 'builtin' ? mocks.enqueueUserMessage.mock.calls.at(-1)?.[0]
+        : (mocks.enqueueExternalSendForDesktop.mock.calls.at(-1) as unknown[] | undefined)?.[0];
+      expect(received).toContain('<PROJECT_CONTEXT>');
+      expect(received).toContain('确定采用方案B');
+      expect(parseLeadingSystemReminder(String(received)).visibleText).toBe('继续项目');
+      projectBackground.mockResolvedValueOnce({ projectId: 'p', totalSessions: 1, scannedSessions: 1,
+        unavailableSessions: 0, sources: [{ sessionId: 'other', messageId: 'revised', role: 'user',
+          timestamp: '2026-10-16T02:00:00Z', text: '取消B，改用方案C', state: 'reported' }] });
+      const retry = await getSessionEngine().retryUserMessage('first-message');
+      expect(retry.success).toBe(true);
+      const replayed = runtime === 'builtin' ? mocks.enqueueUserMessage.mock.calls.at(-1)?.[0]
+        : (mocks.enqueueExternalSendForDesktop.mock.calls.at(-1) as unknown[] | undefined)?.[0];
+      expect(replayed).toContain('取消B，改用方案C');
+      expect(parseLeadingSystemReminder(String(replayed)).visibleText).toBe('retry');
+    } finally {
+      if (previous === undefined) delete process.env.MYAGENTS_RUNTIME;
+      else process.env.MYAGENTS_RUNTIME = previous;
+    }
   });
 
   it('resolves IM Bridge caller identity through the selected Runtime adapter', () => {
@@ -3154,6 +3197,84 @@ describe('user-confirmed updater admission through the SessionEngine owner', () 
     releaseSessionAdmissionsForUpdate(token);
     releaseSessionAdmissionsForUpdate(other);
     vi.restoreAllMocks();
+  });
+
+  it('stops and flushes only after explicit interruption consent, retaining the admission fence', async () => {
+    const builtin = await import('../agent-session');
+    const storage = await import('../SessionStore');
+    const engine = getSessionEngine();
+    vi.mocked(engine.isBusy).mockReturnValue(true);
+    vi.mocked(builtin.stopBuiltinSessionForUpdate).mockImplementationOnce(async () => {
+      await expect(runProcessUpdateAdmission(async () => undefined)).rejects.toThrow('UPDATE_BUSY');
+      vi.mocked(engine.isBusy).mockReturnValue(false);
+    });
+    await freezeSessionAdmissionsForUpdate(token, true);
+    expect(builtin.stopBuiltinSessionForUpdate).toHaveBeenCalledTimes(1);
+    expect(storage.flushSessionTranscriptsForUpdate).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(builtin.stopBuiltinSessionForUpdate).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(storage.flushSessionTranscriptsForUpdate).mock.invocationCallOrder[0]);
+    await expect(engine.compactContext()).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(token);
+    await expect(runProcessUpdateAdmission(async () => 'open')).resolves.toBe('open');
+  });
+
+  it('stops an external process through its adapter before flushing', async () => {
+    mocks.state.useExternal = true;
+    mocks.state.externalActive = true;
+    mocks.stopExternalSession.mockResolvedValueOnce(true);
+    idleOwnerFixture();
+    await freezeSessionAdmissionsForUpdate(token, true);
+    expect(mocks.stopExternalSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops an idle external process and its background children instead of trusting root idle', async () => {
+    mocks.state.useExternal = true;
+    mocks.state.externalActive = false;
+    mocks.state.externalProcessAlive = true;
+    mocks.stopExternalSession.mockResolvedValueOnce(true);
+    idleOwnerFixture();
+    await freezeSessionAdmissionsForUpdate(token, true);
+    expect(mocks.stopExternalSession).toHaveBeenCalledTimes(1);
+    mocks.state.externalProcessAlive = false;
+  });
+
+  it('acknowledges a stopped Task only after the confirmed durable checkpoint, keeping writes fenced', async () => {
+    const engine = getSessionEngine();
+    vi.spyOn(engine, 'getCurrentTurnIdentity').mockReturnValue(null);
+    await freezeSessionAdmissionsForUpdate(token, true);
+    mocks.cancelQueueItem.mockClear();
+    await expect(stopOwnedTurnByQueueId({ kind: 'task', id: 'checkpointed-task' }, 'queue-id'))
+      .resolves.toEqual({ success: true, alreadyStopped: true });
+    expect(mocks.cancelQueueItem).not.toHaveBeenCalled();
+    await expect(runProcessUpdateAdmission(async () => undefined)).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(token);
+    await freezeSessionAdmissionsForUpdate(token);
+    await expect(stopOwnedTurnByQueueId({ kind: 'task', id: 'checkpointed-task' }, 'queue-id'))
+      .rejects.toThrow('UPDATE_BUSY');
+  });
+
+  it('never resurrects a timed-out token or overwrites a newer restart after a late flush', async () => {
+    const storage = await import('../SessionStore');
+    let finish!: () => void;
+    vi.mocked(storage.flushSessionTranscriptsForUpdate).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const old = freezeSessionAdmissionsForUpdate(token, true);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    releaseSessionAdmissionsForUpdate(token);
+    await freezeSessionAdmissionsForUpdate(other);
+    finish();
+    await expect(old).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    await expect(runProcessUpdateAdmission(async () => undefined)).rejects.toThrow('UPDATE_BUSY');
+    releaseSessionAdmissionsForUpdate(other);
+    await expect(runProcessUpdateAdmission(async () => 'usable')).resolves.toBe('usable');
+  });
+
+  it.each(['stop', 'flush'])('keeps install rejected and releases admission when %s fails', async (failure) => {
+    const builtin = await import('../agent-session');
+    const storage = await import('../SessionStore');
+    const operation = failure === 'stop' ? vi.mocked(builtin.stopBuiltinSessionForUpdate) : vi.mocked(storage.flushSessionTranscriptsForUpdate);
+    operation.mockRejectedValueOnce(new Error('synthetic persistence/termination failure'));
+    await expect(freezeSessionAdmissionsForUpdate(token, true)).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    await expect(runProcessUpdateAdmission(async () => 'usable')).resolves.toBe('usable');
   });
 
   it('refuses running/queued/approval owners without invoking stop or cancellation', async () => {

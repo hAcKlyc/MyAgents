@@ -1,0 +1,16 @@
+{
+  "environment": "isolated actual React with synthetic read-only APIs",
+  "viewports": [
+    1440,
+    540
+  ],
+  "results": [
+    "light: only retry shows live progress and completed check stays done",
+    "dark: only retry shows live progress and completed check stays done",
+    "list keeps one live progress presentation",
+    "completed check still opens the original shared Session",
+    "540px detail preserves timeout evidence and Escape closes",
+    "paused shared Goal affects only current card"
+  ],
+  "pageErrors": []
+}
