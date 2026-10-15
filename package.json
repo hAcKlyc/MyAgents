@@ -2,7 +2,7 @@
   "name": "myagents",
   "description": "MoXBots - AI workspace connecting Bot teams, desktop tasks and cloud collaboration.",
   "type": "module",
-  "version": "0.5.2",
+  "version": "0.5.5",
   "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=24.14.0",
