@@ -55,3 +55,7 @@ MYAGENTS_BUILD_PROFILE=moxbot node dev-docs/project-board-validation/run.mjs --c
 看板卡片/列表显示原会话TODO完成数、当前/待续步骤和子Agent简报，详情展开三态清单与子Agent状态、后台标记及耗时。此信息为同源只读投影，不能编辑勾选或推导TaskStore完成；需继续沟通或处理审批时进入原会话。一个Task关联多个Session时优先正在等待/运行的观察，否则展示最近活动Session的观察，详情标明来源。
 
 HTTP activity字段progress可选，旧版state-only仍兼容。过期/失败标明快照，不继续宣称实时运行；历史TODO保留为计划记录，历史loading不能判子Agent活跃。Native plan只在活跃Session内从原事件同步，冷历史未记录的原生计划明确不可用。细节与证据 `project-board-todo-acceptance.md`。
+
+## 共享会话的进度去重（MOXBOTS-BOARD-DEDUP-001）
+
+Task.sessionIds保留历史关联，不表示当前Query同时属于所有关联Task。每个Session的观察只装饰一张代表Task卡片：优先具体running/stopping/stop_failed执行态，其次最近执行/dispatch证据，再以创建时间和稳定ID打平。旧任务编辑updatedAt不改变代表；同一Task可独立接收多个Session。其余Task保留原状态、执行结果和原会话入口，不复制当前TODO/计时/Goal；Task自身的具体执行态不被去重。此规则只裁决展示归属，不改TaskStore、调度或Session执行权威，也不宣称证明当前Query所属Task。回归与合成页面见 `project-board-validation/dedup/`；正式056原生验收单独进行。

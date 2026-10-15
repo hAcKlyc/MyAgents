@@ -58,8 +58,25 @@ export function boardGoalState(snapshot: ActivitySnapshot | undefined, now: numb
   return goal.value.status === 'canceled' ? 'stopped' : goal.value.status;
 }
 
-/** Task identity wins over a Session decoration; a shared execution Session
- * may appear under several real Tasks but never also becomes a standalone row. */
+/** Select one presentation representative for each linked Session. Links are execution
+ * history, so copying one current snapshot onto every Task invents parallel work.
+ * Prefer a concrete live Task, then its latest dispatch evidence (not updatedAt,
+ * which can change when an old Task is edited). This does not mutate Task state. */
+function activityRepresentatives(tasks: readonly Task[]): ReadonlyMap<string, string> {
+  const executionRank = (task: Task) => task.executionState && task.executionState !== 'checking' ? 1 : 0;
+  const dispatchAt = (task: Task) => Math.max(task.lastExecutedAt ?? 0, task.lastExecution?.at ?? 0,
+    ...task.statusHistory.filter(entry => entry.to === 'running').map(entry => entry.at));
+  const ranked = [...tasks].sort((a, b) => executionRank(b) - executionRank(a)
+    || dispatchAt(b) - dispatchAt(a) || b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+  const representatives = new Map<string, string>();
+  for (const task of ranked) for (const sessionId of task.sessionIds) {
+    if (!representatives.has(sessionId)) representatives.set(sessionId, task.id);
+  }
+  return representatives;
+}
+
+/** Keep every real Task and its original links, but decorate a shared Session
+ * only once. Historical Task records remain governed by their own lifecycle. */
 export function projectBoardRows(
   workspace: { id?: string; path: string },
   tasks: readonly Task[],
@@ -72,24 +89,27 @@ export function projectBoardRows(
     && !isManagedScheduledJob(t)
     && (t.workspacePath ? workspacePathsEqual(t.workspacePath, workspace.path) : t.workspaceId === workspace.id));
   const linked = new Set(visibleTasks.flatMap(t => t.sessionIds));
+  const representatives = activityRepresentatives(visibleTasks);
   const rows: BoardRow[] = visibleTasks.map(task => {
+    const activitySessionIds = task.sessionIds.filter(id => representatives.get(id) === task.id);
     const executionSessions = sessions.filter(s => task.sessionIds.includes(s.id));
-    const goals = task.sessionIds.map(id => boardGoalState(activity.get(id), now));
+    const goals = activitySessionIds.map(id => boardGoalState(activity.get(id), now));
     const goalReason = goals.includes('blocked') ? 'blocked' : goals.includes('paused') ? 'paused' : goals.includes('stopped') ? 'stopped' : goals.includes('unknown') ? 'unknown' : undefined;
     const goalRunning = goals.includes('running');
-    const waitingSessionId = task.sessionIds.find(id => freshActivity(activity.get(id), now) === 'waiting_user_action');
-    const runningSessionId = task.sessionIds.find(id => freshActivity(activity.get(id), now) === 'running');
-    const snapshot = activity.get((waitingSessionId ?? runningSessionId) ?? task.sessionIds.find(id => boardGoalState(activity.get(id), now) === 'running') ?? '')
-      ?? executionSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now))
-      ?? [...executionSessions].sort((a,b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)).map(s => activity.get(s.id)).find(a => !!a);
-    const lastKnownActive = task.sessionIds.some(id => {
+    const waitingSessionId = activitySessionIds.find(id => freshActivity(activity.get(id), now) === 'waiting_user_action');
+    const runningSessionId = activitySessionIds.find(id => freshActivity(activity.get(id), now) === 'running');
+    const observedSessions = executionSessions.filter(s => activitySessionIds.includes(s.id));
+    const snapshot = activity.get((waitingSessionId ?? runningSessionId) ?? activitySessionIds.find(id => boardGoalState(activity.get(id), now) === 'running') ?? '')
+      ?? observedSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now))
+      ?? [...observedSessions].sort((a,b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)).map(s => activity.get(s.id)).find(a => !!a);
+    const lastKnownActive = activitySessionIds.some(id => {
       const observation = activity.get(id);
       return observation && !freshActivity(observation, now)
         && (observation.state === 'running' || observation.state === 'waiting_user_action');
     });
     const confirmationReason: ConfirmationReason | undefined = task.executionState === 'stop_failed' ? 'stopFailed'
       : waitingSessionId ? 'waiting' : runningSessionId || goalRunning ? undefined
-      : task.sessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
+      : activitySessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
       : task.executionState ? undefined
       : goalReason ? goalReason
       : lastKnownActive ? 'unknown' : task.status === 'verifying' ? 'verification' : task.status === 'blocked' ? 'blocked'
@@ -103,7 +123,7 @@ export function projectBoardRows(
       id: `task:${task.id}`, title: task.name, group, task, sessions: executionSessions,
       summary: task.executionError || task.lastExecution?.error || task.description || '',
       updatedAt: task.updatedAt,
-      activity: snapshot, activitySessionId: task.sessionIds.find(id => activity.get(id) === snapshot), confirmationReason, archived: task.status === 'archived',
+      activity: snapshot, activitySessionId: activitySessionIds.find(id => activity.get(id) === snapshot), confirmationReason, archived: task.status === 'archived',
     };
   });
   for (const session of visibleSessions) {
