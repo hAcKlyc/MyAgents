@@ -35,3 +35,7 @@
 先继续源码/相称回归，不抢日常App。055客户端安装仍因16:26准确HRM执行中而未做，fresh完整owner/代次/子进程/PTY/队列/待交互/编辑准入和一致备份必须重新取得。不可把055服务器发布记成日常客户端已升级。
 
 101测试机network-test后检failed/MainPID0：16:21:58起ACCOUNT_SESSION_EXPIRED，16:22:02 exit1/systemd重试限制；Node测试服务保留，无活动Session。实际网络状态已保留失败JSON，前期错误文字已纠正；未经新操作窗口不自动重启/补凭据，不读token或把归档完整GET当Host联调。056由原Host owner接续会话有效性和完整业务路径。
+
+## MOXBOTS-BOARD-DEDUP-001 intake
+
+共享Session的当前进度只装饰一个代表Task卡片，保留旧任务状态和会话入口。代码/合成验证详见 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。发布056时需在实际薪资共享会话场景核对只出现一份TODO/计时及旧检查已完成；当前未安装/重启日常客户端，不能把本地React结果称原生完成。

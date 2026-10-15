@@ -6,6 +6,49 @@ const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
 describe('project board authority projection', () => {
+  it('decorates shared-session work once while preserving completed and blocked Task records', () => {
+    const old = task({id:'check',status:'done',lastExecutedAt:100,updatedAt:now+1000});
+    const retry = task({id:'retry',status:'blocked',lastExecutedAt:200,lastExecution:{at:200,durationMs:3600000,sessionId:'s1',success:false,error:'Execution timed out',trigger:'scheduled'}});
+    const snapshot = {state:'running' as const,checkedAt:now,execution:{startedAt:new Date(now-1000).toISOString(),elapsedMs:1000},
+      progress:{source:'live' as const,todoSource:'tools' as const,todos:[],todoTotal:21,todoCompleted:3,agents:[],agentTotal:0,agentRunning:0},
+      goal:{checkedAt:now,value:{status:'active' as const,isExecuting:true}}};
+    for(const tasks of [[old,retry],[retry,old]]) {
+      const rows=projectBoardRows({path:'/work/p'},tasks,[session()],new Map([['s1',snapshot]]),now);
+      expect(rows).toHaveLength(2);
+      expect(rows.filter(row=>row.group==='running')).toHaveLength(1);
+      expect(rows.find(row=>row.task?.id==='retry')).toMatchObject({activity:snapshot,activitySessionId:'s1'});
+      expect(rows.find(row=>row.task?.id==='check')).toMatchObject({group:'done',activity:undefined,activitySessionId:undefined,sessions:[{id:'s1'}]});
+      expect(old.status).toBe('done'); expect(retry.status).toBe('blocked');
+    }
+  });
+  it('prefers a current concrete execution over a newer historical or future Task', () => {
+    const rows=projectBoardRows({path:'/work/p'},[
+      task({id:'active',executionState:'running',lastExecutedAt:100}),
+      task({id:'later',status:'done',lastExecutedAt:200}),
+      task({id:'future',status:'todo',createdAt:now+1000}),
+    ],[session()],new Map([['s1',{state:'waiting_user_action',checkedAt:now}]]),now);
+    expect(rows.find(row=>row.task?.id==='active')).toMatchObject({group:'needs',confirmationReason:'waiting',activitySessionId:'s1'});
+    expect(rows.filter(row=>row.activity)).toHaveLength(1);
+    expect(rows.find(row=>row.task?.id==='later')?.group).toBe('done');
+    expect(rows.find(row=>row.task?.id==='future')?.group).toBe('todo');
+  });
+  it('keeps shared-session failure and stale observations on one row without changing other task states', () => {
+    for(const snapshot of [{checkedAt:now,error:'failed',errorCode:'execution_failed' as const}, {state:'running' as const,checkedAt:now-61000}]) {
+      const rows=projectBoardRows({path:'/work/p'},[task({id:'old',status:'archived',lastExecutedAt:100}),task({id:'new',status:'blocked',lastExecutedAt:200})],
+        [session()],new Map([['s1',snapshot]]),now);
+      expect(rows.find(row=>row.task?.id==='old')).toMatchObject({group:'archived',activity:undefined});
+      expect(rows.find(row=>row.task?.id==='new')?.group).toBe('needs');
+      expect(rows.filter(row=>row.activity)).toHaveLength(1);
+    }
+  });
+  it('assigns each shared Session independently and handles missing metadata and duplicate links', () => {
+    const observations=new Map([['s1',{state:'running' as const,checkedAt:now}],['s2',{state:'waiting_user_action' as const,checkedAt:now}]]);
+    const rows=projectBoardRows({path:'/work/p'},[task({id:'old',status:'done',sessionIds:['s1','s2'],lastExecutedAt:100}),
+      task({id:'new',sessionIds:['s1','s1'],lastExecutedAt:200})],[],observations,now);
+    expect(rows.find(row=>row.task?.id==='old')).toMatchObject({confirmationReason:'waiting',activitySessionId:'s2'});
+    expect(rows.find(row=>row.task?.id==='new')).toMatchObject({group:'running',activitySessionId:'s1'});
+  });
+
   it('preserves trusted Task execution when the independent Goal read fails or is paused',()=>{
     for(const goal of [{checkedAt:now,error:'unavailable'},{checkedAt:now,value:{status:'paused' as const,isExecuting:false}}]){
       const row=projectBoardRows({path:'/work/p'},[task({status:'done',executionState:'running'})],[session()],new Map([['s1',{state:'idle',checkedAt:now,goal}]]),now)[0];

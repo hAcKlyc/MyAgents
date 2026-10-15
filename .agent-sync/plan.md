@@ -263,3 +263,7 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 ## MOXBOTS-RESTART-001 — 用户确认后允许中断并重启
 
 2026-10-15 用户明确确认目标仓库并要求运行任务也能手动重启。056候选改为明确停止/保存确认；后台下载不安装，取消无副作用。Rust验包/签名、精确代次DispatchLease、SessionEngine全会话停止和writer落盘依次完成，运行中Task按用户Stop记为Stopped，空闲调度保留；安装失败恢复文档/语音准入，迟到响应不能复活旧token。当前Agent负责实现/集成/原生门禁，restart_safety_review独立只读审查。代码、回归、CI/main及签名原生发行分别追踪，见 `.agent-sync/tasks/codex-restart-001-20261015-35044beb.md` 和 `dev-docs/restart-001-acceptance.md`。不回写不可变055，未操作日常客户端。
+
+## MOXBOTS-BOARD-DEDUP-001 — shared Session presentation
+
+多个Task复用同一Session时只选一个当前进度代表卡片，历史任务按自身状态保留，不再把同一TODO/计时/Goal复制成多个执行。renderer限定修复，零业务数据写入；代码/React合成验证/main与056原生发布分别追踪于 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。
