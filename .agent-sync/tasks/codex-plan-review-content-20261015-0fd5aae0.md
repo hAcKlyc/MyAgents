@@ -21,6 +21,10 @@ MOXBOTS-PLAN-REVIEW-001：修复方案审核空卡。用户确认目标仓库 ht
 - [ ] CI/review/main/远端包含性核实。
 - [ ] 原生安装与真实模型验收：单独追踪，当前统一055安装任务活动且日常业务运行，不能替换、退出或重启客户端；不借用其QA窗口。
 
+## Completed
+
+实现、相邻回归、SDK callback synthetic集成、实际渲染UI、自审、web/server构建已完成并提交。PR：https://github.com/heavenzhang/MoXBots/pull/57 。CI/main尚待核实；原生安装/真实模型保持开放，不因源码交付宣称已发布。Git交付以PR实际merge状态、远端main包含性与外部delivery.json收据为准。
+
 ## Verification
 
 - 本机日志明确 No session plan markdown found for current turn；真实 Write 结果为 Plan hook denied。业务正文恢复仅存项目本地 output，不提交 Git。
