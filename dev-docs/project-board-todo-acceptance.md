@@ -18,7 +18,7 @@
 | 类型/lint/构建 | 通过 | Node24类型、完整lint（16已有orphan warning/0errors），MoXBots profile web/server生产构建 |
 | 实际React合成UI | 通过 | 6组journeys，1440深浅、540窄窗、17TODO/3子Agent、回原会话/返回、全部勾完Task仍等待、失败观察保留旧进度和stale子Agent；0pageerror |
 | 独立审阅 | 通过 | todo_review只读代码/视觉审阅；准确Session/Query、nativeplan reset、冷历史/完成权威通过。未亲自操作原生GUI，不冒称独立原生验收 |
-| main/CI | PR58运行中 | feature3992d3bf已推远端，CI38684226016；以最新PR head和远端main为准 |
+| main/CI | 通过并合入 | PR58/head34db21c0，CI38684296565六项success；main7346499bbfee211bb2fff0335dd0b3087b96309e，源码树与已验收head一致，远端ref已核实 |
 | 原生安装/Provider/发布 | 未执行 | 当前日常客户端不包含新增feature；统一包owner串行纳入，不退出、重启或发送现有业务会话 |
 
 精选合成截图、原始journey输出、图像hash和可复现脚本在 `project-board-validation/todo/`。临时完整命令输出 `/tmp/board-todo-*.log`。全部截图使用隔离合成数据，不是生产账号或真实模型执行证据。
@@ -26,3 +26,9 @@
 首次UI预优化缺debug默认导出，补夹具CJS预优化后通过，未改变产品依赖。首次540截图在侧栏过渡动画中取图，独立审阅指出证据不足；夹具改为等待rail与有限CSS动画稳定后重跑并独立复看通过。首次完整SessionEngine测试因既有mock未包含新增export而在对象初始化失败；adapter采用与现有其他方法一致的惰性facade调用，并追加两类facade测试，120项通过；未放宽边界或忽略失败。
 
 执行：主Agent实现/集成/关键交互；一个只读reviewer gpt-6-luna/medium负责数据与UI审阅，请求值已知、运行型号与用量未知；未调用外部模型。不调用外部原因：沿用ai-yaoren-local纯内置模式。审阅发现一处夹具证据问题并修复，下一次响应式取证先等状态和动画稳定。
+
+## 主干交付与统一包接收
+
+PR58在2026-10-15 13:14（Asia/Shanghai）合入main7346499bbfee211bb2fff0335dd0b3087b96309e；运行源码与head34db21c0逐项无差异。首次CI38684226016因文档接续补齐而被新run取代取消，不计失败/通过；最终38684296565的六项完整检查全部success。提交记录与同步门禁已保存；最终docs追加不修改产品源码。
+
+统一打包负责人已确认新TODO/子Agent展示进入待集成队列，当前A7不包含新增功能。本Agent发送exact main与CI/验收证据后由既有owner串行纳入；已发布的旧版本不覆盖。新增版本的真实原生/Provider验收、官网发布及日常客户端用户手动更新仍未完成，不能以本次main或合成截图代替。

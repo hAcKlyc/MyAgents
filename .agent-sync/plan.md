@@ -220,4 +220,4 @@ Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已�
 
 ## MOXBOTS-PROJECT-BOARD-TODO-001
 
-在四阶段看板增量接入原会话TODO和子Agent真实进度。卡片/列表摘要、详情三态清单/子Agent状态，复用共享reducer与既有只读activity owner；历史/过期不冒充实时，TODO全勾不推导Task完成。代码、251项相关unit/DOM、类型/lint、MoXBots web/server构建、6组合成UI及独立代码/视觉审阅已通过；PR/CI/main及统一原生纳入分别核实。验收 `dev-docs/project-board-todo-acceptance.md`，任务 `.agent-sync/tasks/codex-project-board-todo-20261015-06d8ff2b.md`。
+在四阶段看板增量接入原会话TODO和子Agent真实进度。卡片/列表摘要、详情三态清单/子Agent状态，复用共享reducer与既有只读activity owner；历史/过期不冒充实时，TODO全勾不推导Task完成。代码、251项相关unit/DOM、类型/lint、MoXBots web/server构建、6组合成UI及独立代码/视觉审阅已通过；PR58六项CI通过并合入main7346499b（产品树与CI head一致），统一原生纳入仍待负责人队列。验收 `dev-docs/project-board-todo-acceptance.md`，任务 `.agent-sync/tasks/codex-project-board-todo-20261015-06d8ff2b.md`。
