@@ -2458,6 +2458,10 @@ async function main() {
             : undefined;
           return {
             providerId: cfg.providerId,
+            apiProtocol: cfg.apiProtocol,
+            authType: cfg.authType,
+            headersTimeoutMs: cfg.headersTimeoutMs,
+            modelFailover: cfg.modelFailover,
             baseUrl: cfg.baseUrl,
             apiKey: cfg.apiKey,
             credentialVersion: cfg.credentialVersion,

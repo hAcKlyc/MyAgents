@@ -222,3 +222,7 @@ Custom Provider 复用相同 route/env/bridge 架构。新增或修改时：
 - Provider history family 与 Query replacement；
 - legacy session providerEnv redaction / repair；
 - `server_tool_use` input 和装饰性 wrapper 的精确兼容。
+
+## 可选主备模型接管
+
+内置 API Session 的自动切换由原 Query bridge-token 拥有，配置、HTTP恢复/防重放和不支持范围见 [内置 API 模型自动接管](model_failover.md)。临时备用不是用户选定模型，不写回 Session desired config；已交付流中断保留现场并停止。
