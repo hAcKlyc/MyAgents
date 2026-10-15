@@ -1,0 +1,13 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { i18n } from "@/i18n";
+import { ThemeRuntimeProvider } from "@/theme/ThemeRuntime";
+import { acceptNetworkRegistry } from "@/features/agent-network/store";
+import { ToastProvider } from "@/components/Toast";
+import AgentNetwork from "@/pages/AgentNetwork";
+import { snapshot, localId, mode } from "./mock";
+import "./fixture.css";
+await i18n.changeLanguage(new URLSearchParams(location.search).get("lang") || "zh-CN");
+localStorage.setItem("myagents_device_id", localId);
+acceptNetworkRegistry({ selfhostEnabled: true, selected: "qa-owned", connections: [{ id: "qa-owned", name: "MoXBots · 验收网络", official: false, url: "https://network.example.test", removing: false, snapshot: snapshot as never }] });
+createRoot(document.getElementById("root")!).render(<ThemeRuntimeProvider selection={null}><div style={{ height: "100vh", display: "flex", flexDirection: "column" }}><aside style={{ padding: "6px 16px", fontSize: 12, background: "var(--paper-inset)", color: "var(--ink-muted)" }}>MOXBOTS-HOST-ONBOARDING-001 · 合成元数据 / 无原生账号或模型调用 · {mode}</aside><div style={{ flex: 1, minHeight: 0 }}><ToastProvider><AgentNetwork /></ToastProvider></div></div></ThemeRuntimeProvider>);
