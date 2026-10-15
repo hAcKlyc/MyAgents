@@ -122,6 +122,13 @@ const BASH_INPUT_FIELDS = new Set([
   'timeout',
 ]);
 
+/** Lightweight status projection for folded process rows; shares the terminal
+ * precedence with the expanded transcript without formatting output/commands. */
+export function resolveBashTranscriptStatus(tool: ToolUseSimple): BashTranscriptStatus {
+  const input = resolveBashInput(tool);
+  return resolveBashStatus(tool, input, parseSdkBashResult(tool.result), Boolean(input.command));
+}
+
 export function resolveBashTranscriptModel(tool: ToolUseSimple): BashTranscriptModel {
   const input = resolveBashInput(tool);
   const rawCommand = typeof input.command === 'string' ? input.command : '';
