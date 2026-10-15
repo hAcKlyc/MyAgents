@@ -623,6 +623,8 @@
       "cancelFailed": "Could not cancel. Retry, or use the composer Stop button to end this turn."
     },
     "planPrompt": {
+      "missingPlanSubtitle": "Plan content is missing. Ask the AI to provide it first.",
+      "missingPlan": "The plan could not be loaded, so approval is disabled. Ask the AI below to provide the full plan and resubmit, or reject this review.",
       "submitFeedback": "Submit feedback",
       "rejectPlan": "Reject plan",
       "title": "Plan review",

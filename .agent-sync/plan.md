@@ -225,3 +225,9 @@ FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用�
 ## MOXBOTS-BRAND-COMMUNITY-001 — 2026-10-15
 
 用户要求清理可见MyAgents名称/介绍，并重建社区到现有云服务体系。隔离分支`codex/brand-community-20261015`，基线c7bab285；桌面品牌/导航、同云账号社区及后台管理已由PR50交main b5b9c9c4；7CI、151云回归、独立UI和生产真实OIDC/只读路径通过。云已安全发布并释放维护hold，原生0.5.5由统一负责人继续。最终证据见`dev-docs/brand-community-delivery.md`。合同`services/agentnet/COMMUNITY.md`，任务`.agent-sync/tasks/codex-brand-community-20261015-5872226e.md`。云服务和桌面分别追踪发布；统一桌面0.5.5打包owner正在工作，本任务不并发安装或重启日常应用。不得把合成OIDC、本地fixture或主干合入称为生产/原生完成。
+
+
+## MOXBOTS-PLAN-REVIEW-001
+
+2026-10-15 用户确认 MoXBots 目标仓库，当前Agent直接修复方案审核空卡。仅当前 Session 专用 Markdown 写入例外；无完整正文时返回模型可修复错误，UI旧空卡禁用批准。任务及分项验收见 `.agent-sync/tasks/codex-plan-review-content-20261015-0fd5aae0.md`。代码/模拟/UI/main与原生安装分别追踪；不操作现有业务审核或并发替换统一055客户端。
+

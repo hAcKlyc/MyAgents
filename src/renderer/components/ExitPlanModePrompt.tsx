@@ -32,6 +32,7 @@ export function ExitPlanModePrompt({ request, onApprove, onReject }: ExitPlanMod
     const { t } = useTranslation('chat');
     const isResolved = !!request.resolved;
     const isApproved = request.resolved === 'approved';
+    const hasPlan = typeof request.plan === 'string' && !!request.plan.trim();
 
     const [feedback, setFeedback] = useState('');
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,7 +128,7 @@ export function ExitPlanModePrompt({ request, onApprove, onReject }: ExitPlanMod
                             isResolved && !isApproved
                                 ? 'text-[var(--ink-muted)]'
                                 : 'text-[var(--success)]'
-                        }`}>{t('shell.planPrompt.subtitle')}</p>
+                        }`}>{t(hasPlan ? 'shell.planPrompt.subtitle' : 'shell.planPrompt.missingPlanSubtitle')}</p>
                     </div>
                     {/* Resolved badge in header */}
                     {isResolved && (
@@ -145,14 +146,20 @@ export function ExitPlanModePrompt({ request, onApprove, onReject }: ExitPlanMod
                 </div>
 
                 {/* Plan content — always visible */}
-                {request.plan && (
+                {hasPlan && (
                     <div className={`mt-3 max-h-[26rem] overflow-y-auto rounded-lg border p-3 text-sm ${
                         isResolved && !isApproved
                             ? 'border-[var(--line)] bg-[var(--paper)]'
                             : 'border-[var(--success)]/30 bg-[var(--paper-elevated)]/80'
                     }`}>
-                        <Markdown>{request.plan}</Markdown>
+                        <Markdown>{request.plan ?? ''}</Markdown>
                     </div>
+                )}
+
+                {!hasPlan && (
+                    <p role="alert" className="mt-3 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] p-3 text-sm text-[var(--ink)]">
+                        {t('shell.planPrompt.missingPlan')}
+                    </p>
                 )}
 
                 {/* Allowed prompts — always visible */}
@@ -185,8 +192,9 @@ export function ExitPlanModePrompt({ request, onApprove, onReject }: ExitPlanMod
                 {!isResolved && (
                     <div className="mt-3 space-y-2">
                         <button
-                            onClick={onApprove}
-                            className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--success)] px-3 py-2 text-sm font-medium text-[var(--on-success)] transition-colors hover:brightness-110"
+                            onClick={() => { if (hasPlan) onApprove(); }}
+                            disabled={!hasPlan}
+                            className="disabled:cursor-not-allowed disabled:opacity-50 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--success)] px-3 py-2 text-sm font-medium text-[var(--on-success)] transition-colors hover:brightness-110"
                         >
                             <CheckIcon className="h-4 w-4" />
                             {t('shell.planPrompt.approve')}

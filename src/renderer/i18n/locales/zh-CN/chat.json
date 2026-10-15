@@ -623,6 +623,8 @@
       "cancelFailed": "取消失败，请重试；也可以用输入框的停止按钮结束本轮。"
     },
     "planPrompt": {
+      "missingPlanSubtitle": "方案正文缺失，请先要求 AI 补充",
+      "missingPlan": "方案正文未能加载，暂时无法批准。请在下方要求 AI 补充完整方案后重新提交，或拒绝本次审核。",
       "submitFeedback": "提交修改意见",
       "rejectPlan": "拒绝方案",
       "title": "方案审核",
