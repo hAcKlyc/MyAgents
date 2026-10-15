@@ -1,0 +1,67 @@
+{
+  "task": "MOXBOTS-BOTS-READY-056-20261015",
+  "scope": "Actual NetworkHeader/NetworkSelector with real i18n; fixture outer navigation and directory, not native App",
+  "cases": [
+    {
+      "width": 1280,
+      "height": 900,
+      "lng": "zh-CN",
+      "scheme": "light",
+      "title": "Bots 网络",
+      "menu": "Bots Ready",
+      "welcome": "Your bots are ready.",
+      "pickerAndInfoEscape": true,
+      "realConnectionLabelPreserved": true,
+      "longNameOverflow": false,
+      "unknownCountsPreserved": true,
+      "screenshot": "1280-zh-CN-light.png"
+    },
+    {
+      "width": 900,
+      "height": 700,
+      "lng": "zh-CN",
+      "scheme": "dark",
+      "title": "Bots 网络",
+      "menu": "Bots Ready",
+      "welcome": "Your bots are ready.",
+      "pickerAndInfoEscape": true,
+      "realConnectionLabelPreserved": true,
+      "longNameOverflow": false,
+      "unknownCountsPreserved": true,
+      "screenshot": "900-zh-CN-dark.png"
+    },
+    {
+      "width": 640,
+      "height": 800,
+      "lng": "en-US",
+      "scheme": "light",
+      "title": "Bots Network",
+      "menu": "Bots Ready",
+      "welcome": "Your bots are ready.",
+      "pickerAndInfoEscape": true,
+      "realConnectionLabelPreserved": true,
+      "longNameOverflow": false,
+      "unknownCountsPreserved": true,
+      "screenshot": "640-en-US-light.png"
+    },
+    {
+      "width": 1280,
+      "height": 900,
+      "lng": "en-US",
+      "scheme": "dark",
+      "title": "Bots Network",
+      "menu": "Bots Ready",
+      "welcome": "Your bots are ready.",
+      "pickerAndInfoEscape": true,
+      "realConnectionLabelPreserved": true,
+      "longNameOverflow": false,
+      "unknownCountsPreserved": true,
+      "screenshot": "1280-en-US-dark.png"
+    }
+  ],
+  "pageErrors": [],
+  "externalRequests": [],
+  "nativeOrDailyClientUsed": false,
+  "passed": true,
+  "checkedAt": "2026-10-15T08:13:40.244Z"
+}

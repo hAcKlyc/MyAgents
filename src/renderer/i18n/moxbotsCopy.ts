@@ -1,6 +1,16 @@
 /** Product copy for the owned edition; upstream legal attribution stays intact. */
 export const moxbotsCopy = {
   'zh-CN': {
+    tabs: { agentNetwork: 'Bots 网络' },
+    globalSidebar: { agentNetwork: 'Bots Ready' },
+    agentNetwork: {
+      pageTitle: 'Bots 网络',
+      welcome: 'Your bots are ready.',
+      onboardingTitle: 'Bots Ready',
+      infoIntro: 'Bots 网络用于连接同一云账号下授权的设备与 Agent。设备管理和远程执行以目标 Host 的实际权限与状态为准。',
+      infoRelay: '设备通过当前连接的云服务发现彼此并中转网络通信。',
+      infoLocal: '任务在所选择的设备或 Host 执行，模型与工具由该执行环境的配置决定。',
+    },
     about: {
       slogan: '人定目标，Bot 团队协作执行',
       developerLabel: '关于 MoXBots',
@@ -16,6 +26,16 @@ export const moxbotsCopy = {
     },
   },
   'en-US': {
+    tabs: { agentNetwork: 'Bots Network' },
+    globalSidebar: { agentNetwork: 'Bots Ready' },
+    agentNetwork: {
+      pageTitle: 'Bots Network',
+      welcome: 'Your bots are ready.',
+      onboardingTitle: 'Bots Ready',
+      infoIntro: 'Bots Network connects authorized devices and Agents under your cloud account. Device management and remote execution follow the target Host’s effective permissions and state.',
+      infoRelay: 'Devices use the connected cloud service for discovery and relaying network communication.',
+      infoLocal: 'Tasks run on the selected device or Host, using that environment’s configured models and tools.',
+    },
     about: {
       slogan: 'Set goals. Let your Bot team get to work.',
       developerLabel: 'About MoXBots',
