@@ -17,7 +17,7 @@
 - [x] 冻结055源码52bf61602522fb28715edf620d98ad8e3deee842已在远端main历史；正式ZIP本地size/SHA/CRC与发布回执一致，formal App签名/票据/Gatekeeper独立只读复验通过，未启动App。
 - [x] 负责人完成唯一Linux完整HTTPS GET，读取完整原始回执确认336038989-byte TAR/SHA31ee2b5eb9a4afb846dc3b4e211fb153290bc06cd700a69a914734d0a232f731和自身更新签名，不能用partial或server磁盘hash代替。
 - [x] 负责人完成stable CAS0.5.5，核原始promote/rollback回执和实际 https://140.143.183.232/updates/stable/darwin-aarch64.json version/URL/signature与冻结055一致；等其释放冲突维护锁。
-- [ ] 门槛通过后发布或复用匹配的immutable公开GitHub ZIP，完整匿名网络下载/SHA/CRC、签名公证及制品对应关系通过；禁止覆盖旧055/054资产。
+- [x] 门槛通过后发布或复用匹配的immutable公开GitHub ZIP，完整匿名网络下载/SHA/CRC、签名公证及制品对应关系通过；禁止覆盖旧055/054资产。
 - [ ] 更新services/website/trial-release.json及必要记录；最新main只作metadata集成基础，不重新构建055。现有静态设计不改。
 - [ ] 重新读取live symlink/HTML，四把既有锁、backup/ownership-checked rollback、CAS覆层仅新content-addressed JSON及HTML引用；不改Nginx/TLS/auth/cloud/updates或其他服务路径。
 - [ ] 真实IP网页桌面1440x960/手机390x844版本、大小、下载/源码/发行说明、签名/SHA、无JS错误/横溢和有限route回归；PR/必要CI通过、main合并及远端tree/live manifest核实。
@@ -55,3 +55,7 @@
 ## 2026-10-15 ZIP 上传 checkpoint
 
 上述历史进度中的下载阻断已解除；本轮的阻断为GitHub ZIP上传仍在进行。候选metadata提交4dac206b，draft tag moxbots-trial-0.5.5-52bf6160已建立且target52bf正确；校验文件已uploaded，ZIP尚未完成。保持现有上传，不新增重复大传输、不覆盖资产；后续从私有execution-status.json中的PID/session和GitHub资产状态接续。第一次代理上传已仅停止自有未完成进程；小请求证实直连可用后改为单次upload进程NO_PROXY=uploads.github.com，未修改系统代理或新增隧道。官网仍054，无服务器写锁或部署。完整接续边界/已过和待验项见dev-docs/moxbots-055-download-acceptance.md。
+
+## 2026-10-16 手动ZIP发布与完整readback完成
+
+自有上传正常exit0，GitHub两资产exact size/digest通过后公开prerelease moxbots-trial-0.5.5-52bf6160；远端tag精确52bf。匿名正常TLS/H2完整GET344623193B、SHA b2bf...及14830个ZIP条目CRC通过，未运行任何App。当前新阻断是Root另一个updater发布租约：重读website仍054 pointer和原HTML SHA，.release-lock存在；已联系原唯一负责人串行交回，不拿锁、不staging/改站。接续只读私有phase waiting-website-publication-window；不用再上传/完整下载。055已通过的下载/stable先决条件保持回执，后续056发布不得被倒切。官网overlay/最终页面/main仍待交付。
