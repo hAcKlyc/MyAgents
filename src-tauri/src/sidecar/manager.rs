@@ -817,6 +817,28 @@ impl SidecarManager {
         Ok(targets)
     }
 
+    /// Pin every exact generation until its restart checkpoint response has
+    /// been read. A stopped Task may concurrently release its final owner.
+    pub(super) fn acquire_update_restart_targets(
+        &mut self,
+    ) -> Result<Vec<(GlobalShutdownTarget, DispatchLease)>, String> {
+        let targets = self.update_restart_targets()?;
+        let mut admitted = Vec::new();
+        for target in targets {
+            let gate = self.sidecars.iter().find_map(|(id, sidecar)| {
+                (sidecar.port == target.port && self.generation_for(id) == Some(target.generation))
+                    .then_some(&sidecar.dispatch_gate)
+            }).or_else(|| self.instances.values().find_map(|instance| {
+                (instance.port == target.port && instance.generation == target.generation)
+                    .then_some(&instance.dispatch_gate)
+            })).ok_or_else(|| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+            let lease = DispatchGate::try_acquire(gate)
+                .ok_or_else(|| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+            admitted.push((target, lease));
+        }
+        Ok(admitted)
+    }
+
     /// Stop all instances (session sidecars and global sidecar)
     pub(crate) fn prepare_stop_all(&mut self) -> SidecarShutdownPreparation {
         let mut drains = Vec::with_capacity(
@@ -2425,6 +2447,29 @@ mod completion_claim_tests {
             .unwrap()
             .unwrap();
         assert_eq!(dispatch.generation(), generation);
+    }
+
+    #[test]
+    fn update_checkpoint_pins_task_only_process_until_its_durable_response() {
+        let mut manager = SidecarManager::new();
+        manager.insert_test_ready_frontend_sidecar(
+            "task-checkpoint", 31428, SidecarOwner::Task("task".to_string()),
+        );
+        let admitted = manager.acquire_update_restart_targets().unwrap();
+        assert_eq!(admitted.len(), 1);
+        let drain = DispatchGate::close(&manager.sidecars.get("task-checkpoint").unwrap().dispatch_gate);
+        let (started, ready) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let retiring = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            drain.wait();
+            finished.send(()).unwrap();
+        });
+        ready.recv().unwrap();
+        assert!(done.recv_timeout(std::time::Duration::from_millis(20)).is_err());
+        drop(admitted);
+        done.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        retiring.join().unwrap();
     }
 
     #[test]

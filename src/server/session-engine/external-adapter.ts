@@ -859,7 +859,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     async stopTurn(options) {
-      if (!isExternalSessionActive()) {
+      if (!isExternalSessionActive() && !(options?.wholeSession && (hasExternalRuntimeProcess() || isExternalSessionBusy()))) {
         return { success: true, alreadyStopped: true };
       }
       const stopped = options?.preserveQueue

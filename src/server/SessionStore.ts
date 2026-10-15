@@ -87,6 +87,17 @@ export function assertSessionTranscriptsDurableForUpdate(): void {
     }
 }
 
+/** Called after the lifecycle owner has stopped producers and closed admission. */
+export async function flushSessionTranscriptsForUpdate(): Promise<void> {
+    await Promise.all(transcriptBindings.values());
+    for (const transcript of activeTranscripts.values()) {
+        if (!transcript.isRevoked && !await transcript.writer.flush()) {
+            throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+        }
+    }
+    assertSessionTranscriptsDurableForUpdate();
+}
+
 export function getActiveSessionTranscript(sessionId: string): SessionTranscript | undefined {
     const active = activeTranscripts.get(sessionId);
     return active?.isRevoked ? undefined : active;

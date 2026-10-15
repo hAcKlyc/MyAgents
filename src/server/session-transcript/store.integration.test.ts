@@ -50,6 +50,25 @@ async function create(patch: Partial<SessionMetadata> = {}) {
 }
 
 describe('SessionStore V2 ownership and compatibility', () => {
+  it('flushes the live answer before restart and preserves it on a cold read', async () => {
+    const { metadata, active } = await create();
+    active.writer.observe({ kind: 'message-create', message: { id: 'restart-answer', role: 'assistant', content: 'saved before restart', timestamp: 't' } });
+    await store.flushSessionTranscriptsForUpdate();
+    expect(active.writer.status.liveRevision).toBe(active.writer.status.durableRevision);
+    await active.revoke();
+    vi.resetModules();
+    store = await import('../SessionStore');
+    expect((await store.getSessionData(metadata.id))?.messages[0].content).toBe('saved before restart');
+  });
+
+  it('does not approve a restart when the live transcript cannot flush', async () => {
+    const { active } = await create();
+    const flush = vi.spyOn(active.writer, 'flush').mockResolvedValueOnce(false);
+    await expect(store.flushSessionTranscriptsForUpdate()).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    flush.mockRestore();
+    await expect(store.flushSessionTranscriptsForUpdate()).resolves.toBeUndefined();
+  });
+
   it('does not create product directories during cold identity and empty transcript reads', async () => {
     testState.failSyncStorage = true;
     expect(store.getAllSessionMetadata()).toEqual([]);

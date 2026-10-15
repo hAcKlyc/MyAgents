@@ -57,25 +57,15 @@ Renderer 的 `updateReady`、`preparing` 和启动对话框只是上述磁盘状
 
 ## 用户确认重启与活动保护
 
-macOS 的安装入口先取得已有 lifecycle update-quiesce exclusive permit，再检查
-`TaskSchedulerController.executions` 与每个 Sidecar 的精确 generation。Task 的
-`Running` 行仅表示调度已启用，不是执行证据；只有瞬时 execution 才阻止安装。
-所有新的 scheduler execution claim 与进程创建使用同一 shared permit。已准入创建尚未完成时安装直接返回 busy，保持原准入开放，不关闭 gate 后等待并误拒其后续资源创建。
+MoXBots 的手动「重启更新」在确认框中明确说明：会中断本机任务与终端命令、停止并保存录音，先保存会话和输入草稿。启动 pending 对话框与手动入口复用同一个确认组件，禁用自动 Enter 确认；取消不进入任何停止/安装流程。确认后才传入 `install_pending_update({ interruptWork: true })`。检查与下载仍只在后台准备更新，绝不因空闲或 ready 事件自动停止或安装。
 
-录音 live/paused/settling、文档及语音队列/活动/探测 reservation 由各自 owner
-检查，新提交复用同一 shared permit。Terminal 没有可靠的当前命令 idle 协议；
-任何仍打开的用户 PTY 都要求用户完成并主动关闭后重试，更新不终止终端。
+Rust 在读取版本、校验 pending bytes 与 pinned signature 成功后，取得 lifecycle exclusive permit。已准入但尚未完成的资源创建只要求稍后重试，不能绕过其注册。明确中断路径调用既有录音停止并保存、终端关闭及文档/语音 worker shutdown；任一步无法确认完成均不安装。已中断工作不回滚或伪报完成，失败提示明确部分操作可能已停止。文档及语音的恢复仍由各自持久 owner 管理。
 
-每个 Node Sidecar 通过具有内部 caller 凭据和 generation 校验的 lifecycle 端点，
-在既有 SessionEngine query facade 同步关闭 turn admission 并读取 adapter 活动。
-正在执行、已准入且仍等待 IO、排队、等待审批/提问、SDK 后台任务或 compaction
-均返回 `UPDATE_BUSY`。代次、网络或状态读取失败返回 `UPDATE_ACTIVITY_UNKNOWN`；
-两者都保留 pending 更新包且不停止原任务。已冻结的 idle owner 由同一事务 token
-释放，迟到 release 不能打开新事务。成功安装后保持关闭直到受管重启；安装失败
-释放冻结和 lifecycle gate。Renderer 状态不参与此安全裁决。
+然后对每个精确 Sidecar generation 调用认证 lifecycle 端点 `interrupt-and-freeze`：SessionEngine 同步关闭 mutable/turn admission，经选定 adapter 停止外部 Runtime，builtin 终止整个 Query（含后台任务、审批及 delayed warm-up），等待实际 termination 与 domain rollback，保存内存会话并 flush 现有 transcript writer。确认所有已准入 IO 已结束、writer healthy 且 liveRevision==durableRevision 后，才允许 Task scheduler interrupt_for_update 释放其 Session owner；被冻结且已停止的 Task 只返回幂等停止确认并复核 writer，不开放普通 mutable 准入。这样仅由 Task 持有的 Sidecar 也不会在最后输出落盘前被释放。随后才能安装。超时或保存失败返回 `UPDATE_ACTIVITY_UNKNOWN`，保留 pending，不通过清空活动标记伪造停止证明。冻结由同一事务 token 释放，迟到 release 不能打开新事务。
 
-独立 Host daemon 和远端机器的执行有自己的生命周期，不能从桌面 Session idle
-推断它们空闲，也不能为了更新桌面客户端主动停止它们。
+省略或传入 false 的调用维持非中断契约：Task Running 行不是执行证据，仅瞬时 execution、打开的 PTY、录音/处理队列以及 Node 活动 owner 会返回 `UPDATE_BUSY`；代次或读取失败返回 unknown，原工作不被主动停止。Renderer busy 状态不是安全裁决源。
+
+独立 Host daemon 与远端执行拥有自己的生命周期，桌面更新不主动停止它们；尚未接入草稿持久交接的 remote-session Tab 仍需保留原安全限制。成功安装后保持 admission 关闭直到受管重启；失败先释放 Node 冻结并恢复文档/语音服务准入，再开放 lifecycle gate；已中断的 turn 不重跑，空闲的定时/Detector loop 保留以继续未来调度；真正被中断的 Running Task 通过已有用户 Stop 状态转换显示为 Stopped，待用户检查后继续，不伪装为仍在调度。文档/语音更新专用停止必须确认真实进程树退出；失败保留精确 worker 句柄供重试，不把普通退出的 best-effort 结果当作安装证明。
 
 ## Windows installer handoff
 
@@ -128,6 +118,6 @@ verified-clean handoff 只证明进程与锁已释放，安装资源的完整替
 
 Mox profile 使用独立更新地址、公钥与0.5.3发行版本，MyAgents默认地址/公钥保持原值。首个支持更新的版本必须手动安装，旧的updater-disabled 0.5.2不能自行发现此更新。当前部署仅交付macOS arm64，其他目标端点返回204，Linux保持手动deb。发布准备/验证/原子推广/回滚见scripts/moxbot-updates/README.md。
 
-确认重启不提供中断任务的覆盖选项。读任务/会话/审批、SDK后台和DSH子Agent、录音/处理队列及用户终端的真实owner；busy或unknown均保留pending并继续原工作。既有Lifecycle shared admission与nonwaiting exclusive检查保护资源出生，已准入创建导致更新暂缓；Node mutable准入与builtin delayed warm-up同步冻结，仅空闲owner可安装。必须确认active transcript writer健康且liveRevision==durableRevision，原生异步子Agent观测后再次复读，避免已完成但未落盘的回答丢失。
+确认重启的用户行为以本文「用户确认重启与活动保护」为准：056提供明确的停止并重启路径，默认未确认调用保持非中断语义。此改动不回写已发布的不可变055，也不使旧客户端自动获得新准入逻辑。原生签名包中的真实有任务更新、录音保存、草稿恢复和安装失败路径仍须分别验收。
 
 安装和下载共享pending guard，install前用profile pinned public key复验磁盘字节，不能依赖早先download验签。签名失败清理失效pending，用户可重新检查下载。上游可下载资源继续用原资源签名根，不替换为Mox更新密钥。

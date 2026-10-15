@@ -450,7 +450,7 @@ export interface SessionEngine {
   enqueueInboxMessage(request: InboxMessageRequest): Promise<InboxAdmissionResult>;
   prepareScheduledTurn(request: ScheduledTurnPreparationRequest): Promise<ScheduledTurnPreparationResult>;
   runInjectedTurn(request: InjectedTurnRequest): Promise<InjectedTurnResult>;
-  stopTurn(options?: { preserveQueue?: boolean }): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
+  stopTurn(options?: { preserveQueue?: boolean; wholeSession?: boolean }): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
   stopOwnedTurn(owner: TurnOwner): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
   cancelQueuedMessage(queueId: string): Promise<QueueCancelResult>;
   forceQueuedMessage(queueId: string): Promise<boolean>;
