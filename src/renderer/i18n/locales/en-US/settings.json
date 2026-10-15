@@ -207,6 +207,9 @@
       "title": "App Shortcuts",
       "description": "These shortcuts work globally inside the app and cannot be customized yet.",
       "items": {
+        "zoom-in": "Increase interface size",
+        "zoom-out": "Decrease interface size",
+        "zoom-reset": "Reset interface size",
         "cycle-tab": "Cycle tabs (Shift reverses)",
         "jump-to-tab": "Jump to tab 1-9 (9 means last)",
         "new-tab": "New tab",

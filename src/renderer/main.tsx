@@ -17,6 +17,7 @@ import {
 import { initFrontendLogger, setLogServerReady, setRendererLogLabel } from './utils/frontendLogger';
 import { installMacFunctionKeyGuard } from './utils/macFunctionKeyGuard';
 import { installTextCorrectionPolicy } from './utils/textCorrectionPolicy';
+import { initializeAppZoom } from './utils/appZoom';
 import { dispatchNativeHistoryCommand, type NativeHistoryCommand } from './utils/nativeHistoryCommands';
 import { listenWithCleanup } from './utils/tauriListen';
 
@@ -195,6 +196,7 @@ if (tauriWindowLabel === 'fb-ball') {
     </AppErrorBoundary>
   );
 } else {
+  initializeAppZoom();
   const App = React.lazy(() => import('./App'));
   // Note: React.StrictMode removed to prevent double-rendering of SSE effects in development
   // StrictMode causes useEffect to run twice, which duplicates SSE events and thinking blocks

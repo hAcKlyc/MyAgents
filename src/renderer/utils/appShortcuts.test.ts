@@ -53,7 +53,7 @@ describe('matchAppShortcut — characterization of every existing binding', () =
   it('jumps to tab on ⌘/Ctrl+1~9 (digit only, no shift)', () => {
     expect(id(ev({ metaKey: true, key: '1' }), MAC)).toBe('jump-to-tab');
     expect(id(ev({ ctrlKey: true, key: '9' }), WIN)).toBe('jump-to-tab');
-    expect(id(ev({ metaKey: true, key: '0' }), MAC)).toBeNull();
+    expect(id(ev({ metaKey: true, key: '0' }), MAC)).toBe('zoom-reset');
     expect(id(ev({ metaKey: true, shiftKey: true, key: '1' }), MAC)).toBeNull();
   });
 
@@ -104,11 +104,43 @@ function mkCtx(over: Partial<AppShortcutContext> = {}): AppShortcutContext {
     hasBlockingBackdrop: vi.fn(() => false),
     openTaskCenter: vi.fn(),
     openSettings: vi.fn(),
+    changeZoom: vi.fn(),
     ...over,
   };
 }
 
 describe('shortcut run() side effects', () => {
+  it('handles zoom on both modifiers on Mac, including the unshifted + key and keypad', () => {
+    const ctx = mkCtx();
+    for (const isMac of [MAC, WIN]) {
+      for (const modifier of isMac ? [{ metaKey: true }, { ctrlKey: true }] : [{ ctrlKey: true }]) {
+        for (const combo of [{ key: '+' }, { key: '=', code: 'Equal' }, { code: 'NumpadAdd', key: '+' }]) {
+          const preventDefault = vi.fn();
+          const stopPropagation = vi.fn();
+          expect(dispatchAppShortcut(ev({ ...modifier, ...combo, preventDefault, stopPropagation }), isMac, ctx)).toBe(true);
+          expect(preventDefault).toHaveBeenCalledOnce();
+          expect(stopPropagation).toHaveBeenCalledOnce();
+          expect(ctx.changeZoom).toHaveBeenLastCalledWith('in');
+        }
+        dispatchAppShortcut(ev({ ...modifier, key: '-' }), isMac, ctx);
+        expect(ctx.changeZoom).toHaveBeenLastCalledWith('out');
+        dispatchAppShortcut(ev({ ...modifier, key: '0' }), isMac, ctx);
+        expect(ctx.changeZoom).toHaveBeenLastCalledWith('reset');
+      }
+    }
+  });
+
+  it('leaves typing, IME composition, AltGr and unrelated shifted chords alone', () => {
+    for (const combo of [
+      { key: '+' },
+      { key: '+', ctrlKey: true, altKey: true },
+      { key: '+', metaKey: true, isComposing: true },
+      { key: '=', ctrlKey: true, keyCode: 229 },
+      { key: '_', ctrlKey: true, shiftKey: true },
+      { key: '0', ctrlKey: true, shiftKey: true },
+    ]) expect(id(ev(combo), MAC)).toBeNull();
+  });
+
   it('jump-to-tab: 9 → last, N → Nth, out-of-range → no-op', () => {
     const ctx = mkCtx();
     dispatchAppShortcut(ev({ metaKey: true, key: '9' }), MAC, ctx);

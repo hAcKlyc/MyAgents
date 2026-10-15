@@ -1,3 +1,7 @@
+## MOXBOTS-UI-ZOOM-001 — 2026-10-15
+
+主窗口Ctrl/Command加减与0缩放；75%–200%，成功后记忆，设置页快捷键说明。独立分支`codex/ui-zoom-20261015`，32项相关测试、类型/lint和MoXBots web构建通过；浏览器、CI/main、原生发布各自追踪。任务`.agent-sync/tasks/codex-ui-zoom-20261015-698c789d.md`；原生验证由统一发布窗口承接，不并发操作日常App。
+
 ## MOXBOTS-AUTH-HOST-20261014 — current continuation
 
 Root owns integration. Human-approved29 is installed; owned account restoration, bottom-left account entry, actual k3/model-directory save, disabled Agent creation and desktop plus both Host services restart persistence pass without a new keychain prompt. Read-only extended Agent list is repaired with three regressions. Latest main model-center source is being incorporated with cloud_models remaining disabled. Final combined tests/candidate/CI and PR14/main/public download delivery remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
