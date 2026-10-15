@@ -1043,6 +1043,35 @@
       "unknown": "Status needs verification",
       "stopFailed": "Stop not confirmed"
     },
-    "lastKnown": "Last observed: {{state}}"
+    "lastKnown": "Last observed: {{state}}",
+    "workProgress": "Execution progress",
+    "progressUnavailable": "Progress has not been read. Refresh or open the original chat.",
+    "progressSession": "Chat: {{title}}",
+    "todoProgress": "TODO {{completed}}/{{total}} completed",
+    "progressSnapshot": "Last observed snapshot",
+    "currentStep": "Current step: {{step}}",
+    "unfinishedStep": "Unfinished step: {{step}}",
+    "progressLimited": "Showing {{shown}}/{{total}}. Open the original chat for the rest.",
+    "noTodoProgress": "This chat has no available TODO list.",
+    "agentsProgress": "Subagents: {{running}} running · {{total}} total",
+    "agentsSnapshot": "Last observed: {{running}} subagents running · {{total}} total",
+    "backgroundAgent": "Background",
+    "agentDuration": "Elapsed {{minutes}}m {{seconds}}s",
+    "agentSnapshotDuration": "Snapshot elapsed {{minutes}}m {{seconds}}s",
+    "progressHint": "Read-only chat progress. Completed steps do not mean the task has passed acceptance. Updates with board refresh.",
+    "progressHistoryHint": "From chat history. Historical running flags do not establish current activity.",
+    "todoStates": {
+      "pending": "Pending",
+      "in_progress": "In progress",
+      "completed": "Completed"
+    },
+    "agentStates": {
+      "running": "Running",
+      "completed": "Completed",
+      "failed": "Failed",
+      "interrupted": "Interrupted",
+      "unknown": "Unknown",
+      "lastRunning": "Last seen running"
+    }
   }
 }

@@ -1,3 +1,4 @@
+import SessionWorkProgress from './SessionWorkProgress';
 import SessionExecutionTime from './SessionExecutionTime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -94,6 +95,7 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
           {(task?.executionError || task?.lastExecution?.error) && <div className="pb-error">{task.executionError || task.lastExecution?.error}</div>}
         </section>
         <SessionExecutionTime snapshot={row.activity} now={now} />
+        <SessionWorkProgress snapshot={row.activity} now={now} full sessionTitle={row.sessions.find(s => s.id === row.activitySessionId)?.title} />
         <section className="pb-detail-section"><h3>{t('projectBoard.summary')}</h3><p>{task?.description || row.summary || t('projectBoard.noSummary')}</p></section>
         <div className="pb-detail-note">{t('projectBoard.originalHint')}</div>
       </>}

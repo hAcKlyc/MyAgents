@@ -49,6 +49,8 @@ let queryMcpMutationOwner: {
   settle(result: QueryMcpMutationResult): void;
 } | null = null;
 export type QueryBackgroundTaskInfo = {
+  startedAt?: number;
+  agentType?: string;
   toolUseId?: string;
   description?: string;
   runId?: string;
@@ -304,6 +306,13 @@ export function getQueryBackgroundTask(
   taskId: string,
 ): QueryBackgroundTaskInfo | undefined {
   return query ? queryBackgroundTasks.get(query)?.get(taskId)?.info : undefined;
+}
+
+/** Snapshot only; reading must not drain, complete or retain another Query. */
+export function readQueryBackgroundTasks(query: Query | null): Array<{ id: string } & QueryBackgroundTaskInfo> {
+  if (!query) return [];
+  return [...(queryBackgroundTasks.get(query)?.entries() ?? [])].filter(([,task]) => task.active)
+    .map(([id, task]) => ({ id, ...task.info }));
 }
 
 export function hasQueryBackgroundTasks(query: Query | null = querySession): boolean {

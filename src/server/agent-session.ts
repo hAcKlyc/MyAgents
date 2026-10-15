@@ -1,3 +1,4 @@
+import { deriveSessionWorkProgress } from '../shared/sessionWorkProgress';
 import { bootstrapFromEnvironment as hostBotBootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { desktopContextOf } from '../shared/agentMentions';
@@ -300,6 +301,7 @@ import {
   getQueryMcpPrewarmOwner,
   hasQueryBackgroundTask,
   hasQueryBackgroundTasks,
+  readQueryBackgroundTasks,
   readQueryMcpStatuses,
   awaitSessionTermination as awaitBuiltinSessionTermination,
   clearAbortFlag,
@@ -7736,6 +7738,11 @@ export function getAgentState(): {
   return { agentDir, sessionState, hasInitialPrompt };
 }
 
+export function getBuiltinWorkProgressSnapshot() {
+  return deriveSessionWorkProgress(getBuiltinMessages(), { live: true,
+    activeBackground: readQueryBackgroundTasks(lifecycleState.query) });
+}
+
 export function getBuiltinExecutionStartedAt(): string | undefined {
   return getBuiltinProductContent()?.executionStartedAt;
 }
@@ -12608,6 +12615,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           const recorded = recordQueryBackgroundTask(activeQuery, taskMsg.task_id, {
             toolUseId: taskMsg.tool_use_id,
             description: taskMsg.description,
+            startedAt: Date.now(),
+            agentType: taskMsg.task_type,
             runId: taskMsg.run_id,
           });
           if (recorded) {

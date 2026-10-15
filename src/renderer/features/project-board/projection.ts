@@ -1,3 +1,4 @@
+import type { SessionWorkProgress } from '@/../shared/sessionWorkProgress';
 import type { SessionMetadata } from '@/api/sessionClient';
 import type { Task } from '@/../shared/types/task';
 import { workspacePathsEqual } from '@/../shared/workspacePath';
@@ -10,6 +11,7 @@ export interface ActivitySnapshot {
   state?: SessionActivity;
   checkedAt: number;
   execution?: { startedAt: string; elapsedMs: number };
+  progress?: SessionWorkProgress;
   error?: string;
   errorCode?: 'execution_failed';
 }
@@ -22,6 +24,7 @@ export interface BoardRow {
   summary: string;
   updatedAt: number;
   activity?: ActivitySnapshot;
+  activitySessionId?: string;
   confirmationReason?: ConfirmationReason;
   archived: boolean;
 }
@@ -62,7 +65,8 @@ export function projectBoardRows(
     const waitingSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'waiting_user_action');
     const runningSession = executionSessions.find(s => freshActivity(activity.get(s.id), now) === 'running');
     const snapshot = activity.get((waitingSession ?? runningSession)?.id ?? '')
-      ?? executionSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now));
+      ?? executionSessions.map(s => activity.get(s.id)).filter((a): a is ActivitySnapshot => !!a).find(a => a.error || !freshActivity(a, now))
+      ?? [...executionSessions].sort((a,b) => Date.parse(b.lastActiveAt) - Date.parse(a.lastActiveAt)).map(s => activity.get(s.id)).find(a => !!a);
     const lastKnownActive = executionSessions.some(s => {
       const observation = activity.get(s.id);
       return observation && !freshActivity(observation, now)
@@ -83,7 +87,7 @@ export function projectBoardRows(
       id: `task:${task.id}`, title: task.name, group, task, sessions: executionSessions,
       summary: task.executionError || task.lastExecution?.error || task.description || '',
       updatedAt: task.updatedAt,
-      activity: snapshot, confirmationReason, archived: task.status === 'archived',
+      activity: snapshot, activitySessionId: executionSessions.find(s => activity.get(s.id) === snapshot)?.id, confirmationReason, archived: task.status === 'archived',
     };
   });
   for (const session of visibleSessions) {
@@ -97,7 +101,7 @@ export function projectBoardRows(
     rows.push({ id: `session:${session.id}`, title: session.title, sessions: [session], group,
       confirmationReason: group === 'needs' ? executionFailed ? 'blocked' : state === 'waiting_user_action' ? 'waiting' : 'unknown' : undefined,
       archived: Boolean(session.archived),
-      summary: session.lastMessagePreview || '', updatedAt: Date.parse(session.lastActiveAt) || 0, activity: snapshot });
+      summary: session.lastMessagePreview || '', updatedAt: Date.parse(session.lastActiveAt) || 0, activity: snapshot, activitySessionId: session.id });
   }
   return rows.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
 }

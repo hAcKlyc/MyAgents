@@ -1043,6 +1043,35 @@
       "unknown": "状态待核实",
       "stopFailed": "停止未确认"
     },
-    "lastKnown": "上次观测：{{state}}"
+    "lastKnown": "上次观测：{{state}}",
+    "workProgress": "执行进展",
+    "progressUnavailable": "尚未取得执行清单，请刷新状态或进入原会话查看。",
+    "progressSession": "对应会话：{{title}}",
+    "todoProgress": "TODO 已完成 {{completed}}/{{total}}",
+    "progressSnapshot": "上次查询快照",
+    "currentStep": "当前步骤：{{step}}",
+    "unfinishedStep": "待续步骤：{{step}}",
+    "progressLimited": "显示 {{shown}}/{{total}}，其余请进入原会话查看。",
+    "noTodoProgress": "此会话未提供 TODO 清单。",
+    "agentsProgress": "子 Agent {{running}} 执行中 · 共 {{total}} 个",
+    "agentsSnapshot": "上次查询：子 Agent {{running}} 执行中 · 共 {{total}} 个",
+    "backgroundAgent": "后台",
+    "agentDuration": "已用 {{minutes}}分{{seconds}}秒",
+    "agentSnapshotDuration": "快照已用 {{minutes}}分{{seconds}}秒",
+    "progressHint": "只读同步原会话清单；步骤完成不代表任务已经验收。状态随看板刷新更新。",
+    "progressHistoryHint": "来自会话历史；保留计划记录，不把历史运行标记当作当前执行。",
+    "todoStates": {
+      "pending": "待办",
+      "in_progress": "进行中",
+      "completed": "已完成"
+    },
+    "agentStates": {
+      "running": "执行中",
+      "completed": "已完成",
+      "failed": "失败",
+      "interrupted": "已中断",
+      "unknown": "状态未知",
+      "lastRunning": "上次执行中"
+    }
   }
 }
