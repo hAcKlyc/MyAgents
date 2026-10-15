@@ -25,7 +25,7 @@
 
 ## Verification
 
-90项unit、168项DOM通过；完整类型/lint及MoXBots web构建通过，最终小修后复验中。实际React主审及独立380浅深色/默认英文交互通过。一轮摘要结果归属歧义已修复并复验。证据`dev-docs/output-display/acceptance.md`及合成截图；不代替原生/真实Provider路径。
+90项unit、168项DOM通过；完整类型/lint及MoXBots web构建通过，最终小修后类型/lint/web构建复验通过。实际React主审及独立380浅深色/默认英文交互通过。一轮摘要结果归属歧义已修复并复验。证据`dev-docs/output-display/acceptance.md`及合成截图；不代替原生/真实Provider路径。
 
 ## Execution record
 
@@ -33,8 +33,8 @@
 
 ## Blockers and unknowns
 
-日常App与原生发布属于统一窗口，未占用、不换包、不调用付费Provider。
+原生发布属于统一窗口；用户已授权通知，负责人已登记PR62归入0.5.6待集成，不纳入冻结0.5.5。版本元数据PR61合入后同步。日常App未占用、不换包、不调用付费Provider。
 
 ## Next step
 
-完成聚合/状态回归和本地React实测，再提交CI与main。
+PR62（产品head3be8f8ae）等待CI及main；版本PR61合入后同步0.5.6并复验受影响部分，合入后核实远端main并发送最终锚点给统一负责人。
