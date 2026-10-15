@@ -51,3 +51,7 @@
 ## 2026-10-15 发布门槛已解除
 
 已逐项核对public-archive-gates及其原始curl、stat前后、sha256sum输出，所有evidenceHashes一致；完整336038989-byte TAR通过正常TLS，非Range和partial。stable实际小JSON的SHA2cd4fcea767da9802ed531db996a66e73a1f0b5166c995e8cd353d53258fda66、version055、URL和signature与冻结回执一致；server-promote/server-finish确认CAS及Root租约释放。当前正发布手动ZIP，网站尚为054；不操作updates或客户端。
+
+## 2026-10-15 ZIP 上传 checkpoint
+
+上述历史进度中的下载阻断已解除；本轮的阻断为GitHub ZIP上传仍在进行。候选metadata提交4dac206b，draft tag moxbots-trial-0.5.5-52bf6160已建立且target52bf正确；校验文件已uploaded，ZIP尚未完成。保持现有上传，不新增重复大传输、不覆盖资产；后续从私有execution-status.json中的PID/session和GitHub资产状态接续。第一次代理上传已仅停止自有未完成进程；小请求证实直连可用后改为单次upload进程NO_PROXY=uploads.github.com，未修改系统代理或新增隧道。官网仍054，无服务器写锁或部署。完整接续边界/已过和待验项见dev-docs/moxbots-055-download-acceptance.md。
