@@ -533,6 +533,8 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Default on. Bounded read-only context from other desktop chats at first send. */
+  projectContextEnabled?: boolean;
   lastOpened?: string;
   /** Launcher right rail pin time. Pinned workspaces sort newest-first. */
   pinnedAt?: string | undefined;

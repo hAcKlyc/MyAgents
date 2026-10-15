@@ -62,3 +62,7 @@ User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb4
 ## 内置 API 主备模型
 
 `src/shared/modelFailover.ts`/`AppConfig.modelFailover`定义非秘密配置；设置组件`ModelFailoverSettings`复用原writer。`src/server/builtin-session/model-failover.ts`从原catalog/credential resolver选择兼容备用，`openai-bridge/model-failover.ts`在既有Query token上做有限HTTP恢复和防重放；原turn-lifecycle释放root。合同`specs/tech_docs/model_failover.md`，验收`dev-docs/model-failover-001-acceptance.md`。不新增Session/工具执行/持久化owner。
+
+## 项目背景自动接续
+
+`src/shared/projectContext.ts` 为有限来源/预算纯投影，`src/server/session-engine/project-context.ts` 经原SessionStore读取并在首轮query preparation注入，设置位于ProjectContextSection。合同 `specs/tech_docs/project_context.md`；合成/独立审阅与Token计数 `dev-docs/project-context-validation/`。不新增模型调用、存储writer或发布owner。

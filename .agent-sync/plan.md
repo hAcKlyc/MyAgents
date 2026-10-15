@@ -280,3 +280,7 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 ## MOXBOTS-MODEL-FAILOVER-001 — 2026-10-16
 
 内置API模型一主一备，当前Session主模型不变，在原Query token推理请求边界有限重试/备用接管，保留native历史及工具结果，指纹/SSE终态防止隐式重放。默认关闭，设置复用原配置writer；订阅/DSH/external与真实供应商另验。合同`specs/tech_docs/model_failover.md`、验收`dev-docs/model-failover-001-acceptance.md`，任务`.agent-sync/tasks/codex-model-failover-001-6b96c57f.md`。当前Agent负责源码/CI/main，发行请求排入统一owner下一未冻结批次，不改变已有056冻结源码或操作日常客户端；代码、模拟/真实SDK loopback与原生/生产分别追踪。
+
+## MOXBOTS-PROJECT-CONTEXT-001 — 2026-10-16
+
+用户授权同项目新会话自动带入近期重要进展/决策，测试并main交付，发布交统一发布会话。只读原对话摘录、零新增模型请求、6000 UTF-8 bytes body；typed来源、独立开关和首轮重试刷新。开发/main/发布分别追踪于 `.agent-sync/tasks/codex-project-context-20261016-b1d6cb74.md`。不自动加入已冻结056候选，不操作日常App或生产。

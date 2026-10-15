@@ -14,7 +14,7 @@ export class ModelFailoverController implements BridgeModelFailover {
   private state: { scope: string; backup?: boolean; blocked?: boolean; delivered: Set<string>; inFlight: Set<string> } | undefined;
 
   constructor(private readonly options: {
-    /** Includes logical turn + selected route + settings revision. Undefined disables recovery. */
+    /** Stable logical turn and selected primary route. Undefined disables recovery. */
     scope: () => string | undefined;
     resolveBackup: () => UpstreamConfig | undefined;
     onSwitch: (target: UpstreamConfig, status: number) => void;
@@ -42,39 +42,39 @@ export class ModelFailoverController implements BridgeModelFailover {
     }
     if (requestKey) state.inFlight.add(requestKey);
     const recover = async (): Promise<Response> => {
-    // Once switched, every later inference in this turn uses the backup.
-    // An exhausted chain never starts again because the SDK retries HTTP.
-    const useBackup = () => {
-      const target = this.options.resolveBackup();
-      return target && live() ? execute(target) : Promise.resolve(cancelled());
-    };
-    if (state.backup) return useBackup();
-    const firstResult = await execute(primary);
-    if (!live()) { void firstResult.body?.cancel().catch(() => undefined); return cancelled(); }
-    if (this.options.canSwitch?.() === false) return firstResult;
-    const first = await inspectFailure(firstResult);
-    if (!live()) { void first.response.body?.cancel().catch(() => undefined); return cancelled(); }
-    if (!first.recoverable || this.options.canSwitch?.() === false) return first.response;
-    await first.response.body?.cancel();
-    if (!live()) return cancelled();
-    if (state.backup) return useBackup();
-    const retryResult = await execute(primary);
-    if (!live()) { void retryResult.body?.cancel().catch(() => undefined); return cancelled(); }
-    const retry = await inspectFailure(retryResult);
-    if (!live()) { void retry.response.body?.cancel().catch(() => undefined); return cancelled(); }
-    if (!retry.recoverable || this.options.canSwitch?.() === false) return retry.response;
-    if (state.backup) { await retry.response.body?.cancel(); return useBackup(); }
-    const status = retry.response.status;
-    await retry.response.body?.cancel();
-    if (!live() || this.options.canSwitch?.() === false) return cancelled();
-    if (state.backup) return useBackup();
-    const backup = this.options.resolveBackup();
-    if (!backup) return cancelled();
-    // CAS without an await: concurrent child requests can adopt this winner,
-    // but cannot publish another switch or mutate a later turn's state.
-    state.backup = true;
-    this.options.onSwitch(backup, status);
-    return execute(backup);
+      // Once switched, every later inference in this turn uses the backup.
+      // An exhausted chain never starts again because the SDK retries HTTP.
+      const useBackup = () => {
+        const target = this.options.resolveBackup();
+        return target && live() ? execute(target) : Promise.resolve(cancelled());
+      };
+      if (state.backup) return useBackup();
+      const firstResult = await execute(primary);
+      if (!live()) { void firstResult.body?.cancel().catch(() => undefined); return cancelled(); }
+      if (this.options.canSwitch?.() === false) return firstResult;
+      const first = await inspectFailure(firstResult);
+      if (!live()) { void first.response.body?.cancel().catch(() => undefined); return cancelled(); }
+      if (!first.recoverable || this.options.canSwitch?.() === false) return first.response;
+      await first.response.body?.cancel();
+      if (!live()) return cancelled();
+      if (state.backup) return useBackup();
+      const retryResult = await execute(primary);
+      if (!live()) { void retryResult.body?.cancel().catch(() => undefined); return cancelled(); }
+      const retry = await inspectFailure(retryResult);
+      if (!live()) { void retry.response.body?.cancel().catch(() => undefined); return cancelled(); }
+      if (!retry.recoverable || this.options.canSwitch?.() === false) return retry.response;
+      if (state.backup) { await retry.response.body?.cancel(); return useBackup(); }
+      const status = retry.response.status;
+      await retry.response.body?.cancel();
+      if (!live() || this.options.canSwitch?.() === false) return cancelled();
+      if (state.backup) return useBackup();
+      const backup = this.options.resolveBackup();
+      if (!backup) return cancelled();
+      // CAS without an await: concurrent child requests can adopt this winner,
+      // but cannot publish another switch or mutate a later turn's state.
+      state.backup = true;
+      this.options.onSwitch(backup, status);
+      return execute(backup);
     };
     try {
       const response = await recover();

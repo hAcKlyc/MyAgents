@@ -1,5 +1,9 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseLeadingSystemReminder } from '../../shared/systemReminder';
+import type { ProjectContextSnapshot } from '../../shared/projectContext';
+const projectBackground = vi.hoisted(() => vi.fn<() => Promise<ProjectContextSnapshot | undefined>>(async () => undefined));
+vi.mock('./project-context', () => ({ optionalProjectContext: projectBackground }));
 const qaMode = vi.hoisted(() => ({ enabled: false }));
 vi.mock('../../shared/updaterQa', () => ({ isUpdaterQaBuild: () => qaMode.enabled, isModelQaBuild: () => false, isIsolatedQaBuild: () => qaMode.enabled }));
 
@@ -406,6 +410,7 @@ vi.mock('../agent-session', async () => ({
   resetInteractionScenario: mocks.resetInteractionScenario,
   requireCurrentBuiltinSkill: mocks.requireCurrentBuiltinSkill,
   rewindSession: mocks.rewindSession,
+  retryBuiltinUserMessage: async (_id: string, replay: (result: { success: boolean; content: string }) => unknown) => replay({ success: true, content: 'retry' }),
   setAgents: mocks.setAgents,
   forceReloadActiveSession: mocks.forceReloadActiveSession,
   setBackgroundAgentPermissionMode: mocks.setBackgroundAgentPermissionMode,
@@ -471,6 +476,9 @@ vi.mock('../runtimes/external-session', () => ({
   isExternalTurnCurrent: mocks.isExternalTurnCurrent,
   popLastUserMessageForRetry: mocks.popLastUserMessageForRetry,
   retryLastExternalUserMessage: mocks.retryLastExternalUserMessage,
+  rewindExternalConversation: async (_id: string, replay?: (result: { success: boolean; content: string }) => unknown) => replay
+    ? replay({ success: true, content: 'retry' }) : { success: true, content: 'retry' },
+  retryDshConversation: async (_id: string, replay: (result: { success: boolean; content: string }) => unknown) => replay({ success: true, content: 'retry' }),
   prewarmExternalSession: mocks.prewarmExternalSession,
   respondExternalAskUserQuestion: mocks.respondExternalAskUserQuestion,
   respondExternalPlanApproval: mocks.respondExternalPlanApproval,
@@ -566,6 +574,7 @@ function runInjectedTurn(request: TestInjectedTurnRequest) {
 describe('session-engine selector and adapters', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    projectBackground.mockReset().mockResolvedValue(undefined);
     mocks.state.useExternal = false;
     mocks.state.externalActive = false;
     mocks.state.externalBusy = false;
@@ -614,6 +623,38 @@ describe('session-engine selector and adapters', () => {
 
     await engine.updateAgents(agents, { forceReload: true });
     expect(mocks.forceReloadActiveSession).toHaveBeenCalledExactlyOnceWith('agents');
+  });
+
+  it.each(['builtin', 'codex', 'claude-code', 'dsh'])('passes first-send project context through the real %s adapter', async (runtime) => {
+    mocks.state.useExternal = runtime !== 'builtin';
+    mocks.getActiveRuntimeType.mockReturnValue(runtime);
+    const previous = process.env.MYAGENTS_RUNTIME;
+    process.env.MYAGENTS_RUNTIME = runtime;
+    projectBackground.mockResolvedValueOnce({ projectId: 'p', totalSessions: 1, scannedSessions: 1,
+      unavailableSessions: 0, sources: [{ sessionId: 'other', messageId: 'decision', role: 'user',
+        timestamp: '2026-10-16T01:00:00Z', text: '确定采用方案B', state: 'reported' }] });
+    try {
+      const result = await getSessionEngine().sendDesktopMessage({ text: '继续项目', sessionId: 'external-session',
+        workspacePath: '/workspace', scenario: desktopScenario });
+      expect(result.success).toBe(true);
+      const received = runtime === 'builtin' ? mocks.enqueueUserMessage.mock.calls.at(-1)?.[0]
+        : (mocks.enqueueExternalSendForDesktop.mock.calls.at(-1) as unknown[] | undefined)?.[0];
+      expect(received).toContain('<PROJECT_CONTEXT>');
+      expect(received).toContain('确定采用方案B');
+      expect(parseLeadingSystemReminder(String(received)).visibleText).toBe('继续项目');
+      projectBackground.mockResolvedValueOnce({ projectId: 'p', totalSessions: 1, scannedSessions: 1,
+        unavailableSessions: 0, sources: [{ sessionId: 'other', messageId: 'revised', role: 'user',
+          timestamp: '2026-10-16T02:00:00Z', text: '取消B，改用方案C', state: 'reported' }] });
+      const retry = await getSessionEngine().retryUserMessage('first-message');
+      expect(retry.success).toBe(true);
+      const replayed = runtime === 'builtin' ? mocks.enqueueUserMessage.mock.calls.at(-1)?.[0]
+        : (mocks.enqueueExternalSendForDesktop.mock.calls.at(-1) as unknown[] | undefined)?.[0];
+      expect(replayed).toContain('取消B，改用方案C');
+      expect(parseLeadingSystemReminder(String(replayed)).visibleText).toBe('retry');
+    } finally {
+      if (previous === undefined) delete process.env.MYAGENTS_RUNTIME;
+      else process.env.MYAGENTS_RUNTIME = previous;
+    }
   });
 
   it('resolves IM Bridge caller identity through the selected Runtime adapter', () => {
