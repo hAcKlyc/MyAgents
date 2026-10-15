@@ -1,0 +1,66 @@
+{
+  "environment": "actual product community HTML/CSS/JS with explicitly mocked auth/API; no native or production",
+  "cases": [
+    {
+      "name": "callback clears PKCE and never persists bearer",
+      "pass": true
+    },
+    {
+      "name": "user 1440 responsive and escaped topic/reply",
+      "pass": true
+    },
+    {
+      "name": "user 768 responsive and escaped topic/reply",
+      "pass": true
+    },
+    {
+      "name": "user 390 responsive and escaped topic/reply",
+      "pass": true
+    },
+    {
+      "name": "search and category filters operate",
+      "pass": true
+    },
+    {
+      "name": "empty required form makes no post",
+      "pass": true
+    },
+    {
+      "name": "invalid preserves editable topic draft",
+      "pass": true
+    },
+    {
+      "name": "forbidden preserves editable topic draft",
+      "pass": true
+    },
+    {
+      "name": "conflict preserves editable topic draft",
+      "pass": true
+    },
+    {
+      "name": "network uncertainty freezes same mutation across retries",
+      "pass": true
+    },
+    {
+      "name": "real15second timeout preserves original topic mutation",
+      "pass": true
+    },
+    {
+      "name": "uncertain retry401 retains original mutation after real login navigation",
+      "pass": true
+    },
+    {
+      "name": "uncertain reply freezes and retries original request",
+      "pass": true
+    },
+    {
+      "name": "logout clears DOM and fresh reload requires login",
+      "pass": true
+    },
+    {
+      "name": "different principal cannot restore draft or pending",
+      "pass": true
+    }
+  ],
+  "errors": []
+}

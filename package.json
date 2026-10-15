@@ -1,6 +1,6 @@
 {
   "name": "myagents",
-  "description": "MyAgents - Desktop Claude Code for everyone. AI-powered productivity, not just for developers.",
+  "description": "MoXBots - AI workspace connecting Bot teams, desktop tasks and cloud collaboration.",
   "type": "module",
   "version": "0.5.2",
   "license": "AGPL-3.0-only",
@@ -20,14 +20,14 @@
       "onFail": "error"
     }
   },
-  "author": "MyAgents Team <myagents.io@gmail.com>",
-  "homepage": "https://myagents.io",
+  "author": "MoXBots contributors",
+  "homepage": "https://140.143.183.232/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hAcKlyc/MyAgents.git"
+    "url": "git+https://github.com/heavenzhang/MoXBots.git"
   },
   "bugs": {
-    "url": "https://github.com/hAcKlyc/MyAgents/issues"
+    "url": "https://github.com/heavenzhang/MoXBots/issues"
   },
   "keywords": [
     "claude",
