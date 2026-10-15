@@ -1297,5 +1297,48 @@
     "unavailable": "这次讨论没有保存可恢复的原文。请检查原始 Record 或已经保存的会话内容。",
     "resend": "确认重新发送",
     "resendConfirm": "发送响应丢失，正文可能已被接纳。请先检查会话历史和队列，重新发送可能产生重复消息。"
+  },
+  "process": {
+    "resultFor": "最近结果对应：{{action}}",
+    "thinkingRecord": "思考记录",
+    "exitCode": "退出码 {{code}}",
+    "phase": {
+      "plan": "计划与任务安排",
+      "explore": "读取与检索",
+      "change": "文件修改",
+      "verify": "测试与检查",
+      "execute": "命令与工具执行",
+      "delegate": "协作执行",
+      "think": "分析与思考"
+    },
+    "status": {
+      "running": "执行中",
+      "succeeded": "已返回结果",
+      "failed": "执行失败",
+      "stopped": "已中断",
+      "unknown": "结果未确认"
+    },
+    "summary": {
+      "tools": "{{count}} 次工具调用",
+      "records": "{{count}} 项思考记录",
+      "succeeded": "{{count}} 项已返回",
+      "running": "{{count}} 项执行中",
+      "failed": "{{count}} 项失败",
+      "stopped": "{{count}} 项中断",
+      "unknown": "{{count}} 项未确认"
+    },
+    "latest": "最近动作：{{action}}",
+    "showDetails": "展开执行详情（{{count}}）",
+    "hideDetails": "收起执行详情（{{count}}）",
+    "action": {
+      "Read": "读取 {{target}}",
+      "Write": "写入 {{target}}",
+      "Edit": "修改 {{target}}",
+      "MultiEdit": "修改 {{target}}",
+      "Grep": "搜索 {{target}}",
+      "Glob": "查找 {{target}}",
+      "WebSearch": "搜索 {{target}}",
+      "command": "执行命令"
+    }
   }
 }

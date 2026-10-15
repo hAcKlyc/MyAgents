@@ -1297,5 +1297,48 @@
     "unavailable": "No recoverable original was saved for this discussion. Check the original Record or saved conversation.",
     "resend": "Confirm resend",
     "resendConfirm": "The send response was lost and the message may already have been admitted. Check history and the queue first; resending may create a duplicate."
+  },
+  "process": {
+    "resultFor": "Latest result for: {{action}}",
+    "thinkingRecord": "Reasoning record",
+    "exitCode": "Exit code {{code}}",
+    "phase": {
+      "plan": "Plan and organize",
+      "explore": "Read and research",
+      "change": "File changes",
+      "verify": "Tests and checks",
+      "execute": "Commands and tools",
+      "delegate": "Agent collaboration",
+      "think": "Analysis"
+    },
+    "status": {
+      "running": "Running",
+      "succeeded": "Result returned",
+      "failed": "Failed",
+      "stopped": "Interrupted",
+      "unknown": "Unconfirmed"
+    },
+    "summary": {
+      "tools": "{{count}} tool calls",
+      "records": "{{count}} reasoning records",
+      "succeeded": "{{count}} returned",
+      "running": "{{count}} running",
+      "failed": "{{count}} failed",
+      "stopped": "{{count}} interrupted",
+      "unknown": "{{count}} unconfirmed"
+    },
+    "latest": "Latest action: {{action}}",
+    "showDetails": "Show execution details ({{count}})",
+    "hideDetails": "Hide execution details ({{count}})",
+    "action": {
+      "Read": "Read {{target}}",
+      "Write": "Write {{target}}",
+      "Edit": "Edit {{target}}",
+      "MultiEdit": "Edit {{target}}",
+      "Grep": "Search {{target}}",
+      "Glob": "Find {{target}}",
+      "WebSearch": "Search {{target}}",
+      "command": "Run command"
+    }
   }
 }
