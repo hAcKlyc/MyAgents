@@ -75,3 +75,5 @@ Private receipts are under the pointer workspace `work/unified-055-20261015/`; A
 - [ ] A6 normal login waits in Security write IPC before PKCE. Normal QA restart/private unlock retry performed once. System SecurityAgent app exists but tool forbids access; human prompt text requested. No claim helper/relay/Host passed, no system-service or daily changes.
 
 - [x] Human explicitly confirmed: after formal packaging, publish latest0.5.5 to existing updater server for client discovery/download; retain exact-byte/signature/rollback checks and idle-only confirmed restart.
+
+- [ ] Added direct-human ordinary Session automatic-title gate: owner01a1361b prepares isolated normal Session sidecar; actual empty-tool SDK init required before at most2 model calls. Backend hook/persist/SSE/reload and later native sidebar/Tab remain separate; no modelqa bypass/daily GUI.

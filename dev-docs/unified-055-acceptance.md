@@ -91,3 +91,10 @@ The first normal login did not reach PKCE. A native stack sample located the wai
 ## Latest update publication authorization
 
 The human explicitly requested publishing the latest update to the existing server after this formal package completes. Publish formal0.5.5 only after the preceding acceptance/main/signing/notarization gates, using the existing own signing key and stable darwin-aarch64 endpoint. Verify public manifest version, exact downloaded archive hash/signature and rollback availability so clients can fetch it. This conditional authorization does not publish the QA application or authorize interrupting busy clients; restart remains user-confirmed and actual installation still requires idle/backup checks.
+
+
+## Ordinary Session automatic title gate
+
+A new direct human instruction in the TITLE owner chat explicitly requires ordinary Session automatic title acceptance before unified0.5.5. A4 utility receipts remain valid only for their narrower scope. The TITLE owner prepares a frozen-source, normal moxbot Session sidecar in a fresh private HOME/data/cwd, separate loopback port and closed environment, using only the already-authorized Kimi key. No daily window, modelqa guard relaxation, direct title-utility trigger or owned/Host bootstrap is permitted. Native GUI lease remains with Root pending human system-prompt inspection.
+
+Before the bounded normal-turn plus automatic-title model calls, the installed SDK must independently prove project deny rules actually produce an empty tool catalog, with no MCP/hooks/extra agents or fallback. Official SDK permission documentation supports deny precedence and project settings, but installed runtime behavior is the gate. Backend acceptance must observe normal post-turn automatic triggering, real model completion, persisted title/source, SSE and reload. Sidebar/Tab/manual-title UI protection remain distinct native evidence. This gate is not yet passed.
