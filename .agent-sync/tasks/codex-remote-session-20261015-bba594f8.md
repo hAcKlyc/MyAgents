@@ -46,3 +46,49 @@ PR45：https://github.com/heavenzhang/MoXBots/pull/45。源实现32518221，已�
 明确的日常App保护约束：WPS项目 `output/formal-install-20261015/PROTECTED-DAILY-APP.md`。不借用/修改日常App、~/.moxbot、登录或钥匙串。开发目录本身不证明bundle/单实例/数据/端口/credential namespace隔离。本候选未启动。已有101验收记录普通execution=false且Agent禁用，不能擅自开启；本机SSH agent的只读BatchMode连接返回publickey,password拒绝，尚未找到本任务可复用的Host凭据路径。
 
 下一步：整合最新主干、六项CI全绿、合入并核实远端main；重建与记录最终候选。真实验收需独立测试身份/运行环境及目标已授权的可执行Agent，正式发布仍须签名/公证、活动owner、回滚与真实用户验收。不得把源码/模拟/原生编译冒充生产可用。
+
+
+## 2026-10-15 actual integration resume and capability compatibility fix
+
+Feature PR45 and final014105a2 are on main. Formal signed/notarized0.5.4 freezes runtime e5a05f76; root verified installation and four restored tabs/8projects/35sessions, preserving original transcript bytes, Providers and attachments. Current remote main c7bab285 includes feature and release records. Local SwiftPM CLT incompatibility was solved with a task-local public-interface/library-preserving overlay, full fresh three-bridge probe and standard client rebuild; no system/dependency changes or stubs. Earlier cold-build/protected-daily-app statements above are historical and superseded for this task by verified repair and the user's explicit local non-isolated installation/testing authorization.
+
+User now explicitly approved the existing dedicated Linux-Host Agent and Kimi Coding/k3 few-turn conversation/file-approval validation. Existing controlled operator SSH was verified read-only. Target actual Node dd7192d4/native114e2ac5 predates the feature; Host is idle, no children, original threeAgents disabled and executionfalse. No target config/key/Agent/model has yet been changed. CI38623129708 Node/native artifact checkout83e48946 has the same Git tree5c8347c5 as signed runtimee5. Prepare paired upgrade with existing identity/data/unit/policy safeguards and rollback; keep unrelated namespace/services intact. Operator preparation is not remote-business acceptance.
+
+Detected and reproduced a production compatibility defect: src/host/main.ts advertises session.remote in host.capabilities.methods, while the renderer's strict OwnedHostCapabilities codec rejected that existing method. The new regression failed HOST_MANAGEMENT_RESPONSE_INVALID before the fix. Accept only this known capability in the renderer type/schema; arbitrary methods remain rejected and Host configuration write operations are unchanged. Focused API/Host management/Provider DOM/remote-session suite38 passed; Node24.20 typecheck/scopedlint passed. CI and main delivery of this small fix remain pending. Existing0.5.4 archive bytes must not be overwritten; the corrected installed desktop requires a new signed version and safe update window.
+
+- [x] Verify main, authorized local0.5.4 install, source/artifact and data preservation.
+- [x] Exact authorization to enable only the dedicated testAgent and reuse Kimi credentials; no repeat permission question.
+- [x] Read-only real Linux runtime/activity and existing controlled credential location verification.
+- [x] Regression-first reproduction and minimal renderer capability codec fix; unknown capability rejection retained.
+- [ ] Required CI, main merge/push/SHA verification for this fix; new signed desktop package and safe installation.
+- [ ] Paired testHost upgrade with verified source/digests, runtime idle/backup/rollback and unchanged identity/policies.
+- [ ] Exact dedicatedAgent enabled/default approval mode, encrypted Kimi credential and execution-authorized owner writes; persist receipts and before-state.
+- [ ] Native direct open/send/continue/allow-once/deny/stop/reconnect/persistence and source-side no-executor acceptance.
+- [ ] Restore temporary execution/Agent authorization, release all task-owned GUI/control windows; retain evidence and limitations.
+
+GUI lease is temporarily released for queued feedback/title verification; root performs only CLI/source preparation and must reclaim the shared native lease before UI actions. Private receipts/screenshots remain outside Git and raw credentials are not logged or committed.
+
+
+## Objective
+
+Deliver direct same-account remote Agent conversations on the original Session owner, including continuation and exact approvals. Resume actual Linux/desktop acceptance under the user's explicit dedicated Kimi test authorization; repair discovered compatibility defects.
+
+## Acceptance criteria
+
+Code and meaningful regression gates pass, all required CI passes and remote main contains the result. A source-verified paired testHost upgrade preserves identities/state/policies; real isolated desktop open/send/continue/approvals/persistence are proven separately. The unified owner signs and installs the next immutable0.5.5 package after all owners deliver main, without interrupting user tasks.
+
+## Completed
+
+PR45 feature/main, formal0.5.4 installation/data restoration, task-local cold Swift build repair, actual SSH/Host idle/version inspection, and minimal known-capability regression fix1c534aea. Target3Agents remain disabled, executionfalse, no credential mutation or model calls yet. PR49 tracks the discovered compatibility defect.
+
+## Verification
+
+Regression failed before fix; focused38 tests pass on Node24.20, typecheck/scopedlint pass. Artifact CI38623129708 is successful; its83e48946 checkout tree equals runtimee5a05f76. Existing source/installed-client evidence stays outside Git. PR49 required run38653219767 remains pending.
+
+## Blockers and unknowns
+
+Actual target predates session.remote and needs controlled paired upgrade. Target dynamic Kimi credential is absent, existing authorized local Kimi credential is available. Host management API cannot enable the disabled registry Agent, so exact operator preparation is separate from native remote-business acceptance. GUI is queued behind feedback/title; no concurrent installation or UI interaction. New fixed signed client is owned by unified0.5.5 release coordinator.
+
+## Next step
+
+Pass PR49 CI/merge/remote-main verification. Finish verified CI Host artifact transfer and safe paired upgrade/rollback preparation; enable only the approved dedicatedAgent. Reclaim GUI only after explicit release and use the unified real-model isolation profile for few-turn Kimi/approval acceptance. Return precise receipts/source/results to the already authorized unified owner; final signing/update is centralized.

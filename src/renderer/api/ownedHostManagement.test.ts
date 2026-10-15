@@ -33,6 +33,24 @@ const write = {
 beforeEach(() => {
   invoke.mockReset();
 });
+it("reads configuration capabilities from a Host that also supports remote sessions", async () => {
+  const result = {
+    kind: "capabilities",
+    version: 1,
+    methods: ["host.inspect", "config.provider.set", "session.remote"],
+    providerKinds: ["anthropic"],
+    limits: { directoryEntries: 128, pathBytes: 4096 },
+  };
+  invoke.mockResolvedValue({ scope, result });
+  await expect(
+    ownedHostManagement(locator, null, { method: "host.capabilities", params: {} }, new AbortController().signal),
+  ).resolves.toEqual({ scope, result });
+
+  invoke.mockResolvedValue({ scope, result: { ...result, methods: ["unrecognized.execute"] } });
+  await expect(
+    ownedHostManagement(locator, null, { method: "host.capabilities", params: {} }, new AbortController().signal),
+  ).rejects.toMatchObject({ code: "HOST_MANAGEMENT_RESPONSE_INVALID" });
+});
 it("requires an inspected target for writes and never sends owned commands to official", async () => {
   await expect(
     ownedHostManagement(locator, null, write, new AbortController().signal),

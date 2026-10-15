@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import type { AgentConfigMutation } from '../../../shared/agentConfigMutation';
 // WorkspaceBasicsSection — workspace name, icon, model, permission, MCP tools
 // AI config (model/provider/permission/mcp) reads from AgentConfig (source of truth).
@@ -141,7 +142,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
       const label = runtime === 'claude-code' ? 'Claude Code'
         : runtime === 'dsh' ? 'DSH'
         : runtime === 'codex' ? 'Codex'
-        : 'MyAgents';
+        : APP_DISPLAY_NAME;
       toast.success(t('agentSettings.basics.runtimeChanged', { label }));
     } catch (err) {
       console.error('[runtime] Failed to save runtime:', err);
