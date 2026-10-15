@@ -4894,7 +4894,7 @@ async function handleExitPlanMode(
 
   if (!plan?.trim() || Buffer.byteLength(plan, 'utf8') > MAX_PLAN_BYTES) {
     const plansDir = agentDir ? getSessionPlansDirectoryPath(agentDir, sessionId) : '当前会话专用方案目录';
-    return { approved: false, error: `无法提交方案审核：没有可完整展示的方案正文。请先用 Write/Edit 将完整方案保存到 ${plansDir} 下的 Markdown 文件，再调用 ExitPlanMode。不要修改项目 .agent-sync/plan.md；尚未请求用户审批，也没有获得执行授权。` };
+    return { approved: false, error: `无法提交方案审核：没有可完整展示的方案正文。请先用 Write/Edit 将完整方案保存到规划提示中指定的方案文件（位于 ${plansDir}，沿用 SDK 指定文件名），再调用 ExitPlanMode。不要修改项目 .agent-sync/plan.md；尚未请求用户审批，也没有获得执行授权。` };
   }
 
   // No wall-clock timeout — see pendingExitPlanMode Map declaration.

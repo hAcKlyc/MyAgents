@@ -56,7 +56,7 @@ MyAgents 的允许路径必须带 `updatedInput`。AskUserQuestion 等会改变�
 
 有效 mode 同时观察 hook 的 `permission_mode` 与 Sidecar 的 live mirror；任一表示 plan 都按 plan 处理，以关闭切换期间的异步窗口。非只读工具 fail closed。`canUseTool` 与 hook 共用同一 policy，不能各维护一份名单。
 
-规划期仅有一个文件写入例外：`Write` / `Edit` 当前 Product Session 的 `.claude/plans/myagents/<sessionId>/` 目录内直接 Markdown 文件。`plan-files.ts` 校验既存各级目录和叶文件，拒绝符号链接、硬链接、跨 Session 和项目源文件；PreToolUse 与 canUseTool 共用该检查。不允许 Bash/MultiEdit 等借此扩大写入范围。
+规划期仅有一个文件写入例外：`Write` / `Edit` 当前 Product Session 的 `.claude/plans/myagents/<sessionId>/` 目录内直接 Markdown 文件。`plan-files.ts` 校验既存各级目录和叶文件，拒绝符号链接、硬链接、跨 Session 和项目源文件；PreToolUse 与 canUseTool 共用该检查。不允许 Bash/MultiEdit 等借此扩大写入范围。模型须沿用原生规划提示给出的具体方案文件名；SDK resolver 仍执行其正常检查，不新增全局工具白名单。
 
 `ExitPlanMode` 必须取得当前轮可完整展示的方案（兼容显式 `plan`，或读取该 Session 专用目录）。缺失、空白、读取失败或超过展示上限时返回可修复的 `deny + interrupt:false`，不广播空审核、不冒充用户拒绝、不改变权限模式。用户看到的卡片正文是该次 pending request 的快照；重连 replay 保持同一正文。旧空请求在 UI 明确提示并禁止批准，仍可拒绝或提交补充要求。正文随审批结果保留，只有有效用户批准才恢复执行模式。
 

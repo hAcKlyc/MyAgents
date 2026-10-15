@@ -133,7 +133,7 @@ export function planModeDenyMessage(toolName: string, plansDir?: string): string
   return (
     `当前处于 Plan（规划）模式，禁止执行写操作或有副作用的工具（本次被拦截：${toolName}）。` +
     `请先完成调研与规划，再用 ExitPlanMode 工具提交方案供用户审批；获批退出 Plan 模式后才能执行写操作。` +
-    (plansDir ? `方案正文请用 Write/Edit 保存到当前会话专用目录 ${plansDir} 下的 Markdown 文件；不要写入项目 .agent-sync/plan.md 或其他源文件。` : '')
+    (plansDir ? `方案正文请用 Write/Edit 保存到规划提示中指定的方案文件（当前会话专用目录 ${plansDir}，沿用 SDK 指定文件名）；不要写入项目 .agent-sync/plan.md 或其他源文件。` : '')
   );
 }
 
