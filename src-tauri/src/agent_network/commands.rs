@@ -304,9 +304,16 @@ pub(crate) async fn cmd_agent_network_owned_start(
     issuer: String,
     public_tls_ca_file: Option<String>,
 ) -> Result<super::owned_account_desktop::StartedLogin, NetworkError> {
-    state
+    let result = state
         .owned_start(&issuer, public_tls_ca_file.as_deref())
-        .await
+        .await;
+    if let Err(error) = &result {
+        crate::ulog_warn!(
+            "[agent-network] owned login start failed code={}",
+            super::actor::diagnostic_code(error)
+        );
+    }
+    result
 }
 #[tauri::command]
 pub(crate) async fn cmd_agent_network_owned_open_authorization(
