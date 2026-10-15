@@ -140,6 +140,7 @@ import { recordGet } from '@/api/taskCenter';
 import { createSession, getSessions, updateSession } from '@/api/sessionClient';
 import { dismissTopmost } from '@/utils/closeLayer';
 import { dispatchAppShortcut } from '@/utils/appShortcuts';
+import { changeAppZoom } from '@/utils/appZoom';
 import { handleSelectAllKeydown } from '@/utils/selectAllRouter';
 import {
   forceFlushLogs,
@@ -1838,6 +1839,7 @@ export default function App() {
             ),
           openSettings: () =>
             window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS)),
+          changeZoom: changeAppZoom,
         })
       )
         return;
@@ -5052,7 +5054,7 @@ export default function App() {
   return (
     <SessionDeletionContext.Provider value={handleDeleteSession}>
       <LinkContextMenuProvider>
-        <div className="flex h-screen bg-[var(--paper)]">
+        <div className="flex h-[var(--app-viewport-height,100vh)] bg-[var(--paper)]">
           <GlobalSidebar
             newAgentPanelOpen={newAgentPanelOpen}
             onNewAgentPanelOpenChange={setNewAgentPanelOpen}

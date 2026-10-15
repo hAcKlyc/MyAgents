@@ -18,6 +18,7 @@ import {
 import { initFrontendLogger, setLogServerReady, setRendererLogLabel } from './utils/frontendLogger';
 import { installMacFunctionKeyGuard } from './utils/macFunctionKeyGuard';
 import { installTextCorrectionPolicy } from './utils/textCorrectionPolicy';
+import { initializeAppZoom } from './utils/appZoom';
 import { dispatchNativeHistoryCommand, type NativeHistoryCommand } from './utils/nativeHistoryCommands';
 import { listenWithCleanup } from './utils/tauriListen';
 
@@ -196,6 +197,7 @@ if (tauriWindowLabel === 'fb-ball') {
     </AppErrorBoundary>
   );
 } else {
+  initializeAppZoom();
   const surface = new URLSearchParams(location.search).get('surface');
   const App = React.lazy(async () => {
     if (isModelQaBuild()) {

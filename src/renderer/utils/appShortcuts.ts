@@ -18,8 +18,13 @@
  * the structure they would grow from.)
  */
 
+import { isImeComposingEvent } from './imeKeyboard';
+import type { AppZoomAction } from './appZoom';
+
 /** Structural subset of a keyboard event — satisfied by the native KeyboardEvent. */
 export interface KeyboardEventLike {
+  isComposing?: boolean;
+  keyCode?: number;
   key: string;
   code: string;
   shiftKey: boolean;
@@ -27,6 +32,7 @@ export interface KeyboardEventLike {
   ctrlKey: boolean;
   altKey: boolean;
   preventDefault: () => void;
+  stopPropagation?: () => void;
 }
 
 /** Primitives a shortcut's `run` may use — supplied by App.tsx at dispatch time. */
@@ -42,6 +48,7 @@ export interface AppShortcutContext {
   hasBlockingBackdrop: () => boolean;
   openTaskCenter: () => void;
   openSettings: () => void;
+  changeZoom: (action: AppZoomAction) => void;
 }
 
 export interface AppShortcut {
@@ -76,6 +83,21 @@ function shiftActiveTab(ctx: AppShortcutContext, delta: number, wrap: boolean): 
  * are evaluated before the ⌘-gated entries).
  */
 export const APP_SHORTCUTS: AppShortcut[] = [
+  ...(['in', 'out', 'reset'] as const).map((action): AppShortcut => ({
+    id: `zoom-${action}`,
+    keys: (isMac) => `${isMac ? '⌘ / Ctrl' : 'Ctrl'} + ${action === 'in' ? '+' : action === 'out' ? '−' : '0'}`,
+    match: (e, isMac) => {
+      if (!(e.ctrlKey || (isMac && e.metaKey)) || e.altKey) return false;
+      if (action === 'in') return e.key === '+' || e.key === '=' || e.code === 'NumpadAdd';
+      if (action === 'out') return !e.shiftKey && (e.key === '-' || e.code === 'NumpadSubtract');
+      return !e.shiftKey && e.key === '0';
+    },
+    run: (ctx, e) => {
+      // Capture owner: embedded editors must not also apply their own font zoom.
+      e.stopPropagation?.();
+      ctx.changeZoom(action);
+    },
+  })),
   {
     // Block reload (F5 / ⌘|Ctrl+R / ⌘|Ctrl+Shift+R). Reload wipes in-memory tab
     // state and tears down every Sidecar (~30s cold-start) — never allowed.
@@ -154,6 +176,7 @@ export const VISIBLE_APP_SHORTCUTS = APP_SHORTCUTS.filter((s) => s.keys);
 
 /** First shortcut whose predicate matches this event, or null. Pure. */
 export function matchAppShortcut(e: KeyboardEventLike, isMac: boolean): AppShortcut | null {
+  if (isImeComposingEvent(e)) return null;
   for (const s of APP_SHORTCUTS) {
     if (s.match(e, isMac)) return s;
   }
