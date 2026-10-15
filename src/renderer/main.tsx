@@ -197,8 +197,11 @@ if (tauriWindowLabel === 'fb-ball') {
   );
 } else {
   const surface = new URLSearchParams(location.search).get('surface');
-  const App = React.lazy(() => {
+  const App = React.lazy(async () => {
     if (isModelQaBuild()) {
+      if (surface !== 'app') {
+        await (await import('./api/tauriClient')).startGlobalSidecar();
+      }
       if (surface === 'next-prompt') return import('./pages/ModelQaNextPrompt');
       if (surface === 'title-utility') return import('./pages/ModelQaTitle');
       if (surface !== 'app') return import('./pages/ModelQaHome');
