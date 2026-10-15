@@ -19,6 +19,14 @@
 - [ ] 相关单元、隔离持久化/链路集成、类型/lint/build 与 CI。
 - [ ] 远端main包含成果；固定SHA/用量边界交给发布owner。
 
+## Completed
+
+已实现共享安全文本投影、原SessionStore只读提取、首轮/重试动态注入、默认独立项目开关、来源/预算与故障过滤。189项相关回归+10项持久化集成、独立复审、设置浏览器检查和构建通过。初始实现提交e5d1d6c2；最新main发布协调已合并且无代码冲突。
+
+## Blockers and unknowns
+
+目前无源码/本地测试阻断。必需CI和main合入待完成；真实Provider/签名包/安装后Native路径属于统一发布会话的后续门槛，不将未执行项当作通过。
+
 ## Verification
 
 相关unit/DOM189项、SessionStore集成10项通过；独立复审5文件162项通过。类型/完整lint/server和Web build通过。设置实际React/IAB 1024浅色及540深色、开关/键盘/失败恢复通过。证据 `dev-docs/project-context-validation/README.md` 与token-metrics.json。无日常App或生产数据写入。模型真实语义/安装后的原生验收由统一发布owner按隔离身份进行，不拿合成测试冒充。
