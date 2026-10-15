@@ -47,11 +47,11 @@ Task 的核心职责：
 Todo -> Running -> Verifying -> Done
           |             |
           +-> Blocked / Stopped
-Done -> Archived
+Done -> Archived -> Done (user-only restore; no run)
 any allowed state -> Deleted (product-level irreversible tombstone)
 ```
 
-`Archived` 是长期可恢复状态；`Deleted` 会从普通产品 surface 中不可恢复地移除 Task，并立即解除 scheduler、pending activation 与 Trigger state。TaskStore 保留行级 tombstone/statusHistory 是为了审计和阻止旧 Cron 重迁移，不代表存在 30 天恢复或 undelete 契约；TaskStore 也不拥有、不会删除工作区 Detector 脚本及其自持状态。
+`Archived` 是长期可恢复状态；项目看板恢复使用仅用户可调用的 `Archived -> Done`，保留 execution_count/last_executed_at，不启动 Task 或 scheduler。原 `Archived -> Todo` 的重新执行准备路径保持独立。`Deleted` 会从普通产品 surface 中不可恢复地移除 Task，并立即解除 scheduler、pending activation 与 Trigger state。TaskStore 保留行级 tombstone/statusHistory 是为了审计和阻止旧 Cron 重迁移，不代表存在 30 天恢复或 undelete 契约；TaskStore 也不拥有、不会删除工作区 Detector 脚本及其自持状态。
 
 对时间型 Task，`Running` 表示 scheduler enabled，不表示某个 AI Turn 正在执行。具体 Turn 的 `checking | running | stopping | stop_failed` 只存在于 `TaskSchedulerController.executions`，Task list/get 在 wire projection 上附加 `executionState/executionError`，不写入 `tasks.jsonl`。列表只投影 Task 行与该瞬时执行态；完整 checkpoint/health/pending/error 仅由按 id 的 get 读取，因此一个损坏或较大的 `trigger-state.json` 不会击穿整个 Task 列表。
 

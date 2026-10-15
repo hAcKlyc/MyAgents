@@ -28,7 +28,7 @@
 
 ## Verification
 
-161项相关unit/DOM通过；Node24 typecheck、完整lint通过（depcruise既存16 warnings/0errors，agentdocs4pass）；web/server构建通过。独立实际React检查四列、history/archive/restore、成果确认/重跑边界、540覆盖/焦点/返回、1440/1024无溢出。发现history跨scope需要处理计数已修。见dev-docs/project-board-validation/state/。
+与最新main b5b9c9c4集成后161项相关unit/DOM、类型及完整lint再次通过；Node24 typecheck、完整lint通过（depcruise既存16 warnings/0errors，agentdocs4pass）；web/server构建通过。独立实际React检查四列、history/archive/restore、成果确认/重跑边界、540覆盖/焦点/返回、1440/1024无溢出。发现history跨scope需要处理计数已修。见dev-docs/project-board-validation/state/。
 
 Rust恢复持久化实际测试1pass；本机CLT6.3.2 ManifestAPI私有接口陈旧，通过临时public-interface shadow与LIBRARY_PATH单命令修正，不改系统/registry。CLIProxy按现有签名脚本准备；其他非执行资源路径按CI fixture，不是正式打包制品。Task全组82/82与owner healthy/absent/starting/dead/draining/recovery两项测试2/2通过。
 
@@ -46,3 +46,9 @@ UI审阅基准：PB-003 v3；1440/1024/800内容宽度及必要窄窗；四列�
 ## Next step
 
 汇总Rust与独立review最终结果，提交并同步最新main后跑CI，交付远端main；统一0.5.5纳入与原生真实HRM复验单列等待负责人串行窗口。
+
+## Candidate / native intake
+
+PR https://github.com/heavenzhang/MoXBots/pull/56 已推远端任务分支，handoff gate通过。已保留并行community与remote-session主干成果；产品看板/状态文件合并前后未发生额外变动。CI Test run38657536353已启动，最终结果需核实，不能预称通过。
+
+统一负责人为现有「MoxBots桌面端统一打包负责人」聊天，统一0.5.5 worktree不属于本任务。已向人类发起可选跨聊天协调授权问题，等待答复；未擅自发消息。源码/验证资料已可审阅，正式profile构建、公证、串行安装与原生真实HRM复验仍待统一owner窗口。本轮没有安装、退出、重启或付费模型调用。
