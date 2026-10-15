@@ -834,6 +834,16 @@ it.skipIf(process.getuid?.() === 0)(
       expect(response).toMatchObject({ kind: "response", requestId });
       return response.result as Record<string, unknown>;
     };
+    const advertised = await sendRequest('host.capabilities', {});
+    expect(advertised).toMatchObject({ kind: 'capabilities', version: 1,
+      methods: expect.arrayContaining(['host.inspect', 'config.provider.set', 'credential.provider.set', 'receipt.provider.get', 'resources.directory.list', 'resources.register', 'session.remote']),
+    });
+    // The deployed Rust v1 codec rejects an entire response above 12 methods,
+    // causing the desktop to mistake this modern Host for a legacy Kimi Host.
+    const methods = advertised.methods as string[];
+    expect(methods.length).toBeLessThanOrEqual(12);
+    expect(new Set(methods).size).toBe(methods.length);
+    // The unadvertised baseline must still work for pre-extension controllers.
     expect(await sendRequest("host.snapshot", {})).toMatchObject({
       kind: "snapshot",
       configured: false,
