@@ -28,7 +28,7 @@
 - npm run typecheck、npm run lint、npm run build:web及构建主题8项回归通过。
 - 独立只读审阅发现 Goal晚到hydrate、raw弹窗编辑和A→B→A复用风险，均已修复；最终复核无阻断。
 - IAB真实SimpleChatInput合成交互通过：已保存Task配置通过检查点且正文恢复；Goal仅设置无正文恢复；Cron 17分钟、新任务模式与正文同时恢复，均未发送/启动任务。初次重载无响应由fixture不稳定服务引用引发，改为常量适配器后复验通过；不据此修改产品代码。原生重启仍未执行。截图位于项目指针目录output/restart-task-draft-20261016/{saved-task-restored,goal-settings-restored,cron-settings-and-text-restored}.jpg（仅合成数据，未入Git）。
-- 日常客户端0.5.7，HRM任务有持续输出；本任务未停止或重启客户端。
+- 日常客户端0.5.7原生只读复验：MoX bot cloud trial下Mac-mini-2.local显示在线，目录2设备，另一设备离线，开放Agent为0，未做跨设备Agent执行验收；另一会话仍在输出。本任务未停止或重启客户端，查看后返回原会话。native-bots-network-online.jpg为本机取证。
 - 本地日志 /tmp/moxbots-restart-draft-{tests,final-tests,typecheck,lint,build}.log，不将本地日志/浏览器存储/个人内容提交Git。
 
 ## Blockers and unknowns
@@ -37,11 +37,11 @@
 
 ## Next step
 
-PR90/CI与最新main同步核验后合并，沿既有授权交统一发行owner安排下一未冻结修复版。
+PR90已同步main PR89的登录自动检测修复（78752f65），无文件冲突；等待合并候选CI后核验远端主干。发行owner已接收并登记0.5.8（保持未冻结），待本任务最终主干SHA及适用验收。
 
 ## Deployment request
 
-Required：由统一桌面发布聊天01a12bc2-907a-7702-b6dd-788225c5dfe4处理下一未冻结修复版，不修改已发布0.5.7。该修复解决用户入网修复升级时遇到的草稿门禁；沿用用户已授权发送并安排修复版。无数据库迁移/服务端配置变更。旧客户端没有v2写入能力，必须由发行owner评估安全原生启用路径并备份应用/草稿；保持已运行任务，任务空闲且fresh admission通过后才启用。回滚保留v2交接文件，旧版不能解释时必须保留并拒绝更新，不清理或重建身份。代码主干、候选包、发布和真实重启/入网验收分别记录。
+已授权通知并收到登记0.5.8回执；Required：由统一桌面发布聊天01a12bc2-907a-7702-b6dd-788225c5dfe4处理下一未冻结修复版，不修改已发布0.5.7。该修复解决用户入网修复升级时遇到的草稿门禁；沿用用户已授权发送并安排修复版。无数据库迁移/服务端配置变更。旧客户端没有v2写入能力，必须由发行owner评估安全原生启用路径并备份应用/草稿；保持已运行任务，任务空闲且fresh admission通过后才启用。回滚保留v2交接文件，旧版不能解释时必须保留并拒绝更新，不清理或重建身份。代码主干、候选包、发布和真实重启/入网验收分别记录。
 
 ## Execution record
 
