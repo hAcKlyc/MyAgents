@@ -453,6 +453,7 @@
       "stopButton": "Stop"
     },
     "settingsModal": {
+      "updateDraftPending": "The task settings window has unconfirmed changes. Confirm or cancel them before updating; your changes have been retained.",
       "title": "Scheduled task",
       "goalTitle": "Goal Loop",
       "executionMode": "Execution mode",

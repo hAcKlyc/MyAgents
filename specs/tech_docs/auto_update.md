@@ -67,6 +67,14 @@ Rust 在读取版本、校验 pending bytes 与 pinned signature 成功后，取
 
 独立 Host daemon 与远端执行拥有自己的生命周期，桌面更新不主动停止它们；尚未接入草稿持久交接的 remote-session Tab 仍需保留原安全限制。成功安装后保持 admission 关闭直到受管重启；失败先释放 Node 冻结并恢复文档/语音服务准入，再开放 lifecycle gate；已中断的 turn 不重跑，空闲的定时/Detector loop 保留以继续未来调度；真正被中断的 Running Task 通过已有用户 Stop 状态转换显示为 Stopped，待用户检查后继续，不伪装为仍在调度。文档/语音更新专用停止必须确认真实进程树退出；失败保留精确 worker 句柄供重试，不把普通退出的 best-effort 结果当作安装证明。
 
+### 任务设置草稿的更新交接
+
+已保存 Task 的 `cronConfig` 是运行配置投影，不属于待提交草稿，不得据此阻止更新。已确认到输入框、尚未提交的 Goal/Cron 设置与正文、上下文使用同一个 `update-composer-drafts.json` owner 保存；仅设置、无正文的草稿也必须交接。含设置的文件写入严格 v2 格式，纯正文仍写 v1，读取兼容原 v1。未知字段、损坏或较新格式保留文件并拒绝更新，避免静默丢弃设置或密钥扩散。
+
+恢复必须精确匹配 Tab、Session、workspace 和模式，等待该次 owner 激活的 Goal 与 Cron 查询均完成，且不覆盖现有正文、附件、设置或已存在 Goal/Task；查询失败或晚到结果不能授权消费交接文件。恢复只回到编辑状态，不创建、启动或重跑任务。切换 A→B→A 必须重新等待当前激活的查询，不能复用旧 A 的成功状态。
+
+设置弹窗未修改时不阻止更新；有未确认的原始表单编辑（含尚不能形成合法配置的输入）时，明确要求确认或取消，并保留表单。Launcher、pending Session 等尚无持久恢复 owner 的草稿，以及录音、附件处理中和写盘失败等保护继续生效。本改动不替代活动任务的用户确认与生命周期保护，也不使已安装旧客户端自动支持 v2。
+
 ## Windows installer handoff
 
 Windows 安装前必须证明当前安装目录不再被 MyAgents 进程树占用：

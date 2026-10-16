@@ -30,6 +30,12 @@ export type CronTaskStatus = 'running' | 'stopped';
 /** Renderer-only creation surface identity. Schedule shape is persistence detail. */
 export type ScheduledTaskKind = 'cron' | 'goal';
 
+/** Unsaved composer configuration, before Task creation/Session binding. */
+export type CronTaskDraftConfig = Omit<CronTaskConfig, 'workspacePath' | 'sessionId' | 'name' | 'managedKind'> & {
+  taskKind: ScheduledTaskKind;
+  executionTarget?: 'current_session' | 'new_task';
+};
+
 /**
  * End conditions for a cron task
  * Note: Uses camelCase to match Rust's serde(rename_all = "camelCase")

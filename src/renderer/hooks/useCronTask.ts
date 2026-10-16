@@ -1,7 +1,6 @@
 // Hook for managing cron task state within a Tab
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type { CronTask, CronTaskConfig, CronDelivery, CronEndConditions, CronRunMode, CronSchedule, ScheduledTaskKind } from '@/types/cronTask';
-import type { RuntimeConfig, RuntimeType } from '../../shared/types/runtime';
+import type { CronTask, CronTaskConfig, CronTaskDraftConfig, ScheduledTaskKind } from '@/types/cronTask';
 import {
   createAndStartCronTask,
   stopCronTask,
@@ -19,32 +18,7 @@ export interface CronTaskState {
   /** Whether cron mode is enabled (before task is created) */
   isEnabled: boolean;
   /** Cron task configuration (set before task creation) */
-  config: {
-    taskKind: ScheduledTaskKind;
-    prompt: string;
-    intervalMinutes: number;
-    endConditions: CronEndConditions;
-    runMode: CronRunMode;
-    notifyEnabled: boolean;
-    /** Model to use for task execution (captured at task creation time) */
-    model?: string;
-    /** Permission mode (captured at task creation time) */
-    permissionMode?: string;
-    /** Provider identity used only when initializing a new execution Session. */
-    providerId?: string;
-    /** Agent runtime snapshot for external Runtime tasks */
-    runtime?: RuntimeType;
-    /** Runtime-scoped config snapshot for external Runtime tasks */
-    runtimeConfig?: RuntimeConfig;
-    /** Flexible schedule (overrides intervalMinutes when present) */
-    schedule?: CronSchedule;
-    /** Execution target: current_session (legacy) or new_task (standalone) */
-    executionTarget?: 'current_session' | 'new_task';
-    /** Where to deliver execution results (IM channel) */
-    delivery?: CronDelivery;
-    /** Per-task MCP enable list — see `CronTaskConfig.mcpEnabledServers`. */
-    mcpEnabledServers?: string[];
-  } | null;
+  config: CronTaskDraftConfig | null;
   /** Active cron task (after creation) */
   task: CronTask | null;
   /** Whether task is currently being created/started */
