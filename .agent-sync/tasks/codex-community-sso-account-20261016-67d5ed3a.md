@@ -17,7 +17,7 @@ Task ID: COMMUNITY-SSO-ACCOUNT-20261016. Open the owned community inside the des
 - [x] Simulated acceptance: focused unit/DOM and rendered-browser journeys pass, including uncertain writes retaining the same body and mutation ID. Independent auth and screenshot review pass.
 - [x] Native-source compile and deterministic tests; separate from an installed/signed client. Standalone headless regression passes after shared-module compatibility updates.
 - [ ] Real authenticated community integration and installed native-client acceptance. No daily App lease or matching current-account test authorization was claimed; synthetic IPC is not cloud acceptance.
-- [ ] Git: push branch, required CI, merge latest main, verify remote main contains the exact code. Do not mark a PR as final main delivery.
+- [x] Git: PR87 final head303fb76b merged as c0f7649d; sixCI SUCCESS, fresh remote main containment and full-tree equality independently rechecked by desktop release owner.
 - [ ] Release: designated owner packages next unfrozen candidate, publishes and coordinates real installed-client acceptance. No frozen 0.5.7 artifacts are changed.
 
 ## Completed
@@ -50,7 +50,7 @@ Primary owns integration and delivery. Two bounded native workers were requested
 
 ## Blockers and unknowns
 
-- Required remote CI and main delivery are pending.
+- Source CI/main delivery complete (PR87/head303fb76b/mainc0f7649d). Formal058 candidate and real native/account acceptance remain pending under the desktop release owner.
 - Real authenticated and installed-client acceptance need the designated release owner's current account/GUI/idle/backup gates. No cloud server change is required.
 
 ## Deployment request
@@ -62,4 +62,4 @@ Primary owns integration and delivery. Two bounded native workers were requested
 
 ## Next step
 
-Commit/push this task, run required CI and merge/verify current remote main; send the exact reviewed head/main SHA and acceptance limits to the designated desktop owner. Real account and installed-client acceptance remain explicit open gates until that owner coordinates them.
+Source main delivery has completed and was independently accepted by the desktop release owner. Continue formal candidate and gated real account/installed-client acceptance through MOXBOTS-058-COMMUNITY-RELEASE-20261016; preserve the explicit open gates and frozen057 artifacts.

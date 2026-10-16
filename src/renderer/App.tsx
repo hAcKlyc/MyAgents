@@ -4725,10 +4725,11 @@ export default function App() {
       return true;
     }, []);
 
-  const handleRestartAndUpdate = useCallback(async (confirmed = false) => {
+  const handleRestartAndUpdate = useCallback(async (confirmed = false, interruptWork = false) => {
     if (APP_BUILD_PROFILE === 'moxbot') {
-      // Only this explicit confirmation permits local work to stop. Saving and
-      // process settlement still belong to Rust/SessionEngine, not UI busy flags.
+      // The normal action keeps work running and lets Rust reject busy/unknown
+      // owners. Only the separately labelled stop action grants interruption;
+      // both actions save the same drafts before native admission.
       if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
       let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
       let restarting = false;
@@ -4742,7 +4743,7 @@ export default function App() {
           if (!(await submit())) return;
         }
         await checkpoint.persist(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
-        restarting = (await performRestartAndUpdate(checkpoint, true)) === 'ok';
+        restarting = (await performRestartAndUpdate(checkpoint, interruptWork)) === 'ok';
       } catch (error) {
         console.error('[App] Failed to save drafts before update:', error);
         toastRef.current?.error(error instanceof Error ? `更新已暂停：${error.message}` : t('appChrome.updateInstallFailed'));
@@ -5205,9 +5206,9 @@ export default function App() {
           {showUpdateRestartConfirmation && !updatePreparing && (
             <UpdateRestartConfirmation
               version={updateVersion}
-              onConfirm={() => {
+              onConfirm={(interruptWork) => {
                 setShowUpdateRestartConfirmation(false);
-                void handleRestartAndUpdate(true);
+                void handleRestartAndUpdate(true, interruptWork);
               }}
               onCancel={() => setShowUpdateRestartConfirmation(false)}
             />
@@ -5216,9 +5217,9 @@ export default function App() {
             APP_BUILD_PROFILE === 'moxbot' ? (
               <UpdateRestartConfirmation
                 version={pendingUpdateOnStartup}
-                onConfirm={() => {
+                onConfirm={(interruptWork) => {
                   dismissPendingUpdate();
-                  void handleRestartAndUpdate(true);
+                  void handleRestartAndUpdate(true, interruptWork);
                 }}
                 onCancel={dismissPendingUpdate}
               />

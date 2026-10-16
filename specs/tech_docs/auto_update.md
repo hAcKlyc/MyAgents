@@ -57,7 +57,7 @@ Renderer 的 `updateReady`、`preparing` 和启动对话框只是上述磁盘状
 
 ## 用户确认重启与活动保护
 
-MoXBots 的手动「重启更新」在确认框中明确说明：会中断本机任务与终端命令、停止并保存录音，先保存会话和输入草稿。启动 pending 对话框与手动入口复用同一个确认组件，禁用自动 Enter 确认；取消不进入任何停止/安装流程。确认后才传入 `install_pending_update({ interruptWork: true })`。检查与下载仍只在后台准备更新，绝不因空闲或 ready 事件自动停止或安装。
+MoXBots 的手动「重启更新」与启动 pending 对话框复用同一确认组件，禁用自动 Enter 确认。普通「重启更新」先完整保存会话、录音笔记、文件编辑和输入/任务草稿，再调用既有非中断安装路径（省略或 false 的 `interruptWork`）；Rust 在同一生命周期 admission 中拒绝 busy/unknown owner，保持现有执行，Renderer 释放此次 checkpoint。单独明确标注的「停止任务并重启更新」才传入 `install_pending_update({ interruptWork: true })`，允许停止本机任务与终端命令并保存录音。两种动作都不能绕过相同的 checkpoint/persist/verify；取消不进入停止或安装流程。检查与下载仍只在后台准备更新，绝不因空闲或 ready 事件自动停止或安装。
 
 Rust 在读取版本、校验 pending bytes 与 pinned signature 成功后，取得 lifecycle exclusive permit。已准入但尚未完成的资源创建只要求稍后重试，不能绕过其注册。明确中断路径调用既有录音停止并保存、终端关闭及文档/语音 worker shutdown；任一步无法确认完成均不安装。已中断工作不回滚或伪报完成，失败提示明确部分操作可能已停止。文档及语音的恢复仍由各自持久 owner 管理。
 

@@ -25,6 +25,8 @@ interface ConfirmDialogProps {
      * Escape-to-cancel stays on, button clicks still work.
      */
     disableEnterShortcut?: boolean;
+    /** An explicitly clicked alternative; never invoked by Enter. */
+    alternativeAction?: { text: string; onClick: () => void; danger?: boolean };
     onConfirm: () => void;
     onCancel: () => void;
 }
@@ -40,6 +42,7 @@ export default function ConfirmDialog({
     danger = false,
     loading = false,
     disableEnterShortcut = false,
+    alternativeAction,
     onConfirm,
     onCancel
 }: ConfirmDialogProps) {
@@ -76,7 +79,7 @@ export default function ConfirmDialog({
     // body level — observed 2026-05-08 with SessionHistoryDropdown.
     return createPortal(
         <OverlayBackdrop onClose={loading ? undefined : onCancel} className="z-[300] px-4">
-            <div className="glass-panel w-full max-w-sm">
+            <div className="glass-panel max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto">
                 <div className="border-b border-[var(--line)] px-5 py-4">
                     <div className="break-words text-lg font-semibold text-[var(--ink)]">{title}</div>
                 </div>
@@ -86,7 +89,7 @@ export default function ConfirmDialog({
                         callers render identically. */}
                     <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--ink-muted)]">{message}</p>
                 </div>
-                <div className="flex justify-end gap-2 border-t border-[var(--line)] px-5 py-3">
+                <div className={`flex justify-end gap-2 border-t border-[var(--line)] px-5 py-3 ${alternativeAction ? 'flex-wrap' : ''}`}>
                     <button
                         type="button"
                         onClick={onCancel}
@@ -95,6 +98,16 @@ export default function ConfirmDialog({
                     >
                         {finalCancelText}
                     </button>
+                    {alternativeAction && <button
+                        type="button"
+                        onClick={alternativeAction.onClick}
+                        disabled={loading}
+                        className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors disabled:opacity-50 ${alternativeAction.danger
+                            ? 'text-[var(--error)] hover:bg-[var(--button-secondary-bg-hover)]'
+                            : 'bg-[var(--button-secondary-bg)] text-[var(--button-secondary-text)] hover:bg-[var(--button-secondary-bg-hover)]'}`}
+                    >
+                        {alternativeAction.text}
+                    </button>}
                     <button
                         type="button"
                         onClick={onConfirm}
