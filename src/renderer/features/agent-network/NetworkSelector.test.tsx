@@ -631,3 +631,33 @@ it("offers direct re-login only for the selected invalid owned account without m
   view.rerender(<NetworkSelector registry={{ ...owned, selected: "official" }} />);
   expect(screen.queryByRole("button", { name: "重新登录" })).not.toBeInTheDocument();
 });
+
+it("automatically completes a generic join after browser login without clicking manual check", async () => {
+  calls.ownedPoll.mockResolvedValue({ status: "authenticated", registry });
+  render(<NetworkSelector registry={registry} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "加入自部署网络" }));
+  fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "https://hub.example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "检查登录状态" })).toBeEnabled());
+  fireEvent(window, new Event("focus"));
+  await waitFor(() => expect(calls.accept).toHaveBeenCalledWith(registry));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(calls.ownedCancel).not.toHaveBeenCalled();
+});
+it("fences a generic join's late automatic poll after explicit cancellation", async () => {
+  let resolvePoll!: (value: unknown) => void;
+  calls.ownedPoll.mockImplementationOnce(() => new Promise(resolve => { resolvePoll = resolve; }));
+  render(<NetworkSelector registry={registry} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "加入自部署网络" }));
+  fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "https://hub.example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "检查登录状态" })).toBeEnabled());
+  fireEvent(window, new Event("focus"));
+  await waitFor(() => expect(calls.ownedPoll).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "取消登录" }));
+  await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
+  await act(async () => { resolvePoll({ status: "authenticated", registry }); });
+  expect(calls.accept).not.toHaveBeenCalled();
+});
