@@ -9,7 +9,8 @@ import {
   AlertIcon,
   CheckIcon,
 } from '@/components/icons';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
+import { useUpdateEditorAdmission } from '@/hooks/useUpdateEditorAdmission';
 import { useTranslation } from 'react-i18next';
 
 import { useCloseLayer } from '@/hooks/useCloseLayer';
@@ -177,6 +178,31 @@ function CronTaskSettingsForm({
   const [maxExecutions, setMaxExecutions] = useState(endCondInit.maxExec);
   const [aiCanExit, setAiCanExit] = useState(endCondInit.aiCanExit);
 
+  // This modal owns raw, potentially invalid form values until Confirm. They
+  // are not the accepted composer draft and must never be silently discarded.
+  const formRef = useRef<HTMLDivElement>(null);
+  const noTextarea = useRef<HTMLTextAreaElement>(null);
+  const formSnapshot = JSON.stringify([taskKind, executionTarget, schedule, intervalMinutes,
+    notifyEnabled, deliveryBotId, endMode, useDeadline, deadline, useMaxExecutions, maxExecutions, aiCanExit]);
+  const interacted = useRef(false);
+  const initialFormSnapshot = useRef(formSnapshot);
+  const initialFields = useRef('');
+  const fieldsSnapshot = () => JSON.stringify(Array.from(formRef.current?.querySelectorAll('input, textarea, select') ?? [])
+    .map(element => [element.tagName, (element as HTMLInputElement).type,
+      (element as HTMLInputElement).value, (element as HTMLInputElement).checked]));
+  useLayoutEffect(() => {
+    // Child editors may normalize defaults on mount. That is not a user edit.
+    if (!interacted.current) {
+      initialFormSnapshot.current = formSnapshot;
+      initialFields.current = fieldsSnapshot();
+    }
+  });
+  const markInteracted = () => { interacted.current = true; };
+  useUpdateEditorAdmission('cron-settings', formRef, noTextarea,
+    () => interacted.current && (formSnapshot !== initialFormSnapshot.current || fieldsSnapshot() !== initialFields.current),
+    t('cron.settingsModal.updateDraftPending'));
+
+
   const isAtSchedule = schedule?.kind === 'at';
   const isGoalMode = taskKind === 'goal';
 
@@ -245,7 +271,8 @@ function CronTaskSettingsForm({
   }, [isValid, taskKind, initialPrompt, schedule, intervalMinutes, runMode, notifyEnabled, deliveryBotId, resolveDelivery, endMode, aiCanExit, useDeadline, deadline, useMaxExecutions, maxExecutions, executionTarget, isAtSchedule, onConfirm]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div ref={formRef} onClickCapture={markInteracted} onInputCapture={markInteracted} onChangeCapture={markInteracted}
+      className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }} />
 
       <div className="relative z-10 flex h-[80vh] w-full max-w-lg flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">

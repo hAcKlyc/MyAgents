@@ -453,6 +453,7 @@
       "stopButton": "停止"
     },
     "settingsModal": {
+      "updateDraftPending": "任务设置窗口还有未确认的修改。请先确认或取消这些修改，再更新；当前修改已保留。",
       "title": "定时任务",
       "goalTitle": "目标模式 Goal Loop",
       "executionMode": "执行模式",

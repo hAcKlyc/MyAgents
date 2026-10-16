@@ -1,4 +1,5 @@
 import type React from 'react';
+import type { ComposerWorkflowDraft } from '@/utils/composerWorkflowDraft';
 
 import type { SessionState } from '@/context/TabContext';
 import type {
@@ -114,6 +115,8 @@ export interface SimpleChatInputProps {
     schedule?: CronSchedule;
   } | null;
   goalDraftActive?: boolean;
+  workflowDraft?: ComposerWorkflowDraft;
+  onRestoreWorkflowDraft?: (draft: ComposerWorkflowDraft) => boolean;
   cronTask?: ScheduledTaskBarProjection | null;
   /** Current Session Goal. */
   sessionGoal?: SessionGoal | null;

@@ -62,6 +62,57 @@ describe('MoxBots composer update checkpoint', () => {
     expect(api.restoreComposerUpdateDraft(state.scope, true)).toBeNull();
     await api.clearComposerUpdateHandoff(); expect(disk.values.size).toBe(0);
   });
+  it.each(['goal', 'scheduled'] as const)('persists a settings-only %s draft and restores it only after the config owner accepts', async kind => {
+    const workflowDraft = kind === 'goal' ? {
+      kind: 'goal' as const, config: { taskKind: 'goal' as const, prompt: '', endConditions: { aiCanExit: false, maxExecutions: 7 }, notifyEnabled: false, runtime: 'codex' as const, permissionMode: 'full-auto' },
+    } : {
+      kind: 'scheduled' as const, config: { taskKind: 'cron' as const, prompt: 'saved prompt', intervalMinutes: 9, endConditions: { aiCanExit: true, deadline: '2027-01-01T00:00:00Z' }, runMode: 'new_session' as const, notifyEnabled: true,
+        schedule: { kind: 'every' as const, minutes: 9, startAt: '2026-12-01T00:00:00Z', catchUpWindow: { timezone: 'Asia/Shanghai', start: '09:00', end: '18:00' } },
+        executionTarget: 'new_task' as const, providerId: 'synthetic-provider', model: 'synthetic-model', permissionMode: 'default', runtime: 'codex' as const,
+        runtimeConfig: { source: 'system-cli' as const, model: 'synthetic-model', permissionMode: 'default', reasoningEffort: 'high', additionalArgs: ['--synthetic'], envPolicy: { proxy: 'terminal' as const } },
+        delivery: { botId: 'synthetic-bot', chatId: 'synthetic-room', platform: 'synthetic' }, mcpEnabledServers: ['synthetic-mcp'] },
+    };
+    const { api, state, unregister } = await owner({ text: '', stagedWorkflow: true, workflowDraft });
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs);
+    await lease.persist([tab], tab.id); lease.verify([tab], tab.id); lease.release(); unregister();
+    const stored = disk.values.get('/synthetic/qa/update-composer-drafts.json');
+    expect(stored).toMatchObject({ version: 2, drafts: [{ text: '', workflowDraft }] });
+    await api.loadComposerUpdateHandoff(deserializeTabs);
+    const accept = vi.fn(() => false);
+    expect(api.restoreComposerUpdateDraft({ ...state.scope, sessionId: 'wrong' }, true, accept)).toBeNull();
+    expect(accept).not.toHaveBeenCalled();
+    expect(api.restoreComposerUpdateDraft(state.scope, true)).toBeNull();
+    expect(api.restoreComposerUpdateDraft(state.scope, true, accept)).toBeNull();
+    expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('尚未恢复');
+    accept.mockReturnValue(true);
+    const draft = api.restoreComposerUpdateDraft(state.scope, true, accept);
+    expect(draft?.workflowDraft).toEqual(workflowDraft);
+    expect(accept).toHaveBeenLastCalledWith(workflowDraft);
+    expect(api.restoreComposerUpdateDraft(state.scope, true, accept)).toBeNull();
+    await api.clearComposerUpdateHandoff(); expect(disk.values.size).toBe(0);
+  });
+  it('retains task settings when changed during persistence or when the handoff cannot be written', async () => {
+    const workflowDraft = { kind: 'goal' as const, config: { taskKind: 'goal' as const, prompt: '', endConditions: { aiCanExit: true }, notifyEnabled: false } };
+    const { api, state } = await owner({ stagedWorkflow: true, workflowDraft });
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await lease.persist([tab], tab.id);
+    state.workflowDraft = { ...workflowDraft, config: { ...workflowDraft.config, notifyEnabled: true } };
+    expect(() => lease.verify([tab], tab.id)).toThrow('变化');
+    await lease.abort(); lease.release(); expect(state.workflowDraft.config.notifyEnabled).toBe(true);
+    disk.write.mockRejectedValueOnce(new Error('synthetic fsync failure'));
+    const retry = api.beginComposerUpdateCheckpoint(serializeTabs);
+    await expect(retry.persist([tab], tab.id)).rejects.toThrow('fsync');
+    await retry.abort(); retry.release(); expect(state.workflowDraft.config.notifyEnabled).toBe(true);
+  });
+  it('does not discard unknown task settings or admit workflow data under the legacy format', async () => {
+    const { api } = await owner({ stagedWorkflow: true, workflowDraft: { kind: 'goal', config: { taskKind: 'goal', prompt: '', endConditions: { aiCanExit: true }, notifyEnabled: false } } });
+    const lease = api.beginComposerUpdateCheckpoint(serializeTabs); await lease.persist([tab], tab.id); lease.release();
+    const path = '/synthetic/qa/update-composer-drafts.json';
+    const stored = disk.values.get(path) as { version: number; drafts: Array<{ workflowDraft: { config: Record<string, unknown> } }> };
+    stored.drafts[0].workflowDraft.config.providerEnv = { apiKey: 'synthetic-only' };
+    await expect(api.loadComposerUpdateHandoff(deserializeTabs)).rejects.toThrow(); expect(disk.values.has(path)).toBe(true);
+    delete stored.drafts[0].workflowDraft.config.providerEnv; stored.version = 1;
+    await expect(api.loadComposerUpdateHandoff(deserializeTabs)).rejects.toThrow(); expect(disk.values.has(path)).toBe(true);
+  });
   it('rejects IME before freezing to preserve uncommitted input', async () => {
     const { api, freeze } = await owner({ composing: true });
     expect(() => api.beginComposerUpdateCheckpoint(serializeTabs)).toThrow('输入法'); expect(freeze).not.toHaveBeenCalled();
