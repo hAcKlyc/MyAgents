@@ -15,14 +15,19 @@
 - [x] 仅精确Session路径登记，保留Global隔离，不开放整个/api/chat/。
 - [x] 正式composition→实际route→实际owner service回归先红后绿，模型/Session数据为隔离fixture。
 - [x] 189项定向unit/DOM通过，包含运行中409且不触发模型、不变更任务，以及Enter仅采纳为草稿。
-- [ ] 类型、scoped lint及正常CI通过，审查diff，同步最新main合入并核验远端。
+- [x] 类型与scoped lint通过，主Agent审查diff。
+- [ ] PR92正常六项CI通过，同步最新main合入并核验远端。
 - [ ] 唯一桌面发布owner接收下一未冻结发行请求，核实冻结源码包含成果；冻结058不得直接换源码。
 - [ ] 发布owner协调正式签名客户端、安全空闲/解锁、兼容备份与回退后启用，无stop/kill/强退。
 - [ ] 正式客户端完整真人路径：可继续的受控任务正常结束→输入框空白→真实建议出现→Enter采纳可编辑草稿→原任务/消息数未增加。真实生成null不能算通过，也不强制每次生成。
 
-## Completed and Verification
+## Completed
 
 根因：production-consumed Sidecar ownership表未登记/api/chat/next-prompt，实际handler被composition前置拒绝。补SESSION_EXACT_PATHS精确路径；未更改提示词、模型/认证配置、客户端交互或活动owner。
+
+## Verification
+
+类型检查 `tsc --noEmit` 与限定两文件ESLint均exit0通过。
 
 新文件src/server/routes/prompt-suggestion-composition.unit.test.ts含9例：修复前7失败（200/400/409均收到404）/2通过；修复后9通过。测试实际composeSidecarRequestHandler、handlePromptSuggestionRoute及suggestNextPrompt，只mock模型与Session snapshot。Builtin和Codex/Claude Code/DSH均验证原owner；Global、邻近未知路径和非POST不生成。
 

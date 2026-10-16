@@ -33,4 +33,4 @@ node_modules/.bin/vitest run --project unit \
 
 ## 当前状态
 
-代码回归通过；类型/lint、CI/main、正式签名包/发布及实际用户路径待逐项回填。未修改0.5.7安装包、日常配置或运行任务。
+代码回归189项、完整tsc --noEmit、两文件ESLint均通过；PR92六项CI/main、正式签名包/发布及实际用户路径待逐项回填。未修改0.5.7安装包、日常配置或运行任务。
