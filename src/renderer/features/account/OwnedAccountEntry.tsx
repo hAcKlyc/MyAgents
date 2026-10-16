@@ -405,8 +405,10 @@ export default function OwnedAccountEntry({
           }}
           onOwnedOpen={(attemptId) => openOwnedNetworkAuthorization(attemptId)}
           onOwnedCancel={async (attemptId) => {
-            generation.current += 1;
-            pendingAttemptId.current = null;
+            if (pendingAttemptId.current === attemptId) {
+              generation.current += 1;
+              pendingAttemptId.current = null;
+            }
             try {
               await cancelOwnedNetworkLogin(attemptId);
             } catch {
