@@ -27,15 +27,15 @@ flowchart LR
 
 | 断点 | 当前事实 | 对流程的影响 | 源码入口 |
 | --- | --- | --- | --- |
-| 用户管理未闭环 | 后台仅返回 principal/network 清单，没有用户创建、停用、重置 API | 管理员无法在产品内完成开户 | `src/admin_http.rs` router/bootstrap、`admin-web/app.js` users render |
-| 身份不可辨认 | AuthStore 按 issuer+subject 建 principal；管理角色来自配置 allowlist，页面主要显示 UUID | 用户难以判断“登录的是谁、拥有什么权限” | `src/store.rs`、`src/admin_store.rs` |
-| 账号入口依赖所看网络 | 桌面个人菜单从 selected connection 或第一个 eligible connection 取账号 | 浏览切换容易被理解成切账号 | `src/renderer/features/account/OwnedAccountEntry.tsx`（仓库根相对路径） |
-| 登录与联网混合 | 保存登录连接后才执行设备签发和 Actor 接入 | 登录成功但身份冲突时仍像在无限重连 | `src-tauri/src/agent_network/registry.rs`、`owned_admission.rs` |
-| 设备身份跨账号复用 | 桌面 admission 等仍使用安装级 global deviceId；服务拒绝跨 principal 认领同一 network/device | 新账号不能直接继承旧账号设备 | `account.rs`、`identity.rs`、`device-core/src/lib.rs` |
-| 端间操作语义不同 | 桌面退出移除连接；Web 仅注销当前页面会话；Host cancel/logout 共用清理 | 用户无法预测退出、取消、离网会影响哪些对象 | `registry.rs`、`admin-web/app.js`、`headless-network/src/owned.rs`、`owned_state.rs` |
-| 页面导航未确认账号 | 桌面打开 Web 仅导航 URL，Web 独立登录 | 浏览器可能使用另一账号 | `src/renderer/utils/ownedCloud.ts`、`admin-web/app.js` |
+| 用户管理未闭环 | 后台仅返回 principal/network 清单，没有用户创建、停用、重置 API | 管理员无法在产品内完成开户 | [admin router/bootstrap](../src/admin_http.rs)、[用户清单](../admin-web/app.js) |
+| 身份不可辨认 | AuthStore 按 issuer+subject 建 principal；管理角色来自配置 allowlist，页面主要显示 UUID | 用户难以判断“登录的是谁、拥有什么权限” | [AuthStore](../src/store.rs)、[AdminConfig](../src/admin_store.rs) |
+| 账号入口依赖所看网络 | 桌面个人菜单从 selected connection 或第一个 eligible connection 取账号 | 浏览切换容易被理解成切账号 | [OwnedAccountEntry](../../../src/renderer/features/account/OwnedAccountEntry.tsx) |
+| 登录与联网混合 | 保存登录连接后才执行设备签发和 Actor 接入 | 登录成功但身份冲突时仍像在无限重连 | [registry](../../../src-tauri/src/agent_network/registry.rs)、[admission](../../../src-tauri/src/agent_network/owned_admission.rs) |
+| 设备身份跨账号复用 | 桌面 admission 等仍使用安装级 global deviceId；服务拒绝跨 principal 认领同一 network/device | 新账号不能直接继承旧账号设备 | [account](../../../src-tauri/src/agent_network/account.rs)、[identity](../../../src-tauri/src/agent_network/identity.rs)、[device-core](../device-core/src/lib.rs) |
+| 端间操作语义不同 | 桌面退出移除连接；Web 仅注销当前页面会话；Host cancel/logout 共用清理 | 用户无法预测退出、取消、离网会影响哪些对象 | [registry](../../../src-tauri/src/agent_network/registry.rs)、[Web](../admin-web/app.js)、[Host owned](../../../src-tauri/headless-network/src/owned.rs)、[Host state](../../../src-tauri/headless-network/src/owned_state.rs) |
+| 页面导航未确认账号 | 桌面打开 Web 仅导航 URL，Web 独立登录 | 浏览器可能使用另一账号 | [ownedCloud](../../../src/renderer/utils/ownedCloud.ts)、[Web](../admin-web/app.js) |
 
-表中 `src/`、`admin-web/`、`device-core/` 默认相对 `services/agentnet/`，其余注明仓库根。当前 Web/桌面入口已经只读检查；Linux Host 与完整新用户闭环尚未进行真实验收。静态代码、截图和 HTTP 200 分别只证明对应层状态。
+当前 Web/桌面入口已经只读检查；Linux Host 与完整新用户闭环尚未进行真实验收。静态代码、截图和 HTTP 200 分别只证明对应层状态。
 
 ## 3. 五类状态各有 owner
 
