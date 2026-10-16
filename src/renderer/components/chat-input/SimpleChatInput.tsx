@@ -1505,9 +1505,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
           {/* Textarea area */}
           <div ref={textareaWrapperRef} className="relative px-4 pt-3">
-            <div className="grid">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
             {visibleSuggestion && (
-              <div aria-hidden="true" data-testid="next-prompt-ghost" onMouseDown={event => { event.preventDefault(); textareaRef.current?.focus(); }} className="pointer-events-auto relative z-[1] col-start-1 row-start-1 whitespace-pre-wrap break-words text-base leading-relaxed text-[var(--ink-muted)]" style={{ maxHeight: `${LINE_HEIGHT * MAX_LINES}px`, overflowY: 'auto', overscrollBehaviorY: 'contain' }}>
+              <div aria-hidden="true" data-testid="next-prompt-ghost" onMouseDown={event => { event.preventDefault(); textareaRef.current?.focus(); }} className="pointer-events-auto relative z-[1] col-start-1 row-start-1 min-w-0 whitespace-pre-wrap break-words text-base leading-relaxed text-[var(--ink-muted)]" style={{ maxHeight: `${LINE_HEIGHT * MAX_LINES}px`, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain' }}>
                 {visibleSuggestion}
               </div>
             )}
@@ -1533,10 +1533,13 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                   : t('input.placeholder')
               }
               rows={effectiveMinLines}
-              className="col-start-1 row-start-1 block w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
+              className="col-start-1 row-start-1 block min-w-0 w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
               style={{
                 minHeight: `${LINE_HEIGHT * effectiveMinLines}px`,
                 maxHeight: `${LINE_HEIGHT * MAX_LINES}px`,
+                // Wrapped prose never scrolls sideways. WebView page zoom can
+                // leave a horizontal scrollbar when the implicit axis is auto.
+                overflowX: 'hidden',
                 overflowY: 'auto',
                 // The auto-resize effect imperatively writes `style.height`
                 // each keystroke; this transition smooths the visible
