@@ -101,6 +101,7 @@ export default function AgentNetwork({
       official={connection?.official ?? true}
       networkName={connection?.name ?? ""}
       ownedAccount={connection?.ownedAccount}
+      localDeviceId={connection?.localDeviceId}
       serviceUrl={connection?.url ?? null}
       selector={<NetworkSelector registry={registry} />}
       isActive={isActive}
@@ -116,6 +117,7 @@ function AgentNetworkContent({
   official,
   networkName,
   ownedAccount,
+  localDeviceId,
   serviceUrl,
   selector,
   onOpenRemoteSession,
@@ -126,11 +128,13 @@ function AgentNetworkContent({
   official: boolean;
   networkName: string;
   ownedAccount?: NetworkConnection["ownedAccount"];
+  localDeviceId?: string | null;
   serviceUrl: string | null;
   selector: ReactNode;
   onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const { t } = useTranslation("app");
+  const localId = localDeviceId ?? (ownedAccount ? "" : getDeviceId());
   const networkRequest = useCallback(
     (request: NetworkRequest) => requestNetwork(request, connectionId),
     [connectionId],
@@ -215,7 +219,6 @@ function AgentNetworkContent({
       .then(async ([info, page]) => {
         if (!current()) return;
         metadataSchemas.network.parse(info);
-        const localId = getDeviceId();
         setDevices(
           page.items.sort(
             (a, b) =>
@@ -255,6 +258,7 @@ function AgentNetworkContent({
     official,
     connectionId,
     networkRequest,
+    localId,
   ]);
   async function retryCatalog(deviceId: string) {
     const generation = networkGeneration(connectionId);
@@ -421,7 +425,6 @@ function AgentNetworkContent({
       </NetworkPage>
     );
   }
-  const localId = getDeviceId();
   const joinedDevices = devices.filter((device) => device.joined);
   const pendingDevices = devices.filter((device) => !device.joined);
   const joinedCatalogs = joinedDevices.map(

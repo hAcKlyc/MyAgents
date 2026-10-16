@@ -122,8 +122,7 @@ impl NetworkIdentity {
         account: &NetworkAccountSession,
     ) -> Result<KeyScope, NetworkError> {
         account.validate_instance().await?;
-        let device = crate::device_identity::current_device_identity()
-            .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        let device = account.device_identity()?;
         let value = account
             .request(
                 AccountOperation::IdentityState(device.device_id.clone()),
@@ -165,8 +164,7 @@ impl NetworkIdentity {
         store: Arc<dyn IdentityStore>,
     ) -> Result<Self, NetworkError> {
         account.validate_instance().await?;
-        let device = crate::device_identity::current_device_identity()
-            .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        let device = account.device_identity()?;
         let service_id = account.service_id()?.to_owned();
         let gate_key = format!(
             "{}|{}|{}|{}",
@@ -342,8 +340,7 @@ impl NetworkIdentity {
         );
         let _gate = IDENTITY_GATES.acquire(&[&gate_key]).await;
         self.account.ensure_current()?;
-        let device = crate::device_identity::current_device_identity()
-            .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        let device = self.account.device_identity()?;
         if device.device_id != self.scope.device_id {
             return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
         }

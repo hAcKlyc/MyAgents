@@ -534,6 +534,7 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
           onOwnedPoll={async (attemptId) => {
             try {
               const result = await pollOwnedNetworkLogin(attemptId);
+              if (result.status === "reauthorize") return result.authorization;
               if (result.status === "authenticated") {
                 acceptNetworkRegistry(result.registry);
                 return "authenticated";
@@ -593,12 +594,14 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
             const generation = ownedLoginGeneration.current;
             try {
               const result = await pollOwnedNetworkLogin(attemptId);
-              if (result.status !== "authenticated" || generation !== ownedLoginGeneration.current) return "pending";
+              if (generation !== ownedLoginGeneration.current) return "pending";
+              if (result.status === "reauthorize") return result.authorization;
+              if (result.status !== "authenticated") return "pending";
               const next = result.registry;
               pendingOwnedLoginAttempt.current = null;
               completedOwnedLoginAttempt.current = true;
               const matching = next.connections.find((connection) =>
-                !connection.official && !connection.removing && connection.url === ownedLoginTarget.url,
+                connection.id === next.selected && !connection.official && !connection.removing && connection.url === ownedLoginTarget.url,
               );
               if (matching) {
                 const selected = await selectNetworkConnection(matching.id);

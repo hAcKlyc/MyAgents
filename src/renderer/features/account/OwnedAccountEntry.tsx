@@ -424,17 +424,16 @@ export default function OwnedAccountEntry({
           onOwnedPoll={async (attemptId) => {
             const epoch = openedLoginGeneration.current;
             const result = await pollOwnedNetworkLogin(attemptId);
-            if (
-              result.status !== "authenticated" ||
-              !loginEpochIsCurrent(epoch)
-            )
-              return "pending";
+            if (!loginEpochIsCurrent(epoch)) return "pending";
+            if (result.status === "reauthorize") return result.authorization;
+            if (result.status !== "authenticated") return "pending";
             const next = result.registry;
             pendingAttemptId.current = null;
             completedAttempt.current = true;
             acceptNetworkRegistry(next);
             const match = next.connections.find(
               (connection) =>
+                connection.id === next.selected &&
                 !connection.official &&
                 !connection.removing &&
                 canonicalOwnedIssuer(connection.url) === serviceUrl,

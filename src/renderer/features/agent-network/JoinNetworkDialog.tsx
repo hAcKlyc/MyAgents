@@ -22,7 +22,7 @@ export function JoinNetworkDialog({
   onConfirm: (url: string, key: string) => Promise<void>;
   onOwnedStart: (issuer: string, publicTlsCaFile?: string) => Promise<OwnedLoginAttempt>;
   onOwnedOpen: (attemptId: string) => Promise<void>;
-  onOwnedPoll: (attemptId: string) => Promise<"pending" | "authenticated">;
+  onOwnedPoll: (attemptId: string) => Promise<"pending" | "authenticated" | OwnedLoginAttempt>;
   onOwnedCancel: (attemptId: string) => Promise<void>;
   onCancel: () => void;
   accountOnly?: boolean;
@@ -131,7 +131,10 @@ export function JoinNetworkDialog({
     setNotice(null);
     try {
       const status = await onOwnedPoll(attempt.attemptId);
-      if (status === "authenticated") {
+      if (typeof status === "object") {
+        setAttempt(status);
+        setNotice(t("agentNetwork.ownedLogin.restoreIdentity"));
+      } else if (status === "authenticated") {
         setAttempt(null);
         onCancel();
       } else {

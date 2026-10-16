@@ -320,6 +320,8 @@ impl Connection {
         let binding = a.binding.clone();
         Ok(NetworkAccountSession::Owned(Arc::new(OwnedAccount {
             connection_id: binding.clone(),
+            device_id: self.owner.scope.device_id.clone(),
+            session_bound: false,
             descriptor: self.instance.clone(),
             active: Arc::new(AtomicBool::new(true)),
             session,

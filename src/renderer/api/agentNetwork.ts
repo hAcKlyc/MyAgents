@@ -276,6 +276,9 @@ export function networkErrorKey(
   if (code === "NETWORK_TRUST_CHANGED") return "trustChanged";
   if (code === "KEY_GENERATION_CONFLICT" || code === "NETWORK_CREDENTIAL_GENERATION_CONFLICT")
     return "identityConflict";
+  if (code === "OWNED_LOGIN_COMMIT_UNCONFIRMED") return "ownedLoginCommitUnconfirmed";
+  if (code === "OWNED_ACCOUNT_MISMATCH") return "ownedAccountMismatch";
+  if (code === "OWNED_IDENTITY_SELECTION_REQUIRED") return "ownedIdentitySelectionRequired";
   if (code === "NETWORK_REMOVAL_UNCONFIRMED") return "removalPending";
   if (code === "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
     return "credentialStoreAuthorizationRequired";
@@ -308,6 +311,7 @@ export function networkErrorKey(
 }
 
 export interface NetworkConnection {
+  localDeviceId?: string | null;
   id: string;
   name: string;
   official: boolean;
@@ -345,6 +349,7 @@ export interface OwnedLoginAttempt {
 }
 export type OwnedLoginPoll =
   | { status: "pending" }
+  | { status: "reauthorize"; authorization: OwnedLoginAttempt }
   | { status: "authenticated"; registry: NetworkRegistry };
 export const startOwnedNetworkLogin = (
   issuer: string,

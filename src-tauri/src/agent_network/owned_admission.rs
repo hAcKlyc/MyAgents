@@ -17,8 +17,7 @@ pub(crate) async fn enroll(
         return Err(NetworkError::new("OWNED_PROFILE_REQUIRED"));
     };
     let network = &account.descriptor.network_id;
-    let device = crate::device_identity::current_device_identity()
-        .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+    let device = identity.account.device_identity()?;
     if device.device_id != identity.scope.device_id {
         return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
     }
