@@ -135,7 +135,7 @@ const AgentStatusPanel = memo(function AgentStatusPanel({ containerRef, onJumpTo
     <div
       aria-hidden={!opaque}
       inert={!opaque}
-      className={`flex w-[260px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)]/95 shadow-lg backdrop-blur-md transition-opacity duration-200 [&:not(:only-child)]:mr-auto ${
+      className={`flex w-[min(380px,100%)] min-w-0 flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)]/95 shadow-lg backdrop-blur-md transition-opacity duration-200 [&:not(:only-child)]:mr-auto ${
         opaque ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
       }`}
     >
@@ -148,6 +148,7 @@ const AgentStatusPanel = memo(function AgentStatusPanel({ containerRef, onJumpTo
       )}
       <AgentStatusBar
         summary={state.summary}
+        currentTodo={state.todos.find(todo => todo.status === 'in_progress')?.activeForm || state.todos.find(todo => todo.status === 'in_progress')?.content}
         expanded={expanded}
         onToggle={toggle}
       />
@@ -159,6 +160,7 @@ export default AgentStatusPanel;
 
 interface AgentStatusBarProps {
   summary: import('./types').AgentStatusSummary;
+  currentTodo?: string;
   expanded: boolean;
   onToggle: () => void;
 }
@@ -166,7 +168,7 @@ interface AgentStatusBarProps {
 // V3 收起态文案（用户拍板）：「Todo 0/4   Agents 3 ·」，· 是脉冲绿点。
 // 不显示 icon prefix、不显示 elapsed 时间数字、不区分 sync/bg 计数——
 // 信息密度刚好够「瞥一眼知有几件事」，详情留给展开态。
-const AgentStatusBar = memo(function AgentStatusBar({ summary, expanded, onToggle }: AgentStatusBarProps) {
+const AgentStatusBar = memo(function AgentStatusBar({ summary, currentTodo, expanded, onToggle }: AgentStatusBarProps) {
   const { t } = useTranslation('app');
   const hasTodos = summary.todoTotal > 0;
   const hasSubagents = summary.subagentTotal > 0;
@@ -177,18 +179,20 @@ const AgentStatusBar = memo(function AgentStatusBar({ summary, expanded, onToggl
       onClick={onToggle}
       aria-expanded={expanded}
       aria-label={expanded ? t('agentStatus.collapse') : t('agentStatus.expand')}
-      className={`flex items-center gap-4 px-3 py-2 text-xs text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)]/40 ${
+      className={`flex min-w-0 items-center gap-2 px-3 py-2 text-xs text-[var(--ink)] transition-colors hover:bg-[var(--paper-inset)]/40 ${
         expanded ? 'border-t border-[var(--line-subtle)]' : ''
       }`}
     >
       {hasTodos && (
-        <span className="tabular-nums">
+        <span className="shrink-0 tabular-nums">
           Todo {summary.todoCompleted}/{summary.todoTotal}
         </span>
       )}
 
+      {currentTodo && <span data-current-todo className="min-w-0 flex-1 truncate text-left text-[var(--ink-secondary)]" title={currentTodo}>{currentTodo}</span>}
+
       {hasSubagents && (
-        <span className="flex items-center gap-1.5 tabular-nums">
+        <span className="flex shrink-0 items-center gap-1.5 tabular-nums">
           Agents {summary.subagentTotal}
           {summary.subagentRunning > 0 ? (
             <SubagentRunningIcon />

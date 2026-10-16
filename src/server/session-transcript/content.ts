@@ -1,3 +1,4 @@
+import type { ExecutionTiming } from '../../shared/executionTiming';
 import { randomUUID } from 'node:crypto';
 import { buildFilePatchDisplayDescriptor, type FilePatchToolLike } from '../../shared/toolDisplay/filePatch';
 import {
@@ -118,7 +119,7 @@ export class ProductTranscriptContent {
     const message = this.assistant();
     const target = { messageId: message.id, blockId: randomUUID() };
     this.writer.observe({ kind: 'block-upsert', messageId: target.messageId,
-      block: { ...details, id: target.blockId, type } });
+      block: { ...((type === 'text' || type === 'thinking') ? { executionTiming: observedStart() } : {}), ...details, id: target.blockId, type } });
     this.blocks.set(key, target);
     return target;
   }
@@ -136,13 +137,18 @@ export class ProductTranscriptContent {
   }
 
   updateBlock(target: ProductBlockTarget, details: TranscriptObject, boundary = false): void {
-    if (!this.readBlock(target)) return;
+    const block = this.readBlock(target);
+    if (!block) return;
+    if ((block.type === 'text' || block.type === 'thinking') && details.isComplete === true && !block.isComplete) {
+      details = withActivityTiming(block, details, true);
+    }
     this.writer.observe({ kind: 'block-update', ...target, target: 'block', details }, boundary);
   }
 
   updateTool(target: ProductBlockTarget, details: TranscriptObject, boundary = false): void {
     const tool = this.readTool(target);
     if (!tool) return;
+    if (details.isLoading === false && tool.isLoading !== false) details = withActivityTiming(tool, details, true);
     if (details.inputComplete === true || details.isLoading === false) {
       const display = buildFilePatchDisplayDescriptor({ ...tool, ...details } as FilePatchToolLike);
       if (display) details = { ...details, display: display as unknown as TranscriptObject };
@@ -155,6 +161,13 @@ export class ProductTranscriptContent {
     const operationTarget = { ...target, field };
     const offset = getTranscriptText(this.writer.projection, operationTarget).length;
     for (const operation of appendTextParts(operationTarget, text, offset)) this.writer.observe(operation);
+    const owner = field === 'text' || field === 'thinking' ? this.readBlock(target) : this.readTool(target);
+    if (owner?.executionTiming) {
+      const details = withActivityTiming(owner, {}, false);
+      if (!details.executionTiming) return;
+      if (field === 'text' || field === 'thinking') this.updateBlock(target, details);
+      else this.updateTool(target, details);
+    }
   }
 
   confirmText(target: ProductBlockTarget, field: TranscriptTextTarget['field'], text: string): void {
@@ -182,12 +195,12 @@ export class ProductTranscriptContent {
       if (!parent || parent.subagentToolId) return undefined;
       const target = { ...parent, subagentToolId: toolId };
       this.writer.observe({ kind: 'subagent-upsert', messageId: parent.messageId, blockId: parent.blockId,
-        call: { ...details, id: toolId, name, input: {}, inputJson: '', isLoading: true } });
+        call: { executionTiming: observedStart(), ...details, id: toolId, name, input: {}, inputJson: '', isLoading: true } });
       this.tools.set(toolId, target);
       return target;
     }
     const target = this.block(`tool:${toolId}`, type, {
-      tool: { ...details, id: toolId, name, input: {}, inputJson: '', isLoading: true },
+      tool: { executionTiming: observedStart(), ...details, id: toolId, name, input: {}, inputJson: '', isLoading: true },
     });
     this.tools.set(toolId, target);
     return target;
@@ -289,4 +302,26 @@ function attachmentKey(target: ProductBlockTarget): string {
 
 function record(value: unknown): TranscriptObject | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as TranscriptObject : undefined;
+}
+
+/** Called only while consuming execution events. Cold restore folds persisted
+ * operations directly and deliberately does not acquire a new clock value. */
+function observedStart(): ExecutionTiming {
+  const now = Date.now();
+  return { startedAt: now, lastActivityAt: now, source: 'observed' };
+}
+
+function withActivityTiming(owner: TranscriptObject, details: TranscriptObject, terminal: boolean): TranscriptObject {
+  const timing = record(owner.executionTiming);
+  // An old block receiving a late update still has no known start time.
+  if (!timing || typeof timing.startedAt !== 'number' || !Number.isFinite(timing.startedAt)) return details;
+  if (typeof timing.finishedAt === 'number') return details;
+  const previous = typeof timing.lastActivityAt === 'number' ? timing.lastActivityAt : timing.startedAt;
+  const now = Math.max(timing.startedAt, previous, Date.now());
+  // Persist an actual event observation at most once per epoch second. This
+  // keeps intermediate activity within <1s of the last event and lets adjacent
+  // text appends continue using the writer's existing queue coalescing. Start
+  // and terminal observations always retain their exact millisecond values.
+  if (!terminal && Math.floor(now / 1_000) <= Math.floor(previous / 1_000)) return details;
+  return { ...details, executionTiming: { ...timing, lastActivityAt: now, ...(terminal ? { finishedAt: now } : {}) } };
 }

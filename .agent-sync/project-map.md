@@ -66,3 +66,7 @@ User chose https://140.143.183.232/ directly. Preserve the current static design
 ## 项目背景自动接续
 
 `src/shared/projectContext.ts` 为有限来源/预算纯投影，`src/server/session-engine/project-context.ts` 经原SessionStore读取并在首轮query preparation注入，设置位于ProjectContextSection。合同 `specs/tech_docs/project_context.md`；合成/独立审阅与Token计数 `dev-docs/project-context-validation/`。不新增模型调用、存储writer或发布owner。
+
+## MOXBOTS-OUTPUT-002 — 结果、时间与质量参考
+
+聊天执行区沿原 BlockGroup/ProcessRow/ToolUse 呈现结果与当前工作；`ProductTranscriptContent`在原 transcript owner 记录可选 `executionTiming`，开始/结束精确毫秒，中间活动最多每秒采样。`processTiming.ts`只投影可信事实（子任务采用其生命周期），`ExecutionQuality`只展示当前执行证据和已有usage。实现、合成UI/持久化/主干与统一原生发行边界见 `dev-docs/output-results/acceptance.md` 及任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。

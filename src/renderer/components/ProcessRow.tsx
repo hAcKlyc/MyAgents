@@ -35,6 +35,8 @@ import {
 import ToolUse from '@/components/ToolUse';
 import ProcessStatus from './ProcessStatus';
 import { getProcessOutcome } from '@/utils/processPresentation';
+import { processResultLabel } from '@/utils/processResults';
+import ProcessTiming from './ProcessTiming';
 import ToolAttachmentGallery from '@/components/tools/ToolAttachmentGallery';
 import type { ContentBlock } from '@/types/chat';
 
@@ -43,6 +45,10 @@ interface ProcessRowProps {
     index: number;
     totalBlocks: number;
     isStreaming?: boolean;
+    resultFirst?: boolean;
+    resultLabel?: string;
+    expandedOverride?: boolean;
+    onExpansionChange?: (expanded: boolean) => void;
     // Called when the user EXPANDS this row. The parent BlockGroup uses it to
     // suppress its auto-fold for the turn — otherwise folding would unmount a
     // row the user deliberately opened and silently lose its expanded state.
@@ -54,6 +60,10 @@ const ProcessRow = memo(function ProcessRow({
     index,
     totalBlocks,
     isStreaming = false,
+    resultFirst = false,
+    resultLabel,
+    expandedOverride,
+    onExpansionChange,
     onUserExpand
 }: ProcessRowProps) {
     // User manually toggled state (null = not toggled, true/false = user choice)
@@ -212,14 +222,15 @@ const ProcessRow = memo(function ProcessRow({
     // thinking 块刻意不再随 streaming 自动展开、完成后自动收起——那个"展开→收起"
     // 会在流式时让页面上下跳动，体验差。折叠态仍通过 "思考中… (Xs)" 标签 + active
     // 指示实时反馈思考进行中（见 isThinkingActive / mainLabel），不影响可感知性。
-    const isExpanded = userToggled ?? false;
+    const isExpanded = expandedOverride ?? userToggled ?? false;
 
     // Handle user click
     const handleToggle = () => {
         if (!hasContent) return;
-        const willExpand = userToggled !== true; // null / false → this click opens it
+        const willExpand = !isExpanded;
         notifyRowLayoutChanged(willExpand ? 'process-row-expand' : 'process-row-collapse');
-        setUserToggled(prev => prev === null ? true : !prev);
+        setUserToggled(willExpand);
+        onExpansionChange?.(willExpand);
         // Signal the parent group on EXPAND so it can pin its layout (stop the
         // auto-fold that would unmount this row and drop the just-opened state).
         if (willExpand) onUserExpand?.();
@@ -261,7 +272,7 @@ const ProcessRow = memo(function ProcessRow({
     // already wrapped in React.memo so we only render when `block` changes, and the
     // React Compiler handles further optimization. Manual useMemo with granular deps
     // would defeat compiler auto-memoization.
-    const summaryNode = isTool && block.tool && outcome === 'succeeded' ? getToolSummaryNode(block.tool, t) : null;
+    const summaryNode = !resultFirst && isTool && block.tool && outcome === 'succeeded' ? getToolSummaryNode(block.tool, t) : null;
 
     if (isThinking) {
         const durationSec = block.thinkingDurationMs ? Math.floor(block.thinkingDurationMs / 1000) : 0;
@@ -297,6 +308,11 @@ const ProcessRow = memo(function ProcessRow({
         icon = config.icon;
     }
 
+    if (resultFirst) {
+        mainLabel = resultLabel ?? processResultLabel({ block, index, outcome }, t);
+        subLabel = '';
+    }
+
     // PRD 0.2.17 Agent Status Panel：当本 row 是 Task/Agent 工具时挂 data-tool-id 锚点。
     // 必须放在最外层（不是 TaskTool 内部），这样折叠态/展开态都保留锚点；点击 panel 行
     // 跳转能 scrollIntoView 到这里。
@@ -316,9 +332,9 @@ const ProcessRow = memo(function ProcessRow({
                     }`}
             >
                 {/* Icon - fixed size container */}
-                <div className={`flex size-4 shrink-0 items-center justify-center text-[var(--ink-muted)] [&>svg]:size-4`}>
+                {!resultFirst && <div className={`flex size-4 shrink-0 items-center justify-center text-[var(--ink-muted)] [&>svg]:size-4`}>
                     {icon}
-                </div>
+                </div>}
 
                 {/* Main Label */}
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
@@ -349,7 +365,7 @@ const ProcessRow = memo(function ProcessRow({
                             {t('shell.toolChrome.common.completedContinuable')}
                         </span>
                     )}
-                    {taskDuration && (
+                    {taskDuration && !resultFirst && (
                         <span className="text-xs text-[var(--ink-muted)]">
                             {taskDuration}
                         </span>
@@ -368,9 +384,10 @@ const ProcessRow = memo(function ProcessRow({
                         </span>
                     )}
                     {summaryNode && <span className="shrink-0 text-xs leading-none">{summaryNode}</span>}
+                    {resultFirst && <span className="w-full"><ProcessTiming blocks={[block]} running={outcome === 'running'} /></span>}
                 </div>
 
-                <ProcessStatus outcome={outcome} />
+                <ProcessStatus outcome={outcome} compact={resultFirst && outcome === 'succeeded'} />
 
                 {/* Chevron */}
                 {hasContent && (
@@ -423,7 +440,7 @@ const ProcessRow = memo(function ProcessRow({
                                 )}
                                 {isTool && block.tool && (
                                     <div className="w-full overflow-hidden select-text">
-                                        <ToolUse tool={block.tool} />
+                                        <ToolUse tool={block.tool} resultOnly={resultFirst} />
                                         {/* #293 — process media (screenshots) renders here inside the
                                             fold, the inverse of the PRD 0.2.30 artifact hoist: these
                                             are the AI's working captures, not deliverables, so they

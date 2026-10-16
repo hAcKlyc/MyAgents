@@ -130,7 +130,7 @@
       "empty": "Nothing here yet",
       "failed": "Could not load results",
       "unavailable": "Unavailable in this context",
-        "networkPartial": "Network Agent list is incomplete",
+      "networkPartial": "Network Agent list is incomplete",
       "partial": "Partial results. Refine your search."
     },
     "permissionModes": {
@@ -1242,9 +1242,20 @@
     "taskOffered": "Offered to",
     "taskBlockedBy": "Blocked by",
     "interruptTurn": "Interrupt current turn",
-    "nativeModes": { "one-shot": "One-time delegation", "continuable": "Continuable Agent" },
-    "nativeStates": { "running": "Running", "inactive": "Inactive" },
-    "taskStates": { "pending": "Pending", "in_progress": "In progress", "completed": "Completed", "cancelled": "Cancelled" },
+    "nativeModes": {
+      "one-shot": "One-time delegation",
+      "continuable": "Continuable Agent"
+    },
+    "nativeStates": {
+      "running": "Running",
+      "inactive": "Inactive"
+    },
+    "taskStates": {
+      "pending": "Pending",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
     "title": "Agent work tree",
     "close": "Close",
     "unknown": "Unknown",
@@ -1339,6 +1350,78 @@
       "Glob": "Find {{target}}",
       "WebSearch": "Search {{target}}",
       "command": "Run command"
+    },
+    "heading": {
+      "plan": "Task progress",
+      "explore": "Research results",
+      "change": "Changes",
+      "verify": "Check results",
+      "execute": "Results",
+      "delegate": "Collaboration",
+      "think": "Analysis"
+    },
+    "work": {
+      "plan": "Organizing tasks and progress",
+      "explore": "Reviewing relevant material",
+      "change": "Updating files",
+      "verify": "Checking changes",
+      "execute": "Working on the task",
+      "delegate": "Working with collaborators",
+      "think": "Analyzing the problem"
+    },
+    "result": {
+      "unknown": "No confirmed result yet",
+      "stopped": "This item was interrupted",
+      "failed": "This item did not complete; review its result",
+      "file": "Updated {{target}}",
+      "files": "Updated {{count}} files",
+      "think": "Analysis ended",
+      "foundFiles": "Found {{count}} files",
+      "matches": "Returned {{count}} matching lines",
+      "verify": "This check returned",
+      "execute": "This execution returned",
+      "explore": "Relevant material returned",
+      "plan": "Task progress returned",
+      "delegate": "Collaboration result returned",
+      "needsAttention": "Some results need attention",
+      "returned": "{{count}} results returned",
+      "progress": "Succeeded {{completed}}/{{total}}",
+      "updates": "{{count}} updates",
+      "updateNumber": "Update result {{count}}",
+      "awaiting": "Waiting for a result",
+      "files_one": "Updated {{count}} file",
+      "files_other": "Updated {{count}} files",
+      "updates_one": "{{count}} update",
+      "updates_other": "{{count}} updates",
+      "foundFiles_one": "Found {{count}} file",
+      "foundFiles_other": "Found {{count}} files",
+      "matches_one": "Returned {{count}} matching line",
+      "matches_other": "Returned {{count}} matching lines"
+    },
+    "showResults": "Show results and timing ({{count}})",
+    "hideResults": "Hide results and timing ({{count}})",
+    "timing": {
+      "start": "Started",
+      "unrecorded": "Time not recorded",
+      "elapsed": "Elapsed {{time}}",
+      "duration": "Duration {{time}}",
+      "activity": "Last activity {{time}}",
+      "sinceActivity": "No new event for {{time}}",
+      "observed": "Backend event observation time, not API latency; the timer does not establish service health",
+      "runtime": "Execution time reported by the runtime"
+    },
+    "quality": {
+      "label": "Quality reference",
+      "attention": "Items need confirmation",
+      "checks": "Checks",
+      "checkCounts": "{{returned}} succeeded · {{failed}} failed",
+      "execution": "Execution signals",
+      "executionCounts": "{{failed}} failed · {{stopped}} interrupted · {{unknown}} unconfirmed",
+      "tokens": "Input {{input}} · output {{output}}",
+      "model": "Model",
+      "content": "Content quality",
+      "notAssessed": "Not assessed",
+      "scope": "Returned checks describe execution results. Content quality and business acceptance require separate confirmation."
     }
   }
 }

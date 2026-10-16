@@ -1,25 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, render as renderDom } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { ThemeRuntimeProvider } from '@/theme';
 import type { ContentBlock } from '@/types/chat';
 import BlockGroup from './BlockGroup';
 import { ChatRowLayoutProvider } from '@/context/ChatRowLayoutContext';
 
+const render = (ui: ReactElement) => renderDom(ui, { wrapper: ({ children }) =>
+  <ThemeRuntimeProvider selection={{ themeId: 'myagents-default', appearanceMode: 'light' }}>{children}</ThemeRuntimeProvider> });
+
 function tool(id: string, name = 'Read', patch: Record<string, unknown> = {}): ContentBlock {
   return { type: 'tool_use', tool: { id, name, input: {}, inputJson: '{}', result: `OUTPUT_${id}`, streamIndex: 0, ...patch } } as ContentBlock;
 }
-const details = () => screen.getByRole('button', { name: /展开执行详情|收起执行详情/ });
+const details = () => screen.getByRole('button', { name: /展开结果与时间|收起结果与时间/ });
 
 describe('BlockGroup stage summaries and folding', () => {
   it('defaults to a result summary with heavy tool bodies unmounted; can unfold and refold', () => {
     const blocks = Array.from({ length: 12 }, (_, i) => tool(String(i), 'Read', { parsedInput: { file_path: `/tmp/salary-source-${i}.ts` } }));
     const { container } = render(<BlockGroup blocks={blocks} />);
     expect(container.querySelectorAll('[data-process-row]')).toHaveLength(0);
-    expect(screen.getByText('12 次工具调用')).toBeTruthy();
-    expect(screen.getByText('12 项已返回')).toBeTruthy();
+    expect(screen.getByText('成功返回 12/12')).toBeTruthy();
+    expect(screen.getByText('已返回 12 项结果')).toBeTruthy();
     expect(screen.queryByText('OUTPUT_0')).toBeNull();
     fireEvent.click(details());
     expect(container.querySelectorAll('[data-process-row]')).toHaveLength(12);
-    fireEvent.click(screen.getByRole('button', { name: /读取 salary-source-0.ts/ }));
+    fireEvent.click(screen.getAllByRole('button', { name: /相关资料已返回/ })[0]);
     expect(screen.getByText('OUTPUT_0')).toBeTruthy();
     fireEvent.click(details());
     expect(container.querySelectorAll('[data-process-row]')).toHaveLength(0);
@@ -73,9 +78,9 @@ describe('BlockGroup stage summaries and folding', () => {
       tool('failed', 'Bash', { parsedInput: { command: 'npm test', description: '失败的隔离检查' }, isError: true, resultMeta: { exitCode: 1 } }),
       tool('passed', 'Bash', { parsedInput: { command: 'npm run typecheck', description: '成功的类型检查' }, resultMeta: { exitCode: 0, durationMs: 860 } }),
     ]} />);
-    expect(screen.getByText('最近结果对应：成功的类型检查')).toBeTruthy();
-    expect(screen.getByText('退出码 0')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /失败的隔离检查/ })).toBeTruthy();
+    expect(screen.queryByText(/最近结果对应/)).toBeNull();
+    expect(screen.queryByText('退出码 0')).toBeNull();
+    expect(screen.getByRole('button', { name: /OUTPUT_failed/ })).toBeTruthy();
   });
   it('notifies the chat layout owner when a visible running row folds after completion', () => {
     const notify = vi.fn();
@@ -94,13 +99,27 @@ describe('BlockGroup stage summaries and folding', () => {
   it('keeps a directly opened active tool mounted after it completes', () => {
     const input = { file_path: '/tmp/live.ts' };
     const { rerender } = render(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, result: undefined, isLoading: true })]} isStreaming />);
-    const row = screen.getByRole('button', { name: /读取 live.ts/ });
+    const row = screen.getByRole('button', { name: /正在查看相关资料/ });
     fireEvent.click(row);
     expect(details()).toHaveAttribute('aria-expanded', 'true');
     rerender(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, isLoading: false })]} />);
     expect(row).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('OUTPUT_active')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /读取 live.ts/ })).toBe(row);
+    expect(screen.getByRole('button', { name: /相关资料已返回/ })).toBe(row);
+  });
+
+  it('retains opened output when finishing an update aggregates it with the same file', () => {
+    const input = { file_path: '/tmp/a.ts', old_string: 'old', new_string: 'new' };
+    const first = tool('first', 'Edit', { parsedInput: input });
+    const second = tool('second', 'Edit', { parsedInput: input, isLoading: true, result: undefined });
+    const { rerender, container } = render(<BlockGroup blocks={[first, second]} isStreaming />);
+    fireEvent.click(screen.getByRole('button', { name: /正在更新文件/ }));
+    expect(container.querySelector('[data-process-row="running"] button')).toHaveAttribute('aria-expanded', 'true');
+    rerender(<BlockGroup blocks={[first, tool('second', 'Edit', { parsedInput: input })]} />);
+    expect(screen.getByRole('button', { name: /第 2 次更新结果/ })).toHaveAttribute('aria-expanded', 'true');
+    expect(container).toHaveTextContent('a.ts · 2 次更新');
+    expect(container.querySelector('[data-process-body-layout]')).toBeTruthy();
+    expect(container.querySelector('[data-phase-result]')).not.toHaveTextContent('+');
   });
 
 });

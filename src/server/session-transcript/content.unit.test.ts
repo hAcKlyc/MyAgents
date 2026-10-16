@@ -19,6 +19,87 @@ function setup() {
 }
 
 describe('adapter product content identities', () => {
+  it('bounds activity timing updates to one per epoch second while preserving exact start and finish', async () => {
+    const { writer, content, user } = setup();
+    vi.setSystemTime(10_123);
+    user('u1');
+    const tool = content.startTool('stream', 'Bash')!;
+    const observed: import('../../shared/sessionTranscript').TranscriptOperation[] = [];
+    writer.subscribeOperations(operation => observed.push(operation));
+    const timingCount = () => observed.filter(operation => operation.kind === 'block-update' && operation.details.executionTiming).length;
+    for (let index = 0; index < 1_000; index++) {
+      vi.setSystemTime(10_124 + index % 876);
+      content.append(tool, 'result', 'x');
+    }
+    console.info(`[timing-sample] deltas=1000 same-second timing-updates=${timingCount()}`);
+    expect(timingCount()).toBe(0);
+    vi.setSystemTime(11_321);
+    content.append(tool, 'result', 'next second');
+    expect(timingCount()).toBe(1);
+    expect(content.readTool(tool)?.executionTiming).toEqual({ startedAt: 10_123, lastActivityAt: 11_321, source: 'observed' });
+    vi.setSystemTime(11_876);
+    content.append(tool, 'result', 'same second');
+    expect(timingCount()).toBe(1);
+    content.updateTool(tool, { isLoading: false }, true);
+    expect(timingCount()).toBe(2);
+    expect(content.readTool(tool)?.executionTiming).toEqual({ startedAt: 10_123, lastActivityAt: 11_876, finishedAt: 11_876, source: 'observed' });
+    vi.setSystemTime(12_500);
+    content.confirmAttachments(tool, [{ path: 'ready' }]);
+    expect(timingCount()).toBe(2);
+    await writer.close();
+  });
+
+  it('persists backend observation timing without treating input completion or late attachments as execution completion', async () => {
+    const { writer, content, user, durable } = setup();
+    vi.setSystemTime(10_000);
+    user('u1');
+    const tool = content.startTool('read', 'Read')!;
+    const child = content.startTool('child', 'Bash', {}, 'read')!;
+    const text = content.block('text', 'text', { text: '', isComplete: false });
+    expect(content.readTool(tool)?.executionTiming).toEqual({ startedAt: 10_000, lastActivityAt: 10_000, source: 'observed' });
+    vi.setSystemTime(10_100);
+    content.confirmInput(tool, { path: 'file' });
+    expect(content.readTool(tool)?.executionTiming).toMatchObject({ lastActivityAt: 10_000 });
+    expect((content.readTool(tool)?.executionTiming as Record<string, unknown>).finishedAt).toBeUndefined();
+    vi.setSystemTime(10_200);
+    content.append(text, 'text', 'answer');
+    content.append(child, 'result', 'partial');
+    expect(content.readTool(child)?.executionTiming).toMatchObject({ startedAt: 10_000, lastActivityAt: 10_000 });
+    vi.setSystemTime(10_300);
+    content.updateTool(tool, { isLoading: false, isError: true }, true);
+    content.updateBlock(text, { isComplete: true });
+    expect(content.readTool(tool)?.executionTiming).toMatchObject({ finishedAt: 10_300 });
+    expect(content.readBlock(text)?.executionTiming).toMatchObject({ finishedAt: 10_300 });
+    vi.setSystemTime(10_400);
+    content.confirmAttachments(tool, [{ pendingId: 'a' }]);
+    content.updateAttachment(tool, 'a', { path: 'ready' });
+    content.updateTool(tool, { isLoading: false });
+    expect(content.readTool(tool)?.executionTiming).toMatchObject({ finishedAt: 10_300, lastActivityAt: 10_300 });
+    // Parent terminal does not claim a still-running child's completion.
+    content.finishTurn('error');
+    expect((content.readTool(child)?.executionTiming as Record<string, unknown>).finishedAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(transcriptMessages(durable)).toEqual(transcriptMessages(writer.projection));
+    const restored = new ProductTranscriptContent(writer);
+    vi.setSystemTime(20_000);
+    expect(restored.startTool('read', 'Read')).toEqual(tool);
+    expect(restored.readTool(tool)?.executionTiming).toMatchObject({ startedAt: 10_000, finishedAt: 10_300 });
+    await writer.close();
+  });
+
+  it('keeps timing unknown for legacy blocks and does not invent a start on late result completion', async () => {
+    const { writer, content, user } = setup();
+    user('u1');
+    const target = content.block('legacy', 'tool_use', { tool: { id: 'legacy', name: 'Read', isLoading: true } });
+    content.append(target, 'result', 'late');
+    content.updateTool(target, { isLoading: false }, true);
+    expect(content.readTool(target)?.executionTiming).toBeUndefined();
+    const restored = new ProductTranscriptContent(writer);
+    expect(restored.startTool('legacy', 'Read')).toEqual(target);
+    expect(restored.readTool(target)?.executionTiming).toBeUndefined();
+    await writer.close();
+  });
+
   it.each(['complete','stopped','error','interrupted'] as const)('exposes only running turn start and clears it after %s', async status => {
     const {content,writer,user} = setup();
     expect(content.executionStartedAt).toBeUndefined();
