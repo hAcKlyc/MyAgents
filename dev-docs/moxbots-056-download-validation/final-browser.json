@@ -1,0 +1,25 @@
+{
+  "stage": "final",
+  "url": "https://140.143.183.232/download/",
+  "actual": {
+    "version": "0.5.6 · a81d2509",
+    "href": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.6-a81d2509/MoxBots-0.5.6-macOS-arm64.zip",
+    "sha256": "f9b31491e5bf15b3073c41cd483833ae9c58b99c246b099e3c8f1256d493bdb4",
+    "signing": "Developer ID · 已公证",
+    "source": "https://github.com/heavenzhang/MoXBots/tree/a81d2509fa92968ddaaed63416a2478d21b8a373",
+    "notes": "https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-0.5.6-a81d2509",
+    "bytesLabel": "344.7 MB",
+    "releaseManifest": "releases.98f42775b3e8.json"
+  },
+  "desktop": "1440x960",
+  "mobile": "390x844",
+  "desktopOverflow": false,
+  "mobileOverflow": false,
+  "detailsToggle": true,
+  "pageErrors": [],
+  "userProfileUsed": false,
+  "strictHttps": true,
+  "accepted": true,
+  "baselineOnly": false,
+  "checkedAt": "2026-10-16T00:05:41.158Z"
+}

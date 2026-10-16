@@ -1,0 +1,67 @@
+{
+  "task": "MOXBOTS-DOWNLOAD-056-20261016",
+  "status": "PASS",
+  "archive": "MoxBots-0.5.6-macOS-arm64.zip",
+  "bytes": 344739590,
+  "sha256": "f9b31491e5bf15b3073c41cd483833ae9c58b99c246b099e3c8f1256d493bdb4",
+  "zipEntries": 14830,
+  "crc": "PASS",
+  "version": "0.5.6",
+  "identifier": "com.moxbot.app",
+  "binarySHA256": "98cddba4fbfe55d7089fac9b765869a662395884c16a83ae47af12c8f4625e75",
+  "team": "QJ5URBG9AP",
+  "checks": {
+    "signature": {
+      "exitCode": 0
+    },
+    "ticket": {
+      "exitCode": 0
+    },
+    "gatekeeper": {
+      "exitCode": 0
+    },
+    "signing-identity": {
+      "exitCode": 0
+    }
+  },
+  "packagedRendererBotsReady": {
+    "format": "Tauri2.6.3 brotli include_bytes assets",
+    "actualBinary": "MoXBots.app/Contents/MacOS/myagents",
+    "actualBinarySHA256": "98cddba4fbfe55d7089fac9b765869a662395884c16a83ae47af12c8f4625e75",
+    "localePresent": true,
+    "headerWired": true,
+    "proof": [
+      {
+        "cacheFile": "1fe72836e6fe967bc17e7e8c0f88bd7dfeb0843739fe1e4a918b477bcb555fae.js",
+        "compressedBytes": 241737,
+        "compressedSHA256": "6fb65c9ef54b08cf76c7178acf1950f2444d97c19fe938b38d881882d7796662",
+        "offsetInActualBinary": 63937906,
+        "decodedBytes": 988653,
+        "decodedSHA256": "a4b4f86dfe15d3fe018ca9ffb30c551305f19d5b8b55129ce89af0aad207cddc",
+        "labelsFound": [
+          "Bots Ready",
+          "Bots 网络",
+          "Your bots are ready."
+        ],
+        "headerReferences": []
+      },
+      {
+        "cacheFile": "bd345c0ec5dea6348dcf095925efe9ff3e2d6efc9c86dc555c62b19d111b0ca4.js",
+        "compressedBytes": 27151,
+        "compressedSHA256": "bc14143cf520df6059123f0b11aa5e276613993b38eed36cd8dd3cac4daebbc0",
+        "offsetInActualBinary": 61161427,
+        "decodedBytes": 118219,
+        "decodedSHA256": "955fe4af837beb74b9435fb54f121a64b55ad1a7485c979997b36e4f69a2ff10",
+        "labelsFound": [],
+        "headerReferences": [
+          "agentNetwork.pageTitle",
+          "agentNetwork.welcome"
+        ]
+      }
+    ],
+    "appLaunched": false
+  },
+  "appLaunched": false,
+  "dailyTouched": false,
+  "checkedAt": "2026-10-15T23:45:56.540217+00:00"
+}

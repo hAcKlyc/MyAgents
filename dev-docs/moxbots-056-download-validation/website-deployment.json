@@ -1,0 +1,24 @@
+{
+  "task": "MOXBOTS-DOWNLOAD-056-20261016",
+  "previousPointer": "releases/e7e283c096a1654bad1dddd7f1e9de874fcf1a21-download-054-ce86cc4f-download-055-4dac206b",
+  "previousIndexSha256": "d16765a5fe0cb1c58a1eb649a4bc0ec3a8522cb6ca800519a760953c570085b4",
+  "releaseManifest": "releases.98f42775b3e8.json",
+  "metadataSha256": "98f42775b3e8ab59a38ec56591bba57a9e6f8dacc3d067e4ce88aa811015c08e",
+  "archiveSha256": "d95acef72d4621cc265b07d8ca4ef2f197d331a07dc507c3da3fa612796192d0",
+  "files": {
+    "download/releases.98f42775b3e8.json": "98f42775b3e8ab59a38ec56591bba57a9e6f8dacc3d067e4ce88aa811015c08e",
+    "download/index.html": "623bc1a37d5361de04cd0499e7dbd4f6ae47a7d32e377e47ce480d5880ceebaf"
+  },
+  "previousLink": "releases/e7e283c096a1654bad1dddd7f1e9de874fcf1a21-download-054-ce86cc4f-download-055-4dac206b",
+  "currentLink": "releases/e7e283c096a1654bad1dddd7f1e9de874fcf1a21-download-054-ce86cc4f-download-055-4dac206b-download-056-98f42775",
+  "backup": "/root/moxbots-download-056-98f42775",
+  "changedFiles": [
+    "download/index.html",
+    "download/releases.98f42775b3e8.json"
+  ],
+  "allOtherWebsiteFilesUnchanged": true,
+  "nginxConfigurationUnchanged": true,
+  "nginxReloaded": false,
+  "cloudPidUnchanged": 1380996,
+  "dailyAppTouched": false
+}

@@ -1,0 +1,20 @@
+{
+  "task": "MOXBOTS-DOWNLOAD-056-20261016",
+  "website": "https://140.143.183.232/download/",
+  "archiveSource": "a81d2509fa92968ddaaed63416a2478d21b8a373",
+  "botsReady": "Verified compressed frontend bytes in actual extracted Mach-O and decoded locale/header references; no App launch",
+  "localArchive": "PASS",
+  "publicFullArchive": "PASS",
+  "websiteProduction": "PASS",
+  "routes": 13,
+  "uiQualityOwner": "primary agent; metadata-only existing design regression",
+  "desktop": "1440x960",
+  "mobile": "390x844",
+  "primaryViewedFinalScreenshots": true,
+  "dailyOperated": false,
+  "nativeInstallOrHostBusinessAcceptance": false,
+  "newWorkers": 0,
+  "externalModelCalls": 0,
+  "ciAndMain": "pending normal PR gates; final PR receipt records remote main SHA",
+  "checkedAt": "2026-10-16T00:06:36.821481+00:00"
+}
