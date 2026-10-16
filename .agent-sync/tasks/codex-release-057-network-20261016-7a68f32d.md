@@ -7,39 +7,33 @@
 
 ## Objective
 
-用户于2026-10-16在入网修复聊天01a1420f-245b-7f22-8a0f-4caaaf31b91b明确回复“授权发送并安排修复版”；本聊天实际核读human message01a142d4-9285-7c93-a968-52d61de5ab7d。安排下一未冻结0.5.7，保留055/056不可变，以既有own updater/Developer ID/公证/Reader/锁串行推进。不改云服务、Host、权限或公网范围；确认任务空闲且Mac手动解锁后才启用，不停止运行任务。
+下一修复版0.5.7经统一owner发布到既有own updater；人类原授权见plan，随后用户明确要求把057更新包放到服务器，并明确本机打包直传云端。当前状态服务器已发布/验收，客户端启用及真实入网仍pending。保持055/056不可变，不打断运行任务，不部署云/Host/网站服务、不扩大权限或公网范围。
 
 ## Acceptance criteria
 
-- [x] 实际仓库/sole owner/人类授权/主干b1001048及版本命名空间核对，clean独占worktree新任务分支。
-- [ ] 057版本元数据和发布记录正常PR/七CI/main交付，固定正式SHA；后来main不混入。
-- [ ] 完整正式native构建（不使用DOCS_RS或stub、不改系统工具链）、Reader/endpoint/公钥连续、Developer ID/Apple Accepted/staple/Gatekeeper和独立验包。
-- [ ] 正常TLS完整公网GET/stat+hash/自有签名独审、原056回滚包完整、同锁CAS/备份/fsync/原子stable及公开复验；原生门禁未满足时保留候选而不宣称修复已上线可用。
-- [ ] 新配置sessionBound的启用前兼容配置私有备份及新旧凭据槽保留、恢复配置而不回滚业务数据的回退准备。
-- [ ] fresh完整活动准入、确认空闲及手动解锁后启用；实际新账号session/identity登记/membership/relay ready/目录/既有scope可调用路径和同账号恢复/旧身份保留逐项复验。
-- [ ] 最终代码/main、正式制品、服务器发布、客户端启用及真实入网分别记录；未验边界与接续落盘。
+- [x] 实际仓库/唯一owner/人类授权、clean隔离分支、版本命名空间及主干核对。
+- [x] PR82/83版本和最小窗口修正，经精确源码七CI/main接受，最终固定ee055458/tag v0.5.7；不混入后来main。
+- [x] 完整正式native构建（4391输入不变、无DOCS_RS/stub/系统工具链修改）、Reader/endpoint/公钥连续。
+- [x] Developer ID、Apple Accepted/staple/Gatekeeper、最终TAR/ZIP完整回解、自有签名和独立实际验包；Root119项原证据重核。
+- [x] 正常TLS单次完整公网GET、实际stat/hash、17原件与同一远端文件独审及Root复核；056完整可验签回滚、ownedlock/CAS/备份/fsync/原子stable与公开/独立复验，锁释放。
+- [ ] 启用前当前兼容配置/实际应用私有备份、新旧凭据槽保留与可执行回退；不回滚业务库。
+- [ ] 手动解锁、fresh完整活动owner确认空闲后启用；真实新账号session/identity登记/membership/relay ready/目录/既有scope调用/同账号恢复逐项验收。
+- [x] 源码、正式制品、服务器发布、客户端启用和真实业务分别记录；最终记录见发行文档及本次publication-records分支。
 
 ## Completed
 
-基线main b1001048bc5877ccaae0ab7af137cd94b2ddbde2，包含PR81入网恢复及此前已交主干057队列：Project Context/Provider记录、Host引导/兼容、默认关闭主备模型、缩放横滚动修复和输出时间/质量参考。当前只推进版本与记录，不修改这些产品实现；既有服务器认证与网站元数据不重新部署。记录dev-docs/releases/moxbots-0.5.7.md。
+最终冻结ee055458af8823a611503450424ecadd30be0f4e，PR83/main40f7de8f11a7c848a5f0b98aff3e4969af3fd068同tree。独立实际组件UI9项/零错误，含660×400长错误与取消可达。首轮aea未公证包因布局缺陷弃用，重新完整构建，不复用旧hash或PASS。详细版本、失败原件/重现边界及签名/公证/发布证据见dev-docs/releases/moxbots-0.5.7.md与moxbots-0.5.7-evidence.json。
+
+0.5.7本机生成后直接SSH上传140.143.183.232；GitHub仅源码、CI与记录，不承担包分发。完整公网GET从101.42.11.29实际下载336184128B/2843.672468秒，SHA b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82；stable正式返回057、无缓存，两段Range字节匹配、隐藏路径404/Windows204/网站未变、独立HTTPS复验通过，发行锁释放。
 
 ## Verification
 
-来源delivery.json报告PR81候选cb8eff17、mainb100同tree及七CI通过；Root将独立核对。源码测试/合成JoinNetworkDialog不是签名原生或实际入网。正式构建可复验既有任务私有SwiftPM兼容wrapper，只在task-local副本移除不匹配private interface，系统库/public interface不变；若当前环境不符即阻断，禁止DOCS_RS发布。
+精确ee七CI通过；JS复制反馈瞬态断言首次失败保留，未改变代码重跑失败job一次通过，根因未证实。发布器PUBSCRIPT-01首审失败在任何服务器写入前修复，精确归档/证据绑定与13项fixture/独立复审通过。Root复核实际独立包119项、完整GET17项+独立远端stat/hash、公开复验20项原件摘要。非实现者独立UI/实际制品/发布审阅均有报告，不能替代原生或真实账号验收。
 
 ## Blockers and unknowns
 
-实际客户端代次/活动/配置路径、当前锁屏和新账号实际网络状态均待fresh核对；历史PID/包版本不能当空闲。没有通过签名包安装、真实identity/membership/relay/目录/可调用路径，不宣布入网恢复。PB004及真实Provider/其他Runtime边界继续独立追踪，不用模拟状态或付费调用凑验收。
+本聊天没有安装/启动/退出/重启客户端或停止任务；Mac手动解锁、当前完整活动/generation、启用前兼容备份仍待核对。不能用历史PID/Task行/HTTP200证明客户端已升级或入网恢复。PB004及其他来源原生/Provider边界保留。云后台与更新源已在同一机器；约1Mbps为观测而非已核实购买带宽，TCP重传/出口或链路根因待确认，未改网络或付费服务。
 
 ## Next step
 
-通过版本/协调PR后固定主干源码并正式构建签名公证。并行准备只读回滚和验收合同，不动日常App；真实启用严格等待空闲/手动解锁/兼容配置备份门禁。
-
-## 2026-10-16 candidate acceptance update
-
-- [x] PR82/aeaebda2已通过七CI，远端main2e9fef6c包含该源且完整tree相同。
-- [x] 首轮完整native构建、Developer ID及独立ZIP/内容/签名审计通过，仅候选范围；旧候选保留不可发行。
-- [ ] 独立UI发现660×400恢复弹窗取消按钮不可达；仅修复弹窗视口限高/内部滚动，复验后构建新SHA候选。
-- [ ] 公证配置暂不可读取，用户要求稍后解锁先准备候选；既有公证/客户端/网络真实验收门禁不变。
-
-本轮修改限JoinNetworkDialog布局与该交付记录，不改账户或服务端协议，不安装、不重启、不打断任务。下一步：精确修正SHA的UI复验、CI、主干与重建候选，所有未公证/未发布/未真实入网状态分别保留。
+保持正式057、055/056历史不可变；待用户手动解锁后先由完整owner读取当前活动，再在空闲、兼容配置/实际App备份及回退就绪后启用，逐项真实入网验收。不请求重复授权、不强退、不扩大scope，不恢复旧业务数据库。当前私有接续入口项目指针work/release-057-20261016/owner/CONTINUE.md，制品output/updater-057-20261016/final-ee055458/。

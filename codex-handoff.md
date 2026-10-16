@@ -338,3 +338,14 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 用户直接要求101.42.11.29安装Host并入网；实查已装83e48946而登录过期，复用原身份/账号/配置进行恢复。正式PKCE→auth-wait→明确同principal renew-management→run，原Host cc8fc885-529b-43e9-8a58-ee7c5f2a4c58已ready；受控connector重启保留并自动恢复，Node/connector enabled，实际云metadata joined/ready与epoch一致，原key/config/unit hash一致。独立网络聊天只读复核140连接和IPC ESTAB，不并发写入。证据`dev-docs/host101-network-recovery-20261016.md`，私有备份/root/moxbot-host101-recovery-20261016T141329；PR85仅记录，不改源码/现有模型执行权限、旧myagents服务、140配置或日常Mac。实际native Bots Ready未操作，不能以metadata读取冒称UI验收。
 
 现行云session24h，本次到期2026-10-17 14:14:14北京时间；未来自动续期未实现，勿称无人值守持续在线。安装/入网当前通过，真实模型和自动续期不在本任务。恢复窗口已结束，后续需重新核对目标状态与权限。
+
+
+## 2026-10-16 14:57：0.5.7 已发布到 own updater（服务器验收）
+
+MOXBOTS-057-NETWORK-RELEASE-20261016 固定源码ee055458af8823a611503450424ecadd30be0f4e，PR83/main40f7de8f接受且完整tree相同，远端v0.5.7已核验指向冻结源。完整native/Developer ID/Apple Accepted/staple/Gatekeeper、正式TAR/ZIP完整回解、自有updater签名和独立实际验包通过。本机打包后直传140.143.183.232，GitHub只源码/CI/记录。不可变TAR336184128B/SHA b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82，stable057实际正常TLS返回，公钥连续；056全量可验签回滚保留。单次外部Linux101完整公网GET47分23.67秒/118221Bps，原始stat/hash/17证据及实际远端同文件经独审；同锁CAS/fsync/精确旧stable备份/公开Range206/隐藏404/unsupported204/网站未变/独立复验通过，owned lock释放。
+
+权威记录dev-docs/releases/moxbots-0.5.7.md与moxbots-0.5.7-evidence.json；私有制品在项目指针output/updater-057-20261016/final-ee055458/，接续work/release-057-20261016/owner/CONTINUE.md，当前原始证据round2-ee055458。旧aea候选有最小窗口缺陷，已保留不可发行；ee布局修正独立实际组件9项复验通过，但非原生/真实账号证明。PR84及后来源码不自动纳入冻结包。
+
+未安装/启动/退出/重启客户端，未打断任务。启用和真实新账号session/独立identity登记/membership/relay/目录/既有scope调用/同账号恢复仍待手动解锁、fresh完整活动owner空闲与兼容配置/实际应用备份；PB004等原生验收不关闭，其他Host聊天的实际服务验收仍按其独立记录。回退禁止旧业务库恢复，须保留当前业务数据及新旧身份/凭据槽。
+
+下载源与云后台已在同一140服务器，搬目录不能增带宽。Nginx无rate限制、负载低，两条公网路径均慢且有明显TCP重传；源站出口或链路问题待确认，未证实云套餐限额，未改网络/付费服务。
