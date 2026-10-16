@@ -331,3 +331,10 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 固定源码maina81d2509fa92968ddaaed63416a2478d21b8a373/tag v0.5.6，own updater stable056及不可变TAR 685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549/336158365B已正式签名、公证、独立验包和真实完整GET/stat+SHA/签名独审，通过同锁055回滚前置/CAS/备份/fsync/公开接口复验后发布，自有锁释放。详见dev-docs/releases/moxbots-0.5.6.md及evidence JSON；制品位于项目指针output/updater-056-20261016/final-a81d2509/。055保留且不可变，不自动降级。
 
 本任务没有退出、停止、安装或重启日常客户端。发布前只读观察它已是正式055；旧054/PID记录为历史，安装事务与完整活动/generation无本轮证明。真实Host、薪资/有数据原生、精确IME及签名包下有任务/录音/草稿保存恢复另验，不因分发通过而关闭。后续Project Context按来源聊天接续排入0.5.7；禁止后来main静默加入或同版本替换056。
+
+
+## 2026-10-16 · MOXBOTS-HOST-101-20261016
+
+用户直接要求101.42.11.29安装Host并入网；实查已装83e48946而登录过期，复用原身份/账号/配置进行恢复。正式PKCE→auth-wait→明确同principal renew-management→run，原Host cc8fc885-529b-43e9-8a58-ee7c5f2a4c58已ready；受控connector重启保留并自动恢复，Node/connector enabled，实际云metadata joined/ready与epoch一致，原key/config/unit hash一致。独立网络聊天只读复核140连接和IPC ESTAB，不并发写入。证据`dev-docs/host101-network-recovery-20261016.md`，私有备份/root/moxbot-host101-recovery-20261016T141329；PR85仅记录，不改源码/现有模型执行权限、旧myagents服务、140配置或日常Mac。实际native Bots Ready未操作，不能以metadata读取冒称UI验收。
+
+现行云session24h，本次到期2026-10-17 14:14:14北京时间；未来自动续期未实现，勿称无人值守持续在线。安装/入网当前通过，真实模型和自动续期不在本任务。恢复窗口已结束，后续需重新核对目标状态与权限。
