@@ -1,0 +1,37 @@
+{
+  "assets": [
+    {
+      "apiUrl": "https://api.github.com/repos/heavenzhang/MoXBots/releases/assets/645564045",
+      "contentType": "application/zip",
+      "createdAt": "2026-10-16T00:01:36Z",
+      "digest": "sha256:f9b31491e5bf15b3073c41cd483833ae9c58b99c246b099e3c8f1256d493bdb4",
+      "downloadCount": 0,
+      "id": "RA_kwDOVFCyos4meoaN",
+      "label": "",
+      "name": "MoxBots-0.5.6-macOS-arm64.zip",
+      "size": 344739590,
+      "state": "uploaded",
+      "updatedAt": "2026-10-16T00:03:43Z",
+      "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.6-a81d2509/MoxBots-0.5.6-macOS-arm64.zip"
+    },
+    {
+      "apiUrl": "https://api.github.com/repos/heavenzhang/MoXBots/releases/assets/645563716",
+      "contentType": "application/octet-stream",
+      "createdAt": "2026-10-16T00:01:27Z",
+      "digest": "sha256:89fb07d5a67d5cfc51bc0bd62f9585cec6fa0b2c08a412ee2015e7992b2cca01",
+      "downloadCount": 0,
+      "id": "RA_kwDOVFCyos4meoVE",
+      "label": "",
+      "name": "SHA256SUMS",
+      "size": 96,
+      "state": "uploaded",
+      "updatedAt": "2026-10-16T00:01:27Z",
+      "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.6-a81d2509/SHA256SUMS"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": true,
+  "tagName": "moxbots-trial-0.5.6-a81d2509",
+  "targetCommitish": "a81d2509fa92968ddaaed63416a2478d21b8a373",
+  "url": "https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-0.5.6-a81d2509"
+}

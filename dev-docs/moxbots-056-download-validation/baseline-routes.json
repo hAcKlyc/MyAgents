@@ -1,0 +1,93 @@
+{
+  "stage": "baseline",
+  "checkedAt": "2026-10-16T00:02:14.704874+00:00",
+  "routes": {
+    "/": {
+      "status": 200,
+      "contentType": "text/html",
+      "location": null,
+      "sha256": "015b5a6535c80c12328426f973c4dd99cdada3dc44eafd859c189fee7074c167",
+      "bytes": 18017
+    },
+    "/download/": {
+      "status": 200,
+      "contentType": "text/html",
+      "location": null,
+      "sha256": "d16765a5fe0cb1c58a1eb649a4bc0ec3a8522cb6ca800519a760953c570085b4",
+      "bytes": 6335
+    },
+    "/download": {
+      "status": 308,
+      "contentType": "text/html",
+      "location": "https://140.143.183.232/download/",
+      "sha256": "43a81fb3d47b34e7d42d6b8444f592ed9251b8e57db8f67d32419aa40b1480d0",
+      "bytes": 164
+    },
+    "/download/releases.e9d3e01adbd5.json": {
+      "status": 200,
+      "contentType": "application/json",
+      "location": null,
+      "sha256": "e9d3e01adbd57ef83eb24f42bb4f16792175f72debcc9b3e5f7136d80f15ca62",
+      "bytes": 469
+    },
+    "/download/download.13af458f2eb6.js": {
+      "status": 200,
+      "contentType": "application/javascript",
+      "location": null,
+      "sha256": "13af458f2eb624154dc073d9d4779f1e8e86601339f2ddb135c17312687f48ec",
+      "bytes": 3974
+    },
+    "/download/releases.aa1b8b9858ca.json": {
+      "status": 200,
+      "contentType": "application/json",
+      "location": null,
+      "sha256": "aa1b8b9858ca34195f7258d9c2e8ecc1cdcd0d93b70f270a13c464bb1981c2fc",
+      "bytes": 482
+    },
+    "/health": {
+      "status": 200,
+      "contentType": "application/json",
+      "location": null,
+      "sha256": "73cf0589a43bff9ddfc7d92e9b6afc8951978901e9766813333026837b8b7b8b",
+      "bytes": 26
+    },
+    "/admin": {
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "location": null,
+      "sha256": "b97b5979944ef55d09978296faeeb6da09ce65a5bc39a8d45951b9c3e6df14e8",
+      "bytes": 2960
+    },
+    "/feedback": {
+      "status": 200,
+      "contentType": "text/html; charset=utf-8",
+      "location": null,
+      "sha256": "2f89f744f33454c01d23a3518a2d9d0bcc1cebee337d2d19af3e1c0180f2f814",
+      "bytes": 3417
+    },
+    "/unknown-unified-056": {
+      "status": 404,
+      "contentType": "text/html",
+      "location": null,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0",
+      "bytes": 146
+    },
+    "/.agent-sync.json": {
+      "status": 404,
+      "contentType": "text/html",
+      "location": null,
+      "sha256": "55f7d9e99b8e2d4e0e193b2f0275501e6d9c1ebd29cadbea6a0da48a8587e3e0",
+      "bytes": 146
+    },
+    "/updates/stable/darwin-aarch64.json": {
+      "status": 200,
+      "contentType": "application/json",
+      "location": null,
+      "sha256": "af8b16c122bce9e470f5792345c6623ef97623a0ebaf17d65fa6131e0a83b504",
+      "bytes": 1412
+    }
+  },
+  "strictHTTPS": true,
+  "passed": true,
+  "authOrHostBusinessAcceptance": false
+}
