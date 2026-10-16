@@ -283,6 +283,24 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
     ownedLoginGeneration.current += 1;
     if (pending) void cancelOwnedNetworkLogin(pending).catch(() => {});
   }, [ownedLoginTarget, ownedLoginTargetIsCurrent]);
+  function openOwnedLogin() {
+    if (
+      !selectedOwnedNeedsLogin ||
+      !selectedConnection ||
+      !selectedOwnedLoginUrl
+    )
+      return;
+    setOpen(false);
+    ownedLoginGeneration.current += 1;
+    completedOwnedLoginAttempt.current = false;
+    pendingOwnedLoginAttempt.current = null;
+    setOwnedLoginTarget({
+      connectionId: selectedConnection.id,
+      url: selectedOwnedLoginUrl,
+      principalId: selectedConnection.ownedAccount?.principalId ?? "",
+      authGeneration: selectedConnection.snapshot.authGeneration,
+    });
+  }
   async function select(id: string) {
     if (restoreOperation.current || restoreOpen) closeRestore();
     setOpen(false);
@@ -325,6 +343,16 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
           <ChevronDownIcon className="h-4 w-4 shrink-0" />
         </button>
       </NetworkLabel>
+      {selectedOwnedNeedsLogin && (
+        <button
+          type="button"
+          disabled={!selectedOwnedLoginUrl || ownedLoginTarget !== null}
+          className="mt-2 self-start rounded-lg bg-[var(--button-primary-bg)] px-3 py-2 text-sm font-medium text-[var(--button-primary-text)] hover:bg-[var(--button-primary-bg-hover)] disabled:opacity-50"
+          onClick={openOwnedLogin}
+        >
+          {t("agentNetwork.ownedLogin.signInAgain")}
+        </button>
+      )}
       <Popover
         open={open}
         onClose={() => setOpen(false)}
@@ -412,19 +440,7 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
               role="menuitem"
               disabled={!selectedOwnedLoginUrl}
               className="w-full rounded-md px-3 py-2.5 text-left text-sm hover:bg-[var(--hover-bg)] disabled:opacity-50"
-              onClick={() => {
-                if (!selectedOwnedLoginUrl) return;
-                setOpen(false);
-                ownedLoginGeneration.current += 1;
-                completedOwnedLoginAttempt.current = false;
-                pendingOwnedLoginAttempt.current = null;
-                setOwnedLoginTarget({
-                  connectionId: selectedConnection.id,
-                  url: selectedOwnedLoginUrl,
-                  principalId: selectedConnection.ownedAccount?.principalId ?? "",
-                  authGeneration: selectedConnection.snapshot.authGeneration,
-                });
-              }}
+              onClick={openOwnedLogin}
             >
               {selectedOwnedLoginUrl ? t("ownedAccountEntry.signIn") : t("ownedAccountEntry.unconfigured")}
             </button>

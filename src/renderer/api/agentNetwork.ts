@@ -274,6 +274,8 @@ export function networkErrorKey(
   if (/^ENROLLMENT_KEY_|^KEY_(EXPIRED|REVOKED|BOUND)/.test(code))
     return "keyInvalid";
   if (code === "NETWORK_TRUST_CHANGED") return "trustChanged";
+  if (code === "KEY_GENERATION_CONFLICT" || code === "NETWORK_CREDENTIAL_GENERATION_CONFLICT")
+    return "identityConflict";
   if (code === "NETWORK_REMOVAL_UNCONFIRMED") return "removalPending";
   if (code === "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
     return "credentialStoreAuthorizationRequired";
@@ -282,6 +284,8 @@ export function networkErrorKey(
   if (code === "NETWORK_CREDENTIAL_STORE_INVALID")
     return "credentialStoreInvalid";
   if (code === "OWNED_SESSION_RECORD_MISSING") return "ownedSessionMissing";
+  if (["OWNED_SESSION_INVALID", "SPACE_REAUTH_REQUIRED", "ACCOUNT_BINDING_CHANGED", "OWNED_ACCOUNT_REVOKED"].includes(code))
+    return "ownedSignInRequired";
   if (code === "NETWORK_PRIVATE_KEY_MISSING" || code === "DEVICE_REVOKED")
     return "privateKeyMissing";
   if (

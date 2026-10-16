@@ -1,0 +1,13 @@
+import React from "react";
+import { createRoot } from "react-dom/client";
+import { i18n } from "@/i18n";
+import { ThemeRuntimeProvider } from "@/theme/ThemeRuntime";
+import { acceptNetworkRegistry } from "@/features/agent-network/store";
+import { ToastProvider } from "@/components/Toast";
+import AgentNetwork from "@/pages/AgentNetwork";
+import { registry, localId, mode } from "./mock";
+import "../host-onboarding-validation/fixture.css";
+await i18n.changeLanguage(new URLSearchParams(location.search).get("lang") || "zh-CN");
+localStorage.setItem("myagents_device_id", localId);
+acceptNetworkRegistry(registry);
+createRoot(document.getElementById("root")!).render(<ThemeRuntimeProvider selection={null}><div style={{ height: "100vh", display: "flex", flexDirection: "column" }}><aside style={{ padding: "6px 16px", fontSize: 12, background: "var(--paper-inset)", color: "var(--ink-muted)" }}>MOXBOTS-NET-AUTH-001 · 合成状态，不连接真实账号 · {mode}</aside><div style={{ flex: 1, minHeight: 0 }}><ToastProvider><AgentNetwork /></ToastProvider></div></div></ThemeRuntimeProvider>);

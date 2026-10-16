@@ -1429,6 +1429,8 @@
       "credentialStoreAuthorizationRequired": "系统凭据需要授权。后台恢复已停止，不会自动重复请求密码。",
       "credentialStoreUnavailable": "系统凭据库暂不可用。后台恢复已停止，请检查系统凭据库状态。",
       "credentialStoreInvalid": "本机保存的会话无法验证。为保护身份，连接已停止，记录未被自动覆盖。",
+      "identityConflict": "此设备的网络身份发生冲突，无法自动恢复。请核对登录账号与设备身份；现有连接和凭据已保留。",
+      "ownedSignInRequired": "此网络的登录已失效，请重新登录后恢复连接。",
       "ownedSessionMissing": "未找到此连接对应的本机登录会话。连接已停止，需要显式登录后才能恢复。",
       "privateKeyMissing": "本机私钥不可用。请管理员先撤销该设备，再用新 key 加入。",
       "protocolUnsupported": "此服务不支持当前 AgentNet 协议。",
@@ -1450,6 +1452,7 @@
       "close": "关闭"
     },
     "ownedLogin": {
+      "signInAgain": "重新登录",
       "mode": "账号登录",
       "hint": "通过浏览器完成登录。会话保存在操作系统凭据库中，令牌不会显示在这里。",
       "fixedServiceUrl": "此实例地址已固定，登录只会发往该服务。",
