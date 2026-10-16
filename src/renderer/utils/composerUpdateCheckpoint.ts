@@ -11,6 +11,7 @@ import type { Tab } from '@/types/tab';
 import { agentMentionSnapshotSchema, desktopPrimaryContextSchema, type QueryMentionContext } from '@/../shared/agentMentions';
 import { isPendingSessionId } from '@/../shared/constants';
 import { assertKnownProductSystemSkillRequirement } from '@/../shared/systemSkills';
+import { composerWorkflowDraftSchema, type ComposerWorkflowDraft } from './composerWorkflowDraft';
 
 export interface ComposerScope {
   tabId: string;
@@ -28,6 +29,7 @@ export interface ComposerSnapshot {
   composing: boolean;
   sending: boolean;
   stagedWorkflow: boolean;
+  workflowDraft?: ComposerWorkflowDraft;
   /** A live editor which cannot yet be safely serialized must refuse exit. */
   blockingReason?: string;
 }
@@ -35,8 +37,8 @@ export interface ComposerOwner {
   snapshot: () => ComposerSnapshot;
   freeze: (locked: boolean) => void;
 }
-interface DurableDraft { scope: ComposerScope; text: string; context: QueryMentionContext }
-interface Handoff { version: 1; tabs: PersistedTabState; drafts: DurableDraft[] }
+interface DurableDraft { scope: ComposerScope; text: string; context: QueryMentionContext; workflowDraft?: ComposerWorkflowDraft }
+interface Handoff { version: 1 | 2; tabs: PersistedTabState; drafts: DurableDraft[] }
 const scopeSchema = z.strictObject({
   tabId: z.string().min(1), sessionId: z.string().min(1).nullable(),
   workspacePath: z.string().min(1).nullable(), mode: z.enum(['chat', 'launcher']),
@@ -47,7 +49,8 @@ const contextSchema = z.strictObject({
   primaryContext: desktopPrimaryContextSchema.optional(),
   requiredSystemSkill: z.unknown().optional(),
 });
-const draftSchema = z.strictObject({ scope: scopeSchema, text: z.string(), context: contextSchema });
+const draftSchema = z.strictObject({ scope: scopeSchema, text: z.string(), context: contextSchema,
+  workflowDraft: composerWorkflowDraftSchema.optional() });
 const owners = new Set<ComposerOwner>();
 let ownerRevision = 0;
 let locked = false;
@@ -95,7 +98,7 @@ function validateDraft(raw: unknown): DurableDraft {
 }
 function hasDraft(snapshot: ComposerSnapshot): boolean {
   return !!snapshot.text || snapshot.imageCount > 0 || !!snapshot.context.primaryContext
-    || !!snapshot.context.requiredSystemSkill || !!snapshot.context.agentMentions?.length || snapshot.stagedWorkflow;
+    || !!snapshot.context.requiredSystemSkill || !!snapshot.context.agentMentions?.length || snapshot.stagedWorkflow || !!snapshot.workflowDraft;
 }
 function assertSafeSnapshot(snapshot: ComposerSnapshot): void {
       if (snapshot.blockingReason) throw new Error(snapshot.blockingReason);
@@ -105,7 +108,8 @@ function assertSafeSnapshot(snapshot: ComposerSnapshot): void {
       if (snapshot.imageCount) throw new Error('草稿包含暂不能安全恢复的图片附件。请处理附件后再更新；草稿已保留。');
       if (snapshot.context.primaryContext?.kind === 'floating-context' && snapshot.context.primaryContext.input.screenshotAttached)
         throw new Error('草稿引用尚不能恢复的截图，请处理后再更新；草稿已保留。');
-      if (snapshot.stagedWorkflow) throw new Error('草稿包含尚未保存的任务设置。请处理后再更新；草稿已保留。');
+      if (snapshot.stagedWorkflow && !snapshot.workflowDraft)
+        throw new Error('此任务草稿尚不能安全恢复，请保留草稿并稍后更新。');
 }
 
 function assertRestorable(draft: DurableDraft, state: PersistedTabState | null): void {
@@ -142,7 +146,8 @@ export function beginComposerUpdateCheckpoint(serializeTabs: (tabs: readonly Tab
     if (revision !== ownerRevision) throw new Error('输入窗口已变化，请重新确认更新。');
     const snapshots = participants.map(owner => owner.snapshot());
     for (const snapshot of snapshots) assertSafeSnapshot(snapshot);
-    return snapshots.filter(hasDraft).map(({ scope, text, context }) => validateDraft({ scope, text, context }));
+    return snapshots.filter(hasDraft).map(({ scope, text, context, workflowDraft }) =>
+      validateDraft({ scope, text, context, ...(workflowDraft ? { workflowDraft } : {}) }));
   };
   return {
     async persist(tabs: readonly Tab[], activeTabId: string | null) {
@@ -168,7 +173,8 @@ export function beginComposerUpdateCheckpoint(serializeTabs: (tabs: readonly Tab
         }
         if (!state || !drafts.length) return;
         attemptedWrite = true; // Own even a failed tmp/fsync/rename attempt.
-        await safeWriteJson(path, { version: 1, tabs: state, drafts } satisfies Handoff);
+        await safeWriteJson(path, { version: drafts.some(draft => draft.workflowDraft) ? 2 : 1,
+          tabs: state, drafts } satisfies Handoff);
       });
       if (captured !== JSON.stringify(collect())) throw new Error('输入草稿已变化，请重新确认更新。');
     },
@@ -218,7 +224,11 @@ export async function loadComposerUpdateHandoff(deserializeTabs: (raw: string | 
       loaded = null;
       return null;
     }
-    const parsed = z.strictObject({ version: z.literal(1), tabs: z.unknown(), drafts: z.array(draftSchema).min(1) }).parse(raw);
+    const legacyDraftSchema = draftSchema.omit({ workflowDraft: true });
+    const parsed = z.discriminatedUnion('version', [
+      z.strictObject({ version: z.literal(1), tabs: z.unknown(), drafts: z.array(legacyDraftSchema).min(1) }),
+      z.strictObject({ version: z.literal(2), tabs: z.unknown(), drafts: z.array(draftSchema).min(1) }),
+    ]).parse(raw);
     const tabs = deserializeTabs(JSON.stringify(parsed.tabs));
     if (!tabs) throw new Error('更新草稿的会话列表无效。');
     const drafts = parsed.drafts.map(validateDraft);
@@ -229,7 +239,7 @@ export async function loadComposerUpdateHandoff(deserializeTabs: (raw: string | 
       if (keys.has(key)) throw new Error('更新草稿身份重复。');
       keys.add(key);
     }
-    loaded = { version: 1, tabs, drafts };
+    loaded = { version: parsed.version, tabs, drafts };
     return tabs;
   }).then(state => {
     handoffChecked = true;
@@ -244,10 +254,15 @@ export async function loadComposerUpdateHandoff(deserializeTabs: (raw: string | 
 
 /** Restores data only; never calls onSend or starts a Session. Exact Tab ID,
  * Session ID, workspace and discussion must all match. Existing text wins. */
-export function restoreComposerUpdateDraft(scope: ComposerScope, empty: boolean): DurableDraft | null {
+export function restoreComposerUpdateDraft(scope: ComposerScope, empty: boolean,
+  restoreWorkflow?: (draft: ComposerWorkflowDraft) => boolean): DurableDraft | null {
   if (!loaded || !empty) return null;
   const index = loaded.drafts.findIndex(draft => scopeKey(draft.scope) === scopeKey(scope));
   if (index < 0) return null;
+  // The existing Chat/config owner must accept the draft first. In particular,
+  // an initial scheduler read must not overwrite it after disk consumption.
+  const candidate = loaded.drafts[index];
+  if (candidate.workflowDraft && !restoreWorkflow?.(candidate.workflowDraft)) return null;
   const [draft] = loaded.drafts.splice(index, 1);
   const remaining = JSON.parse(JSON.stringify(loaded)) as Handoff;
   void enqueue(async () => {

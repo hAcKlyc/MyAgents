@@ -176,6 +176,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   cronModeEnabled = false,
   cronConfig,
   goalDraftActive = false,
+  workflowDraft,
+  onRestoreWorkflowDraft,
   cronTask,
   sessionGoal,
   stoppedCronTask,
@@ -894,7 +896,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       text: inputValue,
       context: { agentMentions: activeAgentSnapshots(inputValue, agentMentions), primaryContext, requiredSystemSkill },
       imageCount: images.length, pendingAttachments: false, composing: false, sending: false,
-      stagedWorkflow: !!goalDraftActive || !!cronConfig,
+      stagedWorkflow: !!goalDraftActive || (cronModeEnabled && !cronTask && !!cronConfig),
+      ...(workflowDraft && onRestoreWorkflowDraft ? { workflowDraft } : {}),
     };
   });
   useLayoutEffect(() => {
@@ -903,13 +906,18 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       ...(composerDiscussionId ? { discussionId: composerDiscussionId } : {}) };
     const current = checkpointSnapshotRef.current!;
     const restored = restoreComposerUpdateDraft(scope, !inputValueRef.current && !getImageCount()
-      && !current.context.primaryContext && !current.context.requiredSystemSkill && !current.context.agentMentions?.length);
+      && !current.stagedWorkflow && !current.workflowDraft
+      && !current.context.primaryContext && !current.context.requiredSystemSkill && !current.context.agentMentions?.length, onRestoreWorkflowDraft);
     if (restored) {
       setInputValue(restored.text);
       setAgentMentions(restored.context.agentMentions ?? []);
       setPrimaryContext(restored.context.primaryContext);
       setRequiredSystemSkill(restored.context.requiredSystemSkill);
     }
+  }, [composerTabId, composerDiscussionId, sessionId, workspacePath, isLauncherMode, setInputValue,
+    getImageCount, goalDraftActive, cronModeEnabled, cronTask, onRestoreWorkflowDraft]);
+  useLayoutEffect(() => {
+    if (APP_BUILD_PROFILE !== 'moxbot') return;
     return registerComposerUpdateOwner({
       snapshot: () => ({ ...checkpointSnapshotRef.current!,
         text: textareaRef.current?.value ?? inputValueRef.current,

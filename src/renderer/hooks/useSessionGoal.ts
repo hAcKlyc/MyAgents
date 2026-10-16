@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
   createSessionGoal,
@@ -89,6 +89,12 @@ export function useSessionGoal(options: UseSessionGoalOptions) {
   const listenerStartedAtRef = useRef(Date.now());
   const listenersReadyAtRef = useRef<number | null>(null);
   const [listenersReady, setListenersReady] = useState(false);
+  const hydrationActivation = useMemo(() => ({ sessionId, workspacePath }), [sessionId, workspacePath]);
+  const currentHydration = useRef(hydrationActivation);
+  useLayoutEffect(() => {
+    currentHydration.current = hydrationActivation;
+  }, [hydrationActivation]);
+  const [hydratedOwner, setHydratedOwner] = useState<typeof hydrationActivation | null>(null);
   const ownerIdentityRef = useRef({ sessionId, workspacePath });
 
   const acceptSnapshot = useCallback((goal: SessionGoal, patch: Partial<SessionGoalState> = {}) => {
@@ -315,7 +321,8 @@ export function useSessionGoal(options: UseSessionGoalOptions) {
 
     let cancelled = false;
     void getSessionGoal(sessionId, workspacePath, true).then(goal => {
-      if (cancelled || !mountedRef.current) return;
+      if (cancelled || !mountedRef.current || currentHydration.current !== hydrationActivation) return;
+      setHydratedOwner(hydrationActivation);
       if (!goal) return;
       if (isTerminalGoal(goal) && dismissedIdsRef.current.has(goal.id)) return;
       const current = stateRef.current.goal;
@@ -330,10 +337,11 @@ export function useSessionGoal(options: UseSessionGoalOptions) {
       if (!cancelled) console.warn('[useSessionGoal] Failed to hydrate Goal state:', error);
     });
     return () => { cancelled = true; };
-  }, [acceptSnapshot, listenersReady, sessionId, setState, stateRef, workspacePath]);
+  }, [acceptSnapshot, hydrationActivation, listenersReady, sessionId, setState, stateRef, workspacePath]);
 
   return {
     state,
+    restorationReady: !isTauriEnvironment() || hydratedOwner === hydrationActivation,
     start,
     pause,
     resume,
