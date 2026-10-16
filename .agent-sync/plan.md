@@ -275,11 +275,11 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 ## Deployment coordination
 
 - **Deployment chat:** `01a12bc2-907a-7702-b6dd-788225c5dfe4`，MoxBots桌面端统一打包负责人。
-- **Designation:** 用户于2026-10-16在「合并重复任务」聊天 `01a14001-8f98-7fb2-9964-2a4465a55e55`要求“打一个5.6的远程更新并推送”，并明确选择“交给现有统一打包聊天执行，并授权我发送本次发布要求”。本记录由指定聊天实际核读两条用户原文后写入；不把开发者消息本身当作新增授权。
-- **Targets and runbook:** 当前授权目标仅既有macOS arm64 MoXBots own updater：`https://140.143.183.232/updates/stable/darwin-aarch64.json`，既有`/srv/moxbots/updates`、同源不可变归档和原子stable；流程`scripts/moxbot-updates/README.md`及`release.mjs`。复用既有Developer ID、公证profile、正式Reader及自己的签名根；不扩展路径/端口，不部署auth/Host/网站服务，不安装或停止日常客户端。
-- **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.6.md`及任务记录维护状态；使用既有`.release-lock`及owner核验。Git计划不是原子锁。既有Release workflow已禁用，Test CI只做验证；开发聊天继续独立源码/CI/main交付，不能并发发布或切换本目标。
-- **Current release:** `MOXBOTS-056-REMOTE-RELEASE-20261016`，`accepted`（服务器分发范围）。正式源码main `a81d2509fa92968ddaaed63416a2478d21b8a373`/tag `v0.5.6`，TAR SHA `685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549`/336158365B；stable已原子切056并经真实完整GET/签名独审、公开接口和055回滚复核，自有锁释放。详见`dev-docs/releases/moxbots-0.5.6.md`及evidence JSON；未停止/安装/重启日常客户端，原生业务验收仍另列。
-- **Acceptance boundary:** 服务器发布、后台发现/下载、用户确认安装、实际版本/数据及真实薪资看板分别报告。本次不强退、不停止或安装日常客户端；原生/真实业务未验项如实保留。其他既有服务不因本次指定而获得新的发布授权；如涉及它们，先协调授权/活动job/目标租约。
+- **Designation:** 既定唯一发布owner仍为本聊天。最新用户于2026-10-16在修复聊天`01a1420f-245b-7f22-8a0f-4caaaf31b91b`明确回复“授权发送并安排修复版”；Root实际核读human message`01a142d4-9285-7c93-a968-52d61de5ab7d`，覆盖下一未冻结修复版及任务空闲后启用、不中断任务。原056授权和交付保持其发行记录，不将开发者转述自身当新增授权。
+- **Targets and runbook:** 本次仅既有macOS arm64 MoXBots own updater `https://140.143.183.232/updates/stable/darwin-aarch64.json`、`/srv/moxbots/updates`及其不可变归档/原子stable；流程`scripts/moxbot-updates/README.md`与`release.mjs`。复用原Developer ID、公证profile、正式Reader和自有签名根。允许确认任务空闲、Mac手动解锁且启用前兼容配置备份就绪后，在本机启用新版并验证已有授权账号；不主动停止运行任务。不扩展路径/端口，不部署auth/Host/网站服务，不扩大External Calls/模型权限。
+- **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.7.md`及本任务记录维护状态；仍用既有`.release-lock`及owner核验，Git计划不是原子锁。Release workflow仅特殊分支push filter、不触发main/tag；Test CI只验证。开发聊天可正常源码/CI/main交付，后来提交不自动进入冻结包，不能并发发布或切换本目标。
+- **Current release:** `MOXBOTS-057-NETWORK-RELEASE-20261016`，`preparing`。下一未冻结版本0.5.7，基线main `b1001048bc5877ccaae0ab7af137cd94b2ddbde2`含PR81及既有057队列；版本/协调PR通过后再固定正式main SHA与digest，后来提交不混入。上一056/a81正式归档与签名保持不可变，作为回滚。详见`dev-docs/releases/moxbots-0.5.7.md`；任务空闲、手动解锁及配置备份前不启用客户端。
+- **Acceptance boundary:** 分别报告源码、签名制品/服务器分发、启用安装、真实账号session/identity/membership/relay/目录/可调用路径。只在fresh完整活动准入确认空闲、Mac手动解锁及兼容配置备份/回退就绪后启用；不强退、不stop运行任务、未知则保持pending。真实Provider/Host/薪资看板等原生边界不得因构建/CI/HTTP200而关闭；其他服务不因本次指定获得新部署授权。
 
 ## MOXBOTS-MODEL-FAILOVER-001 — 2026-10-16
 
@@ -302,3 +302,7 @@ User requested the new Linux Host reuse of current desktop main-Agent model and 
 ## MOXBOTS-OUTPUT-002 — 2026-10-16
 
 用户接受输出区六项优化并要求结果/进度优先、逐项具体时间与低干扰质量信息。独立分支codex/output-results-20261016；原transcript owner新增可选观测时间，UI移除默认工具/方法名，连续同文件聚合，明确操作累计，TODO当前项，质量无主观评分。代码、158项定向/172项消息输入回归/25项持久化及实际IAB与独立审阅分别记录 `dev-docs/output-results/acceptance.md`；CI/main待本任务最终核验。桌面发布queued给既定统一owner下一未冻结批次（0.5.7队列），不改冻结056、不并发操作日常App或服务器，未向其他聊天发送消息。任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。
+
+### 0.5.7 入网修复发布授权（2026-10-16）
+
+用户在原修复聊天`01a1420f-245b-7f22-8a0f-4caaaf31b91b`对“发送给既定统一打包负责人、安排下一未冻结修复版、任务空闲后启用且不中断任务”的问题明确回复“授权发送并安排修复版”。Root已实际核读human message `01a142d4-9285-7c93-a968-52d61de5ab7d`。复用既有own updater及唯一发布owner；允许在确认空闲、Mac手动解锁、启用前兼容配置私有备份和回滚就绪后启用候选，真实入网逐项验收，不扩大云/Host/模型/External Calls权限。旧056服务器accepted记录见dev-docs/releases/moxbots-0.5.6.md，已发布字节不改。新sessionBound配置回退旧版必须恢复启用前兼容配置且保留当前业务数据与所有旧身份/凭据槽，禁止回滚旧业务库。
