@@ -20,7 +20,7 @@ Task ID: COMMUNITY-SSO-ACCOUNT-20261016. Open the owned community inside the des
 - [ ] Git: push branch, required CI, merge latest main, verify remote main contains the exact code. Do not mark a PR as final main delivery.
 - [ ] Release: designated owner packages next unfrozen candidate, publishes and coordinates real installed-client acceptance. No frozen 0.5.7 artifacts are changed.
 
-## Implementation and decisions
+## Completed
 
 - Base observation/start/task-init gates passed on canonical `https://github.com/heavenzhang/MoXBots.git`, main `16c2d8251fa52f8adc6e43d27116dd6dd77f0622`, dedicated worktree `/Users/zhangshaohua/Documents/Codex/2026-10-16/moxbots-community-sso`.
 - Existing external `/community` web app owns an independent OIDC session. Existing `/api/community` already accepts native owned-account bearer, so this fix uses the established invoke -> Rust account owner -> pinned-discovery/fixed HTTPS pattern. No cloud code/deployment or new SSO-ticket contract is needed.
@@ -46,6 +46,11 @@ Local output: `/Users/zhangshaohua/Documents/WPS Cloud/【项目】目录/MoxBot
 ## Execution record
 
 Primary owns integration and delivery. Two bounded native workers were requested as gpt-6.1-sol/medium: `community_ui` implemented only four new UI/test/locale files; `community_auth_review` reviewed source/auth and rendered screenshots without edits. Selected because scope-bound async state, idempotent writes and issuer/principal boundaries justify independent work. No external model calls; exact runtime model/effort, token totals and cost are unverified. No daily GUI, Host, cloud deployment or account mutation performed.
+
+## Blockers and unknowns
+
+- Required remote CI and main delivery are pending.
+- Real authenticated and installed-client acceptance need the designated release owner's current account/GUI/idle/backup gates. No cloud server change is required.
 
 ## Deployment request
 
