@@ -8,7 +8,7 @@
 - 定向TypeScript检查、定向ESLint、CLI实际bundle和离线help、测试分类通过；完整lint通过。完整typecheck首次因本任务使用ignore-scripts安装依赖而缺CodeMirror修补失败，执行本工作区postinstall后重新检查通过。
 - 新Rust回归覆盖strict action schema、禁止credential/device/issuer覆盖、safe revision/UUID、无秘密status、原key完整scope/fingerprint、missing不触发生成、key写删拒绝、原principal/device/binding/trust/membership pin、开始前disabled/stale/missing拒绝、direct binary GUI前分流。另增加排队读取取消不得触碰凭据、丢弃blocking JoinHandle仍持有publication锁的确定性回归。原有取消、提交回滚、late result、account isolation回归同跑。
 - 本机Rust `cargo check --tests` 与clippy红线通过，均以 `DOCS_RS=1` 跳过无关Swift桥构建；不能作为native运行通过。未改Swift源码或系统工具链。真实本地Rust运行被CLT Swift PackageDescription模块/动态库符号不匹配阻断；使用任务独立module cache复核仍失败，保留原始日志。
-- 既有macOS CI job增加真实 `agent_network::` 与 `cli::` native tests，不使用DOCS_RS或OS credential访问；现有Linux完整Rust/JS回归继续作为required gates。
+- 既有macOS CI job增加真实 `agent_network::` 与 `cli::` native tests，不使用DOCS_RS或OS credential访问；现有Linux完整Rust/JS回归继续作为required gates。实现提交 `d39916ba60a06cad0df16d4239c864292d475d69` 的 [CI 38851858454](https://github.com/heavenzhang/MoXBots/actions/runs/38851858454) 六项全部成功：macOS network 193通过/1既有忽略、CLI 24通过、既有credential组件回归通过；Linux完整Rust 1660通过/8既有忽略，Windows原生检查通过。
 
 完整本地回归：unit 5,970通过/5既有跳过；DOM 2,418通过；integration 1,069通过/24既有跳过。首次完整DOM的PermissionPrompt复制反馈断言超时（1失败，其余2,417通过），目标文件与本任务无diff；该文件11项及完整DOM原断言不变重跑均通过，未放宽测试。类型、lint和完整原生CI仍分别追踪。
 
@@ -22,7 +22,7 @@
 
 ## 交付与实际运行边界
 
-CI/PR/main状态由最终PR回执及任务记录更新。此文当前记录实现验证，不宣称日常客户端已升级或网络已ready。没有签名/发布、模型调用、真实账号写入、真实OS Keychain读写或生产连接验收；这些不能由模拟与build替代，也不因main合入自动发生。
+此文是合并前验收快照，记录实现验证；已吸收并发main `40f7de8f11a7c848a5f0b98aff3e4969af3fd068` 的登录对话框小窗口布局修复，native/CLI运行代码与上述已验提交相同。组合后的最终head仍须独立通过全部CI。最终head、CI与remote main ancestry/tree以 [PR84最终交付回执](https://github.com/heavenzhang/MoXBots/pull/84) 为准，不把本快照当成已合入的证明。不宣称日常客户端已升级或网络已ready。没有签名/发布、模型调用、真实账号写入、真实OS Keychain读写或生产连接验收；这些不能由模拟与build替代，也不因main合入自动发生。
 
 ## 协作记录
 
