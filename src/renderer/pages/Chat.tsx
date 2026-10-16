@@ -166,6 +166,7 @@ import { appendCronPromptToDraft } from '@/utils/cronComposerRecovery';
 import { runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
 import { launchSupportDiagnostics } from '@/utils/supportDiagnostics';
 import { createDefaultSessionGoalDraftConfig } from '@/utils/sessionGoalDraft';
+import type { ComposerWorkflowDraft } from '@/utils/composerWorkflowDraft';
 import { MANAGED_CODEX_COMPACT_SLASH_COMMAND } from '@/utils/slashActions';
 import {
   CODEX_SUBSCRIPTION_PROVIDER_ID,
@@ -2682,6 +2683,7 @@ export default function Chat({
   });
   const {
     state: sessionGoalState,
+    restorationReady: goalRestoreReady,
     start: startGoal,
     pause: pauseGoal,
     resume: resumeGoal,
@@ -2947,13 +2949,26 @@ export default function Chat({
     }
   }, [restoreCronTask, setCronExecutionState]);
 
-  useSessionCronRestore({
+  const cronRestoreReady = useSessionCronRestore({
     sessionId,
     tabId,
     task: cronState.task,
     onRestore: restoreSessionCronProjection,
     onClear: disableCronMode,
   });
+
+  const restoreWorkflowDraft = useCallback((draft: ComposerWorkflowDraft): boolean => {
+    if (!cronRestoreReady || !goalRestoreReady || goalDraftConfigRef.current || cronStateRef.current.isStarting
+      || sessionGoalStateRef.current.isStarting || sessionGoalStateRef.current.goal) return false;
+    if (draft.kind === 'goal') {
+      goalDraftConfigRef.current = draft.config;
+      setGoalDraftConfig(draft.config);
+    } else {
+      if (cronStateRef.current.config || cronStateRef.current.task) return false;
+      enableCronMode(draft.config);
+    }
+    return true;
+  }, [cronRestoreReady, goalRestoreReady, enableCronMode]);
 
   // Set loading state after TabProvider's loadSession completes (for cron task executing scenario)
   // This effect watches for messages reference changes, which indicates loadSession has completed
@@ -6878,6 +6893,10 @@ export default function Chat({
               cronModeEnabled={cronState.isEnabled}
               cronConfig={cronState.config}
               goalDraftActive={goalDraftConfig !== null}
+              workflowDraft={goalDraftConfig ? { kind: 'goal', config: goalDraftConfig }
+                : cronState.isEnabled && !cronState.task && cronState.config
+                  ? { kind: 'scheduled', config: cronState.config } : undefined}
+              onRestoreWorkflowDraft={restoreWorkflowDraft}
               cronTask={cronState.task}
               sessionGoal={sessionGoalState.goal}
               stoppedCronTask={stoppedCronTaskForInput}

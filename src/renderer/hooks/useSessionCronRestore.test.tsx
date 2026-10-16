@@ -64,6 +64,35 @@ describe('Session Task hydration', () => {
     rerender({ currentTask: task('A') });
     expect(getSessionCronTask).toHaveBeenCalledTimes(1);
   });
+  it('keeps workflow restoration closed until the exact Session hydration succeeds', async () => {
+    const pending = deferred<CronTask | null>();
+    vi.mocked(getSessionCronTask).mockReturnValueOnce(pending.promise);
+    const onRestore = vi.fn(), onClear = vi.fn();
+    const { result, rerender } = renderHook(({ sessionId }) => useSessionCronRestore({ sessionId, tabId: 'tab', task: null, onRestore, onClear }), { initialProps: { sessionId: 'A' } });
+    expect(result.current).toBe(false);
+    rerender({ sessionId: 'B' });
+    await waitFor(() => expect(result.current).toBe(true));
+    await act(async () => { pending.resolve(task('A')); });
+    expect(onRestore).not.toHaveBeenCalled(); expect(result.current).toBe(true);
+  });
+  it('does not authorize consuming a saved workflow after a failed Task read', async () => {
+    vi.mocked(getSessionCronTask).mockRejectedValueOnce(new Error('synthetic read failure'));
+    const { result } = renderHook(() => useSessionCronRestore({ sessionId: 'A', tabId: 'tab', task: null, onRestore: vi.fn(), onClear: vi.fn() }));
+    await act(async () => {}); expect(result.current).toBe(false);
+  });
+  it('revisiting A cannot reuse its previous readiness while a new hydration is pending', async () => {
+    const secondA = deferred<CronTask | null>(), pendingB = deferred<CronTask | null>();
+    vi.mocked(getSessionCronTask).mockResolvedValueOnce(null).mockReturnValueOnce(pendingB.promise).mockReturnValueOnce(secondA.promise);
+    const onRestore = vi.fn(), onClear = vi.fn();
+    const { result, rerender } = renderHook(({ sessionId }) => useSessionCronRestore({ sessionId, tabId: 'tab', task: null, onRestore, onClear }), { initialProps: { sessionId: 'A' } });
+    await waitFor(() => expect(result.current).toBe(true));
+    rerender({ sessionId: 'B' }); await waitFor(() => expect(getSessionCronTask).toHaveBeenCalledTimes(2));
+    expect(result.current).toBe(false);
+    rerender({ sessionId: 'A' }); await waitFor(() => expect(getSessionCronTask).toHaveBeenCalledTimes(3));
+    expect(result.current).toBe(false);
+    await act(async () => pendingB.resolve(task('B'))); expect(result.current).toBe(false); expect(onRestore).not.toHaveBeenCalled();
+    await act(async () => secondA.resolve(null)); expect(result.current).toBe(true);
+  });
   it('does not overwrite a task installed while hydration was pending', async () => {
     const pending = deferred<CronTask | null>();
     vi.mocked(getSessionCronTask).mockReturnValueOnce(pending.promise);
