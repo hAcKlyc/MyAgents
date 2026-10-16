@@ -40,7 +40,7 @@ MOXBOTS-OUTPUT-002：在现有聊天执行区落实用户接受的六项优化�
 
 ## Next step
 
-- 已合入最新origin/main e872eb53（保留并发网络恢复与账号规划）；组合门禁进行中，下一步PR/CI、main包含核验。发布请求由统一owner处理。
+- 已合入最新origin/main e872eb53（保留并发网络恢复与账号规划）；组合249项/typecheck/lint/web+server通过；PR80首轮CI发现英文复数键缺中文对齐，现补齐并复验，下一步完整CI与main包含核验。发布请求由统一owner处理。
 
 ## Deployment request
 

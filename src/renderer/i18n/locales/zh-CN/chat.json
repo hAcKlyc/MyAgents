@@ -1388,7 +1388,15 @@
       "progress": "成功返回 {{completed}}/{{total}}",
       "updates": "{{count}} 次更新",
       "updateNumber": "第 {{count}} 次更新结果",
-      "awaiting": "正在等待结果"
+      "awaiting": "正在等待结果",
+      "files_one": "已更新 {{count}} 个文件",
+      "files_other": "已更新 {{count}} 个文件",
+      "updates_one": "{{count}} 次更新",
+      "updates_other": "{{count}} 次更新",
+      "foundFiles_one": "找到 {{count}} 个文件",
+      "foundFiles_other": "找到 {{count}} 个文件",
+      "matches_one": "返回 {{count}} 条匹配行",
+      "matches_other": "返回 {{count}} 条匹配行"
     },
     "showResults": "展开结果与时间（{{count}}）",
     "hideResults": "收起结果与时间（{{count}}）",
