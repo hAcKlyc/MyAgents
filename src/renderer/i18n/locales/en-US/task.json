@@ -949,17 +949,19 @@
     },
     "groups": {
       "running": "Running",
-      "needs": "Needs confirmation",
+      "needs": "Needs me",
       "verifying": "To review",
       "done": "Completed",
       "todo": "To start",
       "other": "Other tasks and conversations",
-      "idle": "Conversations to continue",
-      "scheduled": "Automations",
-      "archived": "Archived"
+      "idle": "Ready to continue",
+      "scheduled": "Waiting",
+      "archived": "Archived",
+      "inactive": "Inactive"
     },
     "waiting": "Waiting for reply or approval",
     "idle": "No current execution",
+    "readyToContinue": "Idle; ready to continue",
     "running": "Executing",
     "unknown": "Status needs verification",
     "task": "Task",
@@ -1034,8 +1036,8 @@
     "historyOverview": "{{total}} archived records",
     "historyHint": "History contains archived records only. Restore preserves the previous state and does not start a run; completed tasks return to the last column.",
     "historyEmpty": "No matching archived records",
-    "idleHint": "No current execution. Continue in the original conversation; idle does not mean the goal is complete.",
-    "scheduledHint": "Automations awaiting a trigger are separate; enabled does not mean currently executing.",
+    "idleHint": "These conversations stopped and are waiting for you. Idle does not mean the goal is complete.",
+    "scheduledHint": "Scheduled, recurring or conditional automations waiting for the next trigger; enabled does not mean currently executing.",
     "reasons": {
       "paused": "Goal paused",
       "waiting": "Waiting for an answer or permission",
@@ -1074,6 +1076,9 @@
       "interrupted": "Interrupted",
       "unknown": "Unknown",
       "lastRunning": "Last seen running"
-    }
+    },
+    "inactive": "Inactive for 7+ days",
+    "checkingTrigger": "Checking trigger",
+    "inactiveHint": "No activity for over 7 days. Convert to a Task if there is a clear goal; otherwise archive."
   }
 }

@@ -949,17 +949,19 @@
     },
     "groups": {
       "running": "执行中",
-      "needs": "待确认",
+      "needs": "需要我",
       "verifying": "待验收",
       "done": "已完成",
       "todo": "待开始",
       "other": "其他任务与会话",
-      "idle": "待继续的会话",
-      "scheduled": "自动任务",
-      "archived": "已归档"
+      "idle": "待继续",
+      "scheduled": "等待中",
+      "archived": "已归档",
+      "inactive": "不活跃"
     },
     "waiting": "等待答复或批准",
     "idle": "当前未执行",
+    "readyToContinue": "空闲，等你继续",
     "running": "正在执行",
     "unknown": "状态待核实",
     "task": "任务",
@@ -1034,8 +1036,8 @@
     "historyOverview": "{{total}} 条已归档记录",
     "historyHint": "历史只显示已归档的记录。恢复保留原状态，不启动执行；已完成任务回到最右列。",
     "historyEmpty": "暂无符合条件的已归档记录",
-    "idleHint": "当前没有执行，可进入原会话继续；空闲不代表目标已完成。",
-    "scheduledHint": "等待触发的自动任务独立展示；启用状态不表示此刻正在执行。",
+    "idleHint": "会话已停下，等你继续。空闲不代表目标已完成。",
+    "scheduledHint": "定时、循环或条件任务，正在等下一次触发；启用不代表此刻正在执行。",
     "reasons": {
       "paused": "Goal 已暂停",
       "waiting": "等待答复或授权",
@@ -1074,6 +1076,9 @@
       "interrupted": "已中断",
       "unknown": "状态未知",
       "lastRunning": "上次执行中"
-    }
+    },
+    "inactive": "7 天以上未活动",
+    "checkingTrigger": "检查触发条件中",
+    "inactiveHint": "超过 7 天没有活动。有明确目标就转为任务，没有就归档。"
   }
 }

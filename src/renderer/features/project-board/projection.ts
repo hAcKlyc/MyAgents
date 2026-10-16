@@ -5,7 +5,7 @@ import type { Task } from '@/../shared/types/task';
 import { workspacePathsEqual } from '@/../shared/workspacePath';
 import { isManagedScheduledJob } from '@/../shared/managedScheduledJob';
 
-export type BoardGroup = 'todo' | 'running' | 'needs' | 'done' | 'idle' | 'scheduled' | 'archived';
+export type BoardGroup = 'todo' | 'running' | 'needs' | 'done' | 'idle' | 'inactive' | 'scheduled' | 'archived';
 export type ConfirmationReason = 'waiting' | 'paused' | 'verification' | 'blocked' | 'stopped' | 'unknown' | 'stopFailed';
 export type SessionActivity = 'idle' | 'running' | 'waiting_user_action';
 export interface ActivitySnapshot {
@@ -32,6 +32,8 @@ export interface BoardRow {
 }
 
 export const ACTIVITY_FRESHNESS_MS = 60_000;
+/** Idle conversations older than this leave the continue pool: convert them to a Task or archive them. */
+export const INACTIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function freshActivity(snapshot: ActivitySnapshot | undefined, now: number): SessionActivity | undefined {
   if (!snapshot || snapshot.error || now - snapshot.checkedAt > ACTIVITY_FRESHNESS_MS) return undefined;
@@ -115,8 +117,10 @@ export function projectBoardRows(
       : lastKnownActive ? 'unknown' : task.status === 'verifying' ? 'verification' : task.status === 'blocked' ? 'blocked'
       : task.status === 'stopped' ? 'stopped'
       : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' ? 'unknown' : undefined;
+    // A detector check is a cheap trigger probe, not work; it stays with the waiting automation.
+    const checkingOnly = task.executionState === 'checking' && task.executionMode !== 'once';
     const group: BoardGroup = confirmationReason ? 'needs'
-      : runningSessionId || goalRunning || task.executionState || task.executor === 'user' && task.status === 'running' ? 'running'
+      : runningSessionId || goalRunning || task.executionState && !checkingOnly || task.executor === 'user' && task.status === 'running' ? 'running'
       : task.status === 'archived' ? 'archived' : task.status === 'done' ? 'done'
       : task.status === 'todo' ? 'todo' : 'scheduled';
     return {
@@ -133,13 +137,16 @@ export function projectBoardRows(
     const lastKnownActive = !state && (snapshot?.state === 'running' || snapshot?.state === 'waiting_user_action');
     const executionFailed = snapshot?.errorCode === 'execution_failed';
     const goal = boardGoalState(snapshot, now);
-    const group = state === 'waiting_user_action' ? 'needs' : state === 'running' || goal === 'running' ? 'running'
+    const updatedAt = Date.parse(session.lastActiveAt) || 0;
+    // Never-observed old conversations (beyond the bounded snapshot) are history, not owner work.
+    const inactive = now - updatedAt > INACTIVE_AFTER_MS;
+    const group: BoardGroup = state === 'waiting_user_action' ? 'needs' : state === 'running' || goal === 'running' ? 'running'
       : goal && goal !== 'complete' || lastKnownActive || executionFailed ? 'needs'
-      : session.archived ? 'archived' : !state ? 'needs' : goal === 'complete' ? 'done' : 'idle';
+      : session.archived ? 'archived' : !state ? (snapshot || !inactive ? 'needs' : 'inactive') : goal === 'complete' ? 'done' : inactive ? 'inactive' : 'idle';
     rows.push({ id: `session:${session.id}`, title: session.title, sessions: [session], group,
       confirmationReason: group === 'needs' ? executionFailed || goal === 'blocked' ? 'blocked' : state === 'waiting_user_action' ? 'waiting' : goal === 'paused' ? 'paused' : goal === 'stopped' ? 'stopped' : 'unknown' : undefined,
       archived: Boolean(session.archived),
-      summary: session.lastMessagePreview || '', updatedAt: Date.parse(session.lastActiveAt) || 0, activity: snapshot, activitySessionId: session.id });
+      summary: session.lastMessagePreview || '', updatedAt, activity: snapshot, activitySessionId: session.id });
   }
   return rows.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
 }
@@ -155,8 +162,9 @@ export function boardRowStateKey(row: BoardRow, now: number): string {
   if (row.confirmationReason) return `projectBoard.reasons.${row.confirmationReason}`;
   if (row.group === 'running') return 'projectBoard.running';
   if (row.group === 'done') return 'badges.status.done';
-  if (row.group === 'idle') return 'projectBoard.idle';
-  if (row.group === 'scheduled') return 'projectBoard.awaitingTrigger';
+  if (row.group === 'idle') return 'projectBoard.readyToContinue';
+  if (row.group === 'inactive') return 'projectBoard.inactive';
+  if (row.group === 'scheduled') return row.task?.executionState === 'checking' ? 'projectBoard.checkingTrigger' : 'projectBoard.awaitingTrigger';
   if (row.group === 'archived') return 'projectBoard.groups.archived';
   if (row.task) return `badges.status.${row.task.status}`;
   return freshActivity(row.activity, now) ? 'projectBoard.idle' : 'projectBoard.unknown';
