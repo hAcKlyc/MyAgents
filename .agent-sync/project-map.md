@@ -55,6 +55,10 @@ User chose https://140.143.183.232/ directly. Preserve the current static design
 
 `OwnedAccountEntry`承接设置下方个人菜单的小助理和云端反馈入口。`services/agentnet/feedback-web/`、`src/feedback_http.rs`、`src/feedback_store.rs`为普通用户同源提单及私有历史；现有admin-web追加管理员处理。API、权限、发布/回滚边界见`services/agentnet/FEEDBACK.md`，验收见`dev-docs/feedback-independent-review.md`。
 
+## 账号管理与各端接入流程（设计）
+
+`services/agentnet/planning/ACCOUNT-EXPERIENCE-V1.md` 定义管理员开户/初始密码、首次改密、Web/桌面/Host、账号/会话/设备/连接/资源权限、兼容迁移及验收。用户已选择管理员直接开户；当前后台仍只有账号清单，设备隔离、用户写管理及首次改密尚待实现，不因文档存在视为已上线。进度见 `.agent-sync/tasks/codex-network-account-identities-20261016.md`。
+
 ## MoXBots 协作社区与产品文案
 
 `services/agentnet/community-web/`、`src/community_http.rs`、`src/community_store.rs`（后两者相对服务目录）提供同源、需登录的话题/回复；`admin-web`同后台管理置顶、锁定与隐藏。使用现有AuthStore/AdminConfig及固定`/community` OIDC回跳，社区不使用上游Space账号/API，不迁移上游内容。合同及备份/回滚见`services/agentnet/COMMUNITY.md`。桌面导航经`utils/ownedCloud.ts`只取已配置owned issuer。MoXBots介绍由`i18n/moxbotsCopy.ts`及build profile拥有；内部兼容标识和许可/版权不全局替换。

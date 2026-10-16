@@ -570,3 +570,26 @@ it("cancels after the bounded authorization window without retrying", async () =
     vi.useRealTimers();
   }
 });
+
+it("offers direct re-login only for the selected invalid owned account without mutating on open or cancel", async () => {
+  const owned: NetworkRegistry = {
+    ...registry, selected: "self-a",
+    connections: registry.connections.map((connection) => connection.id === "self-a"
+      ? { ...connection, url: "https://network.example.test", snapshot: { ...connection.snapshot, state: "disconnected", error: { code: "OWNED_SESSION_INVALID", retryable: false } }, ownedAccount: { state: "signInRequired", principalId: "principal-a", expiresAt: 100 } }
+      : connection),
+  };
+  const view = render(<NetworkSelector registry={owned} />);
+  fireEvent.click(screen.getByRole("button", { name: "重新登录" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByLabelText("服务 URL")).toHaveValue("https://network.example.test");
+  expect(screen.getByLabelText("服务 URL")).toHaveAttribute("readonly");
+  expect(calls.ownedStart).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(calls.join).not.toHaveBeenCalled();
+  expect(calls.remove).not.toHaveBeenCalled();
+  view.rerender(<NetworkSelector registry={{ ...owned, selected: "self-b" }} />);
+  expect(screen.queryByRole("button", { name: "重新登录" })).not.toBeInTheDocument();
+  view.rerender(<NetworkSelector registry={{ ...owned, selected: "official" }} />);
+  expect(screen.queryByRole("button", { name: "重新登录" })).not.toBeInTheDocument();
+});

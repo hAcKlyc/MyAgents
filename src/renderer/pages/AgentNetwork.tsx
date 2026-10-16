@@ -21,6 +21,7 @@ import {
   type NetworkRequest,
   type NetworkDevice,
   type NetworkSnapshot,
+  type NetworkConnection,
 } from "@/api/agentNetwork";
 import { useMyAgentsLogin } from "@/hooks/useMyAgentsLogin";
 import { SpaceLogin } from "@/pages/space/SpaceChrome";
@@ -44,19 +45,29 @@ import { HostOnboarding } from "@/features/agent-network/HostOnboarding";
 import { NetworkHeader } from "@/features/agent-network/NetworkHeader";
 import { NetworkSelector } from "@/features/agent-network/NetworkSelector";
 
-const ownedCredentialStoreErrors = new Set([
+const stoppedOwnedConnectionErrors = new Set([
   "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
   "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
   "NETWORK_CREDENTIAL_STORE_INVALID",
   "OWNED_SESSION_RECORD_MISSING",
+  "KEY_GENERATION_CONFLICT",
+  "NETWORK_CREDENTIAL_GENERATION_CONFLICT",
 ]);
 
-function networkStatusMessage(snapshot: NetworkSnapshot, official: boolean) {
+function networkStatusMessage(
+  snapshot: NetworkSnapshot,
+  official: boolean,
+  ownedAccount?: NetworkConnection["ownedAccount"],
+) {
+  // Registry owns credential/session validity, including expiry without an actor.
+  if (!official && ownedAccount?.state === "signInRequired")
+    return "agentNetwork.errors.ownedSignInRequired";
   if (
     !official &&
     snapshot.state === "disconnected" &&
     snapshot.error &&
-    ownedCredentialStoreErrors.has(snapshot.error.code)
+    (stoppedOwnedConnectionErrors.has(snapshot.error.code) ||
+      networkErrorKey(snapshot.error) === "ownedSignInRequired")
   ) {
     return `agentNetwork.errors.${networkErrorKey(snapshot.error)}`;
   }
@@ -89,6 +100,7 @@ export default function AgentNetwork({
       connectionId={connection?.id ?? "official"}
       official={connection?.official ?? true}
       networkName={connection?.name ?? ""}
+      ownedAccount={connection?.ownedAccount}
       serviceUrl={connection?.url ?? null}
       selector={<NetworkSelector registry={registry} />}
       isActive={isActive}
@@ -103,6 +115,7 @@ function AgentNetworkContent({
   connectionId,
   official,
   networkName,
+  ownedAccount,
   serviceUrl,
   selector,
   onOpenRemoteSession,
@@ -112,6 +125,7 @@ function AgentNetworkContent({
   connectionId: string;
   official: boolean;
   networkName: string;
+  ownedAccount?: NetworkConnection["ownedAccount"];
   serviceUrl: string | null;
   selector: ReactNode;
   onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
@@ -480,7 +494,7 @@ function AgentNetworkContent({
         )}
         {snapshot.state !== "ready" && (
           <p role="status" className="mb-4 text-sm text-[var(--ink-muted)]">
-            {t(networkStatusMessage(snapshot, official))}
+            {t(networkStatusMessage(snapshot, official, ownedAccount))}
           </p>
         )}
         {showSetup && (
