@@ -33,13 +33,19 @@ export function summarizeProcessTiming(blocks: ContentBlock[], running: boolean,
   const finishedAt = complete && known.every(timing => timing.finishedAt !== undefined)
     ? Math.max(...known.map(timing => timing.finishedAt!)) : undefined;
   const lastActivityAt = known.length ? Math.max(...known.map(timing => timing.lastActivityAt ?? timing.finishedAt ?? timing.startedAt)) : undefined;
-  let durationMs = startedAt !== undefined && finishedAt !== undefined ? finishedAt - startedAt
-    : startedAt !== undefined && running && now >= startedAt ? now - startedAt : undefined;
-  if (durationMs === undefined && blocks.length === 1 && !running && !(blocks[0].tool && isSubagentContainerTool(blocks[0].tool.name))) {
-    const reported = blocks[0].tool?.resultMeta?.durationMs ?? blocks[0].thinkingDurationMs;
-    if (validDuration(reported)) durationMs = reported;
-  }
-  return { startedAt, finishedAt, lastActivityAt, durationMs, source: known.some(timing => timing.source === 'observed') ? 'observed' : 'runtime' };
+  const spanMs = startedAt !== undefined && finishedAt !== undefined ? finishedAt - startedAt : undefined;
+  const elapsedMs = startedAt !== undefined && running && now >= startedAt ? now - startedAt : undefined;
+  // Only executor-supplied tool metadata describes execution duration (Codex
+  // item.durationMs / DSH result metadata). Thinking duration and product event
+  // timestamps are Date.now observations, including complete-frame 0/1ms spans.
+  // A container launch's result cannot describe a later child activation.
+  const single = blocks.length === 1 ? blocks[0] : undefined;
+  const reported = single && !running && !(single.tool && isSubagentContainerTool(single.tool.name))
+    ? single.tool?.resultMeta?.durationMs : undefined;
+  const durationMs = validDuration(reported) ? reported : undefined;
+  return { startedAt, finishedAt, lastActivityAt, spanMs, elapsedMs, durationMs,
+    source: known.length && known.every(timing => timing.source === 'runtime') ? 'runtime' : 'observed' };
+
 }
 
 export function preciseDuration(ms: number): string {

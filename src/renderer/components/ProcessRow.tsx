@@ -32,7 +32,7 @@ import {
     getSubagentContainerLifecycleStatus,
     isBackgroundSubagentTool,
 } from '@/components/tools/subagentActivity';
-import ToolUse from '@/components/ToolUse';
+import ToolUse, { hasToolResultContent } from '@/components/ToolUse';
 import ProcessStatus from './ProcessStatus';
 import { getProcessOutcome } from '@/utils/processPresentation';
 import { processResultLabel } from '@/utils/processResults';
@@ -213,9 +213,18 @@ const ProcessRow = memo(function ProcessRow({
         [isTool, block.tool?.attachments],
     );
 
-    const hasContent =
-        (isThinking && block.thinking && block.thinking.length > 0) ||
-        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.isLoading || block.tool.subagentCalls?.length || processAttachments.length > 0));
+    // In result-first mode, input JSON alone does not make a useful result
+    // body. Keep input-driven patch/plan/child renderers reachable, but avoid
+    // chevrons that only open an empty/awaiting generic result.
+    const inputDrivenResult = isTaskTool || isFilePatchTool || (isTool && block.tool
+        && ['MultiEdit', 'NotebookEdit', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList'].includes(block.tool.name));
+    const hasContent = Boolean(
+        (isThinking && block.thinking?.trim()) ||
+        (isTool && block.tool && (
+            (resultFirst ? inputDrivenResult && block.tool.inputJson : block.tool.inputJson || block.tool.isLoading)
+            || (resultFirst ? hasToolResultContent(block.tool) : block.tool.result?.trim())
+            || block.tool.subagentCalls?.length || processAttachments.length > 0
+        )));
 
     // 派生展开状态（无 useEffect，避免无限循环）
     // thinking 与 tool 块都默认折叠，只由用户手动点击展开。
@@ -328,7 +337,7 @@ const ProcessRow = memo(function ProcessRow({
                 onClick={handleToggle}
                 disabled={!hasContent}
                 aria-expanded={hasContent ? isExpanded : undefined}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]' : 'cursor-default'
+                className={`flex w-full items-center gap-3 ${resultFirst ? `px-3 ${isThinking ? 'py-1.5' : 'py-2'}` : 'px-4 py-2.5'} text-left transition-colors ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]' : 'cursor-default'
                     }`}
             >
                 {/* Icon - fixed size container */}
@@ -410,8 +419,8 @@ const ProcessRow = memo(function ProcessRow({
                     <div className="overflow-hidden">
                         <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
                             <div
-                                data-process-body-layout={isFilePatchTool ? 'full' : 'indented'}
-                                className={isFilePatchTool ? '' : 'ml-7'}
+                                data-process-body-layout={isFilePatchTool || resultFirst ? 'full' : 'indented'}
+                                className={isFilePatchTool || resultFirst ? '' : 'ml-7'}
                             >
                                 {isThinking && block.thinking && (
                                     <div className="group/think text-[var(--ink-secondary)] select-text">

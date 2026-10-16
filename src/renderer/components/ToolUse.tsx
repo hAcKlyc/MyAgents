@@ -22,7 +22,7 @@ import WebFetchTool from './tools/WebFetchTool';
 import WebSearchTool from './tools/WebSearchTool';
 import WriteTool from './tools/WriteTool';
 import CronTaskCard from './scheduled-tasks/CronTaskCard';
-import { ExpandableResult } from './tools/utils';
+import { ExpandableResult, unwrapSdkResult } from './tools/utils';
 import { dshToolDisplayName } from '../../shared/toolDisplay/dshToolNames';
 
 
@@ -45,6 +45,19 @@ function parseCronResult(result: string): { taskId: string; name?: string; sched
  *  into rich UI — clamping too early would corrupt the JSON. */
 const TEXT_DISPLAY_LIMIT = 50_000;
 const JSON_DISPLAY_LIMIT = 200_000;
+
+function usesPlainResult(tool: ToolUseSimple): boolean {
+  return ['Read', 'Grep', 'Glob', 'Skill', 'BashOutput', 'KillShell'].includes(dshToolDisplayName(tool.name));
+}
+
+/** Match the plain result renderer's unwrapping before offering a disclosure.
+ * Large results are clamped by ToolUse; never parse an unbounded payload just
+ * to render the collapsed row. Rich cards retain their own result projection. */
+export function hasToolResultContent(tool: ToolUseSimple): boolean {
+  if (!tool.result?.trim()) return false;
+  return usesPlainResult(tool) && tool.result.length <= JSON_DISPLAY_LIMIT
+    ? Boolean(unwrapSdkResult(tool.result).trim()) : true;
+}
 
 type ChatTranslator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -89,7 +102,7 @@ export default function ToolUse({ tool: rawTool, resultOnly = false }: ToolUsePr
 }
 
 function renderToolBody(tool: ToolUseSimple, resultOnly: boolean, t: ChatTranslator): React.JSX.Element {
-  if (resultOnly && ['Read', 'Grep', 'Glob', 'Skill', 'BashOutput', 'KillShell'].includes(dshToolDisplayName(tool.name))) {
+  if (resultOnly && usesPlainResult(tool)) {
     return <ExpandableResult content={tool.result ?? t('process.result.awaiting')} />;
   }
   switch (dshToolDisplayName(tool.name)) {

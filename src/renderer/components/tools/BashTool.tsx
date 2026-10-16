@@ -51,7 +51,7 @@ export default function BashTool({ tool, resultOnly = false }: BashToolProps) {
   );
 
   return <BashTerminal model={resultOnly ? { ...model, command: null, shell: undefined, hasHiddenCommandContent: false,
-    meta: { ...model.meta, cwd: undefined, processId: undefined } } : model} t={t} resultOnly={resultOnly} />;
+    meta: { ...model.meta, cwd: undefined, processId: undefined, durationMs: undefined } } : model} t={t} resultOnly={resultOnly} />;
 }
 
 function BashTerminal({ model, t, resultOnly }: { model: BashTranscriptModel; t: ChatTranslator; resultOnly: boolean }) {

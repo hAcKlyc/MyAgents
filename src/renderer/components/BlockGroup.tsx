@@ -29,7 +29,8 @@ function ProcessPhaseCard({ phase, live, totalBlocks }: { phase: ProcessPhase; l
   const important = (entry: ProcessPhase['entries'][number]) =>
     ['running', 'failed', 'stopped'].includes(entry.outcome)
     || Boolean(entry.block.tool && isSubagentContainerTool(entry.block.tool.name));
-  const visible = expanded ? phase.entries : phase.entries.filter(important);
+  const single = phase.entries.length === 1;
+  const visible = single || expanded ? phase.entries : phase.entries.filter(important);
   const hasImportant = phase.entries.some(important);
   const previousVisibleCount = useRef(visible.length);
   useLayoutEffect(() => {
@@ -39,8 +40,8 @@ function ProcessPhaseCard({ phase, live, totalBlocks }: { phase: ProcessPhase; l
   const result = processPhaseResult(phase, t);
 
   return <section data-process-phase={phase.kind} data-phase-outcome={outcome}
-    className="min-w-0 overflow-hidden rounded-lg bg-[var(--paper-inset)]/30">
-    <button type="button" aria-expanded={expanded} aria-controls={detailsId}
+    className={`min-w-0 overflow-hidden rounded-lg ${phase.kind === 'think' ? '' : 'bg-[var(--paper-inset)]/30'}`}>
+    {!single && <button type="button" aria-expanded={expanded} aria-controls={detailsId}
       aria-label={t(expanded ? 'process.hideResults' : 'process.showResults', { count: phase.entries.length })}
       onClick={() => { notify(expanded ? 'block-group-collapse' : 'block-group-expand'); setExpanded(!expanded); }}
       className="flex w-full min-w-0 items-start gap-2 px-3 py-2 text-left hover:bg-[var(--hover-bg)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]">
@@ -53,12 +54,12 @@ function ProcessPhaseCard({ phase, live, totalBlocks }: { phase: ProcessPhase; l
           {counts.failed > 0 && <span className="text-xs text-[var(--error)]">{t('process.summary.failed', { count: counts.failed })}</span>}
           {counts.stopped > 0 && <span className="text-xs text-[var(--warning)]">{t('process.summary.stopped', { count: counts.stopped })}</span>}
           {counts.unknown > 0 && <span className="text-xs text-[var(--ink-secondary)]">{t('process.summary.unknown', { count: counts.unknown })}</span>}
-          {!hasImportant && <span className="ml-auto"><ProcessTiming blocks={phase.entries.map(entry => entry.block)} running={false} /></span>}
+          {!expanded && !hasImportant && <span className="ml-auto"><ProcessTiming blocks={phase.entries.map(entry => entry.block)} running={false} /></span>}
         </span>
-        {!hasImportant && <span data-phase-result className="mt-0.5 block break-words text-sm text-[var(--ink-secondary)]">{result}</span>}
+        {!expanded && !hasImportant && <span data-phase-result className="mt-0.5 block break-words text-sm text-[var(--ink-secondary)]">{result}</span>}
       </span>
-      {!hasImportant && <span className="mt-0.5"><ProcessStatus outcome={outcome} compact={outcome === 'succeeded'} /></span>}
-    </button>
+      {!expanded && !hasImportant && <span className="mt-0.5"><ProcessStatus outcome={outcome} compact={outcome === 'succeeded'} /></span>}
+    </button>}
     <div id={detailsId}>
       {groupProcessResults(visible).map(group => <div key={group.key}>
         {group.path && group.entries.length > 1 && <p className="border-t border-[var(--line-subtle)] px-4 pt-2 text-xs text-[var(--ink-secondary)] break-all">

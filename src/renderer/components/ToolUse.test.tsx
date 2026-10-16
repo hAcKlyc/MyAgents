@@ -7,6 +7,13 @@ import type { ToolUseSimple } from '@/types/chat';
 import ToolUse from './ToolUse';
 
 describe('ToolUse specialized result ownership', () => {
+  it('leaves duration to the result row while retaining the command exit evidence', () => {
+    const { container } = render(<ToolUse resultOnly tool={{ id: 'duration-once', name: 'Bash', input: {}, streamIndex: 0,
+      result: 'Tests 24 passed', resultMeta: { exitCode: 0, durationMs: 2340 } }} />);
+    expect(container).toHaveTextContent('Tests 24 passed');
+    expect(container).toHaveTextContent('exit 0');
+    expect(container).not.toHaveTextContent('耗时');
+  });
   it('keeps result-only output bounded and never exposes unknown tool input or method names', () => {
     const { container } = render(<ToolUse resultOnly tool={{ id: 'large-result-only', name: 'InternalMethodName', input: {}, inputJson: 'PRIVATE_METHOD_ARGUMENT', streamIndex: 0, result: 'x'.repeat(100_000) }} />);
     expect(container.textContent!.length).toBeLessThan(51_000);

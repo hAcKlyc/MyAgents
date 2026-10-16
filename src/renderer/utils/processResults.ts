@@ -42,6 +42,10 @@ export function processResultLabel(entry: ProcessEntry, t: Translate): string {
   if (paths.length === 1) return t('process.result.file', { target: baseName(paths[0]) });
   if (paths.length > 1) return t('process.result.files', { count: paths.length });
   if (kind === 'think') return t('process.result.think');
+  if (tool && dshToolDisplayName(tool.name) === 'Read') {
+    const path = processInput(tool).file_path;
+    if (typeof path === 'string' && path.trim()) return t('process.result.readFile', { target: baseName(path) });
+  }
   if (tool && ['Grep', 'Glob'].includes(dshToolDisplayName(tool.name))) {
     // Only structured counts are evidence; grep text itself is not a total.
     try {
