@@ -68,6 +68,14 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 外层是设备到云端的 HTTPS/WSS，接入以稳定设备公钥绑定的 DPoP 证明持有凭据对应的私钥。官方接入凭据不超过原 Space 登录剩余有效期与 30 天；自部署凭据由固定实例签发，客户端按协议最大有效期验证，不依赖 Space 登录。设备 leaf 有效 7 天，在到期前 48 小时窗口按需续签。活跃回程使用一项带 jitter 的约 6 小时检查，空闲不轮询凭据或证书。暂时签发不可用且现有 leaf 尚有效时保留当前关联，真实撤销与过期不能忽略。
 
+### 桌面协作社区与当前账号
+
+MoXBots 的“更多”、个人菜单和设置页社区入口统一打开内置 `space` Tab 的社区页面。非 MoXBots 的 Cloud Space 仍使用原页面。社区复用 `owned_account_desktop` 已验证的账号，不另外打开网页 OIDC 登录；独立网页入口的登录流程保持原样。
+
+Renderer 只发送闭集 `list/detail/create/reply` intent 和非秘密 `connectionId/principalId/bindingId`。Rust registry 校验配置的自有 HTTPS issuer、保存的账号绑定和当前 actor；账号 owner 在发现并校验原实例信任后，以内存中的 bearer 调用固定 `/api/community` 路由。返回前再次检查账号及 actor 边界，凭据不进入 Renderer、URL、浏览器存储或日志。社区不依赖设备 relay 为 ready 或已入网；多个同 issuer 账号且没有明确选中项时必须先选择账号。
+
+社区使用独立 64 KiB 请求、16 MiB 响应预算，身份接口原预算不变，返回仅投影已知业务字段。账号、binding 改变或退出后清空本地页面与草稿。写入结果不确定（包括请求后 owner 失效）时保留完全相同的 mutationId 和正文，只允许显式重试，避免新编号重复提交。实际账号登录、原生安装和发行验收分别记录于本任务及统一发行记录。
+
 ### 独立账号的桌面凭据访问
 
 `owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期。Owned 连接使用登录响应实际绑定的独立 device ID；identity、admission、discovery、来源和本机标记均使用同一 ID，官方/legacy 保持安装级 ID。浏览器首次以临时 ID 识别账号，完整查询同账号候选登记；已有登记时精确注销临时会话，并显式再次授权旧 ID，校验同一 principal；查询失败/不完整或多候选歧义均不新建身份。

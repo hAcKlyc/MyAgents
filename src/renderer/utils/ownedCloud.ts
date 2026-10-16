@@ -1,3 +1,4 @@
+import { CUSTOM_EVENTS } from '@/../shared/constants';
 import { networkConnections } from '@/api/agentNetwork';
 import { openExternal } from '@/utils/openExternal';
 
@@ -14,6 +15,10 @@ export function canonicalOwnedIssuer(value: string | null | undefined): string |
 }
 
 export async function openOwnedCloudPage(page: 'community' | 'feedback'): Promise<void> {
+  if (page === 'community') {
+    window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SPACE));
+    return;
+  }
   const registry = await networkConnections();
   const issuer = canonicalOwnedIssuer(registry.ownedServiceUrl);
   if (!issuer) throw new Error('OWNED_SERVICE_UNAVAILABLE');

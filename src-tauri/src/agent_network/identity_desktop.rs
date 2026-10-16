@@ -410,6 +410,7 @@ mod authorization_tests {
 
     fn account() -> NetworkAccountSession {
         NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            binding_id: "test-binding".into(),
             connection_id: "connection".into(),
             device_id: "00000000-0000-4000-8000-000000000004".into(),
             session_bound: false,

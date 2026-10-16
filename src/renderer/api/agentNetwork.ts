@@ -322,6 +322,7 @@ export interface NetworkConnection {
   ownedAccount?: {
     state: 'authenticated' | 'authorizationRequired' | 'signInRequired' | 'unavailable';
     principalId: string;
+    bindingId?: string;
     expiresAt: number | null;
   };
 }

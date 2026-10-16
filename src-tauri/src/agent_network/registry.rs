@@ -21,6 +21,13 @@ use tauri::{Emitter, Listener};
 use tokio::sync::Notify;
 use zeroize::Zeroizing;
 const OFFICIAL: &str = "official";
+fn owned_service_url() -> Option<&'static str> {
+    if crate::app_dirs::IS_MOXBOT {
+        Some(option_env!("MOXBOTS_OWNED_SERVICE_URL").unwrap_or("https://140.143.183.232"))
+    } else {
+        None
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct StoredConnection {
@@ -67,6 +74,7 @@ pub(crate) struct ConnectionView {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OwnedAccountView {
+    pub binding_id: String,
     pub state: &'static str,
     pub principal_id: String,
     pub expires_at: Option<u64>,
@@ -216,6 +224,48 @@ impl NetworkRegistry {
                     .unwrap_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))
             })
     }
+    fn community_binding_current(
+        &self,
+        scope: &super::community::CommunityScope,
+        issuer: &str,
+    ) -> Result<(), NetworkError> {
+        let stored = self.owned_stored.lock().unwrap_or_else(|e| e.into_inner());
+        if !stored.iter().any(|c| {
+            !c.removing
+                && c.descriptor.issuer == issuer
+                && scope.matches(&c.id, &c.principal_id, &c.binding_id)
+        }) {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        Ok(())
+    }
+    fn community_finish(
+        &self,
+        scope: &super::community::CommunityScope,
+        issuer: &str,
+        actor: &ManagedConnection,
+        result: Result<Value, NetworkError>,
+    ) -> Result<Value, NetworkError> {
+        self.community_binding_current(scope, issuer)?;
+        let current = self.connection(&scope.connection_id)?;
+        if !Arc::ptr_eq(actor, &current) {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        result
+    }
+    pub(crate) async fn community_request(
+        &self,
+        scope: super::community::CommunityScope,
+        request: super::community::CommunityRequest,
+    ) -> Result<Value, NetworkError> {
+        let issuer =
+            owned_service_url().ok_or_else(|| NetworkError::new("OWNED_SERVICE_UNAVAILABLE"))?;
+        let issuer = super::community::canonical_issuer(issuer)?;
+        self.community_binding_current(&scope, &issuer)?;
+        let actor = self.connection(&scope.connection_id)?;
+        let result = actor.community_request(&scope, &request).await;
+        self.community_finish(&scope, &issuer, &actor, result)
+    }
     pub(crate) fn for_reference(
         &self,
         reference: &myagents_agent_network_protocol::AgentReference,
@@ -339,6 +389,7 @@ impl NetworkRegistry {
                         connection_id: c.id.clone(),
                     });
                 let owned_account = OwnedAccountView {
+                    binding_id: c.binding_id.clone(),
                     state: owned_account_state(
                         metadata,
                         snapshot.error.as_ref().map(|e| e.code.as_str()),
@@ -370,11 +421,7 @@ impl NetworkRegistry {
                 OFFICIAL.into()
             },
             connections: views,
-            owned_service_url: if crate::app_dirs::IS_MOXBOT {
-                Some(option_env!("MOXBOTS_OWNED_SERVICE_URL").unwrap_or("https://140.143.183.232"))
-            } else {
-                None
-            },
+            owned_service_url: owned_service_url(),
         }
     }
     pub(crate) async fn select(
@@ -1709,6 +1756,65 @@ mod tests {
     use super::*;
     use myagents_agent_network_protocol::{AgentReference, SessionReference};
 
+    #[test]
+    fn community_postflight_rejects_logout_rebinding_and_same_binding_actor_replacement() {
+        let owner = NetworkRegistry::new();
+        owner.selfhost_enabled.store(true, Ordering::Release);
+        let record = cli_test_record();
+        let scope = super::super::community::CommunityScope {
+            connection_id: record.id.clone(),
+            principal_id: record.principal_id.clone(),
+            binding_id: record.binding_id.clone(),
+        };
+        let issuer = record.descriptor.issuer.clone();
+        let actor = AgentNetwork::with_generation(record.id.clone(), None, owner.memory.clone(), 1);
+        owner
+            .connections
+            .lock()
+            .unwrap()
+            .insert(record.id.clone(), actor.clone());
+        *owner.owned_stored.lock().unwrap() = vec![record.clone()];
+        let committed = || Ok(json!({"id":"already-committed"}));
+        assert!(owner
+            .community_finish(&scope, &issuer, &actor, committed())
+            .is_ok());
+        // HTTP has already committed; replacing only the actor must withhold the
+        // old result even when connection/principal/login binding stay identical.
+        let replacement =
+            AgentNetwork::with_generation(record.id.clone(), None, owner.memory.clone(), 2);
+        owner
+            .connections
+            .lock()
+            .unwrap()
+            .insert(record.id.clone(), replacement.clone());
+        assert_eq!(
+            owner
+                .community_finish(&scope, &issuer, &actor, committed())
+                .unwrap_err()
+                .code,
+            "ACCOUNT_BINDING_CHANGED"
+        );
+        owner.owned_stored.lock().unwrap()[0].binding_id = "new-login".into();
+        assert_eq!(
+            owner
+                .community_finish(&scope, &issuer, &replacement, committed())
+                .unwrap_err()
+                .code,
+            "ACCOUNT_BINDING_CHANGED"
+        );
+        *owner.owned_stored.lock().unwrap() = vec![record];
+        assert!(owner
+            .community_binding_current(&scope, "https://other.invalid")
+            .is_err());
+        owner.owned_stored.lock().unwrap().clear();
+        assert_eq!(
+            owner
+                .community_finish(&scope, &issuer, &replacement, committed())
+                .unwrap_err()
+                .code,
+            "ACCOUNT_BINDING_CHANGED"
+        );
+    }
     fn cli_test_record() -> StoredOwnedConnection {
         StoredOwnedConnection {
             id: "saved".into(),
@@ -2148,6 +2254,7 @@ mod tests {
             "unavailable"
         );
         let serialized = serde_json::to_value(OwnedAccountView {
+            binding_id: "test-binding".into(),
             state: "authenticated",
             principal_id: "test-principal".into(),
             expires_at: Some(100),
@@ -2155,7 +2262,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serialized,
-            json!({"state":"authenticated", "principalId":"test-principal", "expiresAt":100})
+            json!({"state":"authenticated", "principalId":"test-principal", "bindingId":"test-binding", "expiresAt":100})
         );
     }
     #[test]

@@ -546,6 +546,7 @@ mod tests {
         })).unwrap();
         // This tests only the real in-memory expiry fence, not server login or TLS.
         let account = NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            binding_id: "test-binding".into(),
             connection_id: uuid::Uuid::new_v4().to_string(),
             device_id: old.scope.device_id.clone(),
             session_bound: false,
