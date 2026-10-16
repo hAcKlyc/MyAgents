@@ -16,6 +16,8 @@
 
 `network_cli_security_review`只读审查发现并修复：生产Sidecar漏登记六命令；actor初始化后的隐式凭据迁移；CLI登录重发membership加入。额外保护包括direct app binary不走GUI、保存原选择状态、背景恢复不替换active actor、登录提交前再次检查原actor是否已经自动恢复、背景credential read与新登录guard发布串行化，锁归实际blocking worker持有直到读取结束而非归可取消async future持有。最终独立只读复核无剩余必修问题。不会给既有UI登录增加CLI pinned策略。
 
+额外TOCTOU回归：服务器原登记在预检后消失而本地gen1 key仍存在时，ordinary初始化会尝试activation；显式恢复现在统一走existing-only初始化，拒绝missing generation/key或replacement，无法走Identity/Rotate。普通enrollment行为保持，独立复核无新增必修问题。
+
 状态找回仅含CLI未结束attemptId/connectionId/expiresAt，poll pending可返回原授权链接；不输出PKCE verifier、session token、私钥或配置。后台读取不可授权时typed fail closed；不提供密码命令或Keychain ACL/信任修改。
 
 ## 交付与实际运行边界

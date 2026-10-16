@@ -939,7 +939,7 @@ async fn connect(
         }
         // Explicit recovery already validated an existing key. Do not run the
         // ordinary desktop credential migration after a read-only CLI restore.
-        _ if owner.authorized_identity_store.is_some() => NetworkIdentity::initialize_with_store(account, None, identity_store).await?,
+        _ if owner.authorized_identity_store.is_some() => NetworkIdentity::initialize_existing(account, identity_store).await?,
         _ => super::identity_desktop::initialize_selected(account, None, identity_store).await?,
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(
