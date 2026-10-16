@@ -342,7 +342,8 @@
         "deleted": "Deleted",
         "renamed": "Renamed",
         "edited": "Edited"
-      }
+      },
+      "accumulated": "Cumulative edits"
     },
     "systemTags": {
       "heartbeat": "Heartbeat",

@@ -298,3 +298,7 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 User requested the new Linux Host reuse of current desktop main-Agent model and actual task execution. A real desktop/Host probe exposed a 13-method advertisement against the deployed v1 12-method limit. Task branch `codex/host-capabilities-compat-20261016` removes only the redundant host.snapshot advertisement while preserving its callable fallback and modern model/remote Session methods. Code/IPC regression, CI/main, controlled target-only Host package update, source-model/credential application and real task acceptance remain individually tracked in `.agent-sync/tasks/codex-host-capabilities-compat-20261016-cfb52e68.md`. No daily desktop restart/replacement or shared cloud release.
 
 后续独立批次0.5.7（来源聊天最新用户要求，由该聊天报告）：`MOXBOTS-PROJECT-CONTEXT-001`源码已由PR68交main c225acd8，来源聊天报告真实Kimi Provider隔离补验通过（PR71，最终main及边界以其任务记录为准），签名原生与下一版本冻结仍待验；Token与预算接续在原任务记录；未纳入冻结056，不因排队信息获得新的部署授权。
+
+## MOXBOTS-OUTPUT-002 — 2026-10-16
+
+用户接受输出区六项优化并要求结果/进度优先、逐项具体时间与低干扰质量信息。独立分支codex/output-results-20261016；原transcript owner新增可选观测时间，UI移除默认工具/方法名，连续同文件聚合，明确操作累计，TODO当前项，质量无主观评分。代码、158项定向/172项消息输入回归/25项持久化及实际IAB与独立审阅分别记录 `dev-docs/output-results/acceptance.md`；CI/main待本任务最终核验。桌面发布queued给既定统一owner下一未冻结批次（0.5.7队列），不改冻结056、不并发操作日常App或服务器，未向其他聊天发送消息。任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。

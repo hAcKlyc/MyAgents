@@ -280,13 +280,16 @@ describe('SessionStore V2 ownership and compatibility', () => {
   it('marks only orphaned cold work interrupted without dropping its observed results', async () => {
     const { metadata, active } = await create();
     active.writer.observe({ kind: 'message-create', message: { id: 'a', role: 'assistant', timestamp: 't', transcriptState: 'streaming', content: [
-      { id: 't', type: 'tool_use', tool: { id: 'tool', name: 'Agent', isLoading: true, result: 'partial', subagentCalls: [{ id: 'child', name: 'Read', isLoading: true, result: 'observed' }], subagentLifecycle: { status: 'running', startedAt: 1 } } },
+      { id: 't', type: 'tool_use', tool: { id: 'tool', name: 'Agent', isLoading: true, result: 'partial', executionTiming: { startedAt: 1_000, lastActivityAt: 1_100, source: 'observed' }, subagentCalls: [{ id: 'child', name: 'Read', isLoading: true, result: 'observed' }], subagentLifecycle: { status: 'running', startedAt: 1 } } },
     ] } });
     expect(await active.writer.flush()).toBe(true);
     await store.releaseSessionTranscriptForBinding(metadata.id);
     const restored = await store.activateSessionTranscript(metadata.id);
     const row = restored!.writer.projection.messages.get('a')!;
     expect(row.transcriptState).toBe('interrupted');
+    const tool = Array.isArray(row.content) ? row.content[0].tool as Record<string, unknown> : undefined;
+    expect(tool?.executionTiming).toEqual({ startedAt: 1_000, lastActivityAt: 1_100, source: 'observed' });
+    expect((tool?.subagentCalls as Record<string, unknown>[])[0].executionTiming).toBeUndefined();
     expect(Array.isArray(row.content) && row.content[0].tool).toMatchObject({ isLoading: false, result: 'partial', resultMeta: { status: 'interrupted' }, subagentLifecycle: { status: 'interrupted' }, subagentCalls: [{ isLoading: false, result: 'observed' }] });
   });
 

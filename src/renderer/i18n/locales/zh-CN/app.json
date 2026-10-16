@@ -342,7 +342,8 @@
         "deleted": "已删除",
         "renamed": "已重命名",
         "edited": "已编辑"
-      }
+      },
+      "accumulated": "操作累计"
     },
     "systemTags": {
       "heartbeat": "心跳感知",

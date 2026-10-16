@@ -7,6 +7,24 @@ import type { ToolUseSimple } from '@/types/chat';
 import ToolUse from './ToolUse';
 
 describe('ToolUse specialized result ownership', () => {
+  it('keeps result-only output bounded and never exposes unknown tool input or method names', () => {
+    const { container } = render(<ToolUse resultOnly tool={{ id: 'large-result-only', name: 'InternalMethodName', input: {}, inputJson: 'PRIVATE_METHOD_ARGUMENT', streamIndex: 0, result: 'x'.repeat(100_000) }} />);
+    expect(container.textContent!.length).toBeLessThan(51_000);
+    expect(container).toHaveTextContent('结果过长');
+    expect(container).not.toHaveTextContent('InternalMethodName');
+    expect(container).not.toHaveTextContent('PRIVATE_METHOD_ARGUMENT');
+  });
+
+  it('preserves rich search results while result-only commands omit their invocation', () => {
+    const search = render(<ToolUse resultOnly tool={{ id: 'search-result-only', name: 'WebSearch', input: { query: 'release' }, parsedInput: { query: 'release' }, streamIndex: 0, result: JSON.stringify({ results: [{ title: 'Release', url: 'https://example.com/release' }] }) }} />);
+    expect(search.container).toHaveTextContent('Release');
+    search.unmount();
+    const command = render(<ToolUse resultOnly tool={{ id: 'command-result-only', name: 'Bash', input: { command: 'PRIVATE_COMMAND_ARGUMENT' }, streamIndex: 0, result: JSON.stringify({stdout: 'Tests 24 passed', stderr: 'stderr-evidence', interrupted: false}), resultMeta: {exitCode: 0} }} />);
+    expect(command.container).toHaveTextContent('Tests 24 passed');
+    expect(command.container).toHaveTextContent('stderr-evidence');
+    expect(command.container).not.toHaveTextContent('PRIVATE_COMMAND_ARGUMENT');
+    expect(command.container.querySelector('[data-bash-command-source]')).toBeNull();
+  });
   it('renders DSH file and web tool names through the existing cards without changing their result', () => {
     const edit = render(<ToolUse tool={{
       id: 'dsh-edit', name: 'edit', streamIndex: 0,
