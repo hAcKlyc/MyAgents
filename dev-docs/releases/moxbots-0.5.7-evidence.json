@@ -1,0 +1,178 @@
+{
+  "task": "MOXBOTS-057-NETWORK-RELEASE-20261016",
+  "status": "PUBLISHED_SERVER_ACCEPTED_NATIVE_PENDING",
+  "version": "0.5.7",
+  "recordedAt": "2026-10-16T06:58:38.287773+00:00",
+  "repository": "https://github.com/heavenzhang/MoXBots.git",
+  "sourceCommit": "ee055458af8823a611503450424ecadd30be0f4e",
+  "sourceAcceptanceMain": "40f7de8f11a7c848a5f0b98aff3e4969af3fd068",
+  "sourceTree": "a5c5889596636ce0103e681bf96fd143f8fb8218",
+  "archiveSha256": "b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82",
+  "archiveBytes": 336184128,
+  "zipSha256": "379e99a99991665e2b5e0a32b8fabc8bda8bacf78276f279ad62a992b298be00",
+  "zipBytes": 344783345,
+  "stableURL": "https://140.143.183.232/updates/stable/darwin-aarch64.json",
+  "archiveURL": "https://140.143.183.232/updates/releases/0.5.7/b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82-MoXBots.app.tar.gz",
+  "stableSha256": "67ed1f03d00f78e949063f15a983a2ca58fcc4b72158cf22801e680a47bd4300",
+  "ownUpdaterPublicKeyEncodedSha256": "256ad372294ff13a4e48f7544483dddf43c7cf15e458858e704cd038ce111641",
+  "signatureEncodedSha256": "8b0ca30bcd89c992e32bdd8ab42df64c24bd9e4687e51b55d9e00b58e5975b4c",
+  "appleSubmission": "ad08deeb-c589-4633-8910-a3a9d9ffea1f",
+  "appleStatus": "Accepted",
+  "fullPublicGet": {
+    "normalTLS": true,
+    "httpStatus": 200,
+    "range": false,
+    "retry": false,
+    "redirects": 0,
+    "source": "140.143.183.232",
+    "receiver": "101.42.11.29",
+    "bytes": 336184128,
+    "sha256": "b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82",
+    "seconds": 2843.672468,
+    "averageBytesPerSecond": 118221,
+    "originalEvidenceCount": 17,
+    "independentActualRemoteStatShaStat": true
+  },
+  "verification": {
+    "sourceExactSevenCI": "PASS_AFTER_ONE_UNCHANGED_FAILED_JOB_RERUN_ORIGINAL_FAILURE_RETAINED",
+    "nativeFullBuild": "PASS_4391_INPUTS_UNCHANGED_NO_STUB",
+    "independentComponentUI": "PASS_9_SYNTHETIC_CHECKS_MIN660X400",
+    "independentActualPackage": "PASS_ROOT_REHASHED_119_RAW_EVIDENCE",
+    "developerIdAppleStapleGatekeeper": "PASS",
+    "ownUpdaterSignature": "PASS_ACTUAL_MINISIGN",
+    "publicationScripts": "PASS_AFTER_REPAIR_13_FIXTURES_FIRST_FAIL_RETAINED",
+    "fullPublicGetAndIndependentOriginals": "PASS",
+    "atomicStableAnd056Rollback": "PASS",
+    "publicFinalAndIndependentReview": "PASS",
+    "releaseLockReleased": true,
+    "clientInstalled": false,
+    "clientRestarted": false,
+    "realNativeNetworkAccepted": false
+  },
+  "boundaries": [
+    "arm64 only",
+    "PR84 and later source not included",
+    "Native manual unlock + fresh complete idle + compatible configuration/App backup required",
+    "No forced task interruption",
+    "No cloud/Host/website service deployment or permission expansion",
+    "No business database rollback",
+    "PB004 and real account/relay/authorized call pending"
+  ],
+  "privateEvidenceBase": "MoxBot/work/release-057-20261016/owner/round2-ee055458/",
+  "evidenceDigests": [
+    {
+      "file": "candidate-seven-ci.json",
+      "bytes": 34493,
+      "sha256": "b4f085e6f93082cec5605d37f76ac7788092b75ce593ef9008e5385c65ebdf72"
+    },
+    {
+      "file": "formal-build.json",
+      "bytes": 525,
+      "sha256": "01f4da35b5a11956373dcaebf4a796c07fd675be9a54e3f6dffbdf54df6fd143"
+    },
+    {
+      "file": "app-notary-info.json",
+      "bytes": 191,
+      "sha256": "a8f8a68d6092c1106c2a4ee2fbf9435e7b02dd19d2fc1e717aa13bee7f3e311e"
+    },
+    {
+      "file": "app-notary-log.json",
+      "bytes": 7449,
+      "sha256": "7dce2fc5a640700e3bf6a26ab771279e09b18f42b87fbd8faff4fbf65df57091"
+    },
+    {
+      "file": "app-final-gates.json",
+      "bytes": 1496,
+      "sha256": "e4653c172f4f8b317bc15ebdc0482216df83fc0c2a095e7de62ab2bc90db9608"
+    },
+    {
+      "file": "archives.json",
+      "bytes": 3925,
+      "sha256": "ed6c6081084e71fa2c64b0470da27e758e908465ef694871ec655522a9916278"
+    },
+    {
+      "file": "independent-package-audit.json",
+      "bytes": 143553,
+      "sha256": "cc20f317cfcfdae87c7e13e55e0279981e25dfd9e34a908d6dd253e5edb1de31"
+    },
+    {
+      "file": "independent-publication-script-review-first-fail.json",
+      "bytes": 4456,
+      "sha256": "399cb8a3b6e7d2b1f46b5584619c27141e3197546b7bf20c7845f3ca44b2ef21"
+    },
+    {
+      "file": "independent-publication-script-review.json",
+      "bytes": 3424,
+      "sha256": "8d56a2aac49035640385ee4868f62592f4438d755ef583d2783408ecd71c0869"
+    },
+    {
+      "file": "independent-public-download-review.json",
+      "bytes": 7094,
+      "sha256": "68ae5d7bb915fcc28b7af3cebde0d75400af198f842c4888ce9c2144f136fb42"
+    },
+    {
+      "file": "public-archive-gates.json",
+      "bytes": 7979,
+      "sha256": "d86a2110dff2d45b5b3749e72440ee16949367d4da88c29db8185aaf7beb66c0"
+    },
+    {
+      "file": "server-promote.json",
+      "bytes": 444,
+      "sha256": "03ea2415f2b9eb4dca9d4eeb5ab880491acae50561709bebc80a69e36e75d44d"
+    },
+    {
+      "file": "public-final-gates.json",
+      "bytes": 813,
+      "sha256": "82c94e79b7b52d4c74a69ecafc026b95c7653dc3165d69c184204bcf9465a0e1"
+    },
+    {
+      "file": "independent-published-stable-review.json",
+      "bytes": 11681,
+      "sha256": "3d6ae1c20894caff372b5b3ef9a8a39f0fda4d7ae13f4f4880ebc926271d2c07"
+    },
+    {
+      "file": "root-published-stable-review.json",
+      "bytes": 1084,
+      "sha256": "68ac7a72200c9b4d2f631d248ace669640da163e04c6927f374948b03ab5b903"
+    },
+    {
+      "file": "server-finish.json",
+      "bytes": 117,
+      "sha256": "aca3eb32b42ee474c967978a3ef3983993f74d6c015fca6233a2223b13a9319d"
+    },
+    {
+      "file": "rollback056-crypto.json",
+      "bytes": 2113,
+      "sha256": "7052a3c9a23e22b84acc5910541670d135b76412162ad60a0ac8be3509ef649e"
+    },
+    {
+      "file": "download-path-diagnosis.json",
+      "bytes": 3845,
+      "sha256": "cdc23cf8a85d8fc7e4e219ff6a966b0b7cdd8220cdb39971e1ad3e7bf9b44ebb"
+    },
+    {
+      "file": "report-seal-repair.json",
+      "bytes": 2388,
+      "sha256": "28e35acefae9fc0831d8058b288d2011bc0f8090ee37d7faf127f63463578a27"
+    }
+  ],
+  "sourceTag": {
+    "name": "v0.5.7",
+    "peeledCommit": "ee055458af8823a611503450424ecadd30be0f4e",
+    "remoteVerified": true
+  },
+  "provenanceRepair": {
+    "finding": "RECORD-REF-01",
+    "status": "RESOLVED_ROOT_REVIEWED_SEALED_REPORT",
+    "firstReviewRetained": true,
+    "metadataDeltaExactlyMatchesPriorObservedDigest": true,
+    "rawEvidenceUnchanged": true
+  },
+  "postReleasePathChecks": {
+    "linuxNormalTLSStable": "PASS_057",
+    "macExistingClashProxyNormalTLSStable": "PASS_057",
+    "macDirectStableTLS": "TWO_TIMEOUTS_RETAINED",
+    "configurationChanged": false,
+    "diagnosticOnlyNotNativeAcceptance": true
+  }
+}
