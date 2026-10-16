@@ -24,7 +24,7 @@ describe('BlockGroup stage summaries and folding', () => {
     expect(screen.queryByText('OUTPUT_0')).toBeNull();
     fireEvent.click(details());
     expect(container.querySelectorAll('[data-process-row]')).toHaveLength(12);
-    fireEvent.click(screen.getAllByRole('button', { name: /相关资料已返回/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /已读取 salary-source-0.ts/ })[0]);
     expect(screen.getByText('OUTPUT_0')).toBeTruthy();
     fireEvent.click(details());
     expect(container.querySelectorAll('[data-process-row]')).toHaveLength(0);
@@ -64,14 +64,15 @@ describe('BlockGroup stage summaries and folding', () => {
     const { container } = render(<BlockGroup blocks={[tool('stale', 'Read', { result: undefined, isLoading: true })]} />);
     expect(container.querySelector('[data-phase-outcome="unknown"]')).toBeTruthy();
     expect(container.querySelector('.animate-spin')).toBeNull();
-    expect(screen.getByText('1 项未确认')).toBeTruthy();
+    expect(container.querySelector('[data-process-status="unknown"]')).toBeTruthy();
   });
   it('updates a live summary to its actual terminal result without unfolding raw logs', () => {
     const { container, rerender } = render(<BlockGroup blocks={[tool('live', 'Read', { result: undefined, isLoading: true })]} isStreaming />);
     expect(container.querySelector('[data-phase-outcome="running"]')).toBeTruthy();
     rerender(<BlockGroup blocks={[tool('live', 'Read', { result: '', isLoading: false })]} />);
     expect(container.querySelector('[data-phase-outcome="succeeded"]')).toBeTruthy();
-    expect(details()).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: /展开结果与时间/ })).toBeNull();
+    expect(container.querySelector('[data-process-row] button')).toBeDisabled();
   });
   it('binds the successful command exit code to its action when another command failed', () => {
     render(<BlockGroup blocks={[
@@ -82,30 +83,31 @@ describe('BlockGroup stage summaries and folding', () => {
     expect(screen.queryByText('退出码 0')).toBeNull();
     expect(screen.getByRole('button', { name: /OUTPUT_failed/ })).toBeTruthy();
   });
-  it('notifies the chat layout owner when a visible running row folds after completion', () => {
+  it('notifies the chat layout owner when a directly visible result completes and toggles', () => {
     const notify = vi.fn();
     const view = (blocks: ContentBlock[], live: boolean) => <ChatRowLayoutProvider messageId="message" onRowLayoutChanged={notify}>
       <BlockGroup blocks={blocks} isStreaming={live} />
     </ChatRowLayoutProvider>;
     const { rerender } = render(view([tool('run', 'Read', { result: undefined, isLoading: true })], true));
-    rerender(view([tool('run', 'Read', { result: '', isLoading: false })], false));
+    rerender(view([tool('run', 'Read', { result: 'completed-result', isLoading: false })], false));
     expect(notify).toHaveBeenCalledWith('message', 'tool-complete');
-    fireEvent.click(details());
-    expect(notify).toHaveBeenCalledWith('message', 'block-group-expand');
-    fireEvent.click(details());
-    expect(notify).toHaveBeenCalledWith('message', 'block-group-collapse');
+    const row = screen.getByRole('button', { name: /相关资料已返回/ });
+    fireEvent.click(row);
+    expect(notify).toHaveBeenCalledWith('message', 'process-row-expand');
+    fireEvent.click(row);
+    expect(notify).toHaveBeenCalledWith('message', 'process-row-collapse');
   });
 
   it('keeps a directly opened active tool mounted after it completes', () => {
     const input = { file_path: '/tmp/live.ts' };
-    const { rerender } = render(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, result: undefined, isLoading: true })]} isStreaming />);
+    const { rerender } = render(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, result: 'partial-result', isLoading: true })]} isStreaming />);
     const row = screen.getByRole('button', { name: /正在查看相关资料/ });
     fireEvent.click(row);
-    expect(details()).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('button', { name: /展开结果与时间|收起结果与时间/ })).toBeNull();
     rerender(<BlockGroup blocks={[tool('active', 'Read', { parsedInput: input, isLoading: false })]} />);
     expect(row).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('OUTPUT_active')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /相关资料已返回/ })).toBe(row);
+    expect(screen.getByRole('button', { name: /已读取 live.ts/ })).toBe(row);
   });
 
   it('retains opened output when finishing an update aggregates it with the same file', () => {
@@ -119,7 +121,66 @@ describe('BlockGroup stage summaries and folding', () => {
     expect(screen.getByRole('button', { name: /第 2 次更新结果/ })).toHaveAttribute('aria-expanded', 'true');
     expect(container).toHaveTextContent('a.ts · 2 次更新');
     expect(container.querySelector('[data-process-body-layout]')).toBeTruthy();
-    expect(container.querySelector('[data-phase-result]')).not.toHaveTextContent('+');
+    expect(container.querySelector('[data-phase-result]')).toBeNull();
+  });
+
+  it('opens a single result directly with one label and one timing, without a phase fold', () => {
+    const start = Date.parse('2026-10-16T12:11:21Z');
+    const { container } = render(<BlockGroup blocks={[tool('single', 'Grep', {
+      result: JSON.stringify({ numLines: 11, content: 'salary.ts:21: subjectId' }),
+      executionTiming: { startedAt: start, finishedAt: start + 1, source: 'observed' },
+    })]} />);
+    expect(screen.queryByText('资料结果')).toBeNull();
+    expect(screen.queryByText('成功返回 1/1')).toBeNull();
+    expect(screen.getAllByText('返回 11 条匹配行')).toHaveLength(1);
+    const row = screen.getByRole('button', { name: /返回 11 条匹配行/ });
+    expect(container.querySelectorAll('[data-process-timing]')).toHaveLength(1);
+    fireEvent.click(row);
+    expect(container).toHaveTextContent('salary.ts:21: subjectId');
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelectorAll('[data-process-row]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-process-timing]')).toHaveLength(1);
+  });
+
+  it('does not offer an empty result or empty reasoning disclosure', () => {
+    const { container } = render(<BlockGroup blocks={[
+      tool('empty', 'Read', { result: '  ' }),
+      tool('empty-grep', 'Grep', { result: JSON.stringify({ numLines: 0, content: '' }) }),
+      tool('empty-read', 'Read', { result: JSON.stringify({ type: 'text', file: { content: '' } }) }),
+      { id: 'empty-think', type: 'thinking', thinking: '  ', isComplete: true },
+    ]} />);
+    fireEvent.click(details());
+    expect(container.querySelectorAll('[data-process-row]')).toHaveLength(4);
+    for (const row of container.querySelectorAll('[data-process-row] button')) {
+      expect(row).toBeDisabled();
+      expect(row).not.toHaveAttribute('aria-expanded');
+    }
+    expect(container.querySelector('[data-process-body-layout]')).toBeNull();
+  });
+
+  it('drops the aggregate summary and time while expanded and restores them when collapsed', () => {
+    const { container } = render(<BlockGroup blocks={[tool('one'), tool('two')]} />);
+    expect(container.querySelectorAll('[data-process-timing]')).toHaveLength(1);
+    fireEvent.click(details());
+    expect(screen.queryByText('已返回 2 项结果')).toBeNull();
+    expect(container.querySelectorAll('[data-process-timing]')).toHaveLength(2);
+    expect(container.querySelector('[data-phase-result]')).toBeNull();
+    fireEvent.click(details());
+    expect(screen.getByText('已返回 2 项结果')).toBeTruthy();
+    expect(container.querySelectorAll('[data-process-timing]')).toHaveLength(1);
+  });
+
+  it('preserves a single opened result when its chronological phase grows', () => {
+    const first = tool('one');
+    const { rerender } = render(<BlockGroup blocks={[first]} isStreaming />);
+    fireEvent.click(screen.getByRole('button', { name: /相关资料已返回/ }));
+    expect(screen.getByText('OUTPUT_one')).toBeTruthy();
+    rerender(<BlockGroup blocks={[first, tool('two')]} isStreaming />);
+    expect(details()).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('OUTPUT_one')).toBeTruthy();
+    fireEvent.click(details());
+    fireEvent.click(details());
+    expect(screen.getByText('OUTPUT_one')).toBeTruthy();
   });
 
 });

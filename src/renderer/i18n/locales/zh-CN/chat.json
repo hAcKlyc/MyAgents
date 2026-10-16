@@ -1370,6 +1370,7 @@
       "think": "正在分析问题"
     },
     "result": {
+      "readFile": "已读取 {{target}}",
       "unknown": "尚无可确认结果",
       "stopped": "本项已中断",
       "failed": "本项未完成，请查看结果",
@@ -1403,12 +1404,19 @@
     "timing": {
       "start": "开始",
       "unrecorded": "时间未记录",
-      "elapsed": "已用时 {{time}}",
-      "duration": "耗时 {{time}}",
-      "activity": "最近活动 {{time}}",
+      "elapsed": "已等待 {{time}}",
+      "duration": "执行耗时 {{time}}",
+      "activity": "最近事件 {{time}}",
       "sinceActivity": "{{time}} 未见新事件",
       "observed": "后端事件观测时间，非 API 延迟；计时不代表服务健康",
-      "runtime": "运行时提供的执行时间"
+      "runtime": "运行时生命周期时间；工具执行耗时仅取运行时报告值，非 API 延迟",
+      "finish": "结束",
+      "observedStart": "观测开始",
+      "observedSpan": "观测跨度 {{time}}",
+      "groupStart": "整段开始",
+      "groupSpan": "整段跨度 {{time}}",
+      "spanUnrecorded": "整段跨度未记录",
+      "durationUnrecorded": "执行耗时未记录"
     },
     "quality": {
       "label": "质量参考",

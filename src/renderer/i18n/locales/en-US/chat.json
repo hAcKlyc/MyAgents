@@ -1370,6 +1370,7 @@
       "think": "Analyzing the problem"
     },
     "result": {
+      "readFile": "Read {{target}}",
       "unknown": "No confirmed result yet",
       "stopped": "This item was interrupted",
       "failed": "This item did not complete; review its result",
@@ -1403,12 +1404,19 @@
     "timing": {
       "start": "Started",
       "unrecorded": "Time not recorded",
-      "elapsed": "Elapsed {{time}}",
-      "duration": "Duration {{time}}",
-      "activity": "Last activity {{time}}",
+      "elapsed": "Waited {{time}}",
+      "duration": "Execution {{time}}",
+      "activity": "Last event {{time}}",
       "sinceActivity": "No new event for {{time}}",
       "observed": "Backend event observation time, not API latency; the timer does not establish service health",
-      "runtime": "Execution time reported by the runtime"
+      "runtime": "Runtime lifecycle timestamps; tool execution duration comes only from runtime reports, not API latency",
+      "finish": "Finished",
+      "observedStart": "Observed start",
+      "observedSpan": "Observed span {{time}}",
+      "groupStart": "Phase start",
+      "groupSpan": "Phase span {{time}}",
+      "spanUnrecorded": "Phase span not recorded",
+      "durationUnrecorded": "Execution duration not recorded"
     },
     "quality": {
       "label": "Quality reference",

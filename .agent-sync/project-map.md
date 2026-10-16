@@ -75,3 +75,7 @@ User chose https://140.143.183.232/ directly. Preserve the current static design
 ## MOXBOTS-OUTPUT-002 — 结果、时间与质量参考
 
 聊天执行区沿原 BlockGroup/ProcessRow/ToolUse 呈现结果与当前工作；`ProductTranscriptContent`在原 transcript owner 记录可选 `executionTiming`，开始/结束精确毫秒，中间活动最多每秒采样。`processTiming.ts`只投影可信事实（子任务采用其生命周期），`ExecutionQuality`只展示当前执行证据和已有usage。实现、合成UI/持久化/主干与统一原生发行边界见 `dev-docs/output-results/acceptance.md` 及任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。
+
+## MOXBOTS-OUTPUT-003 — 展开与时间口径修正
+
+沿原BlockGroup/ProcessRow/ToolUse投影，单条一次直达正文；`processTiming.ts`区分runtime报告duration与观测span/等待，不改transcript owner或存储格式。源码/回归及实际展开证据 `dev-docs/output-expanded/acceptance.md`，独立审阅见同目录review.md；原生统一发行另验。

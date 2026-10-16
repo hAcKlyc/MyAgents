@@ -313,3 +313,7 @@ User requested the new Linux Host reuse of current desktop main-Agent model and 
 ### 0.5.7 入网修复发布授权（2026-10-16）
 
 用户在原修复聊天`01a1420f-245b-7f22-8a0f-4caaaf31b91b`对“发送给既定统一打包负责人、安排下一未冻结修复版、任务空闲后启用且不中断任务”的问题明确回复“授权发送并安排修复版”。Root已实际核读human message `01a142d4-9285-7c93-a968-52d61de5ab7d`。复用既有own updater及唯一发布owner；允许在确认空闲、Mac手动解锁、启用前兼容配置私有备份和回滚就绪后启用候选，真实入网逐项验收，不扩大云/Host/模型/External Calls权限。旧056服务器accepted记录见dev-docs/releases/moxbots-0.5.6.md，已发布字节不改。新sessionBound配置回退旧版必须恢复启用前兼容配置且保留当前业务数据与所有旧身份/凭据槽，禁止回滚旧业务库。
+
+## MOXBOTS-OUTPUT-003 — 2026-10-16
+
+用户接受展开区复审并要求实际展开验收。单条直接结果行，多条展开隐藏重复摘要/时间，无实际正文无箭头；执行耗时仅runtime报告，观测跨度/等待/未知分开。独立代码/截图审阅关闭Bash内部重复duration和JSON空结果两项P2，reviewer IAB不可用，实际点击由主Agent补全。用户追加的用户气泡已纳入：紧凑内边距、普通正文400字重、浮动复制/回退及窄栏预留，长文和失败态保留，主Agent实际页面和独立静态复核完成。范围/源码/合成UI/CI/main/原生发行分别见 `.agent-sync/tasks/codex-output-expanded-20261016-f48054da.md` 和 `dev-docs/output-expanded/acceptance.md`；桌面变更queued给唯一owner下一未冻结批次，不修改已冻结包或操作日常App，不向其它聊天发送消息。
