@@ -112,4 +112,3 @@ export function executionEvidence(blocks: ContentBlock[], live = false) {
   }
   return evidence;
 }
-

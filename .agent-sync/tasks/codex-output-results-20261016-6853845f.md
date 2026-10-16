@@ -40,7 +40,7 @@ MOXBOTS-OUTPUT-002：在现有聊天执行区落实用户接受的六项优化�
 
 ## Next step
 
-- 同步origin/main deb26c3c后，跑组合门禁、提交PR与CI、合入并核验远端main；发布请求在下节，由统一owner处理。
+- 已合入最新origin/main e872eb53（保留并发网络恢复与账号规划）；组合门禁进行中，下一步PR/CI、main包含核验。发布请求由统一owner处理。
 
 ## Deployment request
 
