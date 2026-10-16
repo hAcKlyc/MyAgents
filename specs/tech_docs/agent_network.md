@@ -78,6 +78,8 @@ Renderer 只发送闭集 `list/detail/create/reply` intent 和非秘密 `connect
 
 ### 独立账号的桌面凭据访问
 
+登录弹窗的 `useOwnedLoginFlow` 只维护呈现生命周期：用户发起后自动调用原 browser-open、串行轮询原 poll，窗口恢复焦点时补查，成功由原 owner 发布 registry 后关闭。手动检查与浏览器重开保留为备用，完整授权链接默认折叠在高级信息中。轮询成功间隔 2 秒，失败有限退避到 15 秒；到期/取消/卸载停止计时，不并发轮询。现有身份重新授权仍使用 owner 返回的同一逻辑 attempt，不另建身份。各父入口在异步结果发布前核对 generation，取消只失效匹配的 pending attempt；凭据和成功持久化仍由 Rust owner 裁决。
+
 `owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期。Owned 连接使用登录响应实际绑定的独立 device ID；identity、admission、discovery、来源和本机标记均使用同一 ID，官方/legacy 保持安装级 ID。浏览器首次以临时 ID 识别账号，完整查询同账号候选登记；已有登记时精确注销临时会话，并显式再次授权旧 ID，校验同一 principal；查询失败/不完整或多候选歧义均不新建身份。
 
 登录 poll 仅暂存结果。最终由原 registry mutation 和登录 manager 锁裁决取消/提交，再写入新的不可变 binding 凭据槽、原子切换配置，最后在与 stop 共享的发布锁内复核并发放 guard/启动 actor。旧槽不覆盖、不撤销；确认回滚才清理新槽。配置提交与回滚均未知时保留两个槽和 token，拒绝该 issuer 的继续登录，任务空闲后重启按磁盘指针恢复。新配置 `sessionBound: true` 选择原凭据路由下按 binding 哈希的槽，旧记录缺省 false 使用原槽；不扩展凭据 Reader 的闭集协议。旧版严格配置读取器不认识新字段，回退客户端必须恢复启用前的配置备份（保留迁移后业务数据），不得只换旧二进制。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。

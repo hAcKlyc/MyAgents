@@ -67,6 +67,14 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
     authGeneration: number;
   } | null>(null);
   const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const joinGeneration = useRef(0);
+  const pendingJoinAttempt = useRef<string | null>(null);
+  useEffect(() => () => {
+    joinGeneration.current += 1;
+    const pending = pendingJoinAttempt.current;
+    pendingJoinAttempt.current = null;
+    if (pending) void cancelOwnedNetworkLogin(pending).catch(() => {});
+  }, []);
   const ownedLoginGeneration = useRef(0);
   const pendingOwnedLoginAttempt = useRef<string | null>(null);
   const completedOwnedLoginAttempt = useRef(false);
@@ -509,7 +517,7 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
       )}
       {join && (
         <JoinNetworkDialog
-          onCancel={() => setJoin(false)}
+          onCancel={() => { joinGeneration.current += 1; pendingJoinAttempt.current = null; setJoin(false); }}
           onConfirm={async (url, key) => {
             try {
               acceptNetworkRegistry(await joinNetworkConnection(url, key));
@@ -519,7 +527,14 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
           }}
           onOwnedStart={async (issuer, publicTlsCaFile) => {
             try {
-              return await startOwnedNetworkLogin(issuer, publicTlsCaFile);
+              const generation = joinGeneration.current;
+              const attempt = await startOwnedNetworkLogin(issuer, publicTlsCaFile);
+              if (generation !== joinGeneration.current) {
+                await cancelOwnedNetworkLogin(attempt.attemptId).catch(() => {});
+                throw Error(t("agentNetwork.errors.failed"));
+              }
+              pendingJoinAttempt.current = attempt.attemptId;
+              return attempt;
             } catch (failure) {
               throw Error(error(failure));
             }
@@ -532,10 +547,13 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
             }
           }}
           onOwnedPoll={async (attemptId) => {
+            const generation = joinGeneration.current;
             try {
               const result = await pollOwnedNetworkLogin(attemptId);
+              if (generation !== joinGeneration.current) return "pending";
               if (result.status === "reauthorize") return result.authorization;
               if (result.status === "authenticated") {
+                pendingJoinAttempt.current = null;
                 acceptNetworkRegistry(result.registry);
                 return "authenticated";
               }
@@ -545,6 +563,10 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
             }
           }}
           onOwnedCancel={async (attemptId) => {
+            if (pendingJoinAttempt.current === attemptId) {
+              joinGeneration.current += 1;
+              pendingJoinAttempt.current = null;
+            }
             try {
               await cancelOwnedNetworkLogin(attemptId);
             } catch (failure) {
@@ -583,8 +605,10 @@ function NetworkSwitcher({ registry }: { registry: NetworkRegistry }) {
             catch (failure) { throw Error(error(failure)); }
           }}
           onOwnedCancel={async (attemptId) => {
-            ownedLoginGeneration.current += 1;
-            pendingOwnedLoginAttempt.current = null;
+            if (pendingOwnedLoginAttempt.current === attemptId) {
+              ownedLoginGeneration.current += 1;
+              pendingOwnedLoginAttempt.current = null;
+            }
             try { await cancelOwnedNetworkLogin(attemptId); }
             catch {
               // End locally and allow a new attempt; the old server attempt expires on its own.
