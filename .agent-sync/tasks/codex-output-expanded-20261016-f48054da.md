@@ -29,7 +29,7 @@
 
 ## Completed
 
-单条直达正文、多条展开去组级摘要与时间、空结构化结果无箭头、Bash内部耗时去重已实现。运行时duration与观测span/等待已分离。主Agent实际IAB矩阵及非实现者代码/截图审阅完成，详见dev-docs/output-expanded/acceptance.md。
+单条直达正文、多条展开去组级摘要与时间、空结构化结果无箭头、Bash内部耗时去重已实现。运行时duration与观测span/等待已分离。主Agent实际IAB矩阵及非实现者代码/截图审阅完成，详见dev-docs/output-expanded/acceptance.md。用户气泡新增最终full-height hover命中盒，主Agent实际指针移入底部gutter、无键盘focus时仍保持工具栏可见；46项消息/滚动回归再次通过，独立源审完成。已同步main47c80242及19文件231项关联回归。
 
 ## Ownership / contract
 

@@ -1,0 +1,18 @@
+{
+  "bottomAdjacentHit": true,
+  "bubble": {
+    "bottom": 274.9921875,
+    "height": 83.1953125,
+    "left": 538.5,
+    "top": 191.796875
+  },
+  "mainOverflow": 0,
+  "rowHeight": 83.1953125,
+  "toolbar": {
+    "bottom": 274.9921875,
+    "height": 83.1953125,
+    "left": 466.5,
+    "right": 538.5,
+    "top": 191.796875
+  }
+}

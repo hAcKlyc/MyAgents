@@ -64,3 +64,7 @@ output_review请求沿用gpt-6.1-sol medium，因重复交互缺陷和时间语�
 独立源审发现工具栏外margin产生4px hover断点，已改为工具栏自身padding形成连续命中区域；主Agent验证两盒边界相接、键盘及按钮实际点击，不冒充工具不支持的慢速指针逐帧测试。独立审阅者静态inspect04/05，无剩余确认P1/P2。新增消息/滚动回归46项通过。原生和真实业务仍另验。
 
 最终新增气泡合并后，11文件140项定向全部通过（5.28秒）；typecheck、lint/依赖/文档、MoXBots web和8项theme再次通过。287文件2448全DOM为追加气泡之前同源结果区候选；完整当前候选由PR91 CI再验，不能将前者冒充气泡后全量结果。
+
+最终hover加固：工具栏命中盒覆盖气泡整行高度，按钮仍距顶部4px。主Agent在浅色380内容栏实际把指针移到气泡左下相邻位置，移除键盘focus后读取 `toolbarHovered=true / opacity=1 / pointerEvents=auto / keyboardFocusWithin=false`；底部相邻点命中工具栏。气泡、用户行、工具栏均高83.195px，main横溢出0，见[06实际指针图](evidence/06-user-actions-hover.jpg)及[DOM几何记录](evidence/hover-region.json)。46项消息/滚动回归再次通过（3.10秒），Message单文件eslint通过。独立源审确认该单行样式增量，无新增确定风险。
+
+主干并发更新已整合：登录识别回归14文件180项通过；再同步任务草稿恢复main `47c80242` 后19文件231项通过。最终候选仍需完整CI，以PR91和外部任务记录的最终交付证明为准。

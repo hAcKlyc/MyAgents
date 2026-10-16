@@ -476,7 +476,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
             {/* Actions occupy the reserved left gutter, not a blank line below
                 every bubble. Keyboard focus and touch keep them reachable. */}
             <div title={formatTimestamp(message.timestamp)} data-user-message-actions
-                 className="pointer-events-none absolute right-full top-1 flex items-center gap-1 pr-1 opacity-0 transition-opacity duration-150 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-focus-within/user-actions:pointer-events-auto group-focus-within/user-actions:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
+                 className="pointer-events-none absolute inset-y-0 right-full flex items-start gap-1 pr-1 pt-1 opacity-0 transition-opacity duration-150 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-focus-within/user-actions:pointer-events-auto group-focus-within/user-actions:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
               <span className="sr-only">{formatTimestamp(message.timestamp)}</span>
               {onRewind && !message.deliveryStatus && (
                 <span data-rewind-btn>

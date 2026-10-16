@@ -60,3 +60,7 @@ P2 hover gap已修复：操作栏改为`right-full pr-1`，将原margin空隙纳
 已用view_image查看主Agent新增 `04-user-bubble-wide.jpg`、`05-user-bubble-narrow-keyboard.jpg`：宽栏正文/气泡更紧凑且没有下占操作空行；浅色380内容栏回退与复制完整留在左gutter，键盘焦点轮廓清晰，合成本地回退计数1可见。没有从两图发现新增必修P1/P2。
 
 截图证明所见布局和焦点状态；长文展开、failed说明flow、鼠标连续hover和触屏可达性的实际行为仍以主Agent的浏览器执行记录为准。本审阅对这些新气泡变更仅为源码+静态截图复核，不改写为独立点击验收。未新增运行时/审批/标题逻辑改动。
+
+### 最终hover命中盒加固源审
+
+已只读核对Message.tsx单行增量：`top-1 + items-center`改为`inset-y-0 + items-start + pt-1`，保留`right-full/pr-1`。absolute操作栏的命中盒覆盖整个气泡行高度，按钮仍位于顶部4px；不参与正常流、不增加消息高度，仍使用此前80px横向预留。可以覆盖从较低正文位置先向左移入gutter再向上到按钮的连续hover路径。未发现新的确定风险。elementFromPoint命中、rowHeight与实际hover行为由主Agent复验，本段不构成独立浏览器验证；未重复运行测试或重试浏览器。
