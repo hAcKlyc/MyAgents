@@ -69,6 +69,8 @@ const SESSION_EXACT_PATHS = new Set([
   '/api/ask-user-question/respond',
   '/api/agents/set',
   '/api/cc-plugin/session-enable',
+  // Suggestions read the completed turn and use this Session's frozen model/credentials.
+  '/api/chat/next-prompt',
   '/api/enter-plan-mode/respond',
   '/api/exit-plan-mode/respond',
   '/api/generate-session-title',
