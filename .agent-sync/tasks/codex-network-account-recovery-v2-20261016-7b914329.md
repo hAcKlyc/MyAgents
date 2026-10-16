@@ -5,9 +5,13 @@
 
 # MOXBOTS-NET-AUTH-001 — 设备入网恢复实现
 
+## Objective
+
 用户2026-10-16再次要求继续修复并确保Bots网络可用。沿用已批准的新账号、每账号/网络独立设备身份、保留旧身份和任务空闲后启用新版的约束。合同见 `services/agentnet/planning/ACCOUNT-EXPERIENCE-V1.md`；此阶段集中入网，不扩大为完整用户管理开发。
 
 主Agent拥有登录manager、registry、commands及Renderer；既有identity_review worker独占 account/identity/admission/identity_desktop/actor/discovery/source七文件，职责为连接身份引用与局部回归。不操作日常App、真实凭据或服务。原生安装仍遵守统一发布owner；锁屏不妨碍源码和模拟验证，真实UI需要解锁。
+
+## Acceptance criteria
 
 - [x] fetch并核实远端main e872eb53，干净工作树建立独立分支。
 - [x] 公开服务当前TLS/实例标识正常；日常App与原sidecars PID/启动时间未变。
@@ -22,9 +26,11 @@
 
 当前实现前状态：新账号已登录，设备冲突未恢复；未修改生产配置、旧绑定或全局deviceId。无新增外部模型调用，实际token/费用未知。
 
-## 本次实现与验证
+## Completed
 
 原登录 manager / registry 继续拥有会话提交；无新进程、协议或服务权限。每 binding 新 OS 凭据槽与原子配置指针避免覆盖旧 session；提交与回滚均未知时保留两个槽和 token，阻止继续登录。旧记录缺省 `sessionBound: false`，新记录 true；回退旧版必须恢复启用前配置备份、保留当前业务数据。恢复已有登记需第二轮同 principal 授权，保持服务端 device-bound token 不变。
+
+## Verification
 
 - 网络 Rust：184通过、1既有忽略，使用 `DOCS_RS=1 cargo test --lib agent_network::` 跳过本机不相关 Swift bridge 构建；不是完整原生构建。包括崩溃/回滚未知、取消、隔离和旧槽兼容。
 - Headless Rust：157通过；Renderer API34、DOM79通过；typecheck/lint/web build通过（既有依赖警告）。
@@ -33,8 +39,12 @@
 - identity_review完成三轮只读安全审阅；前两轮共四项实质风险已由主Agent修复，最后一轮未发现新增风险；独立审阅不代替真实联调。主Agent集成/验收，原worker实现七处身份引用和三个隔离回归；实际费用、token未知，无额外外部模型调用。
 - 日常App PID48419及global/session sidecar48462/50158启动时间仍为07:39:18/07:39:22/07:40:51，未stop/restart/移除旧连接。Mac仍锁定，工具明确无法自动解锁。
 
-## 串行发布请求（queued）
+## Blockers and unknowns
+
+### 串行发布请求（queued）
 
 需要新版macOS arm64客户端恢复已登录新账号的设备入网；仅纳入统一owner下一未冻结批次，不重写056归档，不操作云服务或Host。发布owner `.agent-sync/plan.md#deployment-coordination`；本记录不会通知该聊天。依赖：CI/main、启用前配置私有备份、正式Reader/签名制品与回滚准备、任务空闲和手动解锁。安装后用原新账号验证session有效、独立设备登记/identity、membership、relay ready、设备目录及既有权限范围的可调用路径；另验同账号重登恢复与旧账号身份保留。当前未安装、未恢复ready、未完成生产验收。
 
-下一步：推送并经CI合入真实main，记录远端包含结果；发布和原生验收仍按上述依赖开放，不能以公开instance HTTP200替代入网。
+## Next step
+
+推送并经CI合入真实main，记录远端包含结果；发布和原生验收仍按上述依赖开放，不能以公开instance HTTP200替代入网。
