@@ -45,6 +45,45 @@ fn key_generation_plan(
     Ok((generation, recovery))
 }
 
+fn existing_generation(
+    previous: Option<u64>,
+    key_present: bool,
+    replacement: bool,
+) -> Result<u64, NetworkError> {
+    if replacement {
+        return Err(NetworkError::new("NETWORK_REMOVAL_UNCONFIRMED"));
+    }
+    if !key_present {
+        return Err(NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"));
+    }
+    previous
+        .filter(|generation| (1..=9_007_199_254_740_991).contains(generation))
+        .ok_or_else(|| NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"))
+}
+
+#[cfg(test)]
+mod existing_only_tests {
+    use super::*;
+    #[test]
+    fn disappearing_issuer_registration_never_falls_back_to_activation_or_rotation() {
+        assert_eq!(existing_generation(Some(7), true, false).unwrap(), 7);
+        for (previous, key, replacement) in [
+            (None, true, false),
+            (Some(7), false, false),
+            (Some(7), true, true),
+            (Some(0), true, false),
+        ] {
+            assert!(existing_generation(previous, key, replacement).is_err());
+        }
+        // Ordinary enrollment remains unchanged; recovery explicitly opts out.
+        assert_eq!(
+            key_generation_plan(None, true, false, true, None).unwrap(),
+            (1, false)
+        );
+        assert!(existing_generation(None, true, false).is_err());
+    }
+}
+
 static IDENTITY_GATES: LazyLock<crate::keyed_lifecycle::KeyedLifecycleRegistry> =
     LazyLock::new(crate::keyed_lifecycle::KeyedLifecycleRegistry::new);
 
@@ -163,6 +202,19 @@ impl NetworkIdentity {
         retired_generation: Option<u64>,
         store: Arc<dyn IdentityStore>,
     ) -> Result<Self, NetworkError> {
+        Self::initialize_mode(account, retired_generation, store, false).await
+    }
+    /// Recovery of an existing desktop key must not silently register/rotate an
+    /// identity if the issuer record disappears after the CLI preflight.
+    pub(crate) async fn initialize_existing(
+        account: NetworkAccountSession, store: Arc<dyn IdentityStore>,
+    ) -> Result<Self,NetworkError> {
+        Self::initialize_mode(account, None, store, true).await
+    }
+    async fn initialize_mode(
+        account: NetworkAccountSession, retired_generation: Option<u64>,
+        store: Arc<dyn IdentityStore>, existing_only: bool,
+    ) -> Result<Self,NetworkError> {
         account.validate_instance().await?;
         let device = account.device_identity()?;
         let service_id = account.service_id()?.to_owned();
@@ -216,13 +268,15 @@ impl NetworkIdentity {
             }
         }
         let has_identity = state.key_generation.is_some();
-        let (generation, recovery) = key_generation_plan(
+        let (generation, recovery) = if existing_only {
+            (existing_generation(state.key_generation, current_key.is_some(), replacement)?, false)
+        } else { key_generation_plan(
             state.key_generation,
             current_key.is_some(),
             replacement,
             account.is_selfhost(),
             retired_generation,
-        )?;
+        )? };
         scope.key_generation = generation;
         let key = match if recovery || replacement {
             load_key_with_store(&scope, store.clone()).await?

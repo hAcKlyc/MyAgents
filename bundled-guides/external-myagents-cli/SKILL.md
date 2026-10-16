@@ -23,7 +23,7 @@ MyAgents 是一个在用户电脑上运行的桌面 Agent 产品。它把本地�
 
 MyAgents App 是这些状态和执行生命周期的本机 Host；CLI 只是调用入口。你是运行在 MyAgents 之外的 AI，能够通过公开 CLI 委托和观察工作，但不会因此获得 MyAgents 内部 Session 身份、全部管理能力或隐藏 API 权限。
 
-MyAgents 产品内部还可以管理模型 Provider、MCP/工具、Skill/Plugin、IM Channel、Cloud Space、Goal、文档与语音等能力；它们帮助 Agent 接入模型、工具、外部沟通渠道和更丰富的工作流。但当前外部 token 契约只开放本文后面介绍的 Agent、Runtime discovery、Session、Task、Record 和状态查询。知道某项产品能力存在，不等于可以从外部 CLI 调用它。
+MyAgents 产品内部还可以管理模型 Provider、MCP/工具、Skill/Plugin、IM Channel、Cloud Space、Goal、文档与语音等能力；它们帮助 Agent 接入模型、工具、外部沟通渠道和更丰富的工作流。但当前外部 token 契约只开放本文后面介绍的 Agent、Runtime discovery、Session、Task、Record、已保存网络连接和状态查询。知道某项产品能力存在，不等于可以从外部 CLI 调用它。
 
 ## 2. MyAgents 能解决什么任务
 
@@ -137,6 +137,25 @@ $env:MYAGENTS_API_TOKEN = "<token>"
 ```
 
 Agent 的注册、Task、Record 与 Runtime discovery 仍操作本机 Host；跨设备寻址不开放远端配置或文件管理。
+
+### 已保存网络连接：登录与恢复
+
+仅操作 App 已保存的 Owned 网络连接；先查询状态取得准确 connection ID 和 registry revision，不接受密码、token 或 issuer 参数，不创建 Session，不自动打开浏览器。
+
+```text
+<CLI> network --help
+<CLI> network status --json
+<CLI> network login --connection <saved-owned-connectionId> --revision <N> --json
+<CLI> network poll --attempt <returned-attempt-UUID> --json
+<CLI> network cancel --attempt <returned-attempt-UUID> --json
+<CLI> network restore --connection <saved-owned-connectionId> --revision <N> --operation-id <new-UUID> --json
+<CLI> network cancel-restore --operation-id <same-operation-UUID> --json
+```
+
+- `login` 返回 `authorization-required`，其中 `started` 包含 attemptId、authorizationUrl、expiresAt。由用户完成浏览器授权，再以同一 attemptId 显式 `poll`；`pending` 表示仍在等待，同时保留 `started` 供取回原授权链接；`authenticated` 才表示登录提交成功。
+- 登录固定到原连接的账号和设备；不能用这些命令创建新连接、切换账号或替换设备身份。
+- `restore` 使用已有凭据在后台恢复，可能耗时约 40 秒；不会弹出系统凭据授权窗口。需要系统授权时按错误停止，并由用户在 App 内处理。
+- 保存 attemptId / operationId；`login` 回复丢失时，先通过 `network status` 的 `loginAttempts` 找回原 attemptId、connectionId 和 expiresAt，再查询或取消原 attempt；状态列表不含授权 URL。取消必须精确使用对应 ID。没有 `--wait` 自动编排；响应中断不证明操作未执行，先查状态，不自动重发 mutation。恢复接纳与真实服务连接 ready 分别判断。
 
 ### Runtime 发现
 

@@ -62,6 +62,7 @@ struct Attempt {
     child_epoch: u64,
     candidates: Vec<super::registry::StoredOwnedConnection>,
     selected_id: String,
+    reuse_identity: bool,
     expected_principal: Option<String>,
     resolved_candidate: Option<super::registry::StoredOwnedConnection>,
     staged_session: Option<OwnedSession>,
@@ -87,6 +88,8 @@ pub(crate) struct CompletedLogin {
     pub candidates: Vec<super::registry::StoredOwnedConnection>,
     pub replaces: Option<String>,
     pub session: OwnedSession,
+    pub identity_store: Option<Arc<dyn super::crypto::IdentityStore>>,
+    pub preserve_membership: bool,
     guard: Arc<AuthorizedSessionGuard>,
 }
 #[derive(Clone, Serialize)]
@@ -888,6 +891,18 @@ fn eligible_candidates(
     Ok(eligible)
 }
 
+fn validate_pinned_candidate(
+    instance: &OwnedInstance,
+    ca: Option<&str>,
+    candidates: &[super::registry::StoredOwnedConnection],
+    record: &super::registry::StoredOwnedConnection,
+) -> Result<(), NetworkError> {
+    let eligible = eligible_candidates(instance, ca, &record.principal_id, candidates)?;
+    if !record.join_authorized || !eligible.iter().any(|candidate| candidate == record) {
+        return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+    }
+    Ok(())
+}
 fn select_registered_candidate(
     candidates: &[super::registry::StoredOwnedConnection],
     registered: &[bool],
@@ -1065,10 +1080,46 @@ impl OwnedLoginManager {
         candidates: Vec<super::registry::StoredOwnedConnection>,
         selected_id: String,
     ) -> Result<StartedLogin, NetworkError> {
+        self.start_scoped(
+            issuer,
+            owner_device_id,
+            read_public_ca_file(public_tls_ca_file)?,
+            candidates,
+            selected_id,
+            None,
+        )
+        .await
+    }
+    /// CLI reauthentication is pinned before PKCE starts. It cannot fall back
+    /// to a temporary/new device or select a different account registration.
+    pub(crate) async fn start_existing(
+        &self,
+        owner_device_id: &str,
+        record: super::registry::StoredOwnedConnection,
+        candidates: Vec<super::registry::StoredOwnedConnection>,
+    ) -> Result<StartedLogin, NetworkError> {
+        self.start_scoped(
+            &record.descriptor.issuer.clone(),
+            owner_device_id,
+            record.public_tls_ca.clone(),
+            candidates,
+            record.id.clone(),
+            Some(record),
+        )
+        .await
+    }
+    async fn start_scoped(
+        &self,
+        issuer: &str,
+        owner_device_id: &str,
+        public_tls_ca: Option<String>,
+        candidates: Vec<super::registry::StoredOwnedConnection>,
+        selected_id: String,
+        pinned: Option<super::registry::StoredOwnedConnection>,
+    ) -> Result<StartedLogin, NetworkError> {
         if crate::app_dirs::IS_UPDATER_QA {
             return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED"));
         }
-        let public_tls_ca = read_public_ca_file(public_tls_ca_file)?;
         let device = crate::device_identity::current_device_identity()
             .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
         if device.device_id != owner_device_id {
@@ -1106,7 +1157,12 @@ impl OwnedLoginManager {
         }
         cleanup?;
         let (client, instance) = OwnedClient::discover(issuer, public_tls_ca.as_deref()).await?;
-        let device_id = uuid::Uuid::new_v4().to_string();
+        let device_id = if let Some(record) = &pinned {
+            validate_pinned_candidate(&instance, public_tls_ca.as_deref(), &candidates, record)?;
+            record.device_id.clone()
+        } else {
+            uuid::Uuid::new_v4().to_string()
+        };
         let (verifier, challenge) = pkce();
         let started = client.start(&device_id, &challenge).await?;
         let attempt_id = uuid::Uuid::new_v4().to_string();
@@ -1119,8 +1175,9 @@ impl OwnedLoginManager {
             child_epoch: 0,
             candidates,
             selected_id,
-            expected_principal: None,
-            resolved_candidate: None,
+            reuse_identity: pinned.is_some(),
+            expected_principal: pinned.as_ref().map(|record| record.principal_id.clone()),
+            resolved_candidate: pinned,
             staged_session: None,
             commit_unconfirmed: false,
             attempt_id: attempt_id.clone(),
@@ -1159,6 +1216,45 @@ impl OwnedLoginManager {
             expires_at: started.expires_at,
         })
     }
+    pub(crate) async fn existing_attempts(&self) -> Vec<serde_json::Value> {
+        let state = self.state.lock().await;
+        let mut attempts: Vec<_> = state.attempts.values().filter(|a| a.reuse_identity && a.expires_at > now()).map(|a|
+            serde_json::json!({"attemptId":a.attempt_id,"connectionId":a.selected_id,"expiresAt":a.expires_at})
+        ).collect();
+        attempts.sort_by(|a, b| a["attemptId"].as_str().cmp(&b["attemptId"].as_str()));
+        attempts
+    }
+    pub(crate) async fn existing_started(
+        &self,
+        attempt_id: &str,
+    ) -> Result<StartedLogin, NetworkError> {
+        let state = self.state.lock().await;
+        let a = state
+            .attempts
+            .get(attempt_id)
+            .filter(|a| a.reuse_identity && a.expires_at > now())
+            .ok_or_else(|| NetworkError::new("OWNED_LOGIN_NOT_FOUND"))?;
+        Ok(StartedLogin {
+            attempt_id: a.attempt_id.clone(),
+            authorization_url: a.authorization_url.clone(),
+            expires_at: a.expires_at,
+        })
+    }
+    pub(crate) async fn require_existing_attempt(
+        &self,
+        attempt_id: &str,
+    ) -> Result<(), NetworkError> {
+        let state = self.state.lock().await;
+        if state
+            .attempts
+            .get(attempt_id)
+            .is_some_and(|attempt| attempt.reuse_identity)
+        {
+            Ok(())
+        } else {
+            Err(NetworkError::new("OWNED_LOGIN_NOT_FOUND"))
+        }
+    }
     pub(crate) async fn open(&self, attempt_id: &str) -> Result<(), NetworkError> {
         let state = self.state.lock().await;
         let attempt = state
@@ -1196,6 +1292,7 @@ impl OwnedLoginManager {
             candidates,
             selected,
             resolved,
+            reuse_identity,
         ) = {
             let mut state = self.state.lock().await;
             let attempt = state
@@ -1239,6 +1336,7 @@ impl OwnedLoginManager {
                 attempt.candidates.clone(),
                 attempt.selected_id.clone(),
                 attempt.resolved_candidate.clone(),
+                attempt.reuse_identity,
             )
         };
         let result = client.poll(&device, &transaction, &verifier).await?;
@@ -1345,6 +1443,17 @@ impl OwnedLoginManager {
                 .cloned()
                 .or_else(|| (eligible.len() == 1).then(|| eligible[0].clone()))
         };
+        let identity_store = if reuse_identity {
+            let record = replacement.as_ref().ok_or_else(|| NetworkError::new("ACCOUNT_BINDING_CHANGED"))?;
+            validate_pinned_candidate(&instance, ca.as_deref(), &candidates, record)?;
+            if record.device_id != device || record.principal_id != session.principal_id {
+                return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+            }
+            let operation = crate::space_cloud::agent_network::AccountOperation::IdentityState(device.clone());
+            let (method, path, _) = operation.request()?;
+            let value = client.identity_request(method, &path, None, &session.access_token).await?;
+            Some(super::identity_desktop::existing_owned_identity(&instance, &session.principal_id, &device, value).await?)
+        } else { None };
         let connection_id = replacement
             .as_ref()
             .map(|c| c.id.clone())
@@ -1359,6 +1468,8 @@ impl OwnedLoginManager {
             device_id: device,
             owner_device_id: owner.clone(),
             session_bound: true,
+            identity_store,
+            preserve_membership: reuse_identity,
             candidates: eligible,
             replaces: replacement.map(|c| c.id),
             guard: staged_guard(&connection_id, &binding_id, session.expires_at),
@@ -2081,6 +2192,8 @@ fn publish_validated_session(
         device_id: validated.device_id,
         candidates: Vec::new(),
         replaces: None,
+        identity_store: None,
+        preserve_membership: true,
         guard,
         session: validated.session,
     };
@@ -2194,6 +2307,27 @@ mod tests {
             join_authorized: true,
             removing: false,
         }
+    }
+
+    #[test]
+    fn cli_pinned_login_cannot_change_registration_account_trust_or_membership() {
+        let record = candidate("saved", "owner");
+        let candidates = vec![record.clone()];
+        super::validate_pinned_candidate(&record.descriptor, None, &candidates, &record).unwrap();
+        for field in 0..6 {
+            let mut changed = record.clone();
+            match field {
+                0 => changed.principal_id = "other".into(),
+                1 => changed.device_id = "other-device".into(),
+                2 => changed.binding_id = "other-binding".into(),
+                3 => changed.public_tls_ca = Some("other-root".into()),
+                4 => changed.removing = true,
+                _ => changed.join_authorized = false,
+            }
+            assert!(super::validate_pinned_candidate(&record.descriptor, None, &candidates, &changed).is_err());
+        }
+        let mut trust = record.descriptor.clone(); trust.root_certificate = "changed".into();
+        assert!(super::validate_pinned_candidate(&trust, None, &candidates, &record).is_err());
     }
 
     #[test]
@@ -2364,6 +2498,7 @@ mod tests {
             child_epoch: 1,
             candidates: vec![],
             selected_id: "old".into(),
+            reuse_identity: false,
             expected_principal: None,
             resolved_candidate: None,
             staged_session: Some(super::OwnedSession {
@@ -2858,6 +2993,8 @@ mod tests {
             session_bound: false,
             candidates: Vec::new(),
             replaces: None,
+            identity_store: None,
+            preserve_membership: false,
             session,
             guard,
         };

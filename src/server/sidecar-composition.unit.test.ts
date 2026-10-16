@@ -54,6 +54,24 @@ describe('Sidecar production composition', () => {
     },
   );
 
+  it.each(['global', 'session'] as const)('%s exposes exactly the six network control routes', async role => {
+    const downstream = vi.fn(async () => Response.json({ success: true }));
+    const dispatch = composeSidecarRequestHandler(resolveSidecarComposition(role, false), downstream);
+    for (const action of ['status', 'login', 'poll', 'cancel', 'restore', 'cancel-restore']) {
+      const incoming = request(`/api/admin/network/${action}`, 'POST');
+      expect(classifySidecarRequest(incoming)).toBe('common');
+      expect((await dispatch(incoming)).status).toBe(200);
+    }
+    expect(downstream).toHaveBeenCalledTimes(6);
+    downstream.mockClear();
+    for (const action of ['', 'create', 'authorize', 'login/future', 'restore-extra']) {
+      const incoming = request(`/api/admin/network/${action}`, 'POST');
+      expect(classifySidecarRequest(incoming)).toBeNull();
+      expect((await dispatch(incoming)).status).toBe(404);
+    }
+    expect(downstream).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['GET', '/health', 'common'],
     ['GET', '/refs/12345678', 'common'],

@@ -417,6 +417,7 @@ Commands:
   tool      Manage registered CLI tools (Lab-gated; enable in Settings first)
   model     Manage model providers
   agent     Discover local/network Agents; manage local settings and channels
+  network   Inspect, authorize and restore saved Owned network connections
   runtime   Inspect Agent Runtimes (list installed + describe models/modes)
   skill     Manage skills (install from URL/local source, list, enable/disable, sync)
   cron      Legacy-compatible scheduled Task aliases
@@ -553,6 +554,7 @@ ${EXTERNAL_CLI_PUBLIC_COMMANDS.map((command) => `  ${APP_CLI_NAME} ${command}`).
     'status',
     'version',
     'agent',
+    'network',
     'runtime',
     'session',
     'task',
@@ -567,7 +569,7 @@ ${EXTERNAL_CLI_PUBLIC_COMMANDS.map((command) => `  ${APP_CLI_NAME} ${command}`).
       `${APP_CLI_NAME} ${invokedCommand}`,
     );
     const allowedFlags = matched.capability.flags.length > 0
-      ? matched.capability.flags.map(flag => `--${flag}`).join(', ')
+      ? matched.capability.flags.map(flag => `--${group === 'network' && flag === 'operationId' ? 'operation-id' : flag}`).join(', ')
       : '(none beyond --help and --json)';
     return `${usage}\n\n${matched.capability.help}\nAllowed flags: ${allowedFlags}\n\nThis command is available to local external programs. Set MYAGENTS_API_TOKEN; credentials are never accepted as positional arguments. Use --json for one machine-readable response.`;
   }
@@ -765,6 +767,9 @@ export function cliRequestTimeoutMs(route: string, body: Record<string, unknown>
   if (route === 'session/state') return 22_000;
   if (route === 'session/watches' || route === 'session/unwatch') return 24_000;
   if (route === 'agent/network-diagnose') return 40_000;
+  if (route === 'network/restore') return 45_000;
+  if (route === 'network/login' || route === 'network/poll') return 85_000;
+  if (route.startsWith('network/')) return 15_000;
   if (route === 'session/watch') return 40_000;
   if (route === 'mcp/test') return 20_000;
   // Verification may run a 15s OpenAI pre-probe followed by a 30s SDK
@@ -3176,7 +3181,7 @@ async function main(): Promise<void> {
     if (dryRunError) return exitAgentCliError(flags, dryRunError);
   }
 
-  if (flags.help && !process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim()) {
+  if (flags.help && (positional[0] === 'network' || !process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim())) {
     const help = publicCliHelp(positional);
     if (help) {
       console.log(help);
@@ -3431,6 +3436,7 @@ export function buildRoute(group: string, action: string, rest: string[]): strin
 }
 
 const PUBLISHED_ADMIN_ROUTES = new Set([
+  'network/status', 'network/login', 'network/poll', 'network/cancel', 'network/restore', 'network/cancel-restore',
   'anydoc/convert', 'anydoc/status', 'anydoc/cancel', 'anydoc/list',
   'speech/transcribe', 'speech/status', 'speech/cancel', 'speech/list',
   'mcp/list', 'mcp/show', 'mcp/add', 'mcp/remove', 'mcp/enable', 'mcp/disable', 'mcp/env', 'mcp/test',
@@ -3464,7 +3470,7 @@ const PUBLISHED_ADMIN_ROUTES = new Set([
 const PUBLISHED_COMMAND_GROUPS = new Set([
   'anydoc', 'speech', 'mcp', 'tool', 'vision', 'model', 'agent', 'runtime', 'diagnose', 'cron', 'goal', 'im', 'widget',
   'plugin', 'cc-plugin', 'skill', 'config', 'task', 'thought', 'record', 'space', 'issue', 'session',
-  'status', 'reload', 'version',
+  'status', 'reload', 'version', 'network',
 ]);
 
 export function validateCliCommand(
@@ -4921,6 +4927,40 @@ export function buildRequestBody(
   rest: string[],
   flags: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (group === 'network') {
+    const invalid = () => exitAgentCliError(flags, {
+      code: 'ARGUMENT_INVALID',
+      error: 'Use the exact network command flags, a saved connection ID, a non-negative safe integer revision and UUID operation/attempt IDs.',
+      suggestedCommand: `${APP_CLI_NAME} network ${action} --help`,
+    });
+    const invocationError = validateInternalCliInvocation(['network', action, ...rest], flags);
+    if (invocationError) return exitAgentCliError(flags, invocationError);
+    if (rest.length) return invalid();
+    const uuid = (value: unknown): value is string => typeof value === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    if (action === 'status') return {};
+    if (action === 'poll' || action === 'cancel') {
+      if (!uuid(flags.attempt)) return invalid();
+      return { attemptId: flags.attempt.toLowerCase() };
+    }
+    if (action === 'cancel-restore') {
+      if (!uuid(flags.operationId)) return invalid();
+      return { operationId: flags.operationId.toLowerCase() };
+    }
+    if (action === 'login' || action === 'restore') {
+      const connectionId = flags.connection;
+      const revision = flags.revision;
+      const expectedRevision = typeof revision === 'string' && /^\d+$/.test(revision)
+        ? Number(revision) : typeof revision === 'number' ? revision : Number.NaN;
+      if (typeof connectionId !== 'string' || connectionId.length > 200
+        || !connectionId.trim() || connectionId !== connectionId.trim()
+        || /\p{Cc}/u.test(connectionId)
+        || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return invalid();
+      if (action === 'restore' && !uuid(flags.operationId)) return invalid();
+      return { connectionId, expectedRevision, ...(action === 'restore' ? { operationId: (flags.operationId as string).toLowerCase() } : {}) };
+    }
+    return invalid();
+  }
   if (group === 'anydoc') {
     return buildAnydocRequestBody(action, rest, flags);
   }
