@@ -38,7 +38,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<BoardGroup>>(() => new Set(['todo', 'running', 'needs', 'done', 'archived']));
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [otherOpen, setOtherOpen] = useState<ReadonlySet<BoardGroup>>(() => new Set());
+  const [otherOpen, setOtherOpen] = useState<ReadonlySet<BoardGroup>>(() => new Set(['idle']));
   const contentRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
   useEffect(() => {
@@ -52,7 +52,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
   const visible = useMemo(() => filterBoardRows(scopedRows, filter, query), [scopedRows, filter, query]);
   const selected = rows.find(r => r.id === selectedId);
   const groups = scope === 'history' ? ['archived'] as BoardGroup[] : filter === 'todo' ? ['todo'] as BoardGroup[] : filter === 'needs' ? ['needs'] as BoardGroup[] : GROUPS;
-  const counts = Object.fromEntries([...GROUPS, 'idle', 'scheduled', 'archived'].map(g => [g, scopedRows.filter(r => r.group === g).length]));
+  const counts = Object.fromEntries([...GROUPS, 'idle', 'inactive', 'scheduled', 'archived'].map(g => [g, scopedRows.filter(r => r.group === g).length]));
   const needCount = rows.filter(r => r.group === 'needs').length;
   const observationFailures = [...data.activity.values()].filter(a => a.error).length;
   const unknownCount = scopedRows.filter(r => r.confirmationReason === 'unknown').length;
@@ -74,7 +74,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
 
   function rowState(row: BoardRow): string { return t(boardRowStateKey(row, data.now)); }
   function canOrganize(row: BoardRow): boolean {
-    return row.group === 'archived' || row.group === 'done' || !row.task && row.group === 'idle';
+    return row.group === 'archived' || row.group === 'done' || !row.task && (row.group === 'idle' || row.group === 'inactive');
   }
   async function organize(row: BoardRow) {
     if (organizingId || !canOrganize(row)) return;
@@ -131,7 +131,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
     </article>;
   }
 
-  const auxiliaryGroups = (['idle', 'scheduled'] as const).map(group => ({ group, rows: visible.filter(r => r.group === group) }));
+  const auxiliaryGroups = (['scheduled', 'idle', 'inactive'] as const).map(group => ({ group, rows: visible.filter(r => r.group === group) }));
   return <section className="project-board" aria-label={t('projectBoard.title')} data-project-board={workspacePath}>
     <header className="pb-header"><div><h1>{name}</h1><div className="pb-meta">{scope === 'history' ? t('projectBoard.historyOverview', { total: scopedRows.length }) : t('projectBoard.overview', { total: scopedRows.length, needs: needCount })}</div></div>
       <div className="pb-actions"><button type="button" className="pb-button" onClick={data.refresh} disabled={data.checking}>{t(data.checking ? 'projectBoard.checking' : 'projectBoard.refresh')}</button>

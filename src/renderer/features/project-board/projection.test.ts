@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '@/../shared/types/task';
 import type { SessionMetadata } from '@/api/sessionClient';
-import { filterBoardRows, projectBoardRows, freshActivity, sessionExecutionTime } from './projection';
+import { boardRowStateKey, filterBoardRows, INACTIVE_AFTER_MS, projectBoardRows, freshActivity, sessionExecutionTime } from './projection';
 const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
@@ -171,5 +171,20 @@ describe('project board authority projection', () => {
     const rows=projectBoardRows({path:'/work/p'},[task({tags:['crm']})],[session()],new Map([['s1',{state:'waiting_user_action',checkedAt:now}]]),now);
     expect(rows[0].group).toBe('needs');
     expect(filterBoardRows(rows,'needs','CRM')).toHaveLength(1);
+  });
+  it('splits idle conversations into continue and inactive pools by last activity', () => {
+    const later = now + INACTIVE_AFTER_MS + 1;
+    const recent = new Date(later - 1000).toISOString(), old = new Date(now).toISOString();
+    const rows = projectBoardRows({path:'/work/p'},[],[session({id:'recent',lastActiveAt:recent}),session({id:'old',lastActiveAt:old}),session({id:'unseen',lastActiveAt:old})],
+      new Map([['recent',{state:'idle' as const,checkedAt:later}],['old',{state:'idle' as const,checkedAt:later}]]),later);
+    expect(Object.fromEntries(rows.map(r=>[r.id,r.group]))).toEqual({'session:recent':'idle','session:old':'inactive','session:unseen':'inactive'});
+    expect(boardRowStateKey(rows.find(r=>r.id==='session:old')!,later)).toBe('projectBoard.inactive');
+    const failed = projectBoardRows({path:'/work/p'},[],[session({lastActiveAt:old})],new Map([['s1',{checkedAt:later,error:'unavailable'}]]),later);
+    expect(failed[0]).toMatchObject({group:'needs',confirmationReason:'unknown'});
+  });
+  it('keeps detector checks with waiting automations instead of running work', () => {
+    const rows = projectBoardRows({path:'/work/p'},[task({id:'probe',executionMode:'recurring',executionState:'checking',sessionIds:[]}),task({id:'once',executionState:'checking',sessionIds:[]})],[],new Map(),now);
+    expect(Object.fromEntries(rows.map(r=>[r.task?.id,r.group]))).toEqual({probe:'scheduled',once:'running'});
+    expect(boardRowStateKey(rows.find(r=>r.task?.id==='probe')!,now)).toBe('projectBoard.checkingTrigger');
   });
 });

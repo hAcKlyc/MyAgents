@@ -96,4 +96,16 @@ describe('project board stages and archive history',()=>{
   fireEvent.click(screen.getByRole('button',{name:'projectBoard.accept'}));
   await waitFor(()=>expect(mocks.status).toHaveBeenCalledWith({id:'review',status:'done',message:undefined}));
  });
+ it('orders waiting, continue and inactive pools and lets inactive conversations be archived',async()=>{
+  const old=new Date(100000-8*24*3600*1000).toISOString();
+  mocks.data.tasks=[{...task('cron','running'),executionMode:'recurring'}];
+  mocks.data.sessions=[session('fresh'),{...session('stale'),lastActiveAt:old}];
+  mocks.data.activity=new Map([['fresh',{state:'idle',checkedAt:100000}],['stale',{state:'idle',checkedAt:100000}]]);
+  mocks.update.mockResolvedValue({...session('stale',true)});
+  const {container}=render(<ProjectBoard workspacePath='/work'/>);
+  expect([...container.querySelectorAll('details.pb-other>summary')].map(e=>e.textContent)).toEqual(['projectBoard.groups.scheduled · 1','projectBoard.groups.idle · 1','projectBoard.groups.inactive · 1']);
+  expect(container.querySelector('details.pb-other[open] [data-board-row="session:fresh"]')).toBeTruthy();
+  fireEvent.click(within(container.querySelector('[data-board-row="session:stale"]')!.closest('article')!).getByRole('button',{name:'projectBoard.archive'}));
+  await waitFor(()=>expect(mocks.update).toHaveBeenCalledWith('stale',{archived:true}));
+ });
 });
