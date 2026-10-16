@@ -13,8 +13,8 @@
 
 - [x] 输入区禁用横向滚动；长URL换行且文本值不变。
 - [x] 多行输入达到高度上限后仍能纵向滚动；建议文字不撑宽输入区。
-- [x] Chromium真实组件60组布局回归，107项输入/IME/建议/保存/快捷键回归与完整类型检查。
-- [ ] WebKit布局回归及最终构建；结果以PR验收回执及浏览器metrics为准。
+- [x] Chromium/WebKit各60组真实组件布局及横向滚动手势回归，107项输入/IME/建议/保存/快捷键回归与完整类型检查。
+- [x] 完整lint与MoXBots生产web构建（含8项主题测试），两引擎125%截图已实看。
 - [ ] CI/远端main交付；客户端安装与真实原生缩放由统一发布聊天另验。
 
 ## Completed
@@ -23,7 +23,9 @@
 
 ## Verification
 
-`vitest`六个相关测试文件107/107通过；`npm run typecheck`通过，修改文件ESLint和diff检查通过。Chromium153.0.8010.12的60组布局通过。使用现有官方Playwright浏览器缓存的独立headless实例，不复用用户Chrome或登录数据；WebKit测试环境准备中。
+`vitest`六个相关测试文件107/107、`npm run typecheck`、完整`npm run lint`及MoXBots`build:web`（含8项主题测试）通过。Chromium153.0.8010.12、WebKit26.0各60组布局/横向wheel/长文纵向滚动通过。使用官方Playwright测试浏览器的独立headless实例，不复用用户Chrome或登录数据。
+
+WebKit CSS zoom下观察到空输入110%时clientWidth702、scrollWidth772的坐标差异；回归使用绘制边界和真实横向wheel不移动，而非直接比较混合坐标。长URL须真实换行并保留完整值，未以隐藏数据或只查样式替代行为。dev页面启动改为等待实际文本域就绪；先前带请求拦截的页面load等待超时不计产品失败或通过。
 
 修复前检查读到横向auto（断言失败），该结果证明策略缺口，不冒充已在真实安装App复现。几何/输入/纵向滚动及截图证据见`dev-docs/ui-zoom-scrollbar-acceptance.md`和PR更新。
 
@@ -33,7 +35,7 @@
 
 ## Next step
 
-完成浏览器/CI并交付main后，由统一发布owner选取包含本补丁的main，在独占原生窗口检查用户截图场景、长文本、纵向滚动和恢复默认。
+完成[PR76](https://github.com/heavenzhang/MoXBots/pull/76)最终CI并交付main后，由统一发布owner选取包含本补丁的main，在独占原生窗口检查用户截图场景、长文本、纵向滚动和恢复默认。
 
 ## Deployment request
 

@@ -1,6 +1,6 @@
 ## MOXBOTS-UI-ZOOM-002 — 2026-10-16
 
-修复Ctrl+后文本域水平滚动条；仅改输入/建议的横轴策略和grid收缩约束。真实组件Chromium60组、相关107测试与类型检查通过，WebKit/CI/main分项继续记录。源码任务`.agent-sync/tasks/codex-ui-zoom-scrollbar-20261016-d37165e0.md`，验收`dev-docs/ui-zoom-scrollbar-acceptance.md`；queued发布请求由既有统一部署聊天处理下一未冻结批次，不操作日常/QA客户端、不回写055/056。
+修复Ctrl+后文本域水平滚动条；仅改输入/建议的横轴策略和grid收缩约束。真实组件Chromium/WebKit各60组、相关107测试、类型/lint及MoXBots web构建通过；CI/main以PR76与任务记录继续追踪。源码任务`.agent-sync/tasks/codex-ui-zoom-scrollbar-20261016-d37165e0.md`，验收`dev-docs/ui-zoom-scrollbar-acceptance.md`；queued发布请求由既有统一部署聊天处理下一未冻结批次，不操作日常/QA客户端、不回写055/056。
 
 ## MOXBOTS-UI-ZOOM-001 — 2026-10-15
 

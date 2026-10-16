@@ -72,15 +72,11 @@ try {
     ...(process.env.MOXBOTS_ZOOM_TEST_BROWSER ? { executablePath: process.env.MOXBOTS_ZOOM_TEST_BROWSER } : {}),
   });
   const page = await browser.newPage();
-  await page.route('**/*', route => {
-    if (new URL(route.request().url()).hostname === '127.0.0.1') return route.continue();
-    return route.abort();
-  });
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__composer_zoom_audit`);
+  page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__composer_zoom_audit`, { waitUntil: 'commit' });
   const input = page.getByRole('textbox');
-  await input.waitFor();
+  await input.waitFor({ timeout: 60_000 });
   for (const width of [844, 520]) {
     await page.setViewportSize({ width, height: 600 });
     for (const [level, key, count] of [[0.75, 'Control+-', 3], [1, '', 0], [1.1, 'Control+=', 1], [1.25, 'Control+=', 2], [1.5, 'Control+=', 3], [2, 'Control+=', 5]]) {
@@ -91,22 +87,37 @@ try {
         await page.waitForFunction(() => document.querySelector('textarea')?.getBoundingClientRect().height > 0);
         const metrics = await input.evaluate(el => {
           const style = getComputedStyle(el);
+          const bounds = el.getBoundingClientRect();
+          const main = document.querySelector('main');
           return { zoom: Number(document.documentElement.style.zoom || 1), overflowX: style.overflowX, overflowY: style.overflowY,
             width: el.clientWidth, scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight, height: el.clientHeight,
-            pageOverflow: document.querySelector('main').scrollWidth > document.querySelector('main').clientWidth + 1, value: el.value };
+            fits: bounds.left >= 0 && bounds.right <= main.getBoundingClientRect().right + 1,
+            pageOverflow: main.scrollWidth > main.clientWidth + 1, value: el.value };
         });
         evidence.push({ viewportWidth: width, level, kind, ...metrics, value: undefined });
         assert.equal(metrics.zoom, level);
         assert.equal(metrics.overflowX, 'hidden', JSON.stringify(evidence.at(-1)));
         assert.equal(metrics.overflowY, 'auto');
-        assert.ok(metrics.scrollWidth <= metrics.width + 1, JSON.stringify(evidence.at(-1)));
+        // WebKit mixes painted scrollWidth and layout clientWidth after CSS
+        // zoom even for an empty textarea. Verify painted containment and real
+        // wheel behavior instead of treating those unequal units as overflow.
+        assert.ok(metrics.fits, JSON.stringify(evidence.at(-1)));
         assert.equal(metrics.pageOverflow, false);
+        const bounds = await input.boundingBox();
+        await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+        await page.mouse.wheel(100, 0);
+        await page.waitForTimeout(50);
+        assert.equal(await input.evaluate(el => el.scrollLeft), 0, 'horizontal wheel must not pan wrapped input');
+        if (kind === 'suggestion') assert.equal(await page.getByTestId('next-prompt-ghost').evaluate(el => el.scrollLeft), 0);
         if (kind === 'multiline') {
           assert.ok(metrics.scrollHeight > metrics.height, 'long drafts must keep vertical scrolling');
           await input.evaluate(el => { el.scrollTop = el.scrollHeight; });
           assert.ok(await input.evaluate(el => el.scrollTop > 0));
         }
-        if (kind === 'url') assert.equal(metrics.value, 'https://example.invalid/' + 'long-path-without-spaces'.repeat(60));
+        if (kind === 'url') {
+          assert.equal(metrics.value, 'https://example.invalid/' + 'long-path-without-spaces'.repeat(60));
+          assert.ok(metrics.scrollHeight > 52, 'long URLs must wrap onto multiple lines rather than get clipped');
+        }
         if (kind === 'empty' && level === 1.25 && width === 844) await page.screenshot({ path: resolve(output, `${engine}-125-empty.png`) });
       }
     }

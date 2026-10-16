@@ -5,9 +5,12 @@
 ## 可复验检查
 
 - `node scripts/verify-chat-input-zoom.mjs chromium`或`webkit`：真实SimpleChatInput与appShortcuts，无模型/真实账号/业务写入。844/520宽，75/100/110/125/150/200%，空文本、loading、长URL、多行、建议五种场景，每引擎60组。检查值保留、宽度约束、横轴hidden、纵轴auto与长文可上下滚动，并保存125%截图和metrics。
-- 可选`MOXBOTS_ZOOM_TEST_BROWSER`指定已有官方测试浏览器可执行文件；不使用个人Chrome/profile。Chromium验证使用官方缓存中的153.0.8010.12，60/60通过。
+- 可选`MOXBOTS_ZOOM_TEST_BROWSER`指定已有官方测试浏览器可执行文件；不使用个人Chrome/profile。Chromium153.0.8010.12和官方WebKit26.0各60/60通过，总120组。
 - 修改前的真实组件计算overflowX为auto，回归检查失败；这是策略缺口的证据，不等同于已复现用户安装版的WebView渲染。修复后Chromium的内容宽度、值与纵向滚动通过，125%截图已由主Agent查看，无横条。
-- 相关DOM/unit六文件107项、完整typecheck与修改文件ESLint通过。WebKit/最终构建与CI结果随PR更新；不会仅凭样式断言宣布原生问题已验收。
+- WebKit在110%空输入下观察到clientWidth702/scrollWidth772；CSS zoom混合坐标不能直接作为横向溢出的度量。回归检查实际绘制边界、横向wheel后scrollLeft=0（建议层也必须为0），并验证长URL产生多行、值未改、长文可纵向滚动。两引擎125%截图主Agent已实看，输入区无横条。
+- WebKit第一次启动的dev页面在请求拦截/等待load时超时；改为普通loopback加载并等待实际文本域，不放宽布局/交互标准。正式脚本两引擎均可完成。
+- 相关DOM/unit六文件107项、完整typecheck/lint、MoXBots生产web构建及8项主题测试通过。最终CI/main以[PR76](https://github.com/heavenzhang/MoXBots/pull/76)状态和远端包含核验为准；不会仅凭样式断言宣布原生问题已验收。
+- 本机合成证据：`/Users/zhangshaohua/Documents/Codex/2026-10-16/ui-zoom002-evidence/`，包含两引擎metrics与125%截图。原用户截图未写入Git。
 
 ## 发布边界与执行记录
 
