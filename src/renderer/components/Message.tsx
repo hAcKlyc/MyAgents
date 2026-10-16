@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { track } from '@/analytics';
 import AttachmentPreviewList from '@/components/AttachmentPreviewList';
 import BlockGroup from '@/components/BlockGroup';
+import ExecutionQuality from '@/components/ExecutionQuality';
 import { projectCitationMarkdown, type CitationSources } from '@/utils/runtimeCitations';
 import Markdown from '@/components/Markdown';
 import { useToastOptional } from '@/components/Toast';
@@ -532,6 +533,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
               <Markdown citationSources={citationSources} streaming={isLoading && !!message.streamingTextActive}>{message.content}</Markdown>
             </div>
           )}
+          <ExecutionQuality message={message} live={isLoading} />
           {!isLoading && <AssistantActions citationSources={citationSources} message={message} onRetry={onRetry} onFork={onFork} />}
         </div>
       </div>
@@ -658,6 +660,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
             })}
           </div>
         </article>
+        <ExecutionQuality message={message} live={isLoading} />
         {!isLoading && <AssistantActions citationSources={citationSources} className="px-4" message={message} onRetry={onRetry} onFork={onFork} />}
       </div>
     </div>
