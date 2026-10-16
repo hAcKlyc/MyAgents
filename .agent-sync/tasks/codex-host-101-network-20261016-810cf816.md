@@ -40,4 +40,3 @@
 ## Next step
 
 主Agent按PR85最终head检查CI和remote main包含恢复记录；实际运行仍旧83e48946安装，不升级程序或日常Mac。会话到期按既有正式登录/显式renew-management恢复；无人值守自动续期是独立后续功能，不通过延长权限或复制token绕过。另一聊天负责其用户提出的真实Bots Ready界面复核，本任务不宣称已操作该页面。
-
