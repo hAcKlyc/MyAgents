@@ -154,7 +154,7 @@ export function JoinNetworkDialog({
   return (
     <OverlayBackdrop
       portal
-      className="z-[260] px-4"
+      className="z-[260] px-4 py-4"
       onClose={busy ? undefined : close}
     >
       <FloatingFocusManager context={context} initialFocus={input}>
@@ -163,7 +163,7 @@ export function JoinNetworkDialog({
           role="dialog"
           aria-modal="true"
           aria-labelledby="join-network-title"
-          className="w-full max-w-md rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5 shadow-xl"
+          className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5 shadow-xl"
           onKeyDown={(e) => {
             if (e.key === "Escape" && !isImeComposingEvent(e)) {
               e.preventDefault();
