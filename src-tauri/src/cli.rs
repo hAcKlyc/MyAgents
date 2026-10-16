@@ -26,7 +26,7 @@ pub const CLI_BOOTSTRAP_ARG: &str = "--myagents-cli-entry";
 /// previously published `MyAgents <group> ...` invocations working.
 const CLI_COMMANDS: &[&str] = &[
     "mcp", "vision", "model", "agent", "runtime", "config", "status", "reload", "version", "cron",
-    "goal", "plugin", "skill", "task", "thought", "im", "session", "widget", "space", "diagnose",
+    "goal", "plugin", "skill", "task", "thought", "im", "session", "widget", "space", "diagnose", "network",
     "tool",
 ];
 
@@ -830,6 +830,9 @@ mod tests {
     fn direct_binary_groups_remain_backwards_compatible() {
         assert!(is_cli_mode(&["--version".to_string()]));
         assert!(is_cli_mode(&["mcp".to_string(), "list".to_string()]));
+        for action in ["status", "login", "poll", "cancel", "restore", "cancel-restore"] {
+            assert!(is_cli_mode(&["network".to_string(), action.to_string()]));
+        }
         assert!(!is_cli_mode(&["myagents://open".to_string()]));
     }
 

@@ -205,6 +205,14 @@ const COMMON_ADMIN_ROUTES = new Set([
   'help',
   'status',
   'version',
+  // Network account control is a fixed common CLI surface. Unknown actions
+  // must remain unowned rather than inheriting authority from a prefix.
+  'network/status',
+  'network/login',
+  'network/poll',
+  'network/cancel',
+  'network/restore',
+  'network/cancel-restore',
   // Addressed Session operations resolve their explicit target through Rust;
   // they do not require the caller process to own a Product Session. This is
   // what lets the authenticated Global Host serve ordinary local programs.

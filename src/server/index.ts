@@ -1461,6 +1461,10 @@ async function routeAdminApi(
   // Strip the prefix for matching
   const route = pathname.replace('/api/admin/', '');
   const sourceKind = caller.kind === 'external-cli' ? 'external-cli' : 'internal-session';
+  if (route.startsWith('network/')) {
+    const { handleNetworkCli } = await import('./network-cli');
+    return handleNetworkCli(route.slice('network/'.length), payload, signal);
+  }
   if (['agent/show', 'session/list', 'session/get', 'session/start', 'session/send', 'session/watch', 'session/state'].includes(route)) {
     const { routeNetworkRequest } = await import('./agent-network/source');
     const networkResult = await routeNetworkRequest(route, payload, sourceKind, signal);

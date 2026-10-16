@@ -179,6 +179,129 @@ fn authorized_scope_from_state(
     ))
 }
 
+/// In-memory, scope-bound read-only view over the existing desktop store.
+/// Used by CLI recovery: missing/denied keys are terminal, never enrollment.
+struct ExistingScopeStore {
+    scope: KeyScope,
+    fingerprint: String,
+    inner: Arc<dyn IdentityStore>,
+}
+impl IdentityStore for ExistingScopeStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        if self.scope.issuer != scope.issuer
+            || self.scope.environment != scope.environment
+            || self.scope.service_id != scope.service_id
+            || self.scope.principal_id != scope.principal_id
+            || self.scope.device_id != scope.device_id
+            || self.scope.key_generation != scope.key_generation
+        {
+            return Err(super::crypto::CryptoError::CredentialConflict);
+        }
+        let key = self.inner.load(scope).map_err(|error| match error {
+            super::crypto::CryptoError::CredentialMissing => {
+                super::crypto::CryptoError::CredentialUnavailable
+            }
+            other => other,
+        })?;
+        if key.public_fingerprint()? != self.fingerprint {
+            return Err(super::crypto::CryptoError::CredentialConflict);
+        }
+        Ok(key)
+    }
+    fn save_pending(
+        &self,
+        _: &KeyScope,
+        _: &DevicePrivateKey,
+    ) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+    fn delete(&self, _: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+}
+fn existing_scope(
+    instance: &super::owned_login::OwnedInstance,
+    principal: &str,
+    device: &str,
+    value: Value,
+) -> Result<(KeyScope, String), NetworkError> {
+    validate_identity_state(&value).map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    let state: IdentityState =
+        serde_json::from_value(value).map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    if state.service_id != instance.service_id
+        || state.environment != instance.environment
+        || state.device_id != device
+    {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+    }
+    let generation = state
+        .key_generation
+        .filter(|g| (1..=9_007_199_254_740_991).contains(g))
+        .ok_or_else(|| NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"))?;
+    let fingerprint = state
+        .key_fingerprint
+        .filter(|f| !f.is_empty() && f.len() <= 128)
+        .ok_or_else(|| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    Ok((
+        KeyScope {
+            issuer: instance.issuer.clone(),
+            environment: instance.environment.clone(),
+            service_id: instance.service_id.clone(),
+            principal_id: principal.to_owned(),
+            device_id: device.to_owned(),
+            key_generation: generation,
+        },
+        fingerprint,
+    ))
+}
+pub(crate) async fn existing_owned_identity(
+    instance: &super::owned_login::OwnedInstance,
+    principal: &str,
+    device: &str,
+    value: Value,
+) -> Result<Arc<dyn IdentityStore>, NetworkError> {
+    let (scope, fingerprint) = existing_scope(instance, principal, device, value)?;
+    let store: Arc<dyn IdentityStore> = Arc::new(ExistingScopeStore {
+        scope: scope.clone(),
+        fingerprint,
+        inner: connection_cache(),
+    });
+    let reader = store.clone();
+    tokio::task::spawn_blocking(move || reader.load(&scope))
+        .await
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+    Ok(store)
+}
+pub(crate) async fn background_owned_identity(
+    account: Arc<OwnedAccount>,
+    device: &str,
+    cancelled: Arc<AtomicBool>,
+) -> Result<Arc<dyn IdentityStore>, NetworkError> {
+    let session = NetworkAccountSession::Owned(account.clone());
+    session.ensure_current()?;
+    session.validate_instance().await?;
+    if session.device_identity()?.device_id != device || cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+    }
+    let state = session
+        .request(
+            crate::space_cloud::agent_network::AccountOperation::IdentityState(device.to_owned()),
+            None,
+        )
+        .await?;
+    let store = existing_owned_identity(
+        &account.descriptor,
+        &account.session.principal_id,
+        device,
+        state,
+    )
+    .await?;
+    session.ensure_current()?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    Ok(store)
+}
 /// Explicitly authorize reading an already-enrolled device key.
 /// It never initializes, rotates, enrolls, or deletes an identity. Fixed-reader
 /// migration copies the verified key into a local slot before returning a
@@ -325,6 +448,38 @@ mod authorization_tests {
             "keyGeneration": 2,
             "keyFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
+    }
+
+    #[test]
+    fn cli_background_seed_is_scope_and_fingerprint_bound_and_never_writes() {
+        struct Backend(std::sync::Mutex<Option<DevicePrivateKey>>);
+        impl IdentityStore for Backend {
+            fn load(&self, _: &KeyScope) -> Result<DevicePrivateKey, super::super::crypto::CryptoError> {
+                self.0.lock().unwrap().take().ok_or(super::super::crypto::CryptoError::CredentialMissing)
+            }
+            fn save_pending(&self, _: &KeyScope, _: &DevicePrivateKey) -> Result<(),super::super::crypto::CryptoError> {panic!("write must not reach backend")}
+            fn delete(&self, _: &KeyScope) -> Result<(),super::super::crypto::CryptoError> {panic!("delete must not reach backend")}
+        }
+        let NetworkAccountSession::Owned(account) = account() else {unreachable!()};
+        let value = state(&account.descriptor.service_id, &account.descriptor.environment, &account.device_id);
+        let (scope, _) = existing_scope(&account.descriptor, &account.session.principal_id, &account.device_id, value.clone()).unwrap();
+        let key = DevicePrivateKey::generate().unwrap();
+        let store = ExistingScopeStore {scope:scope.clone(), fingerprint:key.public_fingerprint().unwrap(), inner:Arc::new(Backend(std::sync::Mutex::new(Some(key))))};
+        for field in 0..6 {
+            let mut changed=scope.clone();
+            match field {0=>changed.issuer.push_str("other"),1=>changed.environment="production".into(),2=>changed.service_id.push('x'),3=>changed.principal_id.push('x'),4=>changed.device_id.push('x'),_=>changed.key_generation+=1}
+            assert!(store.load(&changed).is_err());
+        }
+        let key=store.load(&scope).unwrap();
+        assert!(store.save_pending(&scope,&key).is_err());
+        assert!(store.delete(&scope).is_err());
+        assert!(matches!(store.load(&scope),Err(super::super::crypto::CryptoError::CredentialUnavailable)));
+        let mut missing=value.clone();missing["keyGeneration"]=Value::Null;missing["keyFingerprint"]=Value::Null;
+        assert_eq!(existing_scope(&account.descriptor,&account.session.principal_id,&account.device_id,missing).err().unwrap().code,"NETWORK_PRIVATE_KEY_MISSING");
+        let mut wrong=value;wrong["deviceId"]=json!("00000000-0000-4000-8000-000000000009");
+        assert!(existing_scope(&account.descriptor,&account.session.principal_id,&account.device_id,wrong).is_err());
+        let mismatch=ExistingScopeStore {scope:scope.clone(),fingerprint:"mismatch".into(),inner:Arc::new(Backend(std::sync::Mutex::new(Some(DevicePrivateKey::generate().unwrap()))))};
+        assert!(mismatch.load(&scope).is_err());
     }
 
     #[test]

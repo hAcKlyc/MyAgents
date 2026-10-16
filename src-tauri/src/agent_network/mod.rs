@@ -6,6 +6,7 @@ mod calls;
 mod catalog;
 mod channel;
 pub(crate) mod commands;
+pub(crate) mod cli;
 mod connection;
 mod credential_restore;
 #[cfg(any(test, all(target_os = "macos", myagents_moxbot)))]
