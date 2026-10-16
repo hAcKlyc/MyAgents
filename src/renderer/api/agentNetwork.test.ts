@@ -202,6 +202,12 @@ describe("network read and settings outcome", () => {
     ["NETWORK_CREDENTIAL_STORE_UNAVAILABLE", "credentialStoreUnavailable"],
     ["NETWORK_CREDENTIAL_STORE_INVALID", "credentialStoreInvalid"],
     ["OWNED_SESSION_RECORD_MISSING", "ownedSessionMissing"],
+    ["OWNED_SESSION_INVALID", "ownedSignInRequired"],
+    ["SPACE_REAUTH_REQUIRED", "ownedSignInRequired"],
+    ["ACCOUNT_BINDING_CHANGED", "ownedSignInRequired"],
+    ["OWNED_ACCOUNT_REVOKED", "ownedSignInRequired"],
+    ["KEY_GENERATION_CONFLICT", "identityConflict"],
+    ["NETWORK_CREDENTIAL_GENERATION_CONFLICT", "identityConflict"],
   ])("maps %s to a fixed credential-store message", (code, key) => {
     expect(networkErrorKey({ code })).toBe(key);
   });

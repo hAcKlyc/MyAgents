@@ -1430,6 +1430,8 @@
       "credentialStoreAuthorizationRequired": "System credentials need authorization. Background restore has stopped and will not automatically repeat the password request.",
       "credentialStoreUnavailable": "The system credential store is unavailable. Background restore has stopped; check the system credential store.",
       "credentialStoreInvalid": "The saved local session could not be validated. The connection is stopped to protect your identity; the record was not overwritten.",
+      "identityConflict": "This device has a conflicting network identity and cannot reconnect automatically. Check the account and device identity. Existing connections and credentials are preserved.",
+      "ownedSignInRequired": "Your sign-in for this network is no longer valid. Sign in again to reconnect.",
       "ownedSessionMissing": "No local login session was found for this connection. It is stopped and requires an explicit sign-in to recover.",
       "privateKeyMissing": "The device private key is unavailable. Ask the administrator to revoke this device, then join with a new key.",
       "protocolUnsupported": "This service does not support the current AgentNet protocol.",
@@ -1451,6 +1453,7 @@
       "close": "Close"
     },
     "ownedLogin": {
+      "signInAgain": "Sign in again",
       "mode": "Account sign-in",
       "hint": "Sign in through your browser. The session is stored in the operating system credential store; tokens are not shown here.",
       "fixedServiceUrl": "This instance address is fixed. Sign-in will only be sent to this service.",
