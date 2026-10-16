@@ -563,21 +563,14 @@ impl NetworkRegistry {
         };
         let preflight = async {
             crate::ulog_info!("[agent-network] credential recovery stage=session-read");
-            // Serialize the background credential/guard read against a newer
-            // login's pointer+guard publication. A stale saved slot must not
-            // invalidate the guard just installed by another account mutation.
-            let read_boundary = if !interactive { Some(self.mutation.lock().await) } else { None };
-            if !interactive {
-                self.check_restore_boundary(expected_revision, &cancelled)?;
-                if !self.owned_stored.lock().unwrap_or_else(|e|e.into_inner()).iter().any(|current| current == &record && !current.removing) {
-                    return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
-                }
-            }
             let saved = record.clone();
             let token = cancelled.clone();
+            let registry = self.clone();
             let account = tokio::task::spawn_blocking(move || {
                 if !interactive {
-                    return super::owned_account_desktop::restore_account(&saved.descriptor, &saved.device_id, &saved.principal_id, &saved.id, &saved.binding_id, saved.public_tls_ca.as_deref(), false, saved.session_bound);
+                    return registry.with_cli_restore_read(&saved, expected_revision, &token, || {
+                        super::owned_account_desktop::restore_account(&saved.descriptor, &saved.device_id, &saved.principal_id, &saved.id, &saved.binding_id, saved.public_tls_ca.as_deref(), false, saved.session_bound)
+                    });
                 }
                 super::owned_account_desktop::restore_account_authorized(
                     &saved.descriptor,
@@ -594,7 +587,6 @@ impl NetworkRegistry {
             .await
             .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??
             .ok_or_else(|| NetworkError::new("OWNED_SESSION_RECORD_MISSING"))?;
-            drop(read_boundary);
             if cancelled.load(Ordering::Acquire) {
                 return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
             }
@@ -709,6 +701,29 @@ impl NetworkRegistry {
         let view = self.view();
         let _ = app.emit("agent-network:connections-changed", view.clone());
         Ok(view)
+    }
+    /// The lock belongs to the non-cancellable blocking work itself. Dropping
+    /// an HTTP/preflight future cannot release it while an old credential read
+    /// is still capable of authorizing a session guard.
+    fn with_cli_restore_read<T>(
+        &self,
+        record: &StoredOwnedConnection,
+        revision: u64,
+        cancelled: &AtomicBool,
+        read: impl FnOnce() -> Result<T, NetworkError>,
+    ) -> Result<T, NetworkError> {
+        let _mutation = self.mutation.blocking_lock();
+        self.check_restore_boundary(revision, cancelled)?;
+        if !self
+            .owned_stored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|current| current == record && !current.removing)
+        {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        read()
     }
     fn check_restore_boundary(
         &self,
@@ -1694,6 +1709,89 @@ mod tests {
     use super::*;
     use myagents_agent_network_protocol::{AgentReference, SessionReference};
 
+    fn cli_test_record() -> StoredOwnedConnection {
+        StoredOwnedConnection {
+            id: "saved".into(),
+            descriptor: OwnedInstance {
+                version: 1,
+                profile: "owned-device-relay-v1".into(),
+                service_id: uuid::Uuid::new_v4().to_string(),
+                environment: "development".into(),
+                network_id: "network".into(),
+                name: "test".into(),
+                issuer: "https://owned.invalid".into(),
+                login_issuer: "https://owned.invalid/dex".into(),
+                protocol: 1,
+                capabilities: vec![],
+                root_certificate: "test".into(),
+                jwks: json!({}),
+            },
+            public_tls_ca: None,
+            device_id: uuid::Uuid::new_v4().to_string(),
+            principal_id: uuid::Uuid::new_v4().to_string(),
+            network_id: "network".into(),
+            binding_id: "binding".into(),
+            session_bound: true,
+            join_authorized: true,
+            removing: false,
+        }
+    }
+    #[tokio::test]
+    async fn cancelled_queued_background_read_never_authorizes_a_guard() {
+        let owner = NetworkRegistry::new();
+        owner.selfhost_enabled.store(true, Ordering::Release);
+        let record = cli_test_record();
+        owner.owned_stored.lock().unwrap().push(record.clone());
+        let held = owner.mutation.lock().await;
+        let token = Arc::new(AtomicBool::new(false));
+        let cancel = token.clone();
+        let worker_owner = owner.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            worker_owner.with_cli_restore_read(
+                &record,
+                0,
+                &token,
+                || -> Result<(), NetworkError> {
+                    panic!("cancelled read must not touch credentials")
+                },
+            )
+        });
+        cancel.store(true, Ordering::Release);
+        drop(held);
+        assert_eq!(
+            worker.await.unwrap().err().unwrap().code,
+            "OWNED_LOGIN_CANCELLED"
+        );
+    }
+    #[tokio::test]
+    async fn dropping_background_join_handle_keeps_publication_fenced_until_read_finishes() {
+        let owner = NetworkRegistry::new();
+        owner.selfhost_enabled.store(true, Ordering::Release);
+        let record = cli_test_record();
+        owner.owned_stored.lock().unwrap().push(record.clone());
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_owner = owner.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            worker_owner.with_cli_restore_read(&record, 0, &AtomicBool::new(false), || {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap();
+                Ok(())
+            })
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        drop(worker);
+        assert!(owner.mutation.try_lock().is_err());
+        release_tx.send(()).unwrap();
+        let _unblocked =
+            tokio::time::timeout(std::time::Duration::from_secs(5), owner.mutation.lock())
+                .await
+                .unwrap();
+    }
     #[tokio::test]
     async fn cli_login_rejects_disabled_stale_or_unknown_scope_before_io() {
         let owner = NetworkRegistry::new();

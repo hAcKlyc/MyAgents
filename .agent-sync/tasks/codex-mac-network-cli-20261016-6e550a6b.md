@@ -21,7 +21,7 @@
 
 ## Completed
 
-接口合同与操作说明dev-docs/mac-network-cli.md。TS相关445项单测/loopback通过，typecheck/定向lint通过；独立审查发现并修复composition漏登记、readonly初始化后迁移、CLI登录重入membership。已将native network/cli测试追加到既有macOS CI job；本机Swift工具链PackageDescription链接错误留证，不把受阻运行算通过。
+接口合同与操作说明dev-docs/mac-network-cli.md。TS相关452项单测/loopback通过，typecheck/定向lint通过；独立审查发现并修复composition漏登记、readonly初始化后迁移、CLI登录重入membership。本地完整unit5970/DOM2418/integration1069通过，保留既有skip和一次DOM临时失败后原断言复核证据。PR84已attach，已merge最新main2e9fef6c（仅发行元数据变更）跑组合CI。独立审查最后修复超时blocking工作锁生命周期后无剩余必修问题。已将native network/cli测试追加到既有macOS CI job；本机Swift工具链PackageDescription链接错误留证，不把受阻运行算通过。
 
 ## Verification
 

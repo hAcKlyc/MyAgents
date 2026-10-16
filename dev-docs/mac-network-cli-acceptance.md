@@ -5,14 +5,16 @@
 ## 已完成验证
 
 - TS CLI、严格参数、scope、帮助、准入和网络适配器：452项相关测试通过；其中真实Global/Session Sidecar classification → external token admission → scope → adapter → management HTTP的loopback联调，只替换远端native authority为合成fixture。覆盖六条exact routes、未知路由404、令牌关闭/无效、sidecar generation/internal capability、字段注入、UUID大小写、原code安全投影与不重试。
-- 定向TypeScript检查、定向ESLint、CLI实际bundle和离线help、测试分类通过；完整lint通过。完整typecheck首次因本任务使用ignore-scripts安装依赖而缺CodeMirror修补失败，执行本工作区postinstall后重新检查（结果以CI和最终回执为准）。
-- 新Rust回归覆盖strict action schema、禁止credential/device/issuer覆盖、safe revision/UUID、无秘密status、原key完整scope/fingerprint、missing不触发生成、key写删拒绝、原principal/device/binding/trust/membership pin、开始前disabled/stale/missing拒绝、direct binary GUI前分流。原有取消、提交回滚、late result、account isolation回归同跑。
+- 定向TypeScript检查、定向ESLint、CLI实际bundle和离线help、测试分类通过；完整lint通过。完整typecheck首次因本任务使用ignore-scripts安装依赖而缺CodeMirror修补失败，执行本工作区postinstall后重新检查通过。
+- 新Rust回归覆盖strict action schema、禁止credential/device/issuer覆盖、safe revision/UUID、无秘密status、原key完整scope/fingerprint、missing不触发生成、key写删拒绝、原principal/device/binding/trust/membership pin、开始前disabled/stale/missing拒绝、direct binary GUI前分流。另增加排队读取取消不得触碰凭据、丢弃blocking JoinHandle仍持有publication锁的确定性回归。原有取消、提交回滚、late result、account isolation回归同跑。
 - 本机Rust `cargo check --tests` 与clippy红线通过，均以 `DOCS_RS=1` 跳过无关Swift桥构建；不能作为native运行通过。未改Swift源码或系统工具链。真实本地Rust运行被CLT Swift PackageDescription模块/动态库符号不匹配阻断；使用任务独立module cache复核仍失败，保留原始日志。
 - 既有macOS CI job增加真实 `agent_network::` 与 `cli::` native tests，不使用DOCS_RS或OS credential访问；现有Linux完整Rust/JS回归继续作为required gates。
 
+完整本地回归：unit 5,970通过/5既有跳过；DOM 2,418通过；integration 1,069通过/24既有跳过。首次完整DOM的PermissionPrompt复制反馈断言超时（1失败，其余2,417通过），目标文件与本任务无diff；该文件11项及完整DOM原断言不变重跑均通过，未放宽测试。类型、lint和完整原生CI仍分别追踪。
+
 ## 独立审查与修复
 
-`network_cli_security_review`只读审查发现并修复：生产Sidecar漏登记六命令；actor初始化后的隐式凭据迁移；CLI登录重发membership加入。额外保护包括direct app binary不走GUI、保存原选择状态、背景恢复不替换active actor、登录提交前再次检查原actor是否已经自动恢复、背景credential read与新登录guard发布串行化。不会给既有UI登录增加CLI pinned策略。
+`network_cli_security_review`只读审查发现并修复：生产Sidecar漏登记六命令；actor初始化后的隐式凭据迁移；CLI登录重发membership加入。额外保护包括direct app binary不走GUI、保存原选择状态、背景恢复不替换active actor、登录提交前再次检查原actor是否已经自动恢复、背景credential read与新登录guard发布串行化，锁归实际blocking worker持有直到读取结束而非归可取消async future持有。最终独立只读复核无剩余必修问题。不会给既有UI登录增加CLI pinned策略。
 
 状态找回仅含CLI未结束attemptId/connectionId/expiresAt，poll pending可返回原授权链接；不输出PKCE verifier、session token、私钥或配置。后台读取不可授权时typed fail closed；不提供密码命令或Keychain ACL/信任修改。
 
