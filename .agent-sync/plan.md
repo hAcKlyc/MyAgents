@@ -316,4 +316,4 @@ User requested the new Linux Host reuse of current desktop main-Agent model and 
 
 ## MOXBOTS-OUTPUT-003 — 2026-10-16
 
-用户接受展开区复审并要求实际展开验收。单条直接结果行，多条展开隐藏重复摘要/时间，无实际正文无箭头；执行耗时仅runtime报告，观测跨度/等待/未知分开。独立代码/截图审阅关闭Bash内部重复duration和JSON空结果两项P2，reviewer IAB不可用，实际点击由主Agent补全。范围/源码/合成UI/CI/main/原生发行分别见 `.agent-sync/tasks/codex-output-expanded-20261016-f48054da.md` 和 `dev-docs/output-expanded/acceptance.md`；桌面变更queued给唯一owner下一未冻结批次，不修改已冻结包或操作日常App，不向其它聊天发送消息。
+用户接受展开区复审并要求实际展开验收。单条直接结果行，多条展开隐藏重复摘要/时间，无实际正文无箭头；执行耗时仅runtime报告，观测跨度/等待/未知分开。独立代码/截图审阅关闭Bash内部重复duration和JSON空结果两项P2，reviewer IAB不可用，实际点击由主Agent补全。用户追加的用户气泡已纳入：紧凑内边距、普通正文400字重、浮动复制/回退及窄栏预留，长文和失败态保留，主Agent实际页面和独立静态复核完成。范围/源码/合成UI/CI/main/原生发行分别见 `.agent-sync/tasks/codex-output-expanded-20261016-f48054da.md` 和 `dev-docs/output-expanded/acceptance.md`；桌面变更queued给唯一owner下一未冻结批次，不修改已冻结包或操作日常App，不向其它聊天发送消息。

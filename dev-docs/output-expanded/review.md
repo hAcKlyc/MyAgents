@@ -44,3 +44,19 @@
 当前没有从最终截图确认新的P1/P2。两项已报P2均已代码复验修复，主Agent报告已实际复验terminal页脚仅exit0、结构化零匹配无箭头。主Agent另报告已完成Enter组/Space逐次diff、active→complete、未知状态、宽/窄和主main无横溢出（clientWidth=scrollWidth=1265）；此处作为**主Agent执行记录**保留，不改写成审阅者独立实测。
 
 独立浏览器gate仍未知：审阅者IAB不可用。可合并判断为“代码审阅与截图静态复核无剩余确认P1/P2，主Agent实际UI矩阵另有执行证据”；不能称独立浏览器完整通过，也不代表真实Provider/原生发行/生产验收。
+
+## 用户气泡增量源审
+
+用户新增截图指出气泡文字/留白和操作栏展示不友好，主Agent将Message用户分支纳入同一任务。审阅者读取了该用户截图与Message.tsx / Message.userbubble.test.tsx增量，不触碰产品源码。独立IAB仍不可用，未重新尝试。
+
+源审：气泡px3/py2、rounded-xl，正文局部`--font-weight-prose`→normal400，strong保留既有emphasis600，Markdown字号选择不变；长文fade负margin同步新padding；发送失败说明保留flow且不出现rewind。操作栏改absolute后不再占气泡下方空行；80px预留可容纳两32px按钮+gap4+间距4。
+
+**P2待修 — 鼠标hover可达性**：actions `right-full mr-1`在bubble与操作栏之间形成4px空隙，同时默认pointer-events-none只在group-hover/focus时恢复。鼠标慢速从bubble向左移到按钮，经过空隙时group:hover失效，toolbar立即不可命中，可能出现消失/点不到。已建议将间距移为toolbar自身padding-right（连续命中盒）或增加hover桥；需主Agent实际移动复验。键盘focus与hover:none触屏路径具有独立可达机制，不以此代替鼠标路径。
+
+### 用户气泡修复与截图静态复验
+
+P2 hover gap已修复：操作栏改为`right-full pr-1`，将原margin空隙纳入自身命中盒；预留宽度仍足够。审阅者已读最终class，未进行独立鼠标移动。
+
+已用view_image查看主Agent新增 `04-user-bubble-wide.jpg`、`05-user-bubble-narrow-keyboard.jpg`：宽栏正文/气泡更紧凑且没有下占操作空行；浅色380内容栏回退与复制完整留在左gutter，键盘焦点轮廓清晰，合成本地回退计数1可见。没有从两图发现新增必修P1/P2。
+
+截图证明所见布局和焦点状态；长文展开、failed说明flow、鼠标连续hover和触屏可达性的实际行为仍以主Agent的浏览器执行记录为准。本审阅对这些新气泡变更仅为源码+静态截图复核，不改写为独立点击验收。未新增运行时/审批/标题逻辑改动。

@@ -21,6 +21,8 @@ function Fixture() {
   const [extra, setExtra] = useState(false);
   const [complete, setComplete] = useState(false);
   const [clock] = useState(() => Date.now());
+  const [userCase, setUserCase] = useState<'normal' | 'short' | 'long' | 'failed'>('normal');
+  const [rewinds, setRewinds] = useState(0);
   const blocks: ContentBlock[] = [
     { type: 'thinking', id: 'reasoning', thinking: '先核对主体隔离，再检查失败回滚。这里只展示已有分析记录，不据此宣称测试通过。', isComplete: true, thinkingDurationMs: 1,
       executionTiming: { startedAt: start, finishedAt: start + 1, source: 'observed' } },
@@ -41,6 +43,11 @@ function Fixture() {
       isLoading: !complete, executionTiming: { startedAt: clock - 8000, ...(complete ? { finishedAt: clock + 1000 } : {}), lastActivityAt: clock - 4000, source: 'observed' },
     }),
   ];
+  const user: MessageType = { id: `user-${userCase}`, role: 'user', timestamp: new Date(start),
+    content: userCase === 'short' ? '好的' : userCase === 'long'
+      ? Array.from({length: 30}, (_, index) => `第 ${index + 1} 段：请核对申请规则，并保留原始记录。\n这一段用于验证长消息展开与复制操作。`).join('\n\n')
+      : '提交申请时提示：未找到匹配的处理规则\n这种情况应该怎么处理？',
+    ...(userCase === 'failed' ? { deliveryStatus: 'failed' as const } : {}) };
   const message: MessageType = { id: 'expanded-fixture', role: 'assistant', timestamp: new Date(start), content: blocks };
   return <ThemeRuntimeProvider selection={{ themeId: 'myagents-default', appearanceMode: dark ? 'dark' : 'light' }}>
     <ToastProvider><ImagePreviewProvider>
@@ -53,6 +60,13 @@ function Fixture() {
             <button className="rounded border px-2 py-1 text-sm" onClick={() => void i18n.changeLanguage(i18n.language === 'zh-CN' ? 'en-US' : 'zh-CN')}>中 / EN</button>
             <button className="rounded border px-2 py-1 text-sm" onClick={() => setExtra(!extra)}>追加同类结果</button>
             <button className="rounded border px-2 py-1 text-sm" onClick={() => setComplete(!complete)}>切换执行完成</button>
+            {(['normal', 'short', 'long', 'failed'] as const).map(kind => <button key={kind} className="rounded border px-2 py-1 text-sm" onClick={() => { setUserCase(kind); setRewinds(0); }}>{kind}用户消息</button>)}
+          </div>
+          <div className="mb-3" data-user-fixture>
+            <ChatRowLayoutProvider messageId={user.id} onRowLayoutChanged={(_id, reason) => { document.documentElement.dataset.userLayoutReason = reason; }}>
+              <Message key={user.id} message={user} onRewind={() => setRewinds(value => value + 1)} />
+            </ChatRowLayoutProvider>
+            {rewinds > 0 && <p className="text-xs text-[var(--ink-muted)]">本地回退回调次数 {rewinds}</p>}
           </div>
           <ChatRowLayoutProvider messageId={message.id} onRowLayoutChanged={(_id, reason) => { document.documentElement.dataset.layoutReason = reason; }}>
             <Message message={message} isLoading={!complete} />

@@ -43,7 +43,24 @@ output_review请求沿用gpt-6.1-sol medium，因重复交互缺陷和时间语�
 ## 自动验证和交付
 
 - 时间11项和主UI33项初轮通过。
-- 修复后7文件89项定向测试通过；全量DOM首轮4文件10失败/2438通过及一个Toast teardown异常（372秒，含多项超时）；原始日志保留，maxWorkers=2/minWorkers=1完整复验中，不放宽断言或timeout。
+- 修复后7文件89项定向测试通过；全量DOM首轮4文件10失败/2438通过及一个Toast teardown异常（372秒，含多项超时）；同一代码/断言/timeout，maxWorkers=2/minWorkers=1完整287文件2448项通过（279.58秒）。首轮原始日志保留，不掩盖并发下时序失败；气泡新增另有46项回归和最终CI。
 - MoXBots web构建、Theme CSS和8项主题测试通过；typecheck与lint（含依赖/文档检查）通过。
 - CI、最新main合入与远端包含核验待完成；不把工作分支或本地通过当作主干交付。
 - 桌面发布Required，排既定唯一owner `01a12bc2-907a-7702-b6dd-788225c5dfe4` 下一未冻结批次。无配置/迁移/权限变化，不改已冻结发行版，不并发安装/重启日常App或发布服务器。未向其它聊天发送消息。
+
+## 用户消息补充验收
+
+用户在本任务期间进一步要求改善右侧用户消息展示，纳入同一PR：气泡px3/py2、rounded-xl，普通正文使用已有normal=400，保留字号选择与显式strong语义。复制/回退改为气泡左侧浮动工具栏，预留80px gutter，默认hover/focus淡入，hover:none显示；时间在title及无障碍文本保留。失败文案仍在正常流中，长文折叠渐变跟随padding调整。
+
+主Agent后台IAB tab3，生产Message与合成数据：
+
+- 宽栏普通两行：bubble/userRow高度均60.80px，padding8px12px，正文14px/weight400，操作栏不额外占行。[04实际图](evidence/04-user-bubble-wide.jpg)包含消息与单条结果展开组合。
+- 浅色380内容栏：键盘Enter触达回退，本地callback计数1；toolbar right=538.5=bubble left，toolbar left466.5完整在内容栏内，main横溢出0。[05键盘图](evidence/05-user-bubble-narrow-keyboard.jpg)。
+- 短消息“好的”气泡52×38.40px，userRow同高；无固定大块或额外动作行。
+- 30段长消息实际点展开：collapsed401px→expanded3051.81px，保留30段及user-message-expand布局通知。
+- 失败态实际显示发送失败，回退入口0，复制保留，main横溢出0。附件与Markdown格式通过既有消息回归；未声称新增实际图片预览或原生剪贴板联调通过。
+- 复制按钮实际可点击；IAB剪贴板工具读回为空，未据此宣称系统剪贴板内容验证。回归mock核对copyPlainText接收原始正文/换行/Markdown，并确认回退绑定正确messageId、strong仍为STRONG。
+
+独立源审发现工具栏外margin产生4px hover断点，已改为工具栏自身padding形成连续命中区域；主Agent验证两盒边界相接、键盘及按钮实际点击，不冒充工具不支持的慢速指针逐帧测试。独立审阅者静态inspect04/05，无剩余确认P1/P2。新增消息/滚动回归46项通过。原生和真实业务仍另验。
+
+最终新增气泡合并后，11文件140项定向全部通过（5.28秒）；typecheck、lint/依赖/文档、MoXBots web和8项theme再次通过。287文件2448全DOM为追加气泡之前同源结果区候选；完整当前候选由PR91 CI再验，不能将前者冒充气泡后全量结果。

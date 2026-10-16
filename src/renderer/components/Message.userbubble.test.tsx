@@ -1,12 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Message as MessageType } from '@/types/chat';
 
 vi.mock('@/context/ImagePreviewContext', () => ({ useImagePreview: () => ({ openPreview: vi.fn() }) }));
 vi.mock('@/analytics', () => ({ track: vi.fn() }));
+vi.mock('@/utils/clipboard', () => ({ copyPlainText: vi.fn().mockResolvedValue(undefined) }));
 
 import Message from './Message';
+import { copyPlainText } from '@/utils/clipboard';
 
 function userMsg(
   content: string,
@@ -22,6 +24,15 @@ function userMsg(
 }
 
 describe('Message — user bubble spacing', () => {
+  it('keeps copy and rewind bound to the user message in the floating action bar', async () => {
+    const onRewind = vi.fn();
+    render(<Message message={userMsg('保留原始换行\n**重点内容**')} onRewind={onRewind} />);
+    fireEvent.click(screen.getByRole('button', { name: /^复制$/ }));
+    await waitFor(() => expect(copyPlainText).toHaveBeenCalledWith('保留原始换行\n**重点内容**'));
+    fireEvent.click(screen.getByRole('button', { name: /^时间回溯$/ }));
+    expect(onRewind).toHaveBeenCalledExactlyOnceWith('u1');
+    expect(screen.getByText('重点内容').tagName).toBe('STRONG');
+  });
   it.each(['sending', 'failed'] as const)('keeps a %s user bubble visible without native rewind', status => {
     const { container } = render(<Message message={userMsg('hello', { deliveryStatus: status })} onRewind={vi.fn()} />);
     expect(container.querySelector('article')).toHaveTextContent('hello');
@@ -44,12 +55,12 @@ describe('Message — user bubble spacing', () => {
     expect(container).not.toHaveTextContent('Audit repo');
   });
 
-  it('uses equal bubble padding and scopes Markdown paragraph margins', () => {
+  it('uses compact bubble padding and scopes Markdown paragraph margins', () => {
     const { container } = render(<Message message={userMsg('你可以帮我写个 v3')} />);
 
     const bubble = container.querySelector('article');
-    expect(bubble).toHaveClass('p-4');
-    expect(bubble).not.toHaveClass('py-3');
+    expect(bubble).toHaveClass('px-3', 'py-2');
+    expect(bubble).not.toHaveClass('p-4');
 
     const content = container.querySelector('.user-message-content');
     expect(content).toBeInTheDocument();
