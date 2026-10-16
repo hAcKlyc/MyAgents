@@ -154,6 +154,44 @@ it("cancels a pending owned attempt when the dialog is closed", async () => {
   await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
 });
 
+it("continues a restored identity with the same logical attempt and cancels that attempt", async () => {
+  calls.ownedPoll.mockResolvedValue({ status: "reauthorize", authorization: {
+    attemptId: "attempt-1", authorizationUrl: "https://login.example.test/restore?state=second", expiresAt: 1_900_000_010,
+  } });
+  render(<NetworkSelector registry={registry} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择网络" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "加入自部署网络" }));
+  fireEvent.change(screen.getByLabelText("服务 URL"), { target: { value: "https://hub.example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  expect(await screen.findByText(/已找到此账号原有的设备身份/)).toBeInTheDocument();
+  expect(screen.getByText(/restore\?state=second/)).toBeInTheDocument();
+  expect(calls.accept).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "打开浏览器" }));
+  await waitFor(() => expect(calls.ownedOpen).toHaveBeenCalledWith("attempt-1"));
+  fireEvent.click(screen.getByRole("button", { name: "取消登录" }));
+  await waitFor(() => expect(calls.ownedCancel).toHaveBeenCalledWith("attempt-1"));
+  expect(calls.remove).not.toHaveBeenCalled();
+});
+
+it("selects the authenticated account rather than the first account with the same service URL", async () => {
+  const before: NetworkRegistry = { ...registry, selected: "self-a", connections: registry.connections.map((c) => c.official ? c : {
+    ...c, url: "https://shared.example.test", ownedAccount: { state: "signInRequired", principalId: c.id, expiresAt: null },
+  }) };
+  const after = { ...before, selected: "self-b" };
+  calls.ownedPoll.mockResolvedValue({ status: "authenticated", registry: after });
+  calls.select.mockResolvedValue(after);
+  render(<NetworkSelector registry={before} />);
+  fireEvent.click(screen.getByRole("button", { name: "重新登录" }));
+  fireEvent.click(screen.getByRole("button", { name: "在浏览器中继续" }));
+  await screen.findByText("等待浏览器登录");
+  fireEvent.click(screen.getByRole("button", { name: "检查登录状态" }));
+  await waitFor(() => expect(calls.select).toHaveBeenCalledWith("self-b"));
+  expect(calls.select).not.toHaveBeenCalledWith("self-a");
+  expect(calls.accept).toHaveBeenCalledWith(after);
+});
+
 it("offers account-only re-login for an owned signInRequired connection and selects it after authentication", async () => {
   const owned = {
     ...registry,

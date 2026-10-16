@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   openExternal: vi.fn(),
   selected: "official",
+  localDeviceId: undefined as string | undefined,
   ownedAccount: undefined as NetworkConnection["ownedAccount"],
   snapshot: {
     state: "ready",
@@ -60,6 +61,7 @@ vi.mock("@/features/agent-network/store", async (original) => ({
         removing: false,
         snapshot: mocks.snapshot,
         ownedAccount: mocks.ownedAccount,
+        localDeviceId: mocks.localDeviceId,
       },
     ],
   }),
@@ -102,6 +104,7 @@ const membership = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.selected = "official";
+  mocks.localDeviceId = undefined;
   mocks.ownedAccount = undefined;
   mocks.snapshot = {
     state: "ready",
@@ -133,6 +136,26 @@ beforeEach(() => {
   );
 });
 describe("Agent network account and device management", () => {
+  it("marks the connection-scoped owned identity as local instead of the installation ID", async () => {
+    mocks.selected = "owned";
+    mocks.ownedAccount = { state: "authenticated", principalId: "account", expiresAt: null };
+    mocks.localDeviceId = "44444444-4444-4444-8444-444444444444";
+    const scoped = { ...device, deviceId: mocks.localDeviceId, name: "Account-scoped Mac", joined: true };
+    mocks.devices.mockResolvedValue({ items: [device, scoped], complete: true });
+    render(<AgentNetwork />);
+    const scopedTitle = await screen.findByRole("heading", { name: "Account-scoped Mac" });
+    expect(within(scopedTitle.closest("article")!).getByText("本机")).toBeInTheDocument();
+    expect(within(screen.getByRole("heading", { name: device.name }).closest("article")!).queryByText("本机")).not.toBeInTheDocument();
+  });
+
+  it("does not guess the installation ID for an owned connection missing its identity projection", async () => {
+    mocks.selected = "owned";
+    mocks.ownedAccount = { state: "authenticated", principalId: "account", expiresAt: null };
+    mocks.devices.mockResolvedValue({ items: [{ ...device, joined: true }], complete: true });
+    render(<AgentNetwork />);
+    await screen.findByRole("heading", { name: device.name });
+    expect(screen.queryByText("本机")).not.toBeInTheDocument();
+  });
   it("opens Add Host from the network page and closes without sending mutations", async () => {
     render(<AgentNetwork />);
     fireEvent.click(await screen.findByRole("button", { name: "+ 添加 Host" }));

@@ -8,7 +8,7 @@
 | -------------------------------------------------------- | ---------------------------------------------------------------------- |
 | 官方登录与 sessionBindingId；自部署账号 scope           | 官方沿原 Rust Space connector 与 Space 账号服务；自部署由固定 descriptor 与 Rust 连接生命周期裁决 |
 | 设备身份代次                                            | 当前网络的身份签发方；Rust 按连接验证与投影                              |
-| 稳定设备 ID、OS/默认主机名称                             | 原 `device_identity`                                                   |
+| 安装级设备 ID、OS/默认主机名称；Owned 连接设备 ID         | 原 `device_identity`；Owned 登录响应绑定的账号/网络身份，由原 registry 持久化 |
 | 用户指定的网络设备显示名称                               | 既有网络 SQLite DO 的设备记录；Rust 当前连接只读投影                  |
 | 工作区与 Agent 的本地身份、路径、生命周期                | `resolvePersistedAgentWorkspaceRegistry`；不得用网络设置反向创建工作区 |
 | 私钥、设备 WSS、内层 TLS、连接 epoch、传输分配           | Rust App `NetworkRegistry` / 各连接 `AgentNetwork`，不归 Tab 或 Session                             |
@@ -70,7 +70,9 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 ### 独立账号的桌面凭据访问
 
-`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期；浏览器登录完成后先写入 OS 凭据库，再发放进程内会话 guard。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
+`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期。Owned 连接使用登录响应实际绑定的独立 device ID；identity、admission、discovery、来源和本机标记均使用同一 ID，官方/legacy 保持安装级 ID。浏览器首次以临时 ID 识别账号，完整查询同账号候选登记；已有登记时精确注销临时会话，并显式再次授权旧 ID，校验同一 principal；查询失败/不完整或多候选歧义均不新建身份。
+
+登录 poll 仅暂存结果。最终由原 registry mutation 和登录 manager 锁裁决取消/提交，再写入新的不可变 binding 凭据槽、原子切换配置，最后在与 stop 共享的发布锁内复核并发放 guard/启动 actor。旧槽不覆盖、不撤销；确认回滚才清理新槽。配置提交与回滚均未知时保留两个槽和 token，拒绝该 issuer 的继续登录，任务空闲后重启按磁盘指针恢复。新配置 `sessionBound: true` 选择原凭据路由下按 binding 哈希的槽，旧记录缺省 false 使用原槽；不扩展凭据 Reader 的闭集协议。旧版严格配置读取器不认识新字段，回退客户端必须恢复启用前的配置备份（保留迁移后业务数据），不得只换旧二进制。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
 
 同一持久槽位的新登录提交会失效旧 guard；取消尚未完成的新登录不撤销此前仍有效的登录。精确 binding 删除、账号 active 失效、会话过期和服务器拒绝仍停止旧权限。恢复、登录写入及精确删除由模块内同步存储锁串行化，锁不跨网络 await。正常路径不轮询 Keychain，用户在应用外手工编辑凭据的检测边界是下次恢复；这不代替服务器的过期或撤销检查。
 

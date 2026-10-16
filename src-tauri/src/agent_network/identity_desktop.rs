@@ -195,8 +195,7 @@ pub(crate) async fn authorize_owned_identity(
     let account_session = NetworkAccountSession::Owned(account);
     account_session.ensure_current()?;
     account_session.validate_instance().await?;
-    let current_device = crate::device_identity::current_device_identity()
-        .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+    let current_device = account_session.device_identity()?;
     if current_device.device_id != expected_device {
         return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
     }
@@ -289,6 +288,8 @@ mod authorization_tests {
     fn account() -> NetworkAccountSession {
         NetworkAccountSession::Owned(Arc::new(OwnedAccount {
             connection_id: "connection".into(),
+            device_id: "00000000-0000-4000-8000-000000000004".into(),
+            session_bound: false,
             descriptor: crate::agent_network::owned_login::OwnedInstance {
                 version: 1,
                 profile: "owned-device-relay-v1".into(),

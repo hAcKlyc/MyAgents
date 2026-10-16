@@ -32,8 +32,7 @@ async fn remote_connection(
 ) -> Result<(Value, Allocation), NetworkError> {
     let snapshot = owner.snapshot();
     let generation = owner.generation();
-    let device = crate::device_identity::current_device_identity()
-        .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+    let device = owner.local_device_identity()?;
     let context = json!({"authGeneration":snapshot.auth_generation,"deviceId":device.device_id,"deviceName":snapshot.device_name.or(device.device_name),"platform":device.platform,"networkId":snapshot.network_id,"principalId":snapshot.principal_id});
     let overhead = measure(&context)?.0 + 128;
     let mut allocation = owner.memory_budget().reserve(overhead * 2)?;

@@ -130,6 +130,16 @@ pub(crate) struct AgentNetwork {
 pub(crate) type ManagedConnection = Arc<AgentNetwork>;
 pub(crate) use super::registry::ManagedAgentNetwork;
 impl AgentNetwork {
+    pub(crate) fn local_device_identity(
+        &self,
+    ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {
+        match &self.account {
+            Some(account) => account.device_identity(),
+            None => crate::device_identity::current_device_identity()
+                .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE")),
+        }
+    }
+
     /// Presentation metadata from the existing account owner. This never reads
     /// an OS credential item and does not infer account validity from transport.
     pub(crate) fn owned_session_metadata(&self) -> Option<(u64, bool)> {

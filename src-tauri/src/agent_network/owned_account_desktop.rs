@@ -58,6 +58,14 @@ struct Attempt {
     instance: OwnedInstance,
     public_tls_ca: Option<String>,
     device_id: String,
+    owner_device_id: String,
+    child_epoch: u64,
+    candidates: Vec<super::registry::StoredOwnedConnection>,
+    selected_id: String,
+    expected_principal: Option<String>,
+    resolved_candidate: Option<super::registry::StoredOwnedConnection>,
+    staged_session: Option<OwnedSession>,
+    commit_unconfirmed: bool,
     attempt_id: String,
     transaction_id: String,
     verifier: Zeroizing<String>,
@@ -74,15 +82,24 @@ pub(crate) struct CompletedLogin {
     pub instance: OwnedInstance,
     pub public_tls_ca: Option<String>,
     pub device_id: String,
+    pub owner_device_id: String,
+    pub session_bound: bool,
+    pub candidates: Vec<super::registry::StoredOwnedConnection>,
+    pub replaces: Option<String>,
     pub session: OwnedSession,
     guard: Arc<AuthorizedSessionGuard>,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StartedLogin {
     pub attempt_id: String,
     pub authorization_url: String,
     pub expires_at: u64,
+}
+pub(crate) enum LoginProgress {
+    Pending,
+    Reauthorize(StartedLogin),
+    Authenticated(CompletedLogin),
 }
 #[derive(Default)]
 struct State {
@@ -91,6 +108,17 @@ struct State {
     generation_by_scope: HashMap<String, u64>,
 }
 impl State {
+    fn ensure_startable(&self, scope: &str) -> Result<(), NetworkError> {
+        if self
+            .current_by_scope
+            .get(scope)
+            .and_then(|id| self.attempts.get(id))
+            .is_some_and(|attempt| attempt.commit_unconfirmed)
+        {
+            return Err(NetworkError::new("OWNED_LOGIN_COMMIT_UNCONFIRMED"));
+        }
+        Ok(())
+    }
     fn begin(&mut self, scope: &str) -> (u64, Option<String>) {
         let generation = self
             .generation_by_scope
@@ -293,7 +321,9 @@ fn storage_transaction_lock() -> MutexGuard<'static, ()> {
 }
 
 fn entry(user: &str) -> Result<Entry, NetworkError> {
-    if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
+    if crate::app_dirs::IS_UPDATER_QA {
+        return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED"));
+    }
     let builder: Box<keyring::credential::CredentialBuilder> = {
         #[cfg(target_os = "macos")]
         {
@@ -339,6 +369,22 @@ fn key(
     let material = format!("{scope}\n{principal}\n{ca_hash}");
     URL_SAFE_NO_PAD.encode(Sha256::digest(material.as_bytes()))
 }
+fn session_key(
+    instance: &OwnedInstance,
+    device: &str,
+    principal: &str,
+    ca: Option<&str>,
+    binding: Option<&str>,
+) -> String {
+    let legacy = key(instance, device, principal, ca);
+    binding
+        .map(|binding| {
+            URL_SAFE_NO_PAD.encode(Sha256::digest(
+                format!("{legacy}\nbinding:{binding}").as_bytes(),
+            ))
+        })
+        .unwrap_or(legacy)
+}
 fn attempt_scope(issuer: &str, device_id: &str) -> Result<String, NetworkError> {
     let origin = super::account::origin(issuer)?;
     Ok(format!(
@@ -354,7 +400,12 @@ fn pending_entry(
     public_tls_ca: Option<&str>,
 ) -> Result<Entry, NetworkError> {
     let hash = key(instance, device_id, "pending", public_tls_ca);
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     let hash = session_physical_hash(&hash, super::credential_slots::selected_writer_selection()?)?
         .ok_or_else(|| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     // Pending transactions are newly created by this process, never migrated.
@@ -365,9 +416,15 @@ fn session_entry(
     device_id: &str,
     principal: &str,
     public_tls_ca: Option<&str>,
+    binding: Option<&str>,
 ) -> Result<Entry, NetworkError> {
-    let hash = key(instance, device_id, principal, public_tls_ca);
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    let hash = session_key(instance, device_id, principal, public_tls_ca, binding);
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     let hash = session_physical_hash(
         &hash,
         super::credential_slots::selection(&format!("session:{hash}"))?,
@@ -376,15 +433,21 @@ fn session_entry(
     // A committed route never falls back when its current item is missing.
     entry(&format!("session:{hash}"))
 }
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    not(test),
+    not(myagents_isolated_qa)
+))]
 fn session_entry_for_route(
     instance: &OwnedInstance,
     device_id: &str,
     principal: &str,
     public_tls_ca: Option<&str>,
     selection: super::credential_slots::RouteSelection,
+    binding: Option<&str>,
 ) -> Result<Entry, NetworkError> {
-    let logical = key(instance, device_id, principal, public_tls_ca);
+    let logical = session_key(instance, device_id, principal, public_tls_ca, binding);
     let physical = session_physical_hash(&logical, selection)?
         .ok_or_else(|| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?;
     entry(&format!("session:{physical}"))
@@ -411,12 +474,18 @@ fn write_session_unlocked(
     principal: &str,
     public_tls_ca: Option<&str>,
     secret: &SecretRecord,
+    binding: Option<&str>,
     _preserve_existing: bool,
     before_commit: impl Fn() -> Result<(), NetworkError>,
 ) -> Result<(), NetworkError> {
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     {
-        let legacy = key(instance, device_id, principal, public_tls_ca);
+        let legacy = session_key(instance, device_id, principal, public_tls_ca, binding);
         let target_selection = super::credential_slots::selected_writer_selection()?;
         let expected = serialized_secret(secret)?;
         super::credential_slots::with_committed_route(&format!("session:{legacy}"), |selection| {
@@ -442,11 +511,16 @@ fn write_session_unlocked(
             )
         })
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
+    #[cfg(not(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    )))]
     {
         before_commit()?;
         write_unlocked(
-            &session_entry(instance, device_id, principal, public_tls_ca)?,
+            &session_entry(instance, device_id, principal, public_tls_ca, binding)?,
             secret,
         )
     }
@@ -485,17 +559,32 @@ fn write_session_family_route(
             // The authorized source read is already the target readback.
             // Avoid a second Keychain read that can prompt again.
             target_confirmed = true;
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+            #[cfg(all(
+                target_os = "macos",
+                myagents_moxbot,
+                not(test),
+                not(myagents_isolated_qa)
+            ))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-confirm outcome=authorized-source"
             );
         } else {
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+            #[cfg(all(
+                target_os = "macos",
+                myagents_moxbot,
+                not(test),
+                not(myagents_isolated_qa)
+            ))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-destination-read outcome=start"
             );
             let target_read = read(target);
-            #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+            #[cfg(all(
+                target_os = "macos",
+                myagents_moxbot,
+                not(test),
+                not(myagents_isolated_qa)
+            ))]
             crate::ulog_info!(
                 "[credential-migration] stage=session-destination-read outcome={}",
                 if target_read.is_ok() { "ok" } else { "failed" }
@@ -504,12 +593,22 @@ fn write_session_family_route(
                 Some(existing) if existing.as_slice() == expected => target_confirmed = true,
                 Some(_) => return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED")),
                 None => {
-                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+                    #[cfg(all(
+                        target_os = "macos",
+                        myagents_moxbot,
+                        not(test),
+                        not(myagents_isolated_qa)
+                    ))]
                     crate::ulog_info!(
                         "[credential-migration] stage=session-destination-write outcome=start"
                     );
                     let result = write(target);
-                    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+                    #[cfg(all(
+                        target_os = "macos",
+                        myagents_moxbot,
+                        not(test),
+                        not(myagents_isolated_qa)
+                    ))]
                     crate::ulog_info!(
                         "[credential-migration] stage=session-destination-write outcome={}",
                         if result.is_ok() { "ok" } else { "failed" }
@@ -520,10 +619,20 @@ fn write_session_family_route(
         }
     }
     if !target_confirmed {
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+        #[cfg(all(
+            target_os = "macos",
+            myagents_moxbot,
+            not(test),
+            not(myagents_isolated_qa)
+        ))]
         crate::ulog_info!("[credential-migration] stage=session-confirm outcome=start");
         let result = read(target);
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+        #[cfg(all(
+            target_os = "macos",
+            myagents_moxbot,
+            not(test),
+            not(myagents_isolated_qa)
+        ))]
         crate::ulog_info!(
             "[credential-migration] stage=session-confirm outcome={}",
             if result.is_ok() { "read" } else { "failed" }
@@ -533,13 +642,23 @@ fn write_session_family_route(
         if confirmed.as_slice() != expected {
             return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_INVALID"));
         }
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+        #[cfg(all(
+            target_os = "macos",
+            myagents_moxbot,
+            not(test),
+            not(myagents_isolated_qa)
+        ))]
         crate::ulog_info!("[credential-migration] stage=session-confirm outcome=ok");
     }
     before_commit()?;
     Ok(())
 }
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    not(test),
+    not(myagents_isolated_qa)
+))]
 fn serialized_secret(secret: &SecretRecord) -> Result<Zeroizing<Vec<u8>>, NetworkError> {
     serde_json::to_vec(secret)
         .map(Zeroizing::new)
@@ -747,75 +866,263 @@ fn record(attempt: &Attempt) -> SecretRecord {
     }
 }
 
+fn eligible_candidates(
+    instance: &OwnedInstance,
+    ca: Option<&str>,
+    principal: &str,
+    candidates: &[super::registry::StoredOwnedConnection],
+) -> Result<Vec<super::registry::StoredOwnedConnection>, NetworkError> {
+    let mut eligible = Vec::new();
+    for candidate in candidates.iter().filter(|candidate| {
+        candidate.descriptor.issuer == instance.issuer && candidate.principal_id == principal
+    }) {
+        instance.ensure_same_trust(&candidate.descriptor)?;
+        if candidate.public_tls_ca.as_deref() != ca
+            || candidate.network_id != instance.network_id
+            || candidate.removing
+        {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        eligible.push(candidate.clone());
+    }
+    Ok(eligible)
+}
+
+fn select_registered_candidate(
+    candidates: &[super::registry::StoredOwnedConnection],
+    registered: &[bool],
+    selected: &str,
+) -> Result<Option<super::registry::StoredOwnedConnection>, NetworkError> {
+    if candidates.len() != registered.len() {
+        return Err(NetworkError::new("IDENTITY_STATE_INVALID"));
+    }
+    let matching: Vec<_> = candidates
+        .iter()
+        .zip(registered)
+        .filter_map(|(c, exists)| exists.then_some(c))
+        .collect();
+    if let Some(candidate) = matching.iter().find(|c| c.id == selected) {
+        return Ok(Some((*candidate).clone()));
+    }
+    match matching.as_slice() {
+        [] => Ok(None),
+        [candidate] => Ok(Some((*candidate).clone())),
+        _ => Err(NetworkError::new("OWNED_IDENTITY_SELECTION_REQUIRED")),
+    }
+}
+
+async fn registered_candidates(
+    client: &OwnedClient,
+    instance: &OwnedInstance,
+    session: &OwnedSession,
+    candidates: &[super::registry::StoredOwnedConnection],
+) -> Result<Vec<bool>, NetworkError> {
+    let mut registered = Vec::new();
+    for candidate in candidates {
+        let operation = crate::space_cloud::agent_network::AccountOperation::IdentityState(
+            candidate.device_id.clone(),
+        );
+        let (method, path, _) = operation.request()?;
+        let value = client
+            .identity_request(method, &path, None, &session.access_token)
+            .await?;
+        myagents_agent_network_protocol::validate_identity_state(&value)
+            .map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+        let state: myagents_agent_network_protocol::IdentityState =
+            serde_json::from_value(value)
+                .map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+        registered.push(validate_candidate_state(
+            instance,
+            &candidate.device_id,
+            state,
+        )?);
+    }
+    Ok(registered)
+}
+
+fn validate_candidate_state(
+    instance: &OwnedInstance,
+    device: &str,
+    state: myagents_agent_network_protocol::IdentityState,
+) -> Result<bool, NetworkError> {
+    if state.service_id != instance.service_id
+        || state.environment != instance.environment
+        || state.device_id != device
+    {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+    }
+    if state.key_generation.is_some() != state.key_fingerprint.is_some() {
+        return Err(NetworkError::new("IDENTITY_STATE_INVALID"));
+    }
+    Ok(state.key_generation.is_some())
+}
+
+// Durable pointer switch: credentials are immutable per binding. The old slot
+// remains usable across a crash. An unconfirmed config rollback keeps the new
+// slot too, because disk may already point to it. This seam exercises real
+// commit ordering with fault-injected persistence, without accessing Keychain.
+fn commit_staged_slot<T, P, A>(
+    write: impl FnOnce() -> Result<(), NetworkError>,
+    persist: impl FnOnce() -> Result<(), NetworkError>,
+    rollback: impl FnOnce() -> Result<(), NetworkError>,
+    discard: impl Fn() -> Result<(), NetworkError>,
+    acquire: impl FnOnce() -> P,
+    authorize: impl FnOnce() -> Result<A, NetworkError>,
+    publish: impl FnOnce(A) -> T,
+) -> Result<T, NetworkError> {
+    if let Err(error) = write() {
+        discard()?;
+        return Err(error);
+    }
+    if let Err(error) = persist() {
+        if rollback().is_err() {
+            return Err(NetworkError::new("OWNED_LOGIN_COMMIT_UNCONFIRMED"));
+        }
+        discard()?;
+        return Err(error);
+    }
+    let publication = acquire();
+    let authority = match authorize() {
+        Ok(authority) => authority,
+        Err(error) => {
+            drop(publication);
+            if rollback().is_err() {
+                return Err(NetworkError::new("OWNED_LOGIN_COMMIT_UNCONFIRMED"));
+            }
+            discard()?;
+            return Err(error);
+        }
+    };
+    let result = publish(authority);
+    drop(publication);
+    Ok(result)
+}
+
+fn staged_guard(connection: &str, binding: &str, expires_at: u64) -> Arc<AuthorizedSessionGuard> {
+    Arc::new(AuthorizedSessionGuard {
+        connection_id: connection.to_owned(),
+        binding_id: binding.to_owned(),
+        generation: 0,
+        expires_at,
+        valid: AtomicBool::new(false),
+    })
+}
+
+fn current_child<'a>(
+    state: &'a mut State,
+    scope: &str,
+    id: &str,
+    epoch: u64,
+) -> Result<&'a mut Attempt, NetworkError> {
+    if !state.is_current(scope, id) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    state
+        .attempts
+        .get_mut(id)
+        .filter(|attempt| attempt.child_epoch == epoch && attempt.consuming)
+        .ok_or_else(|| NetworkError::new("OWNED_LOGIN_CANCELLED"))
+}
+
+fn check_fresh_session_slot(login: &CompletedLogin) -> Result<(), NetworkError> {
+    // Each binding gets a new opaque hash under the existing credential route.
+    // A crash before config switch leaves the old pointer and secret intact.
+    let entry = session_entry(
+        &login.instance,
+        &login.device_id,
+        &login.session.principal_id,
+        login.public_tls_ca.as_deref(),
+        Some(&login.binding_id),
+    )?;
+    if read_unlocked(&entry)?.is_some() {
+        return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+    }
+    Ok(())
+}
+fn discard_staged_session(login: &CompletedLogin) -> Result<(), NetworkError> {
+    let entry = session_entry(
+        &login.instance,
+        &login.device_id,
+        &login.session.principal_id,
+        login.public_tls_ca.as_deref(),
+        Some(&login.binding_id),
+    )?;
+    match read_unlocked(&entry)? {
+        Some(SecretRecord::Session { binding_id, .. }) if binding_id == login.binding_id => {
+            delete_unlocked(&entry)
+        }
+        None => Ok(()),
+        _ => Err(NetworkError::new("ACCOUNT_BINDING_CHANGED")),
+    }
+}
+
 impl OwnedLoginManager {
     pub(crate) async fn start(
         &self,
         issuer: &str,
-        device_id: &str,
+        owner_device_id: &str,
         public_tls_ca_file: Option<&str>,
+        candidates: Vec<super::registry::StoredOwnedConnection>,
+        selected_id: String,
     ) -> Result<StartedLogin, NetworkError> {
-        if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
+        if crate::app_dirs::IS_UPDATER_QA {
+            return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED"));
+        }
         let public_tls_ca = read_public_ca_file(public_tls_ca_file)?;
         let device = crate::device_identity::current_device_identity()
             .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
-        if device.device_id != device_id {
+        if device.device_id != owner_device_id {
             return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
         }
-        let scope = attempt_scope(issuer, device_id)?;
-        let (generation, old_attempts, local_cleanup_failed) = {
+        // The logical attempt is installation/issuer scoped. Child PKCE device
+        // identities must never become the cancellation/supersession key.
+        let scope = attempt_scope(issuer, owner_device_id)?;
+        let (generation, old, cleanup) = {
             let mut state = self.state.lock().await;
+            state.ensure_startable(&scope)?;
             let (generation, old_id) = state.begin(&scope);
-            let old = old_id
-                .and_then(|id| state.attempts.remove(&id))
-                .into_iter()
-                .collect::<Vec<_>>();
-            // Clear old local authority before allowing another same-scope start
-            // to write the shared pending slot.
-            let mut cleanup_failed = false;
-            for attempt in &old {
-                let result = pending_entry(
-                    &attempt.instance,
-                    &attempt.device_id,
-                    attempt.public_tls_ca.as_deref(),
-                )
-                .and_then(|entry| delete(&entry));
-                cleanup_failed |= result.is_err();
-                if let Some(done) = &attempt.completed {
-                    cleanup_failed |= delete_account_if_binding(
-                        &done.instance,
-                        &done.device_id,
-                        &done.session.principal_id,
-                        done.public_tls_ca.as_deref(),
-                        &done.binding_id,
-                    )
-                    .is_err();
-                }
-            }
-            (generation, old, cleanup_failed)
+            let old = old_id.and_then(|id| state.attempts.remove(&id));
+            let cleanup = old
+                .as_ref()
+                .map(|attempt| {
+                    delete(&pending_entry(
+                        &attempt.instance,
+                        &attempt.owner_device_id,
+                        attempt.public_tls_ca.as_deref(),
+                    )?)
+                })
+                .transpose();
+            (generation, old, cleanup)
         };
-        for old in old_attempts {
-            if old.completed.is_none() {
+        if let Some(old) = old {
+            if let Some(session) = old.staged_session {
+                let _ = old.client.logout(&session.access_token).await;
+            } else {
                 let _ = old
                     .client
                     .cancel(&old.device_id, &old.transaction_id, &old.verifier)
                     .await;
             }
-            if let Some(done) = old.completed {
-                let _ = old.client.logout(&done.session.access_token).await;
-            }
         }
-        if local_cleanup_failed {
-            return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
-        }
+        cleanup?;
         let (client, instance) = OwnedClient::discover(issuer, public_tls_ca.as_deref()).await?;
+        let device_id = uuid::Uuid::new_v4().to_string();
         let (verifier, challenge) = pkce();
-        let started = client.start(device_id, &challenge).await?;
+        let started = client.start(&device_id, &challenge).await?;
         let attempt_id = uuid::Uuid::new_v4().to_string();
         let attempt = Attempt {
             client,
             instance: instance.clone(),
             public_tls_ca: public_tls_ca.clone(),
-            device_id: device.device_id,
+            device_id,
+            owner_device_id: owner_device_id.to_owned(),
+            child_epoch: 0,
+            candidates,
+            selected_id,
+            expected_principal: None,
+            resolved_candidate: None,
+            staged_session: None,
+            commit_unconfirmed: false,
             attempt_id: attempt_id.clone(),
             transaction_id: started.transaction_id,
             verifier,
@@ -824,21 +1131,14 @@ impl OwnedLoginManager {
             consuming: false,
             completed: None,
         };
-        let secret_entry = pending_entry(&instance, device_id, public_tls_ca.as_deref())?;
+        let secret_entry = pending_entry(&instance, owner_device_id, public_tls_ca.as_deref())?;
         let mut state = self.state.lock().await;
-        if state.generation_by_scope.get(&scope).copied() != Some(generation) {
-            drop(state);
-            let _ = attempt
-                .client
-                .cancel(
-                    &attempt.device_id,
-                    &attempt.transaction_id,
-                    &attempt.verifier,
-                )
-                .await;
-            return Err(NetworkError::new("OWNED_LOGIN_SUPERSEDED"));
-        }
-        if let Err(error) = write(&secret_entry, &record(&attempt)) {
+        let result = if state.generation_by_scope.get(&scope).copied() != Some(generation) {
+            Err(NetworkError::new("OWNED_LOGIN_SUPERSEDED"))
+        } else {
+            write(&secret_entry, &record(&attempt))
+        };
+        if let Err(error) = result {
             drop(state);
             let _ = attempt
                 .client
@@ -881,185 +1181,224 @@ impl OwnedLoginManager {
         crate::browser::open_external(url.as_str())
             .map_err(|_| NetworkError::new("OWNED_BROWSER_UNAVAILABLE"))
     }
-    pub(crate) async fn poll(
-        &self,
-        attempt_id: &str,
-    ) -> Result<Option<CompletedLogin>, NetworkError> {
+    pub(crate) async fn poll(&self, attempt_id: &str) -> Result<LoginProgress, NetworkError> {
         let (
             client,
             instance,
-            public_tls_ca,
-            device_id,
-            transaction_id,
+            ca,
+            device,
+            owner,
+            transaction,
             verifier,
             scope,
-            secret_entry,
+            epoch,
+            expected,
+            candidates,
+            selected,
+            resolved,
         ) = {
             let mut state = self.state.lock().await;
-            let scope = {
-                let attempt = state
-                    .attempts
-                    .get(attempt_id)
-                    .ok_or_else(|| NetworkError::new("OWNED_LOGIN_NOT_FOUND"))?;
-                attempt_scope(&attempt.instance.issuer, &attempt.device_id)?
-            };
+            let attempt = state
+                .attempts
+                .get(attempt_id)
+                .ok_or_else(|| NetworkError::new("OWNED_LOGIN_NOT_FOUND"))?;
+            let scope = attempt_scope(&attempt.instance.issuer, &attempt.owner_device_id)?;
             if !state.is_current(&scope, attempt_id) {
                 return Err(NetworkError::new("OWNED_LOGIN_SUPERSEDED"));
             }
-            let attempt = state
-                .attempts
-                .get_mut(attempt_id)
-                .expect("attempt checked above");
+            let attempt = state.attempts.get_mut(attempt_id).expect("checked attempt");
+            if attempt.commit_unconfirmed {
+                return Err(NetworkError::new("OWNED_LOGIN_COMMIT_UNCONFIRMED"));
+            }
             if let Some(done) = &attempt.completed {
-                return Ok(Some(done.clone()));
+                return Ok(LoginProgress::Authenticated(done.clone()));
             }
             if attempt.consuming || attempt.expires_at <= now() {
                 return Err(NetworkError::new("OWNED_LOGIN_RESULT_UNAVAILABLE"));
             }
-            let secret_entry = pending_entry(
-                &attempt.instance,
-                &attempt.device_id,
-                attempt.public_tls_ca.as_deref(),
-            )?;
             attempt.consuming = true;
-            write(&secret_entry, &record(attempt))?;
+            write(
+                &pending_entry(
+                    &attempt.instance,
+                    &attempt.owner_device_id,
+                    attempt.public_tls_ca.as_deref(),
+                )?,
+                &record(attempt),
+            )?;
             (
                 attempt.client.clone(),
                 attempt.instance.clone(),
                 attempt.public_tls_ca.clone(),
                 attempt.device_id.clone(),
+                attempt.owner_device_id.clone(),
                 attempt.transaction_id.clone(),
                 attempt.verifier.clone(),
                 scope,
-                secret_entry,
+                attempt.child_epoch,
+                attempt.expected_principal.clone(),
+                attempt.candidates.clone(),
+                attempt.selected_id.clone(),
+                attempt.resolved_candidate.clone(),
             )
         };
-        let result = client.poll(&device_id, &transaction_id, &verifier).await;
-        match result {
-            Ok(OwnedPoll::Pending) => {
+        let result = client.poll(&device, &transaction, &verifier).await?;
+        let session = match result {
+            OwnedPoll::Pending => {
                 let mut state = self.state.lock().await;
-                if !state.is_current(&scope, attempt_id) {
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-                }
-                let Some(attempt) = state.attempts.get_mut(attempt_id) else {
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-                };
-                if !attempt.consuming {
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-                }
+                let attempt = current_child(&mut state, &scope, attempt_id, epoch)?;
                 attempt.consuming = false;
-                write(&secret_entry, &record(attempt))?;
-                Ok(None)
+                write(
+                    &pending_entry(&instance, &owner, ca.as_deref())?,
+                    &record(attempt),
+                )?;
+                return Ok(LoginProgress::Pending);
             }
-            Ok(OwnedPoll::Authenticated(session)) => {
-                let connection_id = uuid::Uuid::new_v4().to_string();
-                let binding_id = uuid::Uuid::new_v4().to_string();
-                let mut state = self.state.lock().await;
-                if !state.is_current(&scope, attempt_id) {
+            OwnedPoll::Authenticated(session) => session,
+        };
+        {
+            let mut state = self.state.lock().await;
+            match current_child(&mut state, &scope, attempt_id, epoch) {
+                Ok(attempt) => attempt.staged_session = Some(session.clone()),
+                Err(error) => {
                     drop(state);
                     let _ = client.logout(&session.access_token).await;
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+                    return Err(error);
                 }
-                let Some(attempt) = state.attempts.get_mut(attempt_id) else {
-                    drop(state);
-                    let _ = client.logout(&session.access_token).await;
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-                };
-                if !attempt.consuming {
-                    drop(state);
-                    let _ = client.logout(&session.access_token).await;
-                    return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
-                }
-                let secret = SecretRecord::Session {
-                    version: VERSION,
-                    instance: instance.clone(),
-                    public_tls_ca: public_tls_ca.clone(),
-                    device_id: device_id.clone(),
-                    principal_id: session.principal_id.clone(),
-                    network_id: session.network_id.clone(),
-                    session: session.clone(),
-                    connection_id: connection_id.clone(),
-                    binding_id: binding_id.clone(),
-                };
-                // The consumed transaction is durably marked before the request. If
-                // saving the returned session fails, no subsequent poll can replay it.
-                session.validate(&instance)?;
-                let slot = SessionSlot::new(
-                    &instance,
-                    &device_id,
-                    &session.principal_id,
-                    public_tls_ca.as_deref(),
-                )?;
-                let _storage = storage_transaction_lock();
-                session_guard_cache().ensure_capacity(&slot)?;
-                write_session_unlocked(
-                    &instance,
-                    &device_id,
-                    &session.principal_id,
-                    public_tls_ca.as_deref(),
-                    &secret,
-                    false,
-                    || Ok(()),
-                )?;
-                let guard = session_guard_cache().authorize(
-                    slot,
-                    &binding_id,
-                    &connection_id,
-                    session.expires_at,
-                )?;
-                let completed = CompletedLogin {
-                    attempt_id: attempt_id.to_owned(),
-                    connection_id,
-                    binding_id,
-                    instance: instance.clone(),
-                    public_tls_ca: public_tls_ca.clone(),
-                    device_id: device_id.clone(),
-                    session,
-                    guard,
-                };
-                attempt.completed = Some(completed.clone());
-                delete_unlocked(&secret_entry)?;
-                Ok(Some(completed))
             }
-            Err(error) => Err(error),
         }
+        if expected
+            .as_ref()
+            .is_some_and(|principal| *principal != session.principal_id)
+        {
+            let _ = client.logout(&session.access_token).await;
+            return Err(NetworkError::new("OWNED_ACCOUNT_MISMATCH"));
+        }
+        let eligible =
+            eligible_candidates(&instance, ca.as_deref(), &session.principal_id, &candidates)?;
+        let replacement = if expected.is_some() {
+            resolved
+        } else {
+            // Every candidate query must complete. A rejected/malformed/unknown
+            // read is not evidence of absence and must not cause a fresh identity.
+            let registered = registered_candidates(&client, &instance, &session, &eligible).await?;
+            if let Some(candidate) = select_registered_candidate(&eligible, &registered, &selected)?
+            {
+                // PKCE tokens remain device-bound. Restore the old identity only
+                // after retiring this temporary session and authorizing that ID.
+                client.logout(&session.access_token).await?;
+                {
+                    let mut state = self.state.lock().await;
+                    current_child(&mut state, &scope, attempt_id, epoch)?.staged_session = None;
+                }
+                let (next_verifier, challenge) = pkce();
+                let started = client.start(&candidate.device_id, &challenge).await?;
+                let mut state = self.state.lock().await;
+                let attempt = match current_child(&mut state, &scope, attempt_id, epoch) {
+                    Ok(attempt) => attempt,
+                    Err(error) => {
+                        drop(state);
+                        let _ = client
+                            .cancel(
+                                &candidate.device_id,
+                                &started.transaction_id,
+                                &next_verifier,
+                            )
+                            .await;
+                        return Err(error);
+                    }
+                };
+                attempt.device_id = candidate.device_id.clone();
+                attempt.child_epoch = epoch + 1;
+                attempt.expected_principal = Some(session.principal_id.clone());
+                attempt.resolved_candidate = Some(candidate);
+                attempt.transaction_id = started.transaction_id;
+                attempt.verifier = next_verifier;
+                attempt.authorization_url = started.authorization_url.clone();
+                attempt.expires_at = started.expires_at;
+                attempt.consuming = false;
+                if let Err(error) = write(
+                    &pending_entry(&instance, &owner, ca.as_deref())?,
+                    &record(attempt),
+                ) {
+                    let child_device = attempt.device_id.clone();
+                    let child_transaction = attempt.transaction_id.clone();
+                    let child_verifier = attempt.verifier.clone();
+                    attempt.consuming = true;
+                    drop(state);
+                    let _ = client
+                        .cancel(&child_device, &child_transaction, &child_verifier)
+                        .await;
+                    return Err(error);
+                }
+                return Ok(LoginProgress::Reauthorize(StartedLogin {
+                    attempt_id: attempt_id.to_owned(),
+                    authorization_url: started.authorization_url,
+                    expires_at: started.expires_at,
+                }));
+            }
+            // Configuration alone does not prove enrollment. Reuse its UI
+            // connection ID when repairing an unregistered failed login, while
+            // leaving its old credential/key slots intact.
+            eligible
+                .iter()
+                .find(|c| c.id == selected)
+                .cloned()
+                .or_else(|| (eligible.len() == 1).then(|| eligible[0].clone()))
+        };
+        let connection_id = replacement
+            .as_ref()
+            .map(|c| c.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let binding_id = uuid::Uuid::new_v4().to_string();
+        let completed = CompletedLogin {
+            attempt_id: attempt_id.to_owned(),
+            connection_id: connection_id.clone(),
+            binding_id: binding_id.clone(),
+            instance: instance.clone(),
+            public_tls_ca: ca.clone(),
+            device_id: device,
+            owner_device_id: owner.clone(),
+            session_bound: true,
+            candidates: eligible,
+            replaces: replacement.map(|c| c.id),
+            guard: staged_guard(&connection_id, &binding_id, session.expires_at),
+            session,
+        };
+        let mut state = self.state.lock().await;
+        let attempt = current_child(&mut state, &scope, attempt_id, epoch)?;
+        // No durable session or active guard is published by polling.
+        delete(&pending_entry(&instance, &owner, ca.as_deref())?)?;
+        attempt.completed = Some(completed.clone());
+        Ok(LoginProgress::Authenticated(completed))
     }
     pub(crate) async fn cancel(&self, attempt_id: &str) -> Result<(), NetworkError> {
-        let attempt = {
+        let (attempt, cleanup) = {
             let mut state = self.state.lock().await;
+            // The disk pointer may already reference this token. Closing the UI
+            // must not revoke it or discard its generation. A fresh process
+            // reconciles using the atomic config pointer and immutable slots.
+            if state
+                .attempts
+                .get(attempt_id)
+                .is_some_and(|attempt| attempt.commit_unconfirmed)
+            {
+                return Ok(());
+            }
             let Some(attempt) = state.attempts.remove(attempt_id) else {
                 return Ok(());
             };
-            if let Ok(scope) = attempt_scope(&attempt.instance.issuer, &attempt.device_id) {
-                if state.current_by_scope.get(&scope).map(String::as_str) == Some(attempt_id) {
-                    state.current_by_scope.remove(&scope);
-                }
-                let generation = state
-                    .generation_by_scope
-                    .get(&scope)
-                    .copied()
-                    .unwrap_or(0)
-                    .saturating_add(1);
-                state.generation_by_scope.insert(scope, generation);
-            }
-            delete(&pending_entry(
+            let scope = attempt_scope(&attempt.instance.issuer, &attempt.owner_device_id)?;
+            state.invalidate(&scope, attempt_id);
+            let cleanup = delete(&pending_entry(
                 &attempt.instance,
-                &attempt.device_id,
+                &attempt.owner_device_id,
                 attempt.public_tls_ca.as_deref(),
-            )?)?;
-            if let Some(done) = &attempt.completed {
-                done.guard.valid.store(false, Ordering::Release);
-                delete_account_if_binding(
-                    &done.instance,
-                    &done.device_id,
-                    &done.session.principal_id,
-                    done.public_tls_ca.as_deref(),
-                    &done.binding_id,
-                )?;
-            }
-            attempt
+            )?);
+            (attempt, cleanup)
         };
-        if attempt.completed.is_none() {
+        if let Some(session) = attempt.staged_session {
+            let _ = attempt.client.logout(&session.access_token).await;
+        } else {
             let _ = attempt
                 .client
                 .cancel(
@@ -1068,57 +1407,105 @@ impl OwnedLoginManager {
                     &attempt.verifier,
                 )
                 .await;
-        } else if let Some(done) = attempt.completed {
-            if let Ok((client, _)) =
-                OwnedClient::discover(&done.instance.issuer, done.public_tls_ca.as_deref()).await
-            {
-                let _ = client.logout(&done.session.access_token).await;
-            }
         }
-        Ok(())
+        cleanup
     }
-    pub(crate) async fn is_current(&self, login: &CompletedLogin) -> bool {
-        let state = self.state.lock().await;
-        let Ok(scope) = attempt_scope(&login.instance.issuer, &login.device_id) else {
-            return false;
-        };
-        state.current_by_scope.get(&scope).map(String::as_str) == Some(login.attempt_id.as_str())
-            && state
-                .attempts
-                .get(&login.attempt_id)
-                .and_then(|attempt| attempt.completed.as_ref())
-                .is_some_and(|done| {
-                    done.binding_id == login.binding_id && done.connection_id == login.connection_id
-                })
-    }
-
-    pub(crate) async fn commit_if_current<T>(
+    pub(crate) async fn commit_if_current<T, P>(
         &self,
         login: &CompletedLogin,
-        guard: impl FnOnce() -> Result<(), NetworkError>,
-        commit: impl FnOnce() -> Result<T, NetworkError>,
+        validate: impl Fn() -> Result<(), NetworkError>,
+        persist: impl FnOnce() -> Result<(), NetworkError>,
+        rollback: impl FnOnce() -> Result<(), NetworkError>,
+        acquire_publication: impl FnOnce() -> P,
+        publish: impl FnOnce(&CompletedLogin) -> T,
     ) -> Result<T, NetworkError> {
+        // Cancel and commit linearize at this lock; no network awaits inside.
         let mut state = self.state.lock().await;
-        let scope = attempt_scope(&login.instance.issuer, &login.device_id)?;
+        let scope = attempt_scope(&login.instance.issuer, &login.owner_device_id)?;
         let exact = state.is_current(&scope, &login.attempt_id)
             && state
                 .attempts
                 .get(&login.attempt_id)
-                .and_then(|attempt| attempt.completed.as_ref())
-                .is_some_and(|current| {
-                    current.binding_id == login.binding_id
-                        && current.connection_id == login.connection_id
+                .is_some_and(|attempt| {
+                    attempt.expires_at > now()
+                        && attempt.completed.as_ref().is_some_and(|done| {
+                            done.binding_id == login.binding_id
+                                && done.connection_id == login.connection_id
+                        })
                 });
         if !exact {
             return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
         }
-        guard()?;
-        let result = commit()?;
+        validate()?;
+        login.session.validate(&login.instance)?;
+        let slot = SessionSlot::new(
+            &login.instance,
+            &login.device_id,
+            &login.session.principal_id,
+            login.public_tls_ca.as_deref(),
+        )?;
+        let _storage = storage_transaction_lock();
+        session_guard_cache().ensure_capacity(&slot)?;
+        check_fresh_session_slot(login)?;
+        let secret = SecretRecord::Session {
+            version: VERSION,
+            instance: login.instance.clone(),
+            public_tls_ca: login.public_tls_ca.clone(),
+            device_id: login.device_id.clone(),
+            principal_id: login.session.principal_id.clone(),
+            network_id: login.session.network_id.clone(),
+            session: login.session.clone(),
+            connection_id: login.connection_id.clone(),
+            binding_id: login.binding_id.clone(),
+        };
+        let result = commit_staged_slot(
+            || {
+                write_session_unlocked(
+                    &login.instance,
+                    &login.device_id,
+                    &login.session.principal_id,
+                    login.public_tls_ca.as_deref(),
+                    &secret,
+                    Some(&login.binding_id),
+                    false,
+                    || Ok(()),
+                )
+            },
+            persist,
+            rollback,
+            || discard_staged_session(login),
+            acquire_publication,
+            || {
+                validate()?;
+                login.session.validate(&login.instance)?;
+                session_guard_cache().authorize(
+                    slot,
+                    &login.binding_id,
+                    &login.connection_id,
+                    login.session.expires_at,
+                )
+            },
+            |guard| {
+                let mut committed = login.clone();
+                committed.guard = guard;
+                publish(&committed)
+            },
+        );
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if error.code == "OWNED_LOGIN_COMMIT_UNCONFIRMED" {
+                    if let Some(attempt) = state.attempts.get_mut(&login.attempt_id) {
+                        attempt.commit_unconfirmed = true;
+                    }
+                }
+                return Err(error);
+            }
+        };
         state.attempts.remove(&login.attempt_id);
         state.invalidate(&scope, &login.attempt_id);
         Ok(result)
     }
-
     pub(crate) async fn delete_saved_session_if_binding(
         &self,
         instance: &OwnedInstance,
@@ -1126,10 +1513,18 @@ impl OwnedLoginManager {
         principal: &str,
         public_tls_ca: Option<&str>,
         expected_binding: &str,
+        session_bound: bool,
     ) -> Result<bool, NetworkError> {
-        // Serialize keyring slot mutation with poll's durable session write.
+        // Serialize removal with the final durable login commit.
         let _state = self.state.lock().await;
-        delete_account_if_binding(instance, device, principal, public_tls_ca, expected_binding)
+        delete_account_if_binding(
+            instance,
+            device,
+            principal,
+            public_tls_ca,
+            expected_binding,
+            session_bound,
+        )
     }
 }
 
@@ -1144,6 +1539,8 @@ pub(crate) fn account_from_login(
     Arc::new(OwnedAccount {
         connection_id: login.connection_id.clone(),
         descriptor: login.instance.clone(),
+        device_id: login.device_id.clone(),
+        session_bound: login.session_bound,
         active: Arc::new(AtomicBool::new(true)),
         session: login.session.clone(),
         public_tls_ca: login.public_tls_ca.clone(),
@@ -1160,11 +1557,23 @@ pub(crate) fn delete_account_if_binding(
     principal: &str,
     public_tls_ca: Option<&str>,
     expected_binding: &str,
+    session_bound: bool,
 ) -> Result<bool, NetworkError> {
     let _storage = storage_transaction_lock();
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     {
-        let legacy = key(instance, device, principal, public_tls_ca);
+        let legacy = session_key(
+            instance,
+            device,
+            principal,
+            public_tls_ca,
+            session_bound.then_some(expected_binding),
+        );
         let removed = super::credential_slots::with_deleted_route_family(
             &format!("session:{legacy}"),
             |selection| {
@@ -1188,9 +1597,20 @@ pub(crate) fn delete_account_if_binding(
         session_guard_cache().invalidate_binding(&slot, expected_binding);
         return Ok(removed);
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
+    #[cfg(not(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    )))]
     {
-        let entry = session_entry(instance, device, principal, public_tls_ca)?;
+        let entry = session_entry(
+            instance,
+            device,
+            principal,
+            public_tls_ca,
+            session_bound.then_some(expected_binding),
+        )?;
         let Some(SecretRecord::Session { binding_id, .. }) = read_unlocked(&entry)? else {
             let slot = SessionSlot::new(instance, device, principal, public_tls_ca)?;
             session_guard_cache().invalidate_binding(&slot, expected_binding);
@@ -1214,9 +1634,16 @@ pub(crate) fn restore_account(
     binding_id: &str,
     public_tls_ca: Option<&str>,
     join_authorized: bool,
+    session_bound: bool,
 ) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
     let _storage = storage_transaction_lock();
-    let record = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?;
+    let record = read_unlocked(&session_entry(
+        instance,
+        device,
+        principal,
+        public_tls_ca,
+        session_bound.then_some(binding_id),
+    )?)?;
     restore_account_from_record(
         instance,
         device,
@@ -1226,6 +1653,7 @@ pub(crate) fn restore_account(
         public_tls_ca,
         join_authorized,
         record,
+        session_bound,
     )
 }
 
@@ -1238,15 +1666,27 @@ pub(crate) fn restore_account_authorized(
     public_tls_ca: Option<&str>,
     join_authorized: bool,
     cancelled: &AtomicBool,
+    session_bound: bool,
 ) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     let _storage = storage_transaction_lock();
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     let validated = {
         use super::credential_slots::RouteSelection as Selection;
-        let logical = key(instance, device, principal, public_tls_ca);
+        let logical = session_key(
+            instance,
+            device,
+            principal,
+            public_tls_ca,
+            session_bound.then_some(binding_id),
+        );
         let route_id = format!("session:{logical}");
         let target = super::credential_slots::selected_writer_selection()?;
         let mut validated = None;
@@ -1258,8 +1698,14 @@ pub(crate) fn restore_account_authorized(
             if selection == Selection::Deleted {
                 return Err(NetworkError::new("NETWORK_CREDENTIAL_KEY_MISSING"));
             }
-            let source_entry =
-                session_entry_for_route(instance, device, principal, public_tls_ca, selection)?;
+            let source_entry = session_entry_for_route(
+                instance,
+                device,
+                principal,
+                public_tls_ca,
+                selection,
+                session_bound.then_some(binding_id),
+            )?;
             let source_read = read_authorized_unlocked(&source_entry, cancelled);
             crate::ulog_info!(
                 "[credential-migration] stage=session-source-read outcome={}",
@@ -1290,8 +1736,14 @@ pub(crate) fn restore_account_authorized(
             if cancelled.load(Ordering::Acquire) {
                 return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
             }
-            let target_entry =
-                session_entry_for_route(instance, device, principal, public_tls_ca, target)?;
+            let target_entry = session_entry_for_route(
+                instance,
+                device,
+                principal,
+                public_tls_ca,
+                target,
+                session_bound.then_some(binding_id),
+            )?;
             write_session_family_route(
                 selection,
                 target,
@@ -1307,6 +1759,7 @@ pub(crate) fn restore_account_authorized(
                         principal,
                         public_tls_ca,
                         family,
+                        session_bound.then_some(binding_id),
                     )?;
                     read_unlocked(&entry)?
                         .as_ref()
@@ -1326,10 +1779,21 @@ pub(crate) fn restore_account_authorized(
         transaction?;
         validated.ok_or_else(|| NetworkError::new("OWNED_SESSION_RECORD_MISSING"))?
     };
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
+    #[cfg(not(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    )))]
     {
         let record = read_authorized_unlocked(
-            &session_entry(instance, device, principal, public_tls_ca)?,
+            &session_entry(
+                instance,
+                device,
+                principal,
+                public_tls_ca,
+                session_bound.then_some(binding_id),
+            )?,
             cancelled,
         )?;
         let validated = validate_session_record(
@@ -1346,23 +1810,44 @@ pub(crate) fn restore_account_authorized(
         }
         return match validated {
             Some(validated) => {
-                let restored = publish_validated_session(validated, join_authorized)?;
+                let restored =
+                    publish_validated_session(validated, join_authorized, session_bound)?;
                 restore_if_not_cancelled(Some(restored), cancelled)
             }
             None => Ok(None),
         };
     }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     if cancelled.load(Ordering::Acquire) {
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
-    let restored = publish_validated_session(validated, join_authorized)?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
+    let restored = publish_validated_session(validated, join_authorized, session_bound)?;
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    ))]
     restore_if_not_cancelled(Some(restored), cancelled)
 }
 
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    not(test),
+    not(myagents_isolated_qa)
+))]
 fn current_account_binding(account: &OwnedAccount, device: &str) -> Result<String, NetworkError> {
     (account.guard)()?;
     let slot = SessionSlot::new(
@@ -1385,7 +1870,12 @@ fn current_account_binding(account: &OwnedAccount, device: &str) -> Result<Strin
     Ok(current.binding_id.clone())
 }
 
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    not(test),
+    not(myagents_isolated_qa)
+))]
 pub(crate) fn promote_current_account(
     account: &OwnedAccount,
     device: &str,
@@ -1398,7 +1888,12 @@ pub(crate) fn promote_current_account(
 /// Persist only a session already validated by the account/identity owners.
 /// Legacy encrypted records remain unchanged for rollback. The durable route
 /// prevents a later missing/deleted current item from reviving a legacy token.
-#[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
+#[cfg(all(
+    target_os = "macos",
+    myagents_moxbot,
+    not(test),
+    not(myagents_isolated_qa)
+))]
 pub(crate) fn promote_account(
     account: &OwnedAccount,
     device: &str,
@@ -1435,6 +1930,7 @@ pub(crate) fn promote_account(
         &account.session.principal_id,
         account.public_tls_ca.as_deref(),
         &record,
+        account.session_bound.then_some(binding),
         true,
         || {
             if cancelled.load(Ordering::Acquire) {
@@ -1461,6 +1957,7 @@ fn restore_account_from_record(
     public_tls_ca: Option<&str>,
     join_authorized: bool,
     record: Option<SecretRecord>,
+    session_bound: bool,
 ) -> Result<Option<Arc<OwnedAccount>>, NetworkError> {
     let Some(validated) = validate_session_record(
         instance,
@@ -1474,7 +1971,7 @@ fn restore_account_from_record(
     else {
         return Ok(None);
     };
-    publish_validated_session(validated, join_authorized).map(Some)
+    publish_validated_session(validated, join_authorized, session_bound).map(Some)
 }
 
 struct ValidatedSession {
@@ -1531,7 +2028,15 @@ fn validate_session_record(
     }))
 }
 
-#[cfg(any(test, all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
+#[cfg(any(
+    test,
+    all(
+        target_os = "macos",
+        myagents_moxbot,
+        not(test),
+        not(myagents_isolated_qa)
+    )
+))]
 fn validate_restore_commit_fence(
     validated: &ValidatedSession,
     instance: &OwnedInstance,
@@ -1550,6 +2055,7 @@ fn validate_restore_commit_fence(
 fn publish_validated_session(
     validated: ValidatedSession,
     join_authorized: bool,
+    session_bound: bool,
 ) -> Result<Arc<OwnedAccount>, NetworkError> {
     let slot = SessionSlot::new(
         &validated.instance,
@@ -1570,7 +2076,11 @@ fn publish_validated_session(
         binding_id: validated.binding_id,
         instance: validated.instance,
         public_tls_ca: validated.public_tls_ca,
+        owner_device_id: validated.device_id.clone(),
+        session_bound,
         device_id: validated.device_id,
+        candidates: Vec::new(),
+        replaces: None,
         guard,
         session: validated.session,
     };
@@ -1584,6 +2094,7 @@ pub(crate) fn load_session_for_removal(
     connection_id: &str,
     binding_id: &str,
     public_tls_ca: Option<&str>,
+    session_bound: bool,
 ) -> Result<Option<OwnedSession>, NetworkError> {
     let _storage = storage_transaction_lock();
     let Some(SecretRecord::Session {
@@ -1596,7 +2107,13 @@ pub(crate) fn load_session_for_removal(
         session,
         connection_id: saved_connection,
         binding_id: saved_binding,
-    }) = read_unlocked(&session_entry(instance, device, principal, public_tls_ca)?)?
+    }) = read_unlocked(&session_entry(
+        instance,
+        device,
+        principal,
+        public_tls_ca,
+        session_bound.then_some(binding_id),
+    )?)?
     else {
         return Ok(None);
     };
@@ -1661,6 +2178,275 @@ mod tests {
 
     fn slot(network_id: &str, ca: Option<&str>) -> SessionSlot {
         SessionSlot::new(&instance(network_id), "device-1", "principal-1", ca).unwrap()
+    }
+
+    fn candidate(id: &str, principal: &str) -> super::super::registry::StoredOwnedConnection {
+        let instance = instance("network-candidate");
+        super::super::registry::StoredOwnedConnection {
+            id: id.into(),
+            network_id: instance.network_id.clone(),
+            descriptor: instance,
+            public_tls_ca: None,
+            device_id: format!("device-{id}"),
+            principal_id: principal.into(),
+            binding_id: format!("binding-{id}"),
+            session_bound: false,
+            join_authorized: true,
+            removing: false,
+        }
+    }
+
+    #[test]
+    fn candidate_selection_uses_registration_not_merely_saved_config() {
+        let candidates = vec![candidate("old", "p"), candidate("failed", "p")];
+        assert_eq!(
+            super::select_registered_candidate(&candidates, &[true, false], "failed")
+                .unwrap()
+                .unwrap()
+                .id,
+            "old"
+        );
+        assert!(
+            super::select_registered_candidate(&candidates, &[false, false], "failed")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            super::select_registered_candidate(&candidates, &[true, true], "unrelated").is_err()
+        );
+        assert_eq!(
+            super::select_registered_candidate(&candidates, &[true, true], "old")
+                .unwrap()
+                .unwrap()
+                .id,
+            "old"
+        );
+    }
+
+    #[test]
+    fn candidates_never_cross_accounts_trust_or_removal_boundaries() {
+        let first = candidate("one", "p");
+        let mut other = candidate("other", "q");
+        let eligible = super::eligible_candidates(
+            &first.descriptor,
+            None,
+            "p",
+            &[first.clone(), other.clone()],
+        )
+        .unwrap();
+        assert_eq!(eligible.len(), 1);
+        other.principal_id = "p".into();
+        other.public_tls_ca = Some("different-ca".into());
+        assert!(
+            super::eligible_candidates(&first.descriptor, None, "p", &[other.clone()]).is_err()
+        );
+        other.public_tls_ca = None;
+        other.removing = true;
+        assert!(super::eligible_candidates(&first.descriptor, None, "p", &[other]).is_err());
+    }
+
+    #[test]
+    fn half_empty_identity_state_cannot_trigger_a_new_device() {
+        let instance = instance("state-pair");
+        for (generation, fingerprint) in [(None, Some("x".repeat(43))), (Some(1), None)] {
+            let state = myagents_agent_network_protocol::IdentityState {
+                service_id: instance.service_id.clone(),
+                environment: instance.environment.clone(),
+                device_id: "device".into(),
+                key_generation: generation,
+                key_fingerprint: fingerprint,
+            };
+            assert_eq!(
+                super::validate_candidate_state(&instance, "device", state)
+                    .unwrap_err()
+                    .code,
+                "IDENTITY_STATE_INVALID"
+            );
+        }
+    }
+
+    #[test]
+    fn binding_slots_preserve_legacy_and_separate_login_generations() {
+        let instance = instance("binding-slot");
+        let legacy = super::key(&instance, "device", "p", None);
+        assert_eq!(
+            super::session_key(&instance, "device", "p", None, None),
+            legacy
+        );
+        let first = super::session_key(&instance, "device", "p", None, Some("first"));
+        let second = super::session_key(&instance, "device", "p", None, Some("second"));
+        assert_ne!(first, legacy);
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 43);
+        assert_ne!(
+            first,
+            super::session_key(&instance, "device", "other", None, Some("first"))
+        );
+        let json = serde_json::to_value(candidate("one", "p")).unwrap();
+        assert!(json.get("sessionBound").is_none());
+        let restored: super::super::registry::StoredOwnedConnection =
+            serde_json::from_value(json).unwrap();
+        assert!(!restored.session_bound);
+    }
+
+    #[test]
+    fn crash_between_secret_and_config_leaves_the_old_binding_usable() {
+        use std::cell::RefCell;
+        let slots = RefCell::new(std::collections::HashMap::from([("old", "old-secret")]));
+        let pointer = RefCell::new("old");
+        let crash = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: Result<(), NetworkError> = super::commit_staged_slot(
+                || {
+                    slots.borrow_mut().insert("new", "new-secret");
+                    Ok(())
+                },
+                || panic!("injected process exit before pointer switch"),
+                || {
+                    *pointer.borrow_mut() = "old";
+                    Ok(())
+                },
+                || {
+                    slots.borrow_mut().remove("new");
+                    Ok(())
+                },
+                || (),
+                || Ok::<(), NetworkError>(()),
+                |_| (),
+            );
+        }));
+        assert!(crash.is_err());
+        assert_eq!(slots.borrow().get(*pointer.borrow()), Some(&"old-secret"));
+    }
+
+    #[test]
+    fn unconfirmed_config_rollback_keeps_both_binding_slots() {
+        use std::cell::RefCell;
+        let slots = RefCell::new(std::collections::HashMap::from([("old", "old-secret")]));
+        let result: Result<(), NetworkError> = super::commit_staged_slot(
+            || {
+                slots.borrow_mut().insert("new", "new-secret");
+                Ok(())
+            },
+            || Err(NetworkError::new("NETWORK_CONFIG_WRITE_FAILED")),
+            || Err(NetworkError::new("NETWORK_CONFIG_WRITE_FAILED")),
+            || {
+                slots.borrow_mut().remove("new");
+                Ok(())
+            },
+            || (),
+            || -> Result<(), NetworkError> { panic!("must not authorize") },
+            |_| (),
+        );
+        assert_eq!(result.unwrap_err().code, "OWNED_LOGIN_COMMIT_UNCONFIRMED");
+        assert_eq!(slots.borrow().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn closing_unconfirmed_login_cannot_revoke_its_possibly_committed_token() {
+        let mut instance = instance("00000000-0000-0000-0000-000000000003");
+        instance.root_certificate = crate::agent_network::crypto::tests::Fixture::new().ca.pem();
+        let mut jwk = crate::agent_network::crypto::DevicePrivateKey::generate()
+            .unwrap()
+            .public_jwk()
+            .unwrap();
+        jwk["kid"] = serde_json::json!("unconfirmed-test");
+        jwk["alg"] = serde_json::json!("ES256");
+        jwk["use"] = serde_json::json!("sig");
+        instance.jwks = serde_json::json!({"keys": [jwk]});
+        let manager = super::OwnedLoginManager::default();
+        let scope = super::attempt_scope(&instance.issuer, "installation").unwrap();
+        let attempt = super::Attempt {
+            client: super::OwnedClient::pinned(instance.clone(), None).unwrap(),
+            instance,
+            public_tls_ca: None,
+            device_id: "scoped-device".into(),
+            owner_device_id: "installation".into(),
+            child_epoch: 1,
+            candidates: vec![],
+            selected_id: "old".into(),
+            expected_principal: None,
+            resolved_candidate: None,
+            staged_session: Some(super::OwnedSession {
+                access_token: "a".repeat(43),
+                principal_id: "00000000-0000-0000-0000-000000000002".into(),
+                network_id: "00000000-0000-0000-0000-000000000003".into(),
+                expires_at: now() + 3600,
+            }),
+            commit_unconfirmed: true,
+            attempt_id: "uncertain".into(),
+            transaction_id: "transaction".into(),
+            verifier: Zeroizing::new("verifier".into()),
+            authorization_url: "https://login.example".into(),
+            expires_at: now() + 3600,
+            consuming: true,
+            completed: None,
+        };
+        {
+            let mut state = manager.state.lock().await;
+            let (generation, _) = state.begin(&scope);
+            assert!(state.register(&scope, generation, "uncertain"));
+            state.attempts.insert("uncertain".into(), attempt);
+        }
+        // Production cancel returns before Keychain or HTTP cleanup. The
+        // possibly committed token must remain available for disk recovery.
+        manager.cancel("uncertain").await.unwrap();
+        let state = manager.state.lock().await;
+        assert!(state.attempts["uncertain"].staged_session.is_some());
+        assert!(state.is_current(&scope, "uncertain"));
+        assert_eq!(
+            state.ensure_startable(&scope).unwrap_err().code,
+            "OWNED_LOGIN_COMMIT_UNCONFIRMED"
+        );
+        drop(state);
+        let error = manager.poll("uncertain").await.err().unwrap();
+        assert_eq!(error.code, "OWNED_LOGIN_COMMIT_UNCONFIRMED");
+        // A new process reconciles the stored pointer; no transient attempt
+        // survives, so a disk-restored session is never logged out on startup.
+        assert!(State::default().ensure_startable(&scope).is_ok());
+    }
+
+    #[test]
+    fn cancelled_publication_rolls_back_without_authorizing_or_deleting_old_session() {
+        use std::cell::Cell;
+        let pointer = Cell::new("old");
+        let discarded = Cell::new(false);
+        let published = Cell::new(false);
+        let old_guard = staged_guard_for_test();
+        let result: Result<(), NetworkError> = super::commit_staged_slot(
+            || Ok(()),
+            || {
+                pointer.set("new");
+                Ok(())
+            },
+            || {
+                pointer.set("old");
+                Ok(())
+            },
+            || {
+                discarded.set(true);
+                Ok(())
+            },
+            || (),
+            || Err::<(), _>(NetworkError::new("OWNED_LOGIN_CANCELLED")),
+            |_| {
+                published.set(true);
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(pointer.get(), "old");
+        assert!(discarded.get());
+        assert!(!published.get());
+        old_guard.check().unwrap();
+    }
+
+    fn staged_guard_for_test() -> Arc<AuthorizedSessionGuard> {
+        Arc::new(AuthorizedSessionGuard {
+            binding_id: "old".into(),
+            connection_id: "old".into(),
+            generation: 1,
+            expires_at: now() + 100,
+            valid: AtomicBool::new(true),
+        })
     }
 
     #[test]
@@ -2068,6 +2854,10 @@ mod tests {
             instance,
             public_tls_ca: None,
             device_id: "device-1".into(),
+            owner_device_id: "device-1".into(),
+            session_bound: false,
+            candidates: Vec::new(),
+            replaces: None,
             session,
             guard,
         };
@@ -2204,7 +2994,9 @@ mod tests {
 mod updater_qa_credential_tests {
     #[test]
     fn qa_never_constructs_an_os_keyring_entry() {
-        let error = super::entry("synthetic-only").err().expect("QA entry is disabled");
+        let error = super::entry("synthetic-only")
+            .err()
+            .expect("QA entry is disabled");
         assert_eq!(error.code, "UPDATER_QA_CREDENTIALS_DISABLED");
     }
 }
