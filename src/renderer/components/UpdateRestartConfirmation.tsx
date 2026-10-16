@@ -5,18 +5,19 @@ import ConfirmDialog from './ConfirmDialog';
  * accidentally interrupt work when the startup dialog appears. */
 export default function UpdateRestartConfirmation({ version, onConfirm, onCancel }: {
   version: string | null;
-  onConfirm: () => void;
+  onConfirm: (interruptWork: boolean) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation('app');
   return <ConfirmDialog
     title={t('appChrome.updateRestartTitle')}
     message={t('appChrome.updateRestartMessage', { version })}
-    confirmText={t('appChrome.updateRestartConfirm')}
+    confirmText={t('appChrome.updateRestartWhenIdle')}
     cancelText={t('appChrome.later')}
-    confirmVariant="danger"
+    confirmVariant="primary"
+    alternativeAction={{ text: t('appChrome.updateRestartConfirm'), danger: true, onClick: () => onConfirm(true) }}
     disableEnterShortcut
-    onConfirm={onConfirm}
+    onConfirm={() => onConfirm(false)}
     onCancel={onCancel}
   />;
 }
