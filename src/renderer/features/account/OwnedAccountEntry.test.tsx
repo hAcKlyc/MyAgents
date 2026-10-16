@@ -647,3 +647,15 @@ it("closes an already open account menu when its account generation changes", ()
   ).not.toBeInTheDocument();
   expect(mocks.remove).not.toHaveBeenCalled();
 });
+
+
+it.each([true, false])('opens community from the personal menu without starting another login (expanded=%s)', expanded => {
+  const community = vi.fn();
+  render(<OwnedAccountEntry expanded={expanded} onOpenCommunity={community} />);
+  fireEvent.click(screen.getByRole('button'));
+  fireEvent.click(screen.getByRole('button', { name: '协作社区' }));
+  expect(community).toHaveBeenCalledTimes(1);
+  expect(mocks.start).not.toHaveBeenCalled();
+  expect(mocks.external).not.toHaveBeenCalled();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});

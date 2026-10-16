@@ -1396,7 +1396,7 @@ export default memo(function GlobalSidebar({
           />
           <div className="global-sidebar-account-row grid grid-cols-[minmax(0,1fr)_var(--global-sidebar-action-size)]" data-global-sidebar-account-row data-owned-account-row={APP_BUILD_PROFILE === 'moxbot' ? 'true' : undefined}>
             {APP_BUILD_PROFILE === 'moxbot' ? (
-              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} onOpenHelper={() => { closeFlyout(); closeNotificationCenter(); onOpenBugReport(); }} />
+              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} onOpenCommunity={() => { closeFlyout(); closeNotificationCenter(); onOpenSpace(); }} onOpenHelper={() => { closeFlyout(); closeNotificationCenter(); onOpenBugReport(); }} />
             ) : (
               <AccountEntry expanded={expanded} available={teamSpaceAvailable}
                 environment={config.spaceEnvironment ?? 'production'} onOpenSpace={onOpenSpace} />

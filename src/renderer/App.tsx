@@ -2,7 +2,6 @@ import UpdateRestartConfirmation from '@/components/UpdateRestartConfirmation';
 import { restoreRemoteTabForAccount } from '@/features/remote-session/accountFence';
 import { currentNetworkSnapshot } from '@/features/agent-network/store';
 import type { RemoteSessionOpenIntent } from '@/features/remote-session/tabContract';
-import { openOwnedCloudPage } from '@/utils/ownedCloud';
 import { APP_BUILD_PROFILE } from '../shared/appProfile';
 import { DEFAULT_SPACE_ID } from '@/api/spaceCloud';
 import { startAgentNetworkStore } from '@/features/agent-network/store';
@@ -568,6 +567,8 @@ export default function App() {
   );
 
   useEffect(() => {
+    // The owned community shares the Tab slot, not Cloud Space availability.
+    if (APP_BUILD_PROFILE === 'moxbot') return;
     if (configLoading || spaceBuildCapability.isLoading) return;
     const currentTabs = tabWorkspaceController.getSnapshot().tabs;
     const routeTabId = spaceRouteTabIdRef.current;
@@ -3826,7 +3827,7 @@ export default function App() {
           toastRef.current.info(t('globalSidebar.legacySpaceUnavailable'));
           return true;
         }
-        void openOwnedCloudPage('community').catch(() => toastRef.current.error(t('globalSidebar.cloudUnavailable')));
+        tabWorkspaceController.open('space', { title: t('globalSidebar.community') });
         return true;
       }
       if (!configLoading && config.teamSpaceDevGate === false) {
@@ -3957,7 +3958,7 @@ export default function App() {
 
   const handleOpenSpace = useCallback(() => {
     if (APP_BUILD_PROFILE === 'moxbot') {
-      void openOwnedCloudPage('community').catch(() => toastRef.current.error(t('globalSidebar.cloudUnavailable')));
+      tabWorkspaceController.open('space', { title: t('globalSidebar.community') });
       return;
     }
     if (configLoading || spaceBuildCapability.isLoading) {
@@ -4986,8 +4987,8 @@ export default function App() {
     ],
   );
   const spaceBinding = useMemo<BuiltinTabBindings['space']>(
-    () => ({ onRouteConsumed: handleSpaceRouteConsumed }),
-    [handleSpaceRouteConsumed],
+    () => ({ onRouteConsumed: handleSpaceRouteConsumed, onOpenAccount: () => tabWorkspaceController.open('agentnetwork', { title: t('tabs.agentNetwork') }) }),
+    [handleSpaceRouteConsumed, tabWorkspaceController, t],
   );
   const recordBinding = useMemo<BuiltinTabBindings['record']>(
     () => ({

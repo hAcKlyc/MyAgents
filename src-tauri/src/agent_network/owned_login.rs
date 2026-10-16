@@ -147,6 +147,18 @@ pub(crate) async fn raw_request(
     body: Option<Value>,
     token: Option<&str>,
 ) -> Result<(StatusCode, Value), NetworkError> {
+    raw_request_with_limits(http, origin, method, path, body, token, 16 * 1024, MAX_BODY).await
+}
+async fn raw_request_with_limits(
+    http: &reqwest::Client,
+    origin: &str,
+    method: Method,
+    path: &str,
+    body: Option<Value>,
+    token: Option<&str>,
+    request_limit: usize,
+    response_limit: usize,
+) -> Result<(StatusCode, Value), NetworkError> {
     // Only callers with fixed, reviewed routes use this private HTTP seam.
     let diagnostic =
         crate::network_diagnostics::RequestDiagnostic::new("owned-account", &method, path);
@@ -155,7 +167,7 @@ pub(crate) async fn raw_request(
         let bytes = Zeroizing::new(
             serde_json::to_vec(&body).map_err(|_| NetworkError::new("OWNED_REQUEST_INVALID"))?,
         );
-        if bytes.len() > 16 * 1024 {
+        if bytes.len() > request_limit {
             return Err(NetworkError::new("OWNED_REQUEST_INVALID"));
         }
         request = request
@@ -190,7 +202,7 @@ pub(crate) async fn raw_request(
         .await
         .map_err(|_| NetworkError::cloud("OWNED_ACCOUNT_UNAVAILABLE", 503))?
     {
-        if bytes.len().saturating_add(chunk.len()) > MAX_BODY {
+        if bytes.len().saturating_add(chunk.len()) > response_limit {
             return Err(NetworkError::new("OWNED_RESPONSE_TOO_LARGE"));
         }
         bytes.extend_from_slice(&chunk);
@@ -396,6 +408,30 @@ impl OwnedClient {
             return Err(NetworkError::new("OWNED_SESSION_INVALID"));
         }
         Ok(())
+    }
+    pub(crate) async fn community_request(
+        &self,
+        request: &super::community::CommunityRequest,
+        token: &str,
+    ) -> Result<Value, NetworkError> {
+        let (method, path, body) = request.route()?;
+        // Community lists/details contain full user text. Keep identity limits
+        // unchanged while allowing the server's bounded 100 topics/200 replies.
+        let (status, value) = raw_request_with_limits(
+            &self.http,
+            &self.origin,
+            method,
+            &path,
+            body,
+            Some(token),
+            64 * 1024,
+            16 * 1024 * 1024,
+        )
+        .await?;
+        if status != StatusCode::OK {
+            return Err(NetworkError::new("OWNED_RESPONSE_INVALID"));
+        }
+        request.response(value)
     }
     pub(crate) async fn identity_request(
         &self,

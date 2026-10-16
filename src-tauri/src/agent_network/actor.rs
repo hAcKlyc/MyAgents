@@ -130,6 +130,17 @@ pub(crate) struct AgentNetwork {
 pub(crate) type ManagedConnection = Arc<AgentNetwork>;
 pub(crate) use super::registry::ManagedAgentNetwork;
 impl AgentNetwork {
+    pub(crate) async fn community_request(
+        &self,
+        scope: &super::community::CommunityScope,
+        request: &super::community::CommunityRequest,
+    ) -> Result<Value, NetworkError> {
+        self.account
+            .as_ref()
+            .ok_or_else(|| NetworkError::new("OWNED_SERVICE_UNAVAILABLE"))?
+            .community_request(scope, request)
+            .await
+    }
     pub(crate) fn local_device_identity(
         &self,
     ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {

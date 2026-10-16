@@ -1648,6 +1648,7 @@ pub(crate) fn account_from_login(
     let authorized = login.guard.clone();
     let guard = Arc::new(move || authorized.check());
     Arc::new(OwnedAccount {
+        binding_id: login.binding_id.clone(),
         connection_id: login.connection_id.clone(),
         descriptor: login.instance.clone(),
         device_id: login.device_id.clone(),

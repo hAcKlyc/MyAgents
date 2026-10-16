@@ -85,6 +85,7 @@ pub(crate) struct SelfhostAccount {
     pub enrollment_key: Option<Zeroizing<String>>,
 }
 pub(crate) struct OwnedAccount {
+    pub binding_id: String,
     pub connection_id: String,
     pub device_id: String,
     pub session_bound: bool,
@@ -227,6 +228,37 @@ impl NetworkAccountSession {
                 }
             }
         }
+    }
+    pub(crate) async fn community_request(
+        &self,
+        scope: &super::community::CommunityScope,
+        request: &super::community::CommunityRequest,
+    ) -> Result<Value, NetworkError> {
+        self.ensure_current()?;
+        let Self::Owned(account) = self else {
+            return Err(NetworkError::new("OWNED_SERVICE_UNAVAILABLE"));
+        };
+        if !scope.matches(
+            &account.connection_id,
+            &account.session.principal_id,
+            &account.binding_id,
+        ) {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        // Validate before discovery; a renderer cannot turn this into arbitrary HTTP.
+        request.route()?;
+        let (client, current) = super::owned_login::OwnedClient::discover(
+            &account.descriptor.issuer,
+            account.public_tls_ca.as_deref(),
+        )
+        .await?;
+        account.descriptor.ensure_same_trust(&current)?;
+        self.ensure_current()?;
+        let result = client
+            .community_request(request, &account.session.access_token)
+            .await;
+        self.ensure_current()?;
+        result
     }
     pub(crate) async fn request(
         &self,
@@ -394,6 +426,7 @@ mod tests {
     fn owned_account(device_id: &str, principal_id: &str) -> NetworkAccountSession {
         let d = sample();
         NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            binding_id: "test-binding".into(),
             connection_id: "owned-test".into(),
             device_id: device_id.into(),
             session_bound: false,
