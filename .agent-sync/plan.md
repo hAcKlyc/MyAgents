@@ -272,6 +272,13 @@ MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS
 
 多个Task复用同一Session时只选一个当前进度代表卡片，历史任务按自身状态保留，不再把同一TODO/计时/Goal复制成多个执行。renderer限定修复，零业务数据写入；代码/React合成验证/main与056原生发布分别追踪于 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。
 
+## Deployment coordination — Host101 scoped operation 2026-10-16
+
+- **Deployment chat:** `01a13320-dbf9-7c03-b7f3-37e30d15de48`（Bots 管理控制台），仅本次101.42.11.29既有MoX Host安装/网络恢复。
+- **Designation:** 用户在本聊天直接要求“在101.42.11.29上面安装host程序，并配置到moxbots网络”，并提供专用SSH附件。该具体目标由当前聊天负责，不接管下方桌面updater发布owner或其目标。
+- **Targets and runbook:** 仅101的moxbot-host-test及moxbot-host-network-test；沿用`scripts/host/network-control.py`，先检查维护冲突/无activeSession、备份身份/配置/加密state，原身份恢复登录/run，不重置或覆盖身份，不更改模型执行授权。旧myagents服务、140backend与日常Mac保留。
+- **Current release:** `MOXBOTS-HOST-101-20261016` preparing；既有安装current83e48946，MoX connector因ACCOUNT_SESSION_EXPIRED离线。任务 `.agent-sync/tasks/codex-host-101-network-20261016-810cf816.md`；受控root维护锁与实际PID/运行状态核验，成功以ready+云端在线及原配置保全为准；若登录失败保留原identity/state和备份。
+
 ## Deployment coordination
 
 - **Deployment chat:** `01a12bc2-907a-7702-b6dd-788225c5dfe4`，MoxBots桌面端统一打包负责人。
