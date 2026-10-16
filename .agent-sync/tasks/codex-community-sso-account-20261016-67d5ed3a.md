@@ -32,7 +32,7 @@ Task ID: COMMUNITY-SSO-ACCOUNT-20261016. Open the owned community inside the des
 
 Local output: `/Users/zhangshaohua/Documents/WPS Cloud/【项目】目录/MoxBot/output/community-sso-20261016/`. Browser driver/temporary fixture retained under ignored worktree `output/community-qa/` and `playground/community-qa/`; local server stopped.
 
-- DOM: 39/39 across CommunityPage (15), CommunityContainer (4), OwnedAccountEntry (20).
+- DOM: 41/41 across CommunityPage (15), CommunityContainer (4), OwnedAccountEntry (20), edition-specific Tab renderer/title (2).
 - Unit: 14/14 for owned navigation and account selection (multiple same-issuer accounts, selected peer/official, removal, disconnection).
 - Full TypeScript check, scoped ESLint, dependency graph, test classification, protocol hash verification, theme CSS and license checks: PASS. Protocol artifact unchanged.
 - MoXBots Vite production web build: PASS (`web-build.log`); existing large-chunk warning remains.
@@ -41,6 +41,7 @@ Local output: `/Users/zhangshaohua/Documents/WPS Cloud/【项目】目录/MoxBot
 - Headless library: 163/163 PASS (`headless-unit.log`). This is local source compatibility, not a Host rollout.
 - Native source compilation used the previously reviewed task-local SwiftPM overlay because CLT private Swift interfaces mismatch its libraries; no system/Xcode files were changed. Unit runner supplies the installed CLT Swift compatibility library; dyld reports an existing duplicate Swift class warning. Reused signed CLIProxy/resource build inputs remain verified by the original build gates. This does not assert a fresh signed package or installed-runtime acceptance.
 - Rendered Chromium, actual product components + synthetic IPC: personal menu opens community, disconnected signed-in account loads list, create -> uncertain owner boundary -> exact same-request retry, reply, 760px layout; all 5 checks PASS, no page errors (`browser-qa.json` and five PNGs). No real login, external page, network write or credential access.
+- Integration sweep also bypasses the upstream Cloud Space retirement gate for the owned-community Tab, preventing a later config/Space availability refresh from closing it; edition tests retain the upstream page/title outside MoXBots.
 - Primary reviewed whole diff and personally inspected renders. Independent auth reviewer found the post-commit owner-error retry risk; fixed and re-review passed. Independent review of five rendered screenshots found no blocking readability/overflow issue. Narrow uncertain-state and native/screen-reader behavior are not claimed covered.
 
 ## Execution record

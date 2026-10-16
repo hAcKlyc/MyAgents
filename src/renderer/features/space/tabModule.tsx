@@ -52,8 +52,8 @@ export const spaceTabModule = {
   kind: "space",
   render: SpaceTabRenderer,
   chrome: (_tab, { t }) => ({
-    title: t("tabs.team"),
-    subtitle: t("tabs.team"),
+    title: t(APP_BUILD_PROFILE === "moxbot" ? "globalSidebar.community" : "tabs.team"),
+    subtitle: t(APP_BUILD_PROFILE === "moxbot" ? "globalSidebar.community" : "tabs.team"),
   }),
   identity: () => "space",
   open: {

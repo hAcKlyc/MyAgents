@@ -567,6 +567,8 @@ export default function App() {
   );
 
   useEffect(() => {
+    // The owned community shares the Tab slot, not Cloud Space availability.
+    if (APP_BUILD_PROFILE === 'moxbot') return;
     if (configLoading || spaceBuildCapability.isLoading) return;
     const currentTabs = tabWorkspaceController.getSnapshot().tabs;
     const routeTabId = spaceRouteTabIdRef.current;
