@@ -152,3 +152,39 @@ describe('credential QR provisioning', () => {
     )).rejects.toBe(restartError);
   });
 });
+
+
+describe('QR failure stages and opaque sessions', () => {
+  it.each(['start', 'poll'] as const)('distinguishes %s failure without assuming a network cause', async stage => {
+    const invoke = vi.fn();
+    if (stage === 'poll') invoke.mockResolvedValueOnce({
+      sessionKey: 'code_with-dash', qrUrl: 'https://work.weixin.qq.com/qr/test',
+      pollIntervalMs: 3_000, expiresInMs: 600_000,
+    });
+    invoke.mockRejectedValueOnce(new Error('Invalid QR provisioning session'));
+    const delay = vi.fn(async () => undefined);
+    const result = await runCredentialQrProvisioning({
+      provider: 'wecom', invoke, isCancelled: () => false,
+      onPhase: vi.fn(), onQrUrl: vi.fn(), delay,
+    });
+    expect(result).toMatchObject({ kind: 'error', reason: `${stage}-failed` });
+    if (stage === 'poll') expect(delay).toHaveBeenCalledWith(3_000);
+  });
+
+  it('preserves the provider code through first poll and expiry refresh', async () => {
+    const start = (sessionKey: string) => ({ sessionKey,
+      qrUrl: 'https://work.weixin.qq.com/qr/test', pollIntervalMs: 3_000, expiresInMs: 600_000 });
+    const invoke = vi.fn().mockResolvedValueOnce(start('old_code-1'))
+      .mockResolvedValueOnce({ status: 'expired' })
+      .mockResolvedValueOnce(start('new_code+/%=&2'))
+      .mockResolvedValueOnce({ status: 'waiting' })
+      .mockResolvedValueOnce({ status: 'success', configValues: { botId: 'bot', secret: 'fake-secret' } });
+    const result = await runCredentialQrProvisioning({
+      provider: 'wecom', invoke, isCancelled: () => false,
+      onPhase: vi.fn(), onQrUrl: vi.fn(), delay: async () => undefined,
+    });
+    expect(result.kind).toBe('success');
+    expect(invoke).toHaveBeenNthCalledWith(2, 'cmd_channel_credential_qr_poll', expect.objectContaining({ sessionKey: 'old_code-1' }));
+    for (const call of [4, 5]) expect(invoke).toHaveBeenNthCalledWith(call, 'cmd_channel_credential_qr_poll', expect.objectContaining({ sessionKey: 'new_code+/%=&2' }));
+  });
+});

@@ -276,7 +276,8 @@ Channel credential、token、App Secret和provider env不得进入日志、analy
 - 新 IM Session 由 snapshot compiler 固定最高 unattended 权限（DSH 为 `full-autonomous`）；`/mode` 与渠道权限覆盖已移除。已有 snapshot 权限保持原值，桌面主动修改仍按 Session 规则生效，不能在恢复或每轮隐式提权。
 - credentials、prompt正文、tool参数、群history和platform payload不写常规日志。
 - platform/network request使用统一proxy、timeout、rate-limit与retry policy；401/invalid credential停止或降级，不无限重试。
-- QR credential provisioning只由Rust访问HTTPS allowlist并归一化response；Renderer只持短期session handle和展示数据。
+- QR credential provisioning只由Rust访问HTTPS allowlist并归一化response；Renderer只持短期session handle和展示数据。Provider返回的handle是opaque值，生成与新旧轮询入口共用长度/控制字符校验，禁止按字母数字白名单拒绝或过滤；WeCom query与Feishu form分别按参数编码，不能改变原值。WeCom轮询不跟随重定向，会话码不进入日志或URL错误正文。
+- QR失败提示依据实际操作与终态：生成失败、状态查询失败、拒绝/取消和过期分别展示；刷新次数不能作为错误原因。新建与详情重新扫码共用runner及提示映射，失败不得覆盖既有凭据。
 - Plugin Bridge是受管`ChildTree`；停止/卸载不能按进程名扫描或递归删除未验证目录。
 - Session、workspace和attachment路径经过既有canonical validation；Channel不能扩大Runtime文件权限。
 

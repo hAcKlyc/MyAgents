@@ -7,6 +7,4 @@ function _w(fn) {
   if (!_warned.has(fn)) { _warned.add(fn); console.warn('[sdk-shim] openclaw/plugin-sdk/temp-path.' + fn + '() not implemented in Bridge mode'); }
 }
 
-export function createTempDownloadTarget() { _w('createTempDownloadTarget'); return undefined; }
-export function resolvePreferredOpenClawTmpDir() { _w('resolvePreferredOpenClawTmpDir'); return undefined; }
 export function sanitizeTempFileName() { _w('sanitizeTempFileName'); return ""; }
