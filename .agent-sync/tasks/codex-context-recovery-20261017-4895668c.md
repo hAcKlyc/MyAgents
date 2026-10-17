@@ -9,7 +9,7 @@
 
 User requested durable fixes for effective context budgeting, native compaction failure classification, automatic recovery and the original Goal continuation without repeating business operations, followed by CI/main and release under project workflow. Existing single deployment owner remains 01a12bc2-907a-7702-b6dd-788225c5dfe4; no concurrent release or interruption of daily tasks.
 
-## Acceptance / To Do
+## Acceptance criteria
 
 - [x] Identify incident: provider-declared1,024,000 vs explicit upstream context overflow at341,052; failed native compact incorrectly marked successful; Goal blindly retries10 then blocked.
 - [x] Verify remote/source/base and create isolated worktree; preserve other worktrees.
@@ -29,8 +29,20 @@ Primary owns implementation, integration and acceptance. Read-only scoped review
 
 Private incident/restoration evidence under local output/session-recovery-20261017 (outside Git); never commit user session, credentials or business data. Implement shared policies and scoped regressions, then verify live SDK behavior before release.
 
-## Current evidence
+## Verification
 
 Contract `specs/tech_docs/context_recovery.md`; acceptance `dev-docs/context-recovery-20261017/acceptance.md`. Focused130 tests passed, real SDK manual/auto compact and durable ledger restart passed. CI/main/release pending. Workers follow-up usage-limited; primary accepted and repaired assembled implementation. Next: commit, merge latest main, run CI and main ancestry verification; release remains sole-owner serial.
 
 PR https://github.com/heavenzhang/MoXBots/pull/96; main148c51bc integrated without conflicts. Additional hardening: same-history armed tombstone blocks missing-ledger restart, and explicit route override/official isolation integration test. Six CI gates running; no release yet.
+
+## Completed
+
+Implemented and committed recovery/budget/failure classification, same-Goal pause/resume plumbing, immutable request archives and restart-safe write-ahead action protection. Synced current main without conflicts, pushed reviewed branch and opened PR96. Real SDK manual/automatic compact, native failure regression, durable restart and exact-action duplicate counters passed. Existing original recovered payroll Goal store currently reports complete/0 consecutive failures; this is runtime state, not business acceptance.
+
+## Blockers and unknowns
+
+Six exact-head CI checks are required before main merge. Local Rust is blocked by pre-existing Swift PackageDescription linkage; no native compilation pass claimed. Real commercial capacity, signed next release, installation/Reader and original business-path acceptance remain separate gates. Sole deployment chat owns the next unfrozen release. Cross-session messaging requires explicit human authorization to that specific chat; no new message sent yet. Independent follow-up reviewer workers are usage-limited; primary owns assembled-source review. Tokens/cost unavailable.
+
+## Next step
+
+Wait for PR96 exact-head six checks; repair any real failures, merge normally, verify fresh remote main contains the accepted commits. Then hand the concrete release record to the existing publisher with explicit messaging authorization and retain all active-session/install gates.
