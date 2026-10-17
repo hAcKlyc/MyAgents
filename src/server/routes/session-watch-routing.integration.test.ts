@@ -125,6 +125,26 @@ describe('composed Session watch owner routes', () => {
     expect(await (await remove('local', reference)).json()).toEqual({ accepted: true, removed: false });
   });
 
+  it('rejects continuous network watches until the return protocol supports event delivery', async () => {
+    const { dispatch } = composed('session');
+    const response = await dispatch(post('/api/session-watch/register', {
+      watchId: 'continuous-network',
+      watcherSessionId: 'caller',
+      targetSessionId: 'target',
+      observerScope: 'device-1',
+      mode: 'continuous',
+      networkReturn: reference,
+    }));
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({
+      accepted: false,
+      reason: 'CONTINUOUS_NETWORK_WATCH_UNAVAILABLE',
+      mode: 'continuous',
+    });
+    expect(listPendingSessionWatches()).toEqual([]);
+  });
+
   it.each(['/api/session-watch/manage', '/api/session-watch/network-remove'])('%s requires original owner and internal credentials', async path => {
     pending('network', 'caller', reference);
     const body = { watcherSessionId: 'caller', all: true, watchId: 'network', targetSessionId: 'target', networkReturn: reference };
