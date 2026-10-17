@@ -6,12 +6,36 @@ import { buildReplyBody, deliverInboxReply, type ReplyPayload } from './reply-de
 import { ackPendingSessionWatch, listPendingSessionWatches } from './watch-registry';
 import type { PendingInboxMessage, DeliverOutcome, InboxTurnMeta } from './types';
 import { deliverNetworkReturn } from '../agent-network/return';
+import { watchStreamManager } from './watch-stream';
 
 export async function deliverSessionWatchEvents(
   currentSessionId: string,
   payload: ReplyPayload,
   inboxMetas: readonly InboxTurnMeta[] = [],
 ): Promise<void> {
+  // NEW: Notify continuous subscribers via watch stream
+  const stream = watchStreamManager.getStream(currentSessionId);
+  const isError = !!payload.error;
+  const latestResult = buildReplyBody(payload);
+
+  if (payload.turnId) {
+    if (isError) {
+      await stream.notifyTurnError(
+        payload.turnId,
+        payload.error?.code ?? 'unknown',
+        payload.error?.message ?? 'Turn execution failed',
+        false // TODO: determine if recoverable from error type
+      );
+    } else {
+      await stream.notifyTurnCompleted(
+        payload.turnId,
+        latestResult,
+        payload.terminalStatus === 'complete' ? 'success' : 'partial'
+      );
+    }
+  }
+
+  // LEGACY: Handle single-turn watches
   const watches = listPendingSessionWatches();
   // The turn owner coordinates one local notification before either delivery
   // can yield. Each network route keeps its own source-owned settlement.
@@ -28,9 +52,6 @@ export async function deliverSessionWatchEvents(
     await reply;
     return;
   }
-
-  const latestResult = buildReplyBody(payload);
-  const isError = !!payload.error;
 
   await Promise.all([reply, ...watches.map(async watch => {
     // A later queued turn cannot settle an observation of an earlier turn.

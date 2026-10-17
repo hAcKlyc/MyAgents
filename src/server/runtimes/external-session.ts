@@ -2691,6 +2691,20 @@ function beginExternalTurnTrace(
     status: 'ok',
     detail: { source },
   });
+
+  // NEW: Notify continuous watch subscribers of turn start
+  const lifecycleSessionId = getExternalLifecycleSessionId();
+  if (lifecycleSessionId && currentTurnTraceId) {
+    void import('../inbox/watch-stream')
+      .then(({ watchStreamManager }) => {
+        const stream = watchStreamManager.getStream(lifecycleSessionId);
+        // TODO: track turn index properly
+        return stream.notifyTurnStarted(currentTurnTraceId, 0);
+      })
+      .catch(err => {
+        console.error('[watch-stream] failed to notify turn start:', err);
+      });
+  }
 }
 
 function emitExternalTurnTrace(

@@ -349,3 +349,11 @@ MOXBOTS-057-NETWORK-RELEASE-20261016 固定源码ee055458af8823a611503450424ecad
 未安装/启动/退出/重启客户端，未打断任务。启用和真实新账号session/独立identity登记/membership/relay/目录/既有scope调用/同账号恢复仍待手动解锁、fresh完整活动owner空闲与兼容配置/实际应用备份；PB004等原生验收不关闭，其他Host聊天的实际服务验收仍按其独立记录。回退禁止旧业务库恢复，须保留当前业务数据及新旧身份/凭据槽。
 
 下载源与云后台已在同一140服务器，搬目录不能增带宽。Nginx无rate限制、负载低，两条公网路径均慢且有明显TCP重传；源站出口或链路问题待确认，未证实云套餐限额，未改网络/付费服务。
+
+## MOXBOTS-058 发行接续 · 2026-10-17
+
+唯一发布owner01a12bc2-907a-7702-b6dd-788225c5dfe4，冻结source12449。正式签名公证与独立验包、同源隔离原生更新和真实社区持久化/退出隔离均完成，候选聚合独审PASS。058归档已stage但stable仍057，完整公网下载验签及独审正在进行；未安装日常客户端，不中断任务。正式binary/Reader没有运行、QA导航浮层不证明正式外观、IME/ASR/真实Host模型边界保留。交付与下一步见dev-docs/releases/moxbots-0.5.8.md和.agent-sync/tasks/codex-release-058-delivery-record-20261017-a7176263.md；后来main成果不自动混入058。
+
+### 2026-10-17 最终更新分发
+
+冻结source/tagv0.5.8=12449。完整外部GET336365173B SHA155e6a68、正常TLS/stat-hash-stat/17原件独审与Mac自有签名通过；stable058于03:18Z公开核验SHA51eb69bf；发布后独审012f22b2后同任务finish释放锁，旧057完整归档与回滚保留。日常057客户端未安装/退出/重启；正式binary/Reader、IME/ASR/真实Host模型等边界仍保留。最终记录按当前分支正常PR/CI/main交付，详细非秘密证据摘要见dev-docs/releases/moxbots-0.5.8.md。不能重复start/collect/promote或覆盖同版。

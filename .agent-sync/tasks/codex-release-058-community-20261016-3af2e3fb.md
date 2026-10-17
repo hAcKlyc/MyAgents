@@ -39,3 +39,11 @@
 ## Next step
 
 PR88旧headf31六CI通过，PR89/90最终main已接收并merge；隔离原生计划指出原MoxBots确认仅可达interruptWork=true，Root本次补非中断界面入口及对应DOM/既有生命周期回归，再推最终head完整CI/正常merge；独立UI角色准备七项合成journeys，配方v3以固定四角色和全部原件/PNG绑定拒绝漏证据。正式构建固定接受SHA与全源输入，然后签名公证/独立验包；原生/真实账号窗口不足时先交候选并保留具体门禁，不静默生产推广。
+
+## 2026-10-17 实际发行接续
+
+旧候选/配方状态保留为历史。最终冻结已交main源码12449；正式制品Apple Accepted、staple、Gatekeeper及独立验包通过。同源隔离UpdaterQA真实普通非中断更新与Goal/Cron恢复通过；ModelQA真实测试账号自动登录、唯一受控话题/回复、刷新/正常冷重启持久化与退出隔离通过。候选聚合独审PASS保留正式binary/Reader/日常升级未测边界。058不可变归档已stage，stable057保持，完整外部GET及公开分发门禁待完成。后续记录分支`codex/release-058-delivery-record-20261017`，权威发行事实`dev-docs/releases/moxbots-0.5.8.md`。
+
+### 2026-10-17 最终更新分发
+
+冻结source/tagv0.5.8=12449。完整外部GET336365173B SHA155e6a68、正常TLS/stat-hash-stat/17原件独审与Mac自有签名通过；stable058于03:18Z公开核验SHA51eb69bf；发布后独审012f22b2后同任务finish释放锁，旧057完整归档与回滚保留。日常057客户端未安装/退出/重启；正式binary/Reader、IME/ASR/真实Host模型等边界仍保留。最终记录按当前分支正常PR/CI/main交付，详细非秘密证据摘要见dev-docs/releases/moxbots-0.5.8.md。不能重复start/collect/promote或覆盖同版。
