@@ -32,6 +32,23 @@ Make the formal 0.5.9 macOS arm64 package build against the current merged main 
 
 Do not install, quit, launch or restart the daily MoxBots app; do not interrupt active user work. Do not upload package binaries to GitHub or alter the existing update service routes. Keep the 0.5.8 rollback archive and stable record intact. A source merge, package build or HTTP response alone does not constitute successful updater publication.
 
+## Verification
+
+- `node --test scripts/prepare-moxbot-credential-reader.test.mjs`: 18/18 passed, including the new source-closure pin regression.
+- Full build-script suite with test concurrency set to one: 286 passed, 14 skipped, 0 failed. In the earlier parallel execution, two timing-sensitive tests failed once, then passed individually and in the full serial rerun.
+- `npm run typecheck`: passed.
+- `npm run lint`: passed with 18 existing non-fatal no-orphan warnings.
+- `cargo test --bin moxbots-credential-reader --features fixed-macos-reader`: exit 0, zero tests discovered; not treated as behavior coverage.
+- Independent reader artifact review: passed SHA, CDHash, source closure, fixed signing identity, architecture, strict signature and release-manifest consistency.
+- `git diff --check`: passed before commit. Git handoff gate will be rerun after pushing this exact record.
+
+## Blockers and unknowns
+
+- Follow-up PR checks and normal merge are pending.
+- The `v0.5.9` tag currently points to the initial 0.5.9 main commit `343b37e6`; it was created in this release attempt, but must be corrected only after the reader fix reaches main. No 0.5.9 package or server publication exists.
+- Final Tauri build, signing/notarization, external transfer, stable promotion and public checks have not completed. The original end-to-end timer remains active and must not be reset.
+- The signed reader artifact is local to the release host at `/private/tmp/moxbots-059-reader-artifact-343b`; it is not part of the Git commit. Recompute the packaged source closure after merge before reuse.
+
 ## Next step
 
 Run the final source checks, stage only the pin, regression test, package script and this task record, then commit and push this branch. Open a normal PR, wait for its exact-head checks, merge normally, and verify remote main before correcting the unpublished v0.5.9 tag and continuing the timed package build.
