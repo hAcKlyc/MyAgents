@@ -12,13 +12,13 @@ MOXBOTS-UPSTREAM-INTEGRATION-20261017: user authorized all nine reviewed upstrea
 ## Acceptance criteria / To Do
 
 - [x] Verify source, remotes, clean isolated branch, base4d3b666c and current owner/CI triggers.
-- [ ] Integrate MCP normalization+overflow (db28d65c,8c6ea9e6).
-- [ ] Integrate Goal/MCP recovery (c6787a46,d05472b5) preserving context recovery.
-- [ ] Integrate history body preservation/ref transport (31e813a9).
-- [ ] Integrate DSH diagnostics/build/deletion+paired artifact (9c8ee6cf,6ef57a68,786504dd,706f00cb,required selector only).
-- [ ] Integrate AgentNet recoverable terminal returns/protocol (78d85eb5), validate owned service compatibility.
-- [ ] Integrate plugin SDK+WeCom QR fixes (20d1bcc9,ed28af72).
-- [ ] Port only settings/capabilities consumed-navigation state fix/tests from2fdc6448; sidebar/App menu design unchanged.
+- [x] Integrate MCP normalization+overflow (db28d65c,8c6ea9e6).
+- [x] Integrate Goal/MCP recovery (c6787a46,d05472b5) preserving context recovery.
+- [x] Integrate history body preservation/ref transport (31e813a9).
+- [x] Integrate DSH diagnostics/build/deletion+paired artifact (9c8ee6cf,6ef57a68,786504dd,706f00cb,required selector only).
+- [x] Integrate AgentNet recoverable terminal returns/protocol (78d85eb5), validate owned service compatibility.
+- [x] Integrate plugin SDK+WeCom QR fixes (20d1bcc9,ed28af72).
+- [x] Port only settings/capabilities consumed-navigation state fix/tests from2fdc6448; sidebar/App menu design unchanged.
 - [ ] Review combined diff; focused tests, TS/lint, deterministic suites, JS bundles and relevant Rust/loopback/native tests.
 - [ ] Actual rendered settings/channels state interaction checks; preserve navigation baseline.
 - [ ] Independent review and repair loop, CI pass, main integration, verify remote main contains delivery.
@@ -42,7 +42,7 @@ Desktop signed release required after main delivery. Sole deployment chat remain
 
 ## Blockers and unknowns
 
-No implementation blocker established. Paired native DSH artifact and owned relay route recovery support need verification. Product source/main delivery and production acceptance are separate gates.
+All source groups integrated. Native paired DSH artifact acquisition pending; owned relay currently lacks permit/return-route authority and remains safely capability-gated. Mac full App Rust compile has a Swift dependency link environment failure; required Linux/Windows CI must pass. Product source/main delivery and production acceptance are separate gates.
 
 ## Next step
 
