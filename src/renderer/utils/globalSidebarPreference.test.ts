@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  clampGlobalSidebarWidth,
   DEFAULT_GLOBAL_SIDEBAR_PREFERENCE,
+  GLOBAL_SIDEBAR_DEFAULT_WIDTH,
+  GLOBAL_SIDEBAR_MAX_WIDTH,
+  GLOBAL_SIDEBAR_MIN_WIDTH,
   GLOBAL_SIDEBAR_PREFERENCE_KEY,
   LEGACY_AUTOMATION_HISTORY_KEY,
   loadGlobalSidebarPreference,
@@ -34,6 +38,21 @@ describe('globalSidebarPreference', () => {
     expect(loadGlobalSidebarPreference(storage)).toEqual(
       DEFAULT_GLOBAL_SIDEBAR_PREFERENCE,
     );
+  });
+
+  it('clamps persisted sidebar width and falls back for legacy or invalid values', () => {
+    expect(clampGlobalSidebarWidth(undefined)).toBe(GLOBAL_SIDEBAR_DEFAULT_WIDTH);
+    expect(clampGlobalSidebarWidth(Number.NaN)).toBe(GLOBAL_SIDEBAR_DEFAULT_WIDTH);
+    expect(clampGlobalSidebarWidth(10)).toBe(GLOBAL_SIDEBAR_MIN_WIDTH);
+    expect(clampGlobalSidebarWidth(9999)).toBe(GLOBAL_SIDEBAR_MAX_WIDTH);
+    expect(clampGlobalSidebarWidth(300.4)).toBe(300);
+    const { expandedWidth: _omit, ...legacy } = DEFAULT_GLOBAL_SIDEBAR_PREFERENCE;
+    expect(parseGlobalSidebarPreference(legacy)?.expandedWidth).toBe(
+      GLOBAL_SIDEBAR_DEFAULT_WIDTH,
+    );
+    expect(
+      parseGlobalSidebarPreference({ ...legacy, expandedWidth: 333 })?.expandedWidth,
+    ).toBe(333);
   });
 
   it('migrates the old automation history choice once', () => {

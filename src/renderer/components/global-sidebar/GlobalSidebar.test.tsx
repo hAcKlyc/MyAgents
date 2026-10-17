@@ -2049,3 +2049,70 @@ describe('Agent network and Space navigation', () => {
     expect(network).not.toHaveAttribute('aria-current');
   });
 });
+
+describe('GlobalSidebar width resize', () => {
+  const rootWidth = () => document.documentElement.style.getPropertyValue('--global-sidebar-expanded-width');
+  const storedWidth = () => JSON.parse(window.localStorage.getItem(GLOBAL_SIDEBAR_PREFERENCE_KEY) ?? '{}').expandedWidth;
+
+  beforeEach(async () => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    mocks.projects = [];
+    mocks.forcedRail = false;
+    window.localStorage.clear();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: false, media: '', onchange: null,
+        addEventListener: vi.fn(), removeEventListener: vi.fn(),
+        addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+      })),
+    });
+    await i18n.changeLanguage('zh-CN');
+  });
+
+  it('applies the dragged width live, clamps it, and persists on release', () => {
+    renderSidebar();
+    const handle = screen.getByRole('separator', { name: String(i18n.t('app:globalSidebar.resize')) });
+    expect(rootWidth()).toBe('256px');
+    (handle as HTMLElement).setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { button: 0, clientX: 256, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 316, pointerId: 1 });
+    expect(rootWidth()).toBe('316px');
+    expect(storedWidth()).toBe(256);
+    fireEvent.pointerMove(handle, { clientX: 2000, pointerId: 1 });
+    expect(rootWidth()).toBe('420px');
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    expect(storedWidth()).toBe(420);
+  });
+
+  it('restores a saved width, supports keyboard steps and double-click reset', () => {
+    window.localStorage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify({
+      version: 1, preferredMode: 'expanded', expandedWidth: 300, expandedWorkspaceKeys: [],
+      hasSeededDefaultExpansion: false, showAutomationSessions: false, sessionView: 'all',
+    }));
+    renderSidebar();
+    const handle = screen.getByRole('separator');
+    expect(rootWidth()).toBe('300px');
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(rootWidth()).toBe('292px');
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(rootWidth()).toBe('220px');
+    fireEvent.doubleClick(handle);
+    expect(rootWidth()).toBe('256px');
+    expect(storedWidth()).toBe(256);
+  });
+
+  it('has no resize handle in forced rail mode', () => {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: true, media: '', onchange: null,
+        addEventListener: vi.fn(), removeEventListener: vi.fn(),
+        addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
+      })),
+    });
+    renderSidebar();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+});

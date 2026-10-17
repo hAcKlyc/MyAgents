@@ -42,6 +42,7 @@
     "failed": "操作失败，请稍后重试。"
   },
   "globalSidebar": {
+    "resize": "拖动调整侧边栏宽度",
     "legacySpaceUnavailable": "此链接来自旧版协作空间，当前社区不支持该资源。请从「更多 → 协作社区」进入新的社区。",
     "community": "协作社区",
     "cloudUnavailable": "尚未配置可用的 MoXBots 云服务，请在账号入口检查云服务连接。",
@@ -510,6 +511,7 @@
       "returnHint": "授权完成后会自动回到 MyAgents。"
     },
     "sidebar": {
+      "resize": "拖动调整侧栏宽度",
       "issues": "议题 Issue",
       "goals": "目标 Goals",
       "skills": "技能 Skills",
