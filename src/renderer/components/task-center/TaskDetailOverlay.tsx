@@ -59,6 +59,7 @@ import { TaskCommentTimeline } from "./TaskCommentTimeline";
 import { TaskEditPanel, type FocusDoc } from "./TaskEditPanel";
 import { extractErrorMessage } from "./errors";
 import { TriggerErrorDetails } from "./TriggerErrorDetails";
+import PanelResizeHandle, { usePanelWidth, type PanelWidthConfig } from "@/components/PanelResizeHandle";
 
 /** Esc-to-close for the overlay's preview mode. The edit panel handles its
  *  own Esc (with dirty-guard) via PanelChrome.usePanelKeys, so this wires
@@ -91,6 +92,13 @@ interface Props {
   onChanged?: (next: Task | null) => void;
 }
 
+const PROPERTIES_WIDTH: PanelWidthConfig = {
+  storageKey: "myagents.taskDetail.propertiesWidth.v1",
+  defaultWidth: 380,
+  minWidth: 300,
+  maxWidth: 640,
+};
+
 export function TaskDetailOverlay({
   task: initial,
   startEditing = false,
@@ -100,6 +108,7 @@ export function TaskDetailOverlay({
   onChanged,
 }: Props) {
   const { t } = useTranslation("task");
+  const propertiesWidth = usePanelWidth(PROPERTIES_WIDTH);
   const [task, setTask] = useState<Task>(initial);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -672,7 +681,19 @@ export function TaskDetailOverlay({
               </TaskCommentTimeline>
             </main>
 
-            <aside className="hidden w-[380px] shrink-0 overflow-y-auto border-l border-[var(--line-subtle)] bg-[var(--paper)]/60 px-5 py-5 xl:block">
+            <div
+              className="relative hidden shrink-0 xl:block"
+              style={{ width: propertiesWidth.width }}
+            >
+            <PanelResizeHandle
+              config={PROPERTIES_WIDTH}
+              width={propertiesWidth.width}
+              edge="left"
+              label={t("detail.resizeProperties")}
+              onPreview={propertiesWidth.setWidth}
+              onCommit={propertiesWidth.commit}
+            />
+            <aside className="h-full overflow-y-auto border-l border-[var(--line-subtle)] bg-[var(--paper)]/60 px-5 py-5">
               <SummaryCard task={task} stats={runStats} />
               <div className="mt-5">
                 <TaskSessionsList task={task} onBeforeOpen={onClose} />
@@ -691,6 +712,7 @@ export function TaskDetailOverlay({
               <hr className="my-5 border-[var(--line-subtle)]" />
               <NotificationSummary task={task} />
             </aside>
+            </div>
 
             {showMobileProperties && (
               <aside className="absolute inset-y-0 right-0 z-20 w-[min(380px,88vw)] overflow-y-auto border-l border-[var(--line)] bg-[var(--paper-elevated)] px-5 py-5 shadow-xl xl:hidden">

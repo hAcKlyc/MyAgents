@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { taskGet, taskRun, taskRerun, taskUpdateStatus } from '@/api/taskCenter';
 import { TaskDocBlock } from '@/components/task-center/TaskDocBlock';
 import { CloseIcon } from '@/components/icons';
+import PanelResizeHandle, { usePanelWidth, type PanelWidthConfig } from '@/components/PanelResizeHandle';
 import { useCloseLayer } from '@/hooks/useCloseLayer';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { formatTime } from '@/utils/taskCenterUtils';
@@ -20,10 +21,13 @@ interface Props {
   onOrganize?: () => void; onConvert?: () => void; organizing?: boolean;
 }
 
+const DETAIL_WIDTH: PanelWidthConfig = { storageKey: 'myagents.projectBoard.detailWidth.v1', defaultWidth: 400, minWidth: 320, maxWidth: 720 };
+
 export default function ProjectBoardDetail({ row, workspacePath, isActive, now, draft, onDraftChange, onClose, onOpenSession, onChanged, onOrganize, onConvert, organizing = false }: Props) {
   const overlay = useBoardOverlay();
   const panel = useRef<HTMLElement>(null);
   const { t } = useTranslation('task');
+  const detailWidth = usePanelWidth(DETAIL_WIDTH);
   const [section, setSection] = useState<'overview' | 'history' | 'artifacts'>('overview');
   const [detail, setDetail] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +84,8 @@ export default function ProjectBoardDetail({ row, workspacePath, isActive, now, 
   }
   const sessionIds = task ? task.sessionIds : row.sessions.map(s => s.id);
   const canRerun = row.group !== 'running' && (!row.confirmationReason || ['blocked', 'stopped'].includes(row.confirmationReason)) && task && task.executor === 'agent' && ['blocked', 'stopped', 'done'].includes(task.status);
-  return <aside ref={panel} className="pb-detail" aria-label={t('projectBoard.details')}>
+  return <aside ref={panel} className="pb-detail" style={{ '--pb-detail-width': `${detailWidth.width}px` } as React.CSSProperties} aria-label={t('projectBoard.details')}>
+    <PanelResizeHandle config={DETAIL_WIDTH} width={detailWidth.width} edge="left" label={t('projectBoard.resizeDetail')} onPreview={detailWidth.setWidth} onCommit={detailWidth.commit} />
     <div className="pb-detail-head"><div><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div><h2>{row.title}</h2></div>
       <button ref={closeButton} type="button" className="pb-button" aria-label={t('projectBoard.close')} onClick={onClose} disabled={busy}><CloseIcon className="h-4 w-4" /></button></div>
     <nav className="pb-detail-tabs" aria-label={t('projectBoard.details')}>{(['overview', 'history', 'artifacts'] as const).map(s => <button type="button" key={s} className="pb-detail-tab" aria-pressed={section === s} onClick={() => setSection(s)}>{t(`projectBoard.detailTabs.${s}`)}</button>)}</nav>

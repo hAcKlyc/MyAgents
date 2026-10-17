@@ -689,6 +689,7 @@
     }
   },
   "detail": {
+    "resizeProperties": "Resize properties panel",
     "syncSuccess": "Synced to Agent",
     "syncFailed": "Sync failed: {{message}}",
     "syncTitle": "Sync to Agent",
@@ -932,6 +933,7 @@
     }
   },
   "projectBoard": {
+    "resizeDetail": "Resize details panel",
     "title": "Project board",
     "tabTitle": "{{name}} · Board",
     "openFor": "Open project board for {{name}}",
