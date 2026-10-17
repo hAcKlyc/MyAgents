@@ -106,6 +106,16 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
     return jsonResponse({ accepted: false, reason: 'invalid network return context' }, 401);
   }
 
+  // The current AgentNet return protocol only carries terminal single-turn events.
+  // Do not accept a continuous subscription that cannot deliver its events remotely.
+  if (mode === 'continuous' && networkReturn) {
+    return jsonResponse({
+      accepted: false,
+      reason: 'CONTINUOUS_NETWORK_WATCH_UNAVAILABLE',
+      mode: 'continuous',
+    }, 501);
+  }
+
   const engine = getSessionEngine();
   const runtimeIdentity = engine.getRuntimeIdentity();
   if (body.targetSessionId !== runtimeIdentity.sessionId) {
