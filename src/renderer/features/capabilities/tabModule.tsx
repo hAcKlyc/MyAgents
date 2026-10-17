@@ -34,7 +34,7 @@ const CapabilitiesTabRenderer = memo(function CapabilitiesTabRenderer({
     <Suspense fallback={PAGE_FALLBACK}>
       <Settings
         mode="capabilities"
-        initialSection={intent?.section ?? 'skills'}
+        initialSection={intent?.section}
         navigationNonce={intent?.generation}
         initialMcpId={intent?.mcpServerId}
         initialOfficialToolId={intent?.officialToolId}

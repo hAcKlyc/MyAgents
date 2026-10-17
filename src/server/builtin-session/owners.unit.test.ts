@@ -9,6 +9,7 @@ import {
   hasQueryBackgroundTask,
   hasQueryBackgroundTasks,
   hasQueryBackgroundWork,
+  hasBuiltinActivityForUpdate,
   replaceQueryBackgroundActivity,
   hasMessageResolver,
   incrementPreWarmFailCount,
@@ -169,6 +170,20 @@ describe('builtin-session owners', () => {
     expect(hasQueryBackgroundWork()).toBe(true);
     setQuerySession(null);
     expect(hasQueryBackgroundWork()).toBe(false);
+  });
+
+  it('keeps updater activity fenced when the SDK level arrives before task edges', () => {
+    const query = { close: vi.fn() } as never;
+    setQuerySession(query);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'work', task_type: 'workflow', description: '' }]);
+    expect(hasQueryBackgroundTasks()).toBe(false);
+    expect(hasBuiltinActivityForUpdate()).toBe(true);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'ambient', task_type: 'monitor', description: '', ambient: true }]);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
+    setQuerySession(null);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'late', task_type: 'workflow', description: '' }]);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
   });
 
   it('lifecycle owns abort flag and wakes the persistent generator', async () => {

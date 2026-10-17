@@ -2062,7 +2062,7 @@ export function isSessionBusy(): boolean {
 /** Observation only: background work can outlive its parent product turn.
  * Keep this separate from the root admission/stop/auto-injection busy policy. */
 export function hasBuiltinBackgroundWork(): boolean {
-  return hasQueryBackgroundTasks(lifecycleState.query);
+  return hasQueryBackgroundTasks(lifecycleState.query) || hasQueryBackgroundWork();
 }
 
 /**
@@ -10097,7 +10097,7 @@ function isSessionIdle(): boolean {
   return sessionState === 'idle';
 }
 
-export function hasBuiltinBackgroundWork(): boolean {
+export function hasBuiltinNonAmbientBackgroundWork(): boolean {
   return hasQueryBackgroundWork();
 }
 

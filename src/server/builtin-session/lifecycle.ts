@@ -72,7 +72,7 @@ export function isUpdateRestartFrozen(): boolean { return updateRestartFrozen; }
 
 /** Read-only activity decision exposed through the public builtin facade. */
 export function hasBuiltinActivityForUpdate(): boolean {
-  return hasQueryBackgroundTasks() || Boolean(getQueryMcpMutation())
+  return hasQueryBackgroundTasks() || hasQueryBackgroundWork() || Boolean(getQueryMcpMutation())
     || lifecycleState.preWarming || lifecycleState.preWarmTimer !== null
     || (lifecycleState.processing && !lifecycleState.query);
 }

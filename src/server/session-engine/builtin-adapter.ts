@@ -72,7 +72,7 @@ import {
   stripPlaywrightResults,
   switchToSession,
   waitForSessionIdle,
-  hasBuiltinBackgroundWork,
+  hasBuiltinNonAmbientBackgroundWork,
 } from '../agent-session';
 import type { MessageWire, PermissionMode } from '../agent-session';
 import type { ProviderEnv } from '../provider-types';
@@ -288,7 +288,7 @@ export function createBuiltinSessionEngine(): SessionEngine {
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),
-        hasBackgroundWork: hasBuiltinBackgroundWork(),
+        hasBackgroundWork: hasBuiltinNonAmbientBackgroundWork(),
       };
     },
 
