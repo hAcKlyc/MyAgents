@@ -937,10 +937,23 @@ impl SessionGoalManager {
             };
             super::scheduler::request_continuation(goal_id.to_string(), delay);
         }
-        if (updated.is_terminal() || updated.status == GoalStatus::Paused)
-            && updated.current_turn.is_none()
-        {
+        if updated.is_terminal() && updated.current_turn.is_none() {
             let _ = self.release_goal_owner(&updated).await;
+        } else if applied && updated.status == GoalStatus::Paused && updated.current_turn.is_none()
+        {
+            // A user can resume immediately after the durable pause is visible.
+            // Serialize cleanup with resume/claim, then re-read its exact control
+            // revision so an old finalizer cannot release the new turn's owner.
+            let _lifecycle =
+                crate::sidecar::acquire_session_lifecycle(&[&updated.session_id]).await;
+            let current = self.get(goal_id).await?;
+            if current.as_ref().is_some_and(|goal| {
+                goal.status == GoalStatus::Paused
+                    && goal.control_revision == updated.control_revision
+                    && goal.current_turn.is_none()
+            }) {
+                let _ = self.release_goal_owner(&updated).await;
+            }
         }
         if became_terminal {
             self.cancel_deadline(goal_id).await;
@@ -1694,6 +1707,87 @@ mod tests {
             consumed_tokens: 456,
             channel_delivery_expected: false,
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_finalize_cleanup_serializes_with_explicit_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+        let goal = manager
+            .create_goal(config("recovery-race-session", "finish once"))
+            .await
+            .unwrap();
+        let (sidecars, generation) = live_test_sidecar("recovery-race-session", &goal.id);
+        manager
+            .claim_turn_from_sidecar(
+                &goal.id,
+                "failed-queue",
+                GoalTurnKind::Continuation,
+                goal.control_revision,
+                "recovery-race-session",
+                generation,
+                &sidecars,
+            )
+            .await
+            .unwrap();
+        *manager.stop_goal_turn_hook.write().await =
+            Some(Arc::new(|_, _| Box::pin(async { Ok(()) })));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let allow = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let entered_hook = entered.clone();
+        let allow_hook = allow.clone();
+        let calls_hook = calls.clone();
+        *manager.release_goal_owner_hook.write().await = Some(Arc::new(move |_| {
+            let entered = entered_hook.clone();
+            let allow = allow_hook.clone();
+            let first = calls_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            Box::pin(async move {
+                if first {
+                    entered.notify_one();
+                    allow.notified().await;
+                }
+                Ok(false)
+            })
+        }));
+        let finalizer_manager = manager.clone();
+        let finalizer_goal = goal.id.clone();
+        let finalizer = tauri::async_runtime::spawn(async move {
+            finalizer_manager
+                .finalize_turn_from_sidecar(
+                    &finalizer_goal,
+                    "failed-queue",
+                    recovery_failure("context_recovery_required"),
+                    generation,
+                    &sidecars,
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        let resume_manager = manager.clone();
+        let resume_goal = goal.id.clone();
+        let resume =
+            tauri::async_runtime::spawn(
+                async move { resume_manager.resume_goal(&resume_goal).await },
+            );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "resume must not acquire the Goal owner before old recovery cleanup completes"
+        );
+        allow.notify_one();
+        finalizer.await.unwrap().unwrap();
+        let resumed = tokio::time::timeout(std::time::Duration::from_secs(5), resume)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.id, goal.id);
+        assert_eq!(resumed.status, GoalStatus::Active);
+        assert!(resumed.terminal_reason.is_none());
     }
 
     #[tokio::test]

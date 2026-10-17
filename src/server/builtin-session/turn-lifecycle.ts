@@ -434,6 +434,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
   const failTurn = (error: string, localizedError?: string): SessionCompletionTerminal | null => {
     deps.setStreamingMessage(false);
     const terminalOutcome = snapshotCurrentTurnTerminalOutcome('error', {
+      code: classifyContextTurnFailure({ errorText: error }),
       error: localizedError ?? error,
     });
     const activityAt = terminalActivityAt(terminalOutcome);

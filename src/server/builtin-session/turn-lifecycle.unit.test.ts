@@ -878,6 +878,17 @@ describe('turn-lifecycle owner', () => {
     });
   });
 
+  it('retains structured recovery failure codes when SDK throws instead of yielding a result', async () => {
+    const { deps } = makeDeps();
+    const terminal = vi.fn();
+    setCurrentTurnSourceItem({ id: 'recovery-throw', message: { role: 'user', content: 'continue' },
+      messageText: 'continue', wasQueued: false, resolve: () => {}, channelDelivery: NO_CHANNEL_DELIVERY,
+      turnOwner: { kind: 'goal', id: 'same-goal' }, onTerminal: terminal });
+    createBuiltinTurnLifecycle(deps).failTurn('context_recovery_required: Ledger cannot be read', '本地化错误');
+    await waitForCurrentTurnTerminalObserver();
+    expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', code: 'context_recovery_required' }));
+  });
+
   it('persists unexpected errors and commits terminal metadata for expected terminations', async () => {
     const { deps } = makeDeps();
     const lifecycle = createBuiltinTurnLifecycle(deps);
