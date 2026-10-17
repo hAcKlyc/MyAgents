@@ -1,7 +1,7 @@
 <!-- git-project-sync-task:version=1 -->
 <!-- git-project-sync-task:branch=codex/upstream-integration-20261017 -->
 <!-- git-project-sync-task:base=4d3b666c170367a05a8871bee8a9b6032b7ef379 -->
-<!-- git-project-sync-task:status=in-progress -->
+<!-- git-project-sync-task:status=ready-for-review -->
 
 # Task: Integrate nine upstream repair groups while preserving MoXBots navigation
 
@@ -19,10 +19,11 @@ MOXBOTS-UPSTREAM-INTEGRATION-20261017: user authorized all nine reviewed upstrea
 - [x] Integrate AgentNet recoverable terminal returns/protocol (78d85eb5), validate owned service compatibility.
 - [x] Integrate plugin SDK+WeCom QR fixes (20d1bcc9,ed28af72).
 - [x] Port only settings/capabilities consumed-navigation state fix/tests from2fdc6448; sidebar/App menu design unchanged.
-- [ ] Review combined diff; focused tests, TS/lint, deterministic suites, JS bundles and relevant Rust/loopback/native tests.
-- [ ] Actual rendered settings/channels state interaction checks; preserve navigation baseline.
-- [ ] Independent review and repair loop, CI pass, main integration, verify remote main contains delivery.
-- [ ] Save next-release dependency/acceptance record with no concurrent release.
+- [x] Review combined diff; focused tests, TS/lint, deterministic suites, JS bundles and relevant Rust/loopback/native tests.
+- [x] Actual rendered settings/channels state interaction checks; preserve navigation baseline.
+- [x] Independent review and repair loop, see acceptance record.
+- [ ] Final-head CI pass, main integration and remote ancestry proof via PR98 merge receipt.
+- [x] Save next-release dependency/acceptance record with no concurrent release.
 
 ## Ownership / execution
 
@@ -42,8 +43,12 @@ Desktop signed release required after main delivery. Sole deployment chat remain
 
 ## Blockers and unknowns
 
-All source groups integrated. Native paired DSH artifact acquisition pending; owned relay currently lacks permit/return-route authority and remains safely capability-gated. Mac full App Rust compile has a Swift dependency link environment failure; required Linux/Windows CI must pass. Product source/main delivery and production acceptance are separate gates.
+All source groups integrated; DSH0.1.18/protocol6.2 artifact verified and8 scoped native recovery/delete cases pass; full native has2 pre-existing advisory-prompt assertion failures (old/new artifact source identical), gate retained; owned relay currently lacks permit/return-route authority and remains safely capability-gated. Mac full App Rust compile has a Swift dependency link environment failure; required Linux/Windows CI must pass. Product source/main delivery and production acceptance are separate gates.
 
 ## Next step
 
-Port root-owned repairs while isolated workers implement their packages, then integrate/review and execute acceptance.
+Require final-head PR98 CI green, merge through normal reviewed flow, verify remote main contains the final head and preserve merge receipt. No concurrent desktop/service release; native advisory gate stays open with the existing sole release owner.
+
+## Final source evidence
+
+All nine groups and state-only navigation integrated. Main da68eba3 synchronized without changing its navigation. Combined acceptance, browser provenance, known native advisory gate and execution report: `dev-docs/upstream-integration-20261017/{acceptance.md,execution.md}`. PR98 is the authority for final CI and merge status. Root confirms remote main ancestry after merging and saves the receipt outside Git (the receipt necessarily follows this commit).
