@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { APP_DISPLAY_NAME } from '../shared/appProfile';
 
 import AppErrorBoundary from './components/AppErrorBoundary';
 import { ConfigProvider } from './config/ConfigProvider';
@@ -23,6 +24,7 @@ import './i18n';
 import './index.css';
 
 let tauriWindowLabel: string | undefined;
+document.title = APP_DISPLAY_NAME;
 try {
   tauriWindowLabel = getCurrentWebviewWindow().label;
 } catch {

@@ -111,8 +111,8 @@ pub use session_lifecycle::{
 };
 pub use shutdown::{
     begin_app_exit_shutdown, begin_lifecycle_spawn_permit, begin_update_shutdown,
-    is_update_shutdown_in_progress, shutdown_for_update_verified, stop_all_sidecars,
-    LifecycleSpawnPermit,
+    is_update_shutdown_in_progress, prepare_update_restart, shutdown_for_update_verified,
+    stop_all_sidecars, LifecycleSpawnPermit,
 };
 pub use spawn::find_node_executable_pub;
 pub(crate) use spawn::normalize_external_path;
@@ -231,7 +231,12 @@ fn ensure_high_file_descriptor_limit() {
 }
 
 // Configuration constants
+#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+const BASE_PORT: u16 = 32415;
+#[cfg(not(myagents_moxbot))]
 const BASE_PORT: u16 = 31415;
+#[cfg(myagents_updater_qa)]
+const BASE_PORT: u16 = 33415;
 // Health check: exponential backoff 50ms → 500ms, capped. Wall-clock ceiling ≈ 5 min.
 // Node cold start is ~2s (tsx boot + module load), so the first 5 attempts at
 // 50/100/200/400/500ms (cumulative 1.25s) usually arrive before listen — cheap,
@@ -255,7 +260,12 @@ const PORT_RANGE: u16 = 500;
 pub const GLOBAL_SIDECAR_ID: &str = "__global__";
 // Process identification marker (used to identify our sidecar processes)
 // This marker is added to all sidecar commands for reliable process identification
+#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+const SIDECAR_MARKER: &str = "--moxbot-sidecar";
+#[cfg(not(myagents_moxbot))]
 const SIDECAR_MARKER: &str = "--myagents-sidecar";
+#[cfg(myagents_updater_qa)]
+const SIDECAR_MARKER: &str = "--moxbot-updaterqa-sidecar";
 const SESSION_DELETE_AUTHORITY_ENV: &str = "MYAGENTS_SESSION_DELETE_AUTHORITY";
 const SESSION_DELETE_AUTHORITY_HEADER: &str = "X-MyAgents-Session-Delete-Authority";
 
@@ -299,6 +309,21 @@ fn append_sidecar_entrypoint_args(
     port: u16,
     role: SidecarProcessRole,
 ) {
+    if crate::app_dirs::IS_UPDATER_QA {
+        // Keep even direct QA launches from forwarding credentials to Node children.
+        for (name, _) in std::env::vars_os() {
+            let text = name.to_string_lossy();
+            if text.starts_with("ANTHROPIC_") || text.starts_with("OPENAI_")
+                || text.starts_with("CLAUDE_CODE_OAUTH") || text.starts_with("MYAGENTS_HOST_")
+                || text == "CODEX_HOME" || text == "CLAUDE_CONFIG_DIR" {
+                cmd.env_remove(name);
+            }
+        }
+        if let Some(root) = crate::app_dirs::myagents_data_dir() {
+            cmd.env("CLAUDE_CONFIG_DIR", root.join("claude"));
+            cmd.env("CODEX_HOME", root.join("codex"));
+        }
+    }
     cmd.env("MYAGENTS_APP_VERSION", env!("CARGO_PKG_VERSION"));
     cmd.env(
         "MYAGENTS_APP_BUILD_MODE",

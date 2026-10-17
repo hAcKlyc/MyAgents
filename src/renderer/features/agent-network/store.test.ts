@@ -1,5 +1,13 @@
+import { readRemoteDraft, writeRemoteDraft, readRemoteOperation, writeRemoteOperation } from '@/features/remote-session/drafts';
+import type { RemoteSessionTab } from '@/features/remote-session/tabContract';
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NetworkSnapshot, NetworkRegistry } from "@/api/agentNetwork";
+import {
+  getHostDraft,
+  setHostDraft,
+  getHostPending,
+  setHostPending,
+} from "./hostManagementState";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), listen: vi.fn() }));
 vi.mock("@/api/agentNetwork", () => ({
   networkConnections: mocks.read,
@@ -94,18 +102,51 @@ describe("App network projection", () => {
       );
     setDescriptionDraft(firstDraft, "official text");
     setDescriptionDraft(secondDraft, "self text");
+    const hostAddress = {
+      connectionId: "official",
+      principalId: "account",
+      networkId: "network",
+      authGeneration: 1,
+      deviceId: "host",
+      serviceId: "service",
+      targetIdentityGeneration: 1,
+    };
+    const otherHost = {
+      ...hostAddress,
+      connectionId: "self",
+      principalId: "self-account",
+      networkId: "self-network",
+    };
+    setHostDraft(hostAddress, {
+      config: { baseUrl: "https://fixture.invalid", model: "draft" },
+      expectedRevision: 1,
+    });
+    setHostPending(hostAddress, {
+      mutationId: "pending",
+      resource: "provider",
+      receipt: null,
+    });
+    setHostDraft(otherHost, {
+      config: { baseUrl: "https://fixture.invalid", model: "other" },
+      expectedRevision: 1,
+    });
     acceptNetworkRegistry(registry([base, second], "self"));
     expect(currentNetworkGeneration("official")).toBe(1);
     expect(currentNetworkGeneration("self")).toBe(1);
+    expect(getHostPending(hostAddress)?.mutationId).toBe("pending");
     event({
       payload: { ...base, state: "signedOut", authGeneration: 2, revision: 3 },
     });
     expect(getDescriptionDraft(firstDraft)).toBeUndefined();
     expect(getDescriptionDraft(secondDraft)).toBe("self text");
+    expect(getHostDraft(hostAddress)).toBeUndefined();
+    expect(getHostPending(hostAddress)).toBeUndefined();
+    expect(getHostDraft(otherHost)?.config.model).toBe("other");
     event({ payload: { ...second, revision: 2 } });
     expect(getDescriptionDraft(secondDraft)).toBe("self text");
     acceptNetworkRegistry(registry([{ ...base, authGeneration: 2 }]));
     expect(getDescriptionDraft(secondDraft)).toBeUndefined();
+    expect(getHostDraft(otherHost)).toBeUndefined();
   });
   it("does not read when teardown wins registration", async () => {
     let resolve!: (v: { isRegistered: () => boolean }) => void;
@@ -121,4 +162,18 @@ describe("App network projection", () => {
     await flush();
     expect(mocks.read).not.toHaveBeenCalled();
   });
+});
+
+it('registry-only account change clears remote drafts and pending IDs before the next render', () => {
+  const data = new Map<string, string>();
+  vi.stubGlobal('localStorage', { get length() { return data.size; }, key: (index: number) => [...data.keys()][index] ?? null, getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value), removeItem: (key: string) => data.delete(key) });
+  const owned = { ...base, connectionId: 'owned:test' };
+  acceptNetworkRegistry(registry([owned]));
+  const tab: RemoteSessionTab = { id: 'tab', view: 'remote-session', title: 'draft', locator: { connectionId: 'owned:test', principalId: 'account', networkId: 'network', authGeneration: 1, deviceId: 'device' }, agentId: 'agent', agentName: 'Agent', deviceName: 'Host', sessionId: null, targetScope: null };
+  writeRemoteDraft(tab, 'private draft');
+  writeRemoteOperation(tab, { operationId: '11111111-1111-4111-8111-111111111111', kind: 'start', status: 'unconfirmed' });
+  acceptNetworkRegistry(registry([{ ...owned, principalId: 'different-account', authGeneration: 2, revision: 2 }]));
+  expect(readRemoteDraft(tab)).toBe('');
+  expect(readRemoteOperation(tab)).toBeNull();
+  vi.unstubAllGlobals();
 });

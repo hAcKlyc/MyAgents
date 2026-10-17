@@ -64,9 +64,25 @@ Session label 继续表示会话标题/原摘要。来源回执和异步事件�
 
 ### 设备身份与凭据
 
-Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持有私钥；私钥只持久化到系统凭据库（macOS Keychain、Windows Credential Manager、Linux Secret Service），使用时加载到 Rust 进程，不上传云端或交给 Renderer/Node，没有文件或明文降级。当前网络的身份签发方（官方 Space / 自部署实例）验证包含公钥及签名的 CSR，签发设备 leaf 与 signed binding，将账号、设备、密钥代次绑定到证书指纹、SAN 和有效期。
+Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持有私钥；桌面端私钥只持久化到系统凭据库（macOS Keychain、Windows Credential Manager、Linux Secret Service），使用时加载到 Rust 进程，不上传云端或交给 Renderer/Node。独立共享 crypto 包另提供显式选择的 headless 加密存储：仅从私有 systemd 凭据投影接收 KEK，动态私钥记录使用 AEAD 加密并受 scope 绑定、权限和持久化校验保护；没有桌面错误后的自动回退或明文降级。该后端尚未接入实际 headless 登记 owner，详见 [Headless 身份存储](./headless_identity_store.md)。当前网络的身份签发方（官方 Space / 自部署实例）验证包含公钥及签名的 CSR，签发设备 leaf 与 signed binding，将账号、设备、密钥代次绑定到证书指纹、SAN 和有效期。
 
 外层是设备到云端的 HTTPS/WSS，接入以稳定设备公钥绑定的 DPoP 证明持有凭据对应的私钥。官方接入凭据不超过原 Space 登录剩余有效期与 30 天；自部署凭据由固定实例签发，客户端按协议最大有效期验证，不依赖 Space 登录。设备 leaf 有效 7 天，在到期前 48 小时窗口按需续签。活跃回程使用一项带 jitter 的约 6 小时检查，空闲不轮询凭据或证书。暂时签发不可用且现有 leaf 尚有效时保留当前关联，真实撤销与过期不能忽略。
+
+### 独立账号的桌面凭据访问
+
+`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期；浏览器登录完成后先写入 OS 凭据库，再发放进程内会话 guard。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
+
+同一持久槽位的新登录提交会失效旧 guard；取消尚未完成的新登录不撤销此前仍有效的登录。精确 binding 删除、账号 active 失效、会话过期和服务器拒绝仍停止旧权限。恢复、登录写入及精确删除由模块内同步存储锁串行化，锁不跨网络 await。正常路径不轮询 Keychain，用户在应用外手工编辑凭据的检测边界是下次恢复；这不代替服务器的过期或撤销检查。
+
+内部 MoXBots 试用包更新复用固定代码签名证书，但固定 designated requirement 不能单独保证更新后免提示。Apple 的 [securityd client partition](https://github.com/apple-oss-distributions/Security/blob/main/securityd/src/clientid.cpp) 对无法归入 Apple 证书体系的已签代码仍使用 `cdhash:`；[ACL 验证](https://github.com/apple-oss-distributions/Security/blob/main/securityd/src/acls.cpp) 会额外检查这个 partition。自签名新构建的代码 hash 改变，旧记录可能需要再次批准。手工附加 TeamIdentifier 不会变成 Apple 锚定的签名。本地试用证书不等于 Developer ID 或 Apple 公证。
+
+MoXBots macOS 构建显式启用 `moxbot-credential-reader`，使用 `Contents/Helpers/moxbots-credential-reader` 固定组件和外层 App 封印内的闭集 manifest。桌面更新原样复用组件已签字节，不重编或重签；调用双方验证各自真实运行代码 hash、严格签名、相同叶证书、闭集角色、UID、真实 parent 和同一 App 路径。组件不存在或被修改时拒绝访问，不回退到 App 自身读取。默认 MyAgents 和其他平台的后端保持原路径；构建约束见 [资源准备](build_resource_preparation.md)。签名私钥与专用构建钥匙串仅在本机私有目录，不保存 Mac 登录密码、不修改全局 ACL 或系统信任。
+
+后台访问闭集 service/account/User-domain，经匿名管道和有界结果传输，不请求系统 UI。固定组件承担既有 owner 裁决的读、写、删除；写入确认内容持久化、删除检查真实状态，不能将超时或未知写当成功。显式 Authorize 只允许读取已保存 Owned 连接；整体最多 180 秒，可取消，验证会话及服务器现有 key generation/fingerprint 后才发布 Actor，不执行登录、入网、身份替换或配置写入。后台管道预算 5 秒，前置同步签名封印验证自身不能由这个管道循环中断；大 App 的实际耗时仍需真机验收，不能将单测当作整链硬期限。真实授权错误停止普通重试，不作为条目不存在或新建钥匙的依据。
+
+显式恢复的私钥仅由对应 Actor 的完整 scope 只读 store 持有，拒绝写删。普通恢复使用连接内至多一项的完整 KeyScope 缓存；断线仍重新验证服务器状态与 fingerprint，但不重复读取同一钥匙。缓存随 binding/Actor generation、账号边界及退休清除；未知写或删除也使缓存失效，不掩盖存储结果。关闭、取消、超时及 registry 边界阻止迟到发布，并保留持久记录。
+
+旧记录第一次迁移到固定组件时，会话和设备钥是独立条目，系统可能分别要求确认；不能承诺恰好只输入一次密码。组件本身安全升级改变代码 hash，也可能需要新授权。用户选择“允许一次”不代表持久授权；只有真实冷启动、替换桌面而保持组件不变且恢复在线的对照才能关闭更新免提示验收。
 
 ### 端到端通道与消息路径
 

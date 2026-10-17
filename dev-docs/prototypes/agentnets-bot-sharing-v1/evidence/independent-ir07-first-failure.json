@@ -1,0 +1,10 @@
+{
+  "htmlSha256": "8216b84172b2c6b707cef283954dcd43569281449fcc76f49cf0310964234f57",
+  "scenario": "用户视角许知 → 客户研究Bot → 管理低级成员 → Tab → Escape",
+  "duplicateInvitation": "PASS: 陈序已有有效授权时重复邀请被拒绝",
+  "nestedTab": "PASS: 焦点仍在低级成员dialog",
+  "nestedEscape": "FAIL: Escape nested dialog did not close",
+  "sourceCause": "document keydown sees usersim + #modal dialog and returns before Escape",
+  "exitAfterNested": "未执行：前序断言失败",
+  "evidenceType": "从实际Playwright断言结果归档，非重跑结果"
+}

@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 /**
  * SessionStore - Handles persistence of session data using JSONL format.
  *
@@ -58,7 +59,7 @@ import { assertDshProductInputMatches, fingerprintDshProductInput } from './sess
 import { normalizeSessionRuntimeIdentity, resolveBuiltinSdkSessionId } from './utils/session-runtime-identity';
 import { resolveLastVisibleTurnPreview } from './utils/session-message-preview';
 
-const MYAGENTS_DIR = join(homedir(), '.myagents');
+const MYAGENTS_DIR = join(homedir(), APP_DATA_DIR_NAME);
 const SESSIONS_FILE = join(MYAGENTS_DIR, 'sessions.json');
 const SESSIONS_DIR = join(MYAGENTS_DIR, 'sessions');
 const SESSIONS_V2_DIR = join(MYAGENTS_DIR, 'sessions-v2');
@@ -73,6 +74,18 @@ const LOCK_STALE_MS = 30000;
 const activeTranscripts = new Map<string, SessionTranscript>();
 const transcriptBindings = new Map<string, Promise<SessionTranscript>>();
 const transcriptStatusListeners = new Set<(status: TranscriptSaveStatus) => void>();
+
+/** Update admission must not turn a completed but unsaved answer into data loss.
+ * This is a read of the existing writer owner; it neither flushes nor revokes it. */
+export function assertSessionTranscriptsDurableForUpdate(): void {
+    if (transcriptBindings.size > 0) throw new Error('UPDATE_BUSY');
+    for (const transcript of activeTranscripts.values()) {
+        if (transcript.isRevoked) continue;
+        const status = transcript.writer.status;
+        if (status.state !== 'healthy') throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+        if (status.liveRevision !== status.durableRevision) throw new Error('UPDATE_BUSY');
+    }
+}
 
 export function getActiveSessionTranscript(sessionId: string): SessionTranscript | undefined {
     const active = activeTranscripts.get(sessionId);
@@ -884,6 +897,7 @@ export function isLegacyPreQueryManagedCodexDraft(session: SessionMetadata): boo
 
 export function isHistoryVisibleSession(session: SessionMetadata): boolean {
     return session.materializationState !== 'prepared'
+        && !session.hostBotBinding
         && !(session.pendingDshMutation?.kind === 'dsh-delete'
             && session.pendingDshMutation.runtimeCommitted === true)
         && !isSystemMaintenanceSession(session)
@@ -4240,6 +4254,7 @@ export async function updateSessionMetadata(
         | 'source'
         | 'origin'
         | 'favorite'
+        | 'archived'
         | 'lastMessagePreview'
         | 'titleSource'
         | 'titleGenAttempts'
@@ -4288,6 +4303,7 @@ export async function updateSessionMetadata(
         const current = active.metadata;
         if (changesPendingDshAuthority(current, updates)) return null;
         const { pinned: _pinned, ...patch } = updates;
+        if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
         if (patch.lastActiveAt !== undefined) patch.lastActiveAt = monotonicLastActiveAt(current.lastActiveAt, patch.lastActiveAt);
         return active.patchMetadata(patch);
     }
@@ -4321,6 +4337,7 @@ export async function updateSessionMetadata(
         const current = all[idx];
         const { pinned, ...updatesWithoutPinIntent } = updates;
         const patch: Partial<SessionMetadata> = { ...updatesWithoutPinIntent };
+        if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
         if (pinned !== undefined) {
             if (!pinned) {
                 patch.pinnedAt = undefined;
@@ -4362,6 +4379,7 @@ export async function updateSessionMetadataForBinding(
     if (!active) return updateSessionMetadata(sessionId, updates, precondition);
     if (!precondition(active.metadata) || changesPendingDshAuthority(active.metadata, updates)) return null;
     const { pinned: _pinned, ...patch } = updates;
+    if (patch.archived !== undefined) patch.archived = patch.archived === true ? true : undefined;
     return active.patchMetadata(patch);
 }
 
@@ -4594,7 +4612,9 @@ export async function publishForkSession(
         throw new Error('Fork target must be a fresh V2 Session birth');
     }
     await assertCompleteSessionForkSource(sourceSessionId);
-    const prepared: SessionMetadata = { ...metadata, materializationState: 'prepared', materializationSourceSessionId: sourceSessionId };
+    // Organization state belongs to the source Product Session and is not inherited by forks.
+    const { archived: _archived, ...forkMetadata } = metadata;
+    const prepared: SessionMetadata = { ...forkMetadata, materializationState: 'prepared', materializationSourceSessionId: sourceSessionId };
     let candidate: TranscriptFile | undefined;
     try {
         await publishV2Metadata(prepared, {}, true);

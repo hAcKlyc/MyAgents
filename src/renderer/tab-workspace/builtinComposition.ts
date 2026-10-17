@@ -1,3 +1,5 @@
+import { remoteSessionTabModule } from '@/features/remote-session/tabModule';
+import { projectBoardTabModule } from '@/features/project-board/tabModule';
 import { agentNetworkTabModule } from '@/features/agent-network/tabModule';
 import { createNewTab, type Tab } from '@/types/tab';
 import type { ModuleBinding, ModuleTab } from '@/tab-workspace/contracts';
@@ -19,8 +21,10 @@ export const builtinTabModules = defineTabModules<Tab>()({
   settings: settingsTabModule,
   capabilities: capabilitiesTabModule,
   taskcenter: taskCenterTabModule,
+  projectboard: projectBoardTabModule,
   space: spaceTabModule,
   agentnetwork: agentNetworkTabModule,
+  'remote-session': remoteSessionTabModule,
   record: recordTabModule,
 });
 

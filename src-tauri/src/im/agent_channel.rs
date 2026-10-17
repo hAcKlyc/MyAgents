@@ -754,7 +754,11 @@ async fn create_bot_instance_with_pending_cron_events<R: Runtime>(
         .unwrap_or_else(|| {
             // Try bundled mino workspace first
             dirs::home_dir()
-                .map(|h| h.join(".myagents").join("projects").join("mino"))
+                .map(|home| {
+                    home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                        .join("projects")
+                        .join("mino")
+                })
                 .filter(|p| p.exists())
                 .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")))
         });
@@ -873,7 +877,7 @@ async fn create_bot_instance_with_pending_cron_events<R: Runtime>(
 
             let plugin_dir = dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".myagents")
+                .join(crate::app_dirs::APP_DATA_DIR_NAME)
                 .join("openclaw-plugins")
                 .join(plugin_id);
             let bridge_state_dir = match &agent_id {

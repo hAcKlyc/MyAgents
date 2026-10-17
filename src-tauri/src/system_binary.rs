@@ -57,6 +57,13 @@ pub fn find(binary_name: &str) -> Option<PathBuf> {
 /// Build an augmented PATH string that includes common system binary directories.
 /// Useful when spawning subprocesses that need the full search path.
 pub fn augmented_path() -> std::ffi::OsString {
+    // QA never evaluates user login/interactive shell startup files or scans user tool homes.
+    if crate::app_dirs::IS_UPDATER_QA {
+        let mut paths = Vec::new();
+        append_app_local_runtime_dirs(&mut paths);
+        paths.extend(["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(str::to_owned));
+        return std::env::join_paths(paths).unwrap_or_default();
+    }
     let system_path = std::env::var("PATH").unwrap_or_default();
     // mut needed on non-Windows (EXTRA_SEARCH_DIRS / USER_RELATIVE_DIRS push below)
     #[allow(unused_mut)]
@@ -75,9 +82,14 @@ pub fn augmented_path() -> std::ffi::OsString {
         if let Some(home) = dirs::home_dir() {
             push_path_part(
                 &mut parts,
-                home.join(".myagents").join("npm-global").join("bin"),
+                home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                    .join("npm-global")
+                    .join("bin"),
             );
-            push_path_part(&mut parts, home.join(".myagents").join("bin"));
+            push_path_part(
+                &mut parts,
+                home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("bin"),
+            );
             for rel in USER_RELATIVE_DIRS {
                 push_path_part(&mut parts, home.join(rel));
             }
@@ -208,8 +220,15 @@ fn push_env_dir(parts: &mut Vec<String>, key: &str, rel: &[&str]) {
 #[cfg(target_os = "windows")]
 fn append_windows_runtime_dirs(parts: &mut Vec<String>) {
     if let Some(home) = dirs::home_dir() {
-        push_path_part(parts, home.join(".myagents").join("npm-global"));
-        push_path_part(parts, home.join(".myagents").join("bin"));
+        push_path_part(
+            parts,
+            home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                .join("npm-global"),
+        );
+        push_path_part(
+            parts,
+            home.join(crate::app_dirs::APP_DATA_DIR_NAME).join("bin"),
+        );
         push_path_part(parts, home.join(".bun").join("bin"));
         push_path_part(parts, home.join("AppData").join("Roaming").join("npm"));
     }

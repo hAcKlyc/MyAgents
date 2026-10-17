@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildForkUuidRemap, remapStoredSdkUuids, type ForkTranscriptEntry } from './fork-remap';
+import { buildForkUuidRemap, remapStoredSdkUuids, remapForkMessageUuids, type ForkTranscriptEntry } from './fork-remap';
 
 const e = (type: 'user' | 'assistant' | 'system', uuid: string): ForkTranscriptEntry => ({ type, uuid });
 
@@ -69,5 +69,36 @@ describe('remapStoredSdkUuids (apply to our stored row uuids)', () => {
     const r = remapStoredSdkUuids(['s2'], map);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.remapped).toEqual(['f2']);
+  });
+});
+
+describe('exact legacy user stamp repair in a fork', () => {
+  const user = { role: 'user', content: 'exact original request', sdkUuid: 'lost-user-stamp' };
+  const native: ForkTranscriptEntry = { type: 'user', uuid: 'native-user', message: { content: [{ type: 'text', text: user.content }] } };
+  const map = new Map([['native-user', 'fork-user'], ['native-assistant', 'fork-assistant']]);
+
+  it('re-stamps only the fork snapshot from a unique complete plain-text native match', () => {
+    expect(remapForkMessageUuids([user, { role: 'assistant', content: 'reply', sdkUuid: 'native-assistant' }], [native], map))
+      .toEqual({ ok: true, remapped: ['fork-user', 'fork-assistant'] });
+    expect(user.sdkUuid).toBe('lost-user-stamp');
+  });
+
+  it.each([
+    { message: { ...user, role: 'assistant' }, source: [native], map },
+    { message: { ...user, content: '' }, source: [native], map },
+    { message: { ...user, attachments: [{}] }, source: [native], map },
+    { message: { ...user, content: [{ type: 'text', text: user.content }] }, source: [native], map },
+    { message: user, source: [], map },
+    { message: user, source: [native, { ...native, uuid: 'duplicate-text' }], map },
+    { message: user, source: [native], map: new Map<string, string>() },
+    { message: user, source: [native, { type: 'user' as const, uuid: 'lost-user-stamp' }], map },
+    { message: user, source: [{ ...native, message: { content: [{ type: 'text', text: user.content }, { type: 'image' }] } }], map },
+  ])('refuses missing, ambiguous, beyond-boundary and non-text evidence', ({ message, source, map }) => {
+    expect(remapForkMessageUuids([message], source, map).ok).toBe(false);
+  });
+
+  it('does not assign the same native user to another retained Product row', () => {
+    expect(remapForkMessageUuids([user, { ...user, sdkUuid: 'native-user' }], [native], map).ok).toBe(false);
+    expect(remapForkMessageUuids([user, { ...user, sdkUuid: undefined }], [native], map).ok).toBe(false);
   });
 });

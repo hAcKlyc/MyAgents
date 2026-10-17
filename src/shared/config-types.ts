@@ -1,5 +1,7 @@
 // Provider and permission configuration types
 
+import { APP_BUILD_PROFILE } from './appProfile';
+
 import { TOKENDANCE_MODELS, TOKENDANCE_MODEL_LIST_URL, TOKENDANCE_PROVIDER_ID, type ModelProtocol } from './tokendance';
 import { OPENCODE_GO_BASE_URL, OPENCODE_GO_MODEL_LIST_URL, OPENCODE_GO_MODELS, OPENCODE_GO_PROVIDER_ID } from './opencode-go';
 
@@ -2874,7 +2876,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   notificationSound: true, // 默认开启通知声音
   notificationBadge: false, // 默认关闭通知数字提示（待验证稳定后再恢复默认开启）
   globalSummonShortcut: {
-    enabled: true,
+    enabled: APP_BUILD_PROFILE === 'myagents',
     accelerator: 'CmdOrCtrl+Shift+M',
   },
 };

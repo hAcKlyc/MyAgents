@@ -784,6 +784,39 @@ impl SidecarManager {
         ports
     }
 
+    /// Exact manager-owned endpoints; recovering/starting/closed generations
+    /// are unknown, never inferred idle from missing HTTP or cached UI state.
+    pub(super) fn update_restart_targets(&mut self) -> Result<Vec<GlobalShutdownTarget>, String> {
+        if !self.recovering_sidecars.is_empty() {
+            return Err("UPDATE_ACTIVITY_UNKNOWN".to_string());
+        }
+        let mut targets = Vec::new();
+        for (id, sidecar) in &self.sidecars {
+            if sidecar.state != SidecarState::Healthy || !sidecar.dispatch_gate.is_accepting() {
+                return Err("UPDATE_ACTIVITY_UNKNOWN".to_string());
+            }
+            targets.push(GlobalShutdownTarget {
+                port: sidecar.port,
+                generation: self
+                    .generation_for(id)
+                    .ok_or_else(|| "UPDATE_ACTIVITY_UNKNOWN".to_string())?,
+            });
+        }
+        for instance in self.instances.values_mut() {
+            if !instance.healthy
+                || !instance.dispatch_gate.is_accepting()
+                || !instance.is_process_alive()
+            {
+                return Err("UPDATE_ACTIVITY_UNKNOWN".to_string());
+            }
+            targets.push(GlobalShutdownTarget {
+                port: instance.port,
+                generation: instance.generation,
+            });
+        }
+        Ok(targets)
+    }
+
     /// Stop all instances (session sidecars and global sidecar)
     pub(crate) fn prepare_stop_all(&mut self) -> SidecarShutdownPreparation {
         let mut drains = Vec::with_capacity(
@@ -2186,8 +2219,13 @@ impl SidecarManager {
 
     /// A prepared Inbox lease keeps a process alive, but cannot by itself
     /// authorize an unpublished Session after every original owner is gone.
-    pub(crate) fn session_has_owners_other_than(&self, session_id: &str, excluded: Option<&SidecarOwner>) -> bool {
-        self.session_owners(session_id).any(|owner| Some(owner) != excluded)
+    pub(crate) fn session_has_owners_other_than(
+        &self,
+        session_id: &str,
+        excluded: Option<&SidecarOwner>,
+    ) -> bool {
+        self.session_owners(session_id)
+            .any(|owner| Some(owner) != excluded)
     }
 
     /// Whether deletion is blocked by any owner other than the exact mounted
@@ -2289,6 +2327,41 @@ pub fn create_sidecar_state() -> ManagedSidecar {
 #[cfg(test)]
 mod completion_claim_tests {
     use super::*;
+
+    #[test]
+    fn update_restart_snapshot_keeps_exact_generations_and_rejects_unready_owners() {
+        let mut manager = SidecarManager::new();
+        manager.insert_test_ready_frontend_sidecar(
+            "updater-session",
+            31429,
+            SidecarOwner::Tab("update-tab".to_string()),
+        );
+        let generation = manager.current_generation("updater-session");
+        assert_eq!(
+            manager.update_restart_targets().unwrap(),
+            vec![GlobalShutdownTarget {
+                port: 31429,
+                generation
+            }]
+        );
+        manager.sidecars.get_mut("updater-session").unwrap().state = SidecarState::Starting;
+        assert_eq!(
+            manager.update_restart_targets().unwrap_err(),
+            "UPDATE_ACTIVITY_UNKNOWN"
+        );
+        manager.sidecars.get_mut("updater-session").unwrap().state = SidecarState::Healthy;
+        DispatchGate::close(
+            &manager
+                .sidecars
+                .get("updater-session")
+                .unwrap()
+                .dispatch_gate,
+        );
+        assert_eq!(
+            manager.update_restart_targets().unwrap_err(),
+            "UPDATE_ACTIVITY_UNKNOWN"
+        );
+    }
 
     #[test]
     fn exact_owner_sweep_covers_temporary_multi_session_handover() {

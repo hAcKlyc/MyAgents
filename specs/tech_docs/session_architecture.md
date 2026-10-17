@@ -4,6 +4,14 @@
 
 ## 1. 权威边界
 
+### 下一步建议是草稿预览
+
+`POST /api/chat/next-prompt` 经当前 Tab 的 Session Sidecar 调用，只接收 `sessionId` 和最后一条 assistant 的 `anchorMessageId`。SessionEngine 校验实际绑定、idle、人类会话轮次、完成状态和最新 transcript；生成前后核对内容与配置，不能由 Renderer 提交历史、模型、Provider 或凭据。建议不写入 transcript、Session metadata 或任务队列，不改变执行会话。
+
+Builtin 的可选建议复用隔离 SDK 文本 utility：采用活动会话的模型和 Provider，无工具、MCP、设置加载或会话持久化，成功 terminal 后才接纳文本，超时/取消/失败返回空建议。最近 128 个完成结果（包含失败/空值）使用 LRU 缓存；在途请求合并且不淘汰，被淘汰的历史回复重新成为有效 anchor 时可重新生成。上下文为最近 6 条可见文本、每条最多 2,000 codepoints、总计最多 10,000 UTF-8 bytes；输出单行最多 420 codepoints。DSH、Claude Code 和 Codex 目前没有已验证的无工具、非持久化文本 utility，返回明确 `unsupported`，界面显示不可用；不能借用其它 Runtime 或系统 CLI 替代。
+
+灰色建议与输入值分开。空输入框、无附件、可发送且会话 idle 时才显示；第一次无修饰 Enter 只接纳为可编辑草稿，随后使用已有发送快捷键或按钮才发送。重复 Enter 不接纳/发送，Shift+Enter 保持换行，中文 composition 和 keyCode 229 优先于接纳、菜单与发送。输入或 Esc 忽略当前建议，已接纳/忽略的回复不重复展示；切换 Session/Runtime/模型、回复内容修订、执行或等待审批都会隔离迟到结果。生成失败时保留普通输入，不显示固定替代提示。
+
 Session 不是单一对象，而是同一产品会话在不同生命周期阶段的几种事实：
 
 | 事实 | Authority | 说明 |
@@ -70,6 +78,14 @@ DSH 原生会话使用官方 JSONL persistence，Runtime 自己的 coordination 
 
 ## 3. Session metadata 的语义
 
+### 3.0 自动任务标题
+
+`session-title-service.ts` 是自动命名 owner。首次成功且可用于命名的人类问答完成后，后台异步概括任务对象和动作；标题通常为 8–16 个中文字符，最多 30 个字符，保留必要的项目、版本或文件标识。创建时的首条消息预览仅作暂存标题，不应被当作最终概要。
+
+命名上下文每轮最多保留用户 2000、助手 500 个 Unicode code point；超限同时保留首部和尾部，避免长背景后的真实需求丢失。系统自动消息、错误回答和失败的生成终态不用于发布标题；认证错误也不能成为标题。失败保持当前标题并按现有有界策略在后续成功轮次重试。
+
+生成成功通过 `SessionStore.updateSessionMetadata` 持久化，并发布 `chat:session-title-changed` 更新界面。生成期间发生的手动命名在写入锁内再次检查，自动命名不得覆盖 `titleSource: 'user'`。已概括或手动命名的历史任务不会批量重新命名。
+
 ### 3.1 配置快照
 
 已打开 Chat 的配置快照修改通过 `sessionSidecarFetch` 携带 Tab owner 调用 `PATCH /sessions/:id`，由对应 Session Sidecar 的 `SessionStore` 同时发布磁盘 metadata 并更新活动 V2 binding。不能经 Global Sidecar 保存后仅推送 runtime config：下一轮的 Session 快照会仍读到旧 binding，覆盖刚选的新配置。生产 Session Sidecar 只接受自身 Session ID 的 PATCH；未打开会话的标题、收藏等管理修改保留 Global 入口。
@@ -99,6 +115,8 @@ session selected IDs
 `lastActiveAt` 是 meaningful Session activity 的排序时间，不等于最后一条真人消息时间，也不随任意 JSONL 写入变化。被 turn lifecycle 接纳的可见工作在 admission 和 terminal 更新；pre-warm、replay、silent heartbeat、Memory maintenance 与纯历史重写不更新。需要真人输入时间的调用方应读取消息时间戳。
 
 `pinnedAt` 只表示 Workspace Session 列表中的置顶顺序。置顶与 Tag 都是整理动作，不推进 `lastActiveAt`。Tag assignment 绑定 Product Session id；pending materialization 保留，Reset 与 Fork 不继承。所有 Tag mutation 由 `SessionStore` 在 sessions index 锁内以 typed intent 更新，Renderer 不提交 replacement array，也不维护第二份 Tag catalog。
+
+`archived` 是 Session 历史的整理状态：只有 `true` 持久化，旧记录和缺省值均表示未归档。`PATCH /sessions/:id` 通过 `SessionStore` 的 metadata 锁内读改写链路写入，不改变 `lastActiveAt`、transcript、Runtime 或进程状态；读取接口继续返回归档记录供调用方筛选，Fork 不继承该状态。
 
 ## 4. Runtime 与 turn 生命周期
 
@@ -170,7 +188,7 @@ SDK 输入的 queue UUID 只用于关联准入和消费。Replay、assistant-sta
 | Fork | 创建新 identity | 先建立精确 native 分支，再发布完整产品历史与独立附件 |
 | Retry | 保持原 identity | 同一 mutation 内先 Rewind，再通过普通 desktop admission 接纳原输入；接纳成功不等于 turn 成功 |
 
-Builtin Rewind 以保留前缀末条 native 内容的精确 chain UUID 为边界，包括 user。只可越过明确标记的独立产品诊断（assistant、`messageKind: diagnostic`、无 native UUID/anchor），产品记录仍保留；第一条真实或未分类内容缺锚点时在文件副作用前失败，不能再向前找 UUID。诊断标记与 user 或 native anchor 冲突时拒绝。native 前缀为空（产品前缀为空或全为明确诊断）才分配新的 SDK execution identity。UUID 出现在 Product transcript、原始 SDK JSONL 或 SDK `getSessionMessages()` 的单链投影中，都不能证明它位于 native runtime 当前可恢复分支；同样，缺席该投影也不能证明它无效，因为投影按物理记录选择 leaf，而 CLI resume 使用 durable selected head。Query 启动是 native resumability 的唯一裁决；拒绝时保留显式边界并报告失败，不能清除锚点、恢复更长历史或自动重放。拒绝 `No message found with message.uuid` 且不能恢复推导锚点时展示恢复提示和 toast，保持用户消息及 Product 历史。边界通过既有 mutation intent 与 `sdkResumeSessionAt` metadata 一起提交；新一轮成功后先正常结束该 Query，让 native runtime 发布新的 selected head，再解除边界并发布 Product terminal，配置重启只能发生在此后。已有坏锚点通过从更早、仍可由 native runtime 接受的消息重新 Rewind / Retry 覆盖恢复。文件恢复仍使用现有 Query 的 `rewindFiles`；standalone SDK fork 不携带 undo 历史，不能用它替换 builtin Rewind。旧记录的 `reloadAnchor` 只在加载时推导，优先级低于显式回溯边界；它不是另一份持久化状态或 Session identity。若 SDK 在零模型轮次明确拒绝本次推导的 UUID，清掉这个临时锚点并以 bare resume 重试，保留 Product 历史和当前输入；旧版未持久化的回溯边界在这种失败后可能恢复较长的 native 历史，这是宽松兼容策略，不适用于显式 `sdkResumeSessionAt` 或 fork 边界。
+Builtin Rewind 以保留前缀末条 native 内容的精确 chain UUID 为边界，包括 user。只可越过明确标记的独立产品诊断（assistant、`messageKind: diagnostic`、无 native UUID/anchor），产品记录仍保留；第一条真实或未分类内容缺锚点时在文件副作用前失败，不能再向前找 UUID。诊断标记与 user 或 native anchor 冲突时拒绝。native 前缀为空（产品前缀为空或全为明确诊断）才分配新的 SDK execution identity。UUID 出现在 Product transcript、原始 SDK JSONL 或 SDK `getSessionMessages()` 的单链投影中，都不能证明它位于 native runtime 当前可恢复分支；同样，缺席该投影也不能证明它无效，因为投影按物理记录选择 leaf，而 CLI resume 使用 durable selected head。Query 启动是 native resumability 的唯一裁决；拒绝时保留显式边界并报告失败，不能清除锚点、恢复更长历史或自动重放。拒绝 `No message found with message.uuid` 且不能恢复推导锚点时保留持久错误栏，停止对同一个显式边界的自动 pre-warm；队列结算后回到 idle 以允许用户操作，保持用户消息及 Product 历史，不再重复 toast。错误栏可进入现有 standalone Fork 确认流程，在保留历史末端创建独立 native 前缀，原会话与显式边界不改。新分支不含源会话已撤回的 native 尾部，也不自动发送失败输入。边界通过既有 mutation intent 与 `sdkResumeSessionAt` metadata 一起提交；新一轮成功后先正常结束该 Query，让 native runtime 发布新的 selected head，再解除边界并发布 Product terminal，配置重启只能发生在此后。已有坏锚点通过从更早、仍可由 native runtime 接受的消息重新 Rewind / Retry 覆盖恢复。文件恢复仍使用现有 Query 的 `rewindFiles`；standalone SDK fork 不携带 undo 历史，不能用它替换 builtin Rewind。旧记录的 `reloadAnchor` 只在加载时推导，优先级低于显式回溯边界；它不是另一份持久化状态或 Session identity。若 SDK 在零模型轮次明确拒绝本次推导的 UUID，清掉这个临时锚点并以 bare resume 重试，保留 Product 历史和当前输入；旧版未持久化的回溯边界在这种失败后可能恢复较长的 native 历史，这是宽松兼容策略，不适用于显式 `sdkResumeSessionAt` 或 fork 边界。
 
 新 Fork 统一先实体化 native history，builtin 同时映射 SDK UUID；完整执行配置复用 `snapshotForForkedSession`，不手工挑字段。Fork 不继承 source 的 Agent origin、Goal、置顶或 Tag。旧 lazy fork 通过记录的 binding/source 解析真实 native 来源，允许尚未启动的旧分支继续 fork；新请求不再生成 lazy fork 或通过设置切回旧路径。prepared 发布、附件复制和清理见 [V2 transcript](session_transcript_v2.md#生命周期与显式操作)。
 
@@ -322,3 +340,7 @@ Sidecar ready 而 External/DSH Product Session 尚未绑定 workspace owner 时�
 - Task / Goal：[`task_center.md`](task_center.md)、[`task_provider_routing.md`](task_provider_routing.md)
 - Prompt envelope：[`system_reminder_protocol.md`](system_reminder_protocol.md)
 - 可执行护栏：[`pit_of_success.md`](pit_of_success.md)
+
+### 4.4.1 Fork 中的旧 user UUID 失配
+
+native UUID 优先按 SDK-to-SDK 的精确映射复制。仅当旧 Product user UUID 在 SDK 源链完全不存在、纯文本正文在整个源链唯一且 native user 只含这一完整文本、并且匹配条目在被保留的 prefix 内时，新分支可使用该实际 native user 的新 UUID；原 Product/source 不写回。重复正文、附件、缺失正文、未知 assistant、正文混合其它 native blocks、源 UUID 仍存在但落在 prefix 外、或其它 Product 行已占该条目，均拒绝 Fork。该规则只修正复制快照的旧 stamp，不判断原回溯边界的 native resumability，也不允许移动边界或直接完整 resume 原会话。

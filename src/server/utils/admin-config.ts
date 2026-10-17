@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * Sidecar-side config read/write for Admin API
  *
@@ -18,11 +19,15 @@ import {
   closeSync,
   unlinkSync,
   lstatSync,
+  constants,
+  fstatSync,
 } from 'fs';
-import { resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
+import { resolveHostProviderCredential, resolveHostCloudModelProvider } from './host-credentials';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
+import { HOST_PROVIDER_LIMIT, isHostModelId, isHostProviderProfile, portableProfileToProvider } from '../../shared/hostProviderConfig';
 import { workspacePathsEqual } from '../../shared/workspacePath';
 import { promoteAgentMcpJsonToGlobal } from '../../shared/mcpConfig';
 import type { AppConfig, ManagedProviderCredential, ManagedProviderEndpoint, McpServerDefinition, PermissionMode, Provider, ProviderVerifyStatus, SubscriptionAuthPolicy } from '../../shared/config-types';
@@ -95,7 +100,7 @@ import {
 function getConfigDir(): string {
   const home = getHomeDirOrNull();
   if (!home) throw new Error('Cannot determine home directory');
-  return resolve(home, '.myagents');
+  return resolve(home, APP_DATA_DIR_NAME);
 }
 
 function getConfigPath(): string {
@@ -254,7 +259,49 @@ export interface ProjectSlim {
 // Config read/write
 // ---------------------------------------------------------------------------
 
-export function loadConfig(): AdminAppConfig {
+/** Opt-in for local Host mutations: never recover malformed authority from a backup. */
+export interface PersistenceReadOptions { strict?: boolean }
+export class RegistryCorruptError extends Error {
+  constructor() { super('REGISTRY_CORRUPT'); this.name = 'RegistryCorruptError'; }
+}
+function strictRecord(path: string): unknown {
+  let fd: number;
+  try { fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new RegistryCorruptError();
+  }
+  try {
+    if (!fstatSync(fd).isFile()) throw new RegistryCorruptError();
+    return JSON.parse(stripBom(readFileSync(fd, 'utf-8')));
+  } catch { throw new RegistryCorruptError(); }
+  finally { closeSync(fd); }
+}
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+function validIdentityRows(value: unknown, project: boolean): boolean {
+  if (!Array.isArray(value)) return false;
+  const ids = new Set<string>();
+  return value.every(row => {
+    if (!record(row) || typeof row.id !== 'string' || !row.id || ids.has(row.id) ||
+        typeof row.name !== 'string') return false;
+    ids.add(row.id);
+    return project
+      ? typeof row.path === 'string' && isAbsolute(row.path) && (row.agentId === undefined || (typeof row.agentId === 'string' && !!row.agentId)) &&
+        ['hidden', 'internal'].every(key => row[key] === undefined || typeof row[key] === 'boolean') &&
+        (row.archivedAt === undefined || typeof row.archivedAt === 'string')
+      : typeof row.enabled === 'boolean' && (row.channels === undefined || Array.isArray(row.channels));
+  });
+}
+
+export function loadConfig(options: PersistenceReadOptions = {}): AdminAppConfig {
+  if (options.strict) {
+    const value = strictRecord(getConfigPath());
+    if (value === undefined) return {};
+    if (!record(value) || (value.agents !== undefined && !validIdentityRows(value.agents, false))) throw new RegistryCorruptError();
+    return value as AdminAppConfig;
+  }
   const configPath = getConfigPath();
   if (!existsSync(configPath)) {
     return normalizeThemeConfigRecord({}) as unknown as AdminAppConfig;
@@ -312,6 +359,7 @@ export async function withConfigLock(
   modifier: (
     config: AdminAppConfig,
   ) => AdminAppConfig | Promise<AdminAppConfig>,
+  options: PersistenceReadOptions = {},
 ): Promise<AdminAppConfig> {
   const configPath = getConfigPath();
   const configDir = getConfigDir();
@@ -329,7 +377,7 @@ export async function withConfigLock(
         staleMs: CONFIG_LOCK_STALE_MS,
       },
       async () => {
-        const config = loadConfig();
+        const config = loadConfig(options);
         const before = JSON.stringify(config);
         const modified = normalizeThemeConfigRecord(
           await modifier(config),
@@ -342,8 +390,8 @@ export async function withConfigLock(
         const tmpPath = configPath + '.tmp';
         const bakPath = configPath + '.bak';
 
-        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2));
-        if (existsSync(configPath)) {
+        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2), options.strict);
+        if (!options.strict && existsSync(configPath)) {
           try {
             copyFileSync(configPath, bakPath);
           } catch {
@@ -368,8 +416,9 @@ export async function atomicModifyConfig(
   modifier: (
     config: AdminAppConfig,
   ) => AdminAppConfig | Promise<AdminAppConfig>,
+  options: PersistenceReadOptions = {},
 ): Promise<AdminAppConfig> {
-  return withConfigLock(modifier);
+  return withConfigLock(modifier, options);
 }
 
 /**
@@ -399,8 +448,10 @@ export async function withAgentConfigIntentLock<T>(
   }
 }
 
-function writeFileSynced(path: string, content: string): void {
-  const fd = openSync(path, 'w', 0o600);
+function writeFileSynced(path: string, content: string, strict = false): void {
+  // A strict owner never follows a pre-existing temp symlink or truncates a hardlink.
+  if (strict) { try { unlinkSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; } }
+  const fd = openSync(path, strict ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW : 'w', 0o600);
   try {
     writeFileSync(fd, content, 'utf-8');
     fsyncSync(fd);
@@ -424,7 +475,13 @@ function fsyncDir(dir: string): void {
 // Projects read/write
 // ---------------------------------------------------------------------------
 
-export function loadProjects(): ProjectSlim[] {
+export function loadProjects(options: PersistenceReadOptions = {}): ProjectSlim[] {
+  if (options.strict) {
+    const value = strictRecord(getProjectsPath());
+    if (value === undefined) return [];
+    if (!validIdentityRows(value, true)) throw new RegistryCorruptError();
+    return value as ProjectSlim[];
+  }
   const path = getProjectsPath();
   if (!existsSync(path)) return [];
   try {
@@ -462,6 +519,7 @@ export function saveProjects(projects: ProjectSlim[]): void {
  */
 export async function atomicModifyProjects(
   modifier: (projects: ProjectSlim[]) => ProjectSlim[] | Promise<ProjectSlim[]>,
+  options: PersistenceReadOptions = {},
 ): Promise<ProjectSlim[]> {
   const projectsPath = getProjectsPath();
   const configDir = getConfigDir();
@@ -478,7 +536,7 @@ export async function atomicModifyProjects(
         staleMs: CONFIG_LOCK_STALE_MS,
       },
       async () => {
-        const projects = loadProjects();
+        const projects = loadProjects(options);
         const before = JSON.stringify(projects);
         const modified = await modifier(projects);
 
@@ -487,7 +545,7 @@ export async function atomicModifyProjects(
         }
 
         const tmpPath = projectsPath + '.tmp';
-        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2));
+        writeFileSynced(tmpPath, JSON.stringify(modified, null, 2), options.strict);
         try {
           renameSync(tmpPath, projectsPath);
           fsyncDir(configDir);
@@ -886,7 +944,7 @@ export function redactSecret(value: string): string {
 export function getProvidersDir(): string {
   const home = getHomeDirOrNull();
   if (!home) throw new Error('Cannot determine home directory');
-  return resolve(home, '.myagents', 'providers');
+  return resolve(home, APP_DATA_DIR_NAME, 'providers');
 }
 
 function lstatIfPresent(
@@ -1049,6 +1107,48 @@ function hasProviderId(
   return typeof provider.id === 'string' && provider.id.length > 0;
 }
 
+/** Host-only metadata projection; ordinary desktop catalogs keep their owners. */
+export function projectHostProviderCatalog(
+  config: AdminAppConfig,
+  catalog: readonly ProviderRecord[],
+  hostMode = process.env.MYAGENTS_HOST_MODE === '1',
+): ProviderRecord[] {
+  if (!hostMode || config.hostProviderProfiles === undefined) return [...catalog];
+  const record = (value: unknown): value is Record<string, unknown> => Boolean(value)
+    && typeof value === 'object' && !Array.isArray(value);
+  const profiles = config.hostProviderProfiles;
+  if (!record(profiles) || Object.keys(profiles).length > HOST_PROVIDER_LIMIT) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+  const current = record(config.hostSettings) ? config.hostSettings : undefined;
+  const ledger = config.hostProviderConfigReceipts;
+  if (ledger !== undefined && (!record(ledger) || !Array.isArray(ledger.entries) || ledger.entries.length > 256)) {
+    throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+  }
+  const receipts = record(ledger) && Array.isArray(ledger.entries) ? ledger.entries : [];
+  const imported: ProviderRecord[] = [];
+  for (const [id, profile] of Object.entries(profiles)) {
+    if (!isHostProviderProfile(profile) || profile.id !== id) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+    const models = new Set<string>();
+    if (current?.providerId === id && isHostModelId(current.model)) models.add(current.model);
+    // Prior Sessions can still resolve the original model after changing the
+    // Host default. Receipt metadata is bounded and never contains keys.
+    for (const entry of receipts) {
+      if (!record(entry) || !record(entry.receipt)) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+      const receipt = entry.receipt;
+      if (receipt.status === 'persisted' && entry.providerId === id) {
+        if (!record(receipt.settings) || receipt.settings.providerId !== id || !isHostModelId(receipt.settings.model)) {
+          throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+        }
+        models.add(receipt.settings.model);
+      }
+    }
+    for (const alias of Object.values(profile.modelAliases ?? {})) if (alias) models.add(alias);
+    if (models.size === 0) throw new Error('HOST_PROVIDER_REGISTRY_INVALID');
+    imported.push(portableProfileToProvider(profile, [...models]));
+  }
+  const replacedIds = new Set(imported.map(provider => provider.id));
+  return [...catalog.filter(provider => !replacedIds.has(provider.id)), ...imported];
+}
+
 export function getAllEffectiveProviders(
   config?: AdminAppConfig,
   runtimeModels?: readonly import('../../shared/types/runtime').RuntimeModelInfo[],
@@ -1065,7 +1165,7 @@ export function getAllEffectiveProviders(
   // the in-app picker accepts it.
   const providerConfig = c as unknown as AppConfig;
   const providersWithManagedCodex = withManagedCodexProviderCatalog(
-    [...presetProviders, ...customProviders] as unknown as Provider[],
+    projectHostProviderCatalog(c, [...presetProviders, ...customProviders]) as unknown as Provider[],
     providerConfig,
     runtimeModels,
   );
@@ -1232,6 +1332,10 @@ export function resolveProviderEnv(
 ): ResolvedProviderEnv | undefined {
   if (!providerId) return undefined;
 
+  // This reserved namespace has a Session-only authority and never falls back
+  // to a globally registered provider/key, including after expiry.
+  if (providerId.startsWith('cloud-session:')) return resolveHostCloudModelProvider(providerId, model);
+
   const c = config ?? loadConfig();
   const registeredProvider = findEffectiveProvider(providerId, c);
   if (!registeredProvider) return undefined;
@@ -1282,7 +1386,7 @@ export function resolveProviderEnv(
   // 401 instead of an actionable "no API key" error.
   const apiKey = isManagedOauth
     ? undefined
-    : (c.providerApiKeys ?? {})[providerId];
+    : resolveHostProviderCredential((c.providerApiKeys ?? {})[providerId]);
   if (!isManagedOauth && (!apiKey || !apiKey.trim())) return undefined;
 
   // Extract provider config fields (same shape as frontend Chat.tsx builds)

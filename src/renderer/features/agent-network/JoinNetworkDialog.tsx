@@ -5,33 +5,70 @@ import OverlayBackdrop from "@/components/OverlayBackdrop";
 import { CloseIcon, LoaderIcon } from "@/components/icons";
 import { useCloseLayer } from "@/hooks/useCloseLayer";
 import { isImeComposingEvent } from "@/utils/imeKeyboard";
+import type { OwnedLoginAttempt } from "@/api/agentNetwork";
+
+type JoinMode = "account" | "key";
 export function JoinNetworkDialog({
   onConfirm,
+  onOwnedStart,
+  onOwnedOpen,
+  onOwnedPoll,
+  onOwnedCancel,
   onCancel,
+  accountOnly = false,
+  initialUrl = "",
+  title,
 }: {
   onConfirm: (url: string, key: string) => Promise<void>;
+  onOwnedStart: (issuer: string, publicTlsCaFile?: string) => Promise<OwnedLoginAttempt>;
+  onOwnedOpen: (attemptId: string) => Promise<void>;
+  onOwnedPoll: (attemptId: string) => Promise<"pending" | "authenticated">;
+  onOwnedCancel: (attemptId: string) => Promise<void>;
   onCancel: () => void;
+  accountOnly?: boolean;
+  initialUrl?: string;
+  title?: string;
 }) {
   const { t } = useTranslation("app"),
     { t: common } = useTranslation("common");
-  const [url, setUrl] = useState(""),
+  const [url, setUrl] = useState(initialUrl),
+    [publicTlsCaFile, setPublicTlsCaFile] = useState(""),
+    [showAdvanced, setShowAdvanced] = useState(false),
     [key, setKey] = useState(""),
+    [mode, setMode] = useState<JoinMode>("account"),
+    [attempt, setAttempt] = useState<OwnedLoginAttempt | null>(null),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState<string | null>(null);
+    [error, setError] = useState<string | null>(null),
+    [notice, setNotice] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null),
     flight = useRef(false);
   const { refs, context } = useFloating({ open: true });
-  const close = () => {
-    if (!flight.current) {
+  const cancel = async () => {
+    if (flight.current) return;
+    flight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (attempt) await onOwnedCancel(attempt.attemptId);
       setKey("");
       onCancel();
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : t("agentNetwork.errors.failed"),
+      );
+      setBusy(false);
+    } finally {
+      flight.current = false;
     }
+  };
+  const close = () => {
+    if (!busy) void cancel();
   };
   useCloseLayer(() => {
     close();
     return true;
   }, 260);
-  async function submit() {
+  async function submitLegacy() {
     if (flight.current || !url.trim() || !key.trim()) return;
     flight.current = true;
     setBusy(true);
@@ -43,15 +80,74 @@ export function JoinNetworkDialog({
     } catch (failure) {
       setKey("");
       setError(
-        failure instanceof Error
-          ? failure.message
-          : t("agentNetwork.errors.failed"),
+        failure instanceof Error ? failure.message : t("agentNetwork.errors.failed"),
       );
       setBusy(false);
     } finally {
       flight.current = false;
     }
   }
+  async function startOwned() {
+    if (flight.current || !url.trim()) return;
+    flight.current = true;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const started = await onOwnedStart(url.trim(), publicTlsCaFile.trim() || undefined);
+      setAttempt(started);
+      setNotice(t("agentNetwork.ownedLogin.started"));
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : t("agentNetwork.errors.failed"),
+      );
+    } finally {
+      setBusy(false);
+      flight.current = false;
+    }
+  }
+  async function openOwned() {
+    if (!attempt || flight.current) return;
+    flight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await onOwnedOpen(attempt.attemptId);
+      setNotice(t("agentNetwork.ownedLogin.browserOpened"));
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : t("agentNetwork.errors.failed"),
+      );
+    } finally {
+      setBusy(false);
+      flight.current = false;
+    }
+  }
+  async function checkOwned() {
+    if (!attempt || flight.current) return;
+    flight.current = true;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const status = await onOwnedPoll(attempt.attemptId);
+      if (status === "authenticated") {
+        setAttempt(null);
+        onCancel();
+      } else {
+        setNotice(t("agentNetwork.ownedLogin.pending"));
+      }
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : t("agentNetwork.errors.failed"),
+      );
+    } finally {
+      setBusy(false);
+      flight.current = false;
+    }
+  }
+  const hasAttempt = attempt !== null;
+  const fixedServiceUrl = accountOnly && initialUrl.trim().length > 0;
   return (
     <OverlayBackdrop
       portal
@@ -75,7 +171,7 @@ export function JoinNetworkDialog({
         >
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 id="join-network-title" className="text-lg font-semibold">
-              {t("agentNetwork.joinSelfhost")}
+              {title ?? t("agentNetwork.joinSelfhost")}
             </h2>
             <button
               type="button"
@@ -87,72 +183,131 @@ export function JoinNetworkDialog({
               <CloseIcon className="h-4 w-4" />
             </button>
           </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submit();
+          {!accountOnly && <div className="mb-4 flex rounded-lg bg-[var(--paper-inset)] p-1" role="tablist">
+            {(["account", "key"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="tab"
+                aria-selected={mode === option}
+                disabled={busy || hasAttempt}
+                onClick={() => {
+                  setMode(option);
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="flex-1 rounded-md px-3 py-2 text-sm aria-selected:bg-[var(--paper-elevated)] aria-selected:font-medium"
+              >
+                {t(option === "account" ? "agentNetwork.ownedLogin.mode" : "agentNetwork.legacyKey.mode")}
+              </button>
+            ))}
+          </div>}
+          <label htmlFor="network-url" className="mb-2 block text-sm font-medium">
+            {t("agentNetwork.serviceUrl")}
+          </label>
+          <input
+            ref={input}
+            id="network-url"
+            type="url"
+            autoComplete="url"
+            placeholder="https://your-network.example"
+            value={url}
+            disabled={busy || hasAttempt}
+            readOnly={fixedServiceUrl}
+            aria-describedby={fixedServiceUrl ? "owned-login-fixed-service-url" : undefined}
+            onChange={(e) => {
+              if (!fixedServiceUrl) setUrl(e.target.value);
             }}
-          >
-            <label
-              htmlFor="network-url"
-              className="mb-2 block text-sm font-medium"
-            >
-              {t("agentNetwork.serviceUrl")}
-            </label>
-            <input
-              ref={input}
-              id="network-url"
-              type="url"
-              autoComplete="off"
-              placeholder="https://your-network.workers.dev"
-              value={url}
-              disabled={busy}
-              onChange={(e) => setUrl(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            />
-            <label
-              htmlFor="network-key"
-              className="mb-2 block text-sm font-medium"
-            >
-              {t("agentNetwork.deviceKey")}
-            </label>
-            <input
-              id="network-key"
-              type="password"
-              autoComplete="off"
-              maxLength={256}
-              value={key}
-              disabled={busy}
-              onChange={(e) => setKey(e.target.value)}
-              className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-            />
-            <p className="mt-3 text-xs leading-relaxed text-[var(--ink-muted)]">
-              {t("agentNetwork.selfhostHint")}
+            className="mb-4 w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+          />
+          {fixedServiceUrl && (
+            <p id="owned-login-fixed-service-url" className="-mt-3 mb-4 text-xs text-[var(--ink-muted)]">
+              {t("agentNetwork.ownedLogin.fixedServiceUrl")}
             </p>
-            {error && (
-              <p role="alert" className="mt-3 text-sm text-[var(--error)]">
-                {error}
+          )}
+          {mode === "key" && !accountOnly ? (
+            <>
+              <label htmlFor="network-key" className="mb-2 block text-sm font-medium">
+                {t("agentNetwork.deviceKey")}
+              </label>
+              <input
+                id="network-key"
+                type="password"
+                autoComplete="off"
+                maxLength={256}
+                value={key}
+                disabled={busy}
+                onChange={(e) => setKey(e.target.value)}
+                className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              />
+              <p className="mt-3 text-xs leading-relaxed text-[var(--ink-muted)]">
+                {t("agentNetwork.selfhostHint")}
               </p>
-            )}
-            <div className="mt-5 flex justify-end gap-2">
+            </>
+          ) : (
+            <>
+              <p className="text-xs leading-relaxed text-[var(--ink-muted)]">
+                {t("agentNetwork.ownedLogin.hint")}
+              </p>
+              <details className="mt-3 text-sm" open={showAdvanced} onToggle={(event) => setShowAdvanced(event.currentTarget.open)}>
+                <summary className="cursor-pointer text-[var(--ink-muted)]">{t("agentNetwork.ownedLogin.advanced")}</summary>
+                <label htmlFor="network-public-ca" className="mt-3 mb-2 block text-sm font-medium">
+                  {t("agentNetwork.ownedLogin.caFile")}
+                </label>
+                <input
+                  id="network-public-ca"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="/path/to/test-ca.pem"
+                  value={publicTlsCaFile}
+                  disabled={busy || hasAttempt}
+                  onChange={(e) => setPublicTlsCaFile(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                />
+                <p className="mt-2 text-xs leading-relaxed text-[var(--ink-muted)]">
+                  {t("agentNetwork.ownedLogin.caHint")}
+                </p>
+              </details>
+              {attempt && (
+                <div className="mt-4 rounded-lg border border-[var(--line)] p-3">
+                  <p className="text-sm font-medium">{t("agentNetwork.ownedLogin.waiting")}</p>
+                  <p className="mt-1 break-all text-xs text-[var(--ink-muted)]">
+                    {attempt.authorizationUrl}
+                  </p>
+                  <p className="mt-2 text-xs text-[var(--ink-muted)]">
+                    {t("agentNetwork.ownedLogin.expires", { time: new Date(attempt.expiresAt * 1000).toLocaleTimeString() })}
+                  </p>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => void openOwned()} disabled={busy} className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm disabled:opacity-50">
+                      {t("agentNetwork.ownedLogin.openBrowser")}
+                    </button>
+                    <button type="button" onClick={() => void checkOwned()} disabled={busy} className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-3 py-2 text-sm text-[var(--paper)] disabled:opacity-50">
+                      {busy && <LoaderIcon className="h-4 w-4 animate-spin" />}
+                      {t("agentNetwork.ownedLogin.check")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {notice && <p role="status" className="mt-3 text-sm text-[var(--ink-muted)]">{notice}</p>}
+          {error && <p role="alert" className="mt-3 text-sm text-[var(--error)]">{error}</p>}
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" onClick={close} disabled={busy} className="rounded-lg px-4 py-2 text-sm hover:bg-[var(--paper-inset)]">
+              {hasAttempt ? t("agentNetwork.ownedLogin.cancel") : common("actions.cancel")}
+            </button>
+            {!hasAttempt && (
               <button
                 type="button"
-                onClick={close}
-                disabled={busy}
-                className="rounded-lg px-4 py-2 text-sm hover:bg-[var(--paper-inset)]"
-              >
-                {common("actions.cancel")}
-              </button>
-              <button
-                type="submit"
-                disabled={busy || !url.trim() || !key.trim()}
+                onClick={() => void (mode === "account" ? startOwned() : submitLegacy())}
+                disabled={busy || !url.trim() || (mode === "key" && !key.trim())}
                 className="flex items-center gap-2 rounded-lg bg-[var(--ink)] px-4 py-2 text-sm text-[var(--paper)] disabled:opacity-50"
               >
                 {busy && <LoaderIcon className="h-4 w-4 animate-spin" />}
-                {t(busy ? "agentNetwork.joiningSelfhost" : "agentNetwork.join")}
+                {t(busy ? "agentNetwork.joiningSelfhost" : mode === "account" ? "agentNetwork.ownedLogin.start" : "agentNetwork.join")}
               </button>
-            </div>
-          </form>
+            )}
+          </div>
         </section>
       </FloatingFocusManager>
     </OverlayBackdrop>

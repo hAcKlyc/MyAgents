@@ -385,6 +385,55 @@ describe("Agent network account and device management", () => {
       screen.queryByRole("button", { name: /了解 Agent 组网/ }),
     ).not.toBeInTheDocument();
   });
+  it.each([
+    [
+      "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+      "系统凭据需要授权。后台恢复已停止，不会自动重复请求密码。",
+    ],
+    [
+      "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
+      "系统凭据库暂不可用。后台恢复已停止，请检查系统凭据库状态。",
+    ],
+    [
+      "NETWORK_CREDENTIAL_STORE_INVALID",
+      "本机保存的会话无法验证。为保护身份，连接已停止，记录未被自动覆盖。",
+    ],
+    [
+      "OWNED_SESSION_RECORD_MISSING",
+      "未找到此连接对应的本机登录会话。连接已停止，需要显式登录后才能恢复。",
+    ],
+  ])(
+    "shows %s only as a stopped Owned-connection status",
+    async (code, message) => {
+      mocks.selected = "owned-restore";
+      mocks.snapshot = {
+        ...mocks.snapshot,
+        connectionId: "owned-restore",
+        state: "disconnected",
+        error: { code, retryable: false },
+      };
+      render(<AgentNetwork />);
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(screen.queryByText(/正在自动重连/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    },
+  );
+  it("does not project Owned credential-store errors onto the official connection", async () => {
+    mocks.snapshot = {
+      ...mocks.snapshot,
+      connectionId: "official",
+      state: "disconnected",
+      error: {
+        code: "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+        retryable: false,
+      },
+    };
+    render(<AgentNetwork />);
+    expect(
+      await screen.findByText(/网络连接失败，正在自动重连/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/系统凭据需要授权/)).not.toBeInTheDocument();
+  });
   it("offers read retry without claiming an uncertain save", async () => {
     mocks.devices.mockRejectedValueOnce({ code: "NETWORK_TRANSPORT_FAILED" });
     render(<AgentNetwork />);

@@ -107,6 +107,7 @@ const SESSION_PREFIXES = [
 ] as const;
 
 const GLOBAL_EXACT_PATHS = new Set([
+  '/api/remote-session/prepare',
   '/agent/upload',
   '/api/assets/qr-code',
   '/api/browser/session/retire',
@@ -134,6 +135,10 @@ const GLOBAL_EXACT_PATHS = new Set([
 const GLOBAL_PREFIXES = ['/api/mcp/oauth/', '/api/session-tags/'] as const;
 
 const COMMON_EXACT_PATHS = new Set([
+  // Both Global one-shots and Session engines must attest their own activity.
+  // The handler still requires the internal credential and exact generation.
+  '/api/process/update-quiesce',
+  '/api/remote-session',
   '/api/im/model-options',
   '/api/proxy/set',
   // Both Global one-shots and Session Queries own managed-provider leases.

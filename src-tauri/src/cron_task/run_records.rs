@@ -35,7 +35,7 @@ pub(super) fn run_record_path(task_id: &str) -> PathBuf {
     let safe_id = sanitize_task_id(task_id);
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".myagents")
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
         .join("cron_runs")
         .join(format!("{}.jsonl", safe_id))
 }

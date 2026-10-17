@@ -1044,6 +1044,8 @@ impl SpeechRecognitionManager {
         source_path: &str,
         output_root: Option<&str>,
     ) -> Result<SpeechJob, &'static str> {
+        let _update_admission =
+            crate::sidecar::begin_lifecycle_spawn_permit().map_err(|_| "UPDATE_BUSY")?;
         let admission_started = Instant::now();
         let result = self.submit_agent_attachment_inner(
             initiator_session_id,
@@ -1261,6 +1263,7 @@ impl SpeechRecognitionManager {
         self: &Arc<Self>,
         record_id: &str,
     ) -> Result<SpeechJob, String> {
+        let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
         validate_job_id(record_id).map_err(str::to_string)?;
         let manager = Arc::clone(self);
         let record_id = record_id.to_owned();
@@ -1386,6 +1389,7 @@ impl SpeechRecognitionManager {
         record_id: &str,
         sources: Vec<AnalysisSpoolSource>,
     ) -> Result<(), String> {
+        let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit()?;
         validate_job_id(record_id).map_err(str::to_string)?;
         validate_live_sources(&sources)?;
         let record = self
@@ -2626,6 +2630,20 @@ impl SpeechRecognitionManager {
         }
         self.wake.notify_waiters();
         Ok(())
+    }
+
+    pub(crate) fn has_pending_work(&self) -> Result<bool, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+        Ok(!state.queue.is_empty()
+            || !state.pending_agent.is_empty()
+            || state.agent_admission_reservations > 0
+            || state.active_job.is_some()
+            || state.running.is_some()
+            || !state.live_sessions.is_empty()
+            || state.live_running.is_some())
     }
 
     pub fn queue_snapshot(&self) -> Result<Vec<String>, String> {
@@ -6543,13 +6561,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn updater_observes_probe_reservation_and_queued_speech_until_released() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = manager(&root);
+        assert!(!manager.has_pending_work().unwrap());
+        let reservation = manager.reserve_agent_admission().unwrap();
+        assert!(manager.has_pending_work().unwrap());
+        drop(reservation);
+        assert!(!manager.has_pending_work().unwrap());
+        manager
+            .state
+            .lock()
+            .unwrap()
+            .queue
+            .push_back("pending-speech".into());
+        assert!(manager.has_pending_work().unwrap());
+        manager.state.lock().unwrap().queue.clear();
+        assert!(!manager.has_pending_work().unwrap());
+    }
+
+    #[tokio::test]
     async fn text_record_delete_preflight_does_not_project_audio_processing() {
         let root = tempfile::tempdir().unwrap();
         let manager = manager(&root);
-        let record = manager.record_store.create_text(crate::record::TextRecordCreateInput {
-            content: "Text Record delete regression".to_string(),
-            images: Vec::new(),
-        }).await.unwrap();
+        let record = manager
+            .record_store
+            .create_text(crate::record::TextRecordCreateInput {
+                content: "Text Record delete regression".to_string(),
+                images: Vec::new(),
+            })
+            .await
+            .unwrap();
         manager.cancel_record_processing(&record.id).await.unwrap();
         let retained = manager.record_store.get(&record.id).await.unwrap();
         assert_eq!(retained.kind, RecordKind::Text);

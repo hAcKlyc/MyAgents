@@ -1,3 +1,6 @@
+import { APP_DISPLAY_NAME } from '../../../shared/appProfile';
+import { APP_ICON_SRC } from './appBrand';
+
 /**
  * MYAGENTS logotype (brand v1.1 trial).
  *
@@ -34,6 +37,21 @@ interface MyAgentsLogotypeProps {
 }
 
 export function MyAgentsLogotype({ variant = 'display', className, title }: MyAgentsLogotypeProps) {
+  if (APP_DISPLAY_NAME !== 'MyAgents') {
+    return (
+      <span
+        className={['app-profile-wordmark', className].filter(Boolean).join(' ')}
+        role={title ? 'img' : undefined}
+        aria-label={title ?? APP_DISPLAY_NAME}
+        aria-hidden={title ? undefined : true}
+        data-app-profile-wordmark
+      >
+        {variant === 'display' && <img src={APP_ICON_SRC} alt="" aria-hidden="true" className="app-profile-mark" />}
+        {APP_DISPLAY_NAME}
+      </span>
+    );
+  }
+
   const art = VARIANTS[variant];
   return (
     <svg

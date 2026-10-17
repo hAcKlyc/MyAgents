@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../../shared/appProfile';
 import type { ProductAgentRoleSpec, ProductCommandSpec, ProductSkillSpec } from './contracts';
 import { createHash } from 'node:crypto';
 import {
@@ -1028,7 +1029,7 @@ export function compileProductExtensionSnapshot(
     component('scenario', 'applied', 'scenario_compiled'),
   ];
   const userConfigRoot = input.userConfigRoot === undefined
-    ? (getHomeDirOrNull() ? join(getHomeDirOrNull()!, '.myagents') : null)
+    ? (getHomeDirOrNull() ? join(getHomeDirOrNull()!, APP_DATA_DIR_NAME) : null)
     : input.userConfigRoot;
   const enabledPluginIds = [...new Set(
     input.enabledPluginIds == null

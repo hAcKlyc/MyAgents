@@ -535,6 +535,13 @@ impl DocumentProcessingManager {
         &self,
         request: DocumentSubmitRequest,
     ) -> Result<DocumentJob, DocumentServiceError> {
+        let _update_admission = crate::sidecar::begin_lifecycle_spawn_permit().map_err(|_| {
+            DocumentServiceError::new(
+                "UPDATE_BUSY",
+                "Restart update is being prepared.",
+                "Retry this operation after the update attempt.",
+            )
+        })?;
         let source_path =
             require_absolute_path(&request.source_path, "DOCUMENT_SOURCE_PATH_INVALID")?;
         reject_link_ancestors(&source_path, false)?;
@@ -861,6 +868,17 @@ impl DocumentProcessingManager {
                 "Submit a new conversion if you need a fresh artifact.",
             )),
         }
+    }
+
+    pub(crate) fn has_pending_work(&self) -> Result<bool, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+        Ok(!state.queue.is_empty()
+            || !state.pending.is_empty()
+            || state.active_job.is_some()
+            || state.running.is_some())
     }
 
     pub fn shutdown(&self) -> Result<(), String> {
@@ -3705,6 +3723,52 @@ mod tests {
             }),
             wake: Notify::new(),
         })
+    }
+
+    #[test]
+    fn updater_observes_queued_and_active_document_owner_until_settlement() {
+        let data = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let job_id = "20260815_7f3a91c2b6d4";
+        let manager = test_manager(
+            data.path(),
+            test_job(job_id, output.path(), DocumentJobState::Running),
+            3,
+        );
+        assert!(manager.has_pending_work().unwrap());
+        {
+            let mut state = manager.state.lock().unwrap();
+            state.active_job = None;
+            state.queue.push_back(job_id.into());
+        }
+        assert!(manager.has_pending_work().unwrap());
+        manager.state.lock().unwrap().queue.clear();
+        assert!(!manager.has_pending_work().unwrap());
+    }
+
+    #[test]
+    fn updater_does_not_treat_poisoned_document_owner_as_idle() {
+        let data = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let manager = test_manager(
+            data.path(),
+            test_job(
+                "20260815_7f3a91c2b6d4",
+                output.path(),
+                DocumentJobState::Running,
+            ),
+            3,
+        );
+        let poisoned = Arc::clone(&manager);
+        let _ = std::thread::spawn(move || {
+            let _state = poisoned.state.lock().unwrap();
+            panic!("controlled document owner poison");
+        })
+        .join();
+        assert_eq!(
+            manager.has_pending_work().unwrap_err(),
+            "UPDATE_ACTIVITY_UNKNOWN"
+        );
     }
 
     #[test]

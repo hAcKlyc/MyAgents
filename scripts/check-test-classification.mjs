@@ -13,6 +13,20 @@ const ALLOWED_SUFFIXES = [
   '.credentialed.test.ts',
 ];
 const CHILD_PROCESS_ALLOWLIST = new Set([
+  // Headless Host tests run only isolated Node control/store children with
+  // model execution disabled and pre-warm off. They never launch the SDK.
+  'src/server/host-controller.integration.test.ts',
+  'src/server/host-session-worker.integration.test.ts',
+  // Deployed Host management baseline: isolated Unix/flock service, model execution disabled.
+  'src/server/host-management-ipc.integration.test.ts',
+  // Deployed credential owner: private mkfifo scratch only, no provider/model invocation.
+  'src/server/host-provider-credentials.integration.test.ts',
+  // Boots the real Bot-local Host Session worker with a temporary HOME and
+  // network-deny shim; invocation is rejected before any provider call.
+  'src/server/host-bot-session-worker.integration.test.ts',
+  // Exercises bounded shutdown against isolated children that ignore shutdown
+  // and SIGTERM; only the exact child handle is signalled.
+  'src/server/host-bot-child-stop.integration.test.ts',
   // On Windows, runs process.execPath only to enumerate the sealed child's env
   // names. This catches OS-level case folding without secrets or network I/O.
   'src/server/integrated-runtimes/dsh/child-environment.unit.test.ts',
@@ -36,6 +50,10 @@ const CHILD_PROCESS_ALLOWLIST = new Set([
   // loopback-only fake Rust admission owner. Children get OS-only env, temp
   // HOME/workspaces, synthetic credentials and --no-pre-warm; no model runs.
   'src/server/inbox/external-cli-routing.integration.test.ts',
+  // Boots only the real Global Sidecar against fresh HOME/workspace and a
+  // loopback port. No Session worker, SDK/model execution or real credentials;
+  // validates private-history filtering and the prepared publication barrier.
+  'src/server/remote-session/desktop-routes.integration.test.ts',
   // This regression verifies the existing MCP OAuth refresh lock across real
   // Node processes. Children share only a temp config dir and loopback server.
   'src/server/__tests__/mcp-oauth.integration.test.ts',

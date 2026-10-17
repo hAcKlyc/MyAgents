@@ -1,3 +1,4 @@
+import { appBuildDefines } from './app-build-profile.mjs';
 // Cross-platform esbuild driver for the three Node bundles we ship
 // (server, plugin-bridge, CLI).
 //
@@ -181,6 +182,7 @@ await build({
   target: 'node22',
   define: {
     ...dshBuildDefines(fileURLToPath(new URL('..', import.meta.url))),
+    ...appBuildDefines(process.env),
     // Compile-time version constant. Replaces `process.env.npm_package_version`
     // fallbacks across the codebase so `myagents version` reports the real
     // shipped build instead of a stale hardcoded string in production.

@@ -4488,7 +4488,10 @@ dependencies = [
  "log",
  "macos-accessibility-client",
  "minisign-verify",
+ "myagents-agent-network-crypto",
+ "myagents-agent-network-crypto-parent",
  "myagents-agent-network-protocol",
+ "myagents-host-management-protocol",
  "myagents-media-worker-protocol",
  "nix 0.29.0",
  "notify-debouncer-full",
@@ -4556,6 +4559,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "myagents-agent-network-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "core-foundation 0.10.1",
+ "jsonwebtoken",
+ "keyring",
+ "libc",
+ "myagents-agent-network-protocol",
+ "p256",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-platform-verifier",
+ "security-framework 3.7.0",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "myagents-agent-network-crypto-parent"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "core-foundation 0.10.1",
+ "jsonwebtoken",
+ "keyring",
+ "libc",
+ "myagents-agent-network-protocol",
+ "p256",
+ "rcgen",
+ "ring",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-platform-verifier",
+ "security-framework 3.7.0",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "myagents-agent-network-protocol"
 version = "1.1.0"
 dependencies = [
@@ -4566,6 +4621,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "uuid",
+]
+
+[[package]]
+name = "myagents-host-management-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "uuid",
 ]
 

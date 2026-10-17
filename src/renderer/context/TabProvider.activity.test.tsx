@@ -11,6 +11,7 @@ import {
   tryClaimSessionResourceTransition,
 } from '@/utils/sessionDeletionCoordinator';
 import { useTabState } from './TabContext';
+import { AskUserQuestionPrompt } from '@/components/AskUserQuestionPrompt';
 import type { Message } from '@/types/chat';
 import { ToastProvider } from '@/components/Toast';
 import { NATIVE_RESUME_BOUNDARY_MESSAGE } from '../../shared/nativeResumeBoundary';
@@ -323,7 +324,10 @@ describe('Tab-owned query clock integration', () => {
     await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
     emit('chat:message-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
     expect(screen.getByTestId('agent-error')).toHaveTextContent(NATIVE_RESUME_BOUNDARY_MESSAGE);
-    expect(screen.getAllByRole('status').some(element => element.textContent?.includes(NATIVE_RESUME_BOUNDARY_MESSAGE))).toBe(true);
+    emit('chat:agent-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
+    emit('chat:agent-error', { message: NATIVE_RESUME_BOUNDARY_MESSAGE });
+    expect(screen.getByTestId('agent-error')).toHaveTextContent(NATIVE_RESUME_BOUNDARY_MESSAGE);
+    expect(screen.queryAllByRole('status').filter(element => element.tagName !== 'OUTPUT' && element.textContent?.includes(NATIVE_RESUME_BOUNDARY_MESSAGE))).toHaveLength(0);
   });
 
   it('keeps query time through tool updates and pauses only for unresolved human requests', async () => {
@@ -2935,14 +2939,16 @@ describe('TabProvider question receipts and Task history ownership', () => {
     tauriHarness.isTauri = true;
     tauriHarness.proxyFetch.mockRejectedValue(new Error('submission unavailable'));
   });
-  function capture(strict = false) {
+  function capture(strict = false, showForm = false) {
     let value: ReturnType<typeof useTabState>;
     function Capture() {
       const v = useTabState();
       useEffect(() => {
         value = v;
       }, [v]);
-      return null;
+      return showForm && v.pendingAskUserQuestion ? <AskUserQuestionPrompt
+        request={v.pendingAskUserQuestion} onSubmit={v.respondAskUserQuestion}
+        onCancel={requestId => v.respondAskUserQuestion(requestId, null)} /> : null;
     }
     const tree = (
       <TabProvider
@@ -2985,6 +2991,79 @@ describe('TabProvider question receipts and Task history ownership', () => {
         multiSelect: false,
       },
     ],
+  });
+  it('queues simultaneous questions in FIFO order and sends each answer to its own caller', async () => {
+    const { get } = capture(true);
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    emit('ask-user-question:request', question('first'));
+    emit('ask-user-question:request', question('second'));
+    emit('ask-user-question:request', question('first')); // reconnect replay must not duplicate it
+    expect(get().pendingAskUserQuestion?.requestId).toBe('first');
+    await act(async () => { await expect(get().respondAskUserQuestion('first', { '0': 'Yes' })).rejects.toThrow(); });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('first');
+    tauriHarness.proxyFetch.mockImplementation(async () => new Response(JSON.stringify({ success: true })));
+    await act(async () => { await get().respondAskUserQuestion('first', { '0': 'Yes' }); });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('second');
+    await act(async () => { await get().respondAskUserQuestion('second', { '0': 'Second answer' }); });
+    expect(get().pendingAskUserQuestion).toBeNull();
+    const bodies = tauriHarness.proxyFetch.mock.calls.map(call => JSON.parse(call[1].body as string));
+    expect(bodies.slice(-2)).toEqual([{ requestId: 'first', answers: { '0': 'Yes' } },
+      { requestId: 'second', answers: { '0': 'Second answer' } }]);
+  });
+  it('shows and submits each queued form through the real component and Tab response owner', async () => {
+    const { get } = capture(true, true);
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    for (const id of ['First question?', 'Second question?']) {
+      const input = question(id);
+      emit('ask-user-question:request', { ...input, questions: [{ ...input.questions[0], question: id }] });
+    }
+    expect(screen.getByText('First question?')).toBeVisible();
+    expect(screen.queryByText('Second question?')).toBeNull();
+    tauriHarness.proxyFetch.mockImplementation(async () => new Response(JSON.stringify({ success: true })));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    await screen.findByText('Second question?');
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Custom return to caller' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交' }));
+    await waitFor(() => expect(get().pendingAskUserQuestion).toBeNull());
+    expect(tauriHarness.proxyFetch.mock.calls.map(call => JSON.parse(call[1].body as string))).toEqual([
+      { requestId: 'First question?', answers: { '0': { selected: ['Yes'] } } },
+      { requestId: 'Second question?', answers: { '0': { selected: [], custom: 'Custom return to caller' } } },
+    ]);
+  });
+  it('clears queued questions on session adoption and ignores late events from the old session', async () => {
+    const { get } = capture();
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    emit('ask-user-question:request', question('old-first'));
+    emit('ask-user-question:request', question('old-second'));
+    await act(async () => { await get().adoptMigratedSession('session-next', { sidecarAlreadyMigrated: true }); });
+    expect(get().pendingAskUserQuestion).toBeNull();
+    emit('ask-user-question:request', question('old-replay'));
+    expect(get().pendingAskUserQuestion).toBeNull();
+    emit('ask-user-question:request', { ...question('new-first'), sessionId: 'session-next' });
+    emit('ask-user-question:expired', { requestId: 'new-first', sessionId: 'pending-receipt' });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('new-first');
+  });
+  it('expires only the matching queued request and reveals the next unanswered question', async () => {
+    const { get } = capture();
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    for (const id of ['first', 'removed', 'third']) emit('ask-user-question:request', question(id));
+    emit('ask-user-question:expired', { sessionId: 'pending-receipt', requestId: 'removed' });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('first');
+    emit('ask-user-question:expired', { sessionId: 'pending-receipt', requestId: 'first' });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('third');
+    emit('ask-user-question:expired', { sessionId: 'pending-receipt', requestId: 'first' });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('third');
+  });
+  it('normalizes missing multiSelect and rejects malformed replay without mounting a broken form', async () => {
+    const { get } = capture();
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    const raw = question('legacy');
+    emit('ask-user-question:request', { ...raw, questions: raw.questions.map(({ multiSelect: _unused, ...q }) => q) });
+    expect(get().pendingAskUserQuestion?.questions[0].multiSelect).toBe(false);
+    emit('ask-user-question:request', { ...question('broken'), questions: [{ ...raw.questions[0], options: [null] }] });
+    expect(get().pendingAskUserQuestion?.requestId).toBe('legacy');
+    expect(get().agentError).toContain('options[0]');
   });
   it.each(['reject', 'false'] as const)('keeps the same question retryable on %s', async (mode) => {
     const { get } = capture();

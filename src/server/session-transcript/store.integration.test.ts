@@ -273,7 +273,7 @@ describe('SessionStore V2 ownership and compatibility', () => {
 
   it('publishes a complete fork baseline and hands it off without a source-side target writer', async () => {
     const { createSessionMetadata } = await import('../types/session');
-    const legacy: SessionMetadata = { id: 'fork-source', agentDir: '/workspace', title: 'old', createdAt: 't', lastActiveAt: 't' };
+    const legacy: SessionMetadata = { id: 'fork-source', agentDir: '/workspace', title: 'old', createdAt: 't', lastActiveAt: 't', archived: true };
     await store.saveSessionMetadata(legacy);
     const rows = [
       { id: 'u', role: 'user' as const, content: 'question', timestamp: 't' },
@@ -283,7 +283,7 @@ describe('SessionStore V2 ownership and compatibility', () => {
     expect((await store.appendSessionMessages(legacy.id, source.cursor, rows)).ok).toBe(true);
     const sourcePath = join(testState.home, '.myagents', 'sessions', `${legacy.id}.jsonl`);
     const sourceBytes = await readFile(sourcePath);
-    const target = createSessionMetadata('/workspace', { runtime: 'builtin' });
+    const target = createSessionMetadata('/workspace', { runtime: 'builtin', archived: true });
     testState.beforeTranscriptPublish = async () => {
       expect(store.isHistoryVisibleSession(store.getSessionMetadata(target.id)!)).toBe(false);
       expect(store.getActiveSessionTranscript(target.id)).toBeUndefined();
@@ -291,10 +291,44 @@ describe('SessionStore V2 ownership and compatibility', () => {
     };
     await store.publishForkSession(target, rows, legacy.id);
     expect(store.isHistoryVisibleSession(store.getSessionMetadata(target.id)!)).toBe(true);
+    expect(store.getSessionMetadata(target.id)?.archived).toBeUndefined();
+    expect(store.getSessionMetadata(legacy.id)?.archived).toBe(true);
     expect((await store.getSessionData(target.id))?.messages).toEqual(rows);
     expect(store.getActiveSessionTranscript(target.id)).toBeUndefined();
     expect((await readFile(sourcePath)).equals(sourceBytes)).toBe(true);
     await expect(store.publishForkSession(target, rows, legacy.id)).rejects.toThrow('fresh V2');
+  });
+
+  it('keeps archive and concurrent index fields through active binding patches and transcript commits', async () => {
+    const { metadata, active } = await create({ id: 'archive-active-binding' });
+    active.writer.observe({ kind: 'message-create', message: { id: 'u1', role: 'user', content: 'first', timestamp: 't' } });
+    expect(await active.writer.flush()).toBe(true);
+
+    const update = await store.updateSessionMetadataForBinding(metadata.id, { archived: true }, () => true);
+    expect(update?.archived).toBe(true);
+    expect(await active.writer.flush()).toBe(true);
+
+    // Model another process updating the sessions index after our binding
+    // snapshot. V2 publication must reread and merge this unrelated field.
+    const indexPath = join(testState.home, '.myagents', 'sessions.json');
+    const rows = JSON.parse(await readFile(indexPath, 'utf8')) as SessionMetadata[];
+    const row = rows.find(item => item.id === metadata.id)!;
+    row.providerId = 'concurrent-provider';
+    await writeFile(indexPath, JSON.stringify(rows, null, 2));
+
+    active.writer.observe({ kind: 'message-create', message: { id: 'u2', role: 'user', content: 'second', timestamp: 't' } });
+    expect(await active.writer.flush()).toBe(true);
+    const renamed = await store.updateSessionMetadataForBinding(metadata.id, { title: 'Still archived' }, () => true);
+    expect(renamed).toMatchObject({ archived: true, providerId: 'concurrent-provider', title: 'Still archived' });
+    expect(await active.writer.flush()).toBe(true);
+
+    const persistedRows = JSON.parse(await readFile(indexPath, 'utf8')) as SessionMetadata[];
+    expect(persistedRows.find(item => item.id === metadata.id)).toMatchObject({
+      archived: true,
+      providerId: 'concurrent-provider',
+      title: 'Still archived',
+    });
+    expect((await store.getSessionData(metadata.id))?.messages.map(message => message.id)).toEqual(['u1', 'u2']);
   });
 
   it('waits for healthy slow fork IO and publishes the same target', async () => {

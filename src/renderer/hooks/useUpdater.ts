@@ -19,6 +19,7 @@ import { isTauriEnvironment } from '@/utils/browserMock';
 import { isDebugMode } from '@/utils/debug';
 import { isLinuxDesktop } from '@/utils/desktopPlatform';
 import { compareVersions } from '../../shared/utils';
+import { getPlatform } from '@/identity/deviceIdentity';
 
 export interface UpdateReadyInfo {
     version: string;
@@ -30,7 +31,7 @@ export type CheckUpdateResult = 'up-to-date' | 'downloading' | 'error';
 /** Result of restartAndUpdate, used by caller to show an error toast. 'ok' means
  *  install actually started (process is about to exit) — the renderer just won't
  *  see the resolution because Rust calls exit(0). */
-export type RestartUpdateResult = 'ok' | 'network-error' | 'version-mismatch' | 'blocked' | 'error';
+export type RestartUpdateResult = 'ok' | 'network-error' | 'version-mismatch' | 'blocked' | 'busy' | 'activity-unknown' | 'signature-error' | 'error';
 
 interface UseUpdaterResult {
     /** Whether an update has been downloaded and is ready to install */
@@ -60,9 +61,7 @@ interface UseUpdaterResult {
 }
 
 // Windows and macOS defer installation until the user's explicit restart action.
-const isWindows = typeof navigator !== 'undefined' && navigator.platform?.includes('Win');
-const isMac = typeof navigator !== 'undefined' && navigator.platform?.includes('Mac');
-const usesDeferredInstall = isWindows || isMac;
+const usesDeferredInstall = (): boolean => /^(darwin|windows)-/.test(getPlatform());
 
 // Periodic check interval: 30 minutes
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -115,6 +114,13 @@ export function useUpdater(): UseUpdaterResult {
         try {
             // Step 1: Get remote version
             const result = await invoke('test_update_connectivity') as string;
+            // The updater service uses HTTP 204 when no release is published.
+            // Its empty body is a successful check, not a malformed manifest.
+            const statusMatch = result.match(/^Status:\s*(\d{3})(?:\s|$)/m);
+            if (statusMatch?.[1] === '204') return 'up-to-date';
+            if (statusMatch && statusMatch[1] !== '200') {
+                throw new Error(`Update check HTTP ${statusMatch[1]}`);
+            }
             const versionMatch = result.match(/version:\s*([^\n]+)/);
             if (!versionMatch) {
                 throw new Error(updaterText('remoteVersionParseFailed'));
@@ -202,7 +208,7 @@ export function useUpdater(): UseUpdaterResult {
         // Windows/macOS install verified bytes persisted during the background
         // download. macOS must not replace the live .app before this explicit
         // action: TCC cannot prompt a process whose executable was unlinked.
-        if (usesDeferredInstall) {
+        if (usesDeferredInstall()) {
             try {
                 await invoke('install_pending_update');
                 // Windows exits via NSIS; macOS immediately requests restart.
@@ -211,6 +217,14 @@ export function useUpdater(): UseUpdaterResult {
                 const errStr = String(err);
                 installingRef.current = false;
                 setInstalling(false);
+                if (errStr.includes('UPDATE_BUSY')) return 'busy';
+                if (errStr.includes('UPDATE_ACTIVITY_UNKNOWN')) return 'activity-unknown';
+                if (errStr.includes('UPDATE_SIGNATURE_INVALID')) {
+                    setUpdateReady(false);
+                    setUpdateVersion(null);
+                    setPendingUpdateOnStartup(null);
+                    return 'signature-error';
+                }
                 if (errStr.includes('VERSION_MISMATCH')) {
                     console.warn('[useUpdater] Pending update version mismatch, will re-download');
                     setUpdateReady(false);
@@ -286,6 +300,7 @@ export function useUpdater(): UseUpdaterResult {
             }
             setUpdateVersion(event.payload.version);
             setUpdateReady(true);
+            downloadingRef.current = false;
             setDownloading(false);
             setPreparing(false);
         }, ac.signal);
@@ -305,6 +320,8 @@ export function useUpdater(): UseUpdaterResult {
             if (isDebugMode()) {
                 console.log('[useUpdater] Event received: updater:download-failed', event.payload);
             }
+            downloadingRef.current = false;
+            setDownloading(false);
             setPreparing(false);
         }, ac.signal);
 
@@ -314,7 +331,7 @@ export function useUpdater(): UseUpdaterResult {
     // Windows/macOS: check for a pending update on disk at startup
     // If found, show a dialog prompting the user to install it
     useEffect(() => {
-        if (!isTauriEnvironment() || isLinuxDesktop() || !usesDeferredInstall) return;
+        if (!isTauriEnvironment() || isLinuxDesktop() || !usesDeferredInstall()) return;
 
         const checkPending = async () => {
             try {
@@ -368,7 +385,7 @@ export function useUpdater(): UseUpdaterResult {
                 intervalRef.current = null;
             }
         };
-    }, []); // Empty deps - interval created once on mount
+    }, []); // One interval per enabled app profile
 
     return {
         updateReady,

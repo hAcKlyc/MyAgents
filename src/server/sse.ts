@@ -146,6 +146,15 @@ export const SSE_EVENT_PRIORITIES: Readonly<Record<string, SseEventPriority>> = 
   'queue:added': 'critical',
   'queue:started': 'critical',
   'queue:cancelled': 'critical',
+  // Session watch continuous subscription events (v2 protocol)
+  'watch:turn.started': 'critical',
+  'watch:turn.completed': 'critical',
+  'watch:turn.error': 'critical',
+  'watch:turn.timeout': 'critical',
+  'watch:session.idle': 'critical',
+  'watch:session.cancelled': 'critical',
+  'watch:turn.progress': 'coalescible', // Progress updates can be coalesced
+  'watch:heartbeat': 'droppable', // Heartbeats are non-critical
 });
 
 function resolvePriority(event: string): SseEventPriority {

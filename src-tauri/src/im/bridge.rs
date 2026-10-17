@@ -2050,7 +2050,7 @@ pub async fn install_openclaw_plugin<R: tauri::Runtime>(
 
     let base_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".myagents")
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
         .join("openclaw-plugins")
         .join(&plugin_id);
 
@@ -2543,7 +2543,7 @@ pub async fn uninstall_openclaw_plugin(plugin_id: &str) -> Result<(), String> {
 
     let plugins_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".myagents")
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
         .join("openclaw-plugins")
         .join(plugin_id);
 
@@ -2571,7 +2571,7 @@ pub async fn uninstall_openclaw_plugin(plugin_id: &str) -> Result<(), String> {
 pub async fn list_openclaw_plugins() -> Result<Vec<serde_json::Value>, String> {
     let plugins_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".myagents")
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
         .join("openclaw-plugins");
 
     if !plugins_dir.exists() {

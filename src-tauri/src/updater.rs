@@ -100,7 +100,7 @@ struct PendingUpdateMeta {
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn get_myagents_dir() -> Result<std::path::PathBuf, String> {
     let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-    Ok(home.join(".myagents"))
+    Ok(home.join(crate::app_dirs::APP_DATA_DIR_NAME))
 }
 
 /// Atomically save pending update bytes + metadata to disk
@@ -522,8 +522,8 @@ async fn check_and_download_silently(app: &AppHandle) -> Result<Option<String>, 
     logger::info(
         app,
         format!(
-            "[Updater] Checking for updates... Current: v{}, Target: {}, Endpoint: https://download.myagents.io/update/{}.json",
-            current_version, target, target
+            "[Updater] Checking for updates... Current: v{}, Target: {}, Endpoint: {:?}",
+            current_version, target, app.config().plugins.0.get("updater").and_then(|config| config.get("endpoints"))
         ),
     );
 
@@ -953,6 +953,13 @@ pub async fn install_pending_update(
 
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
+        // Downloads and installs share the pending bytes and metadata authority.
+        // Hold its existing guard before reading disk; a periodic download may
+        // not replace the package while the confirmed install is in flight.
+        if UPDATE_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+            return Err("UPDATE_SHUTDOWN_IN_PROGRESS".to_string());
+        }
+        let _pending_guard = UpdateGuard;
         logger::info(&app, "[Updater] install_pending_update called");
 
         // Step 1: Read update bytes and version from disk
@@ -1014,13 +1021,30 @@ pub async fn install_pending_update(
             return Err("VERSION_MISMATCH".to_string());
         }
 
+        // Download verification cannot cover bytes subsequently read from disk.
+        // Tauri install(bytes) does not verify signatures; recheck against the
+        // selected product's pinned key before freezing or stopping any owner.
+        let public_key = app.config().plugins.0.get("updater")
+            .and_then(|config| config.get("pubkey"))
+            .and_then(|key| key.as_str())
+            .ok_or_else(|| "UPDATE_SIGNING_KEY_NOT_CONFIGURED".to_string())?;
+        if crate::resource_signature::verify_minisign_bytes_with_key(
+            &bytes, &update.signature, public_key, "pending app update",
+        ).is_err() {
+            clear_pending_update_from_disk();
+            return Err("UPDATE_SIGNATURE_INVALID".to_string());
+        }
+        // Freeze only idle execution owners and release admission on failure.
+        let guard = if crate::app_dirs::IS_MOXBOT {
+            Some(crate::sidecar::prepare_update_restart(&app, state.inner()).await?)
+        } else { None };
+
         #[cfg(target_os = "macos")]
         {
             // Installing replaces the on-disk .app. Keep the current bundle
             // intact until the user's explicit restart action, then restart
             // immediately after the local install succeeds so the process is
             // never left interactively running from an unlinked executable.
-            let _ = state;
             let _ = im_state;
             let _ = agent_state;
             let _ = terminal_state;
@@ -1029,9 +1053,11 @@ pub async fn install_pending_update(
                 &app,
                 format!("[Updater] Installing macOS update v{}...", pending_version),
             );
-            update
-                .install(bytes)
-                .map_err(|e| format!("Installation failed: {}", e))?;
+            if let Err(error) = update.install(bytes) {
+                if let Some(guard) = guard { guard.release().await; }
+                return Err(format!("Installation failed: {}", error));
+            }
+            if let Some(guard) = guard { guard.commit_restart(); }
             logger::info(&app, "[Updater] macOS update installed; restarting now");
             app.request_restart();
             return Ok(());
@@ -1045,7 +1071,9 @@ pub async fn install_pending_update(
             // the renderer BEFORE step 2, which meant a network failure would kill
             // the user's session for nothing. Doing it here keeps the user's state
             // intact on every failure path above.
-            let _update_shutdown_guard = crate::sidecar::begin_update_shutdown()?;
+            let _update_shutdown_guard = if crate::app_dirs::IS_MOXBOT {
+                None // prepare_update_restart already holds exclusive admission.
+            } else { Some(crate::sidecar::begin_update_shutdown()?) };
             logger::info(
                 &app,
                 "[Updater] Quiescing app owners before NSIS install...",
@@ -1206,7 +1234,15 @@ pub async fn test_update_connectivity(app: AppHandle) -> Result<String, String> 
     // Detect architecture
     let target = get_update_target();
 
-    let url = format!("https://download.myagents.io/update/{}.json", target);
+    // Diagnostics and real checks share the selected product configuration.
+    // A MoXBots build must never fall back to the upstream update service.
+    let endpoint = app.config().plugins.0.get("updater")
+        .and_then(|config| config.get("endpoints"))
+        .and_then(|endpoints| endpoints.as_array())
+        .and_then(|endpoints| endpoints.first())
+        .and_then(|endpoint| endpoint.as_str())
+        .ok_or_else(|| "UPDATE_ENDPOINT_NOT_CONFIGURED".to_string())?;
+    let url = endpoint.replace("{{target}}", target);
     logger::info(
         &app,
         format!("[Updater] Testing HTTP connectivity to: {}", url),
@@ -1217,7 +1253,7 @@ pub async fn test_update_connectivity(app: AppHandle) -> Result<String, String> 
     let current_version = app.package_info().version.to_string();
     #[allow(clippy::disallowed_methods)]
     let builder = reqwest::Client::builder()
-        .user_agent(format!("MyAgents-Updater/{}", current_version))
+        .user_agent(format!("{}-Updater/{}", crate::app_dirs::APP_DISPLAY_NAME, current_version))
         .timeout(std::time::Duration::from_secs(30));
 
     let client = proxy_config::build_client_with_proxy(builder)

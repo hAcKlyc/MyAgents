@@ -1,0 +1,271 @@
+:root {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    sans-serif;
+  color: #233042;
+  background: #f5f7fa;
+  font-size: 15px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid #d5dce6;
+  border-radius: 8px;
+  padding: 10px 15px;
+  background: #fff;
+  color: inherit;
+}
+button:hover {
+  background: #edf2fa;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.primary {
+  background: #2662db;
+  color: white;
+  border-color: #2662db;
+}
+.primary:hover {
+  background: #1d51bd;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid #7da8fb;
+  outline-offset: 3px;
+}
+header {
+  max-width: 1120px;
+  margin: auto;
+  padding: 28px 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.brand {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 23px;
+}
+.brand small {
+  font-size: 13px;
+  color: #66748a;
+  margin-left: 10px;
+  font-weight: 400;
+}
+main {
+  max-width: 1120px;
+  margin: auto;
+  padding: 20px 24px 64px;
+}
+.card {
+  background: white;
+  border: 1px solid #dde4ef;
+  border-radius: 14px;
+  padding: 26px;
+}
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #526a94;
+}
+h1 {
+  font-size: 30px;
+  margin: 10px 0;
+}
+h2 {
+  font-size: 19px;
+  margin: 0 0 20px;
+}
+p {
+  line-height: 1.6;
+  color: #66748a;
+}
+.intro {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 26px;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 28px;
+}
+label {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 18px;
+}
+input,
+textarea,
+select {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #cdd6e3;
+  border-radius: 8px;
+  padding: 11px;
+  background: #fff;
+  color: inherit;
+  outline: none;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: #2662db;
+  box-shadow: 0 0 0 3px #2662db20;
+}
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+.hint {
+  font-size: 12px;
+}
+.notice {
+  padding: 12px 15px;
+  background: #eaf1ff;
+  border-radius: 8px;
+  margin: 0 0 20px;
+  color: #355385;
+}
+.error {
+  color: #a33434;
+  background: #fff1f0;
+}
+.feedback-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #dde4ef;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 12px;
+}
+.feedback-card strong {
+  display: block;
+  margin: 12px 0 6px;
+  overflow-wrap: anywhere;
+}
+.feedback-card small {
+  color: #758297;
+}
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 100px;
+  background: #edf2fa;
+  color: #4e6589;
+}
+.badge.resolved {
+  background: #e9f7ee;
+  color: #287443;
+}
+.badge.in_progress {
+  background: #fff2d7;
+  color: #8b681b;
+}
+.description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  color: #334259;
+}
+.event {
+  padding: 16px 0;
+  border-top: 1px solid #e4e9f1;
+}
+.event small {
+  color: #758297;
+  display: block;
+}
+.event p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #334259;
+  margin: 8px 0 0;
+}
+dialog {
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  width: min(650px, calc(100% - 32px));
+  max-height: 85vh;
+  padding: 26px;
+  color: inherit;
+}
+dialog::backdrop {
+  background: #19294570;
+}
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+.dialog-head h2 {
+  overflow-wrap: anywhere;
+}
+#login {
+  max-width: 620px;
+  margin: 40px auto;
+}
+#login-status,
+#submit-status {
+  font-size: 13px;
+}
+[hidden] {
+  display: none !important;
+}
+@media (max-width: 750px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+  .intro {
+    align-items: flex-start;
+  }
+  .intro button {
+    white-space: nowrap;
+    margin-top: 10px;
+  }
+  h1 {
+    font-size: 26px;
+  }
+  header {
+    padding: 22px 18px;
+  }
+  main {
+    padding: 12px 18px 40px;
+  }
+  .card {
+    padding: 20px;
+  }
+  dialog {
+    padding: 20px;
+  }
+  .brand small {
+    display: block;
+    margin-left: 0;
+    margin-top: 4px;
+  }
+}

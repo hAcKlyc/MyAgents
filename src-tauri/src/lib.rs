@@ -244,6 +244,12 @@ fn should_request_exit_confirmation(code: Option<i32>, confirmed: bool) -> bool 
 
 fn app_context() -> tauri::Context<tauri::Wry> {
     let context = tauri::generate_context!();
+    if crate::app_dirs::IS_UPDATER_QA {
+        assert_eq!(context.config().identifier, "com.moxbot.updaterqa", "QA requires its isolated bundle configuration");
+        assert_eq!(context.config().product_name.as_deref(), Some("MoXBots Updater QA"));
+    } else if crate::app_dirs::IS_MOXBOT {
+        assert_eq!(context.config().identifier, "com.moxbot.app", "MoX bot requires its isolated bundle configuration");
+    }
     #[cfg(target_os = "windows")]
     let context = {
         let mut context = context;
@@ -258,6 +264,15 @@ fn app_context() -> tauri::Context<tauri::Wry> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(
+        target_os = "macos",
+        myagents_moxbot,
+        feature = "moxbot-credential-reader"
+    ))]
+    let _ = myagents_agent_network_crypto_parent::set_parent_diagnostic_sink(|event| {
+        ulog_info!("[credential-transport] stage={} outcome={} mode={} operation={} elapsed_ms={} budget_ms={}",
+            event.stage, event.outcome, event.mode, event.operation, event.elapsed_ms, event.budget_ms);
+    });
     // ── DIAGNOSTIC PANIC HOOK (April 2026 crash investigation) ─────────────
     // Install BEFORE any other init so we capture every panic, including
     // setup-time / did_finish_launching ones that don't reach the unified
@@ -839,9 +854,16 @@ pub fn run() {
             agent_network::commands::cmd_agent_network_connections,
             agent_network::commands::cmd_agent_network_select,
             agent_network::commands::cmd_agent_network_join,
+            agent_network::commands::cmd_agent_network_owned_start,
+            agent_network::commands::cmd_agent_network_owned_open_authorization,
+            agent_network::commands::cmd_agent_network_owned_poll,
+            agent_network::commands::cmd_agent_network_owned_cancel,
+            agent_network::commands::cmd_agent_network_owned_restore_credentials,
+            agent_network::commands::cmd_agent_network_owned_restore_cancel,
             agent_network::commands::cmd_agent_network_remove,
             agent_network::commands::cmd_agent_discovery,
             agent_network::commands::cmd_agent_network_request,
+            agent_network::commands::cmd_agent_network_management,
             // MyAgents Cloud Space
             space_cloud::cmd_space_get_capability,
             space_cloud::cmd_space_get_session,
@@ -1103,7 +1125,7 @@ pub fn run() {
                 WebviewUrl::default(),
             )
             .scroll_bar_style(crate::webview_policy::scroll_bar_style())
-            .title("MyAgents")
+            .title(crate::app_dirs::APP_DISPLAY_NAME)
             .inner_size(1200.0, 800.0)
             .min_inner_size(800.0, 600.0)
             .resizable(true)

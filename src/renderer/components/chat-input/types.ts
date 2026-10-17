@@ -42,6 +42,9 @@ interface ScheduledTaskBarProjection {
 }
 
 export interface SimpleChatInputProps {
+  /** Exact main-window Tab owner for MoxBots update draft handoff. */
+  composerTabId?: string;
+  composerDiscussionId?: string;
   value?: string;
   onChange?: (value: string) => void;
   onSend: (
@@ -53,6 +56,8 @@ export interface SimpleChatInputProps {
   active?: boolean;
   /** Blocks both keyboard and button send while the owning Session is not authoritative. */
   sendBlocked?: boolean;
+  /** Optional, conversation-bound ghost text. It is never sent before acceptance. */
+  nextPromptSuggestion?: import('@/hooks/useNextPromptSuggestion').NextPromptDraft;
   onStop?: () => void;
   isLoading: boolean;
   workspacePath?: string | null;

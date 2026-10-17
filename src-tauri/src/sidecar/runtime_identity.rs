@@ -77,7 +77,13 @@ impl RuntimeIdentity {
 pub(super) fn distribution_default_runtime_identity() -> RuntimeIdentity {
     let policy = crate::runtime_distribution_policy::policy();
     let configured = dirs::home_dir()
-        .and_then(|home| std::fs::read_to_string(home.join(".myagents/config.json")).ok())
+        .and_then(|home| {
+            std::fs::read_to_string(
+                home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+                    .join("config.json"),
+            )
+            .ok()
+        })
         .and_then(|content| serde_json::from_str::<serde_json::Value>(strip_bom(&content)).ok());
     configured
         .as_ref()
@@ -231,7 +237,7 @@ fn runtime_identity_from_legacy_agent(
 pub(crate) fn resolve_agent_runtime_identity_from_config(
     workspace_path: &std::path::Path,
 ) -> Option<RuntimeIdentity> {
-    let config_dir = dirs::home_dir()?.join(".myagents");
+    let config_dir = dirs::home_dir()?.join(crate::app_dirs::APP_DATA_DIR_NAME);
     let config_path = config_dir.join("config.json");
     let content = std::fs::read_to_string(&config_path).ok()?;
     let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).ok()?;
@@ -243,7 +249,9 @@ pub(crate) fn resolve_agent_runtime_identity_from_config(
 pub(crate) fn resolve_agent_runtime_identity_by_id_from_config(
     agent_id: &str,
 ) -> Option<RuntimeIdentity> {
-    let config_path = dirs::home_dir()?.join(".myagents").join("config.json");
+    let config_path = dirs::home_dir()?
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("config.json");
     let content = std::fs::read_to_string(config_path).ok()?;
     let cfg: serde_json::Value = serde_json::from_str(strip_bom(&content)).ok()?;
     resolve_agent_runtime_identity_by_id_from_value(&cfg, agent_id)
@@ -435,7 +443,9 @@ pub fn resolve_session_runtime_identity(session_id: &str) -> Option<String> {
 }
 
 pub fn resolve_session_runtime_identity_full(session_id: &str) -> Option<RuntimeIdentity> {
-    let sessions_path = dirs::home_dir()?.join(".myagents").join("sessions.json");
+    let sessions_path = dirs::home_dir()?
+        .join(crate::app_dirs::APP_DATA_DIR_NAME)
+        .join("sessions.json");
     let content = std::fs::read_to_string(&sessions_path).ok()?;
     resolve_session_runtime_identity_full_from_json(session_id, &content)
 }
@@ -445,7 +455,10 @@ pub fn resolve_session_runtime_identity_full(session_id: &str) -> Option<Runtime
 /// workspace in which that Session was created; callers must not bind an
 /// existing Session to a Task executing in a different workspace.
 pub fn session_metadata_matches_workspace(session_id: &str, workspace_path: &str) -> bool {
-    let Some(sessions_path) = dirs::home_dir().map(|home| home.join(".myagents/sessions.json"))
+    let Some(sessions_path) = dirs::home_dir().map(|home| {
+        home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+            .join("sessions.json")
+    })
     else {
         return false;
     };
@@ -614,8 +627,10 @@ pub fn cmd_can_restore_session(sessionId: String, agentDir: String) -> bool {
     if crate::workspace_files::path_safety::validate_workspace_root(&agentDir).is_err() {
         return false;
     }
-    let Some(sessions_path) = dirs::home_dir().map(|h| h.join(".myagents").join("sessions.json"))
-    else {
+    let Some(sessions_path) = dirs::home_dir().map(|home| {
+        home.join(crate::app_dirs::APP_DATA_DIR_NAME)
+            .join("sessions.json")
+    }) else {
         return false;
     };
     let Ok(content) = std::fs::read_to_string(&sessions_path) else {

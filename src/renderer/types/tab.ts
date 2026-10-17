@@ -1,3 +1,5 @@
+import type { RemoteSessionTab } from '@/features/remote-session/tabContract';
+import type { ProjectBoardTab } from '@/features/project-board/tabContract';
 import type { AgentNetworkTab } from '@/features/agent-network/tabContract';
 // Builtin-edition Tab model and shared constructors.
 
@@ -31,7 +33,9 @@ export type { RecordTab } from '@/features/record/tabContract';
 
 /** Closed union for the builtin MyAgents edition. Downstream editions extend
  * their own closed union and composition explicitly. */
-export type Tab = LauncherTab | ChatTab | SettingsTab | CapabilitiesTab | TaskCenterTab | SpaceTab | RecordTab | AgentNetworkTab;
+export type { ProjectBoardTab } from '@/features/project-board/tabContract';
+
+export type Tab = RemoteSessionTab | ProjectBoardTab | LauncherTab | ChatTab | SettingsTab | CapabilitiesTab | TaskCenterTab | SpaceTab | RecordTab | AgentNetworkTab;
 
 export type TabKind = Tab['view'];
 export type TabOf<K extends TabKind> = Extract<Tab, { view: K }>;

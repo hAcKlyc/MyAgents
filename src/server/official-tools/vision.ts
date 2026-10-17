@@ -1,3 +1,5 @@
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../../shared/appProfile';
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
 import { randomUUID } from 'crypto';
 import { basename, extname, isAbsolute, relative, resolve, win32 } from 'path';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'fs';
@@ -92,13 +94,13 @@ class VisionToolError extends Error {
 }
 
 export function getVisionToolReadme(): string {
-  return `myagents vision — official image-understanding helper
+  return `${APP_CLI_NAME} vision — official image-understanding helper
 
 Usage:
-  myagents vision analyze --image <path> [--image <path> ...] [--prompt "..."] [--json]
-  myagents vision analyze --image <path> --prompt-file <workspace-relative-text-file>
-  myagents vision analyze --image @myagents_files/screenshot.png --prompt "Read the error message"
-  myagents vision readme
+  ${APP_CLI_NAME} vision analyze --image <path> [--image <path> ...] [--prompt "..."] [--json]
+  ${APP_CLI_NAME} vision analyze --image <path> --prompt-file <workspace-relative-text-file>
+  ${APP_CLI_NAME} vision analyze --image @myagents_files/screenshot.png --prompt "Read the error message"
+  ${APP_CLI_NAME} vision readme
 
 The tool only accepts local image paths inside the current MyAgents workspace.
 Use @myagents_files/... paths when the conversation shows attached images as
@@ -110,6 +112,7 @@ workspace safety boundary as image paths; arbitrary absolute paths are rejected.
 }
 
 export async function analyzeImages(input: VisionAnalyzeInput): Promise<VisionAnalyzeResult> {
+  if (isUpdaterQaBuild()) throw new VisionToolError('UPDATER_QA_EXECUTION_DISABLED', 403);
   const config = loadConfig();
   const workspacePath = input.workspacePath?.trim();
   if (!workspacePath) {
@@ -461,7 +464,7 @@ async function runVisionQueryInner(args: {
     options: {
       maxTurns: 1,
       sessionId,
-      cwd: args.workspacePath || resolve(homedir(), '.myagents', 'projects'),
+      cwd: args.workspacePath || resolve(homedir(), APP_DATA_DIR_NAME, 'projects'),
       settingSources: [],
       strictMcpConfig: true,
       permissionMode: 'bypassPermissions',

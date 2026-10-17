@@ -411,6 +411,15 @@ html[data-color-scheme='dark'] {
   pointer-events: auto;
 }
 
+/* Owned help is part of the account menu, so keep both account and bell
+   reachable in rail mode instead of letting the absolute bell cover it. */
+.global-sidebar[data-global-sidebar-mode='rail'] .global-sidebar-account-row[data-owned-account-row='true'] {
+  height: calc(2 * var(--global-sidebar-action-size) + var(--space-1));
+}
+.global-sidebar[data-global-sidebar-mode='rail'] .global-sidebar-account-row[data-owned-account-row='true'] .global-sidebar-notification-slot {
+  top: calc(var(--global-sidebar-action-size) + var(--space-1));
+}
+
 .global-sidebar-notification-slot {
   top: 0;
   left: calc(
@@ -446,6 +455,35 @@ html[data-color-scheme='dark'] {
   /* Outline art has no line-box leading below the baseline, so restore the
      breathing room a text title would have had above the slogan. */
   margin-bottom: 0.3em;
+}
+
+.app-profile-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  width: max-content;
+  font-family: var(--font-display);
+  font-size: 0.64em;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.app-profile-mark {
+  width: 1.8em;
+  height: 1.8em;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.launcher-hero-logotype.app-profile-wordmark {
+  height: auto;
+}
+
+.global-sidebar-brand-logotype.app-profile-wordmark {
+  height: auto;
+  font-size: 0.8em;
 }
 
 /* Sidebar layout reaches its final 256px/64px slot in one commit so Chat,

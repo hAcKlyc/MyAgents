@@ -1,3 +1,5 @@
+import { isUpdaterQaBuild } from '../../shared/updaterQa';
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { execFile } from 'child_process';
 import { posix as pathPosix, win32 as pathWin32 } from 'path';
 import { readdirSync, existsSync } from 'fs';
@@ -63,6 +65,9 @@ export function getFallbackPaths(options: FallbackPathOptions = {}): string[] {
         ? getBundledNodeDir()
         : options.bundledNodeDir;
 
+    if (isUpdaterQaBuild()) {
+        return bundledNodeDir ? [bundledNodeDir, '/usr/bin', '/bin', '/usr/sbin', '/sbin'] : ['/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+    }
     if (platform === 'win32') {
         const userProfile = envValue(env, 'USERPROFILE');
         const localAppData = envValue(env, 'LOCALAPPDATA');
@@ -75,7 +80,7 @@ export function getFallbackPaths(options: FallbackPathOptions = {}): string[] {
 
         // Keep this in sync with buildClaudeSessionEnv(): product-owned
         // launchers first, then runtimes and package-manager fallbacks.
-        pushPath(paths, userProfile ? joinForPlatform(platform, userProfile, '.myagents', 'bin') : '', platform);
+        pushPath(paths, userProfile ? joinForPlatform(platform, userProfile, APP_DATA_DIR_NAME, 'bin') : '', platform);
         pushPath(paths, programFiles ? joinForPlatform(platform, programFiles, 'nodejs') : '', platform);
         pushPath(paths, programFilesX86 ? joinForPlatform(platform, programFilesX86, 'nodejs') : '', platform);
         pushPath(paths, nvmSymlink, platform);
@@ -99,7 +104,7 @@ export function getFallbackPaths(options: FallbackPathOptions = {}): string[] {
     // GUI apps don't inherit shell PATH, so we enumerate known binary directories.
     const home = envValue(env, 'HOME');
     const paths: string[] = [];
-    pushPath(paths, home ? `${home}/.myagents/bin` : '', platform);
+    pushPath(paths, home ? `${home}/${APP_DATA_DIR_NAME}/bin` : '', platform);
     pushPath(paths, '/opt/homebrew/bin', platform);        // macOS Apple Silicon homebrew
     pushPath(paths, '/usr/local/bin', platform);           // macOS Intel homebrew / Linux system
     pushPath(paths, '/usr/bin', platform);
@@ -226,6 +231,7 @@ let detectedTerminalProxyEnv: TerminalProxyEnv | null = null;
  * fallback) and can wait should use `ensureShellPath()`.
  */
 export function getShellPath(): string {
+    if (isUpdaterQaBuild()) return getFallbackPaths().join(':');
     if (cachedPath && detectedUserPath === null) {
         // Fallback-only cache. Return it; warmup may still be pending.
         return cachedPath;
@@ -284,6 +290,7 @@ export async function ensureShellPath(): Promise<string> {
  * detection is in flight or after it has completed.
  */
 export function warmupShellPath(): Promise<void> {
+    if (isUpdaterQaBuild()) return Promise.resolve();
     if (warmupInFlight) return warmupInFlight;
     if (detectedUserPath !== null) return Promise.resolve(); // already done
 

@@ -64,6 +64,9 @@ export interface SessionMetadata {
   cronTaskId?: string;
   /** Product-owned hidden maintenance marker. Ordinary automation sessions leave this unset. */
   systemMaintenanceKind?: SystemMaintenanceSessionKind;
+  /** Host Bot owner birth fact. Private delegated execution is never a public
+   * interactive Session, even after the Bot run or delegation is removed. */
+  hostBotBinding?: { botId: string; runGeneration: string };
   /** Legacy channel/source metadata; use `origin` for product/statistics origin. */
   source?: SessionSource;
   /** Stable product/statistics origin. This is the session birth fact; legacy `source` is channel metadata. */
@@ -73,6 +76,8 @@ export interface SessionMetadata {
    *  identical semantics, so the on-disk size cost is zero for the common
    *  case. */
   favorite?: boolean;
+  /** User-archived in Session history. Only true is persisted; absent is active. */
+  archived?: boolean;
   /** User-pinned ordering inside the owning workspace's sidebar Session list.
    *  The server assigns a strictly increasing ISO timestamp; absent means unpinned. */
   pinnedAt?: string;

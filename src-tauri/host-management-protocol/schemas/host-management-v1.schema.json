@@ -1,0 +1,2615 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myagents.invalid/schema/host-management-v1.json",
+  "title": "MyAgents Host Management v1 envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "version",
+    "senderSequence",
+    "channelId",
+    "message"
+  ],
+  "properties": {
+    "namespace": {
+      "const": "host.management"
+    },
+    "version": {
+      "const": 1
+    },
+    "senderSequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "channelId": {
+      "$ref": "#/$defs/uuid"
+    },
+    "message": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/hello"
+        },
+        {
+          "$ref": "#/$defs/helloAck"
+        },
+        {
+          "$ref": "#/$defs/request"
+        },
+        {
+          "$ref": "#/$defs/response"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "protocol",
+        "role",
+        "nonce"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hello"
+        },
+        "protocol": {
+          "const": "host-management/v1"
+        },
+        "role": {
+          "enum": [
+            "controller",
+            "host"
+          ]
+        },
+        "nonce": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "helloAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "protocol",
+        "role",
+        "nonce"
+      ],
+      "properties": {
+        "kind": {
+          "const": "hello-ack"
+        },
+        "protocol": {
+          "const": "host-management/v1"
+        },
+        "role": {
+          "enum": [
+            "controller",
+            "host"
+          ]
+        },
+        "nonce": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requestId",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "kind": {
+          "const": "request"
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "method": {
+          "enum": [
+            "host.snapshot",
+            "config.set",
+            "resources.create",
+            "receipt.get",
+            "credential.set",
+            "host.capabilities",
+            "host.inspect",
+            "config.provider.set",
+            "credential.provider.set",
+            "receipt.provider.get",
+            "resources.directory.list",
+            "resources.register",
+            "session.remote"
+          ]
+        },
+        "params": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/snapshotParams"
+            },
+            {
+              "$ref": "#/$defs/configSet"
+            },
+            {
+              "$ref": "#/$defs/resourcesCreate"
+            },
+            {
+              "$ref": "#/$defs/receiptGet"
+            },
+            {
+              "$ref": "#/$defs/credentialSet"
+            },
+            {
+              "$ref": "#/$defs/configProviderSet"
+            },
+            {
+              "$ref": "#/$defs/credentialProviderSet"
+            },
+            {
+              "$ref": "#/$defs/receiptProviderGet"
+            },
+            {
+              "$ref": "#/$defs/directoryListParams"
+            },
+            {
+              "$ref": "#/$defs/resourcesRegister"
+            },
+            {
+              "$ref": "#/$defs/remoteSessionParams"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.snapshot"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "config.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/configSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.create"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/resourcesCreate"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "receipt.get"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/receiptGet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "credential.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/credentialSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.capabilities"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "host.inspect"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/snapshotParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "config.provider.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/configProviderSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "credential.provider.set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/credentialProviderSet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "receipt.provider.get"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/receiptProviderGet"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.directory.list"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/directoryListParams"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "resources.register"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/resourcesRegister"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "session.remote"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/remoteSessionParams"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "snapshotParams": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "configSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "model",
+        "executionAuthorized",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "resourcesCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath",
+        "expectedRevision",
+        "mutationId",
+        "operation"
+      ],
+      "properties": {
+        "rootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "operation": {
+          "enum": [
+            "register",
+            "create"
+          ]
+        }
+      }
+    },
+    "receiptGet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mutationId",
+        "owner"
+      ],
+      "properties": {
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "enum": [
+            "config",
+            "resources",
+            "credentials"
+          ]
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "requestId",
+        "result"
+      ],
+      "properties": {
+        "kind": {
+          "const": "response"
+        },
+        "requestId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/snapshot"
+            },
+            {
+              "$ref": "#/$defs/configReceipt"
+            },
+            {
+              "$ref": "#/$defs/resourceReceipt"
+            },
+            {
+              "$ref": "#/$defs/receiptNotFound"
+            },
+            {
+              "$ref": "#/$defs/error"
+            },
+            {
+              "$ref": "#/$defs/credentialReceipt"
+            },
+            {
+              "$ref": "#/$defs/capabilities"
+            },
+            {
+              "$ref": "#/$defs/extendedSnapshot"
+            },
+            {
+              "$ref": "#/$defs/providerConfigReceipt"
+            },
+            {
+              "$ref": "#/$defs/providerCredentialReceipt"
+            },
+            {
+              "$ref": "#/$defs/directoryList"
+            },
+            {
+              "$ref": "#/$defs/remoteSessionResponse"
+            }
+          ]
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "hostId",
+        "configured",
+        "settings",
+        "activeSession",
+        "stopping",
+        "capabilities",
+        "agentNet",
+        "runtime",
+        "credentials",
+        "resources"
+      ],
+      "properties": {
+        "kind": {
+          "const": "snapshot"
+        },
+        "version": {
+          "const": 1
+        },
+        "hostId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "settings": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/settings"
+            }
+          ]
+        },
+        "activeSession": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "generation",
+                "closing"
+              ],
+              "properties": {
+                "sessionId": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "generation": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "closing": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "stopping": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "enum": [
+              "local-session",
+              "permission",
+              "stop",
+              "persistent-history",
+              "local-config-receipt"
+            ]
+          }
+        },
+        "agentNet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "node",
+            "sdkBinaryPresent"
+          ],
+          "properties": {
+            "node": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "sdkBinaryPresent": {
+              "type": "boolean"
+            }
+          }
+        },
+        "credentials": {
+          "$ref": "#/$defs/credentialsStatus"
+        },
+        "resources": {
+          "$ref": "#/$defs/resourcesSnapshot"
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "providerId",
+        "model",
+        "workspace",
+        "executionAuthorized"
+      ],
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        }
+      }
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "receiptNotFound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "mutationId",
+        "owner"
+      ],
+      "properties": {
+        "kind": {
+          "const": "receipt-not-found"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "owner": {
+          "enum": [
+            "config",
+            "resources",
+            "credentials"
+          ]
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "code"
+      ],
+      "properties": {
+        "kind": {
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      }
+    },
+    "configReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "config-receipt"
+        },
+        "status": {
+          "enum": [
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "new-session",
+            "none"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      }
+    },
+    "resourceReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "resource-receipt"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "none",
+            "registered-disabled-agent",
+            "existing-agent"
+          ]
+        },
+        "resource": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "created",
+            "agentId",
+            "projectId",
+            "name",
+            "workspacePath",
+            "enabled",
+            "archived"
+          ],
+          "properties": {
+            "created": {
+              "type": "boolean"
+            },
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "projectId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "workspacePath": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": "^/"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "archived": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "credentialSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "credential",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[^\\r\\n\\u0000]+$",
+          "writeOnly": true,
+          "description": "Non-whitespace, at most 16384 UTF-8 bytes; validated again by the codec and owner."
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "credentialsStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "configured",
+        "revision",
+        "writeAvailable"
+      ],
+      "properties": {
+        "providerId": {
+          "const": "moonshot-coding"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "writeAvailable": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "configured": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "resourceRoot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "workspacePath"
+      ],
+      "properties": {
+        "rootId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$"
+        },
+        "workspacePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
+    },
+    "resourceAgent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agentId",
+        "projectId",
+        "name",
+        "workspacePath",
+        "enabled",
+        "archived"
+      ],
+      "properties": {
+        "agentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "workspacePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^/[^\\u0000-\\u001f\\u007f]*$"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      }
+    },
+    "resourcesSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "revision",
+        "roots",
+        "agents"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "roots": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceRoot"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resourceAgent"
+          }
+        }
+      },
+      "description": "Codec also rejects duplicate rootId/agentId and enforces the 64 KiB frame budget."
+    },
+    "credentialReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "credential-receipt"
+            },
+            "status": {
+              "const": "persisted"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "effect": {
+              "const": "new-session"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "credential-receipt"
+            },
+            "status": {
+              "const": "conflict"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            },
+            "effect": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "genericModel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "directoryPath": {
+      "type": "string",
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f-\\u009f])(?:(?!\\.\\.?(/|$))[^/]+(?:/(?!\\.\\.?(/|$))[^/]+)*)?$"
+    },
+    "rootId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+    },
+    "providerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "apiProtocol",
+        "baseUrl",
+        "authType"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/providerId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "apiProtocol": {
+          "enum": [
+            "anthropic",
+            "openai"
+          ]
+        },
+        "baseUrl": {
+          "type": "string",
+          "maxLength": 4096,
+          "pattern": "^https://[^@?#\\s\\\\]+$"
+        },
+        "authType": {
+          "enum": [
+            "auth_token",
+            "api_key",
+            "both",
+            "auth_token_clear_api_key"
+          ]
+        },
+        "upstreamFormat": {
+          "enum": [
+            "chat_completions",
+            "responses"
+          ]
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "maxOutputTokensParamName": {
+          "enum": [
+            "max_tokens",
+            "max_completion_tokens",
+            "max_output_tokens"
+          ]
+        },
+        "modelAliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "sonnet": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "opus": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "haiku": {
+              "$ref": "#/$defs/genericModel"
+            },
+            "fable": {
+              "$ref": "#/$defs/genericModel"
+            }
+          }
+        },
+        "sourceProviderId": {
+          "$ref": "#/$defs/providerId"
+        }
+      }
+    },
+    "workspaceSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        }
+      }
+    },
+    "configProviderSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "workspace",
+        "executionAuthorized",
+        "expectedRevision",
+        "mutationId"
+      ],
+      "properties": {
+        "provider": {
+          "$ref": "#/$defs/providerProfile"
+        },
+        "model": {
+          "$ref": "#/$defs/genericModel"
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspaceSelection"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "credentialProviderSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedRevision",
+        "providerId",
+        "credential",
+        "mutationId"
+      ],
+      "properties": {
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "credential": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[^\\r\\n\\u0000]+$",
+          "writeOnly": true,
+          "description": "Non-whitespace, at most 16384 UTF-8 bytes; validated again by the codec and owner."
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "receiptProviderGet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "providerId",
+        "mutationId"
+      ],
+      "properties": {
+        "owner": {
+          "enum": [
+            "config",
+            "credentials"
+          ]
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "directoryListParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        },
+        "cursor": {
+          "$ref": "#/$defs/cursor"
+        }
+      }
+    },
+    "resourcesRegister": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relativePath",
+        "expectedRevision",
+        "mutationId"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1
+            }
+          ]
+        },
+        "expectedRevision": {
+          "$ref": "#/$defs/revision"
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        }
+      }
+    },
+    "genericSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "providerId",
+        "model",
+        "workspace",
+        "executionAuthorized"
+      ],
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "model": {
+          "$ref": "#/$defs/genericModel"
+        },
+        "workspace": {
+          "$ref": "#/$defs/workspaceSelection"
+        },
+        "executionAuthorized": {
+          "type": "boolean"
+        }
+      }
+    },
+    "genericCredentialsStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerId",
+        "configured",
+        "revision",
+        "writeAvailable"
+      ],
+      "properties": {
+        "providerId": {
+          "$ref": "#/$defs/providerId"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "writeAvailable": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "configured": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        }
+      ]
+    },
+    "extendedSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "hostId",
+        "configured",
+        "settings",
+        "activeSession",
+        "stopping",
+        "capabilities",
+        "agentNet",
+        "runtime",
+        "credentials",
+        "resources",
+        "provider"
+      ],
+      "properties": {
+        "kind": {
+          "const": "extended-snapshot"
+        },
+        "version": {
+          "const": 1
+        },
+        "hostId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "configured": {
+          "type": "boolean"
+        },
+        "settings": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/genericSettings"
+            }
+          ]
+        },
+        "activeSession": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sessionId",
+                "generation",
+                "closing"
+              ],
+              "properties": {
+                "sessionId": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "generation": {
+                  "$ref": "#/$defs/uuid"
+                },
+                "closing": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "stopping": {
+          "type": "boolean"
+        },
+        "capabilities": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "enum": [
+              "local-session",
+              "permission",
+              "stop",
+              "persistent-history",
+              "local-config-receipt"
+            ]
+          }
+        },
+        "agentNet": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 64
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "node",
+            "sdkBinaryPresent"
+          ],
+          "properties": {
+            "node": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "sdkBinaryPresent": {
+              "type": "boolean"
+            }
+          }
+        },
+        "credentials": {
+          "$ref": "#/$defs/genericCredentialsStatus"
+        },
+        "resources": {
+          "$ref": "#/$defs/resourcesSnapshot"
+        },
+        "provider": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/providerProfile"
+            }
+          ]
+        }
+      }
+    },
+    "providerConfigReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "mutationId"
+      ],
+      "properties": {
+        "kind": {
+          "const": "provider-config-receipt"
+        },
+        "status": {
+          "enum": [
+            "persisted",
+            "conflict",
+            "not-found"
+          ]
+        },
+        "mutationId": {
+          "$ref": "#/$defs/uuid"
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "effect": {
+          "enum": [
+            "new-session",
+            "none"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/genericSettings"
+        }
+      }
+    },
+    "providerCredentialReceipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "provider-credential-receipt"
+            },
+            "status": {
+              "const": "persisted"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "effect": {
+              "const": "new-session"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "status",
+            "mutationId",
+            "revision",
+            "effect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "provider-credential-receipt"
+            },
+            "status": {
+              "const": "conflict"
+            },
+            "mutationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "revision": {
+              "$ref": "#/$defs/revision"
+            },
+            "effect": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "methods",
+        "providerKinds",
+        "limits"
+      ],
+      "properties": {
+        "kind": {
+          "const": "capabilities"
+        },
+        "version": {
+          "const": 1
+        },
+        "methods": {
+          "type": "array",
+          "maxItems": 12,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "host.snapshot",
+              "config.set",
+              "resources.create",
+              "receipt.get",
+              "credential.set",
+              "host.capabilities",
+              "host.inspect",
+              "config.provider.set",
+              "credential.provider.set",
+              "receipt.provider.get",
+              "resources.directory.list",
+              "resources.register"
+            ]
+          }
+        },
+        "providerKinds": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ]
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "directoryEntries",
+            "pathBytes"
+          ],
+          "properties": {
+            "directoryEntries": {
+              "const": 128
+            },
+            "pathBytes": {
+              "const": 4096
+            }
+          }
+        }
+      }
+    },
+    "directoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "relativePath"
+      ],
+      "properties": {
+        "name": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[^/]+$"
+            }
+          ]
+        },
+        "relativePath": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/directoryPath"
+            },
+            {
+              "minLength": 1
+            }
+          ]
+        }
+      }
+    },
+    "directoryList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "rootId",
+        "relativePath",
+        "entries",
+        "nextCursor"
+      ],
+      "properties": {
+        "kind": {
+          "const": "directory-list"
+        },
+        "rootId": {
+          "$ref": "#/$defs/rootId"
+        },
+        "relativePath": {
+          "$ref": "#/$defs/directoryPath"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/directoryEntry"
+          }
+        },
+        "nextCursor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/cursor"
+            }
+          ]
+        }
+      }
+    },
+    "remoteSessionRequest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "capabilities"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "list"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "before": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "limit"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "get"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30
+            },
+            "before": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "limit"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "start"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "send"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 8000,
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "receipt"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "respond"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "generation": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "turnId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "requestId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "interaction": {
+              "enum": [
+                "permission",
+                "plan",
+                "question"
+              ]
+            },
+            "approved": {
+              "type": "boolean"
+            },
+            "answers": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "maxLength": 512
+              },
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "generation",
+            "turnId",
+            "requestId",
+            "interaction",
+            "approved"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "stop"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "generation": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "turnId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "operationId",
+            "generation",
+            "turnId"
+          ]
+        }
+      ]
+    },
+    "remoteSessionParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remoteSession": {
+          "$ref": "#/$defs/remoteSessionRequest"
+        }
+      },
+      "required": [
+        "remoteSession"
+      ]
+    },
+    "remoteSessionResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "capabilities"
+            },
+            "version": {
+              "const": 1
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "runtime": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxActiveSessions": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "liveUpdates": {
+              "const": "snapshot"
+            }
+          },
+          "required": [
+            "kind",
+            "version",
+            "agentId",
+            "runtime",
+            "maxActiveSessions",
+            "liveUpdates"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "list"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "maxLength": 99,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9-]+$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "updatedAt": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "preview": {
+                    "type": "string",
+                    "maxLength": 512
+                  },
+                  "runtime": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "title",
+                  "updatedAt",
+                  "preview",
+                  "runtime"
+                ]
+              },
+              "maxItems": 30
+            },
+            "hasMore": {
+              "type": "boolean"
+            },
+            "nextBefore": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "items",
+            "hasMore",
+            "nextBefore"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "snapshot"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "sessionId": {
+              "type": "string",
+              "maxLength": 99,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "generation": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "turnId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9._:-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "state": {
+              "enum": [
+                "idle",
+                "running",
+                "waiting_user_action",
+                "unavailable"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "runtime": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "terminal": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "complete",
+                    "stopped",
+                    "error",
+                    "interrupted"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "role": {
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "content": {
+                    "type": "string",
+                    "maxLength": 16000
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9._:-]+$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "maxLength": 160
+                        },
+                        "status": {
+                          "enum": [
+                            "running",
+                            "complete",
+                            "error"
+                          ]
+                        },
+                        "summary": {
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "status",
+                        "summary"
+                      ]
+                    },
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "id",
+                  "role",
+                  "timestamp",
+                  "content",
+                  "truncated",
+                  "tools"
+                ]
+              },
+              "maxItems": 30
+            },
+            "interactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "requestId": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "generation": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "turnId": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._:-]+$"
+                  },
+                  "interaction": {
+                    "enum": [
+                      "permission",
+                      "plan",
+                      "question"
+                    ]
+                  },
+                  "actionable": {
+                    "type": "boolean"
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "answerKey": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "question": {
+                          "type": "string",
+                          "maxLength": 512
+                        },
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "maxLength": 256
+                          },
+                          "maxItems": 8
+                        },
+                        "multiSelect": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "answerKey",
+                        "question",
+                        "options",
+                        "multiSelect"
+                      ]
+                    },
+                    "maxItems": 6
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "generation",
+                  "turnId",
+                  "interaction",
+                  "actionable",
+                  "title",
+                  "description",
+                  "questions"
+                ]
+              },
+              "maxItems": 8
+            },
+            "hasMoreBefore": {
+              "type": "boolean"
+            },
+            "nextBefore": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "sessionId",
+            "generation",
+            "turnId",
+            "revision",
+            "state",
+            "title",
+            "runtime",
+            "model",
+            "terminal",
+            "messages",
+            "interactions",
+            "hasMoreBefore",
+            "nextBefore"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "receipt"
+            },
+            "agentId": {
+              "type": "string",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._:-]+$"
+            },
+            "operationId": {
+              "$ref": "#/$defs/uuid"
+            },
+            "sessionId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 99,
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "status": {
+              "enum": [
+                "processing",
+                "accepted",
+                "rejected",
+                "unconfirmed",
+                "not-found"
+              ]
+            },
+            "code": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128,
+                  "pattern": "^[A-Z0-9_]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "agentId",
+            "operationId",
+            "sessionId",
+            "status",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "error"
+            },
+            "code": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[A-Z0-9_]+$"
+            }
+          },
+          "required": [
+            "kind",
+            "code"
+          ]
+        }
+      ]
+    },
+    "remoteSessionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "remote-session"
+        },
+        "data": {
+          "$ref": "#/$defs/remoteSessionResult"
+        }
+      },
+      "required": [
+        "kind",
+        "data"
+      ]
+    }
+  }
+}

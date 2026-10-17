@@ -4,6 +4,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import {
   networkErrorKey,
   networkRequest,
+  restoreOwnedCredentials,
+  cancelOwnedCredentialRestore,
   setNetworkReadScope,
   type NetworkRequest,
 } from "./agentNetwork";
@@ -12,6 +14,29 @@ beforeEach(() => {
   setNetworkReadScope(null);
 });
 describe("network read and settings outcome", () => {
+  it("uses the explicit owned-credential restore and cancellation commands", async () => {
+    invoke.mockResolvedValueOnce({ revision: 8 }).mockResolvedValueOnce(undefined);
+    await expect(
+      restoreOwnedCredentials({
+        connectionId: "owned-1",
+        expectedRegistryRevision: 7,
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).resolves.toEqual({ revision: 8 });
+    await cancelOwnedCredentialRestore(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(invoke.mock.calls).toEqual([
+      ["cmd_agent_network_owned_restore_credentials", {
+        connectionId: "owned-1",
+        expectedRegistryRevision: 7,
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }],
+      ["cmd_agent_network_owned_restore_cancel", {
+        operationId: "00000000-0000-4000-8000-000000000001",
+      }],
+    ]);
+  });
   it("post-save refresh does not join a read started while the save was pending", async () => {
     let finishWrite!: (value: unknown) => void,
       finishRead!: (value: unknown) => void;
@@ -167,6 +192,17 @@ describe("network read and settings outcome", () => {
   ])("keeps %s save wording scoped to mutations", (code) => {
     expect(networkErrorKey({ code })).toBe("failed");
     expect(networkErrorKey({ code }, "mutation")).toBe("unconfirmed");
+  });
+  it.each([
+    [
+      "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
+      "credentialStoreAuthorizationRequired",
+    ],
+    ["NETWORK_CREDENTIAL_STORE_UNAVAILABLE", "credentialStoreUnavailable"],
+    ["NETWORK_CREDENTIAL_STORE_INVALID", "credentialStoreInvalid"],
+    ["OWNED_SESSION_RECORD_MISSING", "ownedSessionMissing"],
+  ])("maps %s to a fixed credential-store message", (code, key) => {
+    expect(networkErrorKey({ code })).toBe(key);
   });
   it("never checks a mutation receipt for a failed read", async () => {
     const error = { code: "NETWORK_TRANSPORT_FAILED" };

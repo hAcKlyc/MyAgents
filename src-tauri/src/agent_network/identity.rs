@@ -3,8 +3,8 @@
 //! lost activation ACK without replaying activation or storing a second pointer.
 use super::account::NetworkAccountSession;
 use super::crypto::{
-    certificate_chain, certificate_fingerprint, CryptoError, DevicePrivateKey, KeyScope,
-    OsIdentityStore, TlsIdentity,
+    certificate_chain, certificate_fingerprint, CryptoError, DevicePrivateKey, IdentityStore,
+    KeyScope, TlsIdentity,
 };
 use super::jwt::{AccessClaims, AccountVerifier, VerifiedPeer};
 use super::NetworkError;
@@ -25,7 +25,7 @@ fn key_generation_plan(
     retired_generation: Option<u64>,
 ) -> Result<(u64, bool), NetworkError> {
     if retired_generation.is_some_and(|retired| {
-        !replacement && !(key_present && previous.is_some_and(|current| current > retired))
+        !(replacement || key_present && previous.is_some_and(|current| current > retired))
     }) {
         return Err(NetworkError::new("NETWORK_REMOVAL_UNCONFIRMED"));
     }
@@ -159,9 +159,10 @@ impl NetworkIdentity {
             Ok(_) => Err(NetworkError::new("NETWORK_REMOVAL_UNCONFIRMED")),
         }
     }
-    pub(crate) async fn initialize(
+    pub(crate) async fn initialize_with_store(
         account: NetworkAccountSession,
         retired_generation: Option<u64>,
+        store: Arc<dyn IdentityStore>,
     ) -> Result<Self, NetworkError> {
         account.validate_instance().await?;
         let device = crate::device_identity::current_device_identity()
@@ -196,15 +197,12 @@ impl NetworkIdentity {
         let mut scope = KeyScope {
             issuer: account.issuer().into(),
             environment: account.environment().into(),
-            service_id: service_id.into(),
+            service_id,
             principal_id: account.principal_id()?.into(),
             device_id: device.device_id.clone(),
             key_generation: state.key_generation.unwrap_or(1),
         };
-        let replacement = if account.is_selfhost()
-            && account.has_enrollment_key()
-            && state.key_generation.is_some()
-        {
+        let replacement = if account.requires_revocation_probe(state.key_generation) {
             match account.request(AccountOperation::Challenge,Some(json!({"deviceId":scope.device_id,"operation":"recover-query","targetFingerprint":state.key_fingerprint,"expectedKeyGeneration":scope.key_generation}))).await {
                 Err(error) if error.code=="DEVICE_REVOKED"=>true,
                 Err(error)=>return Err(error),
@@ -213,7 +211,7 @@ impl NetworkIdentity {
         } else {
             false
         };
-        let current_key = load_key(&scope).await?;
+        let current_key = load_key_with_store(&scope, store.clone()).await?;
         if let (Some(key), Some(expected)) = (&current_key, &state.key_fingerprint) {
             if !replacement && key.public_fingerprint()? != *expected {
                 return Err(NetworkError::new("NETWORK_CREDENTIAL_GENERATION_CONFLICT"));
@@ -229,7 +227,7 @@ impl NetworkIdentity {
         )?;
         scope.key_generation = generation;
         let key = match if recovery || replacement {
-            load_key(&scope).await?
+            load_key_with_store(&scope, store.clone()).await?
         } else {
             current_key
         } {
@@ -238,7 +236,7 @@ impl NetworkIdentity {
                 let persisted_scope = scope.clone();
                 tokio::task::spawn_blocking(move || {
                     let key = Arc::new(DevicePrivateKey::generate()?);
-                    OsIdentityStore::save_pending(&persisted_scope, &key)?;
+                    store.save_pending(&persisted_scope, &key)?;
                     Ok::<_, CryptoError>(key)
                 })
                 .await
@@ -297,11 +295,7 @@ impl NetworkIdentity {
         {
             return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
         }
-        if let NetworkAccountSession::Selfhost(instance) = &account {
-            instance
-                .descriptor
-                .ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
-        }
+        account.ensure_bootstrap(&bootstrap.root_certificate, &bootstrap.network_url)?;
         let peer = validate_peer(
             &scope,
             key.clone(),
@@ -422,11 +416,12 @@ async fn validate_peer(
     }))
 }
 
-pub(crate) async fn load_key(
+pub(super) async fn load_key_with_store(
     scope: &KeyScope,
+    store: Arc<dyn IdentityStore>,
 ) -> Result<Option<Arc<DevicePrivateKey>>, NetworkError> {
     let scope = scope.clone();
-    match tokio::task::spawn_blocking(move || OsIdentityStore::load(&scope))
+    match tokio::task::spawn_blocking(move || store.load(&scope))
         .await
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))?
     {

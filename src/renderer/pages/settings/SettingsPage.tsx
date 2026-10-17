@@ -35,6 +35,7 @@ import React, {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
+import { APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -186,6 +187,7 @@ import {
 import { AppearanceModeControl } from './components/AppearanceModeControl';
 import { MarkdownReadingSizeControl } from './components/MarkdownReadingSizeControl';
 import { ThemePresetSelect } from './components/ThemePresetSelect';
+import { ProviderConnectionFields } from './ProviderConnectionFields';
 import { useResolvedTheme } from '@/theme';
 import {
   MANAGED_BROWSER_MCP_ID,
@@ -6082,7 +6084,7 @@ export default function Settings({
                   >
                     <MyAgentsLogotype
                       className="launcher-hero-logotype"
-                      title="MyAgents"
+                      title={APP_DISPLAY_NAME}
                     />
                   </h1>
                   <div className="mt-1 flex items-center gap-2">
@@ -6298,10 +6300,10 @@ export default function Settings({
                       Website
                     </p>
                     <ExternalLink
-                      href="https://myagents.io"
+                      href={APP_WEBSITE_URL}
                       className="mt-1 block text-[var(--accent)] hover:underline"
                     >
-                      myagents.io
+                      {new URL(APP_WEBSITE_URL).hostname}
                     </ExternalLink>
                   </div>
                   <div>
@@ -9347,230 +9349,11 @@ export default function Settings({
                 />
               </div>
 
-              <div>
-                <label className="mb-0.5 block text-sm font-medium text-[var(--ink)]">
-                  {tSettings('providers.custom.apiProtocol')}
-                </label>
-                {customForm.apiProtocol === 'openai' && (
-                  <p className="mb-1.5 text-xs text-[var(--ink-muted)]">
-                    {tSettings('providers.custom.bridgeWarning')}
-                  </p>
-                )}
-                <div
-                  className={`flex gap-4${customForm.apiProtocol !== 'openai' ? ' mt-1' : ''}`}
-                >
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="create-apiProtocol"
-                      value="anthropic"
-                      checked={customForm.apiProtocol !== 'openai'}
-                      onChange={() =>
-                        setCustomForm((p) => ({
-                          ...p,
-                          apiProtocol: 'anthropic',
-                          authType: 'auth_token',
-                        }))
-                      }
-                      className="accent-[var(--ink)]"
-                    />
-                    <span className="text-sm text-[var(--ink)]">
-                      {tSettings('providers.custom.anthropicProtocol')}
-                    </span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="create-apiProtocol"
-                      value="openai"
-                      checked={customForm.apiProtocol === 'openai'}
-                      onChange={() =>
-                        setCustomForm((p) => ({
-                          ...p,
-                          apiProtocol: 'openai',
-                          authType: 'api_key',
-                        }))
-                      }
-                      className="accent-[var(--ink)]"
-                    />
-                    <span className="text-sm text-[var(--ink)]">
-                      {tSettings('providers.custom.openaiProtocol')}
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                  {tSettings('providers.custom.baseUrl')}{' '}
-                  <span className="text-[var(--error)]">*</span>
-                </label>
-                <input
-                  type="url"
-                  value={customForm.baseUrl}
-                  onChange={(e) =>
-                    setCustomForm((p) => ({ ...p, baseUrl: e.target.value }))
-                  }
-                  placeholder={
-                    customForm.apiProtocol === 'openai'
-                      ? 'https://api.openai.com/v1'
-                      : 'https://api.example.com/anthropic'
-                  }
-                  className="w-full rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--focus-border)] focus:outline-none"
-                />
-              </div>
-
-              {customForm.apiProtocol === 'openai' && (
-                <>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                      {tSettings('providers.custom.upstreamFormat')}
-                    </label>
-                    <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="create-upstreamFormat"
-                          value="chat_completions"
-                          checked={
-                            customForm.upstreamFormat === 'chat_completions'
-                          }
-                          onChange={() =>
-                            setCustomForm((p) => ({
-                              ...p,
-                              upstreamFormat: 'chat_completions',
-                              maxOutputTokensParamName:
-                                p.maxOutputTokensParamName ===
-                                'max_output_tokens'
-                                  ? 'max_tokens'
-                                  : p.maxOutputTokensParamName,
-                            }))
-                          }
-                          className="accent-[var(--ink)]"
-                        />
-                        <span className="text-sm text-[var(--ink)]">
-                          Chat Completions
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="radio"
-                          name="create-upstreamFormat"
-                          value="responses"
-                          checked={customForm.upstreamFormat === 'responses'}
-                          onChange={() =>
-                            setCustomForm((p) => ({
-                              ...p,
-                              upstreamFormat: 'responses',
-                              maxOutputTokensParamName: 'max_output_tokens',
-                            }))
-                          }
-                          className="accent-[var(--ink)]"
-                        />
-                        <span className="text-sm text-[var(--ink)]">
-                          Responses API
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
-                      {tSettings('providers.custom.maxOutputTokens')}
-                    </label>
-                    <div className="flex gap-2 items-center">
-                      <CustomSelect
-                        value={customForm.maxOutputTokensParamName}
-                        onChange={(v) =>
-                          setCustomForm((p) => ({
-                            ...p,
-                            maxOutputTokensParamName: v as
-                              | 'max_tokens'
-                              | 'max_completion_tokens'
-                              | 'max_output_tokens',
-                          }))
-                        }
-                        options={
-                          customForm.upstreamFormat === 'responses'
-                            ? [
-                                {
-                                  value: 'max_output_tokens',
-                                  label: 'max_output_tokens',
-                                },
-                              ]
-                            : [
-                                { value: 'max_tokens', label: 'max_tokens' },
-                                {
-                                  value: 'max_completion_tokens',
-                                  label: 'max_completion_tokens',
-                                },
-                              ]
-                        }
-                        compact
-                        className="shrink-0"
-                      />
-                      <input
-                        type="number"
-                        value={customForm.maxOutputTokens}
-                        onChange={(e) =>
-                          setCustomForm((p) => ({
-                            ...p,
-                            maxOutputTokens: e.target.value,
-                          }))
-                        }
-                        placeholder={tSettings(
-                          'providers.custom.unlimitedPlaceholder',
-                        )}
-                        className="flex-1 rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] px-3 py-2.5 text-sm transition-colors focus:border-[var(--focus-border)] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {/* Auth Type - only meaningful for Anthropic protocol (controls x-api-key vs Authorization header) */}
-              {customForm.apiProtocol !== 'openai' && (
-                <div>
-                  <label className="mb-0.5 block text-sm font-medium text-[var(--ink)]">
-                    {tSettings('providers.custom.authType')}
-                  </label>
-                  <p className="mb-1.5 text-xs text-[var(--ink-muted)]">
-                    {tSettings('providers.custom.authTypeDescription')}
-                  </p>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="create-authType"
-                        value="auth_token"
-                        checked={customForm.authType === 'auth_token'}
-                        onChange={() =>
-                          setCustomForm((p) => ({
-                            ...p,
-                            authType: 'auth_token',
-                          }))
-                        }
-                        className="accent-[var(--ink)]"
-                      />
-                      <span className="text-sm text-[var(--ink)]">
-                        AUTH_TOKEN
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="create-authType"
-                        value="api_key"
-                        checked={customForm.authType === 'api_key'}
-                        onChange={() =>
-                          setCustomForm((p) => ({ ...p, authType: 'api_key' }))
-                        }
-                        className="accent-[var(--ink)]"
-                      />
-                      <span className="text-sm text-[var(--ink)]">API_KEY</span>
-                    </label>
-                  </div>
-                </div>
-              )}
+              <ProviderConnectionFields
+                idPrefix="settings-provider-create"
+                value={customForm}
+                onChange={(next) => setCustomForm((previous) => ({ ...previous, ...next, authType: next.authType === 'api_key' ? 'api_key' : next.authType === 'auth_token' ? 'auth_token' : previous.authType }))}
+              />
 
               {/* Models — inline input, no dependency on provider creation */}
               <div>

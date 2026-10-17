@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 // Gemini Image Generation MCP Tool — AI image generation & multi-turn editing
 // Uses Shadow Session to maintain Gemini multi-turn context (contents[] + thought_signature)
 // In-process MCP server (same pattern as cron-tools / im-media)
@@ -68,7 +69,7 @@ function getGeneratedDir(): string {
   const workspace = geminiImageConfig?.workspace;
   const dir = workspace
     ? join(workspace, 'myagents_files', 'generated_images')
-    : join(homedir(), '.myagents', 'generated');
+    : join(homedir(), APP_DATA_DIR_NAME, 'generated');
   if (!existsSync(dir)) {
     ensureDirSync(dir);
     if (workspace) ensureGitignorePattern(workspace, 'myagents_files/');
@@ -77,7 +78,7 @@ function getGeneratedDir(): string {
 }
 
 function getContextsDir(): string {
-  const dir = join(homedir(), '.myagents', 'image-contexts');
+  const dir = join(homedir(), APP_DATA_DIR_NAME, 'image-contexts');
   ensureDirSync(dir);
   return dir;
 }

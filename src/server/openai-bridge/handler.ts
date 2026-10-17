@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE } from '../../shared/appProfile';
 // Bridge HTTP handler: receives Anthropic requests, translates to OpenAI, forwards, translates back
 
 // MUST import `fetch` from undici (not use global fetch). Node 24's built-in
@@ -424,7 +425,7 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
     let effectivePromptCacheKey = capabilities.key
       && affinity?.promptCacheKeyMode === 'session'
       && !upstream.cacheCompatibility?.isKeyDisabled(cacheTarget)
-      ? buildPromptCacheKey({ appNamespace: 'myagents', providerId: upstream.providerId,
+      ? buildPromptCacheKey({ appNamespace: APP_BUILD_PROFILE, providerId: upstream.providerId,
           model: targetModel, sessionId: affinity.sessionId, upstreamFormat })
       : undefined;
     let promptCacheBreakpointsEnabled = capabilities.breakpoints

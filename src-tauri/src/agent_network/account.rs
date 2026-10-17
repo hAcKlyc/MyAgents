@@ -84,9 +84,19 @@ pub(crate) struct SelfhostAccount {
     pub active: Arc<AtomicBool>,
     pub enrollment_key: Option<Zeroizing<String>>,
 }
+pub(crate) struct OwnedAccount {
+    pub connection_id: String,
+    pub descriptor: super::owned_login::OwnedInstance,
+    pub active: Arc<AtomicBool>,
+    pub session: super::owned_login::OwnedSession,
+    pub public_tls_ca: Option<String>,
+    pub join_authorized: AtomicBool,
+    pub guard: Arc<dyn Fn() -> Result<(), NetworkError> + Send + Sync>,
+}
 #[derive(Clone)]
 pub(crate) enum NetworkAccountSession {
     Official(OfficialAccountSession),
+    Owned(Arc<OwnedAccount>),
     Selfhost(Arc<SelfhostAccount>),
 }
 impl NetworkAccountSession {
@@ -97,41 +107,86 @@ impl NetworkAccountSession {
         match self {
             Self::Official(a) => a.binding_id(),
             Self::Selfhost(a) => &a.connection_id,
+            Self::Owned(a) => &a.connection_id,
         }
     }
     pub(crate) fn issuer(&self) -> &str {
         match self {
             Self::Official(a) => a.issuer(),
             Self::Selfhost(a) => &a.descriptor.issuer,
+            Self::Owned(a) => &a.descriptor.issuer,
         }
     }
     pub(crate) fn principal_id(&self) -> Result<&str, NetworkError> {
         match self {
             Self::Official(a) => a.principal_id(),
             Self::Selfhost(a) => Ok(&a.descriptor.principal_id),
+            Self::Owned(a) => Ok(&a.session.principal_id),
         }
     }
     pub(crate) fn environment(&self) -> &str {
         match self {
             Self::Official(a) => a.environment(),
             Self::Selfhost(a) => &a.descriptor.environment,
+            Self::Owned(a) => &a.descriptor.environment,
         }
     }
     pub(crate) fn service_id(&self) -> Result<&str, NetworkError> {
         match self {
             Self::Official(a) => a.service_id(),
             Self::Selfhost(a) => Ok(&a.descriptor.service_id),
+            Self::Owned(a) => Ok(&a.descriptor.service_id),
         }
     }
     pub(crate) fn is_selfhost(&self) -> bool {
-        matches!(self, Self::Selfhost(_))
+        matches!(self, Self::Selfhost(_) | Self::Owned(_))
     }
     pub(crate) fn has_enrollment_key(&self) -> bool {
         matches!(self,Self::Selfhost(a) if a.enrollment_key.is_some())
+            || matches!(self, Self::Owned(_))
+    }
+    /// Only legacy enrollment-key owners need a revoked-device replacement probe.
+    /// Owned sessions prove the current key through the normal consumed challenge;
+    /// probing first would leave an unused challenge on every initialization.
+    pub(crate) fn requires_revocation_probe(&self, key_generation: Option<u64>) -> bool {
+        match self {
+            Self::Selfhost(a) => a.enrollment_key.is_some() && key_generation.is_some(),
+            Self::Official(_) | Self::Owned(_) => false,
+        }
+    }
+    pub(crate) fn is_management_only(&self) -> bool {
+        matches!(self, Self::Owned(_))
+    }
+    pub(crate) fn public_tls_ca(&self) -> Option<&str> {
+        match self {
+            Self::Owned(a) => a.public_tls_ca.as_deref(),
+            _ => None,
+        }
+    }
+    pub(crate) fn deactivate(&self) {
+        match self {
+            Self::Owned(a) => a.active.store(false, Ordering::Release),
+            Self::Selfhost(a) => a.active.store(false, Ordering::Release),
+            _ => {}
+        }
+    }
+    pub(crate) fn ensure_bootstrap(&self, root: &str, url: &str) -> Result<(), NetworkError> {
+        match self {
+            Self::Selfhost(a) => a.descriptor.ensure_bootstrap(root, url),
+            Self::Owned(a) => a.descriptor.ensure_bootstrap(root, url),
+            _ => Ok(()),
+        }
     }
     pub(crate) fn ensure_current(&self) -> Result<(), NetworkError> {
         match self {
             Self::Official(a) => a.ensure_current(),
+            Self::Owned(a) => {
+                if !a.active.load(Ordering::Acquire) {
+                    return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+                }
+                a.session.validate(&a.descriptor)?;
+                (a.guard)()
+            }
             Self::Selfhost(a) => {
                 if a.active.load(Ordering::Acquire) {
                     Ok(())
@@ -149,6 +204,23 @@ impl NetworkAccountSession {
         self.ensure_current()?;
         match self {
             Self::Official(a) => a.request(operation, body).await,
+            Self::Owned(a) => {
+                let (method, path, _) = operation.request()?;
+                let (client, current) = super::owned_login::OwnedClient::discover(
+                    &a.descriptor.issuer,
+                    a.public_tls_ca.as_deref(),
+                )
+                .await?;
+                a.descriptor.ensure_same_trust(&current)?;
+                let value = client
+                    .identity_request(method, &path, body, &a.session.access_token)
+                    .await?;
+                if matches!(operation, AccountOperation::Jwks) && value != a.descriptor.jwks {
+                    return Err(NetworkError::new("NETWORK_TRUST_CHANGED"));
+                }
+                self.ensure_current()?;
+                Ok(value)
+            }
             Self::Selfhost(a) => {
                 let (method, path, _) = operation.request()?;
                 let key = if matches!(operation, AccountOperation::Identity) {
@@ -166,6 +238,16 @@ impl NetworkAccountSession {
         }
     }
     pub(crate) async fn validate_instance(&self) -> Result<(), NetworkError> {
+        if let Self::Owned(a) = self {
+            let (_, current) = super::owned_login::OwnedClient::discover(
+                &a.descriptor.issuer,
+                a.public_tls_ca.as_deref(),
+            )
+            .await?;
+            a.descriptor.ensure_same_trust(&current)?;
+            self.ensure_current()?;
+        }
+
         if let Self::Selfhost(a) = self {
             let current = descriptor(&a.descriptor.issuer).await?;
             // Presentation name may change; stable instance and pinned trust may not.
@@ -275,6 +357,56 @@ mod tests {
             ],
             root_certificate: "test-root".into(),
             jwks: serde_json::json!({"keys":[jwk]}),
+        }
+    }
+    #[test]
+    fn revocation_probe_is_exclusive_to_committed_legacy_enrollment_key_owner() {
+        for enrollment_key in [None, Some(Zeroizing::new("test-enrollment".into()))] {
+            let eligible = enrollment_key.is_some();
+            let legacy = NetworkAccountSession::Selfhost(Arc::new(SelfhostAccount {
+                connection_id: "legacy-test".into(),
+                descriptor: sample(),
+                active: Arc::new(AtomicBool::new(true)),
+                enrollment_key,
+            }));
+            assert!(!legacy.requires_revocation_probe(None));
+            assert_eq!(legacy.requires_revocation_probe(Some(1)), eligible);
+            assert_eq!(legacy.has_enrollment_key(), eligible);
+        }
+        let d = sample();
+        let owned = NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            connection_id: "owned-test".into(),
+            descriptor: super::super::owned_login::OwnedInstance {
+                version: 1,
+                profile: "owned-device-relay-v1".into(),
+                service_id: d.service_id,
+                environment: d.environment,
+                network_id: d.network_id.clone(),
+                name: d.name,
+                issuer: d.issuer,
+                login_issuer: "https://login.example.test".into(),
+                protocol: 1,
+                capabilities: vec!["tls13-mtls".into()],
+                root_certificate: d.root_certificate,
+                jwks: d.jwks,
+            },
+            active: Arc::new(AtomicBool::new(true)),
+            session: super::super::owned_login::OwnedSession {
+                access_token: "x".repeat(43),
+                expires_at: jsonwebtoken::get_current_timestamp() + 600,
+                principal_id: d.principal_id,
+                network_id: d.network_id,
+            },
+            public_tls_ca: None,
+            join_authorized: AtomicBool::new(false),
+            guard: Arc::new(|| Ok(())),
+        }));
+        // Preserve enrollment/management policy while excluding the legacy probe.
+        assert!(owned.has_enrollment_key());
+        assert!(owned.is_selfhost());
+        assert!(owned.is_management_only());
+        for generation in [None, Some(1), Some(9_007_199_254_740_991)] {
+            assert!(!owned.requires_revocation_probe(generation));
         }
     }
     #[test]

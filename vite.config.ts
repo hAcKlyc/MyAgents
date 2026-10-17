@@ -1,3 +1,4 @@
+import { resolveAppBuildProfile, appBuildDefines } from './scripts/app-build-profile.mjs';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import tailwindcss from '@tailwindcss/vite';
@@ -30,9 +31,16 @@ function getBuildVersions() {
 
 const buildVersions = getBuildVersions();
 
+const buildProfile = resolveAppBuildProfile(process.env);
+
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), {
+    name: 'application-profile-title',
+    transformIndexHtml: (html) => buildProfile !== 'myagents'
+      ? html.replace('<title>MyAgents</title>', buildProfile === 'moxbot-updaterqa' ? '<title>MoXBots Updater QA</title>' : '<title>MoXBots</title>')
+      : html,
+  }],
   resolve: {
     alias: [
       { find: '@', replacement: resolve(__dirname, 'src/renderer') },
@@ -57,6 +65,9 @@ export default defineConfig({
   // Define environment variables for client code
   define: {
     ...dshBuildDefines(__dirname),
+    // Keep product identity closed and identical to the Node/Rust profile
+    // selected for this build. `src/shared/appProfile.ts` consumes this value.
+    ...appBuildDefines(process.env),
     // DEBUG_MODE: true when VITE_DEBUG_MODE is set or in dev server mode
     '__DEBUG_MODE__': JSON.stringify(process.env.VITE_DEBUG_MODE === 'true'),
     // Build-time version info for developer mode

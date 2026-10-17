@@ -1,0 +1,11 @@
+# IP website trial download metadata
+
+The public website is https://140.143.183.232/ and its download page is /download/. User explicitly chose the IP origin; neither publishing nor runtime requires the old Sites account. Desktop APP_WEBSITE_URL already uses this IP.
+
+The static design is owned separately. Reread the live release pointer and download HTML before each deployment; preserve the current design rather than rebuilding from an old source snapshot. The0.5.4 preflight saw website source9ed08c386184de25b3c03825d09a34f9a92f7dc8. `trial-release.json` is the MoXBots-owned download-channel projection. It names an immutable GitHub release asset and its exact size/SHA256; it does not contain credentials or enable model execution. Preserve old release assets and existing hashed manifests for cached pages/rollback.
+
+For an update, validate the asset against the signed/extracted local delivery and GitHub asset digest/size, publish the accepted GitHub release, then overlay only the content-addressed JSON and the download HTML body data-release-manifest reference onto the existing static base. Use a new immutable directory, hold the website/Nginx/cloud maintenance locks, verify the current symlink with CAS, and atomically switch it. Keep the previous target and a selective rollback receipt. Do not modify Nginx routes, TLS, authentication, cloud executable or Host permissions.
+
+Validate the public /download/ UI version/link and JSON hash, slash redirect, asset MIME/hash, unchanged /health and /admin, and unknown/private-path404. Record local extraction, GitHub-reported digest and full public network download separately; a partial readback is not a verified full download. Model API key and paid invocation remain unconfigured/unexecuted on the accepted Host.
+
+The0.5.4 ZIP contains the signed, Apple-notarized and stapled arm64 App frome5a05f76 (PR46 main0c85b571), including PR44/42/45. The repair was tested through a separate QA A3→B3 update, not by replacing the user's daily0.5.3/5949 client. Users of that older baseline should manually install0.5.4; this publication does not install or restart any client. Production issuer login/logout and paid model execution are outside the no-credentials QA acceptance. Detailed gates and limits are recorded in `dev-docs/moxbots-unified-054-delivery.md`.

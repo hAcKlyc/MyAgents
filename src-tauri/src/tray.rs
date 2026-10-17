@@ -117,7 +117,11 @@ pub fn setup_tray(app: &tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error
     #[cfg(target_os = "macos")]
     let base_icon = {
         // Load template icon from embedded bytes (22x22 for best menu bar appearance)
-        let icon_bytes = include_bytes!("../icons/trayIconTemplate@2x.png");
+        let icon_bytes: &[u8] = if crate::app_dirs::IS_MOXBOT {
+            include_bytes!("../icons/moxbots/32x32.png")
+        } else {
+            include_bytes!("../icons/trayIconTemplate@2x.png")
+        };
         Image::from_bytes(icon_bytes).unwrap_or_else(|_| {
             ulog_warn!("[Tray] Failed to load template icon, using default");
             app.default_window_icon().unwrap().clone()
@@ -131,7 +135,7 @@ pub fn setup_tray(app: &tauri::App<Wry>) -> Result<(), Box<dyn std::error::Error
     let tray_builder = TrayIconBuilder::new()
         .icon(base_icon.clone())
         .menu(&menu)
-        .tooltip("MyAgents")
+        .tooltip(crate::app_dirs::APP_DISPLAY_NAME)
         .show_menu_on_left_click(false);
 
     // On macOS, mark as template image so system can adjust colors for light/dark mode

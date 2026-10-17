@@ -23,6 +23,55 @@ use std::path::PathBuf;
 
 use crate::{ulog_error, ulog_info, ulog_warn};
 
+/// Compile-time product identity; never inferred from inherited user environment.
+#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+pub const APP_DATA_DIR_NAME: &str = ".moxbot";
+#[cfg(not(myagents_moxbot))]
+pub const APP_DATA_DIR_NAME: &str = ".myagents";
+#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+pub const APP_DISPLAY_NAME: &str = "MoXBots";
+#[cfg(not(myagents_moxbot))]
+pub const APP_DISPLAY_NAME: &str = "MyAgents";
+#[cfg(all(myagents_moxbot, not(myagents_updater_qa)))]
+pub const APP_CLI_NAME: &str = "moxbot";
+#[cfg(not(myagents_moxbot))]
+pub const APP_CLI_NAME: &str = "myagents";
+pub const APP_URL_SCHEME: &str = APP_CLI_NAME;
+#[cfg(myagents_updater_qa)]
+pub const APP_DATA_DIR_NAME: &str = ".moxbot-updaterqa";
+#[cfg(myagents_updater_qa)]
+pub const APP_DISPLAY_NAME: &str = "MoXBots Updater QA";
+#[cfg(myagents_updater_qa)]
+pub const APP_CLI_NAME: &str = "moxbot-updaterqa";
+pub const IS_UPDATER_QA: bool = cfg!(myagents_updater_qa);
+pub const IS_MOXBOT: bool = cfg!(myagents_moxbot);
+
+#[cfg(test)]
+mod app_profile_tests {
+    use super::*;
+
+    #[test]
+    fn app_profile_state_and_commands_are_separate() {
+        let home = PathBuf::from("/synthetic/home");
+        let data = home.join(APP_DATA_DIR_NAME);
+        if IS_UPDATER_QA {
+            assert_eq!(data, home.join(".moxbot-updaterqa"));
+            assert_eq!(APP_CLI_NAME, "moxbot-updaterqa");
+            assert_eq!(APP_URL_SCHEME, "moxbot-updaterqa");
+            assert_ne!(data, home.join(".moxbot"));
+        } else if IS_MOXBOT {
+            assert_eq!(data, home.join(".moxbot"));
+            assert_ne!(data.join("app.lock"), home.join(".myagents/app.lock"));
+            assert_ne!(data.join("sidecar.port"), home.join(".myagents/sidecar.port"));
+            assert_eq!(APP_CLI_NAME, "moxbot");
+            assert_eq!(APP_URL_SCHEME, "moxbot");
+        } else {
+            assert_eq!(data, home.join(".myagents"));
+            assert_eq!(APP_CLI_NAME, "myagents");
+        }
+    }
+}
+
 const LAST_EXIT_FILE: &str = "last-exit.json";
 
 /// Record that the app exited cleanly — i.e. the user deliberately quit
@@ -110,7 +159,7 @@ impl LockAcquireResult {
 /// dev/prod operation with fully isolated state (config, bots, sidecars, ports).
 /// For now, both profiles share the same directory.
 pub fn myagents_data_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".myagents"))
+    dirs::home_dir().map(|h| h.join(APP_DATA_DIR_NAME))
 }
 
 /// Path to the PID lock file.

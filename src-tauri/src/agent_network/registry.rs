@@ -4,6 +4,8 @@ use super::account::{NetworkAccountSession, SelfhostAccount, SelfhostDescriptor}
 use super::actor::{AgentNetwork, ManagedConnection, NetworkSnapshot};
 use super::identity::NetworkIdentity;
 use super::memory::MemoryBudget;
+use super::owned_account_desktop::{CompletedLogin, OwnedLoginManager};
+use super::owned_login::OwnedInstance;
 use super::NetworkError;
 use crate::sidecar::ManagedSidecarManager;
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,22 @@ pub(crate) struct StoredConnection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked_scope: Option<super::crypto::KeyScope>,
 }
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct StoredOwnedConnection {
+    pub id: String,
+    pub descriptor: OwnedInstance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_tls_ca: Option<String>,
+    pub device_id: String,
+    pub principal_id: String,
+    pub network_id: String,
+    pub binding_id: String,
+    #[serde(default)]
+    pub join_authorized: bool,
+    #[serde(default)]
+    pub removing: bool,
+}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
@@ -38,6 +56,34 @@ pub(crate) struct ConnectionView {
     pub url: Option<String>,
     pub removing: bool,
     pub snapshot: NetworkSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owned_account: Option<OwnedAccountView>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OwnedAccountView {
+    pub state: &'static str,
+    pub principal_id: String,
+    pub expires_at: Option<u64>,
+}
+
+fn owned_account_state(metadata: Option<(u64, bool)>, error: Option<&str>) -> &'static str {
+    match error {
+        Some("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED") => "authorizationRequired",
+        Some(
+            "OWNED_SESSION_INVALID"
+            | "OWNED_SESSION_RECORD_MISSING"
+            | "SPACE_REAUTH_REQUIRED"
+            | "ACCOUNT_BINDING_CHANGED"
+            | "OWNED_ACCOUNT_REVOKED",
+        ) => "signInRequired",
+        Some("NETWORK_CREDENTIAL_STORE_UNAVAILABLE" | "NETWORK_CREDENTIAL_STORE_INVALID") => {
+            "unavailable"
+        }
+        _ if metadata.is_some_and(|(_, live)| live) => "authenticated",
+        _ if metadata.is_some() => "signInRequired",
+        _ => "unavailable",
+    }
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,12 +92,17 @@ pub(crate) struct RegistryView {
     pub selfhost_enabled: bool,
     pub selected: String,
     pub connections: Vec<ConnectionView>,
+    pub owned_service_url: Option<&'static str>,
 }
 pub(crate) type ManagedAgentNetwork = Arc<NetworkRegistry>;
 pub(crate) struct NetworkRegistry {
     memory: MemoryBudget,
     connections: Mutex<HashMap<String, ManagedConnection>>,
     stored: Mutex<Vec<StoredConnection>>,
+    owned_stored: Mutex<Vec<StoredOwnedConnection>>,
+    owned_restore_errors: Mutex<HashMap<String, NetworkError>>,
+    owned_restore_operations: Mutex<super::credential_restore::RestoreOperations>,
+    owned_login: OwnedLoginManager,
     selected: Mutex<String>,
     revision: AtomicU64,
     stopped: AtomicBool,
@@ -69,6 +120,17 @@ fn persist(stored: Vec<StoredConnection>, selected: String) -> Result<(), Networ
     crate::config_io::with_config_lock(&path, true, move |config| {
         config["agentNetworkConnections"] =
             serde_json::to_value(&stored).map_err(|e| e.to_string())?;
+        config["agentNetworkSelectedConnection"] = json!(selected);
+        Ok(())
+    })
+    .map_err(|_| NetworkError::new("NETWORK_CONFIG_WRITE_FAILED"))?;
+    Ok(())
+}
+fn persist_owned(owned: Vec<StoredOwnedConnection>, selected: String) -> Result<(), NetworkError> {
+    let path = config_path()?;
+    crate::config_io::with_config_lock(&path, true, move |config| {
+        config["agentNetworkOwnedConnections"] =
+            serde_json::to_value(&owned).map_err(|e| e.to_string())?;
         config["agentNetworkSelectedConnection"] = json!(selected);
         Ok(())
     })
@@ -106,6 +168,10 @@ impl NetworkRegistry {
             memory,
             connections: Mutex::new(connections),
             stored: Mutex::new(Vec::new()),
+            owned_stored: Mutex::new(Vec::new()),
+            owned_restore_errors: Mutex::new(HashMap::new()),
+            owned_restore_operations: Mutex::new(Default::default()),
+            owned_login: OwnedLoginManager::default(),
             selected: Mutex::new(OFFICIAL.into()),
             revision: AtomicU64::new(0),
             stopped: AtomicBool::new(false),
@@ -131,7 +197,14 @@ impl NetworkRegistry {
             .unwrap_or_else(|e| e.into_inner())
             .get(id)
             .cloned()
-            .ok_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))
+            .ok_or_else(|| {
+                self.owned_restore_errors
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))
+            })
     }
     pub(crate) fn for_reference(
         &self,
@@ -184,7 +257,13 @@ impl NetworkRegistry {
         }
     }
     pub(crate) fn stop(&self) {
+        let mut operations = self
+            .owned_restore_operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         self.stopped.store(true, Ordering::Release);
+        operations.cancel_all();
+        drop(operations);
         for c in self.all() {
             c.deactivate();
         }
@@ -200,6 +279,7 @@ impl NetworkRegistry {
             url: None,
             removing: false,
             snapshot: self.snapshot(),
+            owned_account: None,
         }];
         for c in stored.iter().filter(|_| enabled) {
             let snapshot = self
@@ -222,7 +302,48 @@ impl NetworkRegistry {
                 url: Some(c.descriptor.issuer.clone()),
                 removing: c.removing,
                 snapshot,
+                owned_account: None,
             });
+        }
+        if enabled {
+            for c in self
+                .owned_stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+            {
+                let actor = self.connection(&c.id).ok();
+                let metadata = actor.as_ref().and_then(|a| a.owned_session_metadata());
+                let snapshot = actor
+                    .map(|a| a.snapshot())
+                    .unwrap_or_else(|| NetworkSnapshot {
+                        state: "disconnected",
+                        principal_id: Some(c.principal_id.clone()),
+                        network_id: Some(c.network_id.clone()),
+                        device_name: None,
+                        error: Some(self.owned_restore_error(&c.id)),
+                        revision: 0,
+                        auth_generation: 0,
+                        connection_id: c.id.clone(),
+                    });
+                let owned_account = OwnedAccountView {
+                    state: owned_account_state(
+                        metadata,
+                        snapshot.error.as_ref().map(|e| e.code.as_str()),
+                    ),
+                    principal_id: c.principal_id.clone(),
+                    expires_at: metadata.map(|(expires_at, _)| expires_at),
+                };
+                views.push(ConnectionView {
+                    id: c.id.clone(),
+                    name: c.descriptor.name.clone(),
+                    official: false,
+                    url: Some(c.descriptor.issuer.clone()),
+                    removing: c.removing,
+                    snapshot,
+                    owned_account: Some(owned_account),
+                });
+            }
         }
         RegistryView {
             revision: self.revision.load(Ordering::Acquire),
@@ -236,6 +357,11 @@ impl NetworkRegistry {
                 OFFICIAL.into()
             },
             connections: views,
+            owned_service_url: if crate::app_dirs::IS_MOXBOT {
+                Some(option_env!("MOXBOTS_OWNED_SERVICE_URL").unwrap_or("https://140.143.183.232"))
+            } else {
+                None
+            },
         }
     }
     pub(crate) async fn select(
@@ -250,6 +376,12 @@ impl NetworkRegistry {
         if id != OFFICIAL
             && !self
                 .stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .any(|c| c.id == id)
+            && !self
+                .owned_stored
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .iter()
@@ -270,6 +402,381 @@ impl NetworkRegistry {
         self.revision.fetch_add(1, Ordering::AcqRel);
         let _ = app.emit("agent-network:connections-changed", self.view());
         Ok(self.view())
+    }
+    pub(crate) async fn owned_start(
+        &self,
+        issuer: &str,
+        public_tls_ca_file: Option<&str>,
+    ) -> Result<super::owned_account_desktop::StartedLogin, NetworkError> {
+        if !self.selfhost_enabled.load(Ordering::Acquire) {
+            return Err(NetworkError::new("NETWORK_FEATURE_DISABLED"));
+        }
+        let device = crate::device_identity::current_device_identity()
+            .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        self.owned_login
+            .start(issuer, &device.device_id, public_tls_ca_file)
+            .await
+    }
+    pub(crate) async fn owned_open(&self, attempt_id: &str) -> Result<(), NetworkError> {
+        self.owned_login.open(attempt_id).await
+    }
+    pub(crate) async fn owned_cancel(&self, attempt_id: &str) -> Result<(), NetworkError> {
+        self.owned_login.cancel(attempt_id).await
+    }
+    pub(crate) fn owned_restore_cancel(&self, operation_id: &str) -> Result<(), NetworkError> {
+        self.owned_restore_operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .cancel(operation_id)
+    }
+    /// Restore only the saved session and existing device key. Reader migration
+    /// may create verified local credential copies; no membership/config edits,
+    /// new login, identity replacement, or membership grant occur in this path.
+    pub(crate) async fn owned_restore_credentials(
+        self: &Arc<Self>,
+        app: tauri::AppHandle,
+        manager: ManagedSidecarManager,
+        connection_id: String,
+        expected_revision: u64,
+        operation_id: String,
+    ) -> Result<RegistryView, NetworkError> {
+        let cancelled = self
+            .owned_restore_operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .begin(&operation_id, &connection_id)?;
+        let _lease = RestoreLease {
+            registry: self.clone(),
+            id: operation_id.clone(),
+            token: cancelled.clone(),
+        };
+        let (record, previous_actor) = {
+            let _mutation = self.mutation.lock().await;
+            self.check_restore_boundary(expected_revision, &cancelled)?;
+            let record = self
+                .owned_stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .find(|r| r.id == connection_id && !r.removing)
+                .cloned()
+                .ok_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))?;
+            let previous = self
+                .connections
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&connection_id)
+                .map(|actor| (actor.clone(), actor.generation()));
+            let error = previous
+                .as_ref()
+                .and_then(|(actor, _)| actor.snapshot().error)
+                .unwrap_or_else(|| self.owned_restore_error(&connection_id));
+            if error.code != "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED" {
+                return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+            }
+            (record, previous)
+        };
+        let preflight = async {
+            crate::ulog_info!("[agent-network] credential recovery stage=session-read");
+            let saved = record.clone();
+            let token = cancelled.clone();
+            let account = tokio::task::spawn_blocking(move || {
+                super::owned_account_desktop::restore_account_authorized(
+                    &saved.descriptor,
+                    &saved.device_id,
+                    &saved.principal_id,
+                    &saved.id,
+                    &saved.binding_id,
+                    saved.public_tls_ca.as_deref(),
+                    false,
+                    &token,
+                )
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??
+            .ok_or_else(|| NetworkError::new("OWNED_SESSION_RECORD_MISSING"))?;
+            if cancelled.load(Ordering::Acquire) {
+                return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+            }
+            crate::ulog_info!("[agent-network] credential recovery stage=session-validated");
+            let store = super::identity_desktop::authorize_owned_identity(
+                // Session has passed durable scope and expiry checks.
+                account.clone(),
+                &record.device_id,
+                cancelled.clone(),
+            )
+            .await?;
+            Ok::<_, NetworkError>((account, store))
+        };
+        let (account, store) = match tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            preflight,
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                cancelled.store(true, Ordering::Release);
+                crate::ulog_warn!("[agent-network] credential recovery code=NETWORK_CREDENTIAL_STORE_UNAVAILABLE stage=deadline");
+                return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+            }
+        };
+        let _mutation = self.mutation.lock().await;
+        self.check_restore_boundary(expected_revision, &cancelled)?;
+        if !self
+            .owned_stored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|r| r == &record && !r.removing)
+        {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        (account.guard)()?;
+        // Copy only the validated session to the reader-owned slot. No old item
+        // or membership is changed; cancellation stays available during IPC.
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+        {
+            let migration_account = account.clone();
+            let migration_record = record.clone();
+            let migration_cancelled = cancelled.clone();
+            tokio::task::spawn_blocking(move || {
+                super::owned_account_desktop::promote_account(
+                    &migration_account,
+                    &migration_record.device_id,
+                    &migration_record.binding_id,
+                    &migration_cancelled,
+                )
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            self.check_restore_boundary(expected_revision, &cancelled)?;
+            (account.guard)()?;
+        }
+        // This mutex linearizes cancellation against publication. It never spans
+        // OS or network reads, and an earlier Cancel always fences late results.
+        let mut operations = self
+            .owned_restore_operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.check_restore_boundary(expected_revision, &cancelled)?;
+        if !operations.current(&operation_id, &cancelled) {
+            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+        }
+        let generation = self.revision.load(Ordering::Acquire).saturating_add(1);
+        let actor = AgentNetwork::with_authorized_store(
+            record.id.clone(),
+            Some(NetworkAccountSession::Owned(account)),
+            self.memory.clone(),
+            generation,
+            Some(store),
+        );
+        let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+        let same_actor = match (connections.get(&record.id), previous_actor.as_ref()) {
+            (None, None) => true,
+            (Some(current), Some((previous, generation))) => {
+                Arc::ptr_eq(current, previous) && current.generation() == *generation
+            }
+            _ => false,
+        };
+        if !same_actor {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        if let Some(old) = connections.insert(record.id.clone(), actor.clone()) {
+            old.deactivate();
+        }
+        drop(connections);
+        self.owned_restore_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&record.id);
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        operations.finish(&operation_id, &cancelled);
+        drop(operations);
+        super::actor::start(app.clone(), actor, manager);
+        crate::ulog_info!("[agent-network] credential recovery stage=actor-published");
+        let view = self.view();
+        let _ = app.emit("agent-network:connections-changed", view.clone());
+        Ok(view)
+    }
+    fn check_restore_boundary(
+        &self,
+        revision: u64,
+        cancelled: &AtomicBool,
+    ) -> Result<(), NetworkError> {
+        if cancelled.load(Ordering::Acquire) || self.stopped.load(Ordering::Acquire) {
+            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+        }
+        if !self.selfhost_enabled.load(Ordering::Acquire) {
+            return Err(NetworkError::new("NETWORK_FEATURE_DISABLED"));
+        }
+        if revision > 9_007_199_254_740_991 || self.revision.load(Ordering::Acquire) != revision {
+            return Err(NetworkError::new("REVISION_CONFLICT"));
+        }
+        Ok(())
+    }
+    pub(crate) async fn owned_poll(
+        self: &Arc<Self>,
+        app: tauri::AppHandle,
+        manager: ManagedSidecarManager,
+        attempt_id: &str,
+    ) -> Result<Option<RegistryView>, NetworkError> {
+        if !self.selfhost_enabled.load(Ordering::Acquire) {
+            return Err(NetworkError::new("NETWORK_FEATURE_DISABLED"));
+        }
+        let Some(login) = self.owned_login.poll(attempt_id).await? else {
+            return Ok(None);
+        };
+        self.install_owned_login(app, manager, login)
+            .await
+            .map(Some)
+    }
+    async fn install_owned_login(
+        self: &Arc<Self>,
+        app: tauri::AppHandle,
+        manager: ManagedSidecarManager,
+        login: CompletedLogin,
+    ) -> Result<RegistryView, NetworkError> {
+        let _lock = self.mutation.lock().await;
+        let owned = StoredOwnedConnection {
+            id: login.connection_id.clone(),
+            descriptor: login.instance.clone(),
+            public_tls_ca: login.public_tls_ca.clone(),
+            device_id: login.device_id.clone(),
+            principal_id: login.session.principal_id.clone(),
+            network_id: login.session.network_id.clone(),
+            binding_id: login.binding_id.clone(),
+            join_authorized: true,
+            removing: false,
+        };
+        let account =
+            super::owned_account_desktop::account_from_login(&login, owned.join_authorized);
+        (account.guard)()?;
+        if !self.owned_login.is_current(&login).await {
+            return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+        }
+        let mut next = self
+            .owned_stored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let replaced_id = next
+            .iter()
+            .find(|c| {
+                c.descriptor.service_id == owned.descriptor.service_id
+                    && c.principal_id == owned.principal_id
+                    && c.device_id == owned.device_id
+            })
+            .map(|c| c.id.clone());
+        if let Some(old) = next.iter_mut().find(|c| {
+            c.descriptor.service_id == owned.descriptor.service_id
+                && c.principal_id == owned.principal_id
+                && c.device_id == owned.device_id
+        }) {
+            if old.descriptor.ensure_same_trust(&owned.descriptor).is_err() {
+                return Err(NetworkError::new("NETWORK_TRUST_CHANGED"));
+            }
+            *old = owned.clone();
+        } else {
+            next.push(owned.clone());
+        }
+        let selected = owned.id.clone();
+        let save = next.clone();
+        let saved_selected = selected.clone();
+        tokio::task::spawn_blocking(move || persist_owned(save, saved_selected))
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CONFIG_WRITE_FAILED"))??;
+        let guard_account = account.clone();
+        let commit = self
+            .owned_login
+            .commit_if_current(
+                &login,
+                || (guard_account.guard)(),
+                || {
+                    let mut restore_errors = self
+                        .owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    restore_errors.remove(&owned.id);
+                    if let Some(old_id) = &replaced_id {
+                        restore_errors.remove(old_id);
+                    }
+                    drop(restore_errors);
+                    if let Some(old_id) = replaced_id.filter(|old_id| old_id != &owned.id) {
+                        if let Some(previous) = self
+                            .connections
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&old_id)
+                        {
+                            previous.deactivate();
+                        }
+                    }
+                    let generation = self.revision.load(Ordering::Acquire).saturating_add(1);
+                    let connector = AgentNetwork::with_generation(
+                        owned.id.clone(),
+                        Some(NetworkAccountSession::Owned(account)),
+                        self.memory.clone(),
+                        generation,
+                    );
+                    if let Some(previous) = self
+                        .connections
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(owned.id.clone(), connector.clone())
+                    {
+                        previous.deactivate();
+                    }
+                    *self.owned_stored.lock().unwrap_or_else(|e| e.into_inner()) = next;
+                    *self.selected.lock().unwrap_or_else(|e| e.into_inner()) = selected;
+                    super::actor::start(app.clone(), connector, manager);
+                    self.revision.fetch_add(1, Ordering::AcqRel);
+                    let _ = app.emit("agent-network:connections-changed", self.view());
+                    Ok(self.view())
+                },
+            )
+            .await;
+        match commit {
+            Ok(view) => Ok(view),
+            Err(error) => {
+                let mut rollback = self
+                    .owned_stored
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                rollback.retain(|c| c.id != owned.id || c.binding_id != owned.binding_id);
+                let current_selected = self
+                    .selected
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                let selected_rollback = if rollback.iter().any(|c| c.id == current_selected) {
+                    current_selected
+                } else {
+                    OFFICIAL.to_owned()
+                };
+                let save_rollback = rollback.clone();
+                let save_selected_rollback = selected_rollback.clone();
+                tokio::task::spawn_blocking(move || {
+                    persist_owned(save_rollback, save_selected_rollback)
+                })
+                .await
+                .map_err(|_| NetworkError::new("NETWORK_CONFIG_WRITE_FAILED"))??;
+                *self.owned_stored.lock().unwrap_or_else(|e| e.into_inner()) = rollback;
+                *self.selected.lock().unwrap_or_else(|e| e.into_inner()) = selected_rollback;
+                let _ = self
+                    .owned_login
+                    .delete_saved_session_if_binding(
+                        &login.instance,
+                        &login.device_id,
+                        &login.session.principal_id,
+                        login.public_tls_ca.as_deref(),
+                        &login.binding_id,
+                    )
+                    .await;
+                Err(error)
+            }
+        }
     }
     pub(crate) async fn join(
         self: &Arc<Self>,
@@ -380,9 +887,11 @@ impl NetworkRegistry {
         )
         .await?;
         if let Some(scope) = stored.revoked_scope.clone() {
-            tokio::task::spawn_blocking(move || super::crypto::OsIdentityStore::delete(&scope))
-                .await
-                .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+            tokio::task::spawn_blocking(move || {
+                super::identity_desktop::selected_store().delete(&scope)
+            })
+            .await
+            .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
         }
         stored.removing = false;
         stored.reenrolling = false;
@@ -448,6 +957,88 @@ impl NetworkRegistry {
         }
         if !self.selfhost_enabled.load(Ordering::Acquire) {
             return Err(NetworkError::new("NETWORK_FEATURE_DISABLED"));
+        }
+        let owned = self
+            .owned_stored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|c| c.id == id)
+            .cloned();
+        if let Some(mut record) = owned {
+            let was_removing = record.removing;
+            record.removing = true;
+            let mut checkpoint = self
+                .owned_stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            *checkpoint
+                .iter_mut()
+                .find(|c| c.id == id)
+                .ok_or_else(|| NetworkError::new("NETWORK_CONNECTION_NOT_FOUND"))? = record.clone();
+            let selected = self
+                .selected
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            persist_owned(checkpoint.clone(), selected.clone())?;
+            *self.owned_stored.lock().unwrap_or_else(|e| e.into_inner()) = checkpoint;
+            if let Some(connector) = self
+                .connections
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id)
+            {
+                connector.deactivate();
+            }
+            let session = super::owned_account_desktop::load_session_for_removal(
+                &record.descriptor,
+                &record.device_id,
+                &record.principal_id,
+                &record.id,
+                &record.binding_id,
+                record.public_tls_ca.as_deref(),
+            )?;
+            if session.is_none() && !was_removing {
+                return Err(NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"));
+            }
+            if session.is_some() {
+                self.owned_login
+                    .delete_saved_session_if_binding(
+                        &record.descriptor,
+                        &record.device_id,
+                        &record.principal_id,
+                        record.public_tls_ca.as_deref(),
+                        &record.binding_id,
+                    )
+                    .await?;
+            }
+            let mut next = self
+                .owned_stored
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            next.retain(|c| c.id != id);
+            let next_selected = if selected == id {
+                OFFICIAL.to_owned()
+            } else {
+                selected
+            };
+            persist_owned(next.clone(), next_selected.clone())?;
+            *self.owned_stored.lock().unwrap_or_else(|e| e.into_inner()) = next;
+            *self.selected.lock().unwrap_or_else(|e| e.into_inner()) = next_selected;
+            self.revision.fetch_add(1, Ordering::AcqRel);
+            let _ = app.emit("agent-network:connections-changed", self.view());
+            if let Some(session) = session {
+                if let Ok(client) = super::owned_login::OwnedClient::pinned(
+                    record.descriptor.clone(),
+                    record.public_tls_ca.as_deref(),
+                ) {
+                    let _ = client.logout(&session.access_token).await;
+                }
+            }
+            return Ok(self.view());
         }
         let stored = self
             .stored
@@ -524,7 +1115,7 @@ impl NetworkRegistry {
             {
                 return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
             }
-            let key = super::identity::load_key(&scope)
+            let key = super::identity_desktop::load_key(&scope)
                 .await?
                 .ok_or_else(|| NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"))?;
             let fingerprint = key.public_fingerprint()?;
@@ -584,7 +1175,7 @@ impl NetworkRegistry {
                     if let Some(previous) =
                         previous_scope.filter(|old| old.key_generation != scope.key_generation)
                     {
-                        super::crypto::OsIdentityStore::delete(&previous)?;
+                        super::identity_desktop::selected_store().delete(&previous)?;
                     }
                     if !already_confirmed {
                         persist(checkpoint.clone(), checkpoint_selected)?;
@@ -592,7 +1183,11 @@ impl NetworkRegistry {
                     }
                     Ok(())
                 },
-                || super::crypto::OsIdentityStore::delete(&scope).map_err(NetworkError::from),
+                || {
+                    super::identity_desktop::selected_store()
+                        .delete(&scope)
+                        .map_err(NetworkError::from)
+                },
                 || {
                     persist(next.clone(), selected.clone())?;
                     *owner.stored.lock().unwrap_or_else(|e| e.into_inner()) = next;
@@ -674,13 +1269,117 @@ impl NetworkRegistry {
             for actor in started {
                 super::actor::start(app.clone(), actor, manager.clone());
             }
+            self.restore_owned_actors(app.clone(), manager.clone());
             let _ = app.emit("agent-network:connections-changed", self.view());
         }
         Ok(())
     }
+    fn restore_owned_actors(&self, app: tauri::AppHandle, manager: ManagedSidecarManager) {
+        if !self.selfhost_enabled.load(Ordering::Acquire) || self.stopped.load(Ordering::Acquire) {
+            return;
+        }
+        let records = self
+            .owned_stored
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        self.owned_restore_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id, _| records.iter().any(|record| &record.id == id));
+        let mut started = Vec::new();
+        let seed = self.revision.load(Ordering::Acquire).saturating_add(1);
+        for record in records.into_iter().filter(|r| !r.removing) {
+            if self
+                .connections
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&record.id)
+            {
+                continue;
+            }
+            let account = match super::owned_account_desktop::restore_account(
+                &record.descriptor,
+                &record.device_id,
+                &record.principal_id,
+                &record.id,
+                &record.binding_id,
+                record.public_tls_ca.as_deref(),
+                false,
+            ) {
+                Ok(Some(account)) => account,
+                Ok(None) => {
+                    self.owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(
+                            record.id.clone(),
+                            NetworkError::new("OWNED_SESSION_RECORD_MISSING"),
+                        );
+                    crate::ulog_warn!(
+                        "[agent-network] owned restore skipped code=OWNED_SESSION_RECORD_MISSING"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    crate::ulog_warn!(
+                        "[agent-network] owned restore failed code={}",
+                        super::actor::diagnostic_code(&error)
+                    );
+                    self.owned_restore_errors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(record.id.clone(), error);
+                    continue;
+                }
+            };
+            let actor = AgentNetwork::with_generation(
+                record.id.clone(),
+                Some(NetworkAccountSession::Owned(account)),
+                self.memory.clone(),
+                seed,
+            );
+            self.owned_restore_errors
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&record.id);
+            let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+            if !connections.contains_key(&record.id) {
+                connections.insert(record.id, actor.clone());
+                started.push(actor);
+            }
+        }
+        for actor in started {
+            super::actor::start(app.clone(), actor, manager.clone());
+        }
+    }
+
+    fn owned_restore_error(&self, id: &str) -> NetworkError {
+        self.owned_restore_errors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| NetworkError::new("CONNECTOR_NOT_READY"))
+    }
+}
+struct RestoreLease {
+    registry: Arc<NetworkRegistry>,
+    id: String,
+    token: Arc<AtomicBool>,
+}
+impl Drop for RestoreLease {
+    fn drop(&mut self) {
+        self.token.store(true, Ordering::Release);
+        self.registry
+            .owned_restore_operations
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .finish(&self.id, &self.token);
+    }
 }
 fn selfhost_gate_enabled(config: &Value) -> bool {
-    config["agentNetworkSelfhostDevGate"].as_bool() == Some(true)
+    crate::app_dirs::IS_MOXBOT || config["agentNetworkSelfhostDevGate"].as_bool() == Some(true)
 }
 /// One removal lifecycle: durable confirmation precedes credential deletion;
 /// forgetting config is last. Any failure leaves the previous recovery point.
@@ -737,6 +1436,41 @@ fn validate_stored(stored: &[StoredConnection]) -> Result<(), NetworkError> {
     }
     Ok(())
 }
+fn validate_owned_stored(stored: &[StoredOwnedConnection]) -> Result<(), NetworkError> {
+    let mut ids = std::collections::HashSet::new();
+    let mut scopes = std::collections::HashSet::new();
+    for item in stored {
+        for id in [
+            &item.id,
+            &item.device_id,
+            &item.principal_id,
+            &item.network_id,
+            &item.binding_id,
+        ] {
+            if uuid::Uuid::parse_str(id).map(|v| v.to_string()).as_deref() != Ok(id.as_str()) {
+                return Err(NetworkError::new("NETWORK_CONFIG_INVALID"));
+            }
+        }
+        item.descriptor.validate(&item.descriptor.issuer)?;
+        if let Some(ca) = &item.public_tls_ca {
+            if ca.is_empty() || ca.len() > 65_536 {
+                return Err(NetworkError::new("NETWORK_CONFIG_INVALID"));
+            }
+            super::crypto::external_tls_config_with_ca(Some(ca))?;
+        }
+        if item.network_id != item.descriptor.network_id
+            || !ids.insert(&item.id)
+            || !scopes.insert((
+                &item.descriptor.service_id,
+                &item.device_id,
+                &item.principal_id,
+            ))
+        {
+            return Err(NetworkError::new("NETWORK_CONFIG_INVALID"));
+        }
+    }
+    Ok(())
+}
 pub(crate) fn start(
     app: tauri::AppHandle,
     owner: ManagedAgentNetwork,
@@ -784,6 +1518,20 @@ pub(crate) fn start(
                             .unwrap_or_else(|| json!([])),
                     ) {
                         Ok(stored) if validate_stored(&stored).is_ok() => {
+                            let owned: Vec<StoredOwnedConnection> = serde_json::from_value(
+                                config["agentNetworkOwnedConnections"]
+                                    .as_array()
+                                    .cloned()
+                                    .map(Value::Array)
+                                    .unwrap_or_else(|| json!([])),
+                            )
+                            .unwrap_or_default();
+                            if validate_owned_stored(&owned).is_err() {
+                                crate::ulog_warn!("[agent-network] invalid persisted owned connection configuration");
+                            } else {
+                                *owner.owned_stored.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    owned;
+                            }
                             let selected = config["agentNetworkSelectedConnection"]
                                 .as_str()
                                 .unwrap_or(OFFICIAL)
@@ -791,6 +1539,12 @@ pub(crate) fn start(
                             *owner.selected.lock().unwrap_or_else(|e| e.into_inner()) = if selected
                                 == OFFICIAL
                                 || stored.iter().any(|c| c.id == selected)
+                                || owner
+                                    .owned_stored
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .iter()
+                                    .any(|c| c.id == selected)
                             {
                                 selected
                             } else {
@@ -804,6 +1558,7 @@ pub(crate) fn start(
                                     super::actor::start(app.clone(), actor, manager.clone());
                                 }
                             }
+                            owner.restore_owned_actors(app.clone(), manager.clone());
                             owner.revision.fetch_add(1, Ordering::AcqRel);
                             let _ = app.emit("agent-network:connections-changed", owner.view());
                         }
@@ -854,6 +1609,141 @@ pub(crate) fn start(
 mod tests {
     use super::*;
     use myagents_agent_network_protocol::{AgentReference, SessionReference};
+
+    #[test]
+    fn credential_restore_rejects_cancel_shutdown_and_registry_changes() {
+        let owner = NetworkRegistry::new();
+        let cancelled = AtomicBool::new(false);
+        assert_eq!(
+            owner
+                .check_restore_boundary(0, &cancelled)
+                .unwrap_err()
+                .code,
+            "NETWORK_FEATURE_DISABLED"
+        );
+        owner.selfhost_enabled.store(true, Ordering::Release);
+        owner.check_restore_boundary(0, &cancelled).unwrap();
+        owner.revision.fetch_add(1, Ordering::AcqRel);
+        assert_eq!(
+            owner
+                .check_restore_boundary(0, &cancelled)
+                .unwrap_err()
+                .code,
+            "REVISION_CONFLICT"
+        );
+        owner.check_restore_boundary(1, &cancelled).unwrap();
+        cancelled.store(true, Ordering::Release);
+        assert_eq!(
+            owner
+                .check_restore_boundary(1, &cancelled)
+                .unwrap_err()
+                .code,
+            "OWNED_LOGIN_CANCELLED"
+        );
+        cancelled.store(false, Ordering::Release);
+        let id = uuid::Uuid::new_v4().to_string();
+        let token = owner
+            .owned_restore_operations
+            .lock()
+            .unwrap()
+            .begin(&id, "owned")
+            .unwrap();
+        owner.stop();
+        assert!(token.load(Ordering::Acquire));
+        assert_eq!(
+            owner
+                .check_restore_boundary(1, &cancelled)
+                .unwrap_err()
+                .code,
+            "OWNED_LOGIN_CANCELLED"
+        );
+    }
+
+    #[test]
+    fn owned_restore_failure_is_scoped_and_does_not_hide_a_live_actor() {
+        let owner = NetworkRegistry::new();
+        let make_record = |id: &str| StoredOwnedConnection {
+            id: id.into(),
+            descriptor: OwnedInstance {
+                version: 1,
+                profile: "owned-device-relay-v1".into(),
+                service_id: "00000000-0000-4000-8000-000000000001".into(),
+                environment: "development".into(),
+                network_id: "00000000-0000-4000-8000-000000000002".into(),
+                name: id.into(),
+                issuer: "https://owned.example".into(),
+                login_issuer: "https://owned.example/dex".into(),
+                protocol: 1,
+                capabilities: vec!["tls13-mtls".into()],
+                root_certificate: String::new(),
+                jwks: json!({}),
+            },
+            public_tls_ca: None,
+            device_id: "00000000-0000-4000-8000-000000000003".into(),
+            principal_id: "00000000-0000-4000-8000-000000000004".into(),
+            network_id: "00000000-0000-4000-8000-000000000002".into(),
+            binding_id: id.into(),
+            join_authorized: true,
+            removing: false,
+        };
+        *owner.owned_stored.lock().unwrap() = vec![make_record("blocked"), make_record("other")];
+        owner.set_selfhost_enabled(true).unwrap();
+        owner.owned_restore_errors.lock().unwrap().insert(
+            "blocked".into(),
+            NetworkError::new("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"),
+        );
+        let view = owner.view();
+        assert_eq!(
+            view.connections
+                .iter()
+                .find(|c| c.id == "blocked")
+                .unwrap()
+                .snapshot
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+        );
+        assert_eq!(
+            owner.connection("blocked").err().unwrap().code,
+            "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED"
+        );
+        assert_eq!(
+            owner.connection("unknown").err().unwrap().code,
+            "NETWORK_CONNECTION_NOT_FOUND"
+        );
+        assert_eq!(
+            view.connections
+                .iter()
+                .find(|c| c.id == "other")
+                .unwrap()
+                .snapshot
+                .error
+                .as_ref()
+                .unwrap()
+                .code,
+            "CONNECTOR_NOT_READY"
+        );
+        let live = AgentNetwork::new("blocked".into(), None, owner.memory_budget());
+        owner
+            .connections
+            .lock()
+            .unwrap()
+            .insert("blocked".into(), live.clone());
+        let snapshot = owner
+            .view()
+            .connections
+            .into_iter()
+            .find(|c| c.id == "blocked")
+            .unwrap()
+            .snapshot;
+        assert_eq!(
+            snapshot.error.as_ref().map(|e| &e.code),
+            live.snapshot().error.as_ref().map(|e| &e.code)
+        );
+        assert_eq!(owner.owned_stored.lock().unwrap().len(), 2);
+    }
 
     fn source_routing_fixture() -> (ManagedAgentNetwork, AgentReference) {
         let owner = NetworkRegistry::new();
@@ -1017,18 +1907,63 @@ mod tests {
     }
 
     #[test]
-    fn selfhost_gate_requires_explicit_true() {
+    fn myagents_requires_explicit_gate_while_moxbot_has_product_owned_networks() {
         for config in [
             json!({}),
             json!({"agentNetworkSelfhostDevGate":false}),
             json!({"agentNetworkSelfhostDevGate":"true"}),
             json!({"agentNetworkSelfhostDevGate":1}),
         ] {
-            assert!(!selfhost_gate_enabled(&config));
+            assert_eq!(selfhost_gate_enabled(&config), crate::app_dirs::IS_MOXBOT);
         }
         assert!(selfhost_gate_enabled(
             &json!({"agentNetworkSelfhostDevGate":true})
         ));
+    }
+    #[test]
+    fn owned_account_projection_separates_transport_from_authentication() {
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("NETWORK_OFFLINE")),
+            "authenticated"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("OWNED_SESSION_INVALID")),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, false)), None),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(None, Some("CONNECTOR_NOT_READY")),
+            "unavailable"
+        );
+        assert_eq!(owned_account_state(None, None), "unavailable");
+        assert_eq!(
+            owned_account_state(None, Some("OWNED_SESSION_RECORD_MISSING")),
+            "signInRequired"
+        );
+        assert_eq!(
+            owned_account_state(
+                Some((100, true)),
+                Some("NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
+            ),
+            "authorizationRequired"
+        );
+        assert_eq!(
+            owned_account_state(Some((100, true)), Some("NETWORK_CREDENTIAL_STORE_INVALID")),
+            "unavailable"
+        );
+        let serialized = serde_json::to_value(OwnedAccountView {
+            state: "authenticated",
+            principal_id: "test-principal".into(),
+            expires_at: Some(100),
+        })
+        .unwrap();
+        assert_eq!(
+            serialized,
+            json!({"state":"authenticated", "principalId":"test-principal", "expiresAt":100})
+        );
     }
     #[test]
     fn developer_gate_pauses_only_selfhost_and_reactivation_rejects_retired_generations() {

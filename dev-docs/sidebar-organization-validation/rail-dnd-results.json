@@ -1,0 +1,205 @@
+{
+  "verifiedAt": "2026-10-13T15:27:40.222Z",
+  "head": "f8894e763f7019a3ebfb1195a5df724912d72d35",
+  "viewport": {
+    "width": 900,
+    "height": 800
+  },
+  "environment": "isolated synthetic renderer; Chromium headless",
+  "sourceSha256": {
+    "src/renderer/components/global-sidebar/GlobalSidebar.tsx": "84ece44db385d8722c3bb2fc30897f5b0bd03be0cb5cfec890afbe4ed287cccd",
+    "src/renderer/components/global-sidebar/SidebarOrganizationControls.tsx": "a144423169a1e97f32027d564d3b05101890d81b53c0cb902173ee222aee0269",
+    "src/renderer/components/SessionContextMenu.tsx": "fb2d5145161f0ab9333eb0243809ff2ae18b673d12ab1831251ffbae64061829",
+    "src/renderer/utils/sidebarOrganization.ts": "7e011bbffad91053f3a1a943c19b2fab46e75ea109cc423f4e7de402180bf028",
+    "src/renderer/utils/globalSidebarPreference.ts": "b1f5fb271d856e4b3beb11cb48a394fffc7f3e3fee426a3825452f45417d0e66"
+  },
+  "results": [
+    {
+      "name": "rail entire task row into section",
+      "status": "pass",
+      "source": {
+        "x": 124,
+        "y": 258.390625,
+        "width": 240,
+        "height": 32
+      },
+      "target": {
+        "x": 81,
+        "y": 362.390625,
+        "width": 287,
+        "height": 32
+      },
+      "flyoutVisible": true,
+      "navigationCount": 0,
+      "prefs": {
+        "version": 1,
+        "preferredMode": "expanded",
+        "expandedWorkspaceKeys": [
+          "/synthetic/alpha"
+        ],
+        "hasSeededDefaultExpansion": true,
+        "showAutomationSessions": false,
+        "sessionView": "all",
+        "organization": {
+          "sections": [
+            {
+              "id": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+              "name": "窄窗口拖拽",
+              "collapsed": false
+            }
+          ],
+          "placements": {
+            "session:alpha-2": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6"
+          },
+          "orders": {
+            "section:9de60304-4abd-43c7-bb32-a9975dd42fc6": [
+              "session:alpha-2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "rail task handle into section",
+      "status": "pass",
+      "source": {
+        "x": 112,
+        "y": 258.390625,
+        "width": 16,
+        "height": 32
+      },
+      "target": {
+        "x": 81,
+        "y": 330.390625,
+        "width": 287,
+        "height": 32
+      },
+      "flyoutVisible": true,
+      "navigationCount": 0,
+      "prefs": {
+        "version": 1,
+        "preferredMode": "expanded",
+        "expandedWorkspaceKeys": [
+          "/synthetic/alpha"
+        ],
+        "hasSeededDefaultExpansion": true,
+        "showAutomationSessions": false,
+        "sessionView": "all",
+        "organization": {
+          "sections": [
+            {
+              "id": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+              "name": "窄窗口拖拽",
+              "collapsed": false
+            }
+          ],
+          "placements": {
+            "session:alpha-2": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+            "session:alpha-1": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6"
+          },
+          "orders": {
+            "section:9de60304-4abd-43c7-bb32-a9975dd42fc6": [
+              "session:alpha-2",
+              "session:alpha-1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "rail entire row downward reorder",
+      "status": "pass",
+      "source": {
+        "x": 93,
+        "y": 363.78125,
+        "width": 271,
+        "height": 32
+      },
+      "target": {
+        "x": 81,
+        "y": 395.78125,
+        "width": 287,
+        "height": 32
+      },
+      "flyoutVisible": true,
+      "navigationCount": 0,
+      "prefs": {
+        "version": 1,
+        "preferredMode": "expanded",
+        "expandedWorkspaceKeys": [
+          "/synthetic/alpha"
+        ],
+        "hasSeededDefaultExpansion": true,
+        "showAutomationSessions": false,
+        "sessionView": "all",
+        "organization": {
+          "sections": [
+            {
+              "id": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+              "name": "窄窗口拖拽",
+              "collapsed": false
+            }
+          ],
+          "placements": {
+            "session:alpha-2": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+            "session:alpha-1": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6"
+          },
+          "orders": {
+            "section:9de60304-4abd-43c7-bb32-a9975dd42fc6": [
+              "session:alpha-1",
+              "session:alpha-2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "rail handle upward reorder",
+      "status": "pass",
+      "source": {
+        "x": 81,
+        "y": 395.78125,
+        "width": 16,
+        "height": 32
+      },
+      "target": {
+        "x": 81,
+        "y": 363.78125,
+        "width": 287,
+        "height": 32
+      },
+      "flyoutVisible": true,
+      "navigationCount": 0,
+      "prefs": {
+        "version": 1,
+        "preferredMode": "expanded",
+        "expandedWorkspaceKeys": [
+          "/synthetic/alpha"
+        ],
+        "hasSeededDefaultExpansion": true,
+        "showAutomationSessions": false,
+        "sessionView": "all",
+        "organization": {
+          "sections": [
+            {
+              "id": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+              "name": "窄窗口拖拽",
+              "collapsed": false
+            }
+          ],
+          "placements": {
+            "session:alpha-2": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6",
+            "session:alpha-1": "section:9de60304-4abd-43c7-bb32-a9975dd42fc6"
+          },
+          "orders": {
+            "section:9de60304-4abd-43c7-bb32-a9975dd42fc6": [
+              "session:alpha-2",
+              "session:alpha-1"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "status": "pass"
+}

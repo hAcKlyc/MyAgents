@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import type { AskUserQuestionAnswers } from '../shared/types/askUserQuestion';
 import {
   appendFileSync,
@@ -244,7 +245,7 @@ async function writeSpaceSkillExportPackages(
   const exportId = randomUUID();
   const exportDir = join(
     homedir(),
-    '.myagents',
+    APP_DATA_DIR_NAME,
     'tmp',
     'skill-url-export',
     exportId,
@@ -716,6 +717,7 @@ import { createTaskDispatchGuard } from './session-engine/task-turn-orchestrator
 import { handleSessionEngineQueueRoute } from './routes/session-engine-queue';
 import { handleSessionEngineRuntimeRoute } from './routes/session-engine-runtime';
 import { handleSessionReadRoute } from './routes/session-read';
+import { handlePromptSuggestionRoute } from './routes/prompt-suggestion';
 import { handleChatStreamRoute } from './routes/chat-stream';
 import { handleSessionConfigRoute } from './routes/session-config';
 import { handleImModelRoute } from './routes/im-model-selection';
@@ -1041,7 +1043,7 @@ interface SkillsConfig {
 
 function getSkillsConfigPath(): string {
   const homeDir = getHomeDirOrNull() || '';
-  return join(homeDir, '.myagents', 'skills-config.json');
+  return join(homeDir, APP_DATA_DIR_NAME, 'skills-config.json');
 }
 
 function readSkillsConfig(): SkillsConfig {
@@ -1203,7 +1205,7 @@ function seedBundledSkills(): void {
 
     const config = readSkillsConfig();
     const homeDir = getHomeDirOrNull() || '';
-    const userSkillsDir = join(homeDir, '.myagents', 'skills');
+    const userSkillsDir = join(homeDir, APP_DATA_DIR_NAME, 'skills');
 
     ensureDirSync(userSkillsDir);
 
@@ -1318,7 +1320,7 @@ function ensurePluginsDirs(): void {
       );
       return;
     }
-    const root = join(homeDir, '.myagents', 'plugins');
+    const root = join(homeDir, APP_DATA_DIR_NAME, 'plugins');
     const dataRoot = join(root, 'data');
     ensureDirSync(root);
     ensureDirSync(dataRoot);
@@ -2294,7 +2296,7 @@ function startupBeacon(step: string): void {
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
-    const logsDir = join(homedir(), '.myagents', 'logs');
+    const logsDir = join(homedir(), APP_DATA_DIR_NAME, 'logs');
     ensureDirSync(logsDir);
     const filePath = join(logsDir, `unified-${y}-${m}-${d}.log`);
     const h = String(now.getHours()).padStart(2, '0');
@@ -2637,6 +2639,31 @@ async function main() {
         const { status, body } = buildReadyResponseBody();
         return jsonResponse(body, status);
       }
+      if (pathname === '/api/process/update-quiesce' && request.method === 'POST') {
+        const { hasValidInternalCliCredential } = await import('./external-cli-admission');
+        if (!hasValidInternalCliCredential(request)) {
+          return jsonResponse({ success: false, error: 'INTERNAL_CALLER_REQUIRED' }, 401);
+        }
+        const generation = process.env.MYAGENTS_SIDECAR_GENERATION?.trim();
+        if (!generation || request.headers.get('x-myagents-sidecar-generation') !== generation) {
+          return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 409);
+        }
+        try {
+          const input = await request.json() as { action?: unknown; token?: unknown };
+          if (typeof input.token !== 'string' || !/^[a-f0-9-]{36}$/.test(input.token)) {
+            return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
+          }
+          const lifecycle = await import('./session-engine/selector');
+          if (input.action === 'freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token);
+          else if (input.action === 'release') lifecycle.releaseSessionAdmissionsForUpdate(input.token);
+          else return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
+          return jsonResponse({ success: true });
+        } catch (error) {
+          const code = error instanceof Error && error.message === 'UPDATE_BUSY'
+            ? 'UPDATE_BUSY' : 'UPDATE_ACTIVITY_UNKNOWN';
+          return jsonResponse({ success: false, error: code }, 409);
+        }
+      }
       // Rust owns process-tree retirement. This bounded handshake lets the
       // Global Sidecar checkpoint Browser identity before Windows closes its
       // Job Object; the generation header prevents a stale retirement from
@@ -2795,6 +2822,23 @@ async function main() {
         });
       }
 
+      if ((pathname === '/api/remote-session' || pathname === '/api/remote-session/prepare') && request.method === 'POST') {
+        if(pathname==='/api/remote-session/prepare' && sidecarRole!=='global')return jsonResponse({success:false,code:'REMOTE_GLOBAL_OWNER_REQUIRED'},403);
+        const { hasValidInternalCliCredential } = await import('./external-cli-admission');
+        if (!hasValidInternalCliCredential(request)) return jsonResponse({success:false,code:'INTERNAL_CALLER_REQUIRED'},401);
+        if (Number(request.headers.get('content-length') || 0) > 48 * 1024) return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},413);
+        try {
+          const bodyText=await request.text();
+          if(Buffer.byteLength(bodyText)>48*1024)return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},413);
+          const owner=await import('./remote-session/desktop');
+          const body:unknown=JSON.parse(bodyText);
+          const result=pathname==='/api/remote-session/prepare'
+            ? await owner.prepareDesktopRemoteSession(body)
+            : await owner.handleDesktopRemoteSession(body,sidecarRole);
+          return jsonResponse(result,result.success?200:409);
+        }catch{return jsonResponse({success:false,code:'REMOTE_SESSION_REQUEST_INVALID'},400)}
+      }
+
       // Tool attachment endpoint (PRD 0.2.15) — rich-media tool outputs (image/audio/pdf/file).
       // URL shape: GET /api/attachment/tool/<sessionId>/<turnId>/<filename>
       //
@@ -2915,6 +2959,9 @@ async function main() {
       }
 
       // Read historical session messages from SDK's persisted session files (v0.2.59+)
+      const promptSuggestionResponse = await handlePromptSuggestionRoute(pathname, request);
+      if (promptSuggestionResponse) return promptSuggestionResponse;
+
       // Works without an active Sidecar — reads directly from .claude/ session data
       if (pathname === '/api/session/messages' && request.method === 'GET') {
         const sdkSessionId = url.searchParams.get('sdkSessionId');
@@ -4300,6 +4347,8 @@ async function main() {
            *  freshly toggled-off session matches "never favorited" exactly
            *  on disk. */
           favorite?: boolean;
+          /** Archive/unarchive in Session history; only true is persisted. */
+          archived?: boolean;
           /** Pin/unpin inside the owning workspace's sidebar Session list. */
           pinned?: boolean;
           model?: string | null;
@@ -4364,6 +4413,12 @@ async function main() {
             400,
           );
         }
+        if (payload.archived !== undefined && typeof payload.archived !== 'boolean') {
+          return jsonResponse(
+            { success: false, error: 'archived must be a boolean.' },
+            400,
+          );
+        }
 
         // `lastActiveAt` is the recency signal that drives history sort
         // order. Bumping it on EVERY PATCH means a pure-UI flag change
@@ -4411,6 +4466,9 @@ async function main() {
             // Convert false → undefined so the on-disk shape stays minimal
             // (the JSON serializer drops undefined keys).
             updates.favorite = payload.favorite === true ? true : undefined;
+          }
+          if (payload.archived !== undefined) {
+            updates.archived = payload.archived === true ? true : undefined;
           }
           if (payload.pinned !== undefined) updates.pinned = payload.pinned;
           if (payload.origin !== undefined) {
@@ -4745,7 +4803,7 @@ async function main() {
 
           // Security: allow reading from workspace/myagents_files/{generated_images,temp}/ or legacy paths
           const resolvedPath = resolve(imagePath);
-          const legacyDir = join(homedir(), '.myagents', 'generated');
+          const legacyDir = join(homedir(), APP_DATA_DIR_NAME, 'generated');
           const legacyDirSep = legacyDir.endsWith(sep)
             ? legacyDir
             : legacyDir + sep;
@@ -4821,7 +4879,7 @@ async function main() {
           const resolvedPath = resolve(audioPath);
           const legacyAudioDir = join(
             homedir(),
-            '.myagents',
+            APP_DATA_DIR_NAME,
             'generated_audio',
           );
           const legacyAudioDirSep = legacyAudioDir.endsWith(sep)
@@ -4984,7 +5042,7 @@ async function main() {
           const { readdirSync, statSync } = await import('fs');
           const { join: joinPath } = await import('path');
           const { homedir } = await import('os');
-          const logsDir = joinPath(homedir(), '.myagents', 'logs');
+          const logsDir = joinPath(homedir(), APP_DATA_DIR_NAME, 'logs');
 
           // Collect last 3 days of unified-*.log files
           const now = Date.now();
@@ -6623,8 +6681,8 @@ async function main() {
 
       // Cross-platform home directory for user skills/commands
       const homeDir = getHomeDirOrNull() || '';
-      const userSkillsBaseDir = join(homeDir, '.myagents', 'skills');
-      const userCommandsBaseDir = join(homeDir, '.myagents', 'commands');
+      const userSkillsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'skills');
+      const userCommandsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'commands');
 
       // Helper: Get project base directories (supports explicit agentDir parameter)
       // Security: validates agentDir to prevent path traversal attacks
@@ -9232,7 +9290,7 @@ async function main() {
 
       // ============= SUB-AGENTS API =============
 
-      const userAgentsBaseDir = join(homeDir, '.myagents', 'agents');
+      const userAgentsBaseDir = join(homeDir, APP_DATA_DIR_NAME, 'agents');
 
       // Helper: Get project agents directory (supports explicit agentDir parameter)
       const getProjectAgentsDir = (queryAgentDir: string | null) => {

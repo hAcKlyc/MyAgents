@@ -306,6 +306,45 @@ afterEach(async () => {
 });
 
 describe('builtin V2 execution independent of product storage', () => {
+  it('normalizes a question before UI delivery and returns the actual answer through builtin canUseTool', async () => {
+    const workspace = join(state.home, 'workspace');
+    await mkdir(workspace);
+    await agent.initializeAgent(workspace, null, undefined, { preWarmDisabled: true });
+    const engine = (await import('../session-engine/builtin-adapter')).createBuiltinSessionEngine();
+    await engine.sendDesktopMessage({ text: 'Start synthetic question test', workspacePath: workspace,
+      sessionId: agent.getSessionId()!, scenario: { type: 'desktop' } });
+    await vi.waitFor(() => expect(state.query).toHaveBeenCalled());
+    const canUseTool = (state.query.mock.calls.at(-1)![0].options as Options).canUseTool!;
+    const input = { questions: [{ question: 'Which channel?', header: 'Channel',
+      options: [{ label: 'Current agent', description: 'Local' }, { label: 'Mori', description: 'Delegate' }] }] };
+    const reply = canUseTool('AskUserQuestion', input, { signal: new AbortController().signal, toolUseID: 'ask-fixture', requestId: 'sdk-ask-fixture' });
+    await vi.waitFor(() => expect(state.events.some(([name]) => name === 'ask-user-question:request')).toBe(true));
+    const request = state.events.find(([name]) => name === 'ask-user-question:request')![1] as { requestId: string; questions: unknown[] };
+    expect(request.questions).toEqual([{ ...input.questions[0], multiSelect: false }]);
+    expect(agent.handleAskUserQuestionResponse(request.requestId, { '0': 'Current agent' })).toBe(true);
+    await expect(reply).resolves.toEqual({ behavior: 'allow', updatedInput: {
+      questions: [{ ...input.questions[0], multiSelect: false }],
+      answers: { '0': 'Current agent', 'Which channel?': 'Current agent' },
+    } });
+    const invalid = await canUseTool('AskUserQuestion', { questions: [{ ...input.questions[0], options: [null] }] },
+      { signal: new AbortController().signal, toolUseID: 'ask-invalid-fixture', requestId: 'sdk-ask-invalid-fixture' });
+    expect(invalid).toEqual({ behavior: 'deny', interrupt: false, message: expect.stringContaining('options[0]') });
+    expect(state.events.filter(([name]) => name === 'ask-user-question:request')).toHaveLength(1);
+    const cancelled = canUseTool('AskUserQuestion', input, { signal: new AbortController().signal,
+      toolUseID: 'ask-cancel-fixture', requestId: 'sdk-ask-cancel-fixture' });
+    const cancelRequest = state.events.filter(([name]) => name === 'ask-user-question:request').at(-1)![1] as { requestId: string };
+    expect(agent.handleAskUserQuestionResponse(cancelRequest.requestId, null)).toBe(true);
+    await expect(cancelled).resolves.toMatchObject({ behavior: 'deny', interrupt: true, message: '用户取消了问答' });
+    const abort = new AbortController();
+    const aborted = canUseTool('AskUserQuestion', input, { signal: abort.signal,
+      toolUseID: 'ask-abort-fixture', requestId: 'sdk-ask-abort-fixture' });
+    abort.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+    expect(state.events.some(([name, data]) => name === 'ask-user-question:expired'
+      && (data as { reason?: string }).reason === 'aborted')).toBe(true);
+
+  });
+
   it.each(['dsh', 'claude-code', 'codex'] as const)('does not start SDK prewarm or publish a %s transcript after a stray builtin reload', async runtime => {
     const workspace = join(state.home, 'workspace');
     await mkdir(workspace, { recursive: true });
@@ -986,6 +1025,104 @@ it('retains an exact rewind boundary across rejection and cold reopen', async ()
   expect(agent.getMessages().some(message => message.role === 'user' && message.content === 'after reopen')).toBe(true);
   expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBe('tail-frame-1');
   expect(state.query.mock.calls.at(-1)?.[0].options.resume).toBe(meta.id);
+});
+
+it('does not treat a successful answer quoting a resume diagnostic as a native refusal', async () => {
+  const workspace = join(state.home, 'quoted-diagnostic');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  const lifecycle = await import('../builtin-session/lifecycle');
+  lifecycle.setPreWarmDisabled(false);
+  state.query.mockImplementationOnce((args: Parameters<typeof fakeQuery>[0]) => {
+    const query = fakeQuery(args);
+    let completed = false;
+    return { ...query, async next() {
+      if (completed) return { done: true, value: undefined };
+      const frame = await query.next();
+      if (!frame.done && (frame.value as { type?: string }).type === 'result') {
+        completed = true;
+        return { done: false, value: { ...(frame.value as object), result: 'Example: No message found with message.uuid of: example-uuid' } };
+      }
+      return frame;
+    } };
+  });
+  await agent.enqueueUserMessage('explain a diagnostic', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(state.query.mock.calls.length).toBe(2), { timeout: 2500 });
+  expect(state.events.some(([name]) => name === 'chat:agent-error')).toBe(false);
+});
+
+it('recovers in an independent retained-prefix fork without reviving the discarded native tail', async () => {
+  const workspace = join(state.home, 'boundary-fork');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  const snapshot = await store.loadSessionTranscript(meta.id);
+  await store.appendSessionMessages(meta.id, snapshot.cursor, [
+    { id: 'kept-u', role: 'user', content: 'requirements', timestamp: 't', sdkUuid: 'lost-native-user-stamp' },
+    { id: 'kept-a', role: 'assistant', content: 'retained question', timestamp: 't', sdkUuid: 'native-question' },
+    { id: 'failed-u', role: 'user', content: 'unsent answer', timestamp: 't' },
+  ]);
+  await store.updateSessionMetadata(meta.id, { sdkResumeSessionAt: 'native-question' });
+  const forkSdkId = randomUUID();
+  const nativePrefix = [{ type: 'user', uuid: 'native-u', message: { content: [{ type: 'text', text: 'requirements' }] } }, { type: 'assistant', uuid: 'native-question' }];
+  state.sdkRead.mockImplementation(async (id: string) => id === forkSdkId
+    ? nativePrefix.map(row => ({ ...row, uuid: `fork-${row.uuid}` }))
+    : [...nativePrefix, { type: 'user', uuid: 'discarded-native-user' }]);
+  state.sdkFork.mockResolvedValue({ sessionId: forkSdkId });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  expect(await agent.forkSession('kept-a')).toMatchObject({ success: true, newSessionId: forkSdkId });
+  expect(state.sdkFork).toHaveBeenCalledWith(meta.id, { dir: workspace, upToMessageId: 'native-question' });
+  expect((await store.getSessionData(meta.id))!.messages.map(message => message.id))
+    .toEqual(['kept-u', 'kept-a', 'failed-u']);
+  expect(store.getSessionMetadata(forkSdkId)?.sdkResumeSessionAt).toBeUndefined();
+  await agent.resetSession();
+  await agent.initializeAgent(workspace, null, forkSdkId, { preWarmDisabled: true });
+  state.rejectedResumeAt = 'fork-native-question';
+  await agent.enqueueUserMessage('continue', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  expect(state.query.mock.calls.map(([args]) => args.options.resume)).toEqual([forkSdkId, forkSdkId]);
+  expect(state.query.mock.calls.map(([args]) => args.options.resumeSessionAt)).toEqual(['fork-native-question', undefined]);
+  expect(agent.getMessages().filter(message => message.content === 'continue')).toHaveLength(1);
+  expect(agent.getMessages().some(message => message.content === 'unsent answer')).toBe(false);
+  expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBe('native-question');
+});
+
+it.each(['result', 'throw'] as const)('stops automatic pre-warm after an exact native boundary rejection (%s)', async failure => {
+  const workspace = join(state.home, 'rejected-boundary');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('original', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  await store.updateSessionMetadata(meta.id, { sdkResumeSessionAt: 'tail-frame-1' });
+  await agent.resetSession();
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  const lifecycle = await import('../builtin-session/lifecycle');
+  lifecycle.setPreWarmDisabled(false);
+  const history = agent.getMessages().map(message => message.id);
+  state.query.mockClear();
+  if (failure === 'throw') state.query.mockImplementation(() => {
+    throw new Error('No message found with message.uuid of: tail-frame-1');
+  });
+  else state.rejectedResumeAt = 'tail-frame-1';
+  await agent.enqueueUserMessage('preserved retry', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(state.events.some(([name, payload]) =>
+    (name === 'chat:agent-error' || name === 'chat:message-error')
+      && JSON.stringify(payload).includes('会话恢复点已失效'))).toBe(true));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  // A real timer window proves the 500ms recovery scheduler does not relaunch.
+  await new Promise(resolve => setTimeout(resolve, 1100));
+  expect(state.query).toHaveBeenCalledTimes(1);
+  expect(lifecycle.lifecycleState.preWarmTimer).toBeNull();
+  expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBe('tail-frame-1');
+  expect(agent.getMessages().slice(0, history.length).map(message => message.id)).toEqual(history);
+  expect(agent.getMessages().some(message => message.content === 'preserved retry')).toBe(true);
 });
 
 it.each([

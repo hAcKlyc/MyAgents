@@ -43,10 +43,22 @@ describe('App Shell chrome contract', () => {
     expect(exitConfirm.indexOf('flushPendingRecordNote')).toBeLessThan(
       exitConfirm.indexOf('pending.resolve(true)'),
     );
-    expect(updateGuard).toContain('requestLifecycleExitConfirmation()');
+    const myagentsUpdateGuard = updateGuard.slice(updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
     expect(
-      updateGuard.indexOf('requestLifecycleExitConfirmation()'),
-    ).toBeLessThan(updateGuard.indexOf('performRestartAndUpdate()'));
+      myagentsUpdateGuard.indexOf('requestLifecycleExitConfirmation()'),
+    ).toBeLessThan(myagentsUpdateGuard.indexOf('performRestartAndUpdate()'));
+    const moxbotUpdateGuard = updateGuard.slice(0, updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
+    expect(moxbotUpdateGuard).not.toContain('requestLifecycleExitConfirmation()');
+    const checkpoint = moxbotUpdateGuard.indexOf('await checkpoint.persist(');
+    const restart = moxbotUpdateGuard.indexOf('await performRestartAndUpdate(checkpoint)');
+    const recordSave = moxbotUpdateGuard.indexOf('pendingRecordNoteSubmittersRef.current.values()');
+    const fileSave = moxbotUpdateGuard.indexOf('fileEditSubmittersRef.current.values()');
+    expect(recordSave).toBeGreaterThanOrEqual(0);
+    expect(fileSave).toBeGreaterThanOrEqual(0);
+    expect(checkpoint).toBeGreaterThanOrEqual(0);
+    expect(restart).toBeGreaterThan(checkpoint);
+    expect(recordSave).toBeLessThan(checkpoint);
+    expect(fileSave).toBeLessThan(checkpoint);
     expect(app).toContain('onExitRequested: requestLifecycleExitConfirmation');
   });
 

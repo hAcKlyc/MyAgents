@@ -11,7 +11,10 @@ import OverlayBackdrop from "@/components/OverlayBackdrop";
 import { useCloseLayer } from "@/hooks/useCloseLayer";
 import { isImeComposingEvent } from "@/utils/imeKeyboard";
 import type { NetworkDevice } from "@/api/agentNetwork";
+import type { HostManagementAdapter } from "@/api/hostManagement";
 import { AgentRow } from "./AgentRow";
+import { HostManagement } from "./HostManagement";
+import { OwnedHostManagement } from "./OwnedHostManagement";
 import {
   DeviceIcon,
   DeviceMenu,
@@ -36,6 +39,10 @@ export function DeviceDetails({
   onRename,
   membershipBusy,
   membershipError,
+  authGeneration = 0,
+  connectionReady = true,
+  hostAdapter,
+  onOpenRemoteSession,
 }: {
   connectionId?: string;
   device: NetworkDevice;
@@ -51,6 +58,11 @@ export function DeviceDetails({
   onRename: () => void;
   membershipBusy: boolean;
   membershipError: string | null;
+  authGeneration?: number;
+  connectionReady?: boolean;
+  /** Isolated acceptance harness seam; production never supplies a fixture. */
+  hostAdapter?: HostManagementAdapter;
+  onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const { t } = useTranslation("app");
   const {
@@ -130,7 +142,7 @@ export function DeviceDetails({
               <div className="flex min-w-0 items-center gap-2">
                 <h2
                   id="network-device-title"
-                  className="min-w-0 truncate text-lg font-semibold text-[var(--ink)]"
+                  className="min-w-0 break-words text-lg font-semibold text-[var(--ink)] [overflow-wrap:anywhere]"
                 >
                   {device.name}
                 </h2>
@@ -183,6 +195,32 @@ export function DeviceDetails({
                 {membershipError}
               </p>
             )}
+            {connectionId !== "official" && !hostAdapter ? (
+              <OwnedHostManagement
+                key={`${connectionId}:${device.principalId}:${device.networkId}:${device.deviceId}:${authGeneration}`}
+                locator={{
+                  connectionId,
+                  principalId: device.principalId,
+                  networkId: device.networkId,
+                  deviceId: device.deviceId,
+                  authGeneration,
+                }}
+                online={connectionReady && device.connectionState === "ready"}
+              />
+            ) : (
+              <HostManagement
+                adapter={hostAdapter}
+                key={`${connectionId}:${device.principalId}:${device.networkId}:${device.deviceId}:${authGeneration}`}
+                locator={{
+                  connectionId,
+                  principalId: device.principalId,
+                  networkId: device.networkId,
+                  deviceId: device.deviceId,
+                  authGeneration,
+                }}
+                online={connectionReady && device.connectionState === "ready"}
+              />
+            )}
             <h3 className="mb-1.5 flex items-baseline gap-2 text-sm font-semibold text-[var(--ink-muted)]">
               {t("agentNetwork.agents")}
               {catalog?.status === "ready" && agents.length > 0 && (
@@ -227,6 +265,8 @@ export function DeviceDetails({
                     agent={agent}
                     device={device}
                     onChanged={onChanged}
+                    onOpenSession={connectionId !== 'official' && onOpenRemoteSession ? () => { onOpenRemoteSession({ title: agent.name, locator: { connectionId, principalId: device.principalId, networkId: device.networkId, deviceId: device.deviceId, authGeneration }, agentId: agent.localAgentId, agentName: agent.name, deviceName: device.name }); onClose(); } : undefined}
+                    sessionOnline={connectionReady && device.joined && device.connectionState === 'ready'}
                   />
                 ))}
               </ul>

@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { existsSync, realpathSync } from "fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "path";
 
@@ -37,7 +38,7 @@ function assertArtifactRoot(
   const output = canonicalizeExistingPrefix(
     resolve(
       workspace,
-      ".myagents",
+      APP_DATA_DIR_NAME,
       "browser-artifacts",
       safeSession || "session",
     ),

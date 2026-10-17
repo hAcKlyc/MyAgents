@@ -19,6 +19,12 @@ rust-version = "1.88"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# Only the macOS MoXBots packaging entry enables the immutable credential
+# reader. The build script rejects bypassing that entry for this profile.
+moxbot-credential-reader = ["myagents-agent-network-crypto/fixed-macos-reader", "dep:myagents-agent-network-crypto-parent", "myagents-agent-network-crypto-parent/fixed-macos-reader"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 url = "2"
@@ -35,6 +41,8 @@ percent-encoding = "2"
 log = "0.4"
 myagents-media-worker-protocol = { path = "media-worker-protocol" }
 myagents-agent-network-protocol = { path = "agent-network-protocol" }
+myagents-agent-network-crypto = { path = "agent-network-crypto", features = ["os-store"] }
+myagents-host-management-protocol = { path = "host-management-protocol" }
 rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std"] }
 rustls-pemfile = "2.2"
 rustls-platform-verifier = "=0.6.2"
@@ -123,6 +131,7 @@ nix = { version = "0.29", default-features = false, features = ["signal"] }
 # U+F74F from the DOM value when the leak happens.
 # See tauri-apps/tauri#5685, tauri-apps/wry#769, tauri-apps/tauri#10194.
 [target.'cfg(target_os = "macos")'.dependencies]
+myagents-agent-network-crypto-parent = { path = "agent-network-crypto-parent", features = ["os-store"], optional = true }
 keyring = { version = "=3.6.3", default-features = false, features = ["apple-native"] }
 # Floating ball (PRD 0.2.35): NSPanel windows that never activate the app.
 # Git branch dependency (not on crates.io) — pinned to a commit per PRD §10.
@@ -219,3 +228,11 @@ tempfile = "3.10"
 [profile.dev]
 debug = "line-tables-only"
 incremental = true
+
+[dev-dependencies.myagents-agent-network-crypto]
+path = "agent-network-crypto"
+features = ["os-store", "test-support"]
+
+[target.'cfg(target_os = "macos")'.dev-dependencies.myagents-agent-network-crypto-parent]
+path = "agent-network-crypto-parent"
+features = ["os-store", "test-support"]

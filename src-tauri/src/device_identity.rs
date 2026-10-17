@@ -108,7 +108,7 @@ pub fn local_device_name() -> Option<String> {
 
 fn device_id_path() -> Result<PathBuf, String> {
     let home_dir = dirs::home_dir().ok_or_else(|| "Failed to get home directory".to_string())?;
-    Ok(home_dir.join(".myagents").join("device_id"))
+    Ok(home_dir.join(crate::app_dirs::APP_DATA_DIR_NAME).join("device_id"))
 }
 
 fn normalize_device_name(value: Option<String>) -> Option<String> {

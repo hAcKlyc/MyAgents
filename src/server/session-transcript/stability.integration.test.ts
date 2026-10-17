@@ -114,3 +114,23 @@ it.each(['builtin', 'builtin-new-sdk', 'codex-rewind'] as const)('can send, save
     .toMatchObject({ ok: true });
   expect(await restored.writer.flush()).toBe(true);
 });
+
+
+it('keeps an idle but unsaved answer alive until its actual writer commits before update', async () => {
+  const active = store.getActiveSessionTranscript(id)!;
+  let finish!: () => void;
+  const commit = new Promise<void>(resolve => { finish = resolve; });
+  const append = active.file.append.bind(active.file);
+  vi.spyOn(active.file, 'append').mockImplementationOnce(async (...args) => {
+    await commit;
+    return append(...args);
+  });
+  active.writer.observe({ kind: 'message-create', message: { id: 'saved-before-update', role: 'assistant', content: 'must survive', timestamp: 't' } });
+  const flushing = active.writer.flush(5000);
+  expect(() => store.assertSessionTranscriptsDurableForUpdate()).toThrow('UPDATE_BUSY');
+  expect(active.isRevoked).toBe(false);
+  finish();
+  expect(await flushing).toBe(true);
+  expect(() => store.assertSessionTranscriptsDurableForUpdate()).not.toThrow();
+  expect((await active.file.read()).projection.messages.get('saved-before-update')?.content).toBe('must survive');
+});

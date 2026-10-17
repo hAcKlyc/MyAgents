@@ -1,0 +1,46 @@
+{
+  "started": "2026-10-13T04:34:48.645Z",
+  "finished": "2026-10-13T04:34:53.462Z",
+  "expected": "8216b84172b2c6b707cef283954dcd43569281449fcc76f49cf0310964234f57",
+  "results": [
+    {
+      "id": "IR03-brand",
+      "status": "PASS"
+    },
+    {
+      "id": "IR06-overlay-focus-exit",
+      "status": "PASS"
+    },
+    {
+      "id": "IR01-paused-resource-restore",
+      "status": "PASS"
+    },
+    {
+      "id": "IR01-offline-related",
+      "status": "PASS"
+    },
+    {
+      "id": "IR02-expiry-invite-approval-recovery",
+      "status": "PASS"
+    },
+    {
+      "id": "IR04-05-mobile-390",
+      "status": "PASS"
+    },
+    {
+      "id": "IR04-05-mobile-768",
+      "status": "PASS"
+    },
+    {
+      "id": "affected-console",
+      "status": "PASS",
+      "errors": []
+    },
+    {
+      "id": "fixed-version",
+      "status": "PASS",
+      "expected": "8216b84172b2c6b707cef283954dcd43569281449fcc76f49cf0310964234f57",
+      "actual": "8216b84172b2c6b707cef283954dcd43569281449fcc76f49cf0310964234f57"
+    }
+  ]
+}

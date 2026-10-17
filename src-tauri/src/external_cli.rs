@@ -89,14 +89,14 @@ fn config_path() -> Result<PathBuf, String> {
 }
 
 fn launcher_path() -> String {
-    let file_name = if cfg!(windows) {
-        "myagents.cmd"
+    let file_name = PathBuf::from(if cfg!(windows) {
+        format!("{}.cmd", crate::app_dirs::APP_CLI_NAME)
     } else {
-        "myagents"
-    };
+        crate::app_dirs::APP_CLI_NAME.to_string()
+    });
     crate::app_dirs::myagents_data_dir()
-        .map(|dir| dir.join("bin").join(file_name))
-        .unwrap_or_else(|| PathBuf::from(file_name))
+        .map(|dir| dir.join("bin").join(&file_name))
+        .unwrap_or(file_name)
         .to_string_lossy()
         .into_owned()
 }
@@ -372,6 +372,17 @@ pub fn authorize_external_token(token: &str) -> Result<ExternalCliAdmission, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_path_uses_the_active_product_cli_name() {
+        let path = PathBuf::from(launcher_path());
+        let expected = if cfg!(windows) {
+            format!("{}.cmd", crate::app_dirs::APP_CLI_NAME)
+        } else {
+            crate::app_dirs::APP_CLI_NAME.to_string()
+        };
+        assert_eq!(path.file_name().and_then(|name| name.to_str()), Some(expected.as_str()));
+    }
 
     #[test]
     fn constant_time_comparison_requires_equal_bytes() {

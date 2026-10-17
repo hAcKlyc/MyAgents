@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 /**
  * store.ts — High-level plugin lifecycle: install / uninstall / toggle / list.
  *
@@ -88,7 +89,7 @@ function assertNameNotReserved(name: string): void {
 export function getPluginsRoot(): string {
   const home = getHomeDirOrNull();
   if (!home) throw new PluginStoreError('Cannot determine home directory', 'NO_HOME', 500);
-  return join(home, '.myagents', 'plugins');
+  return join(home, APP_DATA_DIR_NAME, 'plugins');
 }
 
 /** ~/.myagents/plugins/data/ (parent for ${CLAUDE_PLUGIN_DATA}) */
@@ -714,7 +715,7 @@ export function getDefaultEnabledPluginIdsForWorkspace(workspacePath: string): s
     const cfg = loadConfig();
     const home = getHomeDirOrNull();
     if (!home) return [];
-    const projectsPath = resolve(home, '.myagents', 'projects.json');
+    const projectsPath = resolve(home, APP_DATA_DIR_NAME, 'projects.json');
     if (!existsSync(projectsPath)) return [];
     const projects = JSON.parse(stripBom(readFileSync(projectsPath, 'utf-8'))) as Array<{
       agentId?: string;

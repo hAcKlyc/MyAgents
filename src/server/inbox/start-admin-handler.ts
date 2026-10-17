@@ -1,3 +1,4 @@
+import { APP_CLI_NAME } from '../../shared/appProfile';
 import { isProjectArchived, isProjectVisibleToUser } from '../../shared/config-types';
 import { cancellableFetch } from '../utils/cancellation';
 import { managementRequestHeaders } from '../utils/management-api-client';
@@ -255,7 +256,7 @@ export async function handleAdminSessionStart(
           message: outcome.reason ?? 'admission acknowledgement was not confirmed',
         },
         recoveryHint: {
-          recoveryCommand: `myagents session list --agent ${agentId}`,
+          recoveryCommand: `${APP_CLI_NAME} session list --agent ${agentId}`,
           message: 'Check whether the new Session materialized; do not automatically resend.',
         },
       },

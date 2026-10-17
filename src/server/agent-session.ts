@@ -1,3 +1,5 @@
+import { bootstrapFromEnvironment as hostBotBootstrapFromEnvironment } from '../host/bot-session-bootstrap';
+import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { desktopContextOf } from '../shared/agentMentions';
 import { buildTurnProviderAnalytics } from './session-core/turn-analytics';
 import { selectBuiltinRewindBoundary } from './session-core/builtin-rewind-boundary';
@@ -47,7 +49,7 @@ import { isRejectedReloadAnchor, resolveEffectiveResumeAt } from './utils/rewind
 import { nativeResumeBoundaryRecoveryMessage } from '../shared/nativeResumeBoundary';
 import { attemptFileRewind, type FileRewindStatus } from './utils/rewind-file-result';
 import { summarizeSensitiveSdkMessage } from './utils/sdk-log-summary';
-import { buildForkUuidRemap, remapStoredSdkUuids } from './utils/fork-remap';
+import { buildForkUuidRemap, remapForkMessageUuids } from './utils/fork-remap';
 import {
   decideInFlightCancelSettlement,
   terminalEventMatchesInFlight,
@@ -58,6 +60,8 @@ import { planRetraction } from './utils/message-retraction';
 import type { TransientProviderTextRetryDecision } from './session-core/turn-result-policy';
 import { diagnoseSdkSubprocessFailure } from './utils/sdk-subprocess-diagnostics';
 import { createGuardedSdkQuery } from './utils/sdk-child-launch-guard';
+import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { hostExecutionLimits } from './utils/host-execution-limits';
 import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyError, prepareProviderBinding, type PreparedProvider } from './utils/managed-proxy-binding';
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
 import {
@@ -287,6 +291,7 @@ export type {
 } from './builtin-session/types';
 import type { ProviderEnv } from './provider-types';
 export { stripPlaywrightResults } from './builtin-session/transcript-persistence';
+export { hasBuiltinActivityForUpdate, setUpdateRestartFrozen } from './builtin-session/lifecycle';
 import {
   clearQueryMcpPrewarmOwner,
   completeQueryBackgroundTask,
@@ -301,6 +306,7 @@ import {
   claimQueryMcpMutation,
   forceWakeGeneratorWithNull,
   getQueryMcpMutation,
+  isUpdateRestartFrozen,
   getQueryGeneration,
   incrementPreWarmFailCount,
   getBuiltinLiveRevision,
@@ -3879,6 +3885,7 @@ export function forceReloadActiveSession(reason: RestartReason = 'mcp'): void {
 }
 
 function schedulePreWarm(delayMs = 500): void {
+  if (isUpdaterQaBuild()) return;
   if (lifecycleState.preWarmTimer) clearTimeout(lifecycleState.preWarmTimer);
   if (!agentDir) return;
   if (lifecycleState.preWarmDisabled) return;
@@ -3895,6 +3902,7 @@ function schedulePreWarm(delayMs = 500): void {
   setPreWarmTimer(setTimeout(() => {
     setPreWarmTimer(null);
     if (!agentDir) return;
+    if (isUpdateRestartFrozen()) { schedulePreWarm(); return; }
 
     // Drain deferred config restart: abort the stale session so the next
     // startStreamingSession() picks up the latest MCP/agents/provider/proxy config.
@@ -4652,8 +4660,8 @@ const pendingPermissions = new Map<string, {
 }>();
 
 // AskUserQuestion types - import from shared
-import type { AskUserQuestionInput, AskUserQuestion } from '../shared/types/askUserQuestion';
-import { withQuestionTextAnswerKeys } from '../shared/types/askUserQuestion';
+import type { AskUserQuestionInput } from '../shared/types/askUserQuestion';
+import { normalizeAskUserQuestionInput, withQuestionTextAnswerKeys } from '../shared/types/askUserQuestion';
 export type { AskUserQuestionInput, AskUserQuestion, AskUserQuestionOption } from '../shared/types/askUserQuestion';
 
 // PlanMode types - import from shared
@@ -4729,49 +4737,17 @@ function interactiveEventScope(): { sessionId: string } {
 }
 
 /**
- * Validate AskUserQuestion input structure
- */
-function isValidAskUserQuestionInput(input: unknown): input is AskUserQuestionInput {
-  if (!input || typeof input !== 'object') return false;
-  const obj = input as Record<string, unknown>;
-  if (!Array.isArray(obj.questions) || obj.questions.length === 0) return false;
-
-  // Validate each question has required fields
-  return obj.questions.every((q: unknown) => {
-    if (!q || typeof q !== 'object') return false;
-    const question = q as Record<string, unknown>;
-    return (
-      typeof question.question === 'string' &&
-      typeof question.header === 'string' &&
-      Array.isArray(question.options) &&
-      typeof question.multiSelect === 'boolean' &&
-      (question.id === undefined || typeof question.id === 'string') &&
-      (question.required === undefined || typeof question.required === 'boolean') &&
-      (question.isSecret === undefined || typeof question.isSecret === 'boolean')
-    );
-  });
-}
-
-/**
  * Handle AskUserQuestion tool - prompts user for structured answers
  * Returns the input with answers filled in, or null if denied/aborted
  */
 async function handleAskUserQuestion(
-  input: unknown,
+  questionInput: AskUserQuestionInput,
   signal?: AbortSignal,
   blocksRoot = true
 ): Promise<Record<string, string> | null> {
   console.log('[AskUserQuestion] Requesting user input');
 
-  // Validate input structure
-  if (!isValidAskUserQuestionInput(input)) {
-    console.error('[AskUserQuestion] Invalid input structure:', input);
-    return null;
-  }
-
   const requestId = `ask_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const questionInput = input;
-
   // Broadcast AskUserQuestion request to frontend
   // Short-circuit if already aborted (addEventListener won't fire for past events)
   if (signal?.aborted) {
@@ -5630,7 +5606,7 @@ type OwnedFreezeSnapshotPatch = Partial<Pick<
   'runtime' | 'runtimeSource' | 'providerExecutionIdentity' | 'origin' | keyof ProductSessionSnapshotPatch
 >>;
 
-async function restoreBuiltinConfigFromOwnedMetadata(meta: SessionMetadata): Promise<void> {
+export async function restoreBuiltinConfigFromOwnedMetadata(meta: SessionMetadata): Promise<void> {
   if (!agentDir || isExternalRuntime(getCurrentRuntimeType())) return;
   const { resolveWorkspaceConfig } = await import('./utils/admin-config');
   const resolved = resolveWorkspaceConfig(agentDir, meta, { includeMcp: false });
@@ -6065,7 +6041,7 @@ const WINDOWS_UTF8_BASH_ENV_CONTENT = [
 
 function ensureWindowsUtf8BashEnvScript(home: string): string | undefined {
   if (!home) return undefined;
-  const scriptDir = resolve(home, '.myagents', 'runtime');
+  const scriptDir = resolve(home, APP_DATA_DIR_NAME, 'runtime');
   const scriptPath = resolve(scriptDir, WINDOWS_UTF8_BASH_ENV_FILENAME);
   try {
     ensureDirSync(scriptDir);
@@ -6422,6 +6398,13 @@ export function buildClaudeSessionEnv(
   if (boundModelPolicy) {
     if (boundModelPolicy.maxOutputTokens) env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(boundModelPolicy.maxOutputTokens);
     else env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '';
+  } else if (effectiveProviderEnv?.providerId?.startsWith('cloud-session:') && effectiveProviderEnv.maxOutputTokens) {
+    env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(effectiveProviderEnv.maxOutputTokens);
+  }
+  if (effectiveProviderEnv?.providerId?.startsWith('cloud-session:')) {
+    // The native CLI has an outer retry loop independent of HTTP retry headers.
+    // A scoped paid resource must report uncertainty rather than replay it.
+    env.CLAUDE_CODE_MAX_RETRIES = '0';
   }
   const modelContextLength = resolveContextLength(resolvedModel);
   if (modelContextLength && modelContextLength > 0) {
@@ -7736,6 +7719,10 @@ export function getAgentState(): {
   return { agentDir, sessionState, hasInitialPrompt };
 }
 
+export function getBuiltinExecutionStartedAt(): string | undefined {
+  return getBuiltinProductContent()?.executionStartedAt;
+}
+
 export function getLastBuiltinAssistantText(): string {
   const product = getBuiltinProductContent();
   if (product) {
@@ -8181,6 +8168,7 @@ export async function initializeAgent(
   // and a large JSONL can cost ~30-100ms. Read once, reuse.
   let initMeta = initialSessionId ? getSessionMetadata(initialSessionId) : null;
   if (initialSessionId && initMeta?.pendingConversationMutation) {
+    if (isUpdaterQaBuild()) throw new Error('UPDATER_QA_EXECUTION_DISABLED');
     const resolved = await resolvePendingConversationMutation(initialSessionId);
     if (!resolved.success) {
       throw new Error(
@@ -8202,7 +8190,7 @@ export async function initializeAgent(
     // sdkSessionId is missing, only recover the rare crash-before-metadata-update
     // case when the SDK transcript probe finds real persisted transcriptState.messages.
     const meta = initMeta;
-    if (meta) {
+    if (meta && !isUpdaterQaBuild()) {
       const currentRuntimeType = getCurrentRuntimeType();
       const resumeDecision = await decideBuiltinSessionResume({
         meta,
@@ -10701,7 +10689,7 @@ async function materializeBuiltinFork(opts: {
   const remap = buildForkUuidRemap(srcSliced, forkSdk);
   if (!remap.ok) return fail(`uuid remap failed: ${remap.reason}`);
 
-  const applied = remapStoredSdkUuids(forkedMessages.map(m => m.sdkUuid), remap.map);
+  const applied = remapForkMessageUuids(forkedMessages, srcSdk, remap.map);
   if (!applied.ok) return fail(`stored uuid re-stamp failed: ${applied.reason}`);
   const remapped = forkedMessages.map((m, i) => ({ ...m, sdkUuid: applied.remapped[i] }));
 
@@ -10776,21 +10764,30 @@ async function resolveBuiltinForkSource(source: SessionMetadata, visited = new S
  * This stays Record-specific: it is a safety policy for one bounded product
  * surface, not a general shell parser or command allowlist framework.
  */
+function profileCliPattern(pattern: RegExp): RegExp {
+  return APP_CLI_NAME === 'myagents'
+    ? pattern
+    : new RegExp(pattern.source.replace(/^\^myagents/, '^moxbot'), pattern.flags);
+}
+
 export function isAutoAllowedRecordCliCommand(command: string): boolean {
   const cmd = command.trim();
   return (
-    /^myagents[ \t]+record[ \t]+list(?:[ \t]+(?:--kind[ \t]+(?:text|audio)|--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+thought[ \t]+list(?:[ \t]+(?:--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+(?:--content[ \t]+)?'[^']*'[ \t]*$/.test(cmd)
-    || /^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+--content-file[ \t]+[^ \t\n\r;|&<>$`'"]+[ \t]*$/.test(cmd)
+    profileCliPattern(/^myagents[ \t]+record[ \t]+list(?:[ \t]+(?:--kind[ \t]+(?:text|audio)|--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+thought[ \t]+list(?:[ \t]+(?:--tag[ \t]+[a-z0-9][a-z0-9-]{0,31}|--limit[ \t]+\d{1,4}|--json))*[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+(?:--content[ \t]+)?'[^']*'[ \t]*$/).test(cmd)
+    || profileCliPattern(/^myagents[ \t]+(?:record|thought)[ \t]+create[ \t]+--content-file[ \t]+[^ \t\n\r;|&<>$`'"]+[ \t]*$/).test(cmd)
   );
 }
 
 async function startStreamingSession(preWarm = false): Promise<void> {
+  if (isUpdateRestartFrozen()) return;
   const sessionMutationBarrier = getSessionMutationBarrier();
   if (sessionMutationBarrier) await sessionMutationBarrier;
   await resolvePendingBuiltinConversationMutationForActiveSession();
   await awaitSessionTermination(10_000, 'startStreamingSession');
+  // A delayed launcher may have begun awaiting before idle was frozen.
+  if (isUpdateRestartFrozen()) return;
 
   // (issue #174) Cold-start abort race: enqueueUserMessage schedules this
   // function via setTimeout(0) after pushing to queueState.messageQueue. If the user
@@ -10901,6 +10898,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   // "unknown bridge token" instead of resolving to the new subprocess's
   // config (the cross-pollination class we're eliminating).
   ensureActiveSessionBridgeRegistered({ freshToken: true });
+  // Finite cloud model authority grants text inference only. Capture the
+  // validated immutable birth before async launch work; no later config or
+  // private Provider selection may widen this Query's tool surface.
+  const launchHostBotBootstrap = process.env.MYAGENTS_HOST_MODE === '1' ? hostBotBootstrapFromEnvironment() : undefined;
+  const launchModelOnlyCloudBot = launchHostBotBootstrap?.cloud_model !== undefined;
   const launchProviderId = getSessionProviderId() ?? SUBSCRIPTION_PROVIDER_ID;
   const launchAgentDefinitionsSource = configState.currentAgentDefinitions;
   const launchContextWindowSnapshot = snapshotProviderModelContextLengths([
@@ -10986,6 +10988,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   let queryExitFailed = false;
   let preparedProvider: PreparedProvider | undefined;
   let recoveredRejectedReloadAnchor = false;
+  let rejectedNativeResumeBoundary = false;
 
   const recoverRejectedReloadAnchor = (rawError: string): boolean => {
     if (lifecycleState.abortRequested || sessionId !== queryProductSessionId
@@ -11351,6 +11354,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     }
 
     const commonQueryOptions = {
+      ...hostExecutionLimits(),
       ...(configState.currentProviderEnv?.endpointSource ? { abortController: bindingController } : {}),
       enableFileCheckpointing: true,
       thinking: thinkingConfig,
@@ -11358,10 +11362,10 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // Load settings from project scope only (.claude/)
       // Enabled global Skills are projected into <cwd>/.claude/skills/ before Query launch.
       // CLAUDE_CONFIG_DIR is NOT set — preserves Anthropic subscription Keychain lookup
-      settingSources: buildSettingSources(),
+      settingSources: launchModelOnlyCloudBot ? [] : buildSettingSources(),
       // SDK-level allowlist is the execution gate for both project and global
       // Skills. Disk projection remains the compatibility bridge for Commands.
-      skills: [...new Set(enabledSkillAllowlist)].sort(),
+      skills: launchModelOnlyCloudBot ? [] : [...new Set(enabledSkillAllowlist)].sort(),
       settings: {
         cleanupPeriodDays: claudeTranscriptCleanupPeriodDays,
         // MyAgents does not expose Anthropic feedback submission. Keep the
@@ -11439,17 +11443,17 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         preset: 'claude_code' as const,
         // Product append changes take effect at Query replacement, including resume.
         snapshot: false,
-        append: buildSystemPromptAppend(currentScenario, {
+        append: [buildSystemPromptAppend(currentScenario, {
           // agent-session.ts is the builtin Claude Agent SDK path by definition.
           runtime: 'builtin',
           // Universal CLI capability surface (cron / IM media). Was external-runtime
           // only when builtin still had `cron-tools` / `im-cron` / `im-media` MCPs;
           // those got dropped in favour of `myagents` CLI calls so builtin needs the
           // same prompt now. Single CLI, single source of truth across all runtimes.
-          cliToolsEnabled: true,
-          userCliToolsEnabled: cliToolRegistryEnabled,
+          cliToolsEnabled: !launchModelOnlyCloudBot,
+          userCliToolsEnabled: !launchModelOnlyCloudBot && cliToolRegistryEnabled,
           enabledOfficialToolIds,
-        }),
+        }), launchHostBotBootstrap?.snapshot.config.system_prompt].filter(Boolean).join('\n\n'),
       },
       cwd: agentDir,
       includePartialMessages: true,
@@ -11458,10 +11462,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       toolConfig: {
         askUserQuestion: { previewFormat: 'html' as const },
       },
-      mcpServers: sdkMcpServersInitial,
+      mcpServers: launchModelOnlyCloudBot ? {} : sdkMcpServersInitial,
+      ...(launchModelOnlyCloudBot ? {strictMcpConfig:true} : {}),
       // Product visibility boundary. Permission policy remains separately
       // owned by allowedTools/disallowedTools/canUseTool/Hooks below.
-      tools: [...SDK_BUILTIN_TOOLS],
+      tools: launchModelOnlyCloudBot ? [] : [...SDK_BUILTIN_TOOLS],
       // PRD 0.2.17 — Claude plugin injection. SDK accepts
       // `plugins: [{ type: 'local', path }]`; it then scans each path for
       // .claude-plugin/plugin.json and wires up the contained
@@ -11470,7 +11475,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // already filters to entries that exist on disk as valid plugin roots.
       // Field omitted entirely when no plugins are enabled so empty-array
       // noise doesn't show up in SDK debug output.
-      ...(enabledPluginConfigs.length > 0 ? {
+      ...(launchModelOnlyCloudBot ? {plugins:[]} : enabledPluginConfigs.length > 0 ? {
         plugins: enabledPluginConfigs,
         // SDK/native 0.3.276 delivers paths over stdin, avoiding Windows'
         // command-line limit without changing the enabled plugin inventory.
@@ -11492,7 +11497,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // prompts for plain searches in default mode. Both are read-only tools,
       // so auto-approving matches the existing getPermissionRules() semantics.
       // 'Task' is appended when sub-agents are injected so the model can delegate.
-      allowedTools: [
+      allowedTools: launchModelOnlyCloudBot ? [] : [
         'Grep',
         'Glob',
         ...(launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
@@ -11506,7 +11511,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // model (the parent could be on a 200K model, the sub-agent on a 1M one,
       // or vice versa). The original configState.currentAgentDefinitions is left untouched
       // so config owner fingerprinting and downstream config consumers see clean names.
-      ...(launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
+      ...(launchModelOnlyCloudBot ? {agents:{}} : launchAgentDefinitions && Object.keys(launchAgentDefinitions).length > 0
         ? { agents: launchAgentDefinitions }
         : {}),
       // disallowedTools: group chat deny list + IM-incompatible UI-interaction tools
@@ -11515,6 +11520,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       // Custom permission handling - check rules and prompt user for unknown tools
       // Effective when permissionMode is 'default' or 'acceptEdits' (not 'bypassPermissions')
       canUseTool: async (toolName: string, input: unknown, options: Parameters<CanUseTool>[2]) => {
+        if (launchModelOnlyCloudBot) return {behavior:'deny' as const,message:'Cloud model access does not authorize tools.',interrupt:true};
         console.debug(`[permission] canUseTool checking: ${toolName}, mode=${configState.currentPermissionMode}`);
 
         // First check MCP tool permission based on user's enabled MCP servers
@@ -11580,8 +11586,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
 
           // 1. Widget design contract: `myagents widget [readme|list|<module>] [<module>...]`
           //    — module names limited to `[a-z][a-z0-9-]*`.
-          if (/^myagents[ \t]+widget(?:[ \t]+(?:readme|list))?(?:[ \t]+[a-z][a-z0-9-]*)*[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents widget readme auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+widget(?:[ \t]+(?:readme|list))?(?:[ \t]+[a-z][a-z0-9-]*)*[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} widget readme auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>
@@ -11591,8 +11597,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // 2. Cron / IM read-only surface (zero-arg listings + readme):
           //    `myagents cron list|status|readme [--json]`
           //    `myagents im channels|readme [--json]`
-          if (/^myagents[ \t]+(?:cron[ \t]+(?:list|status|readme)|im[ \t]+(?:channels|readme))(?:[ \t]+--json)?[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents readonly CLI auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+(?:cron[ \t]+(?:list|status|readme)|im[ \t]+(?:channels|readme))(?:[ \t]+--json)?[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} readonly CLI auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>
@@ -11602,8 +11608,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // 3. Cron run history: `myagents cron runs <taskId> [--limit N] [--full] [--json]`
           //    — taskId is an opaque slug-style id (alphanumerics + dash/underscore,
           //    bounded length); --limit takes a small integer. Order-agnostic flags.
-          if (/^myagents[ \t]+cron[ \t]+runs[ \t]+[a-zA-Z0-9_-]{1,64}(?:[ \t]+(?:--limit[ \t]+\d{1,4}|--full|--json))*[ \t]*$/.test(cmd)) {
-            console.log(`[permission] myagents cron runs auto-allowed: ${cmd}`);
+          if (profileCliPattern(/^myagents[ \t]+cron[ \t]+runs[ \t]+[a-zA-Z0-9_-]{1,64}(?:[ \t]+(?:--limit[ \t]+\d{1,4}|--full|--json))*[ \t]*$/).test(cmd)) {
+            console.log(`[permission] ${APP_CLI_NAME} cron runs auto-allowed: ${cmd}`);
             return {
               behavior: 'allow' as const,
               updatedInput: input as Record<string, unknown>
@@ -11699,8 +11705,12 @@ async function startStreamingSession(preWarm = false): Promise<void> {
               interrupt: true,
             };
           }
+          const validation = normalizeAskUserQuestionInput(input);
+          if (!validation.ok) {
+            return { behavior: 'deny' as const, message: validation.error, interrupt: false };
+          }
           console.log('[canUseTool] AskUserQuestion detected, prompting user');
-          const answers = await handleAskUserQuestion(input, options.signal, !options.agentID);
+          const answers = await handleAskUserQuestion(validation.input, options.signal, !options.agentID);
           if (answers === null) {
             return {
               behavior: 'deny' as const,
@@ -11712,8 +11722,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           // looks each answer up by question TEXT (see withQuestionTextAnswerKeys);
           // our renderer keys by index, so we must alias them here or the model is
           // told "The user did not answer the questions." (0.2.119→0.3.158 regression).
-          const inputWithAnswers = input as Record<string, unknown>;
-          const askQuestions = (inputWithAnswers as { questions?: AskUserQuestion[] }).questions;
+          const inputWithAnswers = validation.input;
+          const askQuestions = inputWithAnswers.questions;
           return {
             behavior: 'allow' as const,
             updatedInput: { ...inputWithAnswers, answers: withQuestionTextAnswerKeys(askQuestions, answers) }
@@ -11984,6 +11994,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       );
     }
 
+    if (isUpdateRestartFrozen()) throw new Error('UPDATE_BUSY');
     let sdkQueryResumed = Boolean(resumeFrom);
     try {
       activeQuery = await createGuardedSdkQuery(claudeCodeExecutable, () => query({
@@ -13507,6 +13518,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           continue;
         }
         const handling = await builtinTurnLifecycle.handleSdkResult(resultMessage, recoverRejectedReloadAnchor);
+        if (resultMessage.subtype === 'error_during_execution' && handling !== 'retrying' && nativeResumeBoundaryRecoveryMessage(
+          [resultMessage.result, ...(resultMessage.errors ?? [])].filter(Boolean).join('\n'),
+        )) rejectedNativeResumeBoundary = true;
         if (rewindInputGate && handling !== 'retrying') {
           retireRewoundQueryInput(rewindInputGate);
         }
@@ -13589,7 +13603,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
 
     // Cross-platform SDK subprocess diagnostics. Deterministic executable
     // denials also carry the Rust circuit's next legal probe delay.
-    let userFacingError = nativeResumeBoundaryRecoveryMessage(errorMessage) ?? errorMessage;
+    const nativeResumeError = nativeResumeBoundaryRecoveryMessage(errorMessage);
+    if (nativeResumeError) rejectedNativeResumeBoundary = true;
+    let userFacingError = nativeResumeError ?? errorMessage;
     const sdkSubprocessDiagnostic = diagnoseSdkSubprocessFailure({
       error,
       errorMessage,
@@ -13819,7 +13835,14 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     // They are cleared when the Sidecar Owner is fully released (IM Bot stops).
     resolveTermination!();
 
-    if (wasPreWarming) {
+    if (rejectedNativeResumeBoundary && !lifecycleState.abortRequested && sessionId === queryProductSessionId) {
+      // An exact saved boundary is deterministic: retrying the unchanged UUID
+      // cannot heal it. Keep its metadata and all Product history for recovery.
+      clearPreWarmTimer();
+      drainQueueWithCancellation();
+      setSessionState('idle');
+      console.warn('[agent] native resume boundary rejected; automatic recovery stopped');
+    } else if (wasPreWarming) {
       // sessionRegistered 不修改 — pre-warm 永不触碰此标志
 
       if (!preWarmStartedOk) {

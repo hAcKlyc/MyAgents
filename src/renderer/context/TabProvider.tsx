@@ -1,8 +1,6 @@
 import { LOG_SESSION_HEADER } from '../../shared/types/log';
 import { messageCompletionParams } from '@/analytics/conversation';
-import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
-import { NATIVE_RESUME_BOUNDARY_MESSAGE } from '../../shared/nativeResumeBoundary';
-import { useToastOptional } from '@/components/Toast';
+import { normalizeAskUserQuestionInput, type AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
 import {
   appendStreamingText,
   completeStreamingText,
@@ -943,7 +941,6 @@ export default function TabProvider({
   onUnreadChange,
   claimSessionOpeningTransition,
 }: TabProviderProps) {
-  const toast = useToastOptional();
   const initialPersistedSessionId =
     sessionId && !isPendingSessionId(sessionId) ? sessionId : null;
   // Core state
@@ -1299,8 +1296,9 @@ export default function TabProvider({
     () => peekPermissionRequest(pendingPermissions),
     [pendingPermissions],
   );
-  const [pendingAskUserQuestion, setPendingAskUserQuestion] =
-    useState<AskUserQuestionRequest | null>(null);
+  const [pendingAskUserQuestions, setPendingAskUserQuestions] =
+    useState<AskUserQuestionRequest[]>([]);
+  const pendingAskUserQuestion = pendingAskUserQuestions[0] ?? null;
   const [pendingExitPlanMode, setPendingExitPlanMode] =
     useState<ExitPlanModeRequest | null>(null);
   const [pendingEnterPlanMode, setPendingEnterPlanMode] =
@@ -1610,7 +1608,7 @@ export default function TabProvider({
   // Single source of truth — add new interactive states here to avoid leaking across sessions.
   const clearInteractiveState = useCallback(() => {
     setPendingPermissions([]);
-    setPendingAskUserQuestion(null);
+    setPendingAskUserQuestions([]);
     setPendingExitPlanMode(null);
     setPendingEnterPlanMode(null);
     setQueuedMessages([]);
@@ -4038,7 +4036,6 @@ export default function TabProvider({
               : data && typeof data === 'object' && 'message' in data
                 ? String((data as { message?: unknown }).message ?? '')
                 : '';
-          if (errorMessage === NATIVE_RESUME_BOUNDARY_MESSAGE) toast?.error(errorMessage);
           flushSync(() => {
             // isStreamingRef.current set inside moveStreamingToHistory's updater
             moveStreamingToHistory('failed');
@@ -4353,7 +4350,6 @@ export default function TabProvider({
             userMessageId?: string;
           } | null;
           if (payload?.message) {
-            if (payload.message === NATIVE_RESUME_BOUNDARY_MESSAGE) toast?.error(payload.message);
             recoverStreamingUi('failed');
             setAgentError(payload.message);
             setAgentErrorUserMessageId(payload.userMessageId ?? null);
@@ -4758,12 +4754,21 @@ export default function TabProvider({
             console.log(
               `[TabProvider] Setting pendingAskUserQuestion with ${payload.questions.length} questions`,
             );
-            setPendingAskUserQuestion({
+            const validation = normalizeAskUserQuestionInput(payload);
+            if (!validation.ok) {
+              setAgentError(validation.error);
+              break;
+            }
+            const request: AskUserQuestionRequest = {
               requestId: payload.requestId,
               sessionId: payload.sessionId,
-              questions: payload.questions,
+              questions: validation.input.questions,
               previewFormat: payload.previewFormat,
-            });
+            };
+            // FIFO, keyed by requestId: parallel children and reconnect replay
+            // must not replace an unanswered form or reset its draft.
+            setPendingAskUserQuestions(prev => prev.some(pending => pending.requestId === request.requestId)
+              ? prev : [...prev, request]);
             // Send system notification if user is not focused on the app
             notifyAskUserQuestion();
             if (!isActiveRef.current || shouldNotifyUser()) {
@@ -4843,9 +4848,7 @@ export default function TabProvider({
             payload?.requestId &&
             shouldAcceptInteractiveEvent(payload.sessionId)
           ) {
-            setPendingAskUserQuestion((prev) =>
-              prev?.requestId === payload.requestId ? null : prev,
-            );
+            setPendingAskUserQuestions(prev => prev.filter(request => request.requestId !== payload.requestId));
           }
           break;
         }
@@ -5406,7 +5409,6 @@ export default function TabProvider({
       recoverStreamingUi,
       setStreamingMessage,
       setAgentError,
-      toast,
       postJson,
       loadBornSessionMetadata,
       clearInteractiveState,
@@ -7133,9 +7135,7 @@ export default function TabProvider({
             response.error || 'Question response was not accepted by backend',
           );
         }
-        setPendingAskUserQuestion((prev) =>
-          prev?.requestId === requestId ? null : prev,
-        );
+        setPendingAskUserQuestions(prev => prev.filter(request => request.requestId !== requestId));
       } catch (error) {
         console.error(
           '[TabProvider] Failed to send AskUserQuestion response:',

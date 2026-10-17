@@ -1,7 +1,13 @@
 import { normalizeWorkspacePathIdentity } from '../../shared/workspacePath';
+import {
+  DEFAULT_SIDEBAR_ORGANIZATION,
+  parseSidebarOrganization,
+  type SidebarOrganization,
+} from './sidebarOrganization';
 
 export const GLOBAL_SIDEBAR_PREFERENCE_KEY = 'myagents.globalSidebar.v1';
-export const LEGACY_AUTOMATION_HISTORY_KEY = 'myagents.launcher.showAutomationHistorySessions';
+export const LEGACY_AUTOMATION_HISTORY_KEY =
+  'myagents.launcher.showAutomationHistorySessions';
 
 export type GlobalSidebarPreferredMode = 'expanded' | 'rail';
 
@@ -11,7 +17,8 @@ export interface GlobalSidebarPreferenceV1 {
   expandedWorkspaceKeys: string[];
   hasSeededDefaultExpansion: boolean;
   showAutomationSessions: boolean;
-  sessionView: 'all' | 'favorites';
+  sessionView: 'all' | 'favorites' | 'archived';
+  organization: SidebarOrganization;
 }
 
 export const DEFAULT_GLOBAL_SIDEBAR_PREFERENCE: GlobalSidebarPreferenceV1 = {
@@ -21,6 +28,7 @@ export const DEFAULT_GLOBAL_SIDEBAR_PREFERENCE: GlobalSidebarPreferenceV1 = {
   hasSeededDefaultExpansion: false,
   showAutomationSessions: false,
   sessionView: 'all',
+  organization: DEFAULT_SIDEBAR_ORGANIZATION,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,9 +45,12 @@ function normalizeWorkspaceKeys(value: unknown): string[] {
   return [...keys];
 }
 
-export function parseGlobalSidebarPreference(value: unknown): GlobalSidebarPreferenceV1 | null {
+export function parseGlobalSidebarPreference(
+  value: unknown,
+): GlobalSidebarPreferenceV1 | null {
   if (!isRecord(value) || value.version !== 1) return null;
-  if (value.preferredMode !== 'expanded' && value.preferredMode !== 'rail') return null;
+  if (value.preferredMode !== 'expanded' && value.preferredMode !== 'rail')
+    return null;
   if (typeof value.hasSeededDefaultExpansion !== 'boolean') return null;
 
   return {
@@ -47,14 +58,21 @@ export function parseGlobalSidebarPreference(value: unknown): GlobalSidebarPrefe
     preferredMode: value.preferredMode,
     expandedWorkspaceKeys: normalizeWorkspaceKeys(value.expandedWorkspaceKeys),
     hasSeededDefaultExpansion: value.hasSeededDefaultExpansion,
-    showAutomationSessions: typeof value.showAutomationSessions === 'boolean'
-      ? value.showAutomationSessions
-      : false,
-    sessionView: value.sessionView === 'favorites' ? 'favorites' : 'all',
+    showAutomationSessions:
+      typeof value.showAutomationSessions === 'boolean'
+        ? value.showAutomationSessions
+        : false,
+    sessionView:
+      value.sessionView === 'favorites' || value.sessionView === 'archived'
+        ? value.sessionView
+        : 'all',
+    organization: parseSidebarOrganization(value.organization),
   };
 }
 
-export function loadGlobalSidebarPreference(storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>): GlobalSidebarPreferenceV1 {
+export function loadGlobalSidebarPreference(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+): GlobalSidebarPreferenceV1 {
   const raw = storage.getItem(GLOBAL_SIDEBAR_PREFERENCE_KEY);
   if (raw) {
     try {
@@ -62,7 +80,10 @@ export function loadGlobalSidebarPreference(storage: Pick<Storage, 'getItem' | '
       if (parsed) return parsed;
       console.warn('[GlobalSidebar] Ignoring unsupported sidebar preference');
     } catch (error) {
-      console.warn('[GlobalSidebar] Ignoring malformed sidebar preference:', error);
+      console.warn(
+        '[GlobalSidebar] Ignoring malformed sidebar preference:',
+        error,
+      );
     }
   }
 
@@ -73,9 +94,13 @@ export function loadGlobalSidebarPreference(storage: Pick<Storage, 'getItem' | '
   };
   try {
     storage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify(migrated));
-    if (legacyAutomation !== null) storage.removeItem(LEGACY_AUTOMATION_HISTORY_KEY);
+    if (legacyAutomation !== null)
+      storage.removeItem(LEGACY_AUTOMATION_HISTORY_KEY);
   } catch (error) {
-    console.warn('[GlobalSidebar] Failed to persist migrated sidebar preference:', error);
+    console.warn(
+      '[GlobalSidebar] Failed to persist migrated sidebar preference:',
+      error,
+    );
   }
   return migrated;
 }
@@ -88,7 +113,10 @@ export function saveGlobalSidebarPreference(
     storage.setItem(GLOBAL_SIDEBAR_PREFERENCE_KEY, JSON.stringify(preference));
     return true;
   } catch (error) {
-    console.warn('[GlobalSidebar] Failed to persist sidebar preference:', error);
+    console.warn(
+      '[GlobalSidebar] Failed to persist sidebar preference:',
+      error,
+    );
     return false;
   }
 }
@@ -98,13 +126,18 @@ export function seedDefaultWorkspaceExpansion(
   defaultWorkspacePath: string | null | undefined,
   validWorkspacePaths: readonly string[],
 ): GlobalSidebarPreferenceV1 {
-  if (preference.hasSeededDefaultExpansion || !defaultWorkspacePath) return preference;
+  if (preference.hasSeededDefaultExpansion || !defaultWorkspacePath)
+    return preference;
   const defaultKey = normalizeWorkspacePathIdentity(defaultWorkspacePath);
-  const validKeys = new Set(validWorkspacePaths.map(normalizeWorkspacePathIdentity));
+  const validKeys = new Set(
+    validWorkspacePaths.map(normalizeWorkspacePathIdentity),
+  );
   if (!validKeys.has(defaultKey)) return preference;
   return {
     ...preference,
-    expandedWorkspaceKeys: [...new Set([...preference.expandedWorkspaceKeys, defaultKey])],
+    expandedWorkspaceKeys: [
+      ...new Set([...preference.expandedWorkspaceKeys, defaultKey]),
+    ],
     hasSeededDefaultExpansion: true,
   };
 }
@@ -113,9 +146,14 @@ export function pruneRemovedWorkspaceKeys(
   preference: GlobalSidebarPreferenceV1,
   validWorkspacePaths: readonly string[],
 ): GlobalSidebarPreferenceV1 {
-  const validKeys = new Set(validWorkspacePaths.map(normalizeWorkspacePathIdentity));
-  const expandedWorkspaceKeys = preference.expandedWorkspaceKeys.filter((key) => validKeys.has(key));
-  if (expandedWorkspaceKeys.length === preference.expandedWorkspaceKeys.length) return preference;
+  const validKeys = new Set(
+    validWorkspacePaths.map(normalizeWorkspacePathIdentity),
+  );
+  const expandedWorkspaceKeys = preference.expandedWorkspaceKeys.filter((key) =>
+    validKeys.has(key),
+  );
+  if (expandedWorkspaceKeys.length === preference.expandedWorkspaceKeys.length)
+    return preference;
   return { ...preference, expandedWorkspaceKeys };
 }
 

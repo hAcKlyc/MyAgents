@@ -1,3 +1,4 @@
+import { APP_DATA_DIR_NAME } from '../../shared/appProfile';
 import { existsSync, lstatSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from 'fs';
 import type { Stats } from 'fs';
 import { isAbsolute, join, relative, resolve } from 'path';
@@ -12,7 +13,7 @@ import {
   type GlobalSkillInventorySnapshot,
 } from '../global-skill-inventory';
 
-const MYAGENTS_USER_DIR = '.myagents';
+const MYAGENTS_USER_DIR = APP_DATA_DIR_NAME;
 
 /**
  * Get the MyAgents user directory path.

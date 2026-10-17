@@ -119,6 +119,7 @@ function expectSharedSessionMenu() {
         i18n.t('launcher:rightRail.favorite'),
         i18n.t('common:sessionTags.addTag'),
         i18n.t('launcher:rightRail.viewStats'),
+        i18n.t('launcher:rightRail.archive'),
         i18n.t('launcher:rightRail.delete'),
     ]);
 }

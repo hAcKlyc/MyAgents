@@ -47,7 +47,7 @@ describe('Claude Agent SDK builtin catalog', () => {
     }
   });
 
-  it('keeps control-plane SDK queries tool-free while product sessions use the catalog', () => {
+  it('keeps control-plane queries tool-free and preserves the catalog fallback for ordinary product sessions', () => {
     for (const relativePath of [
       'provider-verify.ts',
       'subscription-auth.ts',
@@ -62,6 +62,13 @@ describe('Claude Agent SDK builtin catalog', () => {
     }
 
     const sessionSource = readFileSync(new URL('agent-session.ts', import.meta.url), 'utf8');
-    expect(sessionSource).toContain('tools: [...SDK_BUILTIN_TOOLS]');
+    expect(sessionSource).toMatch(/\btools:\s*launchModelOnlyCloudBot\s*\?\s*\[\s*\]\s*:\s*\[\s*\.\.\.SDK_BUILTIN_TOOLS\s*\]/);
+  });
+
+  it('closes the validated cloud-model Bot tool surface before inherited permission rules', () => {
+    const sessionSource = readFileSync(new URL('agent-session.ts', import.meta.url), 'utf8');
+    expect(sessionSource).toMatch(/const launchModelOnlyCloudBot\s*=\s*launchHostBotBootstrap\?\.cloud_model\s*!==\s*undefined/);
+    expect(sessionSource).toMatch(/\ballowedTools:\s*launchModelOnlyCloudBot\s*\?\s*\[\s*\]\s*:/);
+    expect(sessionSource).toMatch(/canUseTool:\s*async[^]*?=>\s*\{\s*if\s*\(launchModelOnlyCloudBot\)\s*return\s*\{\s*behavior:\s*'deny'[^}]*interrupt:\s*true/);
   });
 });

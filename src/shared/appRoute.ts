@@ -1,3 +1,4 @@
+import { APP_URL_SCHEME } from './appProfile';
 export interface SpaceHomeAppRoute {
   version: 1;
   name: 'space.home';
@@ -87,21 +88,21 @@ export function serializeAppRoute(route: AppRoute): string {
   if (route.version !== 1) {
     throw new Error('Unsupported app route');
   }
-  if (route.name === 'space.home') return 'myagents://open/v1/spaces';
+  if (route.name === 'space.home') return `${APP_URL_SCHEME}://open/v1/spaces`;
   if (route.name === 'space.tools' || route.name === 'space.issues') {
     if (!isAppRouteId(route.params.spaceId)) throw new Error('Unsupported app route');
-    return `myagents://open/v1/spaces/${encodeURIComponent(route.params.spaceId)}/${route.name === 'space.tools' ? 'tools' : 'issues'}`;
+    return `${APP_URL_SCHEME}://open/v1/spaces/${encodeURIComponent(route.params.spaceId)}/${route.name === 'space.tools' ? 'tools' : 'issues'}`;
   }
   if (route.name === 'space.issue') {
     if (!isAppRouteId(route.params.spaceId) || !isAppRouteId(route.params.issueId)) {
       throw new Error('Unsupported app route');
     }
-    return `myagents://open/v1/spaces/${encodeURIComponent(route.params.spaceId)}/issues/${encodeURIComponent(route.params.issueId)}`;
+    return `${APP_URL_SCHEME}://open/v1/spaces/${encodeURIComponent(route.params.spaceId)}/issues/${encodeURIComponent(route.params.issueId)}`;
   }
   if (route.name !== 'task.comment' || !isAppRouteId(route.params.taskId) || !isAppRouteId(route.params.commentId)) {
     throw new Error('Unsupported app route');
   }
-  return `myagents://open/v1/tasks/${encodeURIComponent(route.params.taskId)}/comments/${encodeURIComponent(route.params.commentId)}`;
+  return `${APP_URL_SCHEME}://open/v1/tasks/${encodeURIComponent(route.params.taskId)}/comments/${encodeURIComponent(route.params.commentId)}`;
 }
 
 export function parseAppRouteUrl(raw: string): AppRoute | null {
@@ -114,7 +115,7 @@ export function parseAppRouteUrl(raw: string): AppRoute | null {
     return null;
   }
   if (
-    url.protocol !== 'myagents:'
+    url.protocol !== `${APP_URL_SCHEME}:`
     || url.hostname !== 'open'
     || url.port
     || url.username
