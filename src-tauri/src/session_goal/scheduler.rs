@@ -369,7 +369,7 @@ fn continuation_work_pending(response: &crate::sidecar::GoalExecuteResponse) -> 
 }
 
 #[cfg(test)]
-mod tests {
+mod continuation_wait_tests {
     use super::*;
 
     #[test]
