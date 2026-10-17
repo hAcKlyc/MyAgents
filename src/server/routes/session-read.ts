@@ -11,6 +11,10 @@ import {
 import { toClientSessionMetadata } from '../utils/session-metadata-wire';
 import type { SessionMessage, SessionMetadata } from '../types/session';
 import { projectSessionActivity } from '../session-engine/observation';
+import { watchStreamManager } from '../inbox/watch-stream';
+import { deliverInboxReply } from '../inbox/reply-deliver';
+import type { WatchSubscriber } from '../../shared/session-watch-protocol';
+import { randomUUID } from 'crypto';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -83,10 +87,21 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
     observedSidecarState?: string;
     networkReturn?: unknown;
     observerScope?: string;
+    mode?: 'continuous' | 'single-turn'; // NEW: subscription mode
+    turnId?: string; // Required for single-turn mode
   } | null;
   if (!body?.watchId || !body.watcherSessionId || !body.targetSessionId) {
     return jsonResponse({ accepted: false, reason: 'invalid body' }, 400);
   }
+
+  // Default to continuous mode (new behavior)
+  const mode = body.mode ?? 'continuous';
+
+  // Validate mode-specific requirements
+  if (mode === 'single-turn' && !body.turnId) {
+    return jsonResponse({ accepted: false, reason: 'turnId required for single-turn mode' }, 400);
+  }
+
   const networkReturn = body.networkReturn == null ? undefined : parseNetworkReturnReference(body.networkReturn);
   if (networkReturn === null || networkReturn && (!body.observerScope || !hasValidInternalCliCredential(request))) {
     return jsonResponse({ accepted: false, reason: 'invalid network return context' }, 401);
@@ -99,7 +114,9 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
   }
 
   const targetSessionState = projectSessionActivity(engine.getLiveSessionState());
-  if (targetSessionState === 'idle') {
+
+  // For continuous mode, don't reject if already idle - they might want future events
+  if (mode === 'single-turn' && targetSessionState === 'idle') {
     const terminal = engine.getSessionCompletionTerminal();
     const latestResult = (await engine.getLatestAssistantResult()).latestResult;
     return jsonResponse({
@@ -113,30 +130,144 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
       ...(terminal ? { turnId: terminal.turnId, terminalStatus: terminal.status } : {}),
     });
   }
-  const turnId = engine.getExecutionTurnId();
-  if (!turnId) return jsonResponse({ accepted: false, delivery: 'error',
-    reason: 'SESSION_TURN_UNAVAILABLE', targetStateAtRegistration: targetSessionState });
-  // No await between observing the execution owner and registering its turn.
-  const watch = registerPendingSessionWatch({
-    watchId: body.watchId,
-    watcherSessionId: body.watcherSessionId,
-    watcherResumeWorkspacePath: body.watcherResumeWorkspacePath,
-    targetSessionId: body.targetSessionId,
-    targetLabel: deriveSessionLabel(getSessionMetadata(body.targetSessionId) ?? null),
-    targetStateAtRegistration: targetSessionState,
-    registeredAt: new Date().toISOString(),
-    turnId,
-    observerScope: networkReturn ? body.observerScope : undefined,
-    ...(networkReturn ? { networkReturn } : {}),
-  });
+
+  const currentTurnId = engine.getExecutionTurnId();
+
+  if (mode === 'continuous') {
+    // NEW: Continuous subscription mode
+    const stream = watchStreamManager.getStream(body.targetSessionId);
+    const managementPort = process.env.MYAGENTS_MANAGEMENT_PORT;
+
+    if (!managementPort && !networkReturn) {
+      return jsonResponse({
+        accepted: false,
+        reason: 'MYAGENTS_MANAGEMENT_PORT not set',
+        mode: 'continuous',
+      }, 500);
+    }
+
+    const subscriber: WatchSubscriber = {
+      watchId: body.watchId,
+      sessionId: body.targetSessionId,
+      mode: 'continuous',
+      createdAt: new Date(),
+      lastHeartbeat: new Date(),
+      notify: async (event) => {
+        const eventWithWatchId = { ...event, watchId: body.watchId };
+
+        if (networkReturn) {
+          // TODO: implement network return delivery
+          console.log('[session-watch] network return delivery not yet implemented for continuous mode');
+          return;
+        }
+
+        // Deliver to local management API
+        try {
+          const resp = await fetch(
+            `http://127.0.0.1:${managementPort}/api/inbox/deliver`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-MyAgents-Internal-Token': process.env.MYAGENTS_INTERNAL_TOKEN || '',
+              },
+              body: JSON.stringify({
+                message: {
+                  messageId: event.eventId,
+                  fromSessionId: body.targetSessionId,
+                  fromLabel: body.targetLabel || 'watched session',
+                  toSessionId: body.watcherSessionId,
+                  text: JSON.stringify(eventWithWatchId, null, 2),
+                  replyBack: false,
+                  timestampMs: Date.now(),
+                  kind: 'event',
+                  inReplyTo: null,
+                  sessionEvent: eventWithWatchId,
+                },
+                resumeWorkspacePath: body.watcherResumeWorkspacePath,
+              }),
+            }
+          );
+
+          if (!resp.ok) {
+            console.warn(`[session-watch] failed to deliver event ${event.eventId}: ${resp.status}`);
+          }
+        } catch (err) {
+          console.error('[session-watch] delivery error:', err);
+        }
+      },
+    };
+
+    stream.subscribe(subscriber);
+
+    return jsonResponse({
+      accepted: true,
+      watchId: body.watchId,
+      mode: 'continuous',
+      targetStateAtRegistration: targetSessionState,
+      currentTurnId,
+    });
+  } else {
+    // LEGACY: Single-turn mode (backward compatibility)
+    if (!currentTurnId) {
+      return jsonResponse({
+        accepted: false,
+        delivery: 'error',
+        reason: 'SESSION_TURN_UNAVAILABLE',
+        targetStateAtRegistration: targetSessionState,
+        mode: 'single-turn',
+      });
+    }
+
+    const watch = registerPendingSessionWatch({
+      watchId: body.watchId,
+      watcherSessionId: body.watcherSessionId,
+      watcherResumeWorkspacePath: body.watcherResumeWorkspacePath,
+      targetSessionId: body.targetSessionId,
+      targetLabel: deriveSessionLabel(getSessionMetadata(body.targetSessionId) ?? null),
+      targetStateAtRegistration: targetSessionState,
+      registeredAt: new Date().toISOString(),
+      turnId: body.turnId || currentTurnId,
+      observerScope: networkReturn ? body.observerScope : undefined,
+      ...(networkReturn ? { networkReturn } : {}),
+    });
+
+    return jsonResponse({
+      accepted: true,
+      watchId: watch.watchId,
+      turnId: body.turnId || currentTurnId,
+      coalesced: watch.watchId !== body.watchId,
+      delivery: 'registered',
+      mode: 'single-turn',
+      targetStateAtRegistration: targetSessionState,
+      pending: pendingSessionWatchCount(),
+    });
+  }
+}
+
+async function handleSessionWatchUnsubscribe(request: Request): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as {
+    watchId?: string;
+    targetSessionId?: string;
+  } | null;
+
+  if (!body?.watchId || !body.targetSessionId) {
+    return jsonResponse({ accepted: false, reason: 'invalid body' }, 400);
+  }
+
+  const engine = getSessionEngine();
+  const runtimeIdentity = engine.getRuntimeIdentity();
+  if (body.targetSessionId !== runtimeIdentity.sessionId) {
+    return jsonResponse({ accepted: false, reason: 'target session mismatch' }, 409);
+  }
+
+  const stream = watchStreamManager.getStream(body.targetSessionId);
+  const removed = stream.unsubscribe(body.watchId);
+
   return jsonResponse({
     accepted: true,
-    watchId: watch.watchId,
-    turnId,
-    coalesced: watch.watchId !== body.watchId,
-    delivery: 'registered',
-    targetStateAtRegistration: targetSessionState,
-    pending: pendingSessionWatchCount(),
+    removed,
+    watchId: body.watchId,
   });
 }
 
@@ -229,6 +360,9 @@ export async function handleSessionReadRoute(
   }
   if (pathname === '/api/session-watch/register'  && request.method === 'POST') {
     return handleSessionWatchRegister(request);
+  }
+  if (pathname === '/api/session-watch/unsubscribe' && request.method === 'POST') {
+    return handleSessionWatchUnsubscribe(request);
   }
   if (pathname === '/api/session-watch/network-remove' && request.method === 'POST') {
     if (!hasValidInternalCliCredential(request)) return jsonResponse({ accepted: false }, 401);
