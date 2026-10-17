@@ -11,27 +11,25 @@
 
 ## Acceptance criteria
 
-- [x] 确认用户指定 canonical Git、实际main、干净独占记录分支；旧共享构建工作树的他人修改保留。
-- [x] 完整制品/自有签名/Apple Accepted及独立验包。
-- [x] 同源隔离UpdaterQA和ModelQA真实路径，Root与独立原件复核。
-- [x] 自有服务器stage不可变058；stable仍057。
-- [ ] 完整外部GET/独审/验签、原子stable和公开复验。
-- [ ] 记录提交、PR/CI、main合入与远端包含核验。
-
-详见 `dev-docs/releases/moxbots-0.5.8.md`。生产正式binary/Reader未运行、日常客户端未升级，QA导航浮层/IME/ASR/Host等限制保留。当前外部完整下载进行中；下一步只在完整证据通过后promote，不改变或退出日常客户端。
+- [x] 用户指定 canonical Git、干净独占记录分支；他人修改不动。
+- [x] 冻结12449正式签名、公证、自有签名及精确实物独审。
+- [x] 同源隔离UpdaterQA真实更新与ModelQA实际社区路径独审，保留正式Runtime未测边界。
+- [x] 自有服务器唯一完整外部GET、实际stat/hash、正常TLS、自有签名及17原件独审。
+- [x] 同任务CAS原子stable058、公开小型复验、发布后独审与own-lock finish；057完整回退保留。
+- [ ] 正常PR/CI/main合入与远端包含核验由发布owner继续，Git ref为最终事实。
 
 ## Completed
 
-冻结12449正式制品、Apple Accepted及自有签名通过；独立核验、同源隔离原生更新、实际社区测试数据回读和退出隔离完成；服务器已stage，未promote。
+正式0.5.8更新分发已发布并核验，tag v0.5.8冻结12449。仅交付记录变更合并最新main85b1d2be（后续产品源码不进058包），没有新的产品代码或制品重建。详细范围/摘要见 `dev-docs/releases/moxbots-0.5.8.md`。
 
 ## Verification
 
-聚合Root报告9cd63dd0、非实现者报告6a8134ca绑定67原件及Root收据；精确完整摘要和边界见发行记录。文档diff --check通过；不因纯记录变更重跑产品测试。
+Root聚合9cd63dd0与独审6a8134ca绑定67原件+Root收据；外部GET独审1c244e19，实际完整336365173B/TAR155e6a68/正常TLS/118909Bps，公钥验签通过；发布后独审012f22b2与Root逐项hash复核，随后server-finish实际通过。源tag远端peeled12449。文档diff --check通过；纯记录变更不重复运行产品测试，仓库CI照常执行。
 
 ## Blockers and unknowns
 
-外部完整下载仍进行中，不能以部分字节替代验签后stable发布。正式binary/Reader未启动，日常客户端0.5.7未升级；本机活动任务不中断。
+生产分发已完成。正式binary/Reader没有运行，日常客户端0.5.7未升级；QA截图导航浮层、IME/ASR/真实Host模型等限制如实保留。最终记录PR/CI/main尚待本分支正常流程，不能把工作分支当主干交付。
 
 ## Next step
 
-继续唯一发布owner的publication-preparation-v3流程：status直到完整GET结束，collect原件并独审，make-public-proof后promote/public-final/finish；随后补最终发布事实、正常CI/PR/main和远端包含核验。
+提交本次最终记录、推送并创建PR，CI通过后正常merge，核实远端main包含记录和冻结source/tag；更新私有最终交付回执并关闭本聊天heartbeat。不得再次start/collect/promote、重打同版或操作日常客户端。
