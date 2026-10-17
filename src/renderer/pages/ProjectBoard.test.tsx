@@ -99,7 +99,7 @@ describe('project board stages and archive history',()=>{
  it('orders waiting, continue and inactive pools and lets inactive conversations be archived',async()=>{
   const old=new Date(100000-8*24*3600*1000).toISOString();
   mocks.data.tasks=[{...task('cron','running'),executionMode:'recurring'}];
-  mocks.data.sessions=[session('fresh'),{...session('stale'),lastActiveAt:old}];
+  mocks.data.sessions=[{...session('fresh'),lastActiveAt:new Date(100000-2*24*3600*1000).toISOString()},{...session('stale'),lastActiveAt:old}];
   mocks.data.activity=new Map([['fresh',{state:'idle',checkedAt:100000}],['stale',{state:'idle',checkedAt:100000}]]);
   mocks.update.mockResolvedValue({...session('stale',true)});
   const {container}=render(<ProjectBoard workspacePath='/work'/>);

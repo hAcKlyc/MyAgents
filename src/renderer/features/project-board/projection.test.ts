@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '@/../shared/types/task';
 import type { SessionMetadata } from '@/api/sessionClient';
-import { boardRowStateKey, filterBoardRows, INACTIVE_AFTER_MS, projectBoardRows, freshActivity, sessionExecutionTime } from './projection';
+import { boardRowStateKey, filterBoardRows, INACTIVE_AFTER_MS, RECENT_FINISH_MS, projectBoardRows, freshActivity, sessionExecutionTime } from './projection';
 const now = 100000;
 const task = (fields: Partial<Task> = {}): Task => ({ id: 't1', name: 'Task', executor: 'agent', workspaceId: 'p', workspacePath: '/work/p', executionMode: 'once', sessionIds: ['s1'], status: 'running', tags: [], createdAt: now, updatedAt: now, statusHistory: [], dispatchOrigin: 'direct', ...fields });
 const session = (fields: Partial<SessionMetadata> = {}): SessionMetadata => ({ id: 's1', title: 'Conversation', agentDir: '/work/p', createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), ...fields });
@@ -93,7 +93,7 @@ describe('project board authority projection', () => {
     const older={state:'idle' as const,checkedAt:now};
     const rows=projectBoardRows({path:'/work/p'},[task({status:'verifying',sessionIds:['s1','s2']})],
       [session({id:'s2',lastActiveAt:new Date(now+100).toISOString()}),session()],new Map([['s1',older],['s2',latest]]),now);
-    expect(rows[0]).toMatchObject({group:'needs',confirmationReason:'verification',activitySessionId:'s2',activity:latest});
+    expect(rows[0]).toMatchObject({group:'done',reviewReady:true,confirmationReason:'verification',activitySessionId:'s2',activity:latest});
     expect(rows[0].task?.status).toBe('verifying');
     expect(rows).toHaveLength(1);
   });
@@ -130,14 +130,15 @@ describe('project board authority projection', () => {
   });
   it('separates idle from unknown and preserves observed duration after a failed refresh', () => {
     const rows=projectBoardRows({path:'/work/p'},[],[session()],new Map([['s1',{state:'idle',checkedAt:now}]]),now);
-    expect(rows[0].group).toBe('idle');
+    expect(rows[0]).toMatchObject({group:'done',reviewReady:true});
+    expect(boardRowStateKey(rows[0],now)).toBe('projectBoard.reviewReady');
     const snapshot={state:'running' as const,checkedAt:now-10000,error:'read failed',execution:{startedAt:'2026-10-14T12:00:00.000Z',elapsedMs:15000}};
     expect(freshActivity(snapshot,now)).toBeUndefined();
     expect(sessionExecutionTime(snapshot,now)).toMatchObject({elapsedMs:15000,stale:true});
   });
   it('merges verification, blocked, stopped and unknown into confirmation with distinct reasons', () => {
     const rows=projectBoardRows({path:'/work/p'}, ['verifying','blocked','stopped','running'].map(status=>task({id:status,status:status as Task['status'],sessionIds:[]})),[],new Map(),now);
-    expect(rows.every(r=>r.group==='needs')).toBe(true);
+    expect(Object.fromEntries(rows.map(r=>[r.task?.id,r.group]))).toEqual({verifying:'done',blocked:'needs',stopped:'needs',running:'needs'});
     expect(rows.map(r=>r.confirmationReason).sort()).toEqual(['blocked','stopped','unknown','verification']);
   });
   it('advances fresh elapsed time locally, freezes stale snapshots, and never fabricates missing timing', () => {
@@ -172,15 +173,25 @@ describe('project board authority projection', () => {
     expect(rows[0].group).toBe('needs');
     expect(filterBoardRows(rows,'needs','CRM')).toHaveLength(1);
   });
-  it('splits idle conversations into continue and inactive pools by last activity', () => {
+  it('puts just-finished conversations in done for review, then idle, then inactive by last activity', () => {
     const later = now + INACTIVE_AFTER_MS + 1;
-    const recent = new Date(later - 1000).toISOString(), old = new Date(now).toISOString();
-    const rows = projectBoardRows({path:'/work/p'},[],[session({id:'recent',lastActiveAt:recent}),session({id:'old',lastActiveAt:old}),session({id:'unseen',lastActiveAt:old})],
-      new Map([['recent',{state:'idle' as const,checkedAt:later}],['old',{state:'idle' as const,checkedAt:later}]]),later);
-    expect(Object.fromEntries(rows.map(r=>[r.id,r.group]))).toEqual({'session:recent':'idle','session:old':'inactive','session:unseen':'inactive'});
+    const fresh = new Date(later - 1000).toISOString(), recent = new Date(later - 2 * RECENT_FINISH_MS).toISOString(), old = new Date(now).toISOString();
+    const rows = projectBoardRows({path:'/work/p'},[],[session({id:'fresh',lastActiveAt:fresh}),session({id:'recent',lastActiveAt:recent}),session({id:'old',lastActiveAt:old}),session({id:'unseen',lastActiveAt:old})],
+      new Map([['fresh',{state:'idle' as const,checkedAt:later}],['recent',{state:'idle' as const,checkedAt:later}],['old',{state:'idle' as const,checkedAt:later}]]),later);
+    expect(Object.fromEntries(rows.map(r=>[r.id,r.group]))).toEqual({'session:fresh':'done','session:recent':'idle','session:old':'inactive','session:unseen':'inactive'});
+    expect(rows.find(r=>r.id==='session:fresh')?.reviewReady).toBe(true);
+    expect(rows.find(r=>r.id==='session:recent')?.reviewReady).toBeUndefined();
     expect(boardRowStateKey(rows.find(r=>r.id==='session:old')!,later)).toBe('projectBoard.inactive');
     const failed = projectBoardRows({path:'/work/p'},[],[session({lastActiveAt:old})],new Map([['s1',{checkedAt:later,error:'unavailable'}]]),later);
     expect(failed[0]).toMatchObject({group:'needs',confirmationReason:'unknown'});
+  });
+  it('moves a finished agent run to done for review only when its Session is observed idle', () => {
+    const run = (activity: Map<string, any>) => projectBoardRows({path:'/work/p'},[task()],[session()],activity,now)[0];
+    expect(run(new Map([['s1',{state:'idle',checkedAt:now}]]))).toMatchObject({group:'done',reviewReady:true});
+    expect(run(new Map([['s1',{state:'running',checkedAt:now}]])).group).toBe('running');
+    expect(run(new Map([['s1',{state:'waiting_user_action',checkedAt:now}]])).group).toBe('needs');
+    expect(run(new Map([['s1',{state:'idle',checkedAt:now-61000}]]))).toMatchObject({group:'needs',confirmationReason:'unknown'});
+    expect(run(new Map())).toMatchObject({group:'needs',confirmationReason:'unknown'});
   });
   it('keeps detector checks with waiting automations instead of running work', () => {
     const rows = projectBoardRows({path:'/work/p'},[task({id:'probe',executionMode:'recurring',executionState:'checking',sessionIds:[]}),task({id:'once',executionState:'checking',sessionIds:[]})],[],new Map(),now);

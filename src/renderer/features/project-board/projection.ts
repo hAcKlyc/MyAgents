@@ -28,10 +28,14 @@ export interface BoardRow {
   activity?: ActivitySnapshot;
   activitySessionId?: string;
   confirmationReason?: ConfirmationReason;
+  /** The agent finished its run and the owner has not accepted it yet; shown in the done group. */
+  reviewReady?: boolean;
   archived: boolean;
 }
 
 export const ACTIVITY_FRESHNESS_MS = 60_000;
+/** A conversation that went idle within this window counts as just finished: it waits in the done group for the owner to accept (archive) or continue it. */
+export const RECENT_FINISH_MS = 24 * 60 * 60 * 1000;
 /** Idle conversations older than this leave the continue pool: convert them to a Task or archive them. */
 export const INACTIVE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -109,6 +113,8 @@ export function projectBoardRows(
       return observation && !freshActivity(observation, now)
         && (observation.state === 'running' || observation.state === 'waiting_user_action');
     });
+    const finishedIdle = !waitingSessionId && !runningSessionId && !goalRunning
+      && activitySessionIds.some(id => freshActivity(activity.get(id), now) === 'idle');
     const confirmationReason: ConfirmationReason | undefined = task.executionState === 'stop_failed' ? 'stopFailed'
       : waitingSessionId ? 'waiting' : runningSessionId || goalRunning ? undefined
       : activitySessionIds.some(id => activity.get(id)?.errorCode === 'execution_failed') ? 'blocked'
@@ -116,10 +122,13 @@ export function projectBoardRows(
       : goalReason ? goalReason
       : lastKnownActive ? 'unknown' : task.status === 'verifying' ? 'verification' : task.status === 'blocked' ? 'blocked'
       : task.status === 'stopped' ? 'stopped'
-      : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' ? 'unknown' : undefined;
+      : task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once' && !finishedIdle ? 'unknown' : undefined;
+    // The run ended (verifying, or an agent run whose Session is observed idle): the owner's next step is acceptance.
+    const reviewReady = confirmationReason === 'verification'
+      || !confirmationReason && !task.executionState && finishedIdle && task.executor === 'agent' && task.status === 'running' && task.executionMode === 'once';
     // A detector check is a cheap trigger probe, not work; it stays with the waiting automation.
     const checkingOnly = task.executionState === 'checking' && task.executionMode !== 'once';
-    const group: BoardGroup = confirmationReason ? 'needs'
+    const group: BoardGroup = reviewReady ? 'done' : confirmationReason ? 'needs'
       : runningSessionId || goalRunning || task.executionState && !checkingOnly || task.executor === 'user' && task.status === 'running' ? 'running'
       : task.status === 'archived' ? 'archived' : task.status === 'done' ? 'done'
       : task.status === 'todo' ? 'todo' : 'scheduled';
@@ -127,7 +136,7 @@ export function projectBoardRows(
       id: `task:${task.id}`, title: task.name, group, task, sessions: executionSessions,
       summary: task.executionError || task.lastExecution?.error || task.description || '',
       updatedAt: task.updatedAt,
-      activity: snapshot, activitySessionId: activitySessionIds.find(id => activity.get(id) === snapshot), confirmationReason, archived: task.status === 'archived',
+      activity: snapshot, activitySessionId: activitySessionIds.find(id => activity.get(id) === snapshot), confirmationReason, reviewReady: reviewReady || undefined, archived: task.status === 'archived',
     };
   });
   for (const session of visibleSessions) {
@@ -142,10 +151,10 @@ export function projectBoardRows(
     const inactive = now - updatedAt > INACTIVE_AFTER_MS;
     const group: BoardGroup = state === 'waiting_user_action' ? 'needs' : state === 'running' || goal === 'running' ? 'running'
       : goal && goal !== 'complete' || lastKnownActive || executionFailed ? 'needs'
-      : session.archived ? 'archived' : !state ? (snapshot || !inactive ? 'needs' : 'inactive') : goal === 'complete' ? 'done' : inactive ? 'inactive' : 'idle';
+      : session.archived ? 'archived' : !state ? (snapshot || !inactive ? 'needs' : 'inactive') : goal === 'complete' || now - updatedAt <= RECENT_FINISH_MS ? 'done' : inactive ? 'inactive' : 'idle';
     rows.push({ id: `session:${session.id}`, title: session.title, sessions: [session], group,
       confirmationReason: group === 'needs' ? executionFailed || goal === 'blocked' ? 'blocked' : state === 'waiting_user_action' ? 'waiting' : goal === 'paused' ? 'paused' : goal === 'stopped' ? 'stopped' : 'unknown' : undefined,
-      archived: Boolean(session.archived),
+      reviewReady: group === 'done' || undefined, archived: Boolean(session.archived),
       summary: session.lastMessagePreview || '', updatedAt, activity: snapshot, activitySessionId: session.id });
   }
   return rows.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
@@ -159,6 +168,7 @@ export function filterBoardRows(rows: readonly BoardRow[], filter: 'all' | 'need
 }
 
 export function boardRowStateKey(row: BoardRow, now: number): string {
+  if (row.reviewReady) return 'projectBoard.reviewReady';
   if (row.confirmationReason) return `projectBoard.reasons.${row.confirmationReason}`;
   if (row.group === 'running') return 'projectBoard.running';
   if (row.group === 'done') return 'badges.status.done';

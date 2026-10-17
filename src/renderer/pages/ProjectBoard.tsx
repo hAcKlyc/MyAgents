@@ -84,7 +84,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
       if (observations.some(a => a.state !== 'idle' || a.error || (boardGoalState(a, Date.now()) !== undefined && boardGoalState(a, Date.now()) !== 'complete'))) throw new Error(t(busyKey));
     }
   }
-  function canConvert(row: BoardRow): boolean { return !row.task && row.group === 'idle' && row.sessions.length === 1; }
+  function canConvert(row: BoardRow): boolean { return !row.task && (row.group === 'idle' || row.group === 'done' && !!row.reviewReady) && row.sessions.length === 1; }
   /** An idle conversation with a deliverable becomes a real Task bound to the same Session,
    * so it can be run, verified and completed instead of staying a pool entry. */
   async function convertToTask(row: BoardRow) {
@@ -183,7 +183,7 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
         : view === 'board' ? <>
           <div className="pb-columns" style={groups.length < 4 ? { gridTemplateColumns: `repeat(${groups.length}, minmax(0, 1fr))` } : undefined}>
             {groups.map(g => <section key={g} className={`pb-column ${expanded.has(g) ? 'expanded' : ''}`} data-group={g} aria-label={t(`projectBoard.groups.${g}`)}>
-              <button type="button" className="pb-column-head" aria-expanded={compact ? expanded.has(g) : true} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(g)) next.delete(g); else next.add(g); return next; })}>
+              <button type="button" className="pb-column-head" title={g === 'done' ? t('projectBoard.doneHint') : undefined} aria-expanded={compact ? expanded.has(g) : true} onClick={() => setExpanded(current => { const next = new Set(current); if (next.has(g)) next.delete(g); else next.add(g); return next; })}>
                 <span>{t(`projectBoard.groups.${g}`)}</span><span className="count">{visible.filter(r => r.group === g).length}</span><span className="chevron" aria-hidden="true">›</span></button>
               <div className="pb-cards">{visible.filter(r => r.group === g).map(card)}{!visible.some(r => r.group === g) && <div className="pb-column-empty">{t('projectBoard.groupEmpty')}</div>}</div>
             </section>)}
