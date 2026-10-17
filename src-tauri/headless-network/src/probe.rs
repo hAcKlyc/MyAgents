@@ -206,6 +206,8 @@ fn message_type(message: &ServerMessage) -> &'static str {
         ServerMessage::OpPrepared { .. } => "op.prepared",
         ServerMessage::Permit { .. } => "permit.result",
         ServerMessage::RouteClosed { .. } => "route.closed",
+        ServerMessage::RouteSuspended { .. } => "route.suspended",
+        ServerMessage::RouteResumed { .. } => "route.resumed",
         ServerMessage::RouteOpened { .. } => "route.opened",
         ServerMessage::RouteRebound { .. } => "route.rebound",
         ServerMessage::Changed { .. } => "change.available",

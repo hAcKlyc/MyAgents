@@ -238,7 +238,7 @@ Session Inbox 与用户手动 query 的投递时机独立：通用 `chatQueueRes
 
 跨设备协作使用 Rust App 的 `agent_network` 传输适配，同样进入上述原 Inbox/SessionEngine；不建立另一 SessionStore 或执行队列。本机 `PreparedFreshSession` / `PreparedDelivery` 在冷准备后释放 lifecycle 锁，保留原 transient owner，取得网络 permit 后重读原 identity/generation，再交给原 Node owner。最后本机 handoff 后属于在途；真实 `accepted` / `delivered` 以 Node 收据为准，网络 permit 不是业务收据。远端 handoff 的 HTTP ACK 丢失返回 `Unconfirmed`，包括内部无回推调用；准备失败和明确 `accepted:false` 仍拒绝，不自动重派。
 
-内部跨设备请求的 `networkReturn` 是 Rust 验证后的 opaque 关联，存于原 turn/watch owner。目标原 terminal 回调通过 App 当前 scope 的 return registry 返回，来源仍投递自己的原 Inbox，拿到真实 source settlement 后再 ACK。`watch` 复用原 one-shot registry/formatter，返回 idle/error 不创建模型 turn。来源未公开或目标退出网络不取消已接纳工作；真实断线销毁关联且无离线补投。完整身份、加密和传输边界见 `agent_network.md`。
+内部跨设备请求的 `networkReturn` 是 Rust 验证后的 opaque 关联，存于原 turn/watch owner。目标原 terminal 回调通过 App 当前身份 scope 的 return registry 返回，来源仍投递自己的原 Inbox，拿到真实 source settlement 后再 ACK。`watch` 复用原 one-shot registry/formatter，返回 idle/error 不创建模型 turn。来源未公开或目标退出网络不取消已接纳工作；双方协商恢复能力后，临时断线可在有界窗口内恢复终态投递，不重放原请求；旧版本仍为连接内回传。身份、加密、恢复期限与失效通知规则见 `agent_network.md`。
 当前 Session 的文本分页由 Rust Management API 发往 owner Sidecar 的 `POST /api/internal/session/text-page`；该路径必须登记为 Session role 路由。否则历史 Session 可从持久化读取，当前 Session 却会在生产 role gate 返回 404。
 
 Desktop、Goal、Task、Inbox、IM、Heartbeat 和 Memory 的执行都经 SessionEngine；DSH 的 `integrated` kind 不能落入 SDK enqueue/config 路径。DSH 强制发送先 interrupt 并持久化 partial terminal，再提升目标 queue item。跨 Sidecar Inbox 只有收到可解析的 `{ accepted: true }` 才算投递成功，HTTP 2xx 的协议错误必须保留上层重试权。

@@ -11,7 +11,8 @@ export type SessionEventType =
   | 'watch.completed'
   | 'watch.error'
   | 'space.issue_delivery'
-  | 'task.comment';
+  | 'task.comment'
+  | 'network.return_unavailable';
 
 export type SourceNotification = 'auto' | 'none';
 export type SessionEventStatus = 'ok' | 'error';
@@ -104,7 +105,17 @@ export interface TaskCommentEvent extends SessionEventBase {
   };
 }
 
-export type SessionEvent = SendRequestEvent | SendResultEvent | WatchEvent | SpaceIssueDeliveryEvent | TaskCommentEvent;
+/** Local App transport notification; never accepted as a remote return event. */
+export interface NetworkReturnUnavailableEvent extends SessionEventBase {
+  type: 'network.return_unavailable';
+  targetSessionId: string;
+  requestEventId?: string;
+  watchId?: string;
+  reason: string;
+  payload: string;
+}
+
+export type SessionEvent = NetworkReturnUnavailableEvent | SendRequestEvent | SendResultEvent | WatchEvent | SpaceIssueDeliveryEvent | TaskCommentEvent;
 type RenderableSessionEvent = Exclude<SessionEvent, SpaceIssueDeliveryEvent | TaskCommentEvent>;
 
 const HTML_ESCAPE_MAP: Record<string, string> = {
@@ -195,6 +206,9 @@ function renderOpenTag(event: RenderableSessionEvent): string {
       : null,
     isWatchEvent(event) ? attr('final_state', event.finalState) : null,
     isWatchEvent(event) ? attr('terminal_reason', event.terminalReason) : null,
+    event.type === 'network.return_unavailable' ? attr('reason', event.reason) : null,
+    event.type === 'network.return_unavailable' ? attr('request_event_id', event.requestEventId) : null,
+    event.type === 'network.return_unavailable' ? attr('watch_id', event.watchId) : null,
     attr('created_at', event.createdAt),
   ].filter(Boolean);
 
@@ -203,6 +217,8 @@ function renderOpenTag(event: RenderableSessionEvent): string {
 
 function summaryForEvent(event: RenderableSessionEvent): string {
   switch (event.type) {
+    case 'network.return_unavailable':
+      return 'MyAgents could not deliver the remote result after connection recovery ended. This notification does not determine whether the remote task succeeded or failed.';
     case 'send.request':
       if (event.sourceKind === 'external-cli') {
         return 'An authenticated local program sent this session a one-way request through MyAgents. There is no source Session and no automatic result delivery.';

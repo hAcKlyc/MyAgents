@@ -499,6 +499,7 @@ mod tests {
             membership_revision: 2,
             enable_revision: 3,
             freshness_ms: 5000,
+            recoverable: false,
             return_route_id: "00000000-0000-0000-0000-000000000011".into(),
         };
         (incoming, action.id, permit)

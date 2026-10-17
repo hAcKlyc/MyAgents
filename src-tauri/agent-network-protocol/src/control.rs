@@ -75,8 +75,11 @@ pub enum ServerMessage {
     },
     #[serde(rename = "credit.available")]
     Credit {
-        #[serde(flatten)] scope: ConnectionScope,
-        channel_id: String, sequence: u64, received_bytes: u64,
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        channel_id: String,
+        sequence: u64,
+        received_bytes: u64,
     },
     #[serde(rename = "channel.ready")]
     ChannelReady {
@@ -115,7 +118,24 @@ pub enum ServerMessage {
         membership_revision: u64,
         enable_revision: u64,
         freshness_ms: u64,
+        #[serde(default)]
+        recoverable: bool,
         return_route_id: String,
+    },
+    #[serde(rename = "route.suspended")]
+    RouteSuspended {
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        return_route_id: String,
+        remaining_ms: u64,
+    },
+    #[serde(rename = "route.resumed")]
+    RouteResumed {
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        return_route_id: String,
+        source_connection_epoch: String,
+        target_connection_epoch: String,
     },
     #[serde(rename = "route.closed")]
     RouteClosed {
@@ -135,6 +155,8 @@ pub enum ServerMessage {
         source_connection_epoch: String,
         target_connection_epoch: String,
         target_mount_id: String,
+        #[serde(default)]
+        recoverable: bool,
     },
     #[serde(rename = "route.rebound")]
     RouteRebound {
@@ -168,6 +190,8 @@ impl ServerMessage {
             | Self::OpPrepared { scope, .. }
             | Self::Permit { scope, .. }
             | Self::RouteClosed { scope, .. }
+            | Self::RouteSuspended { scope, .. }
+            | Self::RouteResumed { scope, .. }
             | Self::RouteOpened { scope, .. }
             | Self::RouteRebound { scope, .. }
             | Self::Changed { scope, .. } => Some(scope),
@@ -287,13 +311,24 @@ pub enum ClientMessage {
     },
     #[serde(rename = "credit.release")]
     Credit {
-        #[serde(flatten)] scope: ConnectionScope,
-        channel_id: String, sequence: u64, received_bytes: u64,
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        channel_id: String,
+        sequence: u64,
+        received_bytes: u64,
+    },
+    #[serde(rename = "route.resume")]
+    Resume {
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        return_route_id: String,
     },
     #[serde(rename = "route.rebind")]
     Rebind {
-        #[serde(flatten)] scope: ConnectionScope,
-        return_route_id: String, channel_id: String,
+        #[serde(flatten)]
+        scope: ConnectionScope,
+        return_route_id: String,
+        channel_id: String,
     },
     #[serde(rename = "route.close")]
     CloseRoute {
