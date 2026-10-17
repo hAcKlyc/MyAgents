@@ -4,11 +4,11 @@ import type { Task } from '@/../shared/types/task';
 import type { SessionMetadata } from '@/api/sessionClient';
 import type { useProjectBoardData } from '@/features/project-board/useProjectBoardData';
 import ProjectBoard from './ProjectBoard';
-const mocks = vi.hoisted(()=>({data:null as unknown as ReturnType<typeof useProjectBoardData>,archive:vi.fn(),status:vi.fn(),get:vi.fn(),update:vi.fn(),observe:vi.fn(),apply:vi.fn()}));
+const mocks = vi.hoisted(()=>({data:null as unknown as ReturnType<typeof useProjectBoardData>,archive:vi.fn(),status:vi.fn(),get:vi.fn(),update:vi.fn(),observe:vi.fn(),apply:vi.fn(),create:vi.fn(),append:vi.fn()}));
 vi.mock('@/hooks/useConfig',()=>({useConfig:()=>({projects:[{id:'p',name:'Project',path:'/work'}]})}));
 vi.mock('@/features/project-board/useProjectBoardData',()=>({useProjectBoardData:()=>mocks.data}));
 vi.mock('@/features/project-board/useBoardOverlay',()=>({useBoardOverlay:()=>false}));
-vi.mock('@/api/taskCenter',()=>({taskArchive:mocks.archive,taskUpdateStatus:mocks.status,taskGet:mocks.get,taskRun:vi.fn(),taskRerun:vi.fn()}));
+vi.mock('@/api/taskCenter',()=>({taskArchive:mocks.archive,taskUpdateStatus:mocks.status,taskGet:mocks.get,taskRun:vi.fn(),taskRerun:vi.fn(),taskCreateDirect:mocks.create,taskAppendSession:mocks.append}));
 vi.mock('@/api/sessionClient',()=>({updateSession:mocks.update}));
 vi.mock('@/features/project-board/activity',()=>({readBoardSessionActivity:mocks.observe}));
 vi.mock('@/hooks/taskCenterStore',()=>({actions:{beginSessionMetadataMutation:()=>1,applySessionMetadata:mocks.apply}}));
@@ -107,5 +107,27 @@ describe('project board stages and archive history',()=>{
   expect(container.querySelector('details.pb-other[open] [data-board-row="session:fresh"]')).toBeTruthy();
   fireEvent.click(within(container.querySelector('[data-board-row="session:stale"]')!.closest('article')!).getByRole('button',{name:'projectBoard.archive'}));
   await waitFor(()=>expect(mocks.update).toHaveBeenCalledWith('stale',{archived:true}));
+ });
+
+ it('converts an idle conversation into a Task bound to the same Session',async()=>{
+  mocks.data.sessions=[session('talk')];
+  mocks.data.activity=new Map([['talk',{state:'idle',checkedAt:100000}]]);
+  mocks.create.mockResolvedValue({...task('new','todo'),sessionIds:['talk']});
+  mocks.append.mockResolvedValue(task('new','todo'));
+  const {container}=render(<ProjectBoard workspacePath='/work'/>);
+  const card=container.querySelector('[data-board-row="session:talk"]')!.closest('article')!;
+  fireEvent.click(within(card).getByRole('button',{name:'projectBoard.convert'}));
+  await waitFor(()=>expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({name:'talk',workspaceId:'p',workspacePath:'/work',executionMode:'once',runMode:'single-session',preselectedSessionId:'talk'})));
+  expect(mocks.append).toHaveBeenCalledWith('new','talk');
+ });
+ it('refuses to convert a conversation that is no longer idle',async()=>{
+  mocks.data.sessions=[session('talk')];
+  mocks.data.activity=new Map([['talk',{state:'idle',checkedAt:100000}]]);
+  mocks.observe.mockResolvedValue({state:'running',checkedAt:100001});
+  const {container}=render(<ProjectBoard workspacePath='/work'/>);
+  const card=container.querySelector('[data-board-row="session:talk"]')!.closest('article')!;
+  fireEvent.click(within(card).getByRole('button',{name:'projectBoard.convert'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('projectBoard.convertBusy');
+  expect(mocks.create).not.toHaveBeenCalled();
  });
 });

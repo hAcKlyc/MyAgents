@@ -4,7 +4,7 @@ import { useConfig } from '@/hooks/useConfig';
 import { GridIcon, ListIcon, PlusIcon, SearchIcon } from '@/components/icons';
 import { CUSTOM_EVENTS } from '@/../shared/constants';
 import { workspacePathsEqual } from '@/../shared/workspacePath';
-import { taskArchive, taskUpdateStatus } from '@/api/taskCenter';
+import { taskAppendSession, taskArchive, taskCreateDirect, taskUpdateStatus } from '@/api/taskCenter';
 import { updateSession } from '@/api/sessionClient';
 import { actions as sessionActions } from '@/hooks/taskCenterStore';
 import { readBoardSessionActivity } from '@/features/project-board/activity';
@@ -76,21 +76,44 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
   function canOrganize(row: BoardRow): boolean {
     return row.group === 'archived' || row.group === 'done' || !row.task && (row.group === 'idle' || row.group === 'inactive');
   }
+  /** Recheck the actual owner before a user-requested archive or conversion. This read
+   * neither starts nor stops an execution; concurrent activity stays visible. */
+  async function assertSessionsIdle(sessionIds: readonly string[], busyKey: string) {
+    for (let start = 0; start < sessionIds.length; start += 4) {
+      const observations = await Promise.all(sessionIds.slice(start, start + 4).map(id => readBoardSessionActivity(id, workspacePath)));
+      if (observations.some(a => a.state !== 'idle' || a.error || (boardGoalState(a, Date.now()) !== undefined && boardGoalState(a, Date.now()) !== 'complete'))) throw new Error(t(busyKey));
+    }
+  }
+  function canConvert(row: BoardRow): boolean { return !row.task && row.group === 'idle' && row.sessions.length === 1; }
+  /** An idle conversation with a deliverable becomes a real Task bound to the same Session,
+   * so it can be run, verified and completed instead of staying a pool entry. */
+  async function convertToTask(row: BoardRow) {
+    const session = row.sessions[0];
+    if (organizingId || !canConvert(row) || !session) return;
+    setOrganizingId(row.id); setOrganizingError(null);
+    let createdId: string | undefined;
+    try {
+      if (!project?.id) throw new Error(t('projectBoard.unavailable'));
+      await assertSessionsIdle([session.id], 'projectBoard.convertBusy');
+      const title = (session.title || t('projectBoard.conversation')).trim();
+      const task = await taskCreateDirect({
+        name: title.slice(0, 120), executor: 'agent', workspaceId: project.id, workspacePath,
+        executionMode: 'once', runMode: 'single-session', preselectedSessionId: session.id,
+        taskMdContent: t('projectBoard.convertTaskDoc', { title, summary: row.summary || t('projectBoard.noSummary') }),
+      });
+      createdId = task.id;
+      await taskAppendSession(task.id, session.id);
+      setSelectedId(`task:${task.id}`);
+    } catch (error) {
+      setOrganizingError(createdId ? `${t('projectBoard.convertLinkFailed')} ${String(error)}` : String(error));
+    } finally { setOrganizingId(null); data.refresh(); }
+  }
   async function organize(row: BoardRow) {
     if (organizingId || !canOrganize(row)) return;
     const restore = row.group === 'archived';
     setOrganizingId(row.id); setOrganizingError(null);
     try {
-      if (!restore) {
-        // Recheck the actual owner before a user-requested archive. This read
-        // neither starts nor stops an execution; concurrent activity remains
-        // visible even if an archived record receives a new run afterwards.
-        const sessionIds = [...new Set(row.task?.sessionIds ?? row.sessions.map(s => s.id))];
-        for (let start = 0; start < sessionIds.length; start += 4) {
-          const observations = await Promise.all(sessionIds.slice(start, start + 4).map(id => readBoardSessionActivity(id, workspacePath)));
-          if (observations.some(a => a.state !== 'idle' || a.error || (boardGoalState(a, Date.now()) !== undefined && boardGoalState(a, Date.now()) !== 'complete'))) throw new Error(t('projectBoard.archiveBusy'));
-        }
-      }
+      if (!restore) await assertSessionsIdle([...new Set(row.task?.sessionIds ?? row.sessions.map(s => s.id))], 'projectBoard.archiveBusy');
       if (row.task) {
         if (restore) await taskUpdateStatus({ id: row.task.id, status: 'done' });
         else await taskArchive(row.task.id);
@@ -125,7 +148,8 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
       </time>
       <div className="pb-card-bottom">
         <button type="button" className="pb-card-action" onClick={() => select(row)}>{t(row.confirmationReason === 'verification' ? 'projectBoard.inspect' : row.group === 'needs' ? 'projectBoard.handle' : 'projectBoard.details')} ↗</button>
-        {canOrganize(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} onClick={() => { void organize(row); }}>{t(row.group === 'archived' ? 'projectBoard.restore' : 'projectBoard.archive')}</button>}
+        {canConvert(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} title={t('projectBoard.convertHint')} onClick={() => { void convertToTask(row); }}>{t('projectBoard.convert')}</button>}
+        {canOrganize(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} title={row.group === 'archived' ? undefined : t('projectBoard.archiveHint')} onClick={() => { void organize(row); }}>{t(row.group === 'archived' ? 'projectBoard.restore' : 'projectBoard.archive')}</button>}
         {row.sessions.length === 1 && <button type="button" className="pb-card-action pb-enter-session" onClick={() => openSession(row.sessions[0].id)} aria-label={t('projectBoard.enterSessionFor', { title: row.sessions[0].title })}>{t('projectBoard.enterSession')} ↗</button>}
       </div>
     </article>;
@@ -167,14 +191,14 @@ export default function ProjectBoard({ workspacePath, isActive = true }: { works
           {scope === 'work' && filter === 'all' && auxiliaryGroups.map(({group, rows: extraRows}) => !!extraRows.length && <details key={group} className="pb-other" open={otherOpen.has(group)} onToggle={e => { const open = e.currentTarget.open; setOtherOpen(current => { const next = new Set(current); if (open) next.add(group); else next.delete(group); return next; }); }}><summary>{t(`projectBoard.groups.${group}`)} · {extraRows.length}</summary>
             <p className="pb-meta">{t(`projectBoard.${group}Hint`)}</p><div className="pb-other-grid">{extraRows.map(card)}</div></details>)}
         </> : <div className="pb-table-wrap"><table className="pb-table"><thead><tr><th>{t('projectBoard.task')}</th><th>{t('projectBoard.status')}</th><th className="summary-col">{t('projectBoard.summary')}</th><th className="time-col">{t('projectBoard.updated')}</th><th>{t('projectBoard.action')}</th></tr></thead>
-          <tbody>{visible.map(row => <tr key={row.id}><td><button type="button" ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className="title-button" onClick={() => select(row)}>{row.title}</button><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div><SessionWorkProgress snapshot={row.activity} now={data.now} /></td><td><span className={`pb-badge ${row.group}`}>{rowState(row)}</span><SessionExecutionTime snapshot={row.activity} now={data.now} /></td><td className="summary-col summary">{row.summary}</td><td className="time-col pb-meta">{formatTime(new Date(row.updatedAt).toISOString())}</td><td><button type="button" className="pb-button" onClick={() => select(row)}>{t('projectBoard.details')}</button>{canOrganize(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} onClick={() => { void organize(row); }}>{t(row.group === 'archived' ? 'projectBoard.restore' : 'projectBoard.archive')}</button>}{row.sessions.length === 1 && <button type="button" className="pb-card-action pb-enter-session" onClick={() => openSession(row.sessions[0].id)} aria-label={t('projectBoard.enterSessionFor', { title: row.sessions[0].title })}>{t('projectBoard.enterSession')} ↗</button>}</td></tr>)}</tbody></table></div>}
+          <tbody>{visible.map(row => <tr key={row.id}><td><button type="button" ref={node => { if (node) rowRefs.current.set(row.id, node); else rowRefs.current.delete(row.id); }} className="title-button" onClick={() => select(row)}>{row.title}</button><div className="pb-meta">{t(row.task ? 'projectBoard.task' : 'projectBoard.conversation')}</div><SessionWorkProgress snapshot={row.activity} now={data.now} /></td><td><span className={`pb-badge ${row.group}`}>{rowState(row)}</span><SessionExecutionTime snapshot={row.activity} now={data.now} /></td><td className="summary-col summary">{row.summary}</td><td className="time-col pb-meta">{formatTime(new Date(row.updatedAt).toISOString())}</td><td><button type="button" className="pb-button" onClick={() => select(row)}>{t('projectBoard.details')}</button>{canConvert(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} title={t('projectBoard.convertHint')} onClick={() => { void convertToTask(row); }}>{t('projectBoard.convert')}</button>}{canOrganize(row) && <button type="button" className="pb-card-action" disabled={!!organizingId} title={row.group === 'archived' ? undefined : t('projectBoard.archiveHint')} onClick={() => { void organize(row); }}>{t(row.group === 'archived' ? 'projectBoard.restore' : 'projectBoard.archive')}</button>}{row.sessions.length === 1 && <button type="button" className="pb-card-action pb-enter-session" onClick={() => openSession(row.sessions[0].id)} aria-label={t('projectBoard.enterSessionFor', { title: row.sessions[0].title })}>{t('projectBoard.enterSession')} ↗</button>}</td></tr>)}</tbody></table></div>}
       </div>
       <footer className="pb-footer"><span>{data.checkedAt ? t('projectBoard.snapshotAt', { time: formatTime(new Date(data.checkedAt).toISOString()) }) : t('projectBoard.snapshotPending')}{unknownCount ? ` · ${t('projectBoard.unknownCount', { count: unknownCount })}` : ''}</span>
         <span>{data.unobservedCount ? t('projectBoard.boundedSnapshot', { count: data.unobservedCount }) : t('projectBoard.snapshotHint')}</span></footer>
     </div>
       {selected && <ProjectBoardDetail key={selected.id} row={selected} workspacePath={workspacePath} isActive={isActive} now={data.now}
         draft={drafts[selected.id] ?? ''} onDraftChange={value => setDrafts(current => ({ ...current, [selected.id]: value }))}
-        onOrganize={canOrganize(selected) ? () => { void organize(selected); } : undefined} organizing={!!organizingId}
+        onOrganize={canOrganize(selected) ? () => { void organize(selected); } : undefined} onConvert={canConvert(selected) ? () => { void convertToTask(selected); } : undefined} organizing={!!organizingId}
         onClose={closeDetail} onOpenSession={openSession} onChanged={data.refresh} />}
     </div>
   </section>;
