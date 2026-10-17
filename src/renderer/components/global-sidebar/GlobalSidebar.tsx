@@ -64,6 +64,7 @@ import {
   useRef,
   useState,
   type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
@@ -137,7 +138,11 @@ import { isSupportedLocale } from '../../../shared/i18n';
 import { isAutomationHistoryOrigin } from '../../../shared/session-origin';
 import { normalizeWorkspacePathIdentity, workspacePathsEqual } from '../../../shared/workspacePath';
 import {
+  clampGlobalSidebarWidth,
   DEFAULT_GLOBAL_SIDEBAR_PREFERENCE,
+  GLOBAL_SIDEBAR_DEFAULT_WIDTH,
+  GLOBAL_SIDEBAR_MAX_WIDTH,
+  GLOBAL_SIDEBAR_MIN_WIDTH,
   loadGlobalSidebarPreference,
   pruneRemovedWorkspaceKeys,
   resolveGlobalSidebarMode,
@@ -837,6 +842,75 @@ export default memo(function GlobalSidebar({
     }));
   }, [expanded, forceRail, updatePreference]);
 
+  // The width lives on :root because the titlebar/content follow rules in
+  // index.css read it from outside the <aside> subtree.
+  const [resizingWidth, setResizingWidth] = useState<number | null>(null);
+  const resizeDragRef = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
+  const appliedWidth = resizingWidth ?? preference.expandedWidth;
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--global-sidebar-expanded-width', `${appliedWidth}px`);
+  }, [appliedWidth]);
+
+  useEffect(() => () => {
+    document.documentElement.style.removeProperty('--global-sidebar-expanded-width');
+  }, []);
+
+  const commitSidebarWidth = useCallback((width: number) => {
+    const next = clampGlobalSidebarWidth(width);
+    updatePreference((current) => (
+      current.expandedWidth === next ? current : { ...current, expandedWidth: next }
+    ));
+  }, [updatePreference]);
+
+  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeDragRef.current = {
+      startX: event.clientX,
+      startWidth: preference.expandedWidth,
+      width: preference.expandedWidth,
+    };
+    setResizingWidth(preference.expandedWidth);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [preference.expandedWidth]);
+
+  const handleResizePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    drag.width = clampGlobalSidebarWidth(drag.startWidth + event.clientX - drag.startX);
+    setResizingWidth(drag.width);
+  }, []);
+
+  const endResize = useCallback((commit: boolean) => {
+    const drag = resizeDragRef.current;
+    if (!drag) return;
+    resizeDragRef.current = null;
+    setResizingWidth(null);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    if (commit) commitSidebarWidth(drag.width);
+  }, [commitSidebarWidth]);
+
+  const handleResizeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 32 : 8;
+    let next: number | null = null;
+    if (event.key === 'ArrowLeft') next = preference.expandedWidth - step;
+    else if (event.key === 'ArrowRight') next = preference.expandedWidth + step;
+    else if (event.key === 'Home') next = GLOBAL_SIDEBAR_MIN_WIDTH;
+    else if (event.key === 'End') next = GLOBAL_SIDEBAR_MAX_WIDTH;
+    if (next === null) return;
+    event.preventDefault();
+    commitSidebarWidth(next);
+  }, [commitSidebarWidth, preference.expandedWidth]);
+
+  useEffect(() => () => {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
   const handleToggleWorkspace = useCallback((project: Project) => {
     const key = normalizeWorkspacePathIdentity(project.path);
     updatePreference((current) => {
@@ -1432,6 +1506,28 @@ export default memo(function GlobalSidebar({
             </span>
           </div>
         </div>
+        {expanded && !forceRail && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('globalSidebar.resize')}
+            aria-valuemin={GLOBAL_SIDEBAR_MIN_WIDTH}
+            aria-valuemax={GLOBAL_SIDEBAR_MAX_WIDTH}
+            aria-valuenow={appliedWidth}
+            tabIndex={0}
+            data-global-sidebar-resize-handle
+            data-resizing={resizingWidth !== null ? 'true' : undefined}
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={() => endResize(true)}
+            onPointerCancel={() => endResize(false)}
+            onDoubleClick={() => commitSidebarWidth(GLOBAL_SIDEBAR_DEFAULT_WIDTH)}
+            onKeyDown={handleResizeKeyDown}
+            className="group/resize absolute inset-y-0 -right-1 z-50 flex w-2 cursor-col-resize justify-center focus-visible:outline-none"
+          >
+            <span className="h-full w-px bg-transparent transition-colors group-hover/resize:bg-[var(--accent)] group-focus-visible/resize:bg-[var(--accent)] group-data-[resizing=true]/resize:bg-[var(--accent)]" />
+          </div>
+        )}
       </aside>
 
       {!expanded && flyoutOpen && (

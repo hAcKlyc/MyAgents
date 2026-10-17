@@ -9,11 +9,21 @@ export const GLOBAL_SIDEBAR_PREFERENCE_KEY = 'myagents.globalSidebar.v1';
 export const LEGACY_AUTOMATION_HISTORY_KEY =
   'myagents.launcher.showAutomationHistorySessions';
 
+export const GLOBAL_SIDEBAR_DEFAULT_WIDTH = 256;
+export const GLOBAL_SIDEBAR_MIN_WIDTH = 220;
+export const GLOBAL_SIDEBAR_MAX_WIDTH = 420;
+
+export function clampGlobalSidebarWidth(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return GLOBAL_SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(GLOBAL_SIDEBAR_MAX_WIDTH, Math.max(GLOBAL_SIDEBAR_MIN_WIDTH, Math.round(value)));
+}
+
 export type GlobalSidebarPreferredMode = 'expanded' | 'rail';
 
 export interface GlobalSidebarPreferenceV1 {
   version: 1;
   preferredMode: GlobalSidebarPreferredMode;
+  expandedWidth: number;
   expandedWorkspaceKeys: string[];
   hasSeededDefaultExpansion: boolean;
   showAutomationSessions: boolean;
@@ -24,6 +34,7 @@ export interface GlobalSidebarPreferenceV1 {
 export const DEFAULT_GLOBAL_SIDEBAR_PREFERENCE: GlobalSidebarPreferenceV1 = {
   version: 1,
   preferredMode: 'expanded',
+  expandedWidth: GLOBAL_SIDEBAR_DEFAULT_WIDTH,
   expandedWorkspaceKeys: [],
   hasSeededDefaultExpansion: false,
   showAutomationSessions: false,
@@ -56,6 +67,7 @@ export function parseGlobalSidebarPreference(
   return {
     version: 1,
     preferredMode: value.preferredMode,
+    expandedWidth: clampGlobalSidebarWidth(value.expandedWidth),
     expandedWorkspaceKeys: normalizeWorkspaceKeys(value.expandedWorkspaceKeys),
     hasSeededDefaultExpansion: value.hasSeededDefaultExpansion,
     showAutomationSessions:

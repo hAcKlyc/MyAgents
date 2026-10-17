@@ -689,6 +689,7 @@
     }
   },
   "detail": {
+    "resizeProperties": "拖动调整属性栏宽度",
     "syncSuccess": "已同步到 Agent",
     "syncFailed": "同步失败：{{message}}",
     "syncTitle": "同步到 Agent",
@@ -932,6 +933,7 @@
     }
   },
   "projectBoard": {
+    "resizeDetail": "拖动调整详情面板宽度",
     "title": "项目看板",
     "tabTitle": "{{name}} · 看板",
     "openFor": "打开 {{name}} 项目看板",

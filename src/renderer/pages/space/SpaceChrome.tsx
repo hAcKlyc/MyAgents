@@ -15,6 +15,7 @@ import {
 
 import type { SpaceInfo, SpaceListItem, SpaceSession } from "@/api/spaceCloud";
 import { APP_WEB_LOGO_SRC as myagentsWebLogo } from "@/components/brand/appBrand";
+import PanelResizeHandle, { usePanelWidth, type PanelWidthConfig } from "@/components/PanelResizeHandle";
 import { SpaceIcon } from "./SpaceAvatar";
 import { PAPER_GRID_STYLE } from "./spaceUi";
 
@@ -128,6 +129,13 @@ export function SpaceLogin({
   );
 }
 
+const SIDEBAR_WIDTH: PanelWidthConfig = {
+  storageKey: "myagents.space.sidebarWidth.v1",
+  defaultWidth: 256,
+  minWidth: 200,
+  maxWidth: 400,
+};
+
 export function SpaceSidebar({
   session,
   mode,
@@ -144,6 +152,7 @@ export function SpaceSidebar({
   onCreateSpace: () => void;
 }) {
   const { t } = useTranslation("app");
+  const sidebarWidth = usePanelWidth(SIDEBAR_WIDTH);
   const canManageSpace =
     session.membership.role === "owner" || session.membership.role === "admin";
   const activeSpaceId = session.space.id || session.space.slug;
@@ -196,7 +205,18 @@ export function SpaceSidebar({
   };
 
   return (
-    <aside className="grid w-64 shrink-0 grid-rows-[minmax(0,1fr)_auto] gap-3.5 border-r border-[var(--line)] bg-[var(--paper)]/70 p-3.5">
+    <aside
+      className="relative grid shrink-0 grid-rows-[minmax(0,1fr)_auto] gap-3.5 border-r border-[var(--line)] bg-[var(--paper)]/70 p-3.5"
+      style={{ width: sidebarWidth.width }}
+    >
+      <PanelResizeHandle
+        config={SIDEBAR_WIDTH}
+        width={sidebarWidth.width}
+        edge="right"
+        label={t("space.sidebar.resize")}
+        onPreview={sidebarWidth.setWidth}
+        onCommit={sidebarWidth.commit}
+      />
       <div className="min-h-0 overflow-y-auto">
         <div className="mb-2 grid gap-1.5">
           <button
