@@ -454,6 +454,27 @@ describe('bounded inference context recovery', () => {
     expect(await restarted.authorizeTool('Read', { file_path: 'receipt' })).toBeUndefined();
   });
 
+  it('continues after denying a duplicate of a newly committed post-recovery action', async () => {
+    const controller = new ContextRecoveryController({ scope: () => 'same-goal', isActive: () => true,
+      backup: async () => '/private/request.json', persistLedger: async () => {} });
+    let calls = 0;
+    await (await controller.run(req(), history(), async () => ++calls === 1 ? overflow() : ok())).text();
+    const input = { id: 'new-record' };
+    expect(await controller.authorizeTool('write_record', input)).toBeUndefined();
+    await controller.commitToolResult('write_record', input, 'committed');
+    const denial = await controller.authorizeTool('write_record', input);
+    expect(denial).toContain('already completed');
+    const compacted: AnthropicRequest = { model: 'fixture-model', max_tokens: 128, messages: [
+      { role: 'user', content: 'Continue original Goal' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'new-write', name: 'write_record', input }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'new-write', content: 'committed' }] },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'duplicate-new-id', name: 'write_record', input }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'duplicate-new-id', is_error: true, content: denial }] },
+    ] };
+    const response = await controller.run(req(), compacted, async () => ok());
+    expect(response.status).toBe(200); await response.text();
+  });
+
   it('never authorizes a business action when its reservation cannot be committed', async () => {
     let fail = false;
     const controller = new ContextRecoveryController({ scope: () => 'same-goal', isActive: () => true,

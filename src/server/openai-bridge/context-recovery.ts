@@ -317,6 +317,12 @@ export class ContextRecoveryController implements BridgeContextRecovery {
 
   async commitToolResult(name: string, input: unknown, result: unknown, failed = false): Promise<void> {
     this.recordToolResult(name, input, result, failed);
+    const evidence = this.completedLedger.get(toolKey(name, input));
+    if (!failed && evidence && this.options.persistLedger && !evidence.archive) {
+      // Post-recovery successes may have no original request archive yet. Their
+      // write-ahead ledger is the durable evidence; await commit before SDK proceeds.
+      evidence.archive = 'durable SessionStore action ledger';
+    }
     await this.persist();
   }
 
