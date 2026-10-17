@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Query } from '@anthropic-ai/claude-agent-sdk';
+import type { Query, SDKBackgroundTasksChangedMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { SystemInitInfo } from '../../shared/types/system';
 import { compareBackgroundTaskRuns } from '../../shared/backgroundTaskRun';
 import {
@@ -72,11 +72,14 @@ export function isUpdateRestartFrozen(): boolean { return updateRestartFrozen; }
 
 /** Read-only activity decision exposed through the public builtin facade. */
 export function hasBuiltinActivityForUpdate(): boolean {
-  return hasQueryBackgroundTasks() || Boolean(getQueryMcpMutation())
+  return hasQueryBackgroundTasks() || hasQueryBackgroundWork() || Boolean(getQueryMcpMutation())
     || lifecycleState.preWarming || lifecycleState.preWarmTimer !== null
     || (lifecycleState.processing && !lifecycleState.query);
 }
 
+// Activity is a replace-level SDK fact; task edge records also contain foreground
+// and ambient tasks and remain independently owned for presentation/cleanup.
+let queryHasBackgroundWork = false;
 let isProcessing = false;
 let abortRequested = false;
 let sessionTerminationPromise: Promise<void> | null = null;
@@ -107,6 +110,7 @@ function replaceQuerySession(session: Query | null): void {
     });
   }
   querySession = session;
+  queryHasBackgroundWork = false;
   queryGeneration += 1;
   console.log(`[builtin-input] phase=query-replaced generation=${queryGeneration} previousQuery=${previousQuery !== null} query=${session !== null}`);
   queryMcpPrewarmOwner = null;
@@ -317,6 +321,18 @@ export function readQueryBackgroundTasks(query: Query | null): Array<{ id: strin
 
 export function hasQueryBackgroundTasks(query: Query | null = querySession): boolean {
   return Boolean(query && [...(queryBackgroundTasks.get(query)?.values() ?? [])].some(task => task.active));
+}
+
+export function replaceQueryBackgroundActivity(
+  query: Query,
+  tasks: SDKBackgroundTasksChangedMessage['tasks'],
+): void {
+  if (querySession !== query) return;
+  queryHasBackgroundWork = tasks.some(task => task.ambient !== true);
+}
+
+export function hasQueryBackgroundWork(): boolean {
+  return querySession !== null && queryHasBackgroundWork;
 }
 
 export function completeQueryBackgroundTask(
@@ -785,6 +801,7 @@ export function resetLifecycleForTest(): void {
   queryMcpPrewarmOwner = null;
   queryMcpMutationOwner = null;
   queryBackgroundTasks.clear();
+  queryHasBackgroundWork = false;
   isProcessing = false;
   abortRequested = false;
   sessionTerminationPromise = null;

@@ -2673,6 +2673,12 @@ pub async fn cmd_wecom_qr_generate() -> Result<WecomQrGenerateResult, String> {
         .await
         .map_err(|e| format!("WeCom QR generate parse failed: {}", e))?;
 
+    let result = parse_wecom_qr_generate(&resp)?;
+    ulog_info!("[wecom-qr] Generated QR code");
+    Ok(result)
+}
+
+fn parse_wecom_qr_generate(resp: &serde_json::Value) -> Result<WecomQrGenerateResult, String> {
     // Check for API-level errors (same pattern as poll)
     let errcode = resp["errcode"].as_i64().unwrap_or(0);
     if errcode != 0 {
@@ -2693,8 +2699,7 @@ pub async fn cmd_wecom_qr_generate() -> Result<WecomQrGenerateResult, String> {
         .ok_or("WeCom QR response missing 'auth_url'")?
         .to_string();
 
-    let scode_preview: String = scode.chars().take(8).collect();
-    ulog_info!("[wecom-qr] Generated QR code, scode={}", scode_preview);
+    crate::im::credential_provisioning::validate_session_key(&scode)?;
     Ok(WecomQrGenerateResult { scode, auth_url })
 }
 
@@ -2706,6 +2711,16 @@ pub struct WecomQrPollResult {
     pub secret: Option<String>,
 }
 
+fn wecom_qr_poll_url(scode: &str) -> Result<reqwest::Url, String> {
+    crate::im::credential_provisioning::validate_session_key(scode)?;
+    let mut url = reqwest::Url::parse("https://work.weixin.qq.com/ai/qc/query_result")
+        .map_err(|_| "Invalid WeCom QR poll URL".to_string())?;
+    // scode is provider-owned, not an identifier we may sanitize. Encoding
+    // preserves its exact value while preventing query/fragment injection.
+    url.query_pairs_mut().append_pair("scode", scode);
+    Ok(url)
+}
+
 /// Poll the WeCom QR scan result. Call repeatedly until status is "success".
 /// `poll_index` is used for periodic logging (log every 10th poll to reduce noise).
 #[tauri::command]
@@ -2713,33 +2728,29 @@ pub async fn cmd_wecom_qr_poll(
     scode: String,
     poll_index: Option<u32>,
 ) -> Result<WecomQrPollResult, String> {
-    // Sanitize scode: only allow alphanumeric (defense-in-depth against URL injection)
-    let safe_scode: String = scode.chars().filter(|c| c.is_alphanumeric()).collect();
-    let url = format!(
-        "https://work.weixin.qq.com/ai/qc/query_result?scode={}",
-        safe_scode
-    );
+    let url = wecom_qr_poll_url(&scode)?;
 
     // External host — system proxy wanted.
     #[allow(clippy::disallowed_methods)]
-    let builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10));
+    let builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none());
     let client = crate::proxy_config::build_client_with_proxy(builder)?;
 
     let resp: serde_json::Value = client
-        .get(&url)
+        .get(url)
         .send()
         .await
-        .map_err(|e| format!("WeCom QR poll failed: {}", e))?
+        .map_err(|e| format!("WeCom QR poll failed: {}", e.without_url()))?
         .json()
         .await
-        .map_err(|e| format!("WeCom QR poll parse failed: {}", e))?;
+        .map_err(|e| format!("WeCom QR poll parse failed: {}", e.without_url()))?;
 
     // Check for API-level errors first
     let errcode = resp["errcode"].as_i64().unwrap_or(0);
     if errcode != 0 {
-        let errmsg = resp["errmsg"].as_str().unwrap_or("unknown error");
-        ulog_error!("[wecom-qr] Poll API error {}: {}", errcode, errmsg);
-        return Err(format!("WeCom QR poll API error {}: {}", errcode, errmsg));
+        ulog_error!("[wecom-qr] Poll API error {}", errcode);
+        return Err(format!("WeCom QR poll API error {}", errcode));
     }
 
     let status_str = resp["data"]["status"].as_str().unwrap_or("waiting");
@@ -2776,19 +2787,96 @@ pub async fn cmd_wecom_qr_poll(
         _ => {
             // Periodic logging: first poll, then every 10th
             if idx == 0 || idx % 10 == 0 {
-                let scode_preview: String = safe_scode.chars().take(8).collect();
-                ulog_info!(
-                    "[wecom-qr] Poll #{} scode={} status={}",
-                    idx,
-                    scode_preview,
-                    status_str
-                );
+                ulog_info!("[wecom-qr] Poll #{} status=waiting", idx);
             }
             Ok(WecomQrPollResult {
                 status: "waiting".into(),
                 bot_id: None,
                 secret: None,
             })
+        }
+    }
+}
+
+#[cfg(test)]
+mod wecom_qr_tests {
+    use super::{cmd_wecom_qr_poll, parse_wecom_qr_generate, wecom_qr_poll_url};
+    use crate::im::credential_provisioning::{
+        cmd_channel_credential_qr_poll, CredentialQrProvider,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn generated_codes_round_trip_through_poll_unchanged() {
+        for code in [
+            "legacyABC123",
+            "code_with-dash",
+            "code+/=%&other=value#fragment",
+        ] {
+            let generated = parse_wecom_qr_generate(&json!({
+                "data": { "scode": code, "auth_url": "https://work.weixin.qq.com/qr/test" }
+            }))
+            .expect("valid generated code");
+            let url = wecom_qr_poll_url(&generated.scode).expect("valid poll URL");
+            assert_eq!(url.query_pairs().next().unwrap().1, code);
+        }
+        for code in ["", "bad\ncode", &"x".repeat(2_049)] {
+            assert!(parse_wecom_qr_generate(&json!({
+                "data": { "scode": code, "auth_url": "https://work.weixin.qq.com/qr/test" }
+            }))
+            .is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn both_poll_entry_points_reject_invalid_handles_before_network_access() {
+        for code in ["", "bad\ncode", &"x".repeat(2_049)] {
+            assert_eq!(
+                cmd_wecom_qr_poll(code.to_string(), None)
+                    .await
+                    .err()
+                    .as_deref(),
+                Some("Invalid QR provisioning session")
+            );
+            assert_eq!(
+                cmd_channel_credential_qr_poll(
+                    CredentialQrProvider::Wecom,
+                    code.to_string(),
+                    None,
+                    None,
+                    None
+                )
+                .await
+                .err()
+                .as_deref(),
+                Some("Invalid QR provisioning session")
+            );
+        }
+    }
+
+    #[test]
+    fn poll_preserves_opaque_codes_without_query_injection() {
+        for code in [
+            "legacyABC123",
+            "code_with-dash",
+            "code+/=%&other=value#frag 汉字",
+        ] {
+            let url = wecom_qr_poll_url(code).expect("valid opaque code");
+            assert_eq!(url.scheme(), "https");
+            assert_eq!(url.host_str(), Some("work.weixin.qq.com"));
+            assert_eq!(url.path(), "/ai/qc/query_result");
+            assert_eq!(url.fragment(), None);
+            assert_eq!(
+                url.query_pairs().collect::<Vec<_>>(),
+                vec![("scode".into(), code.into())]
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_poll_rejects_invalid_codes_instead_of_rewriting_them() {
+        for code in ["", "bad\ncode", "bad\0code", &"x".repeat(2_049)] {
+            assert!(wecom_qr_poll_url(code).is_err());
         }
     }
 }

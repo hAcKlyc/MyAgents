@@ -164,6 +164,8 @@ Builtin 中断请求由 `builtin-session/interrupt.ts` 在既有 Session 内按�
 
 SDK background Agent/Bash 与父 turn 共用同一个 Query 和 Sidecar。自动 deferred restart 必须等待该 Query 的 background-task registry 清空；显式 Stop、Reset、Session switch、应用退出和真实 Query crash 仍可终止。
 
+后台执行活跃性由 exact Query 的 SDK `background_tasks_changed.tasks` 整表替换，排除 `ambient`；Query replacement 时清空。它通过 SessionEngine live snapshot 的 `hasBackgroundWork` 提供给调度。不能从任务卡片或 start/terminal edge registry 推断：前台任务也可能发 start，前台转后台未必重发 start，ambient 监听也不应阻塞 Goal。
+
 后台 task 的稳定 `task_id` 不等于一次执行。SDK `run_id` 在恢复同一 task 时变化，按字符串顺序比较运行先后；缺失值只兼容旧事件，不能覆盖已知新 run。`builtin-session/lifecycle.ts` 在 exact Query 的既有 registry 内同时裁决 start/terminal 的 run、活跃状态与双 terminal channel 的富信息补齐；已完成记录留到 Query finalization，不能让旧 run 的迟到 start/terminal 复活任务、释放新 run 或阻止新 run 完成。Renderer SSE 和通知记录携带可选 `runId`，新 run 重置旧 terminal 投影；历史 hydration 不覆盖已知更晚 run，同一 run 的摘要补齐 upsert 原通知，不同 run 使用不同通知 ID。旧历史缺字段时仍可读取，不改写磁盘历史。
 
 MCP pre-warm 是 soft readiness observation，不是 AI turn 的 admission authority。未 connected、读取失败或观察超时不能拒绝业务 turn；真正的 MCP surface replacement 则是 Query-generation correctness fence，必须在 turn boundary 串行应用。
@@ -212,6 +214,8 @@ turn 在 adapter 的真实 promotion boundary claim，以 `goalId + queueId + si
 
 自动 continuation 是 one-shot 调度，只在上一 turn settlement 后安排。deadline、execution limit、用户控制与模型 terminal 都由 `SessionGoalManager` 在线性化边界内裁决；模型只能请求允许的 terminal，不能仅靠 prompt 绕过 `aiCanExit`。
 
+continuation 在准备前后检查 Session 的 busy/background activity，在真实 promotion 的 claim 前后复核后台活跃性；builtin 在最后一次 materialization await 后再执行同步 commit guard，拒绝时先结算 durable claim 再发布拒绝。有工作未结束时返回未 dispatch 的 `goal_work_pending`，Rust 复用 one-shot scheduler 以 5 秒间隔检查，不调用模型、不计 turn/token/failure；每次检查仍经过 Goal 状态和结束条件裁决。初始用户 turn 不受此自动续跑策略限制。此事实只覆盖 Runtime 可观测的工作，不从“等待中”的文本推断外部任务。
+
 Goal 的详细产品行为和 Task/Goal provider routing 见 [`task_center.md`](task_center.md) 与 [`task_provider_routing.md`](task_provider_routing.md)。
 
 ### 5.2 Session Inbox 与事件
@@ -234,7 +238,7 @@ Session Inbox 与用户手动 query 的投递时机独立：通用 `chatQueueRes
 
 跨设备协作使用 Rust App 的 `agent_network` 传输适配，同样进入上述原 Inbox/SessionEngine；不建立另一 SessionStore 或执行队列。本机 `PreparedFreshSession` / `PreparedDelivery` 在冷准备后释放 lifecycle 锁，保留原 transient owner，取得网络 permit 后重读原 identity/generation，再交给原 Node owner。最后本机 handoff 后属于在途；真实 `accepted` / `delivered` 以 Node 收据为准，网络 permit 不是业务收据。远端 handoff 的 HTTP ACK 丢失返回 `Unconfirmed`，包括内部无回推调用；准备失败和明确 `accepted:false` 仍拒绝，不自动重派。
 
-内部跨设备请求的 `networkReturn` 是 Rust 验证后的 opaque 关联，存于原 turn/watch owner。目标原 terminal 回调通过 App 当前 scope 的 return registry 返回，来源仍投递自己的原 Inbox，拿到真实 source settlement 后再 ACK。`watch` 复用原 one-shot registry/formatter，返回 idle/error 不创建模型 turn。来源未公开或目标退出网络不取消已接纳工作；真实断线销毁关联且无离线补投。完整身份、加密和传输边界见 `agent_network.md`。
+内部跨设备请求的 `networkReturn` 是 Rust 验证后的 opaque 关联，存于原 turn/watch owner。目标原 terminal 回调通过 App 当前身份 scope 的 return registry 返回，来源仍投递自己的原 Inbox，拿到真实 source settlement 后再 ACK。`watch` 复用原 one-shot registry/formatter，返回 idle/error 不创建模型 turn。来源未公开或目标退出网络不取消已接纳工作；双方协商恢复能力后，临时断线可在有界窗口内恢复终态投递，不重放原请求；旧版本仍为连接内回传。身份、加密、恢复期限与失效通知规则见 `agent_network.md`。
 当前 Session 的文本分页由 Rust Management API 发往 owner Sidecar 的 `POST /api/internal/session/text-page`；该路径必须登记为 Session role 路由。否则历史 Session 可从持久化读取，当前 Session 却会在生产 role gate 返回 404。
 
 Desktop、Goal、Task、Inbox、IM、Heartbeat 和 Memory 的执行都经 SessionEngine；DSH 的 `integrated` kind 不能落入 SDK enqueue/config 路径。DSH 强制发送先 interrupt 并持久化 partial terminal，再提升目标 queue item。跨 Sidecar Inbox 只有收到可解析的 `{ accepted: true }` 才算投递成功，HTTP 2xx 的协议错误必须保留上层重试权。

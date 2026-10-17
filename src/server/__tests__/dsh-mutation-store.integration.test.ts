@@ -963,7 +963,7 @@ describe('DSH Product mutation journal', () => {
     expect(store.getSessionMetadata(targetId)).toBeNull();
   });
 
-  it('recovers delete through tombstone, purge, and Product removal', async () => {
+  it.each(['prepared', 'purged'] as const)('recovers delete from %s through physical purge and Product removal', async initialState => {
     const sessionId = 'dsh-delete-recovery-source';
     await createDshSession(sessionId);
     await expect(store.beginDshDeleteMutation({
@@ -973,7 +973,7 @@ describe('DSH Product mutation journal', () => {
 
     const prepareDelete = vi.fn(async () => ({
       token: 'delete-recovery-token',
-      state: 'prepared' as const,
+      state: initialState,
     }));
     const commitDelete = vi.fn(async () => ({
       token: 'delete-recovery-token',
@@ -991,7 +991,8 @@ describe('DSH Product mutation journal', () => {
       controller: { prepareDelete, commitDelete, purgeDelete } as never,
     })).resolves.toEqual({ recovered: true, productDeleted: true });
     expect(prepareDelete).toHaveBeenCalledWith('delete-recovery-1');
-    expect(commitDelete).toHaveBeenCalledWith('delete-recovery-1', 'delete-recovery-token');
+    if (initialState === 'prepared') expect(commitDelete).toHaveBeenCalledWith('delete-recovery-1', 'delete-recovery-token');
+    else expect(commitDelete).not.toHaveBeenCalled();
     expect(purgeDelete).toHaveBeenCalledWith('delete-recovery-1', 'delete-recovery-token');
     expect(store.getSessionMetadata(sessionId)).toBeNull();
   });

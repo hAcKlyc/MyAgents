@@ -85,15 +85,10 @@ struct FeishuBeginResult {
     expires_in_ms: u64,
 }
 
-fn validate_session_key(provider: CredentialQrProvider, value: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 2_048 {
-        return Err("Invalid QR provisioning session".to_string());
-    }
-    let valid = match provider {
-        CredentialQrProvider::Wecom => value.chars().all(|ch| ch.is_ascii_alphanumeric()),
-        CredentialQrProvider::Feishu => value.chars().all(|ch| !ch.is_control()),
-    };
-    if !valid {
+/// Provider-generated handles are opaque. Validate bounds without changing
+/// their identity; the transport must encode them as one query/form value.
+pub(crate) fn validate_session_key(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 2_048 || value.chars().any(char::is_control) {
         return Err("Invalid QR provisioning session".to_string());
     }
     Ok(())
@@ -121,7 +116,7 @@ fn parse_feishu_begin(value: &Value) -> Result<FeishuBeginResult, String> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "Feishu QR response is missing a device code".to_string())?
         .to_string();
-    validate_session_key(CredentialQrProvider::Feishu, &device_code)?;
+    validate_session_key(&device_code)?;
 
     let raw_qr_url = value
         .get("verification_uri_complete")
@@ -345,7 +340,7 @@ async fn poll_feishu_provisioning(
     current_poll_interval_ms: u64,
     poll_index: u32,
 ) -> Result<CredentialQrPollResult, String> {
-    validate_session_key(CredentialQrProvider::Feishu, session_key)?;
+    validate_session_key(session_key)?;
     let client = external_client(Duration::from_secs(10))?;
     let mut domain = FeishuRegistrationDomain::from_session_value(session_domain)?;
     let mut response = post_feishu_registration(
@@ -414,7 +409,6 @@ pub async fn cmd_channel_credential_qr_poll(
     let poll_index = poll_index.unwrap_or_default();
     match provider {
         CredentialQrProvider::Wecom => {
-            validate_session_key(provider, &session_key)?;
             let result = crate::commands::cmd_wecom_qr_poll(session_key, Some(poll_index)).await?;
             normalize_wecom_poll(result.status, result.bot_id, result.secret)
         }
@@ -434,6 +428,16 @@ pub async fn cmd_channel_credential_qr_poll(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn qr_session_keys_are_opaque_provider_values() {
+        for value in ["legacyABC123", "code_with-dash", "code+/=%&?# 汉字"] {
+            assert!(validate_session_key(value).is_ok(), "rejected {value}");
+        }
+        for value in ["", "bad\ncode", "bad\0code", &"x".repeat(2_049)] {
+            assert!(validate_session_key(value).is_err());
+        }
+    }
 
     #[test]
     fn qr_url_validation_rejects_non_https_credentials_and_unknown_hosts() {

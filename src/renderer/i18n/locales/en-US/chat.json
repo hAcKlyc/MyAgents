@@ -63,6 +63,8 @@
       "needsAuth": "Authentication required",
       "unavailable": "Unavailable",
       "starting": "Starting…",
+      "stopped": "Tool runtime stopped; starts with the next message",
+      "start": "Start tool runtime",
       "stale": "Status awaiting confirmation",
       "retry": "Retry connection",
       "retryHint": "Reconnect this session’s tools, keeping the conversation and tool selection",
@@ -74,9 +76,10 @@
         "MCP_CONFIG_INVALID": "Invalid tool startup arguments",
         "MCP_CONNECTION_FAILED": "Tool connection interrupted",
         "MCP_NEEDS_AUTH": "Tool authorization required",
-        "MCP_RUNTIME_EXITED": "Tool runtime exited"
+        "MCP_RUNTIME_EXITED": "Tool runtime exited unexpectedly"
       },
       "retryErrors": {
+        "endpoint_unavailable": "Reconnect endpoint unavailable (HTTP 404); update or restart the app",
         "session_busy": "Wait for this session’s tasks to finish before retrying",
         "unsupported_runtime": "This runtime does not support retrying here",
         "server_not_failed": "The tool status has changed; check its latest status",

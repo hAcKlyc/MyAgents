@@ -63,6 +63,8 @@
       "needsAuth": "需要登录授权",
       "unavailable": "当前不可用",
       "starting": "正在启动…",
+      "stopped": "工具环境已停止，下轮消息时启动",
+      "start": "启动工具环境",
       "stale": "状态待确认",
       "retry": "重试连接",
       "retryHint": "重新连接当前会话的工具，保留对话与工具选择",
@@ -74,9 +76,10 @@
         "MCP_CONFIG_INVALID": "工具启动参数有误",
         "MCP_CONNECTION_FAILED": "工具连接已中断",
         "MCP_NEEDS_AUTH": "工具需要重新授权",
-        "MCP_RUNTIME_EXITED": "工具所在的运行环境已退出"
+        "MCP_RUNTIME_EXITED": "工具环境异常退出"
       },
       "retryErrors": {
+        "endpoint_unavailable": "重连接口不可用（HTTP 404），请更新或重启应用",
         "session_busy": "请等待当前会话任务完成后重试",
         "unsupported_runtime": "当前运行环境不支持原地重试",
         "server_not_failed": "工具状态已变化，请查看最新状态",

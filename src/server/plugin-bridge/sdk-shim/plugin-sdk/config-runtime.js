@@ -34,7 +34,7 @@ function _getConfig() {
 }
 
 function _setConfig(cfg) {
-  const next = _asConfig(cfg);
+  const next = _clone(_asConfig(cfg));
   globalThis[CONFIG_GLOBAL_KEY] = next;
   return _clone(next);
 }
@@ -52,10 +52,34 @@ export function loadConfig() { return _getConfig(); }
 export function readConfigFileSnapshotForWrite() { return _getConfig(); }
 export function setRuntimeConfigSnapshot(cfg) { return _setConfig(cfg); }
 export function writeConfigFile(cfg) { return _setConfig(cfg); }
-export function mutateConfigFile(mutator) {
-  const current = _getConfig();
-  const next = typeof mutator === 'function' ? (mutator(current) ?? current) : current;
-  return _setConfig(next);
+// New entry points share this queue and the existing snapshot. A concurrent
+// legacy/host write invalidates an awaited mutation instead of losing data.
+let mutationTail = Promise.resolve();
+export function mutateConfigFile(params) {
+  if (typeof params === 'function') {
+    const current = _getConfig();
+    return _setConfig(params(current) ?? current);
+  }
+  const run = async () => {
+    if (typeof params?.mutate !== 'function') throw new TypeError('mutateConfigFile requires mutate(draft)');
+    if (params.io || params.base || params.baseHash || params.writeOptions) {
+      throw new Error('Bridge config mutation supports the runtime snapshot, not OpenClaw file writes');
+    }
+    const before = globalThis[CONFIG_GLOBAL_KEY];
+    const draft = _getConfig();
+    const result = await params.mutate(draft, {
+      snapshot: { config: _clone(draft) }, previousHash: null, attempt: 1,
+    });
+    if (globalThis[CONFIG_GLOBAL_KEY] !== before) {
+      throw new Error('Bridge config changed while mutation was running');
+    }
+    const nextConfig = _setConfig(draft);
+    // Rust owns durable channel config; no disk write/restart is claimed.
+    return { nextConfig, result, attempts: 1 };
+  };
+  const pending = mutationTail.then(run);
+  mutationTail = pending.then(() => undefined, () => undefined);
+  return pending;
 }
 export function replaceConfigFile(cfg) { return _setConfig(cfg); }
 export function logConfigUpdated() { return undefined; }

@@ -8,6 +8,9 @@ import {
   getPreWarmFailCount,
   hasQueryBackgroundTask,
   hasQueryBackgroundTasks,
+  hasQueryBackgroundWork,
+  hasBuiltinActivityForUpdate,
+  replaceQueryBackgroundActivity,
   hasMessageResolver,
   incrementPreWarmFailCount,
   isAbortRequested,
@@ -140,6 +143,47 @@ describe('builtin-session owners', () => {
     resetTurnForTest();
     resetConfigForTest();
     resetTranscriptForTest();
+  });
+
+  it('uses exact Query level activity for Goal waits, excluding ambient and foreground edge records', () => {
+    const query = { close: vi.fn() } as never;
+    const next = { close: vi.fn() } as never;
+    setQuerySession(query);
+    recordQueryBackgroundTask(query, 'foreground-agent', {});
+    expect(hasQueryBackgroundWork()).toBe(false);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'watcher', task_type: 'monitor', description: '', ambient: true }]);
+    expect(hasQueryBackgroundWork()).toBe(false);
+    // Includes a task backgrounded without a new start edge.
+    replaceQueryBackgroundActivity(query, [{ task_id: 'foreground-agent', task_type: 'local_agent', description: '' }]);
+    expect(hasQueryBackgroundWork()).toBe(true);
+    // No terminal edge is required to clear a replace-level observation.
+    replaceQueryBackgroundActivity(query, []);
+    expect(hasQueryBackgroundWork()).toBe(false);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'bash', task_type: 'local_bash', description: '' }]);
+    expect(hasQueryBackgroundWork()).toBe(true);
+    setQuerySession(next);
+    expect(hasQueryBackgroundWork()).toBe(false);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'late', task_type: 'local_agent', description: '' }]);
+    expect(hasQueryBackgroundWork()).toBe(false);
+    replaceQueryBackgroundActivity(next, [{ task_id: 'current', task_type: 'workflow', description: '' }]);
+    replaceQueryBackgroundActivity(query, []);
+    expect(hasQueryBackgroundWork()).toBe(true);
+    setQuerySession(null);
+    expect(hasQueryBackgroundWork()).toBe(false);
+  });
+
+  it('keeps updater activity fenced when the SDK level arrives before task edges', () => {
+    const query = { close: vi.fn() } as never;
+    setQuerySession(query);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'work', task_type: 'workflow', description: '' }]);
+    expect(hasQueryBackgroundTasks()).toBe(false);
+    expect(hasBuiltinActivityForUpdate()).toBe(true);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'ambient', task_type: 'monitor', description: '', ambient: true }]);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
+    setQuerySession(null);
+    replaceQueryBackgroundActivity(query, [{ task_id: 'late', task_type: 'workflow', description: '' }]);
+    expect(hasBuiltinActivityForUpdate()).toBe(false);
   });
 
   it('lifecycle owns abort flag and wakes the persistent generator', async () => {

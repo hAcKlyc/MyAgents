@@ -60,6 +60,8 @@ import {
     type OpenClawSchemaProperties,
 } from './openclawConfigScalars';
 import {
+    credentialQrFailureMessageKey,
+    type CredentialQrRunFailure,
     restartProvisionedChannelIfRunning,
     runCredentialQrProvisioning,
 } from './credentialQrProvisioning';
@@ -252,6 +254,7 @@ export default function ChannelDetailView({
     const [dualDetailMode, setDualDetailMode] = useState<'view' | 'qr' | 'edit'>('view');
     const [credentialQrImageUrl, setCredentialQrImageUrl] = useState<string | null>(null);
     const [credentialQrStatus, setCredentialQrStatus] = useState<'idle' | 'loading' | 'waiting' | 'success' | 'error' | 'restart-error'>('idle');
+    const [credentialQrErrorReason, setCredentialQrErrorReason] = useState<CredentialQrRunFailure['reason']>();
     const credentialQrRunIdRef = useRef(0);
 
     // Whether credentials are filled
@@ -495,6 +498,7 @@ export default function ChannelDetailView({
         const isCancelled = () => !isMountedRef.current || credentialQrRunIdRef.current !== runId;
         let credentialsPersisted = false;
         setCredentialQrStatus('loading');
+        setCredentialQrErrorReason(undefined);
         setCredentialQrImageUrl(null);
         setDualDetailMode('qr');
         try {
@@ -544,6 +548,7 @@ export default function ChannelDetailView({
                 setDualDetailMode('view');
                 return;
             }
+            setCredentialQrErrorReason(result.reason);
             setCredentialQrStatus('error');
         } catch (error) {
             if (!isCancelled()) {
@@ -820,7 +825,7 @@ export default function ChannelDetailView({
                                                 <img src={credentialQrImageUrl} alt={t('agentSettings.channelDetail.qrAlt')} className="h-[180px] w-[180px] rounded-lg" />
                                             </div>
                                         )}
-                                        {credentialQrStatus === 'error' && <p className="text-sm text-[var(--error)]">{t('agentSettings.channelDetail.qrFailed')}</p>}
+                                        {credentialQrStatus === 'error' && <p className="text-sm text-[var(--error)]">{t(credentialQrFailureMessageKey(credentialQrErrorReason))}</p>}
                                         {credentialQrStatus === 'restart-error' && (
                                             <p className="text-sm text-[var(--warning)]">{t('agentSettings.channelDetail.credentialsUpdatedRestartFailedInline')}</p>
                                         )}

@@ -1,4 +1,5 @@
 use super::*;
+use crate::mcp_selection::normalize_config_mcp_selections;
 
 // ===== Auto-start on app launch =====
 
@@ -661,6 +662,61 @@ fn find_missing_startable_agent_channels(
 #[cfg(test)]
 mod workspace_projection_tests {
     use super::*;
+    use crate::mcp_selection::normalize_mcp_selection_field;
+
+    #[test]
+    fn mcp_selection_compatibility_matches_typescript_fixtures() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/shared/__fixtures__/mcpSelection.json"
+        ))
+        .unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let mut holder = fixture["input"].clone();
+            normalize_mcp_selection_field(&mut holder);
+            assert_eq!(holder, fixture["expected"], "{}", fixture["name"]);
+            assert!(!normalize_mcp_selection_field(&mut holder));
+        }
+    }
+
+    #[test]
+    fn mcp_selection_keeps_legacy_agent_available_and_heals_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        let mut value = serde_json::json!({
+            "agentChannelIndependenceMigrationV1": true,
+            "mcpEnabledServers": "[]",
+            "agents": [{
+                "id": "legacy", "name": "Legacy", "enabled": false,
+                "workspacePath": "C:/isolated/workspace", "channels": [],
+                "mcpEnabledServers": "[playwright,tavily-search]",
+                "mcpServersJson": "[]"
+            }]
+        });
+        std::fs::write(&path, value.to_string()).unwrap();
+        assert!(normalize_stringified_json_value(&mut value));
+        let agents = agents_from(&value);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "legacy");
+        assert_eq!(
+            agents[0].mcp_enabled_servers,
+            Some(vec!["playwright".into(), "tavily-search".into()])
+        );
+        assert_eq!(value["agents"][0]["mcpServersJson"], "[]");
+        assert_eq!(value["mcpEnabledServers"], serde_json::json!([]));
+        persist_agent_config_read_heal(&path, "MCP selection test");
+        let healed = std::fs::read_to_string(&path).unwrap();
+        let persisted: serde_json::Value = serde_json::from_str(&healed).unwrap();
+        assert_eq!(agents_from(&persisted).len(), 1);
+        assert_eq!(
+            persisted["agents"][0]["mcpEnabledServers"],
+            value["agents"][0]["mcpEnabledServers"]
+        );
+        let backup_path = path.with_file_name("config.json.bak");
+        let backup = std::fs::read_to_string(&backup_path).unwrap();
+        persist_agent_config_read_heal(&path, "MCP selection test");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), healed);
+        assert_eq!(std::fs::read_to_string(&backup_path).unwrap(), backup);
+    }
 
     fn agents_from(value: &serde_json::Value) -> Vec<AgentConfigRust> {
         salvage_agents_from_value(value, &std::collections::HashMap::new())
@@ -2348,7 +2404,7 @@ fn normalize_stringified_json_value(value: &mut serde_json::Value) -> bool {
         }
     }
 
-    let mut changed = false;
+    let mut changed = normalize_config_mcp_selections(value);
     if let Some(agents) = value.get_mut("agents").and_then(|v| v.as_array_mut()) {
         for agent in agents.iter_mut() {
             let Some(obj) = agent.as_object_mut() else {

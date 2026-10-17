@@ -264,6 +264,8 @@
 - Node/Rust owner sentinel 是 `<runtime>:<pid>:<startMs>`；renderer 无可探测的独立 PID owner，使用 `renderer:<createdMs>:<uuid>`。三端 release 都必须逐字校验自己取得的完整 token，防止"暂停过 staleMs 后误删继任者"
 - Agent 单字段编辑传 `AgentConfigMutation`：`runtimeConfigPatch` 只描述改变的字段，`resolveAgentConfigMutation` 在 writer 锁内基于最新 Agent 合并。显式 `runtimeConfig` 仍表示完整替换。Runtime/provider 选择与权限/effort 编辑分开；旧 Session 的执行 context 不能变成重新选择 workspace model 的指令。
 - UI 导航失败不能回滚已提交的 Agent 默认值或删除已发布 Session。
+- 持久化 `mcpEnabledServers` 在对应读取/写入边界使用 `shared/mcpSelection.ts`（Rust: `mcp_selection.rs`）恢复列表语义：合法字符串数组原样保留；JSON 字符串数组及历史 `[playwright,tavily-search]` 恢复为 ID 数组；缺失/null 保持未指定语义；其它标量或混合数组收敛为显式 `[]`，不能因此扩大工具权限。已拆成字符的数组无法可靠还原，不猜测原 ID。`mcpServersJson` 则仍是序列化 JSON 字符串。
+- 配置与 Project 的兼容读取不异步写回；下一次 owner 锁内修改负责持久化，Rust Agent reader 复用既有锁内 read-heal。历史 Session 快照可能从旧 Provider-switch birth 接收原始字符串，由 SessionStore 独立恢复；Rust history projection 仅投影同一语义，不写 Session 或配置。不得用当前 Agent/effective MCP 集覆盖冻结的 Session 选择；全局 availability gate 继续单独生效。
 
 **Don't.**
 - 任何 `config.json` 写入用裸 `tmp + rename`（绕过锁）

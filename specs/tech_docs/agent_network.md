@@ -46,11 +46,11 @@ Rust 来源入口通过协议 `SourceRequest::reference()` 按操作解析完整
 
 目标先由原 owner 冷准备，在网络等待期间释放 Session 生命周期锁；拿到当前授权 permit 后，在本机检查账号/连接/代次/有效期，再交给原 Inbox。最后交接以后是 in-flight，不能承诺 Rust 与 Node 跨进程原子撤销。`start/send` 返回真实接纳结果，不等待 AI terminal；明确失败、已接纳与 unconfirmed 必须区分，不自动重发。
 
-来源/目标 return registry 只持有当前连接的关联。terminal 回调来自实际 Session Sidecar generation；目标重新获得当前授权的 route rebind ACK 后才发送私密 event。来源验证完整 peer/epoch/Session/message/watch 后投递原 Inbox，记录紧凑 settlement 再 ACK。ACK 不明不重复注入，不保存 outbox。真实断线、登出或身份改变丢弃关联；目标原执行继续。watch 绑定目标 adapter 的真实执行 queue ID，Task/Goal owner 可为空；同一 caller/设备 scope、目标和实际轮次合并成一个 canonical watchId。当前轮次完成只结算该轮观察，后续排队请求不会冒充它的结果。
+来源/目标 return registry 由 Rust App 的连接 owner 持有，作用域是当前身份代次，不随 WebSocket attempt 销毁。通过 `/v1/me/network` 能力与双方 Hello 协商 `return-resume-v1` 后，临时断线保留原关联最多 15 分钟；重复尝试不延长该次中断窗口，正常在线长任务不计时。目标 terminal 回调来自实际 Session Sidecar generation，App 以原字节预算接收一次结果并保留最多 15 分钟，Sidecar 无需等待重连。Relay 仅在原 `relay_control` 中保留有界身份/关联/期限元数据；`route.resume` 重新验证双方当前授权、原 principal/device/key/fingerprint/login session，并更新 socket epoch。目标仍须取得授权的 route rebind ACK 后才发送私密 event。来源验证完整 peer/epoch/Session/message/watch，投递原 Inbox，先记录 settlement 再 ACK；同一 event ID + digest 在重连后只复用结算，包括 unconfirmed，不重复注入。紧凑 receipt 保留 30 分钟。结果离线过期后立即释放正文，只在原回传槽位预算内保留最多 30 分钟的关闭控制意图，重连后关闭服务端原关联，防止来源继续等待。既有 Inbox 接纳与 watch 注册在原 owner 完成，不被 socket future 取消。过期/永久失效以本地 `network.return_unavailable` 通知原来源，表示自动结果投递不可用而非远端任务失败。登出/身份变化清理关联与结果，App 退出/重启不保证恢复；无落盘 outbox，原 start/send 永不自动重放。未协商的旧版本保持断线即关闭行为，但新客户端会报告失效。watch 绑定目标 adapter 的真实执行 queue ID，Task/Goal owner 可为空；同一 caller/设备 scope、目标和实际轮次合并成一个 canonical watchId。当前轮次完成只结算该轮观察，后续排队请求不会冒充它的结果。
 
-本地 turn 完成入口先协调自动回传与同 caller/target/turn 观察，共享一次原 Inbox 投递 promise；失败不另行发送第二条通知。网络同一实际轮次的自动回传与观察在来源 `SourceReturns` 内按验证后的 peer/epoch、双方 Session、turnId、原 Inbox requestEventId 共享一次 Inbox 接纳结算；各 operation 仍保留自己的 event digest、receipt 与 ACK。关联不含结果正文，不按文字去重，不跨连接保存。不同请求/轮次/调用方独立。目标观察回传并行结算，单项超时不阻塞下一项。external/DSH Inbox 复用原 operation queue，入队即接纳，native dispatch 的独立 promise 在不可逆接纳时结算；启动空闲队列仍由原 queue owner 负责。
+本地 turn 完成入口先协调自动回传与同 caller/target/turn 观察，共享一次原 Inbox 投递 promise；失败不另行发送第二条通知。网络同一实际轮次的自动回传与观察在来源 `SourceReturns` 内按验证后的稳定 peer 身份、双方 Session、turnId、原 Inbox requestEventId 共享一次 Inbox 接纳结算；各 operation 仍保留自己的 event digest、receipt 与 ACK。关联不含结果正文，不按文字去重，可跨同身份的临时 socket 重连保留。不同请求/轮次/调用方独立。目标观察回传并行结算，单项超时不阻塞下一项。external/DSH Inbox 复用原 operation queue，入队即接纳，native dispatch 的独立 promise 在不可逆接纳时结算；启动空闲队列仍由原 queue owner 负责。
 
-`session watches` 读取当前 caller 的全部活跃本地/网络观察；`session unwatch <watchId>` / 显式 `--all` 只取消观察，不停止执行、不取消默认自动回传、不撤回已进入 Inbox 的消息。网络观察由连接内 SourceReturns 管理，关闭原 route 触发目标精确清理；本地观察仍在目标原 registry，由 Rust 查当前 owner，不复制一套来源注册表。删除时只删除该 caller/Session/watch/reference，不能清空其它 watch。注册回执仍在途时也可取消已有 route；来源保留取消 context 到原 receipt TTL，仅用于验证并丢弃已在途事件。目标 route Context 释放时同时失效注册 job 的原 pre/post handoff guard，清理迟到注册。目标管理与精确清理入口 `/api/session-watch/manage`、`/api/session-watch/network-remove` 由 Session composition 登记并校验内部凭据；Global 不持有 watch registry。精确清理完成后，同轮重新观察可以创建新关联；取消回执不代表跨进程目标清理已原子完成。
+`session watches` 读取当前 caller 的全部活跃本地/网络观察；`session unwatch <watchId>` / 显式 `--all` 只取消观察，不停止执行、不取消默认自动回传、不撤回已进入 Inbox 的消息。网络观察由 App 身份作用域内 SourceReturns 管理，关闭原 route 触发目标精确清理；本地观察仍在目标原 registry，由 Rust 查当前 owner，不复制一套来源注册表。删除时只删除该 caller/Session/watch/reference，不能清空其它 watch。注册回执仍在途时也可取消已有 route；来源保留取消 context 到原 receipt TTL，仅用于验证并丢弃已在途事件。目标 route Context 释放时同时失效注册 job 的原 pre/post handoff guard，清理迟到注册。目标管理与精确清理入口 `/api/session-watch/manage`、`/api/session-watch/network-remove` 由 Session composition 登记并校验内部凭据；Global 不持有 watch registry。精确清理完成后，同轮重新观察可以创建新关联；取消回执不代表跨进程目标清理已原子完成。
 
 `session state` 是按需只读投影：idle、running、waiting_user_action。SessionEngine 根据真实执行状态及阻塞 root 的工具/计划审批、必须回答的问题投影；非阻塞异步问题、普通文本问句及子 Agent 单独交互不证明整个 Session 等待。Rust 无 live owner 且原历史可见才读 idle，尚未就绪/不可观测则查询错误，不启动 Sidecar或模型。不提供远端批准、配置修改、中间状态推送或轮询。idle 不表示任务成功。
 
@@ -59,6 +59,10 @@ Rust 来源入口通过协议 `SourceRequest::reference()` 按操作解析完整
 跨设备内部 Agent 的初始请求沿原 `VerifiedCaller.label` 携带 `Agent名称@来源设备名称`；Rust 来源入口按当前账号/network/device scope 经原 metadata 控制面读取网络显示名称，包含用户昵称，并计入原调用 deadline / generation。目标 `start/send` 原 Inbox 和请求气泡直接使用这个展示标签。CLI 的参数与 transport 始终使用完整稳定 selector，名称仅参与展示。本地跨会话标签保持原格式，已有历史不改写。
 
 Session label 继续表示会话标题/原摘要。来源回执和异步事件另含 Agent/设备 identity，显示为 `Agent @ device · Session label`，不拿 UUID 充当标题。`session list` 文本保留完整可复制的 Session selector。`agent network-diagnose --json` 按需列出协议能力、分页设备 appVersion 与原目录 connectionState（ready / syncing / offline），不从版本号或可发现性推断在线状态。错误记录阶段、代码、requestId，schema 日志只记录字段路径，不打印正文或配置；只有已发送的 start/send 可能接纳未知，读失败按查询错误重试。严格旧客户端会拒绝这些协议扩展（包括目录 icon），本次 dev 验收双方须升级同一固定包。
+
+### MoXBots owned relay 兼容边界
+
+`services/agentnet/relay-core` 仍只承接设备级 opaque TLS relay，当前 `/v1/me/network` 的 capabilities 为空；未实现 `op.prepare` / permit / return route authority，因此不宣告 `return-resume-v1`，对 `route.resume` 返回 `UNSUPPORTED`。客户端按实际 metadata 协商，legacy route 不跨 socket 保留。Host management 与 remote Session 继续沿原独立的设备通道、Host management protocol 及本地 Session owner，不从新回程协议取得执行权限。客户端恢复单测通过不代表 owned 服务已具备该能力，真实双端验收仍须使用具备 permit/route authority 且宣告该 capability 的服务。
 
 ## 身份、加密与资源
 
@@ -158,7 +162,7 @@ Renderer 只合并同一账号/连接投影 revision 下完全相同的在途目
 
 设备详情的 `lastNetworkSeenAt` 来自网络 DO 的 ready/连接关闭与 Hibernation auto-response 在线事实，不能用账号 roster 的 `lastAccountSeenAt` 代替。Project 的 `agentNetworkExposureRevision` 由原归档配置入口持久化，UI/CLI 共用 `nextAgentNetworkExposureRevision`；unarchive 保留该代次。catalog `exposureRevision` 比旧代次增加时原 DO 事务关闭 mount，解决离线 archive→unarchive 被最终 snapshot 合并的问题；rename 不增加代次，简介仍由网络设置 owner 保留。
 
-同 pair 连续完整对象在原 rustls writer 中有序写入，受 `receiveBytes` 和 App `MemoryBudget` 限制；信用窗口只控制 TLS 帧发出，不能把正常第二对象视为连接故障。终止性 pair 写入/加密错误只关闭该 pair，清理它的 pending 调用，保留其他 pair/有效逻辑回程；没有另建执行队列或断线重发。
+同 pair 连续完整对象在原 rustls writer 中有序写入，受 `receiveBytes` 和 App `MemoryBudget` 限制；信用窗口只控制 TLS 帧发出，不能把正常第二对象视为连接故障。终止性 pair 写入/加密错误只关闭该 pair，清理它的 pending 调用，保留其他 pair/有效逻辑回程；不重放原业务请求；已协商的 terminal 结果按上述有界恢复规则补投。
 
 ### Metadata failure outcomes
 
@@ -178,3 +182,5 @@ Rust 外部 HTTP owner 通过 `network_diagnostics::RequestDiagnostic` 记录阶
 工作区目录的 authority 是 `projects.json` 与 `config.json` 的既有身份 registry；Renderer 快照不作为上传内容。Renderer 的 `notifyConfigChanged` 除无配置载荷的 DOM 通知外，向既有 native `app:config-changed` fanout；Sidecar 的 `broadcastAppConfigChanged` 同时广播 SSE 并调用既有 Management API。SSE bridge 只刷新窗口，不反向重复发布 native 通知。网络 actor 复用既有 `Notify` 后重新读取 registry，离线时由下次连接重建目录，无新增轮询。
 
 Project 保存仅在目录字段（身份、名称、图标、路径、可见性、归档状态、exposure revision）变化时通知；打开工作区/排序/模型偏好不会产生目录上传。Agent/Project 复合写入复用 `notification: 'deferred'`，最终两份磁盘状态提交后统一发布。已持久化写入不能因通知失败被报告为回滚；通知错误保留明确日志，已有重连继续从磁盘恢复。
+
+回传日志只记录 op/route/event/request/watch/turn 关联 ID、阶段与规范化原因，不记录正文、名称或凭据。Node 的 unconfirmed 表示当前调用未确认最终送达；Rust 可能仍在恢复窗口内持有结果，最终 ACK/过期以 App 日志为准。

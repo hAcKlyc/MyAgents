@@ -8,6 +8,8 @@ import {
 
 interface UseSettingsNavigationParams {
   initialSection?: string;
+  /** Mount-only default; removing a consumed navigation target must preserve local selection. */
+  defaultSection?: SettingsSection;
   navigationNonce?: number;
   floatingBallDevGate?: boolean;
   onSectionChange?: () => void;
@@ -15,6 +17,7 @@ interface UseSettingsNavigationParams {
 
 export function useSettingsNavigation({
   initialSection,
+  defaultSection = 'providers',
   navigationNonce,
   floatingBallDevGate,
   onSectionChange,
@@ -36,7 +39,7 @@ export function useSettingsNavigation({
       }
       return initialSection as SettingsSection;
     }
-    return 'providers';
+    return defaultSection;
   };
 
   const [activeSection, setActiveSection] = useState<SettingsSection>(getInitialSection);

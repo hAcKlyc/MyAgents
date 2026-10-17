@@ -1,0 +1,266 @@
+[
+  {
+    "name": "missing",
+    "input": {},
+    "expected": {}
+  },
+  {
+    "name": "null",
+    "input": {
+      "mcpEnabledServers": null
+    },
+    "expected": {}
+  },
+  {
+    "name": "array",
+    "input": {
+      "mcpEnabledServers": [
+        "playwright",
+        "tavily-search"
+      ]
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "playwright",
+        "tavily-search"
+      ]
+    }
+  },
+  {
+    "name": "json",
+    "input": {
+      "mcpEnabledServers": "[\"playwright\",\"tavily-search\"]"
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "playwright",
+        "tavily-search"
+      ]
+    }
+  },
+  {
+    "name": "legacy",
+    "input": {
+      "mcpEnabledServers": "[playwright,tavily-search]"
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "playwright",
+        "tavily-search"
+      ]
+    }
+  },
+  {
+    "name": "spaces",
+    "input": {
+      "mcpEnabledServers": " [ playwright , tavily-search ] "
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "playwright",
+        "tavily-search"
+      ]
+    }
+  },
+  {
+    "name": "empty",
+    "input": {
+      "mcpEnabledServers": []
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "json-empty",
+    "input": {
+      "mcpEnabledServers": "[]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "empty-string",
+    "input": {
+      "mcpEnabledServers": ""
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "scalar-string",
+    "input": {
+      "mcpEnabledServers": "playwright"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "number",
+    "input": {
+      "mcpEnabledServers": 42
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "boolean",
+    "input": {
+      "mcpEnabledServers": true
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "object",
+    "input": {
+      "mcpEnabledServers": {}
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "mixed",
+    "input": {
+      "mcpEnabledServers": [
+        "playwright",
+        false
+      ]
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "json-mixed",
+    "input": {
+      "mcpEnabledServers": "[\"playwright\",false]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "json-number-overflow",
+    "input": {
+      "mcpEnabledServers": "[1e400]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "json-negative-number-overflow",
+    "input": {
+      "mcpEnabledServers": "[-1e400]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "quoted-numeric-id",
+    "input": {
+      "mcpEnabledServers": "[\"1e400\"]"
+    },
+    "expected": {
+      "mcpEnabledServers": ["1e400"]
+    }
+  },
+  {
+    "name": "legacy-mixed-numeric-id",
+    "input": {
+      "mcpEnabledServers": "[1e400,tavily-search]"
+    },
+    "expected": {
+      "mcpEnabledServers": ["1e400", "tavily-search"]
+    }
+  },
+  {
+    "name": "broken-json",
+    "input": {
+      "mcpEnabledServers": "[\"playwright\",tavily-search]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "nested",
+    "input": {
+      "mcpEnabledServers": "[[playwright]]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "trailing-comma",
+    "input": {
+      "mcpEnabledServers": "[playwright,]"
+    },
+    "expected": {
+      "mcpEnabledServers": []
+    }
+  },
+  {
+    "name": "opaque-ids",
+    "input": {
+      "mcpEnabledServers": [
+        "custom ID",
+        "??",
+        "x",
+        "x"
+      ]
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "custom ID",
+        "??",
+        "x",
+        "x"
+      ]
+    }
+  },
+  {
+    "name": "damaged-characters",
+    "input": {
+      "mcpEnabledServers": [
+        "[",
+        "p",
+        "l",
+        "a",
+        "y",
+        "w",
+        "r",
+        "i",
+        "g",
+        "h",
+        "t",
+        "]"
+      ]
+    },
+    "expected": {
+      "mcpEnabledServers": [
+        "[",
+        "p",
+        "l",
+        "a",
+        "y",
+        "w",
+        "r",
+        "i",
+        "g",
+        "h",
+        "t",
+        "]"
+      ]
+    }
+  }
+]

@@ -50,6 +50,8 @@ MoXBots macOS 包只从显式 `MOXBOTS_CREDENTIAL_READER_BUNDLE` 输入固定凭
 
 Linux 的 setup 通过 `build_linux.sh --install-deps` 和 `--prepare` 复用资源路径，debug/release 也走该脚本。macOS/Windows 的开发版仍可使用项目 node_modules 提供 sharp/tsx；正式包必须携带自包含资源。
 
+macOS 正式构建完成各目标打包后，收尾步骤使用同一准备入口恢复主机架构的 Node、DSH 和 CLIProxy，并在恢复 DSH 选择后重建业务 bundle。Node 与 DSH 的原生依赖必须属于同一目标，业务 bundle 也必须绑定恢复后的 DSH 身份；只恢复 Node 会让本地启动加载另一架构的 Runtime。此步骤只更新 checkout 的 staging，不修改已经打包的 App；任一准备或业务构建失败都会使脚本失败，重跑准备入口可恢复，不提供跨资源事务回滚。
+
 ## 业务 bundle 与本次 Runtime 选择一致
 
 `npm run build:assets` 是前端、Sidecar、Bridge、CLI 的组合入口。构建派生的 DSH 契约和身份进入业务 bundle，因此必须在选定本次 target 的 handoff 后执行，不能跨 target 复用上一份 bundle。各产物细节仍属于既有 Vite / esbuild driver。

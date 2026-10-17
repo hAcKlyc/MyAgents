@@ -1,4 +1,5 @@
 import { nextAgentNetworkExposureRevision } from "../../../shared/config-types";
+import { normalizeProjectMcpSelections } from '../../../shared/mcpSelection';
 // Project management — CRUD, touch, sort
 import { join, basename } from '@tauri-apps/api/path';
 
@@ -24,6 +25,7 @@ import {
 // ============= Helpers =============
 
 function sortProjectsByLastOpened(projects: Project[]): Project[] {
+    normalizeProjectMcpSelections(projects);
     return [...projects].sort((a, b) => {
         const timeA = a.lastOpened ? new Date(a.lastOpened).getTime() : 0;
         const timeB = b.lastOpened ? new Date(b.lastOpened).getTime() : 0;
@@ -107,6 +109,7 @@ export function projectCatalogChanged(before: Project[], after: Project[]): bool
 }
 
 export async function saveProjects(projects: Project[], options: { notification: ConfigChangeNotification } = { notification: 'immediate' }): Promise<void> {
+    normalizeProjectMcpSelections(projects);
     const changed = options.notification === 'immediate' && projectCatalogChanged(await loadProjects(), projects);
     if (isBrowserDevMode()) {
         mockSaveProjects(projects);

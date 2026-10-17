@@ -1,11 +1,8 @@
-// AUTO-GENERATED STUB — do not edit manually.
-// Regenerate: npm run generate:sdk-shims
-// Source: openclaw/src/plugin-sdk/diffs.ts
+// === AUTO-AUGMENT: drift-stubs from upstream openclaw — do not edit this block ===
+// Stubs for upstream openclaw exports the handwritten file below does not
+// implement. Regenerate via: npm run generate:sdk-shims
+export * from "./diffs.auto.js";
+// === END AUTO-AUGMENT ===
 
-const _warned = new Set();
-function _w(fn) {
-  if (!_warned.has(fn)) { _warned.add(fn); console.warn('[sdk-shim] openclaw/plugin-sdk/diffs.' + fn + '() not implemented in Bridge mode'); }
-}
-
-export function definePluginEntry() { _w('definePluginEntry'); return undefined; }
-export function resolvePreferredOpenClawTmpDir() { _w('resolvePreferredOpenClawTmpDir'); return undefined; }
+// Shared temp-path contract; keep new subpaths off the undefined stub.
+export { resolvePreferredOpenClawTmpDir } from './infra-runtime.js';

@@ -267,4 +267,18 @@ describe('scheduled turn HTTP handlers', () => {
       sessionId: 'active-session',
     });
   });
+
+  it('preserves the undispatched Goal wait result for the Rust scheduler', async () => {
+    const response = await handleGoalExecuteSyncRoute(
+      request('/goal/execute-sync', {
+        goalId: 'goal-1', objective: 'ship', sessionId: 'session-1', queueId: 'queue-1',
+        turnNumber: 2, expectedControlRevision: 3, aiCanExit: true, permissionMode: '',
+      }), {
+        getEngine: () => engine(), getWorkspacePath: () => '/workspace',
+        goalOrchestrator: { runScheduledTurn: async () => ({ success: false, enqueued: false, code: 'goal_work_pending', status: 409 }) },
+      },
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ success: false, code: 'goal_work_pending' });
+  });
 });

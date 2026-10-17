@@ -118,3 +118,15 @@ describe('Session Event Protocol v1 renderer', () => {
     );
   });
 });
+
+
+it('renders return unavailability as a transport outcome without inventing task failure', () => {
+  const prompt = renderSessionEventPrompt({ version: 2, type: 'network.return_unavailable',
+    eventId: 'event-transport', createdAt: '2026-10-12T00:00:00Z', targetSessionId: 'source',
+    sourceSessionId: 'remote-target', requestEventId: 'request-1', reason: 'RETURN_RECOVERY_EXPIRED',
+    payload: 'Inspect the original remote session with session state/get.' });
+  expect(prompt).toContain('does not determine whether the remote task succeeded or failed');
+  expect(prompt).toContain('reason="RETURN_RECOVERY_EXPIRED"');
+  expect(prompt).toContain('request_event_id="request-1"');
+  expect(prompt).not.toContain('terminal_status=');
+});

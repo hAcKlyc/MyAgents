@@ -1,24 +1,6 @@
 //! Backoff belongs to the connector, never to a business request or mutation.
 use std::time::{Duration, Instant};
 
-#[derive(Debug)]
-pub(super) enum RetryWake {
-    Elapsed,
-    Boundary,
-    Power(Result<bool, super::NetworkError>),
-}
-pub(super) async fn wait<B, P>(delay: Duration, boundary: B, power: P) -> RetryWake
-where
-    B: std::future::Future,
-    P: std::future::Future<Output = Result<bool, super::NetworkError>>,
-{
-    tokio::select! { biased;
-        _ = boundary => RetryWake::Boundary,
-        signal = power => RetryWake::Power(signal),
-        _ = tokio::time::sleep(delay) => RetryWake::Elapsed,
-    }
-}
-
 pub(crate) fn retry_after(response: &reqwest::Response) -> Option<Duration> {
     if ![429, 503].contains(&response.status().as_u16()) {
         return None;
@@ -97,37 +79,6 @@ impl ReconnectBackoff {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test]
-    async fn account_and_power_interrupt_a_long_retry_wait() {
-        use futures_util::poll;
-        for power in [false, true] {
-            let (account_tx, mut account) = tokio::sync::watch::channel(0);
-            let (power_tx, mut power_rx) = tokio::sync::watch::channel(false);
-            let mut pending = Box::pin(wait(Duration::from_secs(3600), account.changed(), async {
-                power_rx.changed().await.unwrap();
-                Ok(true)
-            }));
-            assert!(poll!(pending.as_mut()).is_pending());
-            if power {
-                power_tx.send(true).unwrap();
-            } else {
-                account_tx.send(1).unwrap();
-            }
-            let wake = tokio::time::timeout(Duration::from_secs(1), pending)
-                .await
-                .unwrap();
-            if power {
-                assert!(matches!(wake, RetryWake::Power(Ok(true))));
-            } else {
-                assert!(matches!(wake, RetryWake::Boundary));
-            }
-            let mut backoff = ReconnectBackoff::default();
-            backoff.next(0, None);
-            backoff.next(0, None);
-            backoff.reset();
-            assert_eq!(backoff.next(0, None), Duration::from_secs(5));
-        }
-    }
     #[test]
     fn first_recovery_unchanged_then_bounded_jitter_and_reset() {
         let mut backoff = ReconnectBackoff::default();

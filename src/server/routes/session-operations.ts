@@ -10,7 +10,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 async function parseJsonObject(request: Request): Promise<Record<string, unknown>> {
-  return (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const value: unknown = await request.json().catch(() => null);
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function operationResponse(result: CapabilityOperationResult): Response {
@@ -23,7 +26,10 @@ export async function handleSessionOperationRoute(
   request: Request,
   deps: { workspacePath: string },
 ): Promise<Response | null> {
-  if (pathname === '/api/mcp/retry' && request.method === 'POST') {
+  if (pathname === '/api/mcp/retry') {
+    if (request.method !== 'POST') {
+      return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
+    }
     const body = await parseJsonObject(request);
     if (typeof body.serverId !== 'string' || !body.serverId.trim() || body.serverId.length > 256) {
       return jsonResponse({ success: false, errorCode: 'server_not_failed' }, 400);

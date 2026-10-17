@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  CLIENT_MESSAGE_INLINE_MAX_BYTES,
+  CLIENT_HISTORY_AUXILIARY_MAX_BYTES,
   isHumanUserMessage,
   resolveLastVisibleTurnPreview,
   resolveVisibleUserTurnText,
@@ -74,29 +74,60 @@ describe('session-message-preview', () => {
     )).toBe(false);
   });
 
+  it.each(['rest', 'replay-array', 'replay-string'] as const)('preserves every answer block under tool pressure through %s (#665)', (path) => {
+    const finalText = '结论'.repeat(372); // 2,232 UTF-8 bytes; small on its own.
+    const blocks = [
+      ...Array.from({ length: 191 }, (_, i) => ({ type: 'tool_use', id: `block-${i}`, tool: {
+        id: `call-${i}`, name: 'Read', inputJson: JSON.stringify({ query: 'i'.repeat(10_000) }),
+        parsedInput: { query: 'i'.repeat(10_000) }, result: JSON.stringify({ output: 'o'.repeat(20_000) }),
+      } })),
+      ...Array.from({ length: 118 }, (_, i) => ({ type: 'thinking', id: `thinking-${i}`, thinking: 't'.repeat(8_000) })),
+      ...Array.from({ length: 17 }, (_, i) => ({ type: 'text', id: `text-${i}`, text: `Progress ${i}.` })),
+      { type: 'text', id: 'final', text: finalText },
+    ];
+    const serialized = JSON.stringify(blocks);
+    const projected = path === 'rest' ? shrinkSessionMessageForClient(msg(serialized)).content
+      : shrinkReplayContentForClient(path === 'replay-array' ? blocks : serialized);
+    const output = typeof projected === 'string' ? JSON.parse(projected) : projected;
+    expect(output.filter((block: { type: string }) => block.type === 'text')).toEqual(blocks.filter(block => block.type === 'text'));
+    expect(JSON.stringify(blocks)).toBe(serialized);
+    expect(Buffer.byteLength(JSON.stringify(output))).toBeLessThan(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
+  });
+
+  it('retains huge prose and middle answer blocks even when auxiliary blocks must be omitted', () => {
+    const body = { type: 'text', id: 'middle', text: '完整😀'.repeat(100_000) };
+    const tools = Array.from({ length: 1800 }, (_, i) => ({
+      type: 'tool_use', id: `block-${i}`, tool: { id: `tool-${i}`, name: 'Read', result: 'x'.repeat(1000) },
+    }));
+    const input = [...tools.slice(0, 900), body, ...tools.slice(900)];
+    const output = shrinkReplayContentForClient(input) as typeof input;
+    expect(output.find(block => block.id === 'middle')).toEqual(body);
+    expect(output.filter(block => block.type !== 'text').length).toBeLessThan(1800);
+    expect(Buffer.byteLength(JSON.stringify(output.filter(block => block.type !== 'text')))).toBeLessThan(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
+    expect(output.findIndex(block => block.id === 'middle')).toBeGreaterThan(0);
+    expect(output.at(-1)?.id).toBe('block-1799');
+    expect(input[900]).toEqual(body);
+  });
+
   it('keeps normal history messages unchanged by reference', () => {
     const input = msg('short message');
     expect(shrinkSessionMessageForClient(input)).toBe(input);
   });
 
-  it('replaces oversized content with a bounded display preview', () => {
-    const original = `HEAD-${'a'.repeat(CLIENT_MESSAGE_INLINE_MAX_BYTES)}-TAIL`;
+  it('preserves oversized plain body for transport spilling', () => {
+    const original = `HEAD-${'a'.repeat(CLIENT_HISTORY_AUXILIARY_MAX_BYTES)}-TAIL`;
     const output = shrinkSessionMessageForClient(msg(original));
 
-    expect(output.content).not.toBe(original);
-    expect(output.content).toContain('too large for inline display');
-    expect(output.content).toContain('HEAD-');
-    expect(output.content).toContain('-TAIL');
-    expect(Buffer.byteLength(output.content, 'utf8')).toBeLessThan(80 * 1024);
+    expect(output.content).toBe(original);
   });
 
-  it('keeps UTF-8 preview slices within budget without dropping the tail marker', () => {
-    const original = `开头${'界'.repeat(CLIENT_MESSAGE_INLINE_MAX_BYTES)}结尾`;
+  it('preserves every UTF-8 character in a huge body', () => {
+    const original = `开头${'界'.repeat(CLIENT_HISTORY_AUXILIARY_MAX_BYTES)}结尾`;
     const output = shrinkSessionMessageForClient(msg(original));
 
     expect(output.content).toContain('开头');
     expect(output.content).toContain('结尾');
-    expect(Buffer.byteLength(output.content, 'utf8')).toBeLessThan(90 * 1024);
+    expect(output.content).toBe(original);
   });
 
   it('preserves oversized structured assistant history as parseable content blocks', () => {
@@ -106,7 +137,7 @@ describe('session-message-preview', () => {
       large: 'input-'.repeat(20_000),
     }, null, 2);
     const resultJson = JSON.stringify({
-      stdout: 'output-'.repeat(CLIENT_MESSAGE_INLINE_MAX_BYTES),
+      stdout: 'output-'.repeat(CLIENT_HISTORY_AUXILIARY_MAX_BYTES),
       stderr: '',
       exitCode: 0,
     }, null, 2);
@@ -138,7 +169,7 @@ describe('session-message-preview', () => {
 
     expect(output.content).not.toBe(original);
     expect(output.content.startsWith('[')).toBe(true);
-    expect(Buffer.byteLength(output.content, 'utf8')).toBeLessThan(CLIENT_MESSAGE_INLINE_MAX_BYTES);
+    expect(Buffer.byteLength(output.content, 'utf8')).toBeLessThan(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
 
     const parsed = JSON.parse(output.content) as Array<{
       type: string;
@@ -168,12 +199,11 @@ describe('session-message-preview', () => {
     expect(parsed[2].text).toBe('final answer');
   });
 
-  it('falls back to plain preview when oversized JSON-looking content is malformed', () => {
-    const original = `[{"type":"text","text":"${'x'.repeat(CLIENT_MESSAGE_INLINE_MAX_BYTES)}"`;
+  it('preserves malformed JSON-looking legacy body as plain text', () => {
+    const original = `[{"type":"text","text":"${'x'.repeat(CLIENT_HISTORY_AUXILIARY_MAX_BYTES)}"`;
     const output = shrinkSessionMessageForClient(msg(original));
 
-    expect(output.content.startsWith('This history message is too large')).toBe(true);
-    expect(output.content).toContain('--- Beginning ---');
+    expect(output.content).toBe(original);
     expect(() => JSON.parse(output.content)).toThrow();
   });
 
@@ -259,7 +289,7 @@ describe('session-message-preview', () => {
     expect(result).toEqual({ found: true, preview: '解释这段文字' });
   });
 
-  // ── shrinkReplayContentForClient (PRD 0.2.27 — /chat/stream replay 256KB cap) ──
+  // ── Shared REST/replay auxiliary projection ──
   describe('shrinkReplayContentForClient', () => {
     it('passes through small string content by reference', () => {
       const s = 'short reply';
@@ -283,8 +313,8 @@ describe('session-message-preview', () => {
       const arr = out as Array<{ type: string; tool?: { id?: string; name?: string } }>;
       expect(arr[0].type).toBe('tool_use');
       expect(arr[0].tool?.name).toBe('Bash');
-      // Whole serialized payload is now under the inline cap → safe to ship as one SSE event.
-      expect(Buffer.byteLength(JSON.stringify(out), 'utf8')).toBeLessThanOrEqual(CLIENT_MESSAGE_INLINE_MAX_BYTES);
+      // Tool-only payload stays within the auxiliary budget.
+      expect(Buffer.byteLength(JSON.stringify(out), 'utf8')).toBeLessThanOrEqual(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
     });
 
     it('guarantees under-cap (array shape) even at extreme block counts where minimal blocks alone exceed the cap', () => {
@@ -298,18 +328,17 @@ describe('session-message-preview', () => {
       const out = shrinkReplayContentForClient(blocks);
 
       expect(Array.isArray(out)).toBe(true);
-      expect(Buffer.byteLength(JSON.stringify(out), 'utf8')).toBeLessThanOrEqual(CLIENT_MESSAGE_INLINE_MAX_BYTES);
+      expect(Buffer.byteLength(JSON.stringify(out), 'utf8')).toBeLessThanOrEqual(CLIENT_HISTORY_AUXILIARY_MAX_BYTES);
       // An omission marker block is present so the user knows content was dropped.
       const arr = out as Array<{ type: string; text?: string }>;
       expect(arr.some(b => b.type === 'text' && (b.text ?? '').includes('blocks omitted'))).toBe(true);
     });
 
-    it('shrinks oversized plain string content to a bounded preview string', () => {
-      const big = `HEAD-${'z'.repeat(CLIENT_MESSAGE_INLINE_MAX_BYTES)}-TAIL`;
+    it('preserves oversized plain replay body', () => {
+      const big = `HEAD-${'z'.repeat(CLIENT_HISTORY_AUXILIARY_MAX_BYTES)}-TAIL`;
       const out = shrinkReplayContentForClient(big);
       expect(typeof out).toBe('string');
-      expect(out as string).toContain('too large for inline display');
-      expect(Buffer.byteLength(out as string, 'utf8')).toBeLessThan(CLIENT_MESSAGE_INLINE_MAX_BYTES);
+      expect(out).toBe(big);
     });
   });
 

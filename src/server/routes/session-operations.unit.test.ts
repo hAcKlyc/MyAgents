@@ -32,6 +32,7 @@ vi.mock('../session-engine', () => ({
 
 import { getSessionMetadata } from '../SessionStore';
 import { handleSessionOperationRoute } from './session-operations';
+import { composeSidecarRequestHandler, resolveSidecarComposition } from '../sidecar-composition';
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
@@ -63,6 +64,34 @@ describe('handleSessionOperationRoute', () => {
     const busy = await handleSessionOperationRoute('/api/mcp/retry', request(), { workspacePath: '/workspace' });
     expect(busy?.status).toBe(409);
     expect(await busy?.json()).toEqual({ success: false, errorCode: 'session_busy' });
+  });
+
+  it('admits MCP recovery through the production Session gate and real handler only', async () => {
+    const composed = (role: 'session' | 'global') => composeSidecarRequestHandler(
+      resolveSidecarComposition(role, false),
+      async request => await handleSessionOperationRoute(new URL(request.url).pathname, request, {
+        workspacePath: '/workspace',
+      }) ?? new Response('Not Found', { status: 404 }),
+    );
+    const request = (method = 'POST', body = '{"serverId":"playwright"}') => new Request('http://local/api/mcp/retry', {
+      method, ...(method === 'POST' ? { body } : {}),
+    });
+    expect((await composed('global')(request())).status).toBe(404);
+    const wrongMethod = await composed('session')(request('GET'));
+    expect(wrongMethod.status).toBe(405);
+    expect(wrongMethod.headers.get('Allow')).toBe('POST');
+    expect(mocks.engine.retryMcpServer).not.toHaveBeenCalled();
+    expect((await composed('session')(request())).status).toBe(200);
+    expect(mocks.engine.retryMcpServer).toHaveBeenCalledExactlyOnceWith('playwright');
+    mocks.engine.retryMcpServer.mockClear();
+    for (const body of ['null', '[]', 'false', 'bad json', '{}', '{"serverId":42}']) {
+      expect((await composed('session')(request('POST', body))).status).toBe(400);
+    }
+    expect(mocks.engine.retryMcpServer).not.toHaveBeenCalled();
+    mocks.engine.retryMcpServer.mockResolvedValueOnce({ success: false, status: 409, errorCode: 'session_busy' });
+    const busy = await composed('session')(request());
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toEqual({ success: false, errorCode: 'session_busy' });
   });
 
   it('rejects malformed retry input and never returns raw Runtime errors', async () => {

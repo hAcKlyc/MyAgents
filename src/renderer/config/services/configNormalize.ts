@@ -2,12 +2,13 @@
 //
 // Kept as a dependency-free leaf module so it can be unit-tested in the fast
 // `unit` pool without pulling Tauri/runtime imports.
+import { normalizeConfigMcpSelections } from '../../../shared/mcpSelection';
 import type { AppConfig } from '../types';
 export { promoteAgentMcpJsonToGlobal } from '../../../shared/mcpConfig';
 
 /**
- * Restore the "stringified JSON" invariant for agent config fields at the load
- * boundary. `providerEnvJson` / `mcpServersJson` are declared as `string` (they
+ * Restore persisted MCP selections and the "stringified JSON" invariant at the
+ * config boundary. `providerEnvJson` / `mcpServersJson` are declared as `string` (they
  * carry a *serialized* JSON blob), but a legacy write path — or a hand-edit —
  * can persist them as a raw JSON object/array. That breaks every strict
  * consumer of the config:
@@ -27,15 +28,15 @@ export { promoteAgentMcpJsonToGlobal } from '../../../shared/mcpConfig';
  * and let the disk heal opportunistically on the next config write).
  *
  * MUST stay in sync with the Rust twin `normalize_stringified_json_value`
- * (`src-tauri/src/im/mod.rs`) — the two independent config readers restore the
+ * (`src-tauri/src/im/config_store.rs`) — the two independent config readers restore the
  * same invariant. Shared regression fixture:
  * `src/shared/__fixtures__/dirtyConfig301.json`.
  */
 export function normalizeStringifiedJsonFields(config: AppConfig): boolean {
+  let changed = normalizeConfigMcpSelections(config);
   const agents = (config as unknown as { agents?: unknown }).agents;
-  if (!Array.isArray(agents)) return false;
+  if (!Array.isArray(agents)) return changed;
 
-  let changed = false;
   for (const agent of agents) {
     if (!agent || typeof agent !== 'object') continue;
     const a = agent as Record<string, unknown>;

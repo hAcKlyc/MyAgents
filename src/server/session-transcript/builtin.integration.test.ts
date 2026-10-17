@@ -787,6 +787,40 @@ describe('builtin V2 execution independent of product storage', () => {
     expect(lifecycle.hasQueryBackgroundTasks()).toBe(false);
   });
 
+  it('projects replace-level background work through the builtin SessionEngine without treating ambient watchers as work', async () => {
+    const frames = [
+      { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'agent', task_type: 'local_agent', description: '' }] },
+      { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'watch', task_type: 'monitor', description: '', ambient: true }] },
+      { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bash', task_type: 'local_bash', description: '' }] },
+      { type: 'system', subtype: 'background_tasks_changed', tasks: [] },
+    ];
+    state.protocolFrames = frames;
+    const { createBuiltinSessionEngine } = await import('../session-engine/builtin-adapter');
+    const engine = createBuiltinSessionEngine();
+    state.beforeFrame.mockImplementation(frame => {
+      const index = frames.indexOf(frame);
+      if (index >= 0) {
+        const expected = index === 1 || index === 3;
+        expect(engine.getLiveSessionState().hasBackgroundWork).toBe(expected);
+        // MoXBots recovery/model-switch guards and visible activity also honor
+        // the SDK level before any task edge is received.
+        expect(agent.hasBuiltinBackgroundWork()).toBe(expected);
+        expect(engine.getLiveSessionState().backgroundWorkActive === true).toBe(expected);
+      }
+    });
+    const workspace = join(state.home, 'workspace');
+    await mkdir(workspace);
+    const metadata = await store.createSession(workspace, { runtime: 'builtin' });
+    await agent.initializeAgent(workspace, null, metadata.id, { preWarmDisabled: true });
+    let finish!: (outcome: TurnTerminalOutcome) => void;
+    const terminal = new Promise<TurnTerminalOutcome>(resolve => { finish = resolve; });
+    await agent.enqueueUserMessage('question', [], undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      { channelDelivery: NO_CHANNEL_DELIVERY, onTerminal: finish });
+    await expect(terminal).resolves.toMatchObject({ status: 'complete' });
+    expect(engine.getLiveSessionState().hasBackgroundWork).toBe(false);
+  });
+
   it.each([
     [null, { structuredContentOmitted: true }],
     ['parent', { structuredContentOmitted: true }],
@@ -2123,6 +2157,36 @@ it('consumes recovered queued input and the next direct input after a capabiliti
   expect(traces.every(row => Object.values(row).every(value => value === null || ['string', 'number', 'boolean'].includes(typeof value)))).toBe(true);
 });
 
+
+it('rechecks background work after awaited materialization, before SDK yield', async () => {
+  const workspace = join(state.home, 'commit-background-work');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.independentInputPump = true;
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+  const lifecycle = await import('../builtin-session/lifecycle');
+  const claim = store.claimPreparedSessionForTurnAdmission;
+  vi.spyOn(store, 'claimPreparedSessionForTurnAdmission').mockImplementation(async (...args) => {
+    const result = await claim(...args);
+    lifecycle.replaceQueryBackgroundActivity(lifecycle.getQuerySession()!, [
+      { task_id: 'late-background', task_type: 'local_agent', description: 'still working' },
+    ]);
+    return result;
+  });
+  const terminal = vi.fn();
+  const rollback = vi.fn(async () => {});
+  const beforeDispatch = async () => ({ accepted: true, validateAtCommit: () =>
+    lifecycle.hasQueryBackgroundWork()
+      ? { accepted: false, code: 'goal_work_pending', rollbackBeforeReject: rollback() }
+      : { accepted: true },
+  });
+  await agent.enqueueUserMessage('deferred continuation', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY, beforeDispatch, onTerminal: terminal });
+  await vi.waitFor(() => expect(terminal).toHaveBeenCalledOnce());
+  expect(state.sdkInputs).toHaveLength(0);
+  expect(rollback).toHaveBeenCalledOnce();
+  expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'stopped' }));
+});
 
 it('acknowledges Stop of promoted local input without yielding it to the SDK (#648)', async () => {
   const platform = await import('../utils/platform');

@@ -1,10 +1,12 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 
@@ -290,6 +292,21 @@ describe('Ubuntu settings availability', () => {
     settingsMocks.config.teamSpaceDevGate = gate !== 'developer';
     render(<ToastProvider><Settings mode="capabilities" initialSection="plugins" onOpenToolMarket={vi.fn()} isActive /></ToastProvider>);
     expect(document.querySelector('[data-tool-market-entry]')).not.toBeInTheDocument();
+  });
+
+  it('keeps the targeted capabilities section when the host consumes navigation', async () => {
+    const consumed = vi.fn();
+    function NavigationHost() {
+      const [pending, setPending] = useState(true);
+      return <ToastProvider><Settings mode="capabilities" initialSection={pending ? 'plugins' : undefined}
+        navigationNonce={pending ? 1 : undefined} isActive
+        onSectionChange={pending ? () => { consumed(); setPending(false); } : undefined} /></ToastProvider>;
+    }
+    render(<NavigationHost />);
+    await waitFor(() => expect(consumed).toHaveBeenCalledOnce());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(screen.getByRole('tab', { name: String(i18n.t('capabilities.plugins', { ns: 'settings' })) }))
+      .toHaveAttribute('aria-selected', 'true');
   });
 
   it.each([undefined, false, true])('writes the AgentNet developer gate through config (stored: %s)', async (enabled) => {

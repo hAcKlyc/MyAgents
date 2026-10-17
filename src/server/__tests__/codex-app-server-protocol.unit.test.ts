@@ -2185,7 +2185,7 @@ describe('Codex app-server protocol helpers', () => {
         () => {},
       ),
     ).toThrow(/mismatch/i);
-    expect(stop).toHaveBeenCalledWith(codexProc);
+    expect(stop).toHaveBeenCalledWith(codexProc, 'failure');
   });
 
   it('maps Codex turn/plan/updated into an AgentStatusPanel todo snapshot', () => {

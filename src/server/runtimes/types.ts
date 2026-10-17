@@ -667,8 +667,8 @@ export interface AgentRuntime {
     interrupt?: boolean,
   ): Promise<void>;
 
-  /** Stop the session gracefully */
-  stopSession(process: RuntimeProcess): Promise<void>;
+  /** Tear down the process, preserving whether its owner is stopping or cleaning up a failure. */
+  stopSession(process: RuntimeProcess, reason?: 'stop' | 'failure'): Promise<void>;
 
   /**
    * Interrupt the CURRENT turn WITHOUT killing the process — the runtime emits its normal
