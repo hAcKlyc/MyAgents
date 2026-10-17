@@ -113,9 +113,15 @@ function builtinRecoveryPath(sessionId: string, sdkSessionId: string): string {
 
 export function loadBuiltinContextLedger(sessionId: string, sdkSessionId: string): unknown | undefined {
     const path = builtinRecoveryPath(sessionId, sdkSessionId);
-    if (!existsSync(path)) return undefined;
     try {
-        if (statSync(path).size > 16 * 1024 * 1024) throw new Error('Oversized ledger');
+        let size: number;
+        try { size = statSync(path).size; }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+            if (existsSync(join(path, '..', `armed-${sdkSessionId}.json`))) throw new Error('Armed recovery ledger is missing');
+            return undefined;
+        }
+        if (size > 16 * 1024 * 1024) throw new Error('Oversized ledger');
         const value = JSON.parse(readFileSync(path, 'utf8'));
         if (value.version !== 1 || value.sessionId !== sessionId || value.sdkSessionId !== sdkSessionId
             || createHash('sha256').update(JSON.stringify(value.ledger)).digest('hex') !== value.digest) {
@@ -142,6 +148,15 @@ export async function saveBuiltinContextLedger(sessionId: string, sdkSessionId: 
         if (Buffer.byteLength(data) > 16 * 1024 * 1024) throw new Error('Recovery ledger exceeds safe size');
         const dir = join(MYAGENTS_DIR, 'context-recovery', sessionId);
         await asyncFs.mkdir(dir, { recursive: true, mode: 0o700 });
+        // A durable tombstone makes a missing ledger fail closed after recovery
+        // has run, including when native compaction removed the original pairs.
+        let marker: asyncFs.FileHandle | undefined;
+        try {
+            marker = await asyncFs.open(join(dir, `armed-${sdkSessionId}.json`), 'wx', 0o600);
+            await marker.writeFile(JSON.stringify({ version: 1, sessionId, sdkSessionId }));
+            await marker.sync();
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+        finally { await marker?.close(); }
         const temporary = `${path}.${randomUUID()}.tmp`;
         try {
             const file = await asyncFs.open(temporary, 'wx', 0o600);

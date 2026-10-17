@@ -12,6 +12,8 @@ Operational API compaction budgets; explicit native compaction failure overrides
 - Native scripts use isolated temporary HOME and actual MCP tools; no paid provider requests or production writes. Full private JSONL/logs/receipts retained outside Git. Request/archive checksums and ledgers are private.
 - Server bundle and web build passed, including existing theme tests. Minor UI label is covered by real component DOM hover assertion; no page redesign.
 
+Additional final checks: 24 SDK environment tests include an explicit512K operational override while retaining1M declared aliases and official-route isolation. Same-history missing-ledger tombstone regression is covered. PR: https://github.com/heavenzhang/MoXBots/pull/96.
+
 ## Open gates
 
 Full CI Rust/OS checks and final main ancestry; signed next-version release via the existing sole deployment owner; installation only when daily tasks are idle and required local unlock/backup gates hold; fresh installed-version/provider/real business-path validation. An SDK loopback fixture does not prove completion of the original payroll Goal.

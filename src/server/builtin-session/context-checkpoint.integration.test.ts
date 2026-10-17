@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -24,7 +24,7 @@ it('backs up the exact request privately and commits a restart-safe identity-sco
   const digest = createHash('sha256').update(JSON.stringify(request)).digest('hex');
   const archive = await store.archiveBuiltinContextRequest(id, request, { digest, scope: 'goal-turn' }, () => true);
   expect(JSON.parse(await readFile(archive, 'utf8')).request).toEqual(request);
-  expect((await stat(archive)).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') expect((await stat(archive)).mode & 0o777).toBe(0o600);
   const original = await readFile(archive, 'utf8');
   await store.archiveBuiltinContextRequest(id, request, { digest, scope: 'same-request-new-turn' }, () => true);
   expect(await readFile(archive, 'utf8')).toBe(original);
@@ -37,6 +37,8 @@ it('backs up the exact request privately and commits a restart-safe identity-sco
   vi.resetModules(); store = await import('../SessionStore');
   expect(store.loadBuiltinContextLedger(id, id)).toEqual(ledger);
   const ledgerPath = join(archive, '..', `ledger-${id}.json`);
+  await unlink(ledgerPath);
+  expect(() => store.loadBuiltinContextLedger(id, id)).toThrow('context_recovery_required');
   await writeFile(ledgerPath, '{invalid');
   expect(() => store.loadBuiltinContextLedger(id, id)).toThrow('context_recovery_required');
 });

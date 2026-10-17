@@ -32,3 +32,5 @@ Private incident/restoration evidence under local output/session-recovery-202610
 ## Current evidence
 
 Contract `specs/tech_docs/context_recovery.md`; acceptance `dev-docs/context-recovery-20261017/acceptance.md`. Focused130 tests passed, real SDK manual/auto compact and durable ledger restart passed. CI/main/release pending. Workers follow-up usage-limited; primary accepted and repaired assembled implementation. Next: commit, merge latest main, run CI and main ancestry verification; release remains sole-owner serial.
+
+PR https://github.com/heavenzhang/MoXBots/pull/96; main148c51bc integrated without conflicts. Additional hardening: same-history armed tombstone blocks missing-ledger restart, and explicit route override/official isolation integration test. Six CI gates running; no release yet.
