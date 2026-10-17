@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { NetworkRegistry } from "@/api/agentNetwork";
@@ -22,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   external: vi.fn(),
   helper: vi.fn(),
+  listFeedback: vi.fn(),
+  createFeedback: vi.fn(),
 }));
 
 vi.mock("@/features/agent-network/store", () => ({
@@ -43,6 +46,10 @@ vi.mock("@/components/Toast", () => ({
 }));
 
 vi.mock("@/utils/openExternal", () => ({ openExternal: mocks.external }));
+vi.mock("@/features/feedback/api", () => ({
+  listFeedback: mocks.listFeedback,
+  createFeedback: mocks.createFeedback,
+}));
 
 import OwnedAccountEntry from "./OwnedAccountEntry";
 
@@ -85,7 +92,7 @@ const makeRegistry = (ownedAccount?: {
               official: false,
               url: "https://login.example.test",
               removing: false,
-              ownedAccount,
+              ownedAccount: { bindingId: "binding-1", ...ownedAccount },
               snapshot: {
                 connectionId: "owned-a",
                 state: "disconnected",
@@ -530,34 +537,57 @@ it("does not accept a late authenticated poll after the account entry unmounts",
   expect(mocks.select).not.toHaveBeenCalled();
 });
 
-it("merges helper and cloud feedback into account menu even while signed out", async () => {
-  mocks.external.mockResolvedValue(undefined);
+it("merges helper into the account menu and sends signed-out feedback through the single sign-in", async () => {
   render(<OwnedAccountEntry expanded onOpenHelper={mocks.helper} />);
   fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
   fireEvent.click(screen.getByRole("button", { name: "小助理" }));
   expect(mocks.helper).toHaveBeenCalledOnce();
   fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
   fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
-  await waitFor(() =>
-    expect(mocks.external).toHaveBeenCalledWith(
-      "https://login.example.test/feedback",
-    ),
-  );
+  expect(mocks.external).not.toHaveBeenCalled();
+  expect(mocks.listFeedback).not.toHaveBeenCalled();
+  expect(screen.queryByRole("dialog", { name: "帮助与反馈" })).not.toBeInTheDocument();
+});
+it("opens native feedback for a signed-in account without a browser or second login", async () => {
+  mocks.listFeedback.mockResolvedValue({ items: [] });
+  mocks.registry = makeRegistry({ state: "authenticated", principalId: "principal-1", expiresAt: null });
+  render(<OwnedAccountEntry expanded onOpenHelper={mocks.helper} />);
+  fireEvent.click(document.querySelector("[data-owned-account-trigger]")!);
+  fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
+  expect(await screen.findByRole("dialog", { name: "帮助与反馈" })).toBeInTheDocument();
+  expect(mocks.listFeedback).toHaveBeenCalledWith({
+    connectionId: "owned-a",
+    principalId: "principal-1",
+    bindingId: "binding-1",
+  });
+  expect(mocks.external).not.toHaveBeenCalled();
   expect(mocks.start).not.toHaveBeenCalled();
+});
+it("retries an uncertain feedback submission with the same mutation and draft", async () => {
+  mocks.listFeedback.mockResolvedValue({ items: [] });
+  mocks.createFeedback
+    .mockRejectedValueOnce(new Error("network"))
+    .mockResolvedValueOnce({ id: "f1" });
+  mocks.registry = makeRegistry({ state: "authenticated", principalId: "principal-1", expiresAt: null });
+  render(<OwnedAccountEntry expanded />);
+  fireEvent.click(document.querySelector("[data-owned-account-trigger]")!);
+  fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
+  const dialog = await screen.findByRole("dialog", { name: "帮助与反馈" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "标题" }), { target: { value: "保存后未更新" } });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "详细说明" }), { target: { value: "请检查" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "提交反馈" }));
+  await waitFor(() => expect(within(dialog).getByRole("status")).toHaveTextContent("提交未完成"));
+  fireEvent.click(within(dialog).getByRole("button", { name: "提交反馈" }));
+  await waitFor(() => expect(mocks.createFeedback).toHaveBeenCalledTimes(2));
+  const [first, second] = mocks.createFeedback.mock.calls.map(call => call[1]);
+  expect(second.mutationId).toBe(first.mutationId);
+  expect(second).toMatchObject({ category: "bug", title: "保存后未更新", description: "请检查" });
 });
 it("keeps help accessible from the narrow account icon without a hidden label", () => {
   render(<OwnedAccountEntry expanded={false} onOpenHelper={mocks.helper} />);
-  fireEvent.click(screen.getByRole("button", { name: "MoXBots 账号" }));
+  fireEvent.click(document.querySelector("[data-owned-account-trigger]")!);
   fireEvent.click(screen.getByRole("button", { name: "小助理" }));
   expect(mocks.helper).toHaveBeenCalledOnce();
-});
-it("keeps the account menu usable after cloud feedback cannot open", async () => {
-  mocks.external.mockRejectedValueOnce(new Error("failed"));
-  render(<OwnedAccountEntry expanded onOpenHelper={mocks.helper} />);
-  fireEvent.click(screen.getByRole("button", { name: "登录 MoXBots" }));
-  fireEvent.click(screen.getByRole("button", { name: "帮助与反馈" }));
-  await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
-  expect(screen.getByRole("button", { name: "小助理" })).toBeInTheDocument();
 });
 it("closes an old sign-out confirmation and account menu after switching from account A to B without removing B", async () => {
   mocks.registry = makeRegistry({

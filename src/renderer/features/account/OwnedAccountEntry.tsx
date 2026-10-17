@@ -10,7 +10,6 @@ import {
   TeamIcon,
 } from "@/components/icons";
 import { canonicalOwnedIssuer } from '@/utils/ownedCloud';
-import { openExternal } from "@/utils/openExternal";
 import { Popover } from "@/components/ui/Popover";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useToast } from "@/components/Toast";
@@ -28,6 +27,7 @@ import {
   useAgentNetworkRegistry,
 } from "@/features/agent-network/store";
 import { JoinNetworkDialog } from "@/features/agent-network/JoinNetworkDialog";
+import FeedbackDialog from "@/features/feedback/FeedbackDialog";
 
 import { ownedAccountCandidates, selectedOwnedAccount } from './ownedAccountSelection';
 
@@ -59,6 +59,7 @@ export default function OwnedAccountEntry({
   const [loginOpen, setLoginOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const logoutBoundary = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -226,15 +227,21 @@ export default function OwnedAccountEntry({
       if (mounted.current) setBusy(false);
     }
   };
-  const openFeedback = async () => {
-    if (!serviceUrl) return;
-    try {
-      await openExternal(`${serviceUrl}/feedback`);
-      setMenuOpen(false);
-    } catch {
-      toast.error(t("ownedAccountEntry.feedbackFailed"));
-    }
+  const primaryAccountAction = () => {
+    setMenuOpen(false);
+    if (chooseAccount) onOpenAgentNetwork?.();
+    else if (state === "authorizationRequired") void selectRecoveredConnection();
+    else if (state === "unavailable") onOpenAgentNetwork?.();
+    else startLogin();
   };
+  const bindingId = owned?.ownedAccount?.bindingId ?? "";
+  const feedbackScope =
+    owned &&
+    state === "authenticated" &&
+    bindingId &&
+    (expiresAt == null || expiresAt > Date.now() / 1000)
+      ? { connectionId: owned.id, principalId, bindingId }
+      : null;
 
   const label = chooseAccount ? t("community:chooseAccount") :
     state === "authenticated"
@@ -316,14 +323,7 @@ export default function OwnedAccountEntry({
                   ((state === "authorizationRequired" || chooseAccount) && !onOpenAgentNetwork)
                 }
                 className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
-                onClick={() => {
-                  setMenuOpen(false);
-                  if (chooseAccount) onOpenAgentNetwork?.();
-                  else if (state === "authorizationRequired")
-                    void selectRecoveredConnection();
-                  else if (state === "unavailable") onOpenAgentNetwork?.();
-                  else startLogin();
-                }}
+                onClick={primaryAccountAction}
               >
                 {label}
               </button>
@@ -352,7 +352,14 @@ export default function OwnedAccountEntry({
             <button
               type="button"
               disabled={!serviceUrl}
-              onClick={() => void openFeedback()}
+              onClick={() => {
+                if (feedbackScope) {
+                  setMenuOpen(false);
+                  setFeedbackOpen(true);
+                } else {
+                  primaryAccountAction();
+                }
+              }}
               className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
             >
               <HelpIcon className="h-4 w-4" />
@@ -387,6 +394,13 @@ export default function OwnedAccountEntry({
           </div>
         </Popover>
       }
+      {feedbackOpen && feedbackScope && (
+        <FeedbackDialog
+          key={JSON.stringify(feedbackScope)}
+          scope={feedbackScope}
+          onClose={() => setFeedbackOpen(false)}
+        />
+      )}
       {loginOpen && state !== "authenticated" && serviceUrl && (
         <JoinNetworkDialog
           accountOnly

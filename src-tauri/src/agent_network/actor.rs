@@ -141,6 +141,17 @@ impl AgentNetwork {
             .community_request(scope, request)
             .await
     }
+    pub(crate) async fn feedback_request(
+        &self,
+        scope: &super::feedback::FeedbackScope,
+        request: &super::feedback::FeedbackRequest,
+    ) -> Result<Value, NetworkError> {
+        self.account
+            .as_ref()
+            .ok_or_else(|| NetworkError::new("OWNED_SERVICE_UNAVAILABLE"))?
+            .feedback_request(scope, request)
+            .await
+    }
     pub(crate) fn local_device_identity(
         &self,
     ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {

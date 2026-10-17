@@ -260,6 +260,36 @@ impl NetworkAccountSession {
         self.ensure_current()?;
         result
     }
+    pub(crate) async fn feedback_request(
+        &self,
+        scope: &super::feedback::FeedbackScope,
+        request: &super::feedback::FeedbackRequest,
+    ) -> Result<Value, NetworkError> {
+        self.ensure_current()?;
+        let Self::Owned(account) = self else {
+            return Err(NetworkError::new("OWNED_SERVICE_UNAVAILABLE"));
+        };
+        if !scope.matches(
+            &account.connection_id,
+            &account.session.principal_id,
+            &account.binding_id,
+        ) {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        request.route()?;
+        let (client, current) = super::owned_login::OwnedClient::discover(
+            &account.descriptor.issuer,
+            account.public_tls_ca.as_deref(),
+        )
+        .await?;
+        account.descriptor.ensure_same_trust(&current)?;
+        self.ensure_current()?;
+        let result = client
+            .feedback_request(request, &account.session.access_token)
+            .await;
+        self.ensure_current()?;
+        result
+    }
     pub(crate) async fn request(
         &self,
         operation: AccountOperation,

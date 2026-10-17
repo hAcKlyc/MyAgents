@@ -1,0 +1,29 @@
+{
+  "title": "帮助与反馈",
+  "close": "关闭",
+  "categoryLabel": "类型",
+  "categories": {
+    "bug": "问题",
+    "suggestion": "建议",
+    "help": "使用咨询"
+  },
+  "titleLabel": "标题",
+  "titlePlaceholder": "简要描述问题或建议",
+  "descriptionLabel": "详细说明",
+  "descriptionPlaceholder": "请描述遇到的情况或建议。请勿填写密码或密钥。",
+  "submit": "提交反馈",
+  "submitting": "提交中…",
+  "submitted": "反馈已提交",
+  "submitFailed": "提交未完成，内容已保留，可直接重试。",
+  "history": "我的反馈",
+  "loading": "正在读取反馈记录…",
+  "loadFailed": "无法读取反馈记录",
+  "retry": "重试",
+  "empty": "还没有反馈记录",
+  "reply": "回复",
+  "statuses": {
+    "new": "已提交",
+    "in_progress": "处理中",
+    "resolved": "已解决"
+  }
+}

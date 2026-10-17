@@ -1,0 +1,29 @@
+{
+  "title": "Help & feedback",
+  "close": "Close",
+  "categoryLabel": "Type",
+  "categories": {
+    "bug": "Problem",
+    "suggestion": "Suggestion",
+    "help": "Usage question"
+  },
+  "titleLabel": "Title",
+  "titlePlaceholder": "Briefly describe the problem or suggestion",
+  "descriptionLabel": "Details",
+  "descriptionPlaceholder": "Describe what happened or your suggestion. Do not enter passwords or keys.",
+  "submit": "Submit feedback",
+  "submitting": "Submitting…",
+  "submitted": "Feedback submitted",
+  "submitFailed": "Submission did not complete. Your text is kept, so you can retry.",
+  "history": "My feedback",
+  "loading": "Loading feedback…",
+  "loadFailed": "Could not load feedback",
+  "retry": "Retry",
+  "empty": "No feedback yet",
+  "reply": "Reply",
+  "statuses": {
+    "new": "Submitted",
+    "in_progress": "In progress",
+    "resolved": "Resolved"
+  }
+}

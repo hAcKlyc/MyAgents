@@ -266,6 +266,19 @@ impl NetworkRegistry {
         let result = actor.community_request(&scope, &request).await;
         self.community_finish(&scope, &issuer, &actor, result)
     }
+    pub(crate) async fn feedback_request(
+        &self,
+        scope: super::feedback::FeedbackScope,
+        request: super::feedback::FeedbackRequest,
+    ) -> Result<Value, NetworkError> {
+        let issuer =
+            owned_service_url().ok_or_else(|| NetworkError::new("OWNED_SERVICE_UNAVAILABLE"))?;
+        let issuer = super::community::canonical_issuer(issuer)?;
+        self.community_binding_current(&scope, &issuer)?;
+        let actor = self.connection(&scope.connection_id)?;
+        let result = actor.feedback_request(&scope, &request).await;
+        self.community_finish(&scope, &issuer, &actor, result)
+    }
     pub(crate) fn for_reference(
         &self,
         reference: &myagents_agent_network_protocol::AgentReference,

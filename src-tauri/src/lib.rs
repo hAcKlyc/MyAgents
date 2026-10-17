@@ -870,6 +870,7 @@ pub fn run() {
             agent_network::commands::cmd_agent_discovery,
             agent_network::commands::cmd_agent_network_request,
             agent_network::commands::cmd_owned_community_request,
+            agent_network::commands::cmd_owned_feedback_request,
             agent_network::commands::cmd_agent_network_management,
             // MyAgents Cloud Space
             space_cloud::cmd_space_get_capability,

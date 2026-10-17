@@ -433,6 +433,28 @@ impl OwnedClient {
         }
         request.response(value)
     }
+    pub(crate) async fn feedback_request(
+        &self,
+        request: &super::feedback::FeedbackRequest,
+        token: &str,
+    ) -> Result<Value, NetworkError> {
+        let (method, path, body) = request.route()?;
+        let (status, value) = raw_request_with_limits(
+            &self.http,
+            &self.origin,
+            method,
+            &path,
+            body,
+            Some(token),
+            64 * 1024,
+            1024 * 1024,
+        )
+        .await?;
+        if status != StatusCode::OK {
+            return Err(NetworkError::new("OWNED_RESPONSE_INVALID"));
+        }
+        request.response(value)
+    }
     pub(crate) async fn identity_request(
         &self,
         method: Method,

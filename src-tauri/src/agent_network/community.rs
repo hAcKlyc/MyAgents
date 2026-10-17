@@ -59,10 +59,10 @@ pub(crate) enum CommunityRequest {
         content: String,
     },
 }
-fn invalid() -> NetworkError {
+pub(super) fn invalid() -> NetworkError {
     NetworkError::new("REQUEST_INVALID")
 }
-fn uuid(value: &str) -> Result<(), NetworkError> {
+pub(super) fn uuid(value: &str) -> Result<(), NetworkError> {
     if uuid::Uuid::parse_str(value)
         .map(|v| v.to_string())
         .as_deref()
@@ -73,7 +73,7 @@ fn uuid(value: &str) -> Result<(), NetworkError> {
         Err(invalid())
     }
 }
-fn text(value: &str, max: usize) -> Result<(), NetworkError> {
+pub(super) fn text(value: &str, max: usize) -> Result<(), NetworkError> {
     if value.trim().is_empty() || value.chars().count() > max {
         Err(invalid())
     } else {

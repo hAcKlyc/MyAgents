@@ -218,6 +218,14 @@ pub(crate) async fn cmd_owned_community_request(
     state.community_request(scope, request).await
 }
 #[tauri::command]
+pub(crate) async fn cmd_owned_feedback_request(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    scope: super::feedback::FeedbackScope,
+    request: super::feedback::FeedbackRequest,
+) -> Result<Value, NetworkError> {
+    state.feedback_request(scope, request).await
+}
+#[tauri::command]
 pub(crate) async fn cmd_agent_network_request(
     state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
     request: MetadataRequest,

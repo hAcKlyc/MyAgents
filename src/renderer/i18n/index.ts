@@ -6,6 +6,8 @@ import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../shared/appProfile';
 import { resolveEffectiveLocale, type SupportedLocale } from '../../shared/i18n';
 import communityEn from './locales/en-US/community.json';
 import communityZh from './locales/zh-CN/community.json';
+import feedbackEn from './locales/en-US/feedback.json';
+import feedbackZh from './locales/zh-CN/feedback.json';
 import appEn from './locales/en-US/app.json';
 import chatEn from './locales/en-US/chat.json';
 import commonEn from './locales/en-US/common.json';
@@ -22,6 +24,7 @@ import taskZh from './locales/zh-CN/task.json';
 export const resources = {
   'zh-CN': {
     community: communityZh,
+    feedback: feedbackZh,
     app: {
       ...appZh,
       ...(APP_BUILD_PROFILE === 'moxbot' ? {
@@ -38,6 +41,7 @@ export const resources = {
   },
   'en-US': {
     community: communityEn,
+    feedback: feedbackEn,
     app: {
       ...appEn,
       ...(APP_BUILD_PROFILE === 'moxbot' ? {

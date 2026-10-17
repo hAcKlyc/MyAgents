@@ -23,7 +23,6 @@
     "editProfile": "编辑账号资料"
   },
   "ownedAccountEntry": {
-    "feedbackFailed": "无法打开帮助与反馈，请稍后重试。",
     "account": "账号",
     "menu": "MoXBots 账号",
     "instance": "MoXBots 实例",
