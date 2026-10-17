@@ -796,7 +796,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         { id: 'fixture-create-call', name: 'TaskCreate', input: { subject: 'Verify approval progress', description: 'Synthetic native regression' } },
         { id: 'fixture-update-call', name: 'TaskUpdate', input: { taskId: 'task-1', status: 'completed' } },
         { id: 'fixture-skill-call', name: 'Skill', input: { skill: 'permission-review' } },
-        { id: 'fixture-agent-call', name: 'Agent', input: { subagent_type: 'permission-helper', description: 'Verify child approval', prompt: 'Return the synthetic fixture completion.', run_in_background: false } },
+        { id: 'fixture-agent-call', name: 'subagent', input: { description: 'Verify child approval', prompt: 'Return the synthetic fixture completion.', run_in_background: false } },
         { id: 'fixture-child-inherited-call', name: 'bash', input: { command: 'printf inherited-child', workdir: 'child', description: 'Verify the shared directory grant' } },
         { id: 'fixture-child-review-call', name: 'bash', input: { command: `printf approved-child; ${curl} http://dsh-shell-fixture.invalid/child`, description: 'Verify child approval at another directory' } },
         undefined, // The foreground child completes before the root continues.
@@ -808,6 +808,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       ];
       let requests = 0;
       let childSystemPrompt = '';
+      let childModelId: string | undefined;
+      let childAgentId: string | undefined;
+      let advertisedDelegation: Record<string, unknown> | undefined;
       let planSystemPrompt = '';
       let resumedRootInput = '';
       const proxyRequests: string[] = [];
@@ -841,13 +844,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         }
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
-        const modelRequest = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { messages: { content: unknown }[]; system?: unknown };
+        const modelRequest = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { model?: string; tools?: Array<Record<string, unknown>>; messages: { content: unknown }[]; system?: unknown };
         for (const block of modelRequest.messages.flatMap(message => Array.isArray(message.content) ? message.content as { type: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[] : [])) {
           if (block.type === 'tool_result' && block.tool_use_id) modelToolResults.set(block.tool_use_id, block);
           if (block.type === 'tool_result' && (block.tool_use_id === 'fixture-child-inherited-call' || block.tool_use_id === 'fixture-child-review-call')) childResults.set(block.tool_use_id, block);
         }
         const tool = calls[requests++];
-        if (tool?.id === 'fixture-child-inherited-call') childSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
+        if (tool?.id === 'fixture-agent-call') advertisedDelegation = modelRequest.tools?.find(candidate => candidate.name === 'subagent');
+        if (tool?.id === 'fixture-child-inherited-call') {
+          childSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
+          childModelId = modelRequest.model;
+        }
         if (tool?.id === 'fixture-plan-shell-call') planSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
         if (tool?.id === 'fixture-question-call') resumedRootInput = JSON.stringify(modelRequest.messages);
         let input: Record<string, unknown> | undefined = tool?.input;
@@ -930,6 +937,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         const profile = compileDshModelExecutionProfile({ provider, modelId: 'claude-sonnet-4-6' });
         const binding = await host.request('session/create', { clientOperationId: 'native-shell-review-bind', persistenceRef: 'native-shell-review', provider: profile, configRevision: 'native-shell-review-config', extensionDigest: catalog.digest, systemPrompt: '', permissionMode: 'approval-required', interactionScenario: 'host-interaction-v1' });
         expect(binding.state).toBe('ready');
+        if (binding.state !== 'ready') throw new Error('Native Session was not admitted');
+        expect(binding.toolCatalog).toMatchObject({ effectiveTools: expect.arrayContaining(['subagent', 'fork_agent']) });
+        expect(binding.toolCatalog.effectiveTools).not.toContain('Agent');
         const environmentDigest = createDshInitializeParams({ productSessionId, productVersion: '0.4.11', runtimeHome: fixture.runtimeHome, workspace: { path: fixture.workspace, identity: fixture.executionEnvironment.workspace.identity }, executionEnvironment: fixture.executionEnvironment, interaction: 'deterministic-headless' }).executionEnvironment.digest;
         const configured = await host.request('config/apply', { revision: 'native-shell-review-auto', provider: profile, permissionMode: 'approval-required', interactionScenario: 'host-interaction-v1', systemPrompt: '', executionEnvironmentRevision: fixture.executionEnvironment.revision, executionEnvironmentDigest: environmentDigest });
         expect(configured.state).toBe('applied');
@@ -950,8 +960,18 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           const next = approvals[approvalIndex++]!;
           const call = calls.find(candidate => candidate?.id === callId)!;
           expect(next.kind).toBe('permission');
-          expect((next.schema as Record<string, unknown>).tool).toBe(call.name);
+          // Native delegation exposes subagent to the model and Agent to the
+          // shared product permission owner; neither surface is a role compiler.
+          expect((next.schema as Record<string, unknown>).tool).toBe(call.name === 'subagent' ? 'Agent' : call.name);
           expect(next.review?.actor.origin).toBe(origin);
+          if (origin === 'foreground_child') {
+            childAgentId = next.review!.actor.agentId;
+            expect(childAgentId).not.toBe(binding.runtimeSessionId);
+            expect((await host.requestNativeSubagent('subagent/list', {})).items).toEqual(expect.arrayContaining([
+              expect.objectContaining({ id: childAgentId, parentId: binding.runtimeSessionId, depth: 1, mode: 'one-shot', activity: 'running' }),
+            ]));
+            expect(next.review?.scope).toMatchObject({ tool: 'bash', permissionClass: 'process.execute', owner: 'session_tree' });
+          }
           expect(next.authority).toMatchObject({ callId: call.id, rootCallId: call.id });
           expect(next.desiredPolicyRevision).toBe(expectedRevision);
           expect(childResults.has(call.id)).toBe(false);
@@ -1052,14 +1072,18 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           : Array.isArray(childInput.system) ? childInput.system.map(block => block.text ?? '').join('\n') : '';
         const childText = [systemText, ...childInput.messages.flatMap(message => typeof message.content === 'string'
           ? [message.content] : message.content.map(block => block.text ?? ''))].join('\n');
-        const identityText = /Your execution identity \(Runtime authority\): (\{[^\n]*\})/.exec(childText)?.[1];
-        expect(identityText).toBeDefined();
-        expect(JSON.parse(identityText!)).toMatchObject({ model: profile.modelId, provider: profile.providerRouteId, role: 'permission-helper', depth: 1, remainingDepth: 0, canDelegate: false });
+        // Native spawn uses the Runtime-owned child identity rather than the
+        // unsupported Product Agent descriptor's role/depth prompt compiler.
+        expect(childAgentId).toBeDefined();
+        expect(childText).toContain(`Your Agent id is "${childAgentId}" (DSH runtime identity)`);
+        expect(childModelId).toBe(profile.modelId);
+        expect(advertisedDelegation).toMatchObject({ name: 'subagent', input_schema: {
+          required: expect.arrayContaining(['description', 'prompt']),
+          properties: { run_in_background: { type: 'boolean' } },
+        } });
         expect(resumedRootInput).toContain('fixture-agent-call');
         expect(resumedRootInput).not.toContain('activation_completion');
         expect(resumedRootInput).not.toContain('Your execution identity (Runtime authority)');
-        expect(childSystemPrompt).toContain('Product permissions and shared exact grants apply');
-        expect(childSystemPrompt).not.toContain('operations that require approval are rejected automatically');
         // This Provider omits cache buckets, so the native terminal intentionally
         // has no complete usage summary. Reopening must still recover the reply.
         const mutationController = new DshMutationController(host, String(binding.runtimeSessionId));
@@ -1070,6 +1094,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         expect(recovered.assistantTurns).toHaveLength(1);
         expect(recovered.assistantTurns[0]!.assistantMessage.content).toContain('Fixture complete.');
         expect(recovered.assistantTurns[0]!.assistantMessage.usage).toBeUndefined();
+        // Host approval actually succeeded above. The model must not be told
+        // that all child approval requests are rejected without interaction.
+        expect(childSystemPrompt).not.toContain('operations that require approval are rejected automatically');
       } catch (error) {
         const progress = { requests, results: [...modelToolResults].map(([id, result]) => ({ id, isError: result.is_error, content: JSON.stringify(result.content).slice(0, 1500) })), terminal: await host.request('turn/get', { clientOperationId: 'native-shell-review-turn' }).catch(() => undefined), stderr: fixture.stderr.slice(-5) };
         throw new Error(`Native tool sequence failed: ${JSON.stringify(progress)}`, { cause: error });
