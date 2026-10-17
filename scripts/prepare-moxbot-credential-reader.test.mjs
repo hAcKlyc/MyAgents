@@ -364,6 +364,11 @@ test('default module repository root is normalized before source verification', 
   assert.match(computeSourceInputSha256(), /^[0-9a-f]{64}$/);
 });
 
+test('Developer ID reader release pin covers the current packaged source closure', () => {
+  const release = readMoxbotCredentialReaderRelease({ release: 'developer-id-v2' });
+  assert.equal(release.sourceInputSha256, computeSourceInputSha256());
+});
+
 test('release selection is closed, fixed-path and defaults to legacy for low-level callers', (t) => {
   const f = fixture(t);
   const legacyBytes = readFileSync(path.join(f.sourceRoot, 'scripts/moxbot-credential-reader-release.json'));

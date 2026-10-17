@@ -179,7 +179,7 @@ function checkOwnerAndWrites(stat, label, directory = false) {
 function isTrustedWritableAncestor(targetPath, stat, isAncestor) {
   if (!isAncestor || !stat.isDirectory() || stat.uid !== 0) return false;
   const mode = modeOf(stat);
-  if (targetPath === '/private/tmp') return mode === 0o1777;
+  if (targetPath === '/private/tmp' || targetPath === '/tmp') return mode === 0o1777;
   return targetPath === '/Applications'
     && (mode & 0o002) === 0
     && (mode & 0o0777) === 0o0775;
