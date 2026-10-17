@@ -206,7 +206,7 @@ export type InjectedTurnResult = {
   assistantMessagePresent?: boolean;
   text?: string;
   error?: string;
-  code?: 'session_bind_failed' | 'configuration_failed' | 'scenario_failed';
+  code?: string;
   status?: number;
 };
 
@@ -248,7 +248,7 @@ export type ScheduledTurnPreparationResult = {
   requiredSystemSkill?: RequiredSystemSkill;
   release?: () => void | Promise<void>;
   error?: string;
-  code?: 'session_bind_failed' | 'configuration_failed' | 'scenario_failed';
+  code?: string;
   status?: number;
 };
 

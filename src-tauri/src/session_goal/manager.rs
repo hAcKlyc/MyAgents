@@ -439,6 +439,7 @@ impl SessionGoalManager {
                     ));
                 }
                 goal.status = GoalStatus::Active;
+                goal.terminal_reason = None;
                 goal.updated_at = now;
                 goal.bump_revision();
                 goal.bump_control_revision();
@@ -591,6 +592,7 @@ impl SessionGoalManager {
                 }
                 if goal.status == GoalStatus::Paused {
                     goal.status = GoalStatus::Active;
+                    goal.terminal_reason = None;
                 }
                 let authority = GoalTurnAuthority {
                     queue_id: queue_id.clone(),
@@ -749,8 +751,16 @@ impl SessionGoalManager {
         &self,
         goal_id: &str,
         expected_control_revision: u64,
+        code: Option<String>,
         error: Option<String>,
     ) -> Result<SessionGoal, GoalMutationError> {
+        let current = self
+            .get(goal_id)
+            .await?
+            .ok_or_else(|| GoalMutationError::goal_changed("Goal identity changed"))?;
+        // Keep a concurrent explicit resume/claim from reacquiring the Goal
+        // owner before a newly paused dispatch releases that same owner.
+        let _lifecycle = crate::sidecar::acquire_session_lifecycle(&[&current.session_id]).await;
         let now = Utc::now();
         let (updated, became_terminal, changed) = self
             .commit(goal_id, move |goal| {
@@ -759,6 +769,14 @@ impl SessionGoalManager {
                     || goal.control_revision != expected_control_revision
                     || goal.current_turn.is_some()
                 {
+                    return Ok(false);
+                }
+                if let Some(reason) = recovery_pause_reason(code.as_deref(), error.as_deref()) {
+                    goal.status = GoalStatus::Paused;
+                    goal.terminal_reason = Some(reason);
+                    goal.bump_control_revision();
+                    goal.updated_at = now;
+                    goal.bump_revision();
                     return Ok(false);
                 }
                 goal.consecutive_failures = goal.consecutive_failures.saturating_add(1);
@@ -781,6 +799,10 @@ impl SessionGoalManager {
             .await?;
         if changed {
             self.emit_changed(&updated).await;
+        }
+        if changed && updated.status == GoalStatus::Paused && updated.current_turn.is_none() {
+            self.cancel_continuation(goal_id).await;
+            let _ = self.release_goal_owner(&updated).await;
         }
         if became_terminal {
             self.cancel_deadline(goal_id).await;
@@ -841,7 +863,14 @@ impl SessionGoalManager {
                 goal.last_executed_at = Some(now);
                 goal.total_duration_ms = goal.total_duration_ms.saturating_add(request.duration_ms);
                 goal.total_tokens = goal.total_tokens.saturating_add(request.consumed_tokens);
-                goal.consecutive_failures = if request.success {
+                let recovery_reason = (!request.success && goal.status == GoalStatus::Active)
+                    .then(|| {
+                        recovery_pause_reason(request.code.as_deref(), request.error.as_deref())
+                    })
+                    .flatten();
+                goal.consecutive_failures = if recovery_reason.is_some() {
+                    goal.consecutive_failures
+                } else if request.success {
                     0
                 } else {
                     goal.consecutive_failures.saturating_add(1)
@@ -868,8 +897,14 @@ impl SessionGoalManager {
                         }
                     }
                 }
-                let became_terminal =
-                    !request.success && goal.consecutive_failures >= 10 && !goal.is_terminal();
+                if let Some(reason) = recovery_reason {
+                    goal.status = GoalStatus::Paused;
+                    goal.terminal_reason = Some(reason);
+                    goal.bump_control_revision();
+                }
+                let became_terminal = !request.success
+                    && goal.status == GoalStatus::Active
+                    && goal.consecutive_failures >= 10;
                 if became_terminal {
                     goal.status = GoalStatus::Blocked;
                     goal.terminal_reason = Some(format!(
@@ -902,10 +937,29 @@ impl SessionGoalManager {
             };
             super::scheduler::request_continuation(goal_id.to_string(), delay);
         }
-        if (updated.is_terminal() || updated.status == GoalStatus::Paused)
-            && updated.current_turn.is_none()
-        {
+        if updated.is_terminal() && updated.current_turn.is_none() {
             let _ = self.release_goal_owner(&updated).await;
+        } else if changed && updated.status == GoalStatus::Paused && updated.current_turn.is_none()
+        {
+            if applied {
+                // Serialize a newly applied recovery pause with explicit resume,
+                // then re-read the exact control epoch before releasing its owner.
+                let _lifecycle =
+                    crate::sidecar::acquire_session_lifecycle(&[&updated.session_id]).await;
+                let current = self.get(goal_id).await?;
+                if current.as_ref().is_some_and(|goal| {
+                    goal.status == GoalStatus::Paused
+                        && goal.control_revision == updated.control_revision
+                        && goal.current_turn.is_none()
+                }) {
+                    let _ = self.release_goal_owner(&updated).await;
+                }
+            } else {
+                // Preserve stop/control acknowledgement cleanup: its caller can
+                // already hold the lifecycle lock. A no-change duplicate callback
+                // never releases an owner that a newer turn may have acquired.
+                let _ = self.release_goal_owner(&updated).await;
+            }
         }
         if became_terminal {
             self.cancel_deadline(goal_id).await;
@@ -1488,6 +1542,25 @@ fn truncate_delivery_text(text: &str) -> String {
     text[..end].to_string()
 }
 
+// Runtime owns context repair and its bounded attempts. These structured outcomes
+// mean a new unchanged Goal turn cannot make progress; preserve the Goal for an
+// explicit user resume instead of converting a runtime fault into a Goal terminal.
+fn recovery_pause_reason(code: Option<&str>, error: Option<&str>) -> Option<String> {
+    let code = code.filter(|code| {
+        matches!(
+            *code,
+            "context_recovery_required"
+                | "compaction_failed"
+                | "provider_invalid_request"
+                | "automatic_replay_blocked"
+        )
+    })?;
+    Some(match error.filter(|error| !error.trim().is_empty()) {
+        Some(error) => format!("Goal paused for recovery ({code}): {error}"),
+        None => format!("Goal paused for recovery ({code})"),
+    })
+}
+
 pub(super) fn failure_backoff(failures: u32) -> u64 {
     match failures {
         0 | 1 => 3,
@@ -1621,11 +1694,332 @@ mod tests {
     ) -> GoalTurnFinalizationRequest {
         GoalTurnFinalizationRequest {
             success: true,
+            code: None,
             error: None,
             output_text: Some("done".to_string()),
             duration_ms,
             consumed_tokens,
             channel_delivery_expected: false,
+        }
+    }
+
+    fn recovery_failure(code: &str) -> GoalTurnFinalizationRequest {
+        GoalTurnFinalizationRequest {
+            success: false,
+            code: Some(code.to_string()),
+            error: Some("Runtime context needs repair".to_string()),
+            output_text: None,
+            duration_ms: 123,
+            consumed_tokens: 456,
+            channel_delivery_expected: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_finalize_cleanup_serializes_with_explicit_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+        let goal = manager
+            .create_goal(config("recovery-race-session", "finish once"))
+            .await
+            .unwrap();
+        let (sidecars, generation) = live_test_sidecar("recovery-race-session", &goal.id);
+        manager
+            .claim_turn_from_sidecar(
+                &goal.id,
+                "failed-queue",
+                GoalTurnKind::Continuation,
+                goal.control_revision,
+                "recovery-race-session",
+                generation,
+                &sidecars,
+            )
+            .await
+            .unwrap();
+        *manager.stop_goal_turn_hook.write().await =
+            Some(Arc::new(|_, _| Box::pin(async { Ok(()) })));
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let allow = Arc::new(tokio::sync::Notify::new());
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let entered_hook = entered.clone();
+        let allow_hook = allow.clone();
+        let calls_hook = calls.clone();
+        *manager.release_goal_owner_hook.write().await = Some(Arc::new(move |_| {
+            let entered = entered_hook.clone();
+            let allow = allow_hook.clone();
+            let first = calls_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            Box::pin(async move {
+                if first {
+                    entered.notify_one();
+                    allow.notified().await;
+                }
+                Ok(false)
+            })
+        }));
+        let finalizer_manager = manager.clone();
+        let finalizer_goal = goal.id.clone();
+        let finalizer = tauri::async_runtime::spawn(async move {
+            finalizer_manager
+                .finalize_turn_from_sidecar(
+                    &finalizer_goal,
+                    "failed-queue",
+                    recovery_failure("context_recovery_required"),
+                    generation,
+                    &sidecars,
+                )
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        let resume_manager = manager.clone();
+        let resume_goal = goal.id.clone();
+        let resume =
+            tauri::async_runtime::spawn(
+                async move { resume_manager.resume_goal(&resume_goal).await },
+            );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "resume must not acquire the Goal owner before old recovery cleanup completes"
+        );
+        allow.notify_one();
+        finalizer.await.unwrap().unwrap();
+        let resumed = tokio::time::timeout(std::time::Duration::from_secs(5), resume)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed.id, goal.id);
+        assert_eq!(resumed.status, GoalStatus::Active);
+        assert!(resumed.terminal_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn recovery_failure_pauses_same_goal_durably_and_resumes_without_losing_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("goals.json");
+        let manager = SessionGoalManager::with_storage_path(path.clone());
+        let goal = manager
+            .create_goal(config("session-1", "keep shipping"))
+            .await
+            .unwrap();
+        let (sidecars, generation) = live_test_sidecar("session-1", &goal.id);
+        manager
+            .claim_turn_from_sidecar(
+                &goal.id,
+                "recovery-queue",
+                GoalTurnKind::Continuation,
+                goal.control_revision,
+                "session-1",
+                generation,
+                &sidecars,
+            )
+            .await
+            .unwrap();
+        let settled = manager
+            .finalize_turn_from_sidecar(
+                &goal.id,
+                "recovery-queue",
+                recovery_failure("context_recovery_required"),
+                generation,
+                &sidecars,
+            )
+            .await
+            .unwrap();
+        assert!(settled.applied);
+        assert_eq!(settled.goal.id, goal.id);
+        assert_eq!(settled.goal.objective, goal.objective);
+        assert_eq!(settled.goal.status, GoalStatus::Paused);
+        assert!(!settled.goal.is_terminal());
+        assert_eq!(settled.goal.turn_count, 1);
+        assert_eq!(settled.goal.total_tokens, 456);
+        assert_eq!(settled.goal.total_duration_ms, 123);
+        assert_eq!(settled.goal.consecutive_failures, 0);
+        assert!(settled.goal.control_revision > goal.control_revision);
+        assert!(settled
+            .goal
+            .terminal_reason
+            .as_deref()
+            .unwrap()
+            .contains("context_recovery_required"));
+        assert!(manager.continuation_handles.read().await.is_empty());
+        assert_eq!(
+            manager
+                .prepare_continuation(&goal.id)
+                .await
+                .unwrap_err()
+                .code(),
+            "turn_conflict"
+        );
+        let duplicate = manager
+            .finalize_turn_from_sidecar(
+                &goal.id,
+                "recovery-queue",
+                recovery_failure("context_recovery_required"),
+                generation,
+                &sidecars,
+            )
+            .await
+            .unwrap();
+        assert!(!duplicate.applied);
+        assert_eq!(duplicate.goal, settled.goal);
+
+        let reloaded = SessionGoalManager::with_storage_path(path);
+        let stored = reloaded.get(&goal.id).await.unwrap().unwrap();
+        assert_eq!(stored, settled.goal);
+        *reloaded.stop_goal_turn_hook.write().await =
+            Some(Arc::new(|_, _| Box::pin(async { Ok(()) })));
+        *reloaded.release_goal_owner_hook.write().await =
+            Some(Arc::new(|_| Box::pin(async { Ok(true) })));
+        // Suppress the production scheduler in this isolated owner test.
+        let continuation = tauri::async_runtime::spawn(std::future::pending::<()>());
+        reloaded
+            .continuation_handles
+            .write()
+            .await
+            .insert(goal.id.clone(), continuation);
+        let resumed = reloaded.resume_goal(&goal.id).await.unwrap();
+        reloaded.cancel_continuation(&goal.id).await;
+        assert_eq!(resumed.id, goal.id);
+        assert_eq!(resumed.objective, goal.objective);
+        assert_eq!(resumed.status, GoalStatus::Active);
+        assert_eq!(resumed.turn_count, 1);
+        assert_eq!(resumed.total_tokens, 456);
+        assert!(resumed.terminal_reason.is_none());
+        assert!(resumed.control_revision > stored.control_revision);
+    }
+
+    #[tokio::test]
+    async fn structured_dispatch_failures_pause_without_generic_retry_or_text_parsing() {
+        for code in [
+            "context_recovery_required",
+            "compaction_failed",
+            "provider_invalid_request",
+            "automatic_replay_blocked",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+            let goal = manager
+                .create_goal(config("session-1", "work"))
+                .await
+                .unwrap();
+            let paused = manager
+                .record_dispatch_failure(
+                    &goal.id,
+                    goal.control_revision,
+                    Some(code.to_string()),
+                    Some("failed".to_string()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(paused.id, goal.id);
+            assert_eq!(paused.status, GoalStatus::Paused);
+            assert_eq!(paused.turn_count, 0);
+            assert_eq!(paused.consecutive_failures, 0);
+            assert!(manager.continuation_handles.read().await.is_empty());
+            assert_eq!(
+                manager
+                    .record_dispatch_failure(
+                        &goal.id,
+                        goal.control_revision,
+                        Some(code.to_string()),
+                        None,
+                    )
+                    .await
+                    .unwrap(),
+                paused
+            );
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+        let goal = manager
+            .create_goal(config("session-1", "work"))
+            .await
+            .unwrap();
+        for attempt in 1..=10 {
+            let failure = manager
+                .record_dispatch_failure(
+                    &goal.id,
+                    goal.control_revision,
+                    None,
+                    Some("context_recovery_required".to_string()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(failure.consecutive_failures, attempt);
+            assert_eq!(
+                failure.status,
+                if attempt == 10 {
+                    GoalStatus::Blocked
+                } else {
+                    GoalStatus::Active
+                }
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_terminal_cannot_override_newer_control_or_stale_generation() {
+        for (status, stale_generation) in [
+            (GoalStatus::Paused, false),
+            (GoalStatus::Canceled, false),
+            (GoalStatus::Complete, true),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+            let goal = manager
+                .create_goal(config("session-1", "work"))
+                .await
+                .unwrap();
+            let (sidecars, generation) = live_test_sidecar("session-1", &goal.id);
+            manager
+                .claim_turn_from_sidecar(
+                    &goal.id,
+                    "old-queue",
+                    GoalTurnKind::Continuation,
+                    goal.control_revision,
+                    "session-1",
+                    generation,
+                    &sidecars,
+                )
+                .await
+                .unwrap();
+            manager
+                .commit(&goal.id, |goal| {
+                    goal.status = status.clone();
+                    goal.terminal_reason = Some("newer control reason".to_string());
+                    goal.bump_control_revision();
+                    goal.bump_revision();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let callback_generation = if stale_generation {
+                generation + 1
+            } else {
+                generation
+            };
+            let settled = manager
+                .finalize_turn_from_sidecar(
+                    &goal.id,
+                    "old-queue",
+                    recovery_failure("compaction_failed"),
+                    callback_generation,
+                    &sidecars,
+                )
+                .await
+                .unwrap();
+            assert!(!settled.applied);
+            assert_eq!(settled.goal.status, status);
+            assert_eq!(
+                settled.goal.terminal_reason.as_deref(),
+                Some("newer control reason")
+            );
+            assert_eq!(settled.goal.turn_count, 0);
+            assert_eq!(settled.goal.total_tokens, 0);
+            assert!(settled.goal.current_turn.is_none());
         }
     }
 
@@ -1790,6 +2184,8 @@ mod tests {
             .await
             .unwrap();
         assert!(first_settled.applied);
+        assert_eq!(first_settled.goal.id, goal.id);
+        assert_eq!(first_settled.goal.objective, goal.objective);
         assert_eq!(first_settled.goal.view().turn_count, 1);
         assert_eq!(first_settled.goal.view().execution_number, None);
 
@@ -1820,6 +2216,8 @@ mod tests {
             .await
             .unwrap();
         assert!(second_settled.applied);
+        assert_eq!(second_settled.goal.id, goal.id);
+        assert_eq!(second_settled.goal.objective, goal.objective);
         assert_eq!(second_settled.goal.turn_count, 2);
         assert!(second_settled.goal.current_turn.is_none());
         assert_eq!(second_settled.goal.total_duration_ms, 300);
@@ -1831,6 +2229,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        assert_eq!(persisted.id, goal.id);
+        assert_eq!(persisted.objective, goal.objective);
         assert_eq!(persisted.turn_count, 2);
         assert!(persisted.current_turn.is_none());
     }
@@ -2434,6 +2834,7 @@ mod tests {
                 "queue-1",
                 GoalTurnFinalizationRequest {
                     success: false,
+                    code: None,
                     error: Some("Execution stopped".to_string()),
                     output_text: None,
                     duration_ms: 123,

@@ -528,7 +528,7 @@ export function failCurrentImRequest(emit: ImEmitter, data?: unknown): void {
 
 export function snapshotCurrentTurnTerminalOutcome(
   status: TurnTerminalOutcome['status'],
-  details: { error?: string; durationMs?: number } = {},
+  details: { error?: string; code?: string; durationMs?: number } = {},
 ): TurnTerminalOutcome {
   return {
     status,
@@ -544,6 +544,7 @@ export function snapshotCurrentTurnTerminalOutcome(
       outputTokens: currentTurnUsage.outputTokens,
     },
     ...(details.error ? { error: details.error } : {}),
+    ...(details.code ? { code: details.code } : {}),
   };
 }
 

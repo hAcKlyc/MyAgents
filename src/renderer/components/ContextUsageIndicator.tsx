@@ -160,6 +160,13 @@ export default function ContextUsageIndicator({ onCompact }: ContextUsageIndicat
             {' / '}
             {formatTokens(contextWindow)} tokens
           </div>
+          {contextUsage.windowSource === 'safety-budget' && (
+            <div className="mt-1.5 text-xs text-[var(--ink-muted)]">
+              {t('contextUsage.operationalBudget', {
+                capacity: contextUsage.declaredContextWindow ? formatTokens(contextUsage.declaredContextWindow) : '—',
+              })}
+            </div>
+          )}
         </div>
       </Popover>
     </span>

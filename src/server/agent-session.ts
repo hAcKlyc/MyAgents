@@ -5,6 +5,9 @@ import { desktopContextOf } from '../shared/agentMentions';
 import { buildTurnProviderAnalytics } from './session-core/turn-analytics';
 import { selectBuiltinRewindBoundary } from './session-core/builtin-rewind-boundary';
 import { createBuiltinInterruptController } from './builtin-session/interrupt';
+import { contextRecoveryApiRoute, sessionContextBudget } from './builtin-session/context-recovery-config';
+import { ContextRecoveryController } from './openai-bridge/context-recovery';
+import { archiveBuiltinContextRequest, loadBuiltinContextLedger, saveBuiltinContextLedger } from './SessionStore';
 import { configureBuiltinTranscriptBinding } from './builtin-session/transcript';
 import { randomUUID } from 'crypto';
 import { OPENCODE_GO_PROVIDER_ID } from '../shared/opencode-go';
@@ -1679,6 +1682,7 @@ export { getSidecarPort, setSidecarPort } from './session-core/sidecar-port';
 
 let activeSessionBridgeToken: string | null = null;
 let activeSessionModelFailover: ReturnType<typeof createSessionModelFailover> | undefined;
+let activeSessionContextRecovery: ContextRecoveryController | undefined;
 
 /**
  * Build the upstream config that the bridge handler will see for the
@@ -1707,6 +1711,7 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
     apiProtocol: activeProviderEnv?.apiProtocol ?? 'anthropic',
     authType: activeProviderEnv?.authType,
     modelFailover: activeSessionModelFailover,
+    contextRecovery: activeSessionContextRecovery,
     headersTimeoutMs: activeSessionModelFailover ? 30_000 : undefined,
     baseUrl: activeProviderEnv?.baseUrl ?? '',
     apiKey: managedCredential?.accessToken ?? activeProviderEnv?.apiKey ?? '',
@@ -1774,8 +1779,9 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
 function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): void {
   const failoverEnabled = (loadAdminConfig().modelFailover as { enabled?: boolean } | undefined)?.enabled === true
     && sessionApiFailoverEligible(configState.currentProviderEnv);
+  const contextRecoveryEnabled = contextRecoveryApiRoute(configState.currentProviderEnv);
   if (configState.currentProviderEnv?.apiProtocol !== 'openai'
-    && !failoverEnabled) {
+    && !failoverEnabled && !contextRecoveryEnabled) {
     // Provider is not OpenAI-protocol — no bridge needed. If a stale token
     // is registered (e.g., from a previous OpenAI provider before a switch),
     // tear it down here so subsequent SDK launches don't route through it.
@@ -1783,6 +1789,7 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
       unregisterBridgeInRegistry(activeSessionBridgeToken);
       activeSessionBridgeToken = null;
       activeSessionModelFailover = undefined;
+      activeSessionContextRecovery = undefined;
     }
     return;
   }
@@ -1794,10 +1801,35 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
     unregisterBridgeInRegistry(activeSessionBridgeToken);
     activeSessionBridgeToken = null;
     activeSessionModelFailover = undefined;
+    activeSessionContextRecovery = undefined;
   }
   if (!activeSessionBridgeToken) {
     activeSessionBridgeToken = randomUUID();
     const token = activeSessionBridgeToken;
+    if (contextRecoveryEnabled) {
+      const productSessionId = sessionId;
+      const routeIdentity = () => JSON.stringify([configState.currentProviderEnv?.providerId,
+        configState.currentProviderEnv?.baseUrl, configState.currentModel]);
+      const route = routeIdentity();
+      const isCurrent = () => activeSessionBridgeToken === token && sessionId === productSessionId
+        && route === routeIdentity() && !lifecycleState.abortRequested;
+      const nativeHistoryId = getCurrentProductSessionMetadata()?.sdkSessionId ?? productSessionId;
+      let initialLedger: unknown;
+      try { initialLedger = loadBuiltinContextLedger(productSessionId, nativeHistoryId); }
+      catch (error) { activeSessionBridgeToken = null; throw error; }
+      try { activeSessionContextRecovery = new ContextRecoveryController({
+        initialLedger,
+        persistLedger: ledger => saveBuiltinContextLedger(productSessionId, nativeHistoryId, ledger, isCurrent),
+        scope: () => getCurrentTurnSourceItem()?.id,
+        isActive: isCurrent,
+        canRecover: () => !hasBuiltinBackgroundWork(),
+        backup: (body, metadata) => archiveBuiltinContextRequest(productSessionId, body, metadata, isCurrent),
+        onRecovery: () => {
+          const text = '上下文请求超出上游限制，已保存完整请求与工具结果，正在缩减历史证据并恢复当前执行。';
+          getBuiltinProductContent()?.appendDiagnostic(text);
+        },
+      }); } catch (error) { activeSessionBridgeToken = null; throw error; }
+    }
     if (failoverEnabled) {
       activeSessionModelFailover = createSessionModelFailover({
         isLive: () => activeSessionBridgeToken === token && !lifecycleState.abortRequested
@@ -1836,6 +1868,7 @@ function unregisterActiveSessionBridge(): void {
   unregisterBridgeInRegistry(activeSessionBridgeToken);
   activeSessionBridgeToken = null;
   activeSessionModelFailover = undefined;
+  activeSessionContextRecovery = undefined;
 }
 
 /** Returns true if the active session has a registered OpenAI bridge token. */
@@ -2526,7 +2559,9 @@ async function broadcastBuiltinContextUsage(): Promise<void> {
   });
   const snapshotSessionId = sessionId;
   const snapshotQuerySession = lifecycleState.query;
+  const budget = sessionContextBudget(configState.currentProviderEnv, snapshotModel, providerScopedLookup(snapshotModel));
   const registryWindow = providerScopedLookup(snapshotModel);
+  const budgetedApiRoute = contextRecoveryApiRoute(configState.currentProviderEnv);
   let runtimeWindow: number | null = registryWindow ? null : inferContextWindowFromSdkModelTag(snapshotModel);
 
   let occupied = occupiedFromPerCall;
@@ -2552,11 +2587,13 @@ async function broadcastBuiltinContextUsage(): Promise<void> {
 
   const usage = computeContextUsage({
     occupiedTokens: occupied,
-    runtimeWindow,
+    runtimeWindow: budgetedApiRoute ? null : runtimeWindow,
     source: 'builtin',
     model: snapshotModel,
-    lookupWindow: providerScopedLookup,
+    lookupWindow: budgetedApiRoute ? () => budget.window : providerScopedLookup,
   });
+  if (budgetedApiRoute) usage.windowSource = budget.source;
+  if (budgetedApiRoute && budget.source === 'safety-budget') usage.declaredContextWindow = budget.declaredWindow;
   broadcast('chat:context-usage', { ...usage, sessionId: snapshotSessionId });
   // PRD 0.2.32 — 持久化**同一个**快照到 session 记录（单一数据源）。每轮末一次写盘，
   // 重开会话时前端从 session metadata seed → 环立即显示且与会话期间一致。fire-and-forget。
@@ -6459,7 +6496,10 @@ export function buildClaudeSessionEnv(
     // A scoped paid resource must report uncertainty rather than replay it.
     env.CLAUDE_CODE_MAX_RETRIES = '0';
   }
-  const modelContextLength = resolveContextLength(resolvedModel);
+  const declaredContextLength = resolveContextLength(resolvedModel);
+  const modelContextLength = declaredContextLength || contextRecoveryApiRoute(effectiveProviderEnv)
+    ? sessionContextBudget(effectiveProviderEnv, resolvedModel, declaredContextLength).window
+    : undefined;
   if (modelContextLength && modelContextLength > 0) {
     env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(modelContextLength);
     console.log(`[env] CLAUDE_CODE_AUTO_COMPACT_WINDOW=${modelContextLength} (model=${resolvedModel ?? '(unknown)'})`);
@@ -6482,7 +6522,8 @@ export function buildClaudeSessionEnv(
   // handler look up that subprocess's specific upstream without any
   // shared global state. No more `currentOpenAiBridgeConfig` mutation.
   if (effectiveProviderEnv && (effectiveProviderEnv.apiProtocol === 'openai'
-    || (opts?.bridgeToken && sessionApiFailoverEligible(effectiveProviderEnv))) && sidecarPort > 0) {
+    || (opts?.bridgeToken && (sessionApiFailoverEligible(effectiveProviderEnv)
+      || contextRecoveryApiRoute(effectiveProviderEnv)))) && sidecarPort > 0) {
     const bridgeToken = opts?.bridgeToken;
     if (!bridgeToken) {
       // This is a programming error: caller built env for an OpenAI-protocol
@@ -6502,7 +6543,7 @@ export function buildClaudeSessionEnv(
       ? 'myagents-managed-oauth'
       : (effectiveProviderEnv.apiKey ?? '');
     delete env.ANTHROPIC_AUTH_TOKEN;
-    if (opts?.bridgeToken === activeSessionBridgeToken && activeSessionModelFailover) {
+    if (opts?.bridgeToken === activeSessionBridgeToken && (activeSessionModelFailover || activeSessionContextRecovery)) {
       // The bridge owns the bounded retry budget. Native retries must not
       // silently start another chain after partial output or exhaustion.
       env.CLAUDE_CODE_MAX_RETRIES = '0';
@@ -7305,7 +7346,10 @@ function handleToolResultComplete(toolUseId: string, content: string, isError?: 
 }
 
 const builtinTurnLifecycle = createBuiltinTurnLifecycle({
-  endModelFailoverTurn: () => activeSessionModelFailover?.endTurn(),
+  endModelFailoverTurn: () => {
+    activeSessionModelFailover?.endTurn();
+    activeSessionContextRecovery?.endTurn();
+  },
   getSessionId: () => sessionId,
   getWorkspacePath: () => agentDir,
   getCurrentScenario: () => currentScenario,
@@ -11080,6 +11124,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
   // Declared outside try so hooks, iterator events and finally share the exact
   // Query identity without falling back to mutable lifecycleState.query.
   let activeQuery: Query | null = null;
+  const queryContextRecovery = activeSessionContextRecovery;
   let activeQueryAuthority: BuiltinQueryAuthority | null = null;
   const queryInitialCompletionTerminal = getLastSessionCompletionTerminal();
   const queryProductSessionId = sessionId;
@@ -11954,6 +11999,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           hooks: [
             async (input: HookInput): Promise<HookJSONOutput> => {
               const pre = input as PreToolUseHookInput;
+              const duplicate = await queryContextRecovery?.authorizeTool(pre.tool_name, pre.tool_input);
+              if (duplicate) return {
+                hookSpecificOutput: { hookEventName: 'PreToolUse' as const,
+                  permissionDecision: 'deny' as const, permissionDecisionReason: duplicate },
+              };
               const mcpCheck = checkMcpToolPermission(pre.tool_name, pre.mcp_server);
               if (!mcpCheck.allowed) return {
                 hookSpecificOutput: { hookEventName: 'PreToolUse' as const,
@@ -11996,6 +12046,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           hooks: [
             async (input: HookInput, _toolUseId: string | undefined, options: { signal: AbortSignal }): Promise<HookJSONOutput> => {
               const postInput = input as PostToolUseHookInput;
+              await queryContextRecovery?.commitToolResult(postInput.tool_name, postInput.tool_input, postInput.tool_response);
               // Propagate SDK's turn-level AbortSignal so resize aborts when the turn does.
               // Without this, a Jimp/sharp stall here blocks the SDK main loop's stdio drain.
               const resized = await resizeToolImageContent(postInput.tool_response, options?.signal);
@@ -12616,6 +12667,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         }
         if (statusResult.compactResult) {
           setCurrentTurnCompactResult(statusResult.compactResult);
+          if (statusResult.compactResult === 'failed') {
+            markAssistantMessageError(statusResult.compactError || 'Native context compaction failed');
+          }
         }
         console.log(`[agent] System status: ${statusResult.status}` +
           (statusResult.compactResult ? ` compact_result=${statusResult.compactResult}` : ''));

@@ -117,7 +117,7 @@
 ### 2. 双模式兼容
 
 ```typescript
-// 持续订阅（新默认）
+// 新客户端显式选择持续订阅；省略 mode 的既有调用保持单轮回执
 POST /api/session-watch/register
 {
   mode: 'continuous',  // 订阅所有轮次

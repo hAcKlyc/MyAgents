@@ -450,7 +450,8 @@
     "title": "Context usage",
     "compactTip": "Compact context to free up more usable space",
     "compact": "Compact",
-    "usedLabel": "Used context window"
+    "usedLabel": "Used context window",
+    "operationalBudget": "Based on compaction budget; declared capacity {{capacity}} tokens"
   },
   "space": {
     "route": {

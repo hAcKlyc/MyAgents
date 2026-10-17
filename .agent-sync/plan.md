@@ -322,3 +322,7 @@ User requested the new Linux Host reuse of current desktop main-Agent model and 
 ## MOXBOTS-NEXT-PROMPT-003 — 正式下一步建议接口
 
 用户要求修复正式下一步建议404、补正式路由回归、main交付并纳入下一未冻结桌面更新，在不打断任务的前提下验收正式客户端任务结束出现建议与Enter仅采纳为草稿。精确Session路径登记，组合测试先红后绿及189项通过；源码/CI/main/签名发行/安全启用/真实用户路径分别记录。任务 `.agent-sync/tasks/codex-next-prompt-route-003-20261016-e9554c98.md`，验收 `dev-docs/next-prompt-route-003-acceptance.md`。唯一发布owner仍为01a12bc2-907a-7702-b6dd-788225c5dfe4；本聊天不修改已冻结058源码或并发发布/重启。
+
+## MOXBOTS-CONTEXT-RECOVERY-20261017
+
+Builtin API operational compaction budget, native compact failure correction, inference-only bounded recovery, private archives and durable business-action replay ledger; Rust pauses/resumes original Goal instead of blind10 retries. Contract `specs/tech_docs/context_recovery.md`, acceptance `dev-docs/context-recovery-20261017/acceptance.md`, task `.agent-sync/tasks/codex-context-recovery-20261017-4895668c.md`. Real SDK manual/auto compact and Query restart counter=1 passed; source/CI/main and next unfrozen signed release tracked separately. Sole existing deployment owner remains unchanged; do not alter frozen058 or interrupt daily tasks.

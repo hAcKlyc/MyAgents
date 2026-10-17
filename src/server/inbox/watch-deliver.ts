@@ -18,22 +18,12 @@ export async function deliverSessionWatchEvents(
   const isError = !!payload.error;
   const latestResult = buildReplyBody(payload);
 
-  if (payload.turnId) {
-    if (isError) {
-      await stream.notifyTurnError(
-        payload.turnId,
-        payload.error?.code ?? 'unknown',
-        payload.error?.message ?? 'Turn execution failed',
-        false // TODO: determine if recoverable from error type
-      );
-    } else {
-      await stream.notifyTurnCompleted(
-        payload.turnId,
-        latestResult,
-        payload.terminalStatus === 'complete' ? 'success' : 'partial'
-      );
-    }
-  }
+  // Continuous subscribers must not delay independent legacy/network receipts.
+  const continuousDelivery = !payload.turnId ? Promise.resolve() : isError
+    ? stream.notifyTurnError(payload.turnId, payload.error?.code ?? 'unknown',
+      payload.error?.message ?? 'Turn execution failed', false)
+    : stream.notifyTurnCompleted(payload.turnId, latestResult,
+      payload.terminalStatus === 'complete' ? 'success' : 'partial');
 
   // LEGACY: Handle single-turn watches
   const watches = listPendingSessionWatches();
@@ -42,7 +32,7 @@ export async function deliverSessionWatchEvents(
   const replies = inboxMetas.filter(meta => meta.replyBack).map(meta => ({
     meta, delivery: deliverInboxReply(currentSessionId, meta, payload),
   }));
-  const reply = Promise.all(replies.map(item => item.delivery));
+  const reply = Promise.all([continuousDelivery, ...replies.map(item => item.delivery)]);
   if (watches.length === 0) { await reply; return; }
 
   const managementPort = process.env.MYAGENTS_MANAGEMENT_PORT;

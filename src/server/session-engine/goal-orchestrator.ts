@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { classifyContextTurnFailure } from '../utils/context-budget';
 
 import {
   GOAL_CONTEXT_TAG,
@@ -368,6 +369,7 @@ function createGoalTurnLifecycle(
         queueId: input.queueId,
         success: outcome.status === 'complete',
         error: outcome.error,
+        code: outcome.code,
         outputText: outcome.text,
         durationMs: Math.max(0, Math.round(outcome.durationMs ?? 0)),
         consumedTokens: Math.max(0, Math.round(consumedTokens)),
@@ -575,6 +577,7 @@ export function createGoalOrchestrator(client: ManagementClient = managementApi)
           return {
             success: false,
             error: error instanceof Error ? error.message : 'Unknown error',
+            code: classifyContextTurnFailure({ errorText: error instanceof Error ? error.message : String(error) }),
             status: 500,
             sessionId: request.goal.sessionId,
             channelDeliveryExpected,

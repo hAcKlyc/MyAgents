@@ -298,6 +298,7 @@ pub struct GoalTurnFinalization {
 #[derive(Debug, Clone)]
 pub struct GoalTurnFinalizationRequest {
     pub success: bool,
+    pub code: Option<String>,
     pub error: Option<String>,
     pub output_text: Option<String>,
     pub duration_ms: u64,

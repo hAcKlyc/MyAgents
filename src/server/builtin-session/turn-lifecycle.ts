@@ -68,6 +68,7 @@ import {
   buildImErrorPayload,
 } from '../utils/im-terminal-payload';
 import { formatTextPreviewForLog } from '../utils/log-summary';
+import { classifyContextTurnFailure } from '../utils/context-budget';
 
 export type BuiltinTurnTraceSnapshot = {
   turnId: string;
@@ -244,6 +245,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
     terminalError?: string,
     afterPersist?: () => void,
     terminalKind: 'complete' | 'cancelled' = 'complete',
+    terminalCode?: string,
   ): boolean => {
     deps.setStreamingMessage(false);
     const turnStartTime = getCurrentTurnStartTime();
@@ -319,6 +321,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
       terminalKind === 'cancelled' ? 'stopped' : (terminalError ? 'error' : 'complete'),
       {
         durationMs: settledDurationMs,
+        ...(terminalCode ? { code: terminalCode } : {}),
         ...(terminalKind === 'cancelled'
           ? { error: 'Execution stopped' }
           : (terminalError ? { error: terminalError } : {})),
@@ -431,6 +434,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
   const failTurn = (error: string, localizedError?: string): SessionCompletionTerminal | null => {
     deps.setStreamingMessage(false);
     const terminalOutcome = snapshotCurrentTurnTerminalOutcome('error', {
+      code: classifyContextTurnFailure({ errorText: error }),
       error: localizedError ?? error,
     });
     const activityAt = terminalActivityAt(terminalOutcome);
@@ -495,7 +499,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
 
   const canMaterializeRewindResult = (resultMessage: BuiltinSdkResultMessage): boolean => {
     const terminalDisposition = classifyBuiltinSdkTerminalResult({
-      isError: resultMessage.is_error,
+      isError: resultMessage.is_error || getCurrentTurnCompactResult() === 'failed',
       terminalReason: resultMessage.terminal_reason,
     });
     if (terminalDisposition !== 'complete' || deps.getIsInterruptingResponse()) return false;
@@ -536,7 +540,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
 
     const resultText = resultMessage.result || '';
     const terminalDisposition = classifyBuiltinSdkTerminalResult({
-      isError: resultMessage.is_error,
+      isError: resultMessage.is_error || getCurrentTurnCompactResult() === 'failed',
       terminalReason: resultMessage.terminal_reason,
     });
     // An explicit SDK failure remains a failure even when Stop raced it.
@@ -677,7 +681,11 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
       && (resultMessage.errors?.length ?? 0) > 0;
     const hasProviderErrorDetail = apiErrorStatus != null
       || hadAssistantMessageError()
-      || hasSdkExecutionError;
+      || hasSdkExecutionError
+      || getCurrentTurnCompactResult() === 'failed';
+    const terminalCode = isTerminalFailure ? classifyContextTurnFailure({
+      compactResult: getCurrentTurnCompactResult(), apiErrorStatus, errorText: resultErrorText,
+    }) : undefined;
 
     // 终端失败携带 provider 细节（状态码 / provisional error / 执行错误）时，无论本轮
     // 是否已流式输出或执行工具，都要把细节 surface 成 agent-error。原守卫只覆盖「无输出
@@ -791,6 +799,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
         assistant_sdk_uuid: lastAssistant?.sdkUuid,
         assistant_message_id: lastAssistant?.id,
         compact_result: successfulCompactControlTurn ? 'success' : undefined,
+        ...(terminalCode ? { code: terminalCode } : {}),
       };
 
       const scenario = deps.getCurrentScenario();
@@ -867,6 +876,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
           }
         },
         isAbortResult ? 'cancelled' : 'complete',
+        terminalCode,
       );
 
       if (terminalDisposition === 'complete' && !isAbortResult

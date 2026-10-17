@@ -39,6 +39,8 @@ export interface UpstreamConfig {
   headersTimeoutMs?: number;
   /** Only interactive Session bridges opt in, never utility/probe bridges. */
   modelFailover?: import('../model-failover').BridgeModelFailover;
+  /** Exact Query owner; context recovery wraps failover and only retries inference. */
+  contextRecovery?: import('../context-recovery').BridgeContextRecovery;
   /** App-owned continuation guidance, only set on an elected backup. */
   continuationInstruction?: string;
   /** Effective backup identity for SDK usage projection; never changes desired model. */

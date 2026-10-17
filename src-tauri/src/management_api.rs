@@ -2446,6 +2446,8 @@ struct GoalTurnFinalizeRequest {
     goal_id: String,
     queue_id: String,
     success: bool,
+    #[serde(default)]
+    code: Option<String>,
     error: Option<String>,
     output_text: Option<String>,
     #[serde(default)]
@@ -2626,6 +2628,7 @@ async fn goal_turn_finalize_handler(
             &req.queue_id,
             GoalTurnFinalizationRequest {
                 success: req.success,
+                code: req.code,
                 error: req.error,
                 output_text: req.output_text,
                 duration_ms: req.duration_ms,
@@ -5755,6 +5758,20 @@ fn document_manager_unavailable() -> Json<serde_json::Value> {
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    #[test]
+    fn goal_finalization_accepts_legacy_and_structured_failure_payloads() {
+        let legacy = serde_json::json!({
+            "sessionId": "session-1", "goalId": "goal-1", "queueId": "queue-1",
+            "success": false, "error": "failure",
+        });
+        let request: GoalTurnFinalizeRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(request.code.is_none());
+        let mut structured = legacy;
+        structured["code"] = serde_json::json!("context_recovery_required");
+        let request: GoalTurnFinalizeRequest = serde_json::from_value(structured).unwrap();
+        assert_eq!(request.code.as_deref(), Some("context_recovery_required"));
+    }
 
     #[test]
     fn network_diagnose_preserves_device_connection_state_without_private_metadata() {

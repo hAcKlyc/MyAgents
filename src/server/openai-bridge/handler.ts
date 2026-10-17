@@ -463,6 +463,11 @@ export function createBridgeHandler(config: BridgeConfig): BridgeHandler {
       return jsonError(500, 'api_error', 'Bridge configuration error');
     }
 
+    if (upstream.contextRecovery) {
+      return upstream.contextRecovery.run(request, anthropicReq, projected => handler(new Request(request.url, {
+        method: 'POST', headers: request.headers, body: JSON.stringify(projected), signal: request.signal,
+      }), { ...upstream, contextRecovery: undefined }));
+    }
     if (upstream.modelFailover) {
       return upstream.modelFailover.run(request, upstream, target => handler(new Request(request.url, {
         method: 'POST', headers: request.headers, body: JSON.stringify(anthropicReq), signal: request.signal,
