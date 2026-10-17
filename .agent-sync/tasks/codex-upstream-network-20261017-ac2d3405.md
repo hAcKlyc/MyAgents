@@ -22,7 +22,7 @@ Port upstream `78d85eb51aa0cfe96d68566f03250af5777b177e` onto the MoXBots-owned 
 - [x] Direct TypeScript `tsc --noEmit --pretty false` and server test-classification passed.
 - [x] Original `returns.rs`/`memory.rs` state-only temporary harness: 27 tests passed (App/transport shell stubbed; not an App/native/relay integration gate).
 - [ ] Full App Rust/native code gate: macOS dependency Swift linker environment blocks before this task's App modules compile; root must require Linux/Windows CI and review actor integration.
-- [ ] Commit local task branch for parent integration; no subagent push or main/production mutation.
+- [x] Commit local task branch for parent integration; no subagent push or main/production mutation.
 - [ ] Root integration owner reviews combined diff and runs combined checks, merges/pushes main under task authorization.
 
 ## Server compatibility and limitations
