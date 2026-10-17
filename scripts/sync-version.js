@@ -3,7 +3,7 @@
  * 由 npm version 钩子自动调用
  *
  * 数据源: package.json (单一数据源)
- * 同步目标: src-tauri/tauri.conf.json、App Cargo.toml、Document Worker Cargo.toml
+ * 同步目标: 两份 Tauri 配置、App Cargo.toml、Document Worker Cargo.toml
  */
 
 import { readFileSync, writeFileSync } from 'fs';
@@ -25,12 +25,15 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
 
 console.log(`同步版本号: ${version}`);
 
-// 更新 tauri.conf.json
-const tauriConfPath = join(rootDir, 'src-tauri/tauri.conf.json');
-const tauriConf = JSON.parse(readFileSync(tauriConfPath, 'utf-8'));
-tauriConf.version = version;
-writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n', 'utf-8');
-console.log('  ✓ src-tauri/tauri.conf.json');
+// Both configs are used for real builds: the MoxBots product build overrides
+// the generic MyAgents Tauri config with tauri.moxbot.conf.json.
+for (const relativePath of ['src-tauri/tauri.conf.json', 'src-tauri/tauri.moxbot.conf.json']) {
+    const configPath = join(rootDir, relativePath);
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    config.version = version;
+    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+    console.log(`  ✓ ${relativePath}`);
+}
 
 // 更新 Cargo.toml
 const cargoPath = join(rootDir, 'src-tauri/Cargo.toml');
