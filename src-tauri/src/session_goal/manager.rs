@@ -939,19 +939,25 @@ impl SessionGoalManager {
         }
         if updated.is_terminal() && updated.current_turn.is_none() {
             let _ = self.release_goal_owner(&updated).await;
-        } else if applied && updated.status == GoalStatus::Paused && updated.current_turn.is_none()
+        } else if changed && updated.status == GoalStatus::Paused && updated.current_turn.is_none()
         {
-            // A user can resume immediately after the durable pause is visible.
-            // Serialize cleanup with resume/claim, then re-read its exact control
-            // revision so an old finalizer cannot release the new turn's owner.
-            let _lifecycle =
-                crate::sidecar::acquire_session_lifecycle(&[&updated.session_id]).await;
-            let current = self.get(goal_id).await?;
-            if current.as_ref().is_some_and(|goal| {
-                goal.status == GoalStatus::Paused
-                    && goal.control_revision == updated.control_revision
-                    && goal.current_turn.is_none()
-            }) {
+            if applied {
+                // Serialize a newly applied recovery pause with explicit resume,
+                // then re-read the exact control epoch before releasing its owner.
+                let _lifecycle =
+                    crate::sidecar::acquire_session_lifecycle(&[&updated.session_id]).await;
+                let current = self.get(goal_id).await?;
+                if current.as_ref().is_some_and(|goal| {
+                    goal.status == GoalStatus::Paused
+                        && goal.control_revision == updated.control_revision
+                        && goal.current_turn.is_none()
+                }) {
+                    let _ = self.release_goal_owner(&updated).await;
+                }
+            } else {
+                // Preserve stop/control acknowledgement cleanup: its caller can
+                // already hold the lifecycle lock. A no-change duplicate callback
+                // never releases an owner that a newer turn may have acquired.
                 let _ = self.release_goal_owner(&updated).await;
             }
         }
