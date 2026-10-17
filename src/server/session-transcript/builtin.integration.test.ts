@@ -799,7 +799,14 @@ describe('builtin V2 execution independent of product storage', () => {
     const engine = createBuiltinSessionEngine();
     state.beforeFrame.mockImplementation(frame => {
       const index = frames.indexOf(frame);
-      if (index >= 0) expect(engine.getLiveSessionState().hasBackgroundWork).toBe(index === 1 || index === 3);
+      if (index >= 0) {
+        const expected = index === 1 || index === 3;
+        expect(engine.getLiveSessionState().hasBackgroundWork).toBe(expected);
+        // MoXBots recovery/model-switch guards and visible activity also honor
+        // the SDK level before any task edge is received.
+        expect(agent.hasBuiltinBackgroundWork()).toBe(expected);
+        expect(engine.getLiveSessionState().backgroundWorkActive === true).toBe(expected);
+      }
     });
     const workspace = join(state.home, 'workspace');
     await mkdir(workspace);
