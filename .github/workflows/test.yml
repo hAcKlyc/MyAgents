@@ -132,6 +132,11 @@ jobs:
       # transport). Must gate too, else those regressions wouldn't block a merge.
       - run: npm run test:dom
       - run: npm run test:integration
+      - name: Verify native SDK context recovery with isolated loopback fixtures
+        run: |
+          node --import tsx/esm scripts/verify-context-recovery-loopback.ts
+          node --import tsx/esm scripts/verify-context-recovery-loopback.ts --auto
+          node --import tsx/esm scripts/verify-context-recovery-loopback.ts --fail-compact
       # Typecheck does not exercise esbuild/Vite bundling, raw imports, or
       # runtime entrypoint packaging. These cheap smoke builds catch that class.
       - run: npm run build:server

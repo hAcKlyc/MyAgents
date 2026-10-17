@@ -587,6 +587,26 @@ describe('turn-lifecycle owner', () => {
     expect(deps.failCurrentImRequest).not.toHaveBeenCalled();
   });
 
+  it.each(['', 'Error during compaction: API Error: 400 request rejected'])(
+    'settles explicit native compaction failure as error despite outer SDK success: %s', async result => {
+      const { deps } = makeDeps();
+      const terminal = vi.fn();
+      setCurrentTurnSourceItem({ id: 'compact-queue', message: { role: 'user', content: '/compact' },
+        messageText: '/compact', wasQueued: false, resolve: () => {}, channelDelivery: NO_CHANNEL_DELIVERY,
+        turnOwner: { kind: 'goal', id: 'same-goal' }, onTerminal: terminal });
+      setCurrentTurnCompactResult('failed');
+      markAssistantMessageError('Native compaction failed');
+      const lifecycle = createBuiltinTurnLifecycle(deps);
+      const frame = makeResult({ result, num_turns: 0 });
+      expect(lifecycle.canMaterializeRewindResult(frame)).toBe(false);
+      await lifecycle.handleSdkResult(frame);
+      await lifecycle.getLastTurnEndPersist();
+      await waitForCurrentTurnTerminalObserver();
+      expect(terminal).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', code: 'compaction_failed' }));
+      expect(deps.emitTrace).toHaveBeenCalledWith('final', expect.objectContaining({ status: 'error' }));
+      expect(deps.firePostTurnTitleHook).not.toHaveBeenCalled();
+    });
+
   it('auto-retries success-shaped transient provider text instead of completing the turn', async () => {
     const { deps, broadcasts } = makeDeps({
       scheduleTransientProviderRetry: vi.fn(() => true),

@@ -10,6 +10,7 @@ export type BuiltinInjectedTurnTerminal =
       assistantMessagePresent: boolean;
       text: string;
       error?: string;
+      code?: string;
     };
 
 export type InjectedTurnDecision = {
@@ -17,6 +18,7 @@ export type InjectedTurnDecision = {
   assistantMessagePresent?: boolean;
   text?: string;
   error?: string;
+  code?: string;
   status?: number;
 };
 
@@ -208,6 +210,7 @@ export function decideBuiltinInjectedTurnResult(params: {
     return {
       success: false,
       error: params.outcome.error ?? `Injected turn ${params.outcome.status}`,
+      ...(params.outcome.code ? { code: params.outcome.code } : {}),
       status: 503,
     };
   }

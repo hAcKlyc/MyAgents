@@ -2466,6 +2466,7 @@ async function main() {
             authType: cfg.authType,
             headersTimeoutMs: cfg.headersTimeoutMs,
             modelFailover: cfg.modelFailover,
+            contextRecovery: cfg.contextRecovery,
             baseUrl: cfg.baseUrl,
             apiKey: cfg.apiKey,
             credentialVersion: cfg.credentialVersion,

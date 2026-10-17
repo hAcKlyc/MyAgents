@@ -449,7 +449,8 @@
     "title": "上下文用量",
     "compactTip": "智能压缩上下文，提供更大可用空间",
     "compact": "智能压缩",
-    "usedLabel": "已用 context 窗口"
+    "usedLabel": "已用 context 窗口",
+    "operationalBudget": "按压缩预算计算；模型标称容量 {{capacity}} tokens"
   },
   "space": {
     "route": {

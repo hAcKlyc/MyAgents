@@ -350,7 +350,7 @@ describe('Claude SDK context window env', () => {
       );
 
       expect(subscriptionEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
-      expect(customEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('1000000');
+      expect(customEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000'); // Operational budget, not discovered capacity.
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
@@ -403,7 +403,7 @@ describe('Claude SDK context window env', () => {
         'DeepSeek-V4-Flash',
         { providerId: 'amd', contextWindowSnapshot: launchContextWindowSnapshot },
       );
-      expect(beforeDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+      expect(beforeDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
       expect(beforeDiscovery.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('DeepSeek-V4-Flash');
       const beforeDiscoveryLaunchModel = applyContextWindowSuffixForContextLength(
         'DeepSeek-V4-Flash',
@@ -432,15 +432,15 @@ describe('Claude SDK context window env', () => {
         'DeepSeek-V4-Flash',
         { providerId: 'amd', contextWindowSnapshot: launchContextWindowSnapshot },
       );
-      expect(afterDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('1048576');
+      expect(afterDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
       expect(afterDiscovery.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('DeepSeek-V4-Flash[1m]');
-      expect(heldLaunchAfterDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+      expect(heldLaunchAfterDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
       expect(heldLaunchAfterDiscovery.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('DeepSeek-V4-Flash');
       expect(beforeDiscoveryLaunchModel).toBe('DeepSeek-V4-Flash');
       expect(applyContextWindowSuffixForContextLength(
         'DeepSeek-V4-Flash',
         Number(afterDiscovery.CLAUDE_CODE_AUTO_COMPACT_WINDOW),
-      )).toBe('DeepSeek-V4-Flash[1m]');
+      )).toBe('DeepSeek-V4-Flash');
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
@@ -469,7 +469,7 @@ describe('Claude SDK context window env', () => {
     );
 
     expect(env.CLAUDE_CODE_DISABLE_1M_CONTEXT).toBeUndefined();
-    expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('204800');
+    expect(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe('200000');
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('MiniMax-M2.7[1m]');
   });
 });

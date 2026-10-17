@@ -97,6 +97,8 @@ export interface ModelEntity extends Pick<RuntimeModelInfo, 'supportedReasoningE
 
   // === 元数据字段（可选，API 发现时填充）===
   contextLength?: number; // 上下文窗口（token 数）
+  /** Explicit route compaction budget; capacity metadata alone does not verify a proxy limit. */
+  contextCompactionWindow?: number;
   maxOutputTokens?: number; // 最大输出 token 数
   inputModalities?: string[]; // 输入模态 ["text", "image", "video"]
   outputModalities?: string[]; // 输出模态 ["text"]
@@ -131,6 +133,7 @@ export function mergePresetModelWithCustomEntry(
     return {
       ...preset,
       contextLength: preset.contextLength ?? custom.contextLength,
+      contextCompactionWindow: preset.contextCompactionWindow,
       maxOutputTokens: preset.maxOutputTokens ?? custom.maxOutputTokens,
       inputModalities: preset.inputModalities ?? custom.inputModalities,
       outputModalities: preset.outputModalities ?? custom.outputModalities,
@@ -144,6 +147,7 @@ export function mergePresetModelWithCustomEntry(
     modelName: custom.modelName ?? preset.modelName,
     modelSeries: custom.modelSeries ?? preset.modelSeries,
     contextLength: custom.contextLength ?? preset.contextLength,
+    contextCompactionWindow: custom.contextCompactionWindow ?? preset.contextCompactionWindow,
     maxOutputTokens: custom.maxOutputTokens ?? preset.maxOutputTokens,
     inputModalities: custom.inputModalities ?? preset.inputModalities,
     outputModalities: custom.outputModalities ?? preset.outputModalities,

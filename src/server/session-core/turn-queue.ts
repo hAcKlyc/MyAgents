@@ -48,6 +48,8 @@ export type TurnTerminalOutcome = {
   text: string;
   assistantMessagePresent: boolean;
   error?: string;
+  /** Stable runtime failure classification; schedulers must not parse display text. */
+  code?: string;
   durationMs?: number;
   usage?: {
     inputTokens: number;

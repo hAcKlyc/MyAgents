@@ -85,6 +85,23 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('Goal orchestrator', () => {
+  it('preserves the same Goal and stable recovery code without redispatching business input', async () => {
+    const client = clientWithGoal();
+    let terminal: ((outcome: TurnTerminalOutcome) => void | Promise<void>) | undefined;
+    const sendDesktopMessage = vi.fn(async (request: DesktopMessageRequest) => {
+      await request.beforeDispatch?.(); terminal = request.onTerminal;
+      return { success: true, queued: false, queueId: request.queueId };
+    });
+    await createGoalOrchestrator(client).sendDesktopMessage({ sendDesktopMessage }, desktopRequest());
+    await terminal?.({ status: 'error', code: 'context_recovery_required', error: 'Recovery exhausted',
+      text: 'Prior progress retained', assistantMessagePresent: true });
+    await terminal?.({ status: 'error', code: 'context_recovery_required', error: 'Recovery exhausted',
+      text: 'Prior progress retained', assistantMessagePresent: true });
+    const finals = client.mock.calls.filter(([path]) => path === '/api/goal/turn/finalize');
+    expect(finals).toHaveLength(1);
+    expect(finals[0][2]).toMatchObject({ goalId: 'goal-1', success: false, code: 'context_recovery_required' });
+    expect(sendDesktopMessage).toHaveBeenCalledTimes(1);
+  });
   it('sends ordinary messages unchanged when the Session has no Goal', async () => {
     const client = clientWithGoal(null);
     client.mockImplementation(async (path: string): Promise<Record<string, unknown>> => {

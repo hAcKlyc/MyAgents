@@ -19,7 +19,7 @@ import { existsSync, linkSync, readFileSync, writeFileSync, unlinkSync, appendFi
 import { homedir } from 'os';
 import { join } from 'path';
 import * as asyncFs from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import type { DshProjectionCursor, MessageUsage, PendingConversationMutation, PendingDshMutation, PendingDshRootOperation, SessionMetadata, SessionData, SessionMessage, SessionStats } from './types/session';
 import type { PendingDshInput } from './types/session';
@@ -61,6 +61,98 @@ import { resolveLastVisibleTurnPreview } from './utils/session-message-preview';
 
 const MYAGENTS_DIR = join(homedir(), APP_DATA_DIR_NAME);
 const SESSIONS_FILE = join(MYAGENTS_DIR, 'sessions.json');
+
+/** Private inference checkpoint; never changes Product/native history or business files. */
+export async function archiveBuiltinContextRequest(sessionId: string, request: unknown,
+    metadata: { digest: string; scope: string }, isCurrent: () => boolean): Promise<string> {
+    if (!isCurrent() || !getSessionMetadata(sessionId)) throw new Error('Context recovery Session changed');
+    if (!/^[a-zA-Z0-9-]{1,100}$/.test(sessionId) || !/^[a-f0-9]{64}$/.test(metadata.digest)) {
+        throw new Error('Invalid context recovery checkpoint identity');
+    }
+    if (createHash('sha256').update(JSON.stringify(request)).digest('hex') !== metadata.digest) {
+        throw new Error('Invalid context recovery checkpoint digest');
+    }
+    const dir = join(MYAGENTS_DIR, 'context-recovery', sessionId);
+    await asyncFs.mkdir(dir, { recursive: true, mode: 0o700 });
+    const path = join(dir, `${metadata.digest}.json`);
+    if (!existsSync(path)) {
+        const archives = (await asyncFs.readdir(dir)).filter(name => /^[a-f0-9]{64}\.json$/.test(name));
+        const sizes = await Promise.all(archives.map(name => asyncFs.stat(join(dir, name))));
+        if (archives.length >= 128 || sizes.reduce((bytes, value) => bytes + value.size, 0) + Buffer.byteLength(JSON.stringify(request)) > 256 * 1024 * 1024) {
+            throw new Error('Context recovery archive budget exhausted; preserved evidence requires explicit maintenance');
+        }
+    }
+    const data = JSON.stringify({ version: 1, sessionId, ...metadata,
+        createdAt: new Date().toISOString(), request });
+    if (Buffer.byteLength(data) > 64 * 1024 * 1024) throw new Error('Context checkpoint exceeds safe archive size');
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    try {
+        const file = await asyncFs.open(temporary, 'wx', 0o600);
+        try { await file.writeFile(data); await file.sync(); } finally { await file.close(); }
+        if (!isCurrent()) throw new Error('Context recovery cancelled before checkpoint commit');
+        // Content-addressed, immutable archive: an existing backup is never overwritten.
+        try { await asyncFs.link(temporary, path); }
+        catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+            const existing = JSON.parse(await asyncFs.readFile(path, 'utf8'));
+            if (existing.sessionId !== sessionId || existing.digest !== metadata.digest
+                || createHash('sha256').update(JSON.stringify(existing.request)).digest('hex') !== metadata.digest) throw error;
+        }
+        await syncTranscriptDirectory(dir);
+    } finally { await asyncFs.unlink(temporary).catch(() => undefined); }
+    return path;
+}
+/** SessionStore owns both archives and the write-ahead action ledger. SDK identity
+ * scopes the ledger to the native history; a new Product turn does not clear it. */
+function builtinRecoveryPath(sessionId: string, sdkSessionId: string): string {
+    if (![sessionId, sdkSessionId].every(value => /^[a-zA-Z0-9-]{1,100}$/.test(value))) {
+        throw new Error('context_recovery_required: Invalid recovery owner');
+    }
+    return join(MYAGENTS_DIR, 'context-recovery', sessionId, `ledger-${sdkSessionId}.json`);
+}
+
+export function loadBuiltinContextLedger(sessionId: string, sdkSessionId: string): unknown | undefined {
+    const path = builtinRecoveryPath(sessionId, sdkSessionId);
+    if (!existsSync(path)) return undefined;
+    try {
+        if (statSync(path).size > 16 * 1024 * 1024) throw new Error('Oversized ledger');
+        const value = JSON.parse(readFileSync(path, 'utf8'));
+        if (value.version !== 1 || value.sessionId !== sessionId || value.sdkSessionId !== sdkSessionId
+            || createHash('sha256').update(JSON.stringify(value.ledger)).digest('hex') !== value.digest) {
+            throw new Error('Invalid ledger identity or integrity');
+        }
+        return value.ledger;
+    } catch {
+        throw new Error('context_recovery_required: Persisted action ledger is unreadable; automatic business execution stopped.');
+    }
+}
+
+export async function saveBuiltinContextLedger(sessionId: string, sdkSessionId: string,
+    ledger: unknown, isCurrent: () => boolean): Promise<void> {
+    const path = builtinRecoveryPath(sessionId, sdkSessionId);
+    if (!isCurrent()) throw new Error('context_recovery_required: Recovery owner changed');
+    ensureStorageDir();
+    await withSessionsLock(async () => {
+        const owner = getSessionMetadata(sessionId);
+        if (!isCurrent() || !owner || (resolveBuiltinSdkSessionId(owner) ?? owner.id) !== sdkSessionId) {
+            throw new Error('context_recovery_required: Recovery owner changed');
+        }
+        const data = JSON.stringify({ version: 1, sessionId, sdkSessionId, ledger,
+            digest: createHash('sha256').update(JSON.stringify(ledger)).digest('hex') });
+        if (Buffer.byteLength(data) > 16 * 1024 * 1024) throw new Error('Recovery ledger exceeds safe size');
+        const dir = join(MYAGENTS_DIR, 'context-recovery', sessionId);
+        await asyncFs.mkdir(dir, { recursive: true, mode: 0o700 });
+        const temporary = `${path}.${randomUUID()}.tmp`;
+        try {
+            const file = await asyncFs.open(temporary, 'wx', 0o600);
+            try { await file.writeFile(data); await file.sync(); } finally { await file.close(); }
+            if (!isCurrent()) throw new Error('Recovery cancelled before ledger commit');
+            await asyncFs.rename(temporary, path);
+            await syncTranscriptDirectory(dir);
+        } finally { await asyncFs.unlink(temporary).catch(() => undefined); }
+    });
+}
+
 const SESSIONS_DIR = join(MYAGENTS_DIR, 'sessions');
 const SESSIONS_V2_DIR = join(MYAGENTS_DIR, 'sessions-v2');
 const ATTACHMENTS_DIR = join(MYAGENTS_DIR, 'attachments');

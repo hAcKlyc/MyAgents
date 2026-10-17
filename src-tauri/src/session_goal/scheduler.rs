@@ -190,6 +190,7 @@ async fn run_once(goal_id: &str) -> Option<u64> {
             .record_dispatch_failure(
                 goal_id,
                 expected_control_revision,
+                None,
                 Some("App handle unavailable".to_string()),
             )
             .await
@@ -223,16 +224,7 @@ async fn run_once(goal_id: &str) -> Option<u64> {
         return None;
     }
 
-    let error = match response {
-        Ok(response) if response.success => {
-            // The Sidecar route only returns success after it durably finalizes
-            // this exact queue item. Reaching this branch means its response was
-            // malformed or finalization was skipped.
-            Some("Goal turn returned before durable finalization".to_string())
-        }
-        Ok(response) => response.error.or(Some("Goal turn failed".to_string())),
-        Err(error) => Some(error),
-    };
+    let (code, error) = failure_details(response);
 
     if latest
         .as_ref()
@@ -251,6 +243,7 @@ async fn run_once(goal_id: &str) -> Option<u64> {
                 &queue_id,
                 GoalTurnFinalizationRequest {
                     success: false,
+                    code: code.clone(),
                     error: error.clone(),
                     output_text: None,
                     duration_ms: 0,
@@ -275,7 +268,7 @@ async fn run_once(goal_id: &str) -> Option<u64> {
     }
 
     let updated = match manager
-        .record_dispatch_failure(goal_id, expected_control_revision, error.clone())
+        .record_dispatch_failure(goal_id, expected_control_revision, code, error.clone())
         .await
     {
         Ok(goal) => goal,
@@ -288,7 +281,7 @@ async fn run_once(goal_id: &str) -> Option<u64> {
             return Some(3);
         }
     };
-    if updated.is_terminal() {
+    if updated.status != GoalStatus::Active {
         return None;
     }
     let delay = failure_backoff(updated.consecutive_failures);
@@ -303,5 +296,62 @@ async fn run_once(goal_id: &str) -> Option<u64> {
 }
 
 fn next_failure_delay(goal: super::SessionGoal) -> Option<u64> {
-    (!goal.is_terminal()).then(|| failure_backoff(goal.consecutive_failures))
+    (goal.status == GoalStatus::Active).then(|| failure_backoff(goal.consecutive_failures))
+}
+
+// Preserve structured runtime classification through the scheduler fallback as
+// well as the normal Node terminal settlement. Never infer it from error text.
+fn failure_details(
+    response: Result<crate::sidecar::GoalExecuteResponse, String>,
+) -> (Option<String>, Option<String>) {
+    match response {
+        Ok(response) if response.success => (
+            None,
+            Some("Goal turn returned before durable finalization".to_string()),
+        ),
+        Ok(response) => (
+            response.code,
+            response.error.or(Some("Goal turn failed".to_string())),
+        ),
+        Err(error) => (None, Some(error)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scheduler_fallback_preserves_recovery_code_and_suppresses_retry() {
+        let response =
+            serde_json::from_value::<crate::sidecar::GoalExecuteResponse>(serde_json::json!({
+                "success": false,
+                "code": "context_recovery_required",
+                "error": "Context repair exhausted",
+            }))
+            .unwrap();
+        let (code, error) = failure_details(Ok(response));
+        assert_eq!(code.as_deref(), Some("context_recovery_required"));
+        let dir = tempfile::tempdir().unwrap();
+        let manager = SessionGoalManager::with_storage_path(dir.path().join("goals.json"));
+        let goal = manager
+            .create_goal(super::super::SessionGoalConfig {
+                workspace_path: "/tmp/workspace".to_string(),
+                session_id: "session-1".to_string(),
+                objective: "finish the same objective".to_string(),
+                end_conditions: Default::default(),
+                notify_enabled: false,
+                permission_mode: String::new(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(next_failure_delay(goal.clone()), Some(3));
+        let paused = manager
+            .record_dispatch_failure(&goal.id, goal.control_revision, code, error)
+            .await
+            .unwrap();
+        assert_eq!(paused.id, goal.id);
+        assert_eq!(paused.status, GoalStatus::Paused);
+        assert_eq!(next_failure_delay(paused), None);
+    }
 }
