@@ -1,38 +1,54 @@
 # MoXBots 0.5.8 统一桌面发行
 
-任务`MOXBOTS-058-COMMUNITY-RELEASE-20261016`，当前`preparing-candidate`。统一桌面发布owner仍为聊天`01a12bc2-907a-7702-b6dd-788225c5dfe4`。本次统一接收社区、登录与任务草稿修复，准备macOS arm64正式包，完成真实验收后发布既有更新服务器。候选准备不触动日常客户端；真实更新仅在重新确认空闲、备份和回退后进行，不停止正在执行的任务，不回写055/056/057，不改云/Host服务或网络权限。
+任务 `MOXBOTS-058-COMMUNITY-RELEASE-20261016`。唯一桌面发布 owner 仍为聊天 `01a12bc2-907a-7702-b6dd-788225c5dfe4`。
 
-## 来源与范围
+当前状态：正式签名/公证制品和隔离原生、真实社区验收完成；自有服务器不可变归档已 stage，外部完整下载验签进行中，stable 仍为 0.5.7。日常客户端仍为 0.5.7，未安装、退出或重启。后续生产状态以本记录的最终更新为准。
 
-- PR87：[社区账号复用](https://github.com/heavenzhang/MoXBots/pull/87)，最终head`303fb76b5abff4b1f67c5c958e7b0abf4bbad645`，main`c0f7649d8ca08e017001e24492d46952c23b0159`，二者tree`4542be1279728d0a8e69e7dc4d1b0c1d4c86cb85`相同；六CI与fresh远端包含核验通过。早期09ad候选接收记录保留，已经被最终head取代。
-- 内置社区Tab复用Rust Owned账号及现有native bearer API；个人菜单、更多、设置入口汇合。凭据留在Rust owner，不进入Renderer、URL或storage；按issuer/principal/binding/actor隔离，relay未连接仍可访问社区。提交后不确定结果保留完全相同mutationId/body以便显式重试。最终修正隔离上游Space清理gate和Tab标题，其他发行保留原行为。无新云协议或服务部署。
-- 基线main还包含未随冻结057发行的PR84 macOS网络CLI；其source/CI与真实Keychain/连接运行验收边界见`dev-docs/mac-network-cli-acceptance.md`。本次候选包含该主干源码，不把它算成已安装或真实账号通过。
-- PR89：[自动检测浏览器登录完成](https://github.com/heavenzhang/MoXBots/pull/89)，审核head`68fd790aae4b31081388286f8d799d06c4be89e5`，合入main`78752f659efe20c5ff9e176c3368d481f412e3cd`；Root独立核实六CI、同tree和远端包含。自动打开既有授权、串行检测、成功关闭；手动检查/重开备用，授权链接默认折叠；取消、到期、迟到结果仍守原owner。未改Rust/OIDC/凭据authority；真实浏览器/OIDC/OS凭据及installed native另验。
-- PR90：[任务更新草稿交接](https://github.com/heavenzhang/MoXBots/pull/90)，最终head`ea3718567202413271a1090de0ee2b5cc2dec3c7`，main`47c802426f9e86d0b9cec45adf32745b2aafae40`；Root独立核实六CI、同tree及远端包含，原9dbf候选保留为历史。修复已保存cronConfig被误判为未保存草稿，v2交接Goal/Cron设置，恢复编辑态不启动任务，兼容v1。来源152定向/110回归和三条合成重载不代替原生跨进程验收。
-- 正式确认框新增普通「重启更新」：完整草稿交接后使用原Rust非中断admission，活动未结束或状态未知时拒绝安装并释放checkpoint；保留单独明确标注的停止动作。Root本次不操作停止入口，不新增IPC或改Rust生命周期。
-- 本发行分支集成已验收主干，维护058元数据、确认框及交付记录；最终CI/独立UI后固定正式构建SHA，后来main不自动混入。
+## 冻结源码与制品
 
-## To Do与验收状态
+源码固定为已交 main 的 `12449e4741d8f225a73ee540f68331b1bb8e24ac`，tree `2e710a308e5695cc65f241b1f5ec77c0386d8388`；精确源码六项 CI 通过。PR87 社区账号复用、PR89 浏览器登录自动检测、PR90 Goal/Cron v2 草稿、PR91 结果展开与时间口径，以及 PR88 非中断重启确认均包含。后来 main 的 PR92/PR93 等不自动进入此包，须下一未冻结发行单独验收。
 
-- [x] 实际仓库/唯一桌面owner/主干c0f/PR87最终head、六CI及远端包含核验。
-- [ ] 058版本元数据、精确源码CI/main、固定候选SHA与完整树。
-- [ ] 最终固定源码独立实际组件UI：社区个人菜单/更多、列表/详情、发帖/回复、不确定提交和账号隔离；登录自动检测/取消到期；Goal/Cron草稿重载；1280×720和660×400；合成与原生验收分开。
-- [ ] 正式完整native构建、固定生产Reader、公钥/endpoint连续、Developer ID、Apple Accepted/staple/Gatekeeper、最终归档与自有签名/独立实际验包。
-- [ ] 手动解锁、当前完整活动owner确认空闲、兼容配置/实际应用私有备份和回退；不强退、不主动停止任务。
-- [ ] 获授权正确测试身份：个人菜单/更多进入同一社区且无需二次密码；真实列表/详情；受控话题/回复持久化；切换账号或退出后不再显示旧内容或保留旧写入权限。
-- [ ] 真实浏览器授权→无需手点检查即关闭登录、备用检查、取消/到期、原账号恢复；原生跨进程Goal/Cron草稿保留且不自动启动任务。
-- [ ] 适用UI/真实联调门禁满足后，既有own updater完整公网GET/真实stat+SHA/签名独审、旧057回滚、同锁CAS/公开复验及交付main记录。
+- macOS arm64，0.5.8，bundle `com.moxbot.app`。
+- 主程序 SHA256 `281c0a8477a55c8136a66e3b8f5106f4b6eea87002e0dd0acd7ecf10505b8617`。
+- TAR `MoxBots-0.5.8-macOS-arm64.app.tar.gz`：336,365,173 bytes，SHA256 `155e6a68e2050df6fa6bf984ae7e2a7b2854e8d737997ad359727316993d2d19`。
+- ZIP：344,959,688 bytes，SHA256 `dd33e0879fee388af92d315c477d8a6e2d52da9c19d97dfd64ab7c22adf69b59`，仅本地候选交付，非更新服务下载载荷。
+- Developer ID 团队 `QJ5URBG9AP`；Apple submission `fdaafae0-7f7b-4598-bfde-4020eaf1a867` Accepted，staple/validate/Gatekeeper 通过。
+- 自有签名公钥和 endpoint 延续；正式 Reader 精确字节/签名延续，未重建、重签或替换。
 
-源码方报告55项前端、199 native AgentNet（1个由parent调用的私有child entry ignored）、163 headless及5项实际组件+合成IPC交互通过；独立源码/截图复审通过。Root已读取其最终回执与CI，但这些不代替正式签名包或真实账号写入。源码单测使用任务私有SwiftPM overlay/CLT兼容库，已有dyld重复Swift类warning；正式构建不得使用DOCS_RS/ScreenCaptureKit stub或修改系统工具链。
+本机制品在项目指针 `output/updater-058-20261016/final-12449e47/`；详细证据在 `work/release-058-20261016/owner/native-12449e47/`。原生包、密钥、运行数据及真实账号原始证据不入 Git。
 
-## 门禁与回退
+## 验收及明确边界
 
-本机之前明确“稍后解锁，先继续准备候选包”；不以截图、旧PID、端口、Task行或时间经过猜测当前解锁/空闲，也不为观测提前freeze/ensure/create或扩大External Calls。候选准备不等于客户端已升级。真实社区写入仅用已获授权的测试身份与受控数据，不用真实业务数据凑验收。缺少窗口/权限时保留具体门禁，不将合成结果当通过。
+- [x] 精确源码 CI/main/完整源输入闭包、实际组件合成 UI 和独立最小窗口审阅。
+- [x] 正式完整构建、固定生产 Reader/签名根、Apple 公证、自有更新签名；非实现者独立解包校验实际 TAR/ZIP 与 App。
+- [x] 同源码 UpdaterQA：后台完整下载并验签，不自动安装；Enter 不确认重启；空 PTY 运行时普通非中断入口拒绝、保留进程及草稿；正常 EOF 后，由真实 Renderer checkpoint 和原生 admission 执行安装/托管重启，Goal/Cron 文本及完整设置恢复且可编辑，没有发送消息或创建 Goal/Cron 任务。
+- [x] 同源码 ModelQA：正常浏览器授权并自动检测登录完成，无手动点击“检查登录状态”；已授权 cloud trial 测试身份创建唯一话题“0.5.8 发布验收（测试）”和唯一回复“用于验证桌面社区持久化，无需处理”；刷新、正常退出再启动后的列表/详情均回读相同内容；仅退出当前 QA 实例后旧内容清空且无发帖/回复入口。
+- [x] Root 和非实现者独立核对 67 项原件及 Root 收据，共 68 项绑定；候选聚合验收通过。
+- [ ] 自有服务器外部完整正常 TLS GET、真实文件 stat→SHA256→stat 原文和独立核验。
+- [ ] 057 完整回滚 proof、owned lock/CAS stable promotion、公开小型复验和释放本任务锁。
+- [ ] 最终交付记录合入远端 main。
 
-沿用自有更新公钥与endpoint、Developer ID和明确login钥匙串的moxbots-notary；凭据不入Git或日志。旧057源ee055458/正式TAR b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82不可变。回退须恢复启用前兼容配置并保留当前业务库及新旧身份/凭据槽，禁止恢复旧业务数据库；stable回退仅阻止新分发，不会自动降级已安装客户端。
+这是“精确正式制品独审＋同源码隔离原生更新＋真实云端社区”的聚合验收，**不是正式安装运行验收**。正式发行主程序没有启动，production Reader 运行、日常 0.5.7→0.5.8 启用、真实 Host/模型执行、ASR 干净机器加载均未测。QA 含独立验收导航浮层，截图不能证明正式包外观一致性。原生 IME 本轮未重复；Escape 由 Root 观察，但缺单独封存原始动作证据，不能称独立复现。
 
-本机公网路径曾有TLS握手间歇超时，完整GET约118KB/s；这是网络待验证边界，不修改代理/带宽或用TLS绕过代替验收。本次正式候选与原始证据保存于项目指针`work/release-058-20261016/owner/`及`output/updater-058-20261016/`，不将原生包、运行数据或密钥提交Git。
+UpdaterQA 的 0.5.8→0.5.9 是隔离测试版本，**不存在正式 0.5.9 发布**。Goal/Cron 恢复证明对应 QA058 的 v2 捕获，不声称旧日常057已经具备 v2 捕获。TaskStore 在捕获更新前后相同；后来已有 Memory Auto-Update 正常定时执行仅改变运行元数据，不应说当前字节永远不变。
 
-## 构建前证据门禁
+测试钥匙串由验收环境生成密码并保存在受控位置，不是用户 Mac 登录密码。旧 v3 普通解锁失败 `-25293` 原因未知，原环境和备份保留；新 v4 单独受控创建/普通解锁通过，不修改日常钥匙串、ACL、搜索列表或锁策略。冷启动回读的前提是该隔离钥匙串已解锁，未证明锁定状态下恢复或生产 Reader 路径。
 
-独立配方审阅先后发现ENV-01继承动态库环境、GATE-01证据覆盖遗漏、GATE-02缺截图仍可能通过，首轮失败原件均保留。修复后v3独审与25项纯合成门禁夹具通过；四必需CI/main/UI/Root角色、PR89/90祖先、固定源码及同tree、全部原件哈希、执行场景与PNG实际尺寸绑定均受检。此为配方验收，不代表实物包通过；最终源码及原件仍须重新绑定。旧f31合成UI已通过并记录UI-058-01可滚动到达的不确定回执提示建议，最终源码需重新复核，不能复用其PASS代替新增登录/草稿验收。
+## 分发、启用和回退
+
+仅使用自有更新地址 `https://140.143.183.232/updates/stable/darwin-aarch64.json` 和 `/srv/moxbots/updates`；不向 GitHub 上传二进制。归档地址按完整 SHA 固定，stable 切换须同一任务锁、精确旧057 SHA 比较、完整归档和签名/公开路径证据通过后原子替换。055/056/057 的归档与历史保持不可变。官网静态下载页、云服务和 Host 不在本次部署范围。
+
+旧 stable SHA256 `67ed1f03d00f78e949063f15a983a2ca58fcc4b72158cf22801e680a47bd4300`；057 TAR SHA256 `b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82`（336,184,128 bytes）保留。stable 回退阻止新分发，不会自动降级已安装客户端。实际启用仍须原 Renderer/执行 owner 判断空闲、兼容配置和 App 备份就绪，保留现有业务库与身份/凭据槽；未知或忙碌则保持 pending，不调用 stop/interruptWork=true。
+
+## 私有证据索引
+
+以下为可追溯摘要，不将其等同于 Git 内完整原件：
+
+| 证据 | SHA256 | 结论 |
+| --- | --- | --- |
+| `independent-package-audit.json` | `44cad324e8777402885466f3f0dbd450d2f6f68c3c01f78a6772d92db15dfc8a` | 精确正式制品 PASS |
+| `independent-qa-native-review.json` | `0b1f0963f9fa555deb0aed82108e32016c7c6f332d74500569bbb6440a7bf094` | 隔离原生更新 PASS_WITH_LIMITATIONS |
+| `publication-preparation-v3/root-native-ui-business-acceptance.json` | `9cd63dd0d544255b6d824fb1b95003f21aae3b960d2a73c9024185cf30353761` | Root 聚合 PASS |
+| `publication-preparation-v3/independent-native-ui-business-review.json` | `6a8134caf2c45cfdf5e006bc594d60fc97e930aad99a3255d38b9922f44a9e59` | 独立聚合 PASS，保留上列范围 |
+
+失败和旧候选证据未覆盖：旧外层临时签名、旧 v3 解锁、v2 发布脚本跨目录路径错误均有封存记录；当前发布只使用独审通过的 v3 配方。
