@@ -406,7 +406,7 @@ function SidebarMore({ expanded, activeView, onTeam }: {
         }}>
         <button type="button" role="menuitem" onClick={() => { close(); onTeam(); }}
           className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm text-[var(--ink)] hover:bg-[var(--hover-bg)] focus:bg-[var(--hover-bg)]">
-          <TeamIcon className="h-4 w-4 text-[var(--ink-muted)]" /><span className="global-sidebar-label">{APP_BUILD_PROFILE === 'moxbot' ? t('globalSidebar.community') : t('globalSidebar.team')}</span>
+          <TeamIcon className="h-4 w-4 text-[var(--ink-muted)]" /><span className="global-sidebar-label">{t('globalSidebar.team')}</span>
         </button>
       </div>
     </Popover>
@@ -1367,7 +1367,7 @@ export default memo(function GlobalSidebar({
             label={t('globalSidebar.agentNetwork')}
             onClick={() => onOpenAgentNetwork?.()}
           />
-          {(APP_BUILD_PROFILE === 'moxbot' || teamSpaceAvailable) && (
+          {APP_BUILD_PROFILE !== 'moxbot' && teamSpaceAvailable && (
             <SidebarMore key={activeView ?? 'launcher'} expanded={expanded} activeView={activeView} onTeam={onOpenSpace} />
           )}
         </nav>
