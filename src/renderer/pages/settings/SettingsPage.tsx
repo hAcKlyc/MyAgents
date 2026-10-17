@@ -1024,6 +1024,8 @@ export default function Settings({
   const [mcpEnabling, setMcpEnabling] = useState<Record<string, boolean>>({}); // Loading state for enable toggle
   const [browserResourceStatus, setBrowserResourceStatus] =
     useState<BrowserResourceStatus | null>(null);
+  const [browserResourceReadFailed, setBrowserResourceReadFailed] = useState(false);
+  const browserResourceObservationRef = useRef(0);
   const browserResourceOperationRef = useRef(false);
   const [speechModelPackStatus, setSpeechModelPackStatus] =
     useState<SpeechModelPackStatus | null>(null);
@@ -1040,6 +1042,8 @@ export default function Settings({
 
   const acceptBrowserResourceStatus = useCallback(
     (incoming: BrowserResourceStatus) => {
+      browserResourceObservationRef.current += 1;
+      setBrowserResourceReadFailed(false);
       setBrowserResourceStatus((current) =>
         selectLatestBrowserResourceStatus(current, incoming),
       );
@@ -1049,12 +1053,15 @@ export default function Settings({
 
   const refreshBrowserResourceStatus = useCallback(async () => {
     if (!isTauriEnvironment()) return;
+    const observedBeforeRead = browserResourceObservationRef.current;
     try {
       acceptBrowserResourceStatus(
         await invoke<BrowserResourceStatus>('cmd_browser_resource_status'),
       );
     } catch (error) {
       console.warn('[Settings] Failed to read Browser resource status:', error);
+      // A later owner event is stronger evidence than this failed older read.
+      if (browserResourceObservationRef.current === observedBeforeRead) setBrowserResourceReadFailed(true);
     }
   }, [acceptBrowserResourceStatus]);
 
@@ -2282,7 +2289,12 @@ export default function Settings({
     if (!initialMcpId || mcpServers.length === 0) return;
     const server = mcpServers.find((s) => s.id === initialMcpId);
     if (server) {
-      if (server.isBuiltin) {
+      if (!hasUserEditableMcpSettings(server.id)) {
+        const card = document.getElementById(`mcp-tool-${server.id}`);
+        if (!card) return; // Wait until the tools section has rendered.
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        card.focus({ preventScroll: true });
+      } else if (server.isBuiltin) {
         void handleEditBuiltinMcp(server);
       } else {
         handleEditMcp(server);
@@ -2291,7 +2303,7 @@ export default function Settings({
     // Clear parent state so the same ID can be dispatched again
     notifySectionChange();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only triggers on initialMcpId change
-  }, [initialMcpId, mcpServers]);
+  }, [initialMcpId, mcpServers, activeSection]);
 
   useEffect(() => {
     if (!initialOfficialToolId) return;
@@ -5212,6 +5224,8 @@ export default function Settings({
               [IMAGE_UNDERSTANDING_TOOL_ID]: visionToolNeedsConfig,
             }}
             browserResourceStatus={browserResourceStatus}
+            browserResourceReadFailed={browserResourceReadFailed}
+            onRefreshBrowserResource={refreshBrowserResourceStatus}
             speechModelPackStatus={speechModelPackStatus}
             onAddMcp={() => {
               resetMcpForm();

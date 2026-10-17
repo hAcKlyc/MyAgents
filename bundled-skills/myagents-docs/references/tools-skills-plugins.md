@@ -34,9 +34,11 @@ Claude Agent SDK 与托管 Codex 的会话内工具状态可显示失败原因�
 
 ### 应用托管浏览器与 Playwright
 
-「浏览器」是应用管理 Chromium、登录 Cookie 与 Session 隔离的工具，独立于普通 Playwright MCP 和右侧浏览器预览面板。全局可以同时启用两种工具，具体对话按需互斥选择，避免重复暴露浏览器能力。
+「浏览器」对应内置 MCP `myagents-browser`，是应用管理 Chromium、登录 Cookie 与 Session Context 的工具；普通 Playwright MCP preset ID 是 `playwright`，右侧 BrowserPanel 则是网页预览面板。三者的配置、运行时和登录边界不同。托管浏览器和普通 Playwright preset 可在全局同时启用，但具体 Session/执行配置中二者互斥；通常优先选择托管浏览器。具体工具名以当前 Runtime 的实时工具清单为准。
 
-托管浏览器在成功工具调用及关闭边界自动保存 Cookie，不需要 Agent 调用存储工具；localStorage、IndexedDB 不保证跨 Session 恢复。普通 Playwright preset 遵循自身配置，不能用托管浏览器的登录承诺解释它。
+托管浏览器的 Context 按 Product Session 隔离，而登录 Cookie 在当前 OS 用户的身份存储中共享；成功工具调用及关闭边界会自动保存 Cookie，不需要 Agent 调用存储工具。localStorage、IndexedDB 不保证跨 Session 恢复。侧栏 WebView Cookie 不会被托管浏览器读取。普通 Playwright preset 遵循自身浏览器配置，不继承托管浏览器的登录承诺。资源安装与修复使用产品浏览器设置入口；不要直接调用 `browser_install` 或绕过产品入口安装。
+
+MoXBots 正式构建的 CLI 命令名为 `moxbot`。用 `moxbot mcp list` 或 `moxbot mcp show myagents-browser` 检查配置。合法启用命令为 `moxbot mcp enable myagents-browser --scope global`、`moxbot mcp enable myagents-browser --scope project` 或 `moxbot mcp enable myagents-browser --scope both`；handler 只接受这三个 scope，CLI 默认 `both`。有效 Session 配置按全局与项目启用状态取交集。用户要求执行浏览器任务时，可为该任务启用托管浏览器；优先只改这一 MCP，并依据当前 workspace 和已有全局状态选择所需 scope。配置启用不证明当前 Session 已加载工具。
 
 ## Skills
 

@@ -10,8 +10,9 @@ import { isTauriEnvironment } from '@/utils/browserMock';
 import { listenWithCleanup } from '@/utils/tauriListen';
 
 /** Read-only renderer projection of the Rust-owned Browser resource state. */
-export function useBrowserResourceReady(): boolean {
-  const [status, setStatus] = useState<BrowserResourceStatus | null>(null);
+// null = initial read pending, undefined = read failed. Neither is ready.
+export function useBrowserResourceStatus(): BrowserResourceStatus | null | undefined {
+  const [status, setStatus] = useState<BrowserResourceStatus | null | undefined>(null);
 
   useEffect(() => {
     if (!isTauriEnvironment()) return;
@@ -26,9 +27,13 @@ export function useBrowserResourceReady(): boolean {
     );
     void invoke<BrowserResourceStatus>('cmd_browser_resource_status')
       .then(accept)
-      .catch(() => {});
+      .catch(() => { if (!controller.signal.aborted) setStatus(current => current ?? undefined); });
     return () => controller.abort();
   }, []);
 
-  return isBrowserResourceReady(status);
+  return status;
+}
+
+export function useBrowserResourceReady(): boolean {
+  return isBrowserResourceReady(useBrowserResourceStatus());
 }

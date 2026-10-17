@@ -75,6 +75,12 @@ export function applyBuiltinBrowserExecutionToolToggle(current: readonly string[
     return [...next];
   }
 
+  return selectBrowserExecutionTool(current, serverId);
+}
+
+/** Desired execution selection, also used by CLI before resources are ready. */
+export function selectBrowserExecutionTool(current: readonly string[], serverId: string): string[] {
+  const next = new Set(current);
   next.add(serverId);
   if (serverId === STANDARD_PLAYWRIGHT_MCP_ID) {
     next.delete(MANAGED_BROWSER_MCP_ID);

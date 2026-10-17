@@ -455,9 +455,9 @@ Choose by intent:
 
 Examples:
   ${APP_CLI_NAME} mcp list
-  ${APP_CLI_NAME} mcp show playwright
-  ${APP_CLI_NAME} mcp add --id playwright --type stdio --command npx --args @playwright/mcp@latest
-  ${APP_CLI_NAME} mcp enable playwright --scope both
+  ${APP_CLI_NAME} mcp show myagents-browser
+  ${APP_CLI_NAME} mcp enable myagents-browser --scope both
+  ${APP_CLI_NAME} mcp test myagents-browser
   ${APP_CLI_NAME} mcp oauth discover notion-mcp
   ${APP_CLI_NAME} mcp oauth start notion-mcp
   ${APP_CLI_NAME} vision readme

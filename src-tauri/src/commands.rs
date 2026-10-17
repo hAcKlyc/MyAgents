@@ -1114,7 +1114,7 @@ fn sync_admin_agent_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<boo
 // matching exclusion list in src/server/index.ts::seedBundledSkills
 // MUST be kept in sync (comment there points back here).
 
-const SYSTEM_SKILLS_VERSION: &str = "60";
+const SYSTEM_SKILLS_VERSION: &str = "61";
 
 /// One process-wide transaction owner for the versioned system-skill
 /// snapshot. Startup automation and ConfigProvider may request convergence at
@@ -1126,6 +1126,8 @@ static SYSTEM_SKILLS_SYNC_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new
 /// the app's flows depend on them, users are not meant to customise.
 /// Keep in sync with the exclusion list in Bun's `seedBundledSkills()`.
 const SYSTEM_SKILLS: &[&str] = &[
+    // Product browser workflow follows the app-owned MCP/resource contract.
+    "moxbots-browser",
     // Complete Skill+CLI; content updates with the app, user may disable discovery.
     "cuse",
     // v51: one product-owned Task discussion workflow replaces the former
@@ -1648,7 +1650,9 @@ mod system_skills_tests {
 
     #[test]
     fn system_skill_version_keeps_cuse_and_product_skills_aligned() {
-        assert_eq!(SYSTEM_SKILLS_VERSION, "60");
+        assert_eq!(SYSTEM_SKILLS_VERSION, "61");
+        assert!(SYSTEM_SKILLS.contains(&"moxbots-browser"));
+        assert!(!REQUIRED_SYSTEM_SKILLS.contains(&"moxbots-browser"));
         assert!(SYSTEM_SKILLS.contains(&"cuse"));
         assert!(!REQUIRED_SYSTEM_SKILLS.contains(&"cuse"));
         assert!(SYSTEM_SKILLS.contains(&"myagents-task-alignment"));

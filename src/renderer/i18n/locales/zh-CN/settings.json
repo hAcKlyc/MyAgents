@@ -1747,7 +1747,12 @@
         "install_failed": "浏览器资源安装失败",
         "update_failed": "浏览器资源更新失败",
         "unsupported": "当前平台暂不支持"
-      }
+      },
+      "checking": "正在检查浏览器资源…",
+      "nextEnable": "资源已就绪。开启上方开关后，回到对话 → 工具 → Agent 浏览器。",
+      "nextSelect": "已开启。回到对话 → 工具 → Agent 浏览器，选中后即可让 Agent 操作网页。",
+      "checkFailed": "无法读取浏览器资源状态，请重试检查。",
+      "retryCheck": "重新检查"
     },
     "speechResource": {
       "capabilities": "语音识别能力",

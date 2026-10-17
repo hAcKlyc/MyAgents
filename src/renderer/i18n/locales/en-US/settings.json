@@ -1747,7 +1747,12 @@
         "install_failed": "Browser resource installation failed",
         "update_failed": "Browser resource update failed",
         "unsupported": "This platform is not supported"
-      }
+      },
+      "checking": "Checking browser resources…",
+      "nextEnable": "Resources are ready. Turn on the switch above, then return to Chat → Tools → Agent browser.",
+      "nextSelect": "Enabled. Return to Chat → Tools → Agent browser and select it to let the Agent use websites.",
+      "checkFailed": "Could not read browser resource status. Retry the check.",
+      "retryCheck": "Check again"
     },
     "speechResource": {
       "capabilities": "Speech recognition capabilities",

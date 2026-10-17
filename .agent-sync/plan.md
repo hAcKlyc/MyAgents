@@ -330,3 +330,7 @@ Builtin API operational compaction budget, native compact failure correction, in
 ## MOXBOTS-UPSTREAM-INTEGRATION-20261017
 
 User authorized nine upstream repairs and consumed-settings-navigation state only; preserve existing MoXBots menu/sidebar and context recovery safeguards. Source integration includes protocol1.2 client with legacy owned relay negotiation, DSH6.2 contracts/paired release selector0.1.18, MCP/Goal/history/plugin/QR/build repairs. Combined test/main delivery tracked in `.agent-sync/tasks/codex-upstream-integration-20261017-ff567bc3.md` and `dev-docs/upstream-integration-20261017/acceptance.md`. No product version/changelog copy and no new cloud authority. Desktop release request queued to the existing sole owner for the next unfrozen batch; this source task does not install, publish, restart or message another chat.
+
+## MOXBOTS-BROWSER-001 — 2026-10-17
+
+补齐可自动发现的产品浏览器Skill（系统同步v61），让对话工具菜单在未安装/全局未开启时也能定位浏览器资源卡片；明确资源、选择与实际连接，增加读失败重查与事件/查询竞态保护。CLI project browser选择与UI共用互斥规则，不修改全局peer。531项定向回归、实际合成IAB交互与真实Kimi k3→生产SessionEngine/SDK→Browser Host/Registry→锁定Chromium中文表单/截图及新Session合成Cookie恢复通过；Rust authority为测试替身、headless，不冒充原生生产验收。任务 `.agent-sync/tasks/codex-browser-001-20261017-ef4fc5b6.md`；证据 `dev-docs/browser-001/acceptance.md`。主干/CI与下一未冻结桌面发行分别追踪，唯一既定发布owner不变，不并发操作日常App或通知其它聊天。

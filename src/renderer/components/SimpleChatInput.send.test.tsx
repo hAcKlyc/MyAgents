@@ -814,9 +814,10 @@ describe('SimpleChatInput send paths', () => {
 
     await user.click(screen.getByTitle('Use tools'));
 
-    const managedBrowserRow = screen.getByText('Managed Browser').parentElement?.parentElement;
+    const managedBrowserRow = screen.getByText('Agent browser').parentElement?.parentElement;
     const playwrightRow = screen.getByText('Playwright').parentElement?.parentElement;
     expect(managedBrowserRow?.querySelector('button[title="Settings"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Set up Agent browser' })).toBeVisible();
     expect(playwrightRow?.querySelector('button[title="Settings"]')).not.toBeNull();
   });
 

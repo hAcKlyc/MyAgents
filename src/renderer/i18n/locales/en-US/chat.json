@@ -237,6 +237,21 @@
       "message": "The same text repeats about {{count}} times ({{chars}} characters total). This often happens after speech recognition glitches in third-party input methods. Send anyway?",
       "confirm": "Send anyway",
       "cancel": "Cancel"
+    },
+    "browserTool": {
+      "title": "Agent browser",
+      "setup": "Set up Agent browser",
+      "install": "Install resources",
+      "enable": "Enable tool",
+      "description": "Let the Agent navigate, click, fill forms and take screenshots. Separate from the preview panel.",
+      "checking": "Checking browser resources…",
+      "needsResources": "Install browser resources in tool settings first.",
+      "needsEnable": "Resources are ready. Enable the browser in tool settings first.",
+      "selected": "Selected. Waiting for the current chat to confirm the connection.",
+      "ready": "Resources are ready. Enable for this chat.",
+      "manage": "View status",
+      "connected": "Connected. The Agent can now use websites.",
+      "checkFailed": "Could not read resource status. Open browser settings to retry."
     }
   },
   "goalEdit": {

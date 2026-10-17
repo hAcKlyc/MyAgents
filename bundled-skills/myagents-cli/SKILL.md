@@ -63,13 +63,15 @@ MyAgents 能把当前 Workspace 内的单个本地音频或视频附件提交给
 
 ### MCP 工具（mcp）
 
+网页任务优先使用内置 `myagents-browser`，不要重复 `mcp add`。先安装产品设置中的浏览器资源，再按所需 scope 启用。完整页面操作方法见 `/moxbots-browser`；正式 MoXBots 构建使用 `moxbot` 命令名。`mcp test myagents-browser` 只检查当前 Product Session 的 Host capability，实际网页操作仍需当前 Runtime 的工具清单与调用结果验证。
+
 ```bash
 myagents mcp list                                       # 看用户配了哪些 MCP
 myagents mcp show <id>                                  # 看某个 MCP 的完整配置（command/args/env/headers）
 myagents mcp add --id <id> --type <stdio|sse|http> ...  # 新增
 myagents mcp remove <id>                                # 删除
-myagents mcp enable <id> --scope <user|project|both>    # 启用
-myagents mcp disable <id> --scope <user|project|both>   # 禁用
+myagents mcp enable <id> --scope <global|project|both>  # 启用
+myagents mcp disable <id> --scope <global|project|both> # 禁用
 myagents mcp test <id>                                  # 实际握手测试连通性
 myagents mcp env <id> set KEY=val [KEY2=val2 ...]       # 设环境变量（覆盖）
 myagents mcp env <id> get [KEY ...]                     # 读环境变量

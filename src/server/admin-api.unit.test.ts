@@ -3175,6 +3175,20 @@ describe('admin-api config dry-run contract', () => {
 });
 
 describe('admin-api MCP add contract', () => {
+  it.each([
+    ['playwright', 'myagents-browser'],
+    ['myagents-browser', 'playwright'],
+  ])('selects %s via CLI without leaving %s selected for the project', async (selected, previous) => {
+    const workspace = join(scratch, 'browser-project');
+    agentSessionMocks.agentDir = workspace;
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{ id: 'browser-project', path: workspace, mcpEnabledServers: [previous, 'ddg-search'] }]);
+    writeJson(join(scratch, '.myagents', 'config.json'), { mcpEnabledServers: ['playwright', 'myagents-browser', 'ddg-search'] });
+    const { handleMcpEnable } = await import('./admin-api');
+    expect(await handleMcpEnable({ id: selected, scope: 'project' })).toMatchObject({ success: true });
+    expect(readJson(join(scratch, '.myagents', 'projects.json'))[0].mcpEnabledServers).toEqual(['ddg-search', selected]);
+    expect(readConfig().mcpEnabledServers).toEqual(['playwright', 'myagents-browser', 'ddg-search']);
+  });
+
   it.each(['playwright', 'myagents-browser'])('rejects the reserved built-in Browser id %s', async id => {
     const { handleMcpAdd } = await import('./admin-api');
 

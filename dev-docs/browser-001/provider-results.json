@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-17",
+  "sourceBase": "348251b3ce990dfbd0e0888d140477c6ed353f83",
+  "realProvider": "Kimi Coding k3",
+  "terminalStatus": "complete",
+  "realBrowserVersion": "146.0.7680.0",
+  "runtimeArchiveSha256": "8a378e5ff4252d94bb23c509af694b151e99dc88e71099052398cf4eb01a1680",
+  "runtimeArchiveBytes": 176745207,
+  "skillLoaded": true,
+  "pageReceipt": {
+    "phrase": "浏览器完整流程验证",
+    "marker": "BROWSER-791b104046",
+    "hasSyntheticCookie": true
+  },
+  "secondSession": {
+    "restoredCookie": true,
+    "success": true
+  },
+  "toolCalls": [
+    "browser_navigate",
+    "browser_type",
+    "browser_click",
+    "browser_take_screenshot",
+    "browser_navigate"
+  ],
+  "screenshot": "dev-docs/browser-001/model-receipt.png",
+  "screenshotSha256": "61a72b07856ed99c7f7d4d927d1eea3829681a77216e837ccc82ef89168a6d03",
+  "sourceActualScreenshot": "/private/tmp/moxbots-browser-ltu2b3/workspace/browser-test-receipt.png",
+  "boundaries": {
+    "realProvider": "Kimi Coding k3",
+    "realBrowser": true,
+    "lockedChromium": true,
+    "headless": true,
+    "rustAuthority": "synthetic",
+    "nativeUI": false,
+    "production": false,
+    "isolatedHome": true,
+    "realCredentialsInChild": false
+  },
+  "cleanup": {
+    "observedNodePids": [
+      7673
+    ],
+    "remainingProcesses": []
+  },
+  "attempts": [
+    {
+      "receipt": "/private/var/folders/34/45h5k_sd5z134tmnzl7499n00000gn/T/moxbots-browser-rpi224/receipt.json",
+      "sha256": "c7f5614ae427fea00c5ede657979c14f98d89c869eb9d7ee19b386939e929876",
+      "requests": 0,
+      "reportedInputTokensIncludingCache": 0,
+      "reportedOutputTokens": 0,
+      "passed": false
+    },
+    {
+      "receipt": "/private/tmp/moxbots-browser-Whtu3d/receipt.json",
+      "sha256": "1ab7b774255b5430a602cffe5c2b8f4765cae3ffbded9d67273edac1e4768bdd",
+      "requests": 2,
+      "reportedInputTokensIncludingCache": 40728,
+      "reportedOutputTokens": 798,
+      "passed": false
+    },
+    {
+      "receipt": "/private/tmp/moxbots-browser-bhBhYg/receipt.json",
+      "sha256": "fe8f7ba8f6bd577ed3cc4fb31974682587c00522d46313b179b573073d93727d",
+      "requests": 11,
+      "reportedInputTokensIncludingCache": 288020,
+      "reportedOutputTokens": 1545,
+      "passed": false
+    },
+    {
+      "receipt": "/private/tmp/moxbots-browser-ltu2b3/receipt.json",
+      "sha256": "adbf59ae8c1b886e3f22741894e189dcc2970cbc82e15c4e87428b89b0d3d04d",
+      "requests": 6,
+      "reportedInputTokensIncludingCache": 153253,
+      "reportedOutputTokens": 1281,
+      "passed": true
+    }
+  ],
+  "realUpstreamRequestsTotal": 19,
+  "cost": "Unknown; not exposed as a monetary bill."
+}

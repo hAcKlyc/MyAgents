@@ -96,9 +96,9 @@ MyAgents 会把内置运行环境和自身 CLI 放进终端，但仍尽量尊重
 
 ## 内嵌浏览器
 
-浏览器用于在工作区旁预览网页、Agent 链接和本地 HTML。网页内容与桌面应用权限隔离，不能直接获得 MyAgents 的本地权限。关闭浏览器页会结束该页面；登录 cookie 可以在应用浏览器中保留。
+右侧 BrowserPanel 用于在工作区旁预览网页、Agent 链接和本地 HTML。网页内容与桌面应用权限隔离，不能直接获得 MyAgents 的本地权限。关闭浏览器页会结束该页面；该面板的 WebView 登录 Cookie 属于面板自身。
 
-这个浏览器面板与 Agent 可调用的「浏览器」工具、普通 Playwright MCP 是不同入口；工具控制、登录保存与隔离见 `tools-skills-plugins.md`。
+这个浏览器面板与 Agent 可调用的托管浏览器 `myagents-browser`、普通 Playwright MCP `playwright` 是不同入口。浏览器工具的实时名字、工具操作与 Cookie/Session Context 边界见 `tools-skills-plugins.md`；创建网页浏览任务时使用 `/moxbots-browser`。
 
 ## 工具产物与附件
 

@@ -50,7 +50,7 @@ import CronTaskStatusBar from '../cron/CronTaskStatusBar';
 import GoalStatusBar from '../goal/GoalStatusBar';
 import { useUndoStack } from '@/hooks/useUndoStack';
 import { mcpServerState, type McpEffectiveServerState } from '../../../shared/mcpEffectiveState';
-import { hasUserEditableMcpSettings } from '../../../shared/browserTools';
+import { hasUserEditableMcpSettings, MANAGED_BROWSER_MCP_ID } from '../../../shared/browserTools';
 import { CUSTOM_EVENTS } from '../../../shared/constants';
 import { IMAGE_UNDERSTANDING_TOOL_ID } from '../../../shared/official-tools';
 import { reasoningEffortChoices, REASONING_EFFORT_DESCRIPTIONS, REASONING_EFFORT_DEFAULT } from '../../../shared/reasoningEffort';
@@ -74,6 +74,7 @@ import { imageAttachmentName } from './attachmentNames';
 import { MentionPicker } from './components/MentionPicker';
 import { useMentionPicker, type MentionOption } from './hooks/useMentionPicker';
 import { McpStatusNotice } from './components/McpStatusNotice';
+import { BrowserToolEntry } from './components/BrowserToolEntry';
 import { useAttachmentHandling } from './hooks/useAttachmentHandling';
 import { PermissionModeIcon, PermissionModeMenuContent } from '../PermissionModeMenu';
 
@@ -1839,6 +1840,19 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                     <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
                       {t('input.toolsHeader')}
                     </div>
+                    {!isExternalRuntime && <BrowserToolEntry
+                      available={globalMcpEnabled.includes(MANAGED_BROWSER_MCP_ID)}
+                      selected={workspaceMcpEnabled.includes(MANAGED_BROWSER_MCP_ID)}
+                      effective={mcpServerState(mcpEffectiveSnapshot, MANAGED_BROWSER_MCP_ID)}
+                      stale={mcpEffectiveSnapshot?.observationStale}
+                      busy={isLoading}
+                      onToggle={onWorkspaceMcpToggle}
+                      onRetry={onMcpRetry}
+                      onSetup={() => {
+                        setShowToolMenu(false);
+                        window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, { detail: { section: 'mcp', mcpServerId: MANAGED_BROWSER_MCP_ID } }));
+                      }}
+                    />}
                     {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (!isExternalRuntime && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
                       <>
                       {visibleOfficialTools.map((tool) => {
@@ -1912,7 +1926,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         </div>
                       ))}
                       {mcpServers
-                        .filter(s => !isExternalRuntime && globalMcpEnabled.includes(s.id))
+                        .filter(s => !isExternalRuntime && s.id !== MANAGED_BROWSER_MCP_ID && globalMcpEnabled.includes(s.id))
                         .map((server) => {
                           const isEnabled = workspaceMcpEnabled.includes(server.id);
                           const effective = mcpServerState(mcpEffectiveSnapshot, server.id);

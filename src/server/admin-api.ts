@@ -110,6 +110,7 @@ import { buildProactiveAgentTogglePatch } from '../shared/proactiveAgentPolicy';
 import {
   isReservedBuiltinBrowserMcpId,
   MANAGED_BROWSER_MCP_ID,
+  selectBrowserExecutionTool,
 } from '../shared/browserTools';
 
 // Long-running sidecar operations need their own budget. Anchored to the
@@ -9104,10 +9105,8 @@ async function enableMcpForCurrentProject(
     if (idx < 0) return projects;
 
     const project = projects[idx];
-    const enabled = new Set(project.mcpEnabledServers ?? []);
-    enabled.add(serverId);
     const next = [...projects];
-    next[idx] = { ...project, mcpEnabledServers: Array.from(enabled) };
+    next[idx] = { ...project, mcpEnabledServers: selectBrowserExecutionTool(project.mcpEnabledServers ?? [], serverId) };
     result = { status: 'updated', workspacePath };
     return next;
   });

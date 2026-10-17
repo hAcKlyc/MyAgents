@@ -57,13 +57,29 @@ function renderToolbox(browserResourceStatus: BrowserResourceStatus, mcpEnabledI
 }
 
 describe('ToolboxSection managed Browser resources', () => {
+  it('does not offer installation on an unsupported platform', () => {
+    renderToolbox(status('unsupported', { errorCode: 'BROWSER_RESOURCE_UNSUPPORTED' }));
+    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '安装资源' })).not.toBeInTheDocument();
+    expect(screen.getByText('当前平台暂不支持')).toBeVisible();
+  });
+
+  it('offers a resource status retry instead of an endless loading state', async () => {
+    const retry = vi.fn();
+    render(<ToolboxSection mcpServers={[browserServer]} mcpEnabledIds={[]} mcpEnabling={{}} mcpNeedsConfig={{}}
+      browserResourceReadFailed onRefreshBrowserResource={retry} onAddMcp={vi.fn()} onEditMcp={vi.fn()}
+      onEditBuiltinMcp={vi.fn()} onToggleMcp={vi.fn()} />);
+    expect(screen.getByText('无法读取浏览器资源状态，请重试检查。')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: '重新检查' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
   it('requires an explicit resource install before the Browser can be enabled', async () => {
     const user = userEvent.setup();
     const callbacks = renderToolbox(status('never_installed', { totalBytes: 261 * 1024 * 1024 }));
 
     expect(screen.getByRole('switch')).toBeDisabled();
     expect(screen.queryByText(/261\.0 MiB/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/需要安装 Chromium 资源后才能启用/)).not.toBeInTheDocument();
+    expect(screen.getByText(/需要安装 Chromium 资源后才能启用/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: '安装资源' }));
     expect(callbacks.onInstallBrowserResource).toHaveBeenCalledOnce();
     expect(callbacks.onToggleMcp).not.toHaveBeenCalled();

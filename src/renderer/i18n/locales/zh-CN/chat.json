@@ -237,6 +237,21 @@
       "message": "同一段文字重复了约 {{count}} 次（共 {{chars}} 字符）。常见于第三方输入法的语音识别异常。仍要发送吗？",
       "confirm": "仍要发送",
       "cancel": "取消"
+    },
+    "browserTool": {
+      "title": "Agent 浏览器",
+      "setup": "设置 Agent 浏览器",
+      "install": "安装资源",
+      "enable": "启用工具",
+      "description": "让 Agent 打开网页、点击、填写和截图；与右侧网页预览独立。",
+      "checking": "正在检查浏览器资源…",
+      "needsResources": "先在工具设置中安装浏览器资源。",
+      "needsEnable": "资源已就绪，请先开启全局浏览器工具。",
+      "selected": "已选择；等待当前会话确认连接。",
+      "ready": "资源已就绪，可在此对话启用。",
+      "manage": "查看状态",
+      "connected": "已连接，可以让 Agent 操作网页。",
+      "checkFailed": "资源状态读取失败，请打开浏览器设置重试。"
     }
   },
   "goalEdit": {

@@ -39,6 +39,8 @@ interface ToolboxSectionProps {
   officialToolEnabling?: Record<string, boolean>;
   officialToolNeedsConfig?: Record<string, boolean>;
   browserResourceStatus?: BrowserResourceStatus | null;
+  browserResourceReadFailed?: boolean;
+  onRefreshBrowserResource?: () => void;
   speechModelPackStatus?: SpeechModelPackStatus | null;
   onAddMcp: () => void;
   onEditMcp: (server: McpServerDefinition) => void;
@@ -65,6 +67,8 @@ export function ToolboxSection({
   officialToolEnabling = {},
   officialToolNeedsConfig = {},
   browserResourceStatus,
+  browserResourceReadFailed,
+  onRefreshBrowserResource,
   speechModelPackStatus,
   onAddMcp,
   onEditMcp,
@@ -110,7 +114,7 @@ export function ToolboxSection({
         {t('toolbox.tools.description')}
       </p>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {officialTools.map((tool) => {
           const isEnabled = officialEnabledIds.includes(tool.id);
           const isEnabling = officialToolEnabling[tool.id] ?? false;
@@ -219,9 +223,9 @@ export function ToolboxSection({
               'updating',
             ].includes(browserResourceStatus?.state ?? '');
           const disableToggle =
-            isEnabling || (isManagedBrowser && !isEnabled && !browserReady);
+            isEnabling || (isManagedBrowser && !isEnabled && (!browserReady || browserResourceReadFailed));
           const showResourceAction =
-            isManagedBrowser && !browserReady && !browserResourceBusy;
+            isManagedBrowser && browserResourceStatus != null && !browserReady && !browserResourceBusy && browserResourceStatus.state !== 'unsupported';
           const browserResourceSize =
             typeof browserResourceStatus?.totalBytes === 'number'
               ? `${(browserResourceStatus.totalBytes / (1024 * 1024)).toFixed(1)} MiB`
@@ -238,6 +242,8 @@ export function ToolboxSection({
           return (
             <div
               key={server.id}
+              id={`mcp-tool-${server.id}`}
+              tabIndex={-1}
               className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5"
             >
               <div className="flex items-start justify-between gap-2">
@@ -275,6 +281,7 @@ export function ToolboxSection({
                   <button
                     type="button"
                     role="switch"
+                    aria-label={server.name}
                     aria-checked={isEnabled}
                     aria-busy={isEnabling}
                     onClick={() => onToggleMcp(server, !isEnabled)}
@@ -307,6 +314,13 @@ export function ToolboxSection({
                   {t(isManagedBrowser ? 'toolbox.browserCapabilities.managed' : 'toolbox.browserCapabilities.playwright')}
                 </p>
               )}
+              {isManagedBrowser && <p className="mt-2 text-xs leading-relaxed text-[var(--ink-muted)]" role="status">
+                {t(browserResourceReadFailed ? 'toolbox.browserResource.checkFailed' : !browserResourceStatus ? 'toolbox.browserResource.checking' : browserReady ? (isEnabled ? 'toolbox.browserResource.nextSelect' : 'toolbox.browserResource.nextEnable') : `toolbox.browserResource.states.${browserResourceStatus.state}`)}
+              </p>}
+              {isManagedBrowser && browserResourceReadFailed && <button type="button" onClick={onRefreshBrowserResource}
+                className="mt-2 rounded border border-[var(--line)] px-2.5 py-1.5 text-xs text-[var(--ink)] hover:bg-[var(--paper-inset)]">
+                {t('toolbox.browserResource.retryCheck')}
+              </button>}
               {mcpNeedsConfig[server.id] && (
                 <p className="mt-1 text-xs text-[var(--warning)]">
                   {t('toolbox.tools.needsApiKey')}

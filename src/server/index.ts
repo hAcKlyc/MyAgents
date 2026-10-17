@@ -1140,6 +1140,8 @@ function resolveBundledSkillsDir(): string | null {
  * genuine user skill named identically.
  */
 const SYSTEM_SKILLS: readonly string[] = [
+  // Optional discovery, app-owned updates (see Rust SYSTEM_SKILLS).
+  'moxbots-browser',
   // Optional native desktop Skill; Rust owns complete bundle updates.
   'cuse',
   'myagents-task-alignment',
