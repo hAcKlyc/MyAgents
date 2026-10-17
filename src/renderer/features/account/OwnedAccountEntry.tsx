@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  HelpIcon,
   HelperIcon,
   LoaderIcon,
   LogOutIcon,
+  RadioIcon,
   UserIcon,
   TeamIcon,
 } from "@/components/icons";
@@ -351,17 +353,19 @@ export default function OwnedAccountEntry({
               type="button"
               disabled={!serviceUrl}
               onClick={() => void openFeedback()}
-              className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
             >
+              <HelpIcon className="h-4 w-4" />
               {t("titlebar.feedbackTitle")}
             </button>
             {state === "authenticated" && (
               <button
                 type="button"
                 onClick={() => void selectRecoveredConnection()}
-                className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)]"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
                 disabled={!onOpenAgentNetwork || busy}
               >
+                <RadioIcon className="h-4 w-4" />
                 {t("ownedAccountEntry.openNetwork")}
               </button>
             )}

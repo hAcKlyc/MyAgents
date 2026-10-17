@@ -649,6 +649,19 @@ it("closes an already open account menu when its account generation changes", ()
 });
 
 
+it("gives help and AgentNet rows the same icons as the other personal menu rows", () => {
+  mocks.registry = makeRegistry({
+    state: "authenticated",
+    principalId: "principal-1",
+    expiresAt: null,
+  });
+  render(<OwnedAccountEntry expanded onOpenAgentNetwork={vi.fn()} />);
+  fireEvent.click(document.querySelector("[data-owned-account-trigger]")!);
+  for (const name of ["小助理", "协作社区", "帮助与反馈", "打开 AgentNet 与 Host 管理"]) {
+    expect(screen.getByRole("button", { name }).querySelector("svg")).not.toBeNull();
+  }
+});
+
 it.each([true, false])('opens community from the personal menu without starting another login (expanded=%s)', expanded => {
   const community = vi.fn();
   render(<OwnedAccountEntry expanded={expanded} onOpenCommunity={community} />);

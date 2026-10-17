@@ -53,6 +53,12 @@ const mocks = vi.hoisted(() => ({
     warning: vi.fn(),
     info: vi.fn(),
   },
+  buildProfile: 'myagents' as 'myagents' | 'moxbot',
+}));
+
+vi.mock('../../../shared/appProfile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../shared/appProfile')>()),
+  get APP_BUILD_PROFILE() { return mocks.buildProfile; },
 }));
 
 vi.mock('@/features/account/useMyAgentsAccount', () => ({
@@ -2047,6 +2053,15 @@ describe('Agent network and Space navigation', () => {
     view.rerender(sidebar({ onOpenAgentNetwork, activeTab: spaceTab }));
     expect(screen.getByRole('button', { name: String(i18n.t('app:globalSidebar.more')) })).toHaveAttribute('aria-current', 'page');
     expect(network).not.toHaveAttribute('aria-current');
+  });
+});
+
+describe('MoXBots navigation', () => {
+  afterEach(() => { mocks.buildProfile = 'myagents'; });
+  it('leaves Community to the personal menu instead of the top-left more menu', () => {
+    mocks.buildProfile = 'moxbot';
+    renderSidebar({ teamSpaceAvailable: true });
+    expect(screen.queryByRole('button', { name: String(i18n.t('app:globalSidebar.more')) })).not.toBeInTheDocument();
   });
 });
 

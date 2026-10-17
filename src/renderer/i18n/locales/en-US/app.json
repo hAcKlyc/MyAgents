@@ -43,7 +43,7 @@
   },
   "globalSidebar": {
     "resize": "Resize sidebar",
-    "legacySpaceUnavailable": "This link belongs to the legacy collaboration space. Its resources are not available in this community. Open More → Community to continue.",
+    "legacySpaceUnavailable": "This link belongs to the legacy collaboration space. Its resources are not available in this community. Open Community from the personal menu to continue.",
     "community": "Community",
     "cloudUnavailable": "No MoXBots cloud service is configured. Check the cloud connection in the account menu.",
     "navigation": "Global navigation",
