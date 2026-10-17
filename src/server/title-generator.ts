@@ -1,5 +1,6 @@
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
-import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { isUpdaterQaBuild, isModelQaBuild } from '../shared/updaterQa';
+import { withModelQaUtilityAdmission } from './utils/model-qa-utility-admission';
 /**
  * title-generator.ts — AI-powered session title generation.
  *
@@ -202,8 +203,9 @@ export async function generateTitle(
   model: string,
   providerEnv?: ProviderEnv,
   conversationId?: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
-  return generateUtilityText({ prompt: buildUserPrompt(rounds), systemPrompt: SYSTEM_PROMPT, clean: cleanTitle, settingSources: ['project'], requireSuccessfulTerminal: true }, model, providerEnv, conversationId);
+  return generateUtilityText({ prompt: buildUserPrompt(rounds), systemPrompt: SYSTEM_PROMPT, clean: cleanTitle, signal, settingSources: ['project'], requireSuccessfulTerminal: true }, model, providerEnv, conversationId);
 }
 
 export interface TextUtilityTask {
@@ -220,6 +222,14 @@ export async function generateUtilityText(
   task: TextUtilityTask, model: string, providerEnv?: ProviderEnv, conversationId?: string,
 ): Promise<string | null> {
   if (isUpdaterQaBuild()) return null;
+  // QA must never fall back to the user's ambient subscription/Keychain.
+  if (isModelQaBuild() && (!providerEnv?.providerId || providerEnv.providerId === SUBSCRIPTION_PROVIDER_ID || (!providerEnv.apiKey && !providerEnv.credentialSource) || !model.trim())) return null;
+  return withModelQaUtilityAdmission(() => generateUtilityTextAdmitted(task, model, providerEnv, conversationId));
+}
+
+async function generateUtilityTextAdmitted(
+  task: TextUtilityTask, model: string, providerEnv?: ProviderEnv, conversationId?: string,
+): Promise<string | null> {
   if (task.signal?.aborted) return null;
   const requestConversationId = conversationId ?? randomUUID();
   // PRD #124: register a per-call bridge token if the title-gen provider is
@@ -303,7 +313,7 @@ async function generateTitleInner(
         maxTurns: 1,
         sessionId,
         cwd,
-        settingSources: task.settingSources ?? [],
+        settingSources: isModelQaBuild() ? [] : task.settingSources ?? [],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         pathToClaudeCodeExecutable: cliPath,
@@ -494,7 +504,7 @@ export async function generateTitleExternal(
   workspacePath: string,
   runtimeSource?: RuntimeSource,
 ): Promise<string | null> {
-  if (isUpdaterQaBuild()) return null;
+  if (isUpdaterQaBuild() || isModelQaBuild()) return null;
   const startTime = Date.now();
   // Plain UUID — Claude Code CLI rejects `--session-id <non-uuid>` with
   // "Invalid session ID. Must be a valid UUID." A `title-` prefix would tank

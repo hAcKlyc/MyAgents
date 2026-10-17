@@ -38,7 +38,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), {
     name: 'application-profile-title',
     transformIndexHtml: (html) => buildProfile !== 'myagents'
-      ? html.replace('<title>MyAgents</title>', buildProfile === 'moxbot-updaterqa' ? '<title>MoXBots Updater QA</title>' : '<title>MoXBots</title>')
+      ? html.replace('<title>MyAgents</title>', buildProfile === 'moxbot-updaterqa' ? '<title>MoXBots Updater QA</title>' : buildProfile === 'moxbot-modelqa' ? '<title>MoXBots Model QA</title>' : '<title>MoXBots</title>')
       : html,
   }],
   resolve: {

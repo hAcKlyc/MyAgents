@@ -4,6 +4,7 @@ export type RowLayoutChangeReason =
   | 'user-message-collapse-measured'
   | 'user-message-expand'
   | 'block-group-expand'
+  | 'block-group-collapse'
   | 'process-row-expand'
   | 'process-row-collapse'
   | 'expandable-container-expand'

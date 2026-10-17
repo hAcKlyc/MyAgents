@@ -533,6 +533,8 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  /** Default on. Bounded read-only context from other desktop chats at first send. */
+  projectContextEnabled?: boolean;
   lastOpened?: string;
   /** Launcher right rail pin time. Pinned workspaces sort newest-first. */
   pinnedAt?: string | undefined;
@@ -923,6 +925,8 @@ export interface DshCollaborationSettings {
 }
 
 export interface AppConfig {
+  /** Optional builtin API-model failover. Main selection remains Session-owned. */
+  modelFailover?: import('./modelFailover').ModelFailoverSettings;
   // Default settings for new projects
   defaultProviderId?: string;
   defaultPermissionMode: PermissionMode;

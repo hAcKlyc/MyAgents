@@ -55,6 +55,24 @@ describe('next prompt owner service', () => {
     expect(await createPromptSuggestionService(generate)(engine, request)).toEqual({ ...request, suggestion: null, availability: 'unsupported', reason: 'runtime-text-utility-unavailable' });
     expect(generate).not.toHaveBeenCalled();
   });
+  it.each(['codex', 'claude-code', 'dsh'])('uses %s native auxiliary generation without borrowing SDK and cleans output', async runtime => {
+    const { engine, identity } = fixture(); Object.assign(identity, { kind: 'external', runtime });
+    const native = vi.fn(async () => '「请验证CSV空文件。」'); engine.runTextUtility = native;
+    const sdk = vi.fn();
+    expect(await createPromptSuggestionService(sdk)(engine, request)).toEqual({ ...request, suggestion: '请验证CSV空文件。', availability: 'supported' });
+    expect(sdk).not.toHaveBeenCalled();
+    expect(native).toHaveBeenCalledWith(expect.objectContaining({ prompt: expect.stringContaining('请分析测试方式') }));
+  });
+  it('drops native utility results when owner/config changes and never uses an SDK fallback on failure', async () => {
+    const { engine, identity } = fixture(); Object.assign(identity, { runtime: 'codex', runtimeSource: 'managed-provider' });
+    engine.runTextUtility = vi.fn(async () => { Object.assign(identity, { runtimeSource: 'system-cli' }); return '请继续'; });
+    const sdk = vi.fn();
+    await expect(createPromptSuggestionService(sdk)(engine, request)).rejects.toBeInstanceOf(StalePromptSuggestionError);
+    expect(sdk).not.toHaveBeenCalled();
+    engine.runTextUtility = vi.fn(async () => { throw new Error('native auth unavailable'); });
+    expect((await createPromptSuggestionService(sdk)(engine, request)).suggestion).toBeNull();
+    expect(sdk).not.toHaveBeenCalled();
+  });
   it('continues generating beyond the completed LRU bound and retains recently used anchors', async () => {
     const { engine, messages } = fixture();
     const generate = vi.fn(async () => '请按刚才方案测试');

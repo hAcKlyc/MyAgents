@@ -1,10 +1,8 @@
 
 import {
-  AlertIcon,
   BrainIcon,
   ChevronDownIcon,
   ImageIcon,
-  LoaderIcon,
   XCircleIcon,
   StopCircleIcon,
   CopyIcon,
@@ -24,8 +22,8 @@ import { copyPlainText } from '@/utils/clipboard';
 import {
     formatDuration,
     getToolBadgeConfig,
-    getToolLabel,
     getToolMainLabel,
+    getToolActionLabel,
     getToolSummaryNode,
     isSubagentContainerTool
 } from '@/components/tools/toolBadgeConfig';
@@ -33,9 +31,12 @@ import {
     getSubagentContainerDurationMs,
     getSubagentContainerLifecycleStatus,
     isBackgroundSubagentTool,
-    isSubagentContainerRunning,
 } from '@/components/tools/subagentActivity';
-import ToolUse from '@/components/ToolUse';
+import ToolUse, { hasToolResultContent } from '@/components/ToolUse';
+import ProcessStatus from './ProcessStatus';
+import { getProcessOutcome } from '@/utils/processPresentation';
+import { processResultLabel } from '@/utils/processResults';
+import ProcessTiming from './ProcessTiming';
 import ToolAttachmentGallery from '@/components/tools/ToolAttachmentGallery';
 import type { ContentBlock } from '@/types/chat';
 
@@ -44,6 +45,10 @@ interface ProcessRowProps {
     index: number;
     totalBlocks: number;
     isStreaming?: boolean;
+    resultFirst?: boolean;
+    resultLabel?: string;
+    expandedOverride?: boolean;
+    onExpansionChange?: (expanded: boolean) => void;
     // Called when the user EXPANDS this row. The parent BlockGroup uses it to
     // suppress its auto-fold for the turn — otherwise folding would unmount a
     // row the user deliberately opened and silently lose its expanded state.
@@ -55,6 +60,10 @@ const ProcessRow = memo(function ProcessRow({
     index,
     totalBlocks,
     isStreaming = false,
+    resultFirst = false,
+    resultLabel,
+    expandedOverride,
+    onExpansionChange,
     onUserExpand
 }: ProcessRowProps) {
     // User manually toggled state (null = not toggled, true/false = user choice)
@@ -78,12 +87,8 @@ const ProcessRow = memo(function ProcessRow({
     const isThinking = block.type === 'thinking';
     const isTool = block.type === 'tool_use' || block.type === 'server_tool_use';
     const isServerTool = block.type === 'server_tool_use';
-    const providerOutcome = isServerTool
-        ? block.tool?.isLoading && isStreaming ? 'running'
-            : block.tool?.isError ? 'failed'
-                : block.tool?.result !== undefined ? 'succeeded' : 'unknown'
-        : undefined;
-    const isLastBlock = index === totalBlocks - 1;
+    const outcome = getProcessOutcome(block, isStreaming);
+    const providerOutcome = isServerTool ? outcome : undefined;
     const isTaskTool = isTool && !isServerTool && !!block.tool?.name && isSubagentContainerTool(block.tool.name);
     const isFilePatchTool = isTool
         && !isServerTool
@@ -91,20 +96,15 @@ const ProcessRow = memo(function ProcessRow({
             || block.tool?.name === 'edit' || block.tool?.name === 'write');
 
     // Thinking: 没有 isComplete 且正在 streaming 才是 active（避免历史消息计时器永跑）
-    const isThinkingActive = isThinking && block.isComplete !== true && isStreaming;
+    const isThinkingActive = isThinking && outcome === 'running';
 
-    // Tool: 是最后一个 block 且正在 streaming 且没有 result 就是 active
-    const isTaskRunning = isTaskTool && isSubagentContainerRunning(block.tool);
+    // Parallel tools use their own outcome; child lifecycle can outlive the parent turn.
+    const isTaskRunning = isTaskTool && outcome === 'running';
     const subagentLifecycleStatus = isTaskTool
         ? getSubagentContainerLifecycleStatus(block.tool)
         : null;
-    const isToolActive = isServerTool ? providerOutcome === 'running' : isTool
-        && isLastBlock
-        && isStreaming
-        && (Boolean(block.tool?.isLoading) || !block.tool?.result)
-        && (!isTaskTool || isTaskRunning);
+    const isToolActive = isTool && outcome === 'running';
 
-    const isBlockActive = isThinkingActive || isToolActive || isTaskRunning;
     const wasToolActiveRef = useRef(false);
 
     useLayoutEffect(() => {
@@ -213,23 +213,33 @@ const ProcessRow = memo(function ProcessRow({
         [isTool, block.tool?.attachments],
     );
 
-    const hasContent =
-        (isThinking && block.thinking && block.thinking.length > 0) ||
-        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.isLoading || block.tool.subagentCalls?.length || processAttachments.length > 0));
+    // In result-first mode, input JSON alone does not make a useful result
+    // body. Keep input-driven patch/plan/child renderers reachable, but avoid
+    // chevrons that only open an empty/awaiting generic result.
+    const inputDrivenResult = isTaskTool || isFilePatchTool || (isTool && block.tool
+        && ['MultiEdit', 'NotebookEdit', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList'].includes(block.tool.name));
+    const hasContent = Boolean(
+        (isThinking && block.thinking?.trim()) ||
+        (isTool && block.tool && (
+            (resultFirst ? inputDrivenResult && block.tool.inputJson : block.tool.inputJson || block.tool.isLoading)
+            || (resultFirst ? hasToolResultContent(block.tool) : block.tool.result?.trim())
+            || block.tool.subagentCalls?.length || processAttachments.length > 0
+        )));
 
     // 派生展开状态（无 useEffect，避免无限循环）
     // thinking 与 tool 块都默认折叠，只由用户手动点击展开。
     // thinking 块刻意不再随 streaming 自动展开、完成后自动收起——那个"展开→收起"
     // 会在流式时让页面上下跳动，体验差。折叠态仍通过 "思考中… (Xs)" 标签 + active
     // 指示实时反馈思考进行中（见 isThinkingActive / mainLabel），不影响可感知性。
-    const isExpanded = userToggled ?? false;
+    const isExpanded = expandedOverride ?? userToggled ?? false;
 
     // Handle user click
     const handleToggle = () => {
         if (!hasContent) return;
-        const willExpand = userToggled !== true; // null / false → this click opens it
+        const willExpand = !isExpanded;
         notifyRowLayoutChanged(willExpand ? 'process-row-expand' : 'process-row-collapse');
-        setUserToggled(prev => prev === null ? true : !prev);
+        setUserToggled(willExpand);
+        onExpansionChange?.(willExpand);
         // Signal the parent group on EXPAND so it can pin its layout (stop the
         // auto-fold that would unmount this row and drop the just-opened state).
         if (willExpand) onUserExpand?.();
@@ -271,7 +281,7 @@ const ProcessRow = memo(function ProcessRow({
     // already wrapped in React.memo so we only render when `block` changes, and the
     // React Compiler handles further optimization. Manual useMemo with granular deps
     // would defeat compiler auto-memoization.
-    const summaryNode = isTool && block.tool ? getToolSummaryNode(block.tool, t) : null;
+    const summaryNode = !resultFirst && isTool && block.tool && outcome === 'succeeded' ? getToolSummaryNode(block.tool, t) : null;
 
     if (isThinking) {
         const durationSec = block.thinkingDurationMs ? Math.floor(block.thinkingDurationMs / 1000) : 0;
@@ -280,7 +290,7 @@ const ProcessRow = memo(function ProcessRow({
             mainLabel = elapsedSec > 0 ?
                 t('shell.toolChrome.thinking.activeWithSeconds', { seconds: elapsedSec })
                 : t('shell.toolChrome.thinking.active');
-            icon = <LoaderIcon className="size-4 animate-spin" />;
+            icon = <BrainIcon className="size-4" />;
         } else if (block.isFailed) {
             mainLabel = durationSec > 0 ?
                 t('shell.toolChrome.thinking.failedWithSeconds', { seconds: durationSec })
@@ -291,32 +301,25 @@ const ProcessRow = memo(function ProcessRow({
                 t('shell.toolChrome.thinking.stoppedWithSeconds', { seconds: durationSec })
                 : t('shell.toolChrome.thinking.stopped');
             icon = <StopCircleIcon className="size-4 text-[var(--warning)]" />;
+        } else if (outcome === 'unknown') {
+            mainLabel = t('process.thinkingRecord');
+            icon = <BrainIcon className="size-4" />;
         } else {
             mainLabel = t('shell.toolChrome.thinking.completedWithSeconds', { seconds: Math.max(durationSec, 1) });
             icon = <BrainIcon className="size-4" />;
         }
     } else if (isTool && block.tool) {
         const config = getToolBadgeConfig(block.tool.name);
-        const toolLabel = getToolLabel(block.tool, t);
+        mainLabel = getToolActionLabel(block.tool, t);
+        subLabel = getToolMainLabel(block.tool, t);
 
-        mainLabel = getToolMainLabel(block.tool, t);
-        subLabel = toolLabel !== mainLabel ? toolLabel : '';
+        // Tool identity and execution state have separate visual roles.
+        icon = config.icon;
+    }
 
-        if (isToolActive || isTaskRunning) {
-            // (issue #175) Same pit-of-success treatment as the green dot
-            // above: parallel Task/Agent dispatches that aren't the last
-            // block also need the spinner so the icon stays coherent with
-            // the dot and the detail panel's "Agent is running" badge.
-            icon = <LoaderIcon className="size-4 animate-spin" />;
-        } else if (subagentLifecycleStatus === 'failed' || block.tool.isFailed) {
-            icon = <XCircleIcon className="size-4 text-[var(--error)]" />;
-        } else if (subagentLifecycleStatus === 'interrupted' || block.tool.isStopped) {
-            icon = <StopCircleIcon className="size-4 text-[var(--warning)]" />;
-        } else if (block.tool.isError) {
-            icon = <AlertIcon className="size-4 text-[var(--error)]" />;
-        } else {
-            icon = config.icon;
-        }
+    if (resultFirst) {
+        mainLabel = resultLabel ?? processResultLabel({ block, index, outcome }, t);
+        subLabel = '';
     }
 
     // PRD 0.2.17 Agent Status Panel：当本 row 是 Task/Agent 工具时挂 data-tool-id 锚点。
@@ -327,42 +330,24 @@ const ProcessRow = memo(function ProcessRow({
         <div
             className={`group select-none ${index < totalBlocks - 1 ? 'border-b border-[var(--line-subtle)]' : ''}`}
             data-tool-id={toolAnchorId}
+            data-process-row={outcome}
         >
             <button
                 type="button"
                 onClick={handleToggle}
                 disabled={!hasContent}
                 aria-expanded={hasContent ? isExpanded : undefined}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)]' : 'cursor-default'
+                className={`flex w-full items-center gap-3 ${resultFirst ? `px-3 ${isThinking ? 'py-1.5' : 'py-2'}` : 'px-4 py-2.5'} text-left transition-colors ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]' : 'cursor-default'
                     }`}
             >
-                {/* Left indicator dot - smaller.
-                 *  (issue #175) For parallel Task/Agent tool dispatches, all
-                 *  but the last block fail `isLastBlock`, so the legacy
-                 *  `isBlockActive` (which requires last+streaming) leaves
-                 *  earlier still-running tasks showing a grey dot while the
-                 *  expanded TaskTool detail still says "Agent is running".
-                 *  Fall back to the tool's own running state for
-                 *  Task/Agent so each parallel task's indicator reflects its
-                 *  own truth — same predicate TaskTool.tsx uses for its
-                 *  internal "执行中" badge. */}
-                <div className={`flex size-1.5 shrink-0 rounded-full ${isBlockActive
-                    ? 'bg-[var(--success)] animate-pulse'
-                    : block.isFailed || block.tool?.isFailed || subagentLifecycleStatus === 'failed'
-                        ? 'bg-[var(--error)]'
-                        : block.isStopped || block.tool?.isStopped || subagentLifecycleStatus === 'interrupted'
-                            ? 'bg-[var(--warning)]'
-                            : 'bg-[var(--ink-muted)]/40'
-                    }`} />
-
                 {/* Icon - fixed size container */}
-                <div className={`flex size-4 shrink-0 items-center justify-center text-[var(--ink-muted)] [&>svg]:size-4`}>
+                {!resultFirst && <div className={`flex size-4 shrink-0 items-center justify-center text-[var(--ink-muted)] [&>svg]:size-4`}>
                     {icon}
-                </div>
+                </div>}
 
                 {/* Main Label */}
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className={`text-sm leading-snug ${isThinking
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className={`min-w-0 break-words text-sm leading-snug ${isThinking
                         ? 'text-[var(--ink-secondary)]'
                         : 'text-[var(--ink)] font-medium'
                         }`}>
@@ -389,13 +374,13 @@ const ProcessRow = memo(function ProcessRow({
                             {t('shell.toolChrome.common.completedContinuable')}
                         </span>
                     )}
-                    {taskDuration && (
+                    {taskDuration && !resultFirst && (
                         <span className="text-xs text-[var(--ink-muted)]">
                             {taskDuration}
                         </span>
                     )}
                     {subLabel && subLabel !== mainLabel && (
-                        <span className="max-w-[60%] text-xs text-[var(--ink-muted)] font-mono truncate">
+                        <span className="text-xs text-[var(--ink-secondary)]">
                             {subLabel}
                         </span>
                     )}
@@ -408,7 +393,10 @@ const ProcessRow = memo(function ProcessRow({
                         </span>
                     )}
                     {summaryNode && <span className="shrink-0 text-xs leading-none">{summaryNode}</span>}
+                    {resultFirst && <span className="w-full"><ProcessTiming blocks={[block]} running={outcome === 'running'} /></span>}
                 </div>
+
+                <ProcessStatus outcome={outcome} compact={resultFirst && outcome === 'succeeded'} />
 
                 {/* Chevron */}
                 {hasContent && (
@@ -431,8 +419,8 @@ const ProcessRow = memo(function ProcessRow({
                     <div className="overflow-hidden">
                         <div className="border-t border-[var(--line)] bg-[var(--paper-elevated)]/50 px-4 pb-4 pt-3">
                             <div
-                                data-process-body-layout={isFilePatchTool ? 'full' : 'indented'}
-                                className={isFilePatchTool ? '' : 'ml-7'}
+                                data-process-body-layout={isFilePatchTool || resultFirst ? 'full' : 'indented'}
+                                className={isFilePatchTool || resultFirst ? '' : 'ml-7'}
                             >
                                 {isThinking && block.thinking && (
                                     <div className="group/think text-[var(--ink-secondary)] select-text">
@@ -461,7 +449,7 @@ const ProcessRow = memo(function ProcessRow({
                                 )}
                                 {isTool && block.tool && (
                                     <div className="w-full overflow-hidden select-text">
-                                        <ToolUse tool={block.tool} />
+                                        <ToolUse tool={block.tool} resultOnly={resultFirst} />
                                         {/* #293 — process media (screenshots) renders here inside the
                                             fold, the inverse of the PRD 0.2.30 artifact hoist: these
                                             are the AI's working captures, not deliverables, so they

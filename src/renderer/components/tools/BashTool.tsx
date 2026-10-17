@@ -31,6 +31,7 @@ import type {
 
 interface BashToolProps {
   tool: ToolUseSimple;
+  resultOnly?: boolean;
 }
 
 type ChatTranslator = (key: string, options?: Record<string, unknown>) => string;
@@ -42,17 +43,18 @@ const SYNTAX_HIGHLIGHT_LINE_BUDGET = 1_000;
 const SYNTAX_HIGHLIGHT_CHARACTER_BUDGET = 100 * 1024;
 const SYNTAX_HIGHLIGHT_COMMAND_SEGMENT_BUDGET = 100;
 
-export default function BashTool({ tool }: BashToolProps) {
+export default function BashTool({ tool, resultOnly = false }: BashToolProps) {
   const { t } = useTranslation('chat');
   const model = useMemo(
     () => resolveBashTranscriptModel(tool),
     [tool],
   );
 
-  return <BashTerminal model={model} t={t} />;
+  return <BashTerminal model={resultOnly ? { ...model, command: null, shell: undefined, hasHiddenCommandContent: false,
+    meta: { ...model.meta, cwd: undefined, processId: undefined, durationMs: undefined } } : model} t={t} resultOnly={resultOnly} />;
 }
 
-function BashTerminal({ model, t }: { model: BashTranscriptModel; t: ChatTranslator }) {
+function BashTerminal({ model, t, resultOnly }: { model: BashTranscriptModel; t: ChatTranslator; resultOnly: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const notifyRowLayoutChanged = useNotifyRowLayoutChanged();
   const expandDescriptionId = useId();
@@ -80,9 +82,9 @@ function BashTerminal({ model, t }: { model: BashTranscriptModel; t: ChatTransla
     >
       <header className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-b border-[var(--line)] bg-[var(--code-header-bg)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <TerminalIcon className="size-4 shrink-0 text-[var(--code-line-number)]" aria-hidden="true" />
+          {!resultOnly && <TerminalIcon className="size-4 shrink-0 text-[var(--code-line-number)]" aria-hidden="true" />}
           <span className="truncate font-mono text-xs text-[var(--code-text)]">
-            {model.shell ?? t('shell.toolChrome.bash.terminal')}
+            {resultOnly ? t('process.heading.execute') : model.shell ?? t('shell.toolChrome.bash.terminal')}
           </span>
         </div>
         <BashStatus status={model.status} label={statusLabel} />

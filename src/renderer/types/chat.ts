@@ -1,3 +1,4 @@
+import type { ExecutionTiming } from '../../shared/executionTiming';
 import type { AsyncQuestionSet, AsyncQuestionReply } from '../../shared/asyncUserQuestions';
 // Import tool input types from Claude Agent SDK for end-to-end type safety
 import type {
@@ -58,6 +59,7 @@ export interface AgentStatusTodoSnapshot {
 }
 
 export interface SubagentToolCall {
+  executionTiming?: ExecutionTiming;
   id: string;
   name: string;
   input: Record<string, unknown>;
@@ -108,6 +110,7 @@ export interface BackgroundTaskStats {
 }
 
 export interface ToolUseSimple extends ToolUse {
+  executionTiming?: ExecutionTiming;
   // Raw input as it streams in - no parsing, just accumulate the raw string
   inputJson?: string;
   // Parsed input object (populated when inputJson is complete)
@@ -146,6 +149,7 @@ export interface ProviderToolUsePayload extends ToolUse {
 }
 
 export interface ContentBlock {
+  executionTiming?: ExecutionTiming;
   /** Present on V2 blocks; supplied by the product transcript owner. */
   id?: string;
   asyncQuestions?: AsyncQuestionSet;

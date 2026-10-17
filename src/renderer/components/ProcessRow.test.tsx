@@ -99,7 +99,7 @@ describe('ProcessRow Codex CollabAgent activity', () => {
     expect(screen.getByText('子 Agent')).toBeInTheDocument();
     expect(screen.getByText('Agent 消息')).toBeInTheDocument();
     expect(container.querySelector('.animate-spin')).not.toBeNull();
-    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+    expect(container.querySelector('[data-process-status="running"]')).toHaveTextContent('执行中');
   });
 });
 

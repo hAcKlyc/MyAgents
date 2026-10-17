@@ -90,6 +90,9 @@ describe('planModeDenyMessage', () => {
     expect(msg).toContain('Bash');
     expect(msg).toContain('ExitPlanMode');
     expect(msg).toContain('Plan');
+    const scoped = planModeDenyMessage('Write', '/workspace/.claude/plans/myagents/session-1');
+    expect(scoped).toContain('/workspace/.claude/plans/myagents/session-1');
+    expect(scoped).toContain('沿用 SDK 指定文件名');
   });
 });
 

@@ -207,6 +207,9 @@
       "title": "App Shortcuts",
       "description": "These shortcuts work globally inside the app and cannot be customized yet.",
       "items": {
+        "zoom-in": "Increase interface size",
+        "zoom-out": "Decrease interface size",
+        "zoom-reset": "Reset interface size",
         "cycle-tab": "Cycle tabs (Shift reverses)",
         "jump-to-tab": "Jump to tab 1-9 (9 means last)",
         "new-tab": "New tab",
@@ -2240,6 +2243,11 @@
     "feedback": "Report Issue",
     "communityTitle": "Join the User Community",
     "communityDescription": "Scan the QR code to join and talk with other users",
+    "maintainerLabel": "Maintained by",
+    "websiteLabel": "Website",
+    "contactLabel": "Contact & support",
+    "repositoryLabel": "Source repository",
+    "openCommunity": "Open community",
     "communityQrAlt": "User community QR code",
     "licensingTitle": "Open Source & Commercial Licensing",
     "licensingDescription": "MyAgents is licensed under AGPL-3.0-only. Individuals and companies may use it for free, including commercially. If you do not want to or cannot comply with applicable AGPL obligations, a separate commercial license is available for closed-source modification, embedding, OEM distribution, proprietary distribution, or hosting.",
@@ -2302,5 +2310,28 @@
     "timing": "Collaboration message timing",
     "timingHint": "Controls messages between agents and completion reports. Realtime delivers after the current model or tool step. The chat queue setting above controls user input.",
     "unavailable": "Model unavailable"
+  },
+  "modelFailover": {
+    "title": "Backup model",
+    "enable": "Enable automatic model failover",
+    "description": "Keep the conversation’s selected model as primary. If it remains unavailable after retries, use one backup to continue the current turn when safe. The next turn starts with the primary model.",
+    "backup": "Backup provider and model",
+    "none": "Select a backup model",
+    "unavailable": "Unavailable",
+    "chooseHint": "Select a backup model before enabling automatic failover.",
+    "unavailableHint": "The saved backup is unavailable. Choose an enabled API provider and model. Automatic failover cannot use this backup.",
+    "keyHint": "Add this provider’s API key in the provider settings before enabling automatic failover.",
+    "readyHint": "The backup is configured. Model compatibility is checked before each switch.",
+    "empty": "Configure and enable an API provider below to choose a backup.",
+    "details": "How switching works",
+    "scope": "Supports API models in the Claude Agent SDK runtime. DSH, subscription models and external CLI runtimes are not supported yet.",
+    "safety": "Completed work is preserved. If a response is interrupted after it has started reaching the agent, the turn stops with its progress preserved instead of automatically repeating actions.",
+    "compatibility": "The backup must support the conversation’s content and tools. If it is the same as the primary or is incompatible, no switch occurs. Authentication, billing and permission failures require attention.",
+    "saving": "Saving…",
+    "saveFailed": "Could not save. Your previous settings are unchanged. Try again."
+  },
+  "projectContext": {
+    "title": "Project context in new chats",
+    "description": "At first send, include bounded progress and decision excerpts from other desktop chats in this project, with sources. No extra model calls; adds limited input context. Turning this off affects future chats and does not erase context already sent."
   }
 }

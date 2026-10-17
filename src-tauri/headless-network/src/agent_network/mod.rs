@@ -1,4 +1,6 @@
 //! Original fixed-protocol crypto/identity/transport modules, new process owner.
+#[path = "../../../src/agent_network/community.rs"]
+pub(crate) mod community;
 #[path = "../../../src/agent_network/account.rs"]
 pub(crate) mod account;
 #[path = "../../../src/agent_network/account_operation.rs"]

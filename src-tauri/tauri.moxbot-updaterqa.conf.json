@@ -71,7 +71,8 @@
             "global-shortcut:allow-unregister",
             "global-shortcut:allow-is-registered"
           ]
-        }
+        },
+        "ui-zoom"
       ]
     }
   },
@@ -123,5 +124,5 @@
       "dangerousInsecureTransportProtocol": true
     }
   },
-  "version": "0.5.2"
+  "version": "0.5.8"
 }

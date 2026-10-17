@@ -1,3 +1,4 @@
+import { deriveSessionWorkProgress } from '../shared/sessionWorkProgress';
 import { bootstrapFromEnvironment as hostBotBootstrapFromEnvironment } from '../host/bot-session-bootstrap';
 import { APP_CLI_NAME, APP_DATA_DIR_NAME } from '../shared/appProfile';
 import { desktopContextOf } from '../shared/agentMentions';
@@ -27,6 +28,7 @@ import {
   type BackgroundAgentPermissionMode,
 } from './utils/background-agent-permission';
 import { registerBridge as registerBridgeInRegistry, unregisterBridge as unregisterBridgeInRegistry, type UpstreamBridgeConfig } from './openai-bridge/bridge-registry';
+import { createSessionModelFailover, sessionApiFailoverEligible } from './builtin-session/model-failover';
 import { getScriptDir } from './utils/runtime';
 import { getSidecarPort } from './session-core/sidecar-port';
 import { buildMcpStdioLaunchConfig } from './utils/mcp-command';
@@ -60,12 +62,14 @@ import { planRetraction } from './utils/message-retraction';
 import type { TransientProviderTextRetryDecision } from './session-core/turn-result-policy';
 import { diagnoseSdkSubprocessFailure } from './utils/sdk-subprocess-diagnostics';
 import { createGuardedSdkQuery } from './utils/sdk-child-launch-guard';
-import { isUpdaterQaBuild } from '../shared/updaterQa';
+import { isUpdaterQaBuild, isIsolatedQaBuild, isModelQaBuild } from '../shared/updaterQa';
 import { hostExecutionLimits } from './utils/host-execution-limits';
 import { assertManagedProviderPrepared, getPreparedModelPolicy, ManagedProxyError, prepareProviderBinding, type PreparedProvider } from './utils/managed-proxy-binding';
 import { InactivityWatchdog } from './utils/inactivity-watchdog';
 import {
   SESSION_PLANS_GITIGNORE_PATTERN,
+  MAX_PLAN_BYTES,
+  isSessionPlanFileTool,
   clearSessionPlanMarkdown,
   getSessionPlansDirectoryPath,
   getSessionPlansDirectorySetting,
@@ -298,6 +302,7 @@ import {
   getQueryMcpPrewarmOwner,
   hasQueryBackgroundTask,
   hasQueryBackgroundTasks,
+  readQueryBackgroundTasks,
   readQueryMcpStatuses,
   awaitSessionTermination as awaitBuiltinSessionTermination,
   clearAbortFlag,
@@ -1673,6 +1678,7 @@ export { getSidecarPort, setSidecarPort } from './session-core/sidecar-port';
 //     `configState.currentProviderEnv`
 
 let activeSessionBridgeToken: string | null = null;
+let activeSessionModelFailover: ReturnType<typeof createSessionModelFailover> | undefined;
 
 /**
  * Build the upstream config that the bridge handler will see for the
@@ -1698,6 +1704,10 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
     : undefined;
   return {
     providerId: activeProviderEnv?.providerId ?? SUBSCRIPTION_PROVIDER_ID,
+    apiProtocol: activeProviderEnv?.apiProtocol ?? 'anthropic',
+    authType: activeProviderEnv?.authType,
+    modelFailover: activeSessionModelFailover,
+    headersTimeoutMs: activeSessionModelFailover ? 30_000 : undefined,
     baseUrl: activeProviderEnv?.baseUrl ?? '',
     apiKey: managedCredential?.accessToken ?? activeProviderEnv?.apiKey ?? '',
     credentialVersion: managedCredential?.credentialVersion,
@@ -1762,13 +1772,17 @@ async function resolveActiveSessionUpstreamConfig(request?: Request): Promise<Up
  * subprocess that will see a (possibly different) URL.
  */
 function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): void {
-  if (configState.currentProviderEnv?.apiProtocol !== 'openai') {
+  const failoverEnabled = (loadAdminConfig().modelFailover as { enabled?: boolean } | undefined)?.enabled === true
+    && sessionApiFailoverEligible(configState.currentProviderEnv);
+  if (configState.currentProviderEnv?.apiProtocol !== 'openai'
+    && !failoverEnabled) {
     // Provider is not OpenAI-protocol — no bridge needed. If a stale token
     // is registered (e.g., from a previous OpenAI provider before a switch),
     // tear it down here so subsequent SDK launches don't route through it.
     if (activeSessionBridgeToken) {
       unregisterBridgeInRegistry(activeSessionBridgeToken);
       activeSessionBridgeToken = null;
+      activeSessionModelFailover = undefined;
     }
     return;
   }
@@ -1779,9 +1793,31 @@ function ensureActiveSessionBridgeRegistered(opts?: { freshToken?: boolean }): v
     // the cross-pollination class.
     unregisterBridgeInRegistry(activeSessionBridgeToken);
     activeSessionBridgeToken = null;
+    activeSessionModelFailover = undefined;
   }
   if (!activeSessionBridgeToken) {
     activeSessionBridgeToken = randomUUID();
+    const token = activeSessionBridgeToken;
+    if (failoverEnabled) {
+      activeSessionModelFailover = createSessionModelFailover({
+        isLive: () => activeSessionBridgeToken === token && !lifecycleState.abortRequested
+          && (sessionState === 'running' || sessionState === 'starting'),
+        canSwitch: () => !hasBuiltinBackgroundWork(),
+        current: () => ({ env: configState.currentProviderEnv, model: configState.currentModel ?? '',
+          turnId: getCurrentTurnSourceItem()?.id }),
+        onSwitch: (target, status) => {
+          const text = `主模型暂时不可用（HTTP ${status}），已切换备用模型 ${target.providerId} / ${target.model}，沿用当前进度继续执行。`;
+          const product = getBuiltinProductContent();
+          if (product) product.appendDiagnostic(text);
+          else {
+            const message = { id: `diagnostic-${randomUUID()}`, role: 'assistant' as const,
+              content: text, timestamp: new Date().toISOString(), messageKind: 'diagnostic' as const };
+            appendMessage(message);
+            broadcast('chat:message-replay', createLiveUserMessageReplay(sessionId, message));
+          }
+        },
+      });
+    }
   }
   registerBridgeInRegistry(
     activeSessionBridgeToken,
@@ -1799,6 +1835,7 @@ function unregisterActiveSessionBridge(): void {
   if (!activeSessionBridgeToken) return;
   unregisterBridgeInRegistry(activeSessionBridgeToken);
   activeSessionBridgeToken = null;
+  activeSessionModelFailover = undefined;
 }
 
 /** Returns true if the active session has a registered OpenAI bridge token. */
@@ -1985,6 +2022,12 @@ export function isSessionBusy(): boolean {
     || isStreamingMessage
     || hasQueuedOrInFlightWork()
     || queueState.promotedItemInFlight;
+}
+
+/** Observation only: background work can outlive its parent product turn.
+ * Keep this separate from the root admission/stop/auto-injection busy policy. */
+export function hasBuiltinBackgroundWork(): boolean {
+  return hasQueryBackgroundTasks(lifecycleState.query);
 }
 
 /**
@@ -3885,8 +3928,9 @@ export function forceReloadActiveSession(reason: RestartReason = 'mcp'): void {
 }
 
 function schedulePreWarm(delayMs = 500): void {
-  if (isUpdaterQaBuild()) return;
+  if (isIsolatedQaBuild()) return;
   if (lifecycleState.preWarmTimer) clearTimeout(lifecycleState.preWarmTimer);
+  if (isUpdateRestartFrozen()) { setPreWarmTimer(null); return; }
   if (!agentDir) return;
   if (lifecycleState.preWarmDisabled) return;
   // Only the SDK adapter owns this pre-warm. Integrated DSH also owns its
@@ -4681,7 +4725,7 @@ const pendingAskUserQuestions = new Map<string, {
 // `feedback` carries the user's optional 「修改意见」 — when present on a
 // rejection, canUseTool sends it back to the model via deny.message so the
 // AI can revise the plan in the same turn (issue #182).
-type ExitPlanModeResolution = { approved: boolean; feedback?: string };
+type ExitPlanModeResolution = { approved: boolean; feedback?: string; error?: string };
 const pendingExitPlanMode = new Map<string, {
   resolve: (result: ExitPlanModeResolution) => void;
   plan?: string;
@@ -4847,7 +4891,7 @@ async function handleExitPlanMode(
   console.log('[ExitPlanMode] Requesting user approval');
 
   const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const explicitPlan = typeof obj.plan === 'string' ? obj.plan : undefined;
+  const explicitPlan = typeof obj.plan === 'string' && obj.plan.trim() ? obj.plan : undefined;
   const allowedPrompts = Array.isArray(obj.allowedPrompts)
     ? (obj.allowedPrompts as ExitPlanModeAllowedPrompt[])
     : undefined;
@@ -4866,6 +4910,9 @@ async function handleExitPlanMode(
         getSessionPlansDirectoryPath(agentDir, sessionId),
         { minMtimeMs: turnState.currentPlanFileMinMtimeMs ?? turnState.currentTurnStartTime ?? undefined, expectedRoot: agentDir, signal },
       );
+      if (latest?.truncated) {
+        return { approved: false, error: `方案超过 ${MAX_PLAN_BYTES} bytes，无法完整展示。请精简当前会话的方案文件后再次调用 ExitPlanMode；尚未请求用户审批。` };
+      }
       if (latest) {
         plan = latest.content;
         console.log(`[ExitPlanMode] Loaded plan from ${latest.path}${latest.truncated ? ' (truncated)' : ''}`);
@@ -4879,6 +4926,11 @@ async function handleExitPlanMode(
 
   if (signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError');
+  }
+
+  if (!plan?.trim() || Buffer.byteLength(plan, 'utf8') > MAX_PLAN_BYTES) {
+    const plansDir = agentDir ? getSessionPlansDirectoryPath(agentDir, sessionId) : '当前会话专用方案目录';
+    return { approved: false, error: `无法提交方案审核：没有可完整展示的方案正文。请先用 Write/Edit 将完整方案保存到规划提示中指定的方案文件（位于 ${plansDir}，沿用 SDK 指定文件名），再调用 ExitPlanMode。不要修改项目 .agent-sync/plan.md；尚未请求用户审批，也没有获得执行授权。` };
   }
 
   // No wall-clock timeout — see pendingExitPlanMode Map declaration.
@@ -4923,6 +4975,7 @@ export function handleExitPlanModeResponse(
     console.warn(`[ExitPlanMode] Unknown request: ${requestId}`);
     return false;
   }
+  if (approved && !pending.plan?.trim()) return false;
   pendingExitPlanMode.delete(requestId);
   // Restore configState.currentPermissionMode so the hard gate + applySessionConfig stop
   // treating the session as plan. Runs on ANY approval (no longer gated on
@@ -6428,7 +6481,8 @@ export function buildClaudeSessionEnv(
   // unique token in `bridge-registry`; the URL path lets the route
   // handler look up that subprocess's specific upstream without any
   // shared global state. No more `currentOpenAiBridgeConfig` mutation.
-  if (effectiveProviderEnv?.apiProtocol === 'openai' && sidecarPort > 0) {
+  if (effectiveProviderEnv && (effectiveProviderEnv.apiProtocol === 'openai'
+    || (opts?.bridgeToken && sessionApiFailoverEligible(effectiveProviderEnv))) && sidecarPort > 0) {
     const bridgeToken = opts?.bridgeToken;
     if (!bridgeToken) {
       // This is a programming error: caller built env for an OpenAI-protocol
@@ -6448,6 +6502,11 @@ export function buildClaudeSessionEnv(
       ? 'myagents-managed-oauth'
       : (effectiveProviderEnv.apiKey ?? '');
     delete env.ANTHROPIC_AUTH_TOKEN;
+    if (opts?.bridgeToken === activeSessionBridgeToken && activeSessionModelFailover) {
+      // The bridge owns the bounded retry budget. Native retries must not
+      // silently start another chain after partial output or exhaustion.
+      env.CLAUDE_CODE_MAX_RETRIES = '0';
+    }
     // CRITICAL: Strip proxy env vars from subprocess environment.
     // The Claude Code CLI's MA6() unconditionally sets fetchOptions.proxy for the Anthropic
     // SDK client when any proxy env var is present, WITHOUT checking no_proxy. This causes
@@ -6747,7 +6806,7 @@ function ensureAssistantMessage(): MessageWire {
     return product.assistant(product.currentAssistantId ?? allocateMessageId()) as unknown as MessageWire;
   }
   const lastMessage = transcriptState.messages[transcriptState.messages.length - 1];
-  if (lastMessage && lastMessage.role === 'assistant' && isStreamingMessage) {
+  if (lastMessage && lastMessage.role === 'assistant' && lastMessage.messageKind !== 'diagnostic' && isStreamingMessage) {
     return lastMessage;
   }
   // (v0.2.11 cross-bugfix) The previous `flushPendingMidTurnQueue()` call here
@@ -7246,6 +7305,7 @@ function handleToolResultComplete(toolUseId: string, content: string, isError?: 
 }
 
 const builtinTurnLifecycle = createBuiltinTurnLifecycle({
+  endModelFailoverTurn: () => activeSessionModelFailover?.endTurn(),
   getSessionId: () => sessionId,
   getWorkspacePath: () => agentDir,
   getCurrentScenario: () => currentScenario,
@@ -7719,6 +7779,11 @@ export function getAgentState(): {
   return { agentDir, sessionState, hasInitialPrompt };
 }
 
+export function getBuiltinWorkProgressSnapshot() {
+  return deriveSessionWorkProgress(getBuiltinMessages(), { live: true,
+    activeBackground: readQueryBackgroundTasks(lifecycleState.query) });
+}
+
 export function getBuiltinExecutionStartedAt(): string | undefined {
   return getBuiltinProductContent()?.executionStartedAt;
 }
@@ -8152,7 +8217,7 @@ export async function initializeAgent(
   initialSessionId?: string,
   options?: { preWarmDisabled?: boolean },
 ): Promise<void> {
-  if (options?.preWarmDisabled) {
+  if (isModelQaBuild() || options?.preWarmDisabled) {
     setPreWarmDisabled(true);
     console.log('[agent] pre-warm disabled via --no-pre-warm');
   }
@@ -8190,7 +8255,7 @@ export async function initializeAgent(
     // sdkSessionId is missing, only recover the rare crash-before-metadata-update
     // case when the SDK transcript probe finds real persisted transcriptState.messages.
     const meta = initMeta;
-    if (meta && !isUpdaterQaBuild()) {
+    if (meta && !isIsolatedQaBuild()) {
       const currentRuntimeType = getCurrentRuntimeType();
       const resumeDecision = await decideBuiltinSessionResume({
         meta,
@@ -9218,6 +9283,11 @@ export async function enqueueUserMessage(
   );
   const nextModel = model ?? configState.currentModel;
   const modelChanged = !isSessionBusy && model !== undefined && model !== configState.currentModel;
+  // Apply a global opt-in change only at this existing idle configuration
+  // boundary. A pre-warmed Anthropic Query has its endpoint baked into env.
+  const failoverBridgeChanged = !isSessionBusy && !hasBuiltinBackgroundWork()
+    && ((loadAdminConfig().modelFailover as { enabled?: boolean } | undefined)?.enabled === true
+      && sessionApiFailoverEligible(effectiveProviderEnv)) !== !!activeSessionModelFailover;
   const crossesProviderHistoryBoundary = !isSessionBusy
     && (providerChanged || modelChanged)
     && !canResumeAcrossBuiltinProviderHistory({
@@ -9227,7 +9297,7 @@ export async function enqueueUserMessage(
       nextModel,
     });
 
-  if ((providerChanged || crossesProviderHistoryBoundary) && lifecycleState.query) {
+  if ((providerChanged || crossesProviderHistoryBoundary || failoverBridgeChanged) && lifecycleState.query) {
     const fromLabel = configState.currentProviderEnv?.baseUrl ?? 'anthropic';
     const toLabel = effectiveProviderEnv?.baseUrl ?? 'anthropic';
     if (isDebugMode) console.log(`[agent] provider/history changed from ${fromLabel} to ${toLabel}, restarting session`);
@@ -10035,6 +10105,45 @@ function settleCancelledInputActivity(): boolean {
     || getCommittingTurnAdmissionQueueId() !== null || transientProviderRetryTimer) return false;
   if (sessionState === 'running' || sessionState === 'starting') setSessionState('idle');
   return true;
+}
+
+/** Explicit app restart owns the whole local Query, including idle background
+ * work and delayed warm-up. Stop-button semantics only own the current turn. */
+export async function stopBuiltinSessionForUpdate(assertCurrent: () => void = () => undefined): Promise<void> {
+  assertCurrent();
+  if (lifecycleState.preWarmTimer) {
+    clearTimeout(lifecycleState.preWarmTimer);
+    setPreWarmTimer(null);
+  }
+  if (lifecycleState.query || lifecycleState.processing || lifecycleState.preWarming || isSessionBusy()) {
+    abortPersistentSession();
+    drainQueueWithCancellation();
+  }
+  drainPendingInteractiveRequests('session-end');
+  const termination = lifecycleState.termination;
+  if (termination) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        termination,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('UPDATE_ACTIVITY_UNKNOWN')), 10_000);
+        }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  // Await domain reservation rollback too; never pretend an unconfirmed Query
+  // terminated by clearing its flags at a timeout.
+  assertCurrent();
+  await awaitBuiltinSessionTermination();
+  assertCurrent();
+  if (lifecycleState.query || lifecycleState.processing || lifecycleState.preWarming) {
+    throw new Error('UPDATE_ACTIVITY_UNKNOWN');
+  }
+  isStreamingMessage = false;
+  setSessionState('idle');
+  if (transcriptState.messages.length > 0) await persistMessagesToStorage();
+  assertCurrent();
 }
 
 export async function interruptCurrentResponse(reason: CancelReason = 'user'): Promise<boolean> {
@@ -11749,6 +11858,9 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         if (toolName === 'ExitPlanMode') {
           console.log('[canUseTool] ExitPlanMode detected, requesting user approval');
           const result = await handleExitPlanMode(input, options.signal, !options.agentID);
+          if (result.error) {
+            return { behavior: 'deny' as const, message: result.error, interrupt: false };
+          }
           if (!result.approved) {
             const hasFeedback = !!result.feedback;
             // Cap feedback length before splicing into the wrapper.
@@ -11801,6 +11913,11 @@ async function startStreamingSession(preWarm = false): Promise<void> {
             behavior: 'allow' as const,
             updatedInput: input as Record<string, unknown>
           };
+        }
+
+        if (configState.currentPermissionMode === 'plan'
+          && await isSessionPlanFileTool(toolName, input, agentDir, sessionId)) {
+          return { behavior: 'allow' as const, updatedInput: input as Record<string, unknown> };
         }
 
         const decision = await checkToolPermission(
@@ -11861,12 +11978,15 @@ async function startStreamingSession(preWarm = false): Promise<void> {
               if (!shouldBlockToolInPlanMode(pre.tool_name, effectiveMode)) {
                 return {}; // not plan mode, or a read-only / control-transfer tool → normal flow
               }
+              if (await isSessionPlanFileTool(pre.tool_name, pre.tool_input, agentDir, sessionId)) {
+                return {}; // SDK's normal plan-file permission check still runs.
+              }
               console.log(`[permission] plan-mode hard gate denied: ${pre.tool_name} (local=${configState.currentPermissionMode}, hook=${pre.permission_mode ?? 'n/a'})`);
               return {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse' as const,
                   permissionDecision: 'deny' as const,
-                  permissionDecisionReason: planModeDenyMessage(pre.tool_name),
+                  permissionDecisionReason: planModeDenyMessage(pre.tool_name, agentDir ? getSessionPlansDirectoryPath(agentDir, sessionId) : undefined),
                 },
               };
             },
@@ -12580,6 +12700,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           const recorded = recordQueryBackgroundTask(activeQuery, taskMsg.task_id, {
             toolUseId: taskMsg.tool_use_id,
             description: taskMsg.description,
+            startedAt: Date.now(),
+            agentType: taskMsg.task_type,
             runId: taskMsg.run_id,
           });
           if (recorded) {

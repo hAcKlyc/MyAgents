@@ -243,7 +243,7 @@ export function unwrapSdkResult(result: string): string {
     }
 
     // Read format: {"type":"text","file":{"filePath":"...","content":"..."}}
-    if (parsed.type === 'text' && parsed.file?.content && typeof parsed.file.content === 'string') {
+    if (parsed.type === 'text' && typeof parsed.file?.content === 'string') {
       return parsed.file.content;
     }
 

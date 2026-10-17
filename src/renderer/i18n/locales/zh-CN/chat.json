@@ -130,7 +130,7 @@
       "empty": "暂无内容",
       "failed": "暂时无法加载",
       "unavailable": "当前场景不可用",
-        "networkPartial": "网络 Agent 列表尚未完整加载",
+      "networkPartial": "网络 Agent 列表尚未完整加载",
       "partial": "仅展示部分结果，请缩小搜索范围"
     },
     "permissionModes": {
@@ -623,6 +623,8 @@
       "cancelFailed": "取消失败，请重试；也可以用输入框的停止按钮结束本轮。"
     },
     "planPrompt": {
+      "missingPlanSubtitle": "方案正文缺失，请先要求 AI 补充",
+      "missingPlan": "方案正文未能加载，暂时无法批准。请在下方要求 AI 补充完整方案后重新提交，或拒绝本次审核。",
       "submitFeedback": "提交修改意见",
       "rejectPlan": "拒绝方案",
       "title": "方案审核",
@@ -1240,9 +1242,20 @@
     "taskOffered": "开放给",
     "taskBlockedBy": "依赖",
     "interruptTurn": "中断当前轮次",
-    "nativeModes": { "one-shot": "一次性委派", "continuable": "可延续 Agent" },
-    "nativeStates": { "running": "执行中", "inactive": "未运行" },
-    "taskStates": { "pending": "待办", "in_progress": "进行中", "completed": "已完成", "cancelled": "已取消" },
+    "nativeModes": {
+      "one-shot": "一次性委派",
+      "continuable": "可延续 Agent"
+    },
+    "nativeStates": {
+      "running": "执行中",
+      "inactive": "未运行"
+    },
+    "taskStates": {
+      "pending": "待办",
+      "in_progress": "进行中",
+      "completed": "已完成",
+      "cancelled": "已取消"
+    },
     "title": "Agent 任务树",
     "close": "关闭",
     "unknown": "未知",
@@ -1295,5 +1308,128 @@
     "unavailable": "这次讨论没有保存可恢复的原文。请检查原始 Record 或已经保存的会话内容。",
     "resend": "确认重新发送",
     "resendConfirm": "发送响应丢失，正文可能已被接纳。请先检查会话历史和队列，重新发送可能产生重复消息。"
+  },
+  "process": {
+    "resultFor": "最近结果对应：{{action}}",
+    "thinkingRecord": "思考记录",
+    "exitCode": "退出码 {{code}}",
+    "phase": {
+      "plan": "计划与任务安排",
+      "explore": "读取与检索",
+      "change": "文件修改",
+      "verify": "测试与检查",
+      "execute": "命令与工具执行",
+      "delegate": "协作执行",
+      "think": "分析与思考"
+    },
+    "status": {
+      "running": "执行中",
+      "succeeded": "已返回结果",
+      "failed": "执行失败",
+      "stopped": "已中断",
+      "unknown": "结果未确认"
+    },
+    "summary": {
+      "tools": "{{count}} 次工具调用",
+      "records": "{{count}} 项思考记录",
+      "succeeded": "{{count}} 项已返回",
+      "running": "{{count}} 项执行中",
+      "failed": "{{count}} 项失败",
+      "stopped": "{{count}} 项中断",
+      "unknown": "{{count}} 项未确认"
+    },
+    "latest": "最近动作：{{action}}",
+    "showDetails": "展开执行详情（{{count}}）",
+    "hideDetails": "收起执行详情（{{count}}）",
+    "action": {
+      "Read": "读取 {{target}}",
+      "Write": "写入 {{target}}",
+      "Edit": "修改 {{target}}",
+      "MultiEdit": "修改 {{target}}",
+      "Grep": "搜索 {{target}}",
+      "Glob": "查找 {{target}}",
+      "WebSearch": "搜索 {{target}}",
+      "command": "执行命令"
+    },
+    "heading": {
+      "plan": "任务进度",
+      "explore": "资料结果",
+      "change": "变更结果",
+      "verify": "检查结果",
+      "execute": "执行结果",
+      "delegate": "协作进度",
+      "think": "分析进度"
+    },
+    "work": {
+      "plan": "正在整理任务与进度",
+      "explore": "正在查看相关资料",
+      "change": "正在更新文件",
+      "verify": "正在检查修改结果",
+      "execute": "正在处理任务",
+      "delegate": "正在协作处理任务",
+      "think": "正在分析问题"
+    },
+    "result": {
+      "readFile": "已读取 {{target}}",
+      "unknown": "尚无可确认结果",
+      "stopped": "本项已中断",
+      "failed": "本项未完成，请查看结果",
+      "file": "已更新 {{target}}",
+      "files": "已更新 {{count}} 个文件",
+      "think": "分析已结束",
+      "foundFiles": "找到 {{count}} 个文件",
+      "matches": "返回 {{count}} 条匹配行",
+      "verify": "本项检查已返回",
+      "execute": "本项执行已返回",
+      "explore": "相关资料已返回",
+      "plan": "任务进度已返回",
+      "delegate": "协作结果已返回",
+      "needsAttention": "部分结果需要处理",
+      "returned": "已返回 {{count}} 项结果",
+      "progress": "成功返回 {{completed}}/{{total}}",
+      "updates": "{{count}} 次更新",
+      "updateNumber": "第 {{count}} 次更新结果",
+      "awaiting": "正在等待结果",
+      "files_one": "已更新 {{count}} 个文件",
+      "files_other": "已更新 {{count}} 个文件",
+      "updates_one": "{{count}} 次更新",
+      "updates_other": "{{count}} 次更新",
+      "foundFiles_one": "找到 {{count}} 个文件",
+      "foundFiles_other": "找到 {{count}} 个文件",
+      "matches_one": "返回 {{count}} 条匹配行",
+      "matches_other": "返回 {{count}} 条匹配行"
+    },
+    "showResults": "展开结果与时间（{{count}}）",
+    "hideResults": "收起结果与时间（{{count}}）",
+    "timing": {
+      "start": "开始",
+      "unrecorded": "时间未记录",
+      "elapsed": "已等待 {{time}}",
+      "duration": "执行耗时 {{time}}",
+      "activity": "最近事件 {{time}}",
+      "sinceActivity": "{{time}} 未见新事件",
+      "observed": "后端事件观测时间，非 API 延迟；计时不代表服务健康",
+      "runtime": "运行时生命周期时间；工具执行耗时仅取运行时报告值，非 API 延迟",
+      "finish": "结束",
+      "observedStart": "观测开始",
+      "observedSpan": "观测跨度 {{time}}",
+      "groupStart": "整段开始",
+      "groupSpan": "整段跨度 {{time}}",
+      "spanUnrecorded": "整段跨度未记录",
+      "durationUnrecorded": "执行耗时未记录"
+    },
+    "quality": {
+      "label": "质量参考",
+      "attention": "有待确认项",
+      "checks": "检查结果",
+      "checkCounts": "{{returned}} 项成功返回 · {{failed}} 项失败",
+      "execution": "执行信号",
+      "executionCounts": "{{failed}} 项失败 · {{stopped}} 项中断 · {{unknown}} 项未确认",
+      "tokens": "输入 {{input}} · 输出 {{output}}",
+      "model": "模型",
+      "content": "内容质量",
+      "notAssessed": "未评估",
+      "scope": "检查返回仅反映当前执行结果；内容质量与业务验收需另行确认。"
+    }
   }
 }

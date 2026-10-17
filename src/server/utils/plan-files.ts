@@ -1,10 +1,10 @@
 import { constants as fsConstants } from 'fs';
 import { lstat, open, readdir, realpath, unlink, type FileHandle } from 'fs/promises';
-import { join, relative } from 'path';
+import { basename, dirname, join, relative, resolve } from 'path';
 
 const SESSION_PLANS_SEGMENTS = ['.claude', 'plans', 'myagents'] as const;
 export const SESSION_PLANS_GITIGNORE_PATTERN = `${SESSION_PLANS_SEGMENTS.join('/')}/`;
-const MAX_PLAN_BYTES = 128 * 1024;
+export const MAX_PLAN_BYTES = 128 * 1024;
 const OPEN_READ_NOFOLLOW = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
 
 export function sanitizePlanSessionSegment(sessionId: string): string {
@@ -17,6 +17,45 @@ export function getSessionPlansDirectorySetting(sessionId: string): string {
 
 export function getSessionPlansDirectoryPath(agentDir: string, sessionId: string): string {
   return join(agentDir, ...SESSION_PLANS_SEGMENTS, sanitizePlanSessionSegment(sessionId));
+}
+
+/** Only the current Product Session's direct Markdown files are writable in plan mode.
+ * Check each existing component rather than following symlinks; a plan exception
+ * must never grant writes to project source, another session, or a linked file.
+ */
+export async function isSessionPlanFileTool(
+  toolName: string,
+  input: unknown,
+  agentDir: string | null,
+  sessionId: string,
+): Promise<boolean> {
+  if (!agentDir || (toolName !== 'Write' && toolName !== 'Edit')) return false;
+  const obj = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  if (typeof obj.file_path !== 'string' || !obj.file_path || obj.file_path.includes('\0')) return false;
+  const root = resolve(agentDir);
+  const target = resolve(root, obj.file_path);
+  const plansDir = getSessionPlansDirectoryPath(root, sessionId);
+  if (dirname(target) !== plansDir || !basename(target).toLowerCase().endsWith('.md')) return false;
+  const segments = [...SESSION_PLANS_SEGMENTS, sanitizePlanSessionSegment(sessionId), basename(target)];
+  let current = root;
+  try {
+    for (let i = 0; i < segments.length; i += 1) {
+      current = join(current, segments[i]);
+      let stat;
+      try { stat = await lstat(current); }
+      catch (error) {
+        // Write creates missing parents; no existing links can redirect this path.
+        if ((error as { code?: string }).code === 'ENOENT') return true;
+        return false;
+      }
+      if (stat.isSymbolicLink()) return false;
+      if (i === segments.length - 1) return stat.isFile() && stat.nlink === 1;
+      if (!stat.isDirectory()) return false;
+    }
+  } catch {
+    return false; // permission/IO errors must not widen the exception
+  }
+  return false;
 }
 
 export type LatestPlanReadResult = {

@@ -315,3 +315,45 @@ API Key云端加密write-only；Host只能持有限Bot/Session bearer。已有�
 覆盖上方开发阶段状态：PR38 已合入 main，源码/主干七项 CI 全成功；模型中心、builtin/API 分配与调用监控已发布既有云 `/admin`。实际发布整树、二进制/网页 hash、备份与管理员真实路径见 `dev-docs/bots-model-center-production-acceptance.md`。测试 supplier/model 已停用、Bot 软删除，无供应商调用，101 Host/桌面及本地 cloud_models 未变。
 
 用户最终明确“复用功能，后面自己配置”，不再请求配置文件；供应商及密钥由用户后续在模型中心填写。真实 Bot 推理还需实际 Host 的限定接入和联合升级，不能用已保存的 model_ref 表示 Host 已应用。当前任务的实现/管理发布关闭，后续供应商计量路径另验收。通用旧失效 actor 队列公平性 BOTS-EXEC-QUEUE-FAIRNESS-002 仍在 TODO，未扩大本次修复声明。
+
+## 2026-10-15：MOXBOTS-055-RELEASE-FREEZE / 056-CONTINUATION
+
+用户最新明确要求先发布055服务器更新、以后改动进056。055正式源码固定main52bf61602522fb28715edf620d98ad8e3deee842，精确六CI及App/TAR/ZIP/DMG签名、公证、票据、Gatekeeper和ownsig验证通过；055不可变归档全传且服务端SHA一致。公网全量GET/原子stable和客户端实际安装仍单独追踪，不中断busy任务。冻结后字体缩放PR59/main5ebf属于056；下一开发版本元数据同步056，不重发055。权威接续文件见dev-docs/releases/moxbots-0.5.5.md和moxbots-0.5.6-handoff.md，以及.agent-sync/tasks/codex-release-055-handoff-056-20261015-5ebf2979.md。保留真实Host/精确IME/有数据原生UI等未完成边界和已有QA失败记录。
+
+## 2026-10-15 16:39：055正式更新已发布，056继续开发
+
+MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS/完整GET/实际stat+SHA/签名独审/CAS/公开路由/054回滚核验；源main52bf6160及远端tag v0.5.5不可变。055整包平均119030B/s、全GET约47分钟，不证明云带宽上限。本机054未安装或重启：HRM16:26仍busy，须fresh完整代次准入、有效一致备份及用户确认。未把Host/IME/带数据原生UI算通过；测试network服务ACCOUNT_SESSION_EXPIRED失败明确留056。
+
+开发主干已056（版本PR61/main6d1f8912），包含之后的PR59缩放/PR60 Goal/PR62输出/PR63 Bots Ready；均不回写055。源码交付/验收边界见dev-docs/releases/moxbots-0.5.5.md、moxbots-0.5.6-handoff.md，私有制品与README/DELIVERY/SHA256SUMS在指针output/updater-055-20261015/final-52bf6160。官网下载手动ZIP由原官网owner在其新增授权下串行发布，Root不操作该asset或日常客户端。
+
+## 2026-10-16：056正式更新已发布（服务器范围）
+
+固定源码maina81d2509fa92968ddaaed63416a2478d21b8a373/tag v0.5.6，own updater stable056及不可变TAR 685134d0a5129cf7d150b20c86e73736db4142ae150376eb8edeea077a6c8549/336158365B已正式签名、公证、独立验包和真实完整GET/stat+SHA/签名独审，通过同锁055回滚前置/CAS/备份/fsync/公开接口复验后发布，自有锁释放。详见dev-docs/releases/moxbots-0.5.6.md及evidence JSON；制品位于项目指针output/updater-056-20261016/final-a81d2509/。055保留且不可变，不自动降级。
+
+本任务没有退出、停止、安装或重启日常客户端。发布前只读观察它已是正式055；旧054/PID记录为历史，安装事务与完整活动/generation无本轮证明。真实Host、薪资/有数据原生、精确IME及签名包下有任务/录音/草稿保存恢复另验，不因分发通过而关闭。后续Project Context按来源聊天接续排入0.5.7；禁止后来main静默加入或同版本替换056。
+
+
+## 2026-10-16 · MOXBOTS-HOST-101-20261016
+
+用户直接要求101.42.11.29安装Host并入网；实查已装83e48946而登录过期，复用原身份/账号/配置进行恢复。正式PKCE→auth-wait→明确同principal renew-management→run，原Host cc8fc885-529b-43e9-8a58-ee7c5f2a4c58已ready；受控connector重启保留并自动恢复，Node/connector enabled，实际云metadata joined/ready与epoch一致，原key/config/unit hash一致。独立网络聊天只读复核140连接和IPC ESTAB，不并发写入。证据`dev-docs/host101-network-recovery-20261016.md`，私有备份/root/moxbot-host101-recovery-20261016T141329；PR85仅记录，不改源码/现有模型执行权限、旧myagents服务、140配置或日常Mac。实际native Bots Ready未操作，不能以metadata读取冒称UI验收。
+
+现行云session24h，本次到期2026-10-17 14:14:14北京时间；未来自动续期未实现，勿称无人值守持续在线。安装/入网当前通过，真实模型和自动续期不在本任务。恢复窗口已结束，后续需重新核对目标状态与权限。
+
+
+## 2026-10-16 14:57：0.5.7 已发布到 own updater（服务器验收）
+
+MOXBOTS-057-NETWORK-RELEASE-20261016 固定源码ee055458af8823a611503450424ecadd30be0f4e，PR83/main40f7de8f接受且完整tree相同，远端v0.5.7已核验指向冻结源。完整native/Developer ID/Apple Accepted/staple/Gatekeeper、正式TAR/ZIP完整回解、自有updater签名和独立实际验包通过。本机打包后直传140.143.183.232，GitHub只源码/CI/记录。不可变TAR336184128B/SHA b48604872eb967e3419aef0a8da1a33101603fa5883b08c4aadb0a0fe21c6c82，stable057实际正常TLS返回，公钥连续；056全量可验签回滚保留。单次外部Linux101完整公网GET47分23.67秒/118221Bps，原始stat/hash/17证据及实际远端同文件经独审；同锁CAS/fsync/精确旧stable备份/公开Range206/隐藏404/unsupported204/网站未变/独立复验通过，owned lock释放。
+
+权威记录dev-docs/releases/moxbots-0.5.7.md与moxbots-0.5.7-evidence.json；私有制品在项目指针output/updater-057-20261016/final-ee055458/，接续work/release-057-20261016/owner/CONTINUE.md，当前原始证据round2-ee055458。旧aea候选有最小窗口缺陷，已保留不可发行；ee布局修正独立实际组件9项复验通过，但非原生/真实账号证明。PR84及后来源码不自动纳入冻结包。
+
+未安装/启动/退出/重启客户端，未打断任务。启用和真实新账号session/独立identity登记/membership/relay/目录/既有scope调用/同账号恢复仍待手动解锁、fresh完整活动owner空闲与兼容配置/实际应用备份；PB004等原生验收不关闭，其他Host聊天的实际服务验收仍按其独立记录。回退禁止旧业务库恢复，须保留当前业务数据及新旧身份/凭据槽。
+
+下载源与云后台已在同一140服务器，搬目录不能增带宽。Nginx无rate限制、负载低，两条公网路径均慢且有明显TCP重传；源站出口或链路问题待确认，未证实云套餐限额，未改网络/付费服务。
+
+## MOXBOTS-058 发行接续 · 2026-10-17
+
+唯一发布owner01a12bc2-907a-7702-b6dd-788225c5dfe4，冻结source12449。正式签名公证与独立验包、同源隔离原生更新和真实社区持久化/退出隔离均完成，候选聚合独审PASS。058归档已stage但stable仍057，完整公网下载验签及独审正在进行；未安装日常客户端，不中断任务。正式binary/Reader没有运行、QA导航浮层不证明正式外观、IME/ASR/真实Host模型边界保留。交付与下一步见dev-docs/releases/moxbots-0.5.8.md和.agent-sync/tasks/codex-release-058-delivery-record-20261017-a7176263.md；后来main成果不自动混入058。
+
+### 2026-10-17 最终更新分发
+
+冻结source/tagv0.5.8=12449。完整外部GET336365173B SHA155e6a68、正常TLS/stat-hash-stat/17原件独审与Mac自有签名通过；stable058于03:18Z公开核验SHA51eb69bf；发布后独审012f22b2后同任务finish释放锁，旧057完整归档与回滚保留。日常057客户端未安装/退出/重启；正式binary/Reader、IME/ASR/真实Host模型等边界仍保留。最终记录按当前分支正常PR/CI/main交付，详细非秘密证据摘要见dev-docs/releases/moxbots-0.5.8.md。不能重复start/collect/promote或覆盖同版。

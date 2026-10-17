@@ -1,3 +1,4 @@
+import { modelQaRequest } from './modelqa/routes';
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
 import type { AskUserQuestionAnswers } from '../shared/types/askUserQuestion';
 import {
@@ -1460,6 +1461,10 @@ async function routeAdminApi(
   // Strip the prefix for matching
   const route = pathname.replace('/api/admin/', '');
   const sourceKind = caller.kind === 'external-cli' ? 'external-cli' : 'internal-session';
+  if (route.startsWith('network/')) {
+    const { handleNetworkCli } = await import('./network-cli');
+    return handleNetworkCli(route.slice('network/'.length), payload, signal);
+  }
   if (['agent/show', 'session/list', 'session/get', 'session/start', 'session/send', 'session/watch', 'session/state'].includes(route)) {
     const { routeNetworkRequest } = await import('./agent-network/source');
     const networkResult = await routeNetworkRequest(route, payload, sourceKind, signal);
@@ -2082,7 +2087,11 @@ async function routeAdminApi(
       const { readSessionActivity } = await import('./session-observation');
       if (typeof payload.sessionId !== 'string' || !payload.sessionId) return { success: false, code: 'ARGUMENT_INVALID', error: 'sessionId required' };
       return { success: true, session: await readSessionActivity(payload.sessionId) };
-    } catch { return { success: false, code: 'SESSION_STATE_UNAVAILABLE', error: 'Session state could not be read; retry the query.' }; }
+    } catch (error) {
+      const failed = error instanceof Error && error.message === 'SESSION_EXECUTION_FAILED';
+      return { success: false, code: failed ? 'SESSION_EXECUTION_FAILED' : 'SESSION_STATE_UNAVAILABLE',
+        error: failed ? 'Session execution failed; inspect the original conversation.' : 'Session state could not be read; retry the query.' };
+    }
   }
   if (route === 'session/watches' || route === 'session/unwatch') {
     if (caller.kind === 'external-cli') return { success: false, code: 'EXTERNAL_CLI_CAPABILITY_NOT_OPEN', error: 'A real caller Session is required.' };
@@ -2453,6 +2462,10 @@ async function main() {
             : undefined;
           return {
             providerId: cfg.providerId,
+            apiProtocol: cfg.apiProtocol,
+            authType: cfg.authType,
+            headersTimeoutMs: cfg.headersTimeoutMs,
+            modelFailover: cfg.modelFailover,
             baseUrl: cfg.baseUrl,
             apiKey: cfg.apiKey,
             credentialVersion: cfg.credentialVersion,
@@ -2589,6 +2602,8 @@ async function main() {
     {
       const url = new URL(request.url);
       const pathname = url.pathname;
+      const modelQaResponse = await modelQaRequest(request);
+      if (modelQaResponse) return modelQaResponse;
 
       // Polling/config reads only surface state changes or failures at their
       // semantic owner; a successful request line has no diagnostic value.
@@ -2655,6 +2670,7 @@ async function main() {
           }
           const lifecycle = await import('./session-engine/selector');
           if (input.action === 'freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token);
+          else if (input.action === 'interrupt-and-freeze') await lifecycle.freezeSessionAdmissionsForUpdate(input.token, true);
           else if (input.action === 'release') lifecycle.releaseSessionAdmissionsForUpdate(input.token);
           else return jsonResponse({ success: false, error: 'UPDATE_ACTIVITY_UNKNOWN' }, 400);
           return jsonResponse({ success: true });

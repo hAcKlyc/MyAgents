@@ -2,6 +2,7 @@ import { isProjectActiveForUser } from '@/config/types';
 import WorkspaceSelector, { resolveDefaultWorkspaceProject } from '@/components/launcher/WorkspaceSelector';
 import AgentFunctionSettings from './sections/AgentFunctionSettings';
 import { DshCollaborationSettings } from './DshCollaborationSettings';
+import { ModelFailoverSettings } from './ModelFailoverSettings';
 import { getPlatformHiddenProviderIds, isLinuxDesktop } from '@/utils/desktopPlatform';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import {
@@ -35,7 +36,8 @@ import React, {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MyAgentsLogotype } from '@/components/brand/MyAgentsLogotype';
-import { APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
+import { openOwnedCloudPage } from '@/utils/ownedCloud';
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME, APP_WEBSITE_URL } from '../../../shared/appProfile';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -383,6 +385,7 @@ export default function Settings({
   const resolvedTheme = useResolvedTheme();
   const { t: tSettings } = useTranslation('settings');
   const { t: tCommon } = useTranslation('common');
+  const { t: tApp } = useTranslation('app');
   // Stabilize toast reference to avoid unnecessary effect re-runs
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -855,7 +858,7 @@ export default function Settings({
   const sourceRevision = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(
     appVersion,
   )
-    ? `v${appVersion}`
+    && APP_BUILD_PROFILE !== 'moxbot' ? `v${appVersion}`
     : 'main';
   const sourceLicenseUrl = `${MYAGENTS_GITHUB_URL}/blob/${sourceRevision}/LICENSE`;
   const sourceNoticesUrl = `${MYAGENTS_GITHUB_URL}/blob/${sourceRevision}/THIRD_PARTY_NOTICES.md`;
@@ -880,7 +883,7 @@ export default function Settings({
 
   // Load QR code when entering about section
   useEffect(() => {
-    if (activeSection !== 'about') return;
+    if (activeSection !== 'about' || APP_BUILD_PROFILE === 'moxbot') return;
 
     let cancelled = false;
     setQrCodeLoading(true);
@@ -5060,6 +5063,15 @@ export default function Settings({
               {tSettings('providers.description')}
             </p>
 
+            <div className="mb-6">
+              <ModelFailoverSettings
+                value={config.modelFailover}
+                providers={providers}
+                apiKeys={apiKeys}
+                updateConfig={updateConfig}
+              />
+            </div>
+
             {/* Provider list */}
             <div className="grid grid-cols-2 gap-4">
               {visibleProviders.map((provider) =>
@@ -6261,6 +6273,16 @@ export default function Settings({
                 </div>
               </div>
 
+              {APP_BUILD_PROFILE === 'moxbot' && (
+                <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5">
+                  <h3 className="text-base font-medium text-[var(--ink)]">{tSettings('about.communityTitle')}</h3>
+                  <p className="mt-1 text-sm text-[var(--ink-muted)]">{tSettings('about.communityDescription')}</p>
+                  <button type="button" className="mt-4 rounded-lg bg-[var(--button-primary-bg)] px-3 py-2 text-sm text-[var(--button-primary-text)]"
+                    onClick={() => { void openOwnedCloudPage('community').catch(() => toast.error(tApp('globalSidebar.cloudUnavailable'))); }}>
+                    {tSettings('about.openCommunity')}
+                  </button>
+                </div>
+              )}
               {/* User Community QR Code - Show loading state, then image when ready */}
               {(qrCodeLoading || qrCodeDataUrl) && (
                 <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5">
@@ -6291,13 +6313,13 @@ export default function Settings({
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-[var(--ink-muted)]">
-                      Developer
+                      {tSettings('about.maintainerLabel')}
                     </p>
-                    <p className="mt-1 text-[var(--ink)]">Ethan L</p>
+                    <p className="mt-1 text-[var(--ink)]">{APP_BUILD_PROFILE === 'moxbot' ? 'MoXBots' : 'Ethan L'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-[var(--ink-muted)]">
-                      Website
+                      {tSettings('about.websiteLabel')}
                     </p>
                     <ExternalLink
                       href={APP_WEBSITE_URL}
@@ -6308,24 +6330,26 @@ export default function Settings({
                   </div>
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-[var(--ink-muted)]">
-                      Contact
+                      {tSettings('about.contactLabel')}
                     </p>
-                    <ExternalLink
-                      href="mailto:myagents.io@gmail.com"
-                      className="mt-1 block text-[var(--accent)] hover:underline"
-                    >
-                      myagents.io@gmail.com
-                    </ExternalLink>
+                    {APP_BUILD_PROFILE === 'moxbot' ? (
+                      <button type="button" className="mt-1 block text-[var(--accent)] hover:underline"
+                        onClick={() => { void openOwnedCloudPage('feedback').catch(() => toast.error(tApp('globalSidebar.cloudUnavailable'))); }}>
+                        {tSettings('about.feedback')}
+                      </button>
+                    ) : (
+                      <ExternalLink href="mailto:myagents.io@gmail.com" className="mt-1 block text-[var(--accent)] hover:underline">myagents.io@gmail.com</ExternalLink>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-medium uppercase tracking-wider text-[var(--ink-muted)]">
-                      GitHub
+                      {tSettings('about.repositoryLabel')}
                     </p>
                     <ExternalLink
                       href={MYAGENTS_GITHUB_URL}
-                      className="mt-1 block text-[var(--accent)] hover:underline"
+                      className="mt-1 block min-w-0 break-all text-[var(--accent)] hover:underline"
                     >
-                      github.com/hAcKlyc/MyAgents
+                      {MYAGENTS_GITHUB_URL.replace('https://', '')}
                     </ExternalLink>
                   </div>
                 </div>
@@ -6358,12 +6382,14 @@ export default function Settings({
                   >
                     {tSettings('about.thirdPartyNotices')}
                   </ExternalLink>
+                  {APP_BUILD_PROFILE !== 'moxbot' && (
                   <ExternalLink
                     href="mailto:myagents.io@gmail.com"
                     className="rounded-lg bg-[var(--button-primary-bg)] px-3 py-1.5 font-medium text-[var(--button-primary-text)] transition-colors hover:bg-[var(--button-primary-bg-hover)]"
                   >
                     {tSettings('about.commercialLicensing')}
                   </ExternalLink>
+                  )}
                 </div>
               </div>
 

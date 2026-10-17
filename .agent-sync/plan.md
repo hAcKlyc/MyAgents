@@ -1,3 +1,11 @@
+## MOXBOTS-UI-ZOOM-002 — 2026-10-16
+
+修复Ctrl+后文本域水平滚动条；仅改输入/建议的横轴策略和grid收缩约束。真实组件Chromium/WebKit各60组、相关107测试、类型/lint及MoXBots web构建通过；CI/main以PR76与任务记录继续追踪。源码任务`.agent-sync/tasks/codex-ui-zoom-scrollbar-20261016-d37165e0.md`，验收`dev-docs/ui-zoom-scrollbar-acceptance.md`；queued发布请求由既有统一部署聊天处理下一未冻结批次，不操作日常/QA客户端、不回写055/056。
+
+## MOXBOTS-UI-ZOOM-001 — 2026-10-15
+
+主窗口Ctrl/Command加减与0缩放；75%–200%，成功后记忆，设置页快捷键说明。独立分支`codex/ui-zoom-20261015`，32项相关测试、类型/lint和MoXBots web构建通过；浏览器、CI/main、原生发布各自追踪。任务`.agent-sync/tasks/codex-ui-zoom-20261015-698c789d.md`；原生验证由统一发布窗口承接，不并发操作日常App。
+
 ## MOXBOTS-AUTH-HOST-20261014 — current continuation
 
 Root owns integration. Human-approved29 is installed; owned account restoration, bottom-left account entry, actual k3/model-directory save, disabled Agent creation and desktop plus both Host services restart persistence pass without a new keychain prompt. Read-only extended Agent list is repaired with three regressions. Latest main model-center source is being incorporated with cloud_models remaining disabled. Final combined tests/candidate/CI and PR14/main/public download delivery remain open. See `.agent-sync/tasks/codex-mah-auth-host-acceptance-20261014-0bfff75a.md`.
@@ -199,3 +207,118 @@ FEEDBACK-001候选：个人菜单合并小助理/反馈与云端本人提单/管
 ### MOXBOTS-UPDATER-20261014 final0.5.4 delivery
 
 Sourcee5a05f76/PR46 main0c85b571，六CI及main3351运行文件blob等同；已整合统一官网PR47 main16ab3dbd/看板记录80faaab7，无客户端重建。独立QA真实A3→B3、编辑/realPTY拒绝不中断、cancel、signed install/nativecleanup/exactdraft&Record恢复和Root实际UI复看通过。App/DMG AppleAccepted/stapled/Gatekeeper，ZIP/TAR/DMG全清单/签名门禁通过。Own官网stable0.5.4及独立ownkey签名生效；sameSHA TAR复用自有Repo CDN（官网URL和公钥不变，服务器原件保留），完整实际HTTPS343281849bytes/37.19s/9.23MBps、signature/range/privacy通过；网站新设计当前源hash已对齐、其它Nginxbase保全/cloudPID不变。正式文件WPS output/updater-20261014/final-e5a05f76/，最终交接 dev-docs/moxbots-updater-054-delivery.md。paidProvider/realissuer/Host/runningtimer不是本native覆盖；remote-session安全更新证明未就绪明确阻止安装。Root/children、board与unified均停止GUI，remoteowner后续只按其自己的授权安装/联调。已公开0.5.4不可变，下一源码变更发0.5.5。
+
+## MOXBOTS-NEXT-PROMPT-002
+
+用户要求扩展Codex/Claude Code/DSH下一步建议、真实模型生成验收与客户端更新。仅文本utility不执行工具/不改原对话，保持Runtime身份及冻结模型。分阶段状态见.agent-sync/tasks/codex-next-prompt-runtimes-20261015-2fee4eac.md；普通0.5.4发布不代表本任务已实现。
+
+### MOXBOTS-055-UNIFIED-ACCEPTANCE
+
+Unified owner builds a distinct real-model utility acceptance environment, coordinates NEXT-PROMPT/TITLE/Host and brand/community serial native acceptance, then freezes all accepted mainline work for signed/notarized 0.5.5 and idle-only actual client update. Existing updaterqa stays model-disabled; daily work is preserved. Source/tests/runtime/production/mainline gates and ownership: `dev-docs/unified-055-acceptance.md`; task `.agent-sync/tasks/codex-unified-055-modelqa-20261015-38fa9c79.md`. Not a claim of completed 0.5.5 release.
+FEEDBACK-001阶段交付：PR44/main d7264a43已核验，7 CI通过；云端已发布并通过受控真实账号闭环5/5。统一原生候选尚未纳入该提交，收包已登记，当前安装入口不算通过；接续见任务记录及dev-docs/feedback-production-validation.md。
+
+FEEDBACK-001 2026-10-15 07:14 UTC+8 接续：已安装正式0.5.4/e5a05f76包含PR44，实际binary/源码/远端main c7bab285对应通过；按新增人类授权同步给统一客户端负责人并登记FEEDBACK/TITLE原生待验队列。现有非实现者原生入口/布局证据复用；实际issuer/退出恢复及Provider标题生成待当前窗口owner明确交接，未抢占GUI或重复发布。任务保持in-progress。
+
+FEEDBACK-001 原生补验完成：主Agent在明确串行窗口交接后使用正式0.5.4完成个人菜单/助手/正确issuer反馈入口、同账号真实Dex/PKCE退出恢复、8原标签及App/Sidecar PID保留、独立铃铛入口。实际联网状态不作为Host/通知通过。GUI已token校验释放，非秘密摘要dev-docs/feedback-native-acceptance.md。TITLE待独立modelqa，后续统一0.5.5由发布负责人处理。
+
+## MOXBOTS-PROJECT-BOARD-004 — 四阶段与可信执行状态
+
+用户批准PB-003 v3落实际看板：待开始→执行中→待确认→已完成；历史仅主动归档，恢复不执行。当前分支codex/project-board-state-20261015，任务记录 `.agent-sync/tasks/codex-project-board-state-20261015-5b2d05d2.md`。实现renderer与现有owner观察链路，SDK当前Query后台子任务纳入running；Sidecar非健康/恢复不可伪idle。主Agent负责集成，state_review独立检查UI；不碰统一0.5.5工作区，不并发退出/换包。代码、CI/main与统一原生安装/真实HRM复验分开记录。
+
+- [x] 四阶段/细原因、历史归档恢复、可见页有界刷新与失败保留快照。
+- [x] 相关161项unit/DOM，web/server构建。
+- [x] 完整类型/lint、Rust Task82/owner2及独立UI审阅。
+- [x] main20593924/PR56已交付六CI通过，用户直接授权纳入统一0.5.5。
+- [ ] 统一原生安装与真实HRM复验；由统一负责人串行处理，不另起安装或付费模型任务。
+## MOXBOTS-BRAND-COMMUNITY-001 — 2026-10-15
+
+用户要求清理可见MyAgents名称/介绍，并重建社区到现有云服务体系。隔离分支`codex/brand-community-20261015`，基线c7bab285；桌面品牌/导航、同云账号社区及后台管理已由PR50交main b5b9c9c4；7CI、151云回归、独立UI和生产真实OIDC/只读路径通过。云已安全发布并释放维护hold，原生0.5.5由统一负责人继续。最终证据见`dev-docs/brand-community-delivery.md`。合同`services/agentnet/COMMUNITY.md`，任务`.agent-sync/tasks/codex-brand-community-20261015-5872226e.md`。云服务和桌面分别追踪发布；统一桌面0.5.5打包owner正在工作，本任务不并发安装或重启日常应用。不得把合成OIDC、本地fixture或主干合入称为生产/原生完成。
+
+
+## MOXBOTS-PLAN-REVIEW-001
+
+2026-10-15 用户确认 MoXBots 目标仓库，当前Agent直接修复方案审核空卡。仅当前 Session 专用 Markdown 写入例外；无完整正文时返回模型可修复错误，UI旧空卡禁用批准。任务及分项验收见 `.agent-sync/tasks/codex-plan-review-content-20261015-0fd5aae0.md`。代码/模拟/UI/main与原生安装分别追踪；不操作现有业务审核或并发替换统一055客户端。
+
+
+## MOXBOTS-PROJECT-BOARD-TODO-001
+
+在四阶段看板增量接入原会话TODO和子Agent真实进度。卡片/列表摘要、详情三态清单/子Agent状态，复用共享reducer与既有只读activity owner；历史/过期不冒充实时，TODO全勾不推导Task完成。代码、251项相关unit/DOM、类型/lint、MoXBots web/server构建、6组合成UI及独立代码/视觉审阅已通过；PR58六项CI通过并合入main7346499b（产品树与CI head一致），统一原生纳入仍待负责人队列。验收 `dev-docs/project-board-todo-acceptance.md`，任务 `.agent-sync/tasks/codex-project-board-todo-20261015-06d8ff2b.md`。
+
+
+## MOXBOTS-OUTPUT-001 — 阶段化聊天输出
+
+2026-10-15，用户确认截图评审方向并指定本仓库。连续阶段、工具/思考真实状态、结果统计及动作归属、默认折叠/回折已实现；91项unit/169项DOM、类型/lint与MoXBots web构建通过，主审及独立React浅深色/380窄窗/英文验收通过；PR/CI/main和统一原生发布分别追踪。任务`.agent-sync/tasks/codex-output-display-20261015-03caa522.md`，证据`dev-docs/output-display/acceptance.md`。不把工具返回称业务验收，不操作日常App或真实Provider。
+
+## MOXBOTS-PROJECT-BOARD-006 — Goal-aware grouping
+
+截图反馈由独立任务`codex/project-board-goal-20261015`修复：看板只读Rust Goal lifecycle，active覆盖旧done Task及turn idle；未知/暂停/阻塞保留待确认，归档重新核对Goal。实现/合成React/44回归/typecheck/lint/web已通过；CI/main及客户端发布/真实任务复验分开追踪。记录`.agent-sync/tasks/codex-project-board-goal-20261015-0d453018.md`。不碰现有统一0.5.5冻结源或执行中的日常App。
+
+## 2026-10-15：055冻结发行 / 056接续
+
+用户要求先发布冻结0.5.5，后续改动进入0.5.6。055源码main52bf6160已正式签名、公证并完成不可变服务器归档；公网完整GET/原子stable门禁和实际客户端安装分别追踪。main5ebf字体缩放PR59及以后改动属于056；各开发版本元数据推进056。当前发行与精确验收边界见 `dev-docs/releases/moxbots-0.5.5.md`、`dev-docs/releases/moxbots-0.5.6-handoff.md`，后续记录覆盖旧统一055任务的历史状态。
+
+## 2026-10-15 16:39：055正式更新已发布，056继续开发
+
+MOXBOTS-055-RELEASE-FREEZE已完成既有own updater stable055发布及正常TLS/完整GET/实际stat+SHA/签名独审/CAS/公开路由/054回滚核验；源main52bf6160及远端tag v0.5.5不可变。055整包平均119030B/s、全GET约47分钟，不证明云带宽上限。本机054未安装或重启：HRM16:26仍busy，须fresh完整代次准入、有效一致备份及用户确认。未把Host/IME/带数据原生UI算通过；测试network服务ACCOUNT_SESSION_EXPIRED失败明确留056。
+
+开发主干已056（版本PR61/main6d1f8912），包含之后的PR59缩放/PR60 Goal/PR62输出/PR63 Bots Ready；均不回写055。源码交付/验收边界见dev-docs/releases/moxbots-0.5.5.md、moxbots-0.5.6-handoff.md，私有制品与README/DELIVERY/SHA256SUMS在指针output/updater-055-20261015/final-52bf6160。官网下载手动ZIP由原官网owner在其新增授权下串行发布，Root不操作该asset或日常客户端。
+
+
+## MOXBOTS-RESTART-001 — 用户确认后允许中断并重启
+
+2026-10-15 用户明确确认目标仓库并要求运行任务也能手动重启。056候选改为明确停止/保存确认；后台下载不安装，取消无副作用。Rust验包/签名、精确代次DispatchLease、SessionEngine全会话停止和writer落盘依次完成，运行中Task按用户Stop记为Stopped，空闲调度保留；安装失败恢复文档/语音准入，迟到响应不能复活旧token。当前Agent负责实现/集成/原生门禁，restart_safety_review独立只读审查。代码、回归、CI/main及签名原生发行分别追踪，见 `.agent-sync/tasks/codex-restart-001-20261015-35044beb.md` 和 `dev-docs/restart-001-acceptance.md`。不回写不可变055，未操作日常客户端。
+
+## MOXBOTS-BOARD-DEDUP-001 — shared Session presentation
+
+多个Task复用同一Session时只选一个当前进度代表卡片，历史任务按自身状态保留，不再把同一TODO/计时/Goal复制成多个执行。renderer限定修复，零业务数据写入；代码/React合成验证/main与056原生发布分别追踪于 `.agent-sync/tasks/codex-project-board-dedup-20261015-d944a599.md`。
+
+## Deployment coordination — Host101 scoped operation 2026-10-16
+
+- **Deployment chat:** `01a13320-dbf9-7c03-b7f3-37e30d15de48`（Bots 管理控制台），仅本次101.42.11.29既有MoX Host安装/网络恢复。
+- **Designation:** 用户在本聊天直接要求“在101.42.11.29上面安装host程序，并配置到moxbots网络”，并提供专用SSH附件。该具体目标由当前聊天负责，不接管下方桌面updater发布owner或其目标。
+- **Targets and runbook:** 仅101的moxbot-host-test及moxbot-host-network-test；沿用`scripts/host/network-control.py`，先检查维护冲突/无activeSession、备份身份/配置/加密state，原身份恢复登录/run，不重置或覆盖身份，不更改模型执行授权。旧myagents服务、140backend与日常Mac保留。
+- **Current release:** `MOXBOTS-HOST-101-20261016` accepted（运行/入网）；原83e48946安装复用，正式登录+同principal管理绑定续接后ready，重启及原配置/身份保全通过；PR85记录交付另核。任务 `.agent-sync/tasks/codex-host-101-network-20261016-810cf816.md`；验收 `dev-docs/host101-network-recovery-20261016.md`。既有会话24h，本次到期2026-10-17 14:14:14 +08:00，自动续期未实现；不宣称永久在线或真实模型调用通过。窗口已结束，无后续目标写入计划。
+
+## Deployment coordination
+
+- **Deployment chat:** `01a12bc2-907a-7702-b6dd-788225c5dfe4`，MoxBots桌面端统一打包负责人。
+- **Designation:** 既定唯一发布owner仍为本聊天。最新用户于2026-10-16在修复聊天`01a1420f-245b-7f22-8a0f-4caaaf31b91b`明确回复“授权发送并安排修复版”；Root实际核读human message`01a142d4-9285-7c93-a968-52d61de5ab7d`，覆盖下一未冻结修复版及任务空闲后启用、不中断任务。原056授权和交付保持其发行记录，不将开发者转述自身当新增授权。
+- **Targets and runbook:** 本次仅既有macOS arm64 MoXBots own updater `https://140.143.183.232/updates/stable/darwin-aarch64.json`、`/srv/moxbots/updates`及其不可变归档/原子stable；流程`scripts/moxbot-updates/README.md`与`release.mjs`。复用原Developer ID、公证profile、正式Reader和自有签名根。允许确认任务空闲、Mac手动解锁且启用前兼容配置备份就绪后，在本机启用新版并验证已有授权账号；不主动停止运行任务。不扩展路径/端口，不部署auth/Host/网站服务，不扩大External Calls/模型权限。
+- **Release record / concurrency:** `dev-docs/releases/moxbots-0.5.7.md`及本任务记录维护状态；仍用既有`.release-lock`及owner核验，Git计划不是原子锁。Release workflow仅特殊分支push filter、不触发main/tag；Test CI只验证。开发聊天可正常源码/CI/main交付，后来提交不自动进入冻结包，不能并发发布或切换本目标。
+- **Current release:** `MOXBOTS-058-COMMUNITY-RELEASE-20261016`，`published-and-distribution-verified / installed-client-not-upgraded`。正式source/tagv0.5.8固定main `12449e4741d8f225a73ee540f68331b1bb8e24ac`，包括PR87/89/90/91及普通非中断确认。精确制品签名/公证独审、同源码隔离原生更新与真实社区持久化/退出隔离独审、外部完整GET336365173B/TAR155e6a68/真实stat+SHA/自有签名通过；0.5.8 stable已原子启用，公开no-store/Range206/私有404/unsupported204通过，057回退保留。正式binary/Reader未启动，日常客户端057未升级；QA导航/IME/ASR/真实Host模型范围保留。后来main(PR92/93/94等)不进入058。详见`dev-docs/releases/moxbots-0.5.8.md`。不改变云/Host/官网或权限，不中断任务。
+- **Acceptance boundary:** 分别报告源码、签名制品/服务器分发、启用安装、真实账号session/identity/membership/relay/目录/可调用路径。只在fresh完整活动准入确认空闲、Mac手动解锁及兼容配置备份/回退就绪后启用；不强退、不stop运行任务、未知则保持pending。真实Provider/Host/薪资看板等原生边界不得因构建/CI/HTTP200而关闭；其他服务不因本次指定获得新部署授权。
+
+## MOXBOTS-MODEL-FAILOVER-001 — 2026-10-16
+
+内置API模型一主一备，当前Session主模型不变，在原Query token推理请求边界有限重试/备用接管，保留native历史及工具结果，指纹/SSE终态防止隐式重放。默认关闭，设置复用原配置writer；订阅/DSH/external与真实供应商另验。合同`specs/tech_docs/model_failover.md`、验收`dev-docs/model-failover-001-acceptance.md`，任务`.agent-sync/tasks/codex-model-failover-001-6b96c57f.md`。当前Agent负责源码/CI/main，发行请求排入统一owner下一未冻结批次，不改变已有056冻结源码或操作日常客户端；代码、模拟/真实SDK loopback与原生/生产分别追踪。
+
+## MOXBOTS-PROJECT-CONTEXT-001 — 2026-10-16
+
+用户授权同项目新会话自动带入近期重要进展/决策，测试并main交付，发布交统一发布会话。只读原对话摘录、零新增模型请求、6000 UTF-8 bytes body；typed来源、独立开关和首轮重试刷新。开发/main/发布分别追踪于 `.agent-sync/tasks/codex-project-context-20261016-b1d6cb74.md`。不自动加入已冻结056候选，不操作日常App或生产。
+
+### PROJECT-CONTEXT-001 / 0.5.7真实Provider补验（2026-10-16）
+
+用户明确指定纳入0.5.7。已有功能PR68/main c225acd8；本轮真实Kimi/k3源会话+同项目/异项目/关闭开关4请求200/complete、wire/持久化/回答三层与独立复核通过。全部合成数据，不操作日常App。普通文本摘录，代码块仍省略；Native/HTTP/Rust circuit及其他Runtime真实Provider不在通过范围。脱敏证据dev-docs/project-context-validation/provider-acceptance.md与provider-results.json；当前分支task为codex-project-context-provider-057-20261016-44d995ec.md。功能及材料queued给既定统一发布owner的0.5.7，冻结056不变，无并发发布或版本推进。
+
+## MOXBOTS-HOST-INSTALL-82-20261016 — Host capability compatibility
+
+User requested the new Linux Host reuse of current desktop main-Agent model and actual task execution. A real desktop/Host probe exposed a 13-method advertisement against the deployed v1 12-method limit. Task branch `codex/host-capabilities-compat-20261016` removes only the redundant host.snapshot advertisement while preserving its callable fallback and modern model/remote Session methods. Code/IPC regression, CI/main, controlled target-only Host package update, source-model/credential application and real task acceptance remain individually tracked in `.agent-sync/tasks/codex-host-capabilities-compat-20261016-cfb52e68.md`. No daily desktop restart/replacement or shared cloud release.
+
+后续独立批次0.5.7（来源聊天最新用户要求，由该聊天报告）：`MOXBOTS-PROJECT-CONTEXT-001`源码已由PR68交main c225acd8，来源聊天报告真实Kimi Provider隔离补验通过（PR71，最终main及边界以其任务记录为准），签名原生与下一版本冻结仍待验；Token与预算接续在原任务记录；未纳入冻结056，不因排队信息获得新的部署授权。
+
+## MOXBOTS-OUTPUT-002 — 2026-10-16
+
+用户接受输出区六项优化并要求结果/进度优先、逐项具体时间与低干扰质量信息。独立分支codex/output-results-20261016；原transcript owner新增可选观测时间，UI移除默认工具/方法名，连续同文件聚合，明确操作累计，TODO当前项，质量无主观评分。代码、158项定向/172项消息输入回归/25项持久化及实际IAB与独立审阅分别记录 `dev-docs/output-results/acceptance.md`；CI/main待本任务最终核验。桌面发布queued给既定统一owner下一未冻结批次（0.5.7队列），不改冻结056、不并发操作日常App或服务器，未向其他聊天发送消息。任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。
+
+### 0.5.7 入网修复发布授权（2026-10-16）
+
+用户在原修复聊天`01a1420f-245b-7f22-8a0f-4caaaf31b91b`对“发送给既定统一打包负责人、安排下一未冻结修复版、任务空闲后启用且不中断任务”的问题明确回复“授权发送并安排修复版”。Root已实际核读human message `01a142d4-9285-7c93-a968-52d61de5ab7d`。复用既有own updater及唯一发布owner；允许在确认空闲、Mac手动解锁、启用前兼容配置私有备份和回滚就绪后启用候选，真实入网逐项验收，不扩大云/Host/模型/External Calls权限。旧056服务器accepted记录见dev-docs/releases/moxbots-0.5.6.md，已发布字节不改。新sessionBound配置回退旧版必须恢复启用前兼容配置且保留当前业务数据与所有旧身份/凭据槽，禁止回滚旧业务库。
+
+## MOXBOTS-OUTPUT-003 — 2026-10-16
+
+用户接受展开区复审并要求实际展开验收。单条直接结果行，多条展开隐藏重复摘要/时间，无实际正文无箭头；执行耗时仅runtime报告，观测跨度/等待/未知分开。独立代码/截图审阅关闭Bash内部重复duration和JSON空结果两项P2，reviewer IAB不可用，实际点击由主Agent补全。用户追加的用户气泡已纳入：紧凑内边距、普通正文400字重、浮动复制/回退及窄栏预留，长文和失败态保留，主Agent实际页面和独立静态复核完成。范围/源码/合成UI/CI/main/原生发行分别见 `.agent-sync/tasks/codex-output-expanded-20261016-f48054da.md` 和 `dev-docs/output-expanded/acceptance.md`；桌面变更queued给唯一owner下一未冻结批次，不修改已冻结包或操作日常App，不向其它聊天发送消息。
+
+
+## MOXBOTS-NEXT-PROMPT-003 — 正式下一步建议接口
+
+用户要求修复正式下一步建议404、补正式路由回归、main交付并纳入下一未冻结桌面更新，在不打断任务的前提下验收正式客户端任务结束出现建议与Enter仅采纳为草稿。精确Session路径登记，组合测试先红后绿及189项通过；源码/CI/main/签名发行/安全启用/真实用户路径分别记录。任务 `.agent-sync/tasks/codex-next-prompt-route-003-20261016-e9554c98.md`，验收 `dev-docs/next-prompt-route-003-acceptance.md`。唯一发布owner仍为01a12bc2-907a-7702-b6dd-788225c5dfe4；本聊天不修改已冻结058源码或并发发布/重启。

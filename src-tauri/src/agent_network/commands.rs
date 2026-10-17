@@ -210,6 +210,14 @@ pub(crate) fn cmd_agent_network_snapshot(
         .snapshot())
 }
 #[tauri::command]
+pub(crate) async fn cmd_owned_community_request(
+    state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
+    scope: super::community::CommunityScope,
+    request: super::community::CommunityRequest,
+) -> Result<Value, NetworkError> {
+    state.community_request(scope, request).await
+}
+#[tauri::command]
 pub(crate) async fn cmd_agent_network_request(
     state: tauri::State<'_, super::actor::ManagedAgentNetwork>,
     request: MetadataRequest,
@@ -304,9 +312,16 @@ pub(crate) async fn cmd_agent_network_owned_start(
     issuer: String,
     public_tls_ca_file: Option<String>,
 ) -> Result<super::owned_account_desktop::StartedLogin, NetworkError> {
-    state
+    let result = state
         .owned_start(&issuer, public_tls_ca_file.as_deref())
-        .await
+        .await;
+    if let Err(error) = &result {
+        crate::ulog_warn!(
+            "[agent-network] owned login start failed code={}",
+            super::actor::diagnostic_code(error)
+        );
+    }
+    result
 }
 #[tauri::command]
 pub(crate) async fn cmd_agent_network_owned_open_authorization(
@@ -322,18 +337,26 @@ pub(crate) async fn cmd_agent_network_owned_poll(
     manager: tauri::State<'_, crate::sidecar::ManagedSidecarManager>,
     attempt_id: String,
 ) -> Result<OwnedPollResponse, NetworkError> {
+    use super::registry::OwnedRegistryPoll;
     match state
         .inner()
         .owned_poll(app, manager.inner().clone(), &attempt_id)
         .await?
     {
-        Some(registry) => Ok(OwnedPollResponse {
+        OwnedRegistryPoll::Authenticated(registry) => Ok(OwnedPollResponse {
             status: "authenticated",
             registry: Some(registry),
+            authorization: None,
         }),
-        None => Ok(OwnedPollResponse {
+        OwnedRegistryPoll::Pending => Ok(OwnedPollResponse {
             status: "pending",
             registry: None,
+            authorization: None,
+        }),
+        OwnedRegistryPoll::Reauthorize(authorization) => Ok(OwnedPollResponse {
+            status: "reauthorize",
+            registry: None,
+            authorization: Some(authorization),
         }),
     }
 }
@@ -343,6 +366,8 @@ pub(crate) struct OwnedPollResponse {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry: Option<super::registry::RegistryView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<super::owned_account_desktop::StartedLogin>,
 }
 #[tauri::command]
 pub(crate) async fn cmd_agent_network_owned_cancel(

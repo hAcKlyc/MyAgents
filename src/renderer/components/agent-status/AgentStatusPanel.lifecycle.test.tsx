@@ -85,6 +85,20 @@ describe('AgentStatusPanel child lifecycle group', () => {
     vi.useRealTimers();
   });
 
+  it('surfaces the actual in-progress task beside its count without inferring the next pending task', () => {
+    panelHarness.sessionState = 'running';
+    panelHarness.agentPlanTodos = [
+      { key: 'done', content: 'Finished', activeForm: 'Finished', status: 'completed' },
+      { key: 'active', content: '核对工资汇总逻辑', activeForm: '正在核对工资汇总逻辑', status: 'in_progress' },
+      { key: 'next', content: '稍后发布', activeForm: '发布中', status: 'pending' },
+    ];
+    const { container } = render(<AgentStatusPanel containerRef={createRef<HTMLElement>()} onJumpToTool={() => undefined} />);
+    act(() => vi.advanceTimersByTime(80));
+    expect(screen.getByText('Todo 1/3')).toBeTruthy();
+    expect(container.querySelector('[data-current-todo]')).toHaveTextContent('正在核对工资汇总逻辑');
+    expect(container.querySelector('[data-current-todo]')).not.toHaveTextContent('发布中');
+  });
+
 
   it.each(['TodoWrite', 'TaskList', 'runtime'] as const)('does not revive completed %s history on cold open', source => {
     completedTodos(source);

@@ -41,7 +41,7 @@ describe('external MyAgents CLI guide', () => {
 
   it('routes each multi-command capability domain through group help', () => {
     const documented = new Set(documentedInvocations);
-    for (const group of ['agent', 'runtime', 'session', 'task', 'record']) {
+    for (const group of ['agent', 'network', 'runtime', 'session', 'task', 'record']) {
       expect(documented.has(`${group} --help`)).toBe(true);
     }
   });

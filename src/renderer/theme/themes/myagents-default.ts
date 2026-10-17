@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../../shared/appProfile';
 import './myagents-default.css';
 import stylesheetText from './myagents-default.css?inline';
 import { createPrismStyle } from '../prism-style';
@@ -215,14 +216,14 @@ const noHeroBackground = {
 
 export const myAgentsDefaultTheme: ThemeDefinition = {
   id: 'myagents-default',
-  displayName: 'MyAgents Classic',
-  description: 'MyAgents warm paper / warm night visual language',
+  displayName: `${APP_DISPLAY_NAME} Classic`,
+  description: `${APP_DISPLAY_NAME} warm paper / warm night visual language`,
   stylesheetText,
   hero: {
-    productName: 'MyAgents',
+    productName: APP_DISPLAY_NAME,
     slogans: {
-      'zh-CN': '每个人都应享受智能的推背感，欢迎来到言出法随的世界',
-      'en-US': 'Your intent, amplified',
+      'zh-CN': APP_BUILD_PROFILE === 'moxbot' ? '人定目标，Bot 团队协作执行' : '每个人都应享受智能的推背感，欢迎来到言出法随的世界',
+      'en-US': APP_BUILD_PROFILE === 'moxbot' ? 'Set goals. Let your Bot team get to work.' : 'Your intent, amplified',
     },
     backgrounds: { light: noHeroBackground, dark: noHeroBackground },
   },

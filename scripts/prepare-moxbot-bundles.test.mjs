@@ -15,10 +15,19 @@ test('transforms home references, command aliases and only the owned open route'
 
 test('preserves protocol, artifact, project marker and legal/provider names', () => {
   const source = Buffer.from('MYAGENTS_PORT X-MyAgents-Session <myagents-session> .myagents/workspace.json myagents_files/image.png myagents-task-automation MyAgents Claude Codex myagents protocol');
-  assert.deepEqual(transformMoxbotResource('bundled-skills/probe/SKILL.md', source), source);
+  assert.equal(transformMoxbotResource('bundled-skills/probe/SKILL.md', source).toString(), source.toString().replace(' MyAgents Claude', ' MoXBots Claude'));
   assert.deepEqual(transformMoxbotResource('bundled-skills/probe/LICENSE', Buffer.from('myagents task ~/.myagents')), Buffer.from('myagents task ~/.myagents'));
   const vendor = Buffer.from('myagents task ~/.myagents');
   assert.deepEqual(transformMoxbotResource('bundled-skills/cuse/SKILL.md', vendor), vendor);
+});
+
+test('helper uses owned cloud feedback and preserves internal skill names', () => {
+  const source = readFileSync(new URL('bundled-agents/myagents_helper/CLAUDE.md', repo));
+  const output = transformMoxbotResource('bundled-agents/myagents_helper/CLAUDE.md', source).toString();
+  assert.match(output, /MoXBots 协作社区与帮助反馈/);
+  assert.match(output, /未经用户明确授权，不自动发帖/);
+  assert.match(output, /\/myagents-docs/);
+  assert.doesNotMatch(output, /hAcKlyc\/MyAgents|登录 MyAgents Space/);
 });
 
 test('changes only the audited shell home fallback and refuses unknown script roots', () => {
@@ -42,7 +51,7 @@ test('copies real helper and skill source unchanged while staging isolated guide
   files.forEach((path, index) => assert.deepEqual(readFileSync(join(root, path)), originals[index]));
   const helper = readFileSync(join(result.destination, files[0]), 'utf8');
   assert.match(helper, /`~\/\.moxbot\/`/);
-  assert.match(helper, /moxbot:\/\/open\/v1\/spaces/);
+  assert.match(helper, /MoXBots 协作社区与帮助反馈/);
   assert.match(readFileSync(join(result.destination, files[1]), 'utf8'), /moxbot task create-direct/);
   const first = readFileSync(join(result.destination, 'manifest.json'));
   prepareMoxbotBundles({ repositoryRoot: root });

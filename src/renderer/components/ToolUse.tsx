@@ -22,6 +22,7 @@ import WebFetchTool from './tools/WebFetchTool';
 import WebSearchTool from './tools/WebSearchTool';
 import WriteTool from './tools/WriteTool';
 import CronTaskCard from './scheduled-tasks/CronTaskCard';
+import { ExpandableResult, unwrapSdkResult } from './tools/utils';
 import { dshToolDisplayName } from '../../shared/toolDisplay/dshToolNames';
 
 
@@ -45,6 +46,19 @@ function parseCronResult(result: string): { taskId: string; name?: string; sched
 const TEXT_DISPLAY_LIMIT = 50_000;
 const JSON_DISPLAY_LIMIT = 200_000;
 
+function usesPlainResult(tool: ToolUseSimple): boolean {
+  return ['Read', 'Grep', 'Glob', 'Skill', 'BashOutput', 'KillShell'].includes(dshToolDisplayName(tool.name));
+}
+
+/** Match the plain result renderer's unwrapping before offering a disclosure.
+ * Large results are clamped by ToolUse; never parse an unbounded payload just
+ * to render the collapsed row. Rich cards retain their own result projection. */
+export function hasToolResultContent(tool: ToolUseSimple): boolean {
+  if (!tool.result?.trim()) return false;
+  return usesPlainResult(tool) && tool.result.length <= JSON_DISPLAY_LIMIT
+    ? Boolean(unwrapSdkResult(tool.result).trim()) : true;
+}
+
 type ChatTranslator = (key: string, options?: Record<string, unknown>) => string;
 
 function clampResult(tool: ToolUseSimple, t: ChatTranslator): ToolUseSimple {
@@ -63,9 +77,10 @@ function clampResult(tool: ToolUseSimple, t: ChatTranslator): ToolUseSimple {
 
 interface ToolUseProps {
   tool: ToolUseSimple;
+  resultOnly?: boolean;
 }
 
-export default function ToolUse({ tool: rawTool }: ToolUseProps) {
+export default function ToolUse({ tool: rawTool, resultOnly = false }: ToolUseProps) {
   const { t } = useTranslation('chat');
   // Bash and file-patch tools own specialized, bounded projections. Generic
   // pre-clamping would corrupt their structured completion wrappers before the
@@ -83,16 +98,19 @@ export default function ToolUse({ tool: rawTool }: ToolUseProps) {
   // message flow in Message.tsx (standalone, always-visible in-flow cards);
   // PROCESS media (screenshots) is rendered by ProcessRow right after this
   // component inside the expanded body — deliberately behind the fold.
-  return renderToolBody(tool);
+  return renderToolBody(tool, resultOnly, t);
 }
 
-function renderToolBody(tool: ToolUseSimple): React.JSX.Element {
+function renderToolBody(tool: ToolUseSimple, resultOnly: boolean, t: ChatTranslator): React.JSX.Element {
+  if (resultOnly && usesPlainResult(tool)) {
+    return <ExpandableResult content={tool.result ?? t('process.result.awaiting')} />;
+  }
   switch (dshToolDisplayName(tool.name)) {
     case 'bash':
     case 'pwsh':
     case 'Bash':
     case 'PowerShell':
-      return <BashTool tool={tool} />;
+      return <BashTool tool={tool} resultOnly={resultOnly} />;
     case 'BashOutput':
       return <BashOutputTool tool={tool} />;
     case 'KillShell':
@@ -158,6 +176,8 @@ function renderToolBody(tool: ToolUseSimple): React.JSX.Element {
           );
         }
       }
+
+      if (resultOnly) return <ExpandableResult content={tool.result ?? t('process.result.awaiting')} />;
 
       // Fallback for unknown tools - show raw JSON
       const collapsedContent = (

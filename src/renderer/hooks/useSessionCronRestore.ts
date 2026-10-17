@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getSessionCronTask, isTaskExecuting } from '@/api/cronTaskClient';
 import type { CronTask } from '@/types/cronTask';
 import { isTauriEnvironment } from '@/utils/browserMock';
@@ -18,32 +18,42 @@ export function useSessionCronRestore({
   onRestore: (task: CronTask, executing: boolean) => void;
   onClear: () => void;
 }) {
-  const loadedSessionRef = useRef<string | null>(null);
+  // A revisited Session is a new activation, even if an intervening read failed.
+  // Losing the memo can only close readiness and cause another verified read.
+  const activation = useMemo(() => ({ sessionId, tabId }), [sessionId, tabId]);
+  const currentActivation = useRef(activation);
+  useLayoutEffect(() => {
+    currentActivation.current = activation;
+  }, [activation]);
+  const [settledActivation, setSettledActivation] = useState<typeof activation | null>(null);
+  const loadedActivation = useRef<typeof activation | null>(null);
 
   useEffect(() => {
     if (!sessionId || !tabId || !isTauriEnvironment()) return;
-    if (loadedSessionRef.current === sessionId) return;
+    if (loadedActivation.current === activation) return;
     const targetSessionId = sessionId;
     let cancelled = false;
 
     async function hydrate() {
       try {
         const snapshot = await getSessionCronTask(targetSessionId);
-        if (cancelled) return;
+        if (cancelled || currentActivation.current !== activation) return;
         if (snapshot?.status === 'running') {
           const executing = await isTaskExecuting(snapshot.id);
-          if (cancelled) return;
+          if (cancelled || currentActivation.current !== activation) return;
           // Commit together after both reads. Restoring the task may rerender
           // Chat and clean up this effect; no async writes follow that commit.
-          loadedSessionRef.current = targetSessionId;
+          loadedActivation.current = activation;
           onRestore(snapshot, executing);
+          setSettledActivation(activation);
         } else {
-          loadedSessionRef.current = targetSessionId;
+          loadedActivation.current = activation;
           if (task?.sessionId && task.sessionId !== sessionId) {
             const isSessionUpgrade =
               isPendingSessionId(task.sessionId) && !isPendingSessionId(targetSessionId);
             if (!isSessionUpgrade) onClear();
           }
+          setSettledActivation(activation);
         }
       } catch (error) {
         if (!cancelled) console.error('[Chat] Failed to load cron task state:', error);
@@ -54,5 +64,9 @@ export function useSessionCronRestore({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, tabId, task, onRestore, onClear]);
+  }, [activation, sessionId, tabId, task, onRestore, onClear]);
+
+  // Unsaved settings can be restored only after the existing Task projection
+  // has settled. Failed/late reads do not authorize consuming a disk draft.
+  return !isTauriEnvironment() || settledActivation === activation;
 }

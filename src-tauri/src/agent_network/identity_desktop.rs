@@ -12,25 +12,29 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 /// The versioned route is a local credential lookup only; protocol Scope is unchanged.
 pub(crate) fn selected_store() -> Arc<dyn IdentityStore> {
+    #[cfg(myagents_model_qa)]
+    { return Arc::new(ModelQaIdentityStore { inner: Arc::new(OsIdentityStore) }); }
     #[cfg(myagents_updater_qa)]
     { return Arc::new(UpdaterQaDeniedIdentityStore); }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         super::credential_slots::desktop_store()
     }
-    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
+    #[cfg(all(not(myagents_isolated_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         Arc::new(OsIdentityStore)
     }
 }
 pub(crate) fn connection_cache() -> Arc<dyn IdentityStore> {
+    #[cfg(myagents_model_qa)]
+    { return Arc::new(ModelQaIdentityStore { inner: OsIdentityStore::connection_cache() }); }
     #[cfg(myagents_updater_qa)]
     { return Arc::new(UpdaterQaDeniedIdentityStore); }
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         super::credential_slots::connection_cache()
     }
-    #[cfg(all(not(myagents_updater_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
+    #[cfg(all(not(myagents_isolated_qa), not(all(target_os = "macos", myagents_moxbot, not(test)))))]
     {
         OsIdentityStore::connection_cache()
     }
@@ -55,7 +59,7 @@ impl IdentityStore for ReadOnlyScopeStore {
         {
             return Err(super::crypto::CryptoError::CredentialConflict);
         }
-        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+        #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
         {
             let current = super::credential_slots::selection(
                 &super::credential_slots::identity_route_id(scope)?,
@@ -98,7 +102,7 @@ pub(crate) async fn initialize_selected(
     if crate::app_dirs::IS_UPDATER_QA { return Err(NetworkError::new("UPDATER_QA_CREDENTIALS_DISABLED")); }
     let identity =
         NetworkIdentity::initialize_with_store(account, retired_generation, store).await?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         identity.account.ensure_current()?;
         if super::credential_slots::selection(&super::credential_slots::identity_route_id(
@@ -175,6 +179,129 @@ fn authorized_scope_from_state(
     ))
 }
 
+/// In-memory, scope-bound read-only view over the existing desktop store.
+/// Used by CLI recovery: missing/denied keys are terminal, never enrollment.
+struct ExistingScopeStore {
+    scope: KeyScope,
+    fingerprint: String,
+    inner: Arc<dyn IdentityStore>,
+}
+impl IdentityStore for ExistingScopeStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        if self.scope.issuer != scope.issuer
+            || self.scope.environment != scope.environment
+            || self.scope.service_id != scope.service_id
+            || self.scope.principal_id != scope.principal_id
+            || self.scope.device_id != scope.device_id
+            || self.scope.key_generation != scope.key_generation
+        {
+            return Err(super::crypto::CryptoError::CredentialConflict);
+        }
+        let key = self.inner.load(scope).map_err(|error| match error {
+            super::crypto::CryptoError::CredentialMissing => {
+                super::crypto::CryptoError::CredentialUnavailable
+            }
+            other => other,
+        })?;
+        if key.public_fingerprint()? != self.fingerprint {
+            return Err(super::crypto::CryptoError::CredentialConflict);
+        }
+        Ok(key)
+    }
+    fn save_pending(
+        &self,
+        _: &KeyScope,
+        _: &DevicePrivateKey,
+    ) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+    fn delete(&self, _: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        Err(super::crypto::CryptoError::CredentialUnavailable)
+    }
+}
+fn existing_scope(
+    instance: &super::owned_login::OwnedInstance,
+    principal: &str,
+    device: &str,
+    value: Value,
+) -> Result<(KeyScope, String), NetworkError> {
+    validate_identity_state(&value).map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    let state: IdentityState =
+        serde_json::from_value(value).map_err(|_| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    if state.service_id != instance.service_id
+        || state.environment != instance.environment
+        || state.device_id != device
+    {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+    }
+    let generation = state
+        .key_generation
+        .filter(|g| (1..=9_007_199_254_740_991).contains(g))
+        .ok_or_else(|| NetworkError::new("NETWORK_PRIVATE_KEY_MISSING"))?;
+    let fingerprint = state
+        .key_fingerprint
+        .filter(|f| !f.is_empty() && f.len() <= 128)
+        .ok_or_else(|| NetworkError::new("IDENTITY_STATE_INVALID"))?;
+    Ok((
+        KeyScope {
+            issuer: instance.issuer.clone(),
+            environment: instance.environment.clone(),
+            service_id: instance.service_id.clone(),
+            principal_id: principal.to_owned(),
+            device_id: device.to_owned(),
+            key_generation: generation,
+        },
+        fingerprint,
+    ))
+}
+pub(crate) async fn existing_owned_identity(
+    instance: &super::owned_login::OwnedInstance,
+    principal: &str,
+    device: &str,
+    value: Value,
+) -> Result<Arc<dyn IdentityStore>, NetworkError> {
+    let (scope, fingerprint) = existing_scope(instance, principal, device, value)?;
+    let store: Arc<dyn IdentityStore> = Arc::new(ExistingScopeStore {
+        scope: scope.clone(),
+        fingerprint,
+        inner: connection_cache(),
+    });
+    let reader = store.clone();
+    tokio::task::spawn_blocking(move || reader.load(&scope))
+        .await
+        .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
+    Ok(store)
+}
+pub(crate) async fn background_owned_identity(
+    account: Arc<OwnedAccount>,
+    device: &str,
+    cancelled: Arc<AtomicBool>,
+) -> Result<Arc<dyn IdentityStore>, NetworkError> {
+    let session = NetworkAccountSession::Owned(account.clone());
+    session.ensure_current()?;
+    session.validate_instance().await?;
+    if session.device_identity()?.device_id != device || cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+    }
+    let state = session
+        .request(
+            crate::space_cloud::agent_network::AccountOperation::IdentityState(device.to_owned()),
+            None,
+        )
+        .await?;
+    let store = existing_owned_identity(
+        &account.descriptor,
+        &account.session.principal_id,
+        device,
+        state,
+    )
+    .await?;
+    session.ensure_current()?;
+    if cancelled.load(Ordering::Acquire) {
+        return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
+    }
+    Ok(store)
+}
 /// Explicitly authorize reading an already-enrolled device key.
 /// It never initializes, rotates, enrolls, or deletes an identity. Fixed-reader
 /// migration copies the verified key into a local slot before returning a
@@ -191,8 +318,7 @@ pub(crate) async fn authorize_owned_identity(
     let account_session = NetworkAccountSession::Owned(account);
     account_session.ensure_current()?;
     account_session.validate_instance().await?;
-    let current_device = crate::device_identity::current_device_identity()
-        .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+    let current_device = account_session.device_identity()?;
     if current_device.device_id != expected_device {
         return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
     }
@@ -215,7 +341,7 @@ pub(crate) async fn authorize_owned_identity(
         return Err(NetworkError::new("OWNED_LOGIN_CANCELLED"));
     }
     account_session.ensure_current()?;
-    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa)))]
+    #[cfg(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa)))]
     {
         let migration_scope = scope.clone();
         let migration_fingerprint = expected_fingerprint.clone();
@@ -249,17 +375,19 @@ pub(crate) async fn authorize_owned_identity(
             inner: authorized_store,
         }));
     }
-    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_updater_qa))))]
+    #[cfg(not(all(target_os = "macos", myagents_moxbot, not(test), not(myagents_isolated_qa))))]
     {
         let authorization_scope = scope.clone();
         let authorization_cancelled = cancelled.clone();
         let (store, key) = tokio::task::spawn_blocking(move || {
-            let store = OsIdentityStore::authorize_existing(
-                &authorization_scope,
-                &authorization_cancelled,
-            )?;
-            let key = store.load(&authorization_scope)?;
-            Ok::<_, super::crypto::CryptoError>((store, key))
+            #[cfg(myagents_model_qa)]
+            { authorize_model_qa_with(&authorization_scope, &authorization_cancelled, OsIdentityStore::authorize_existing) }
+            #[cfg(not(myagents_model_qa))]
+            {
+                let store = OsIdentityStore::authorize_existing(&authorization_scope, &authorization_cancelled)?;
+                let key = store.load(&authorization_scope)?;
+                Ok::<_, super::crypto::CryptoError>((store, key))
+            }
         })
         .await
         .map_err(|_| NetworkError::new("NETWORK_CREDENTIAL_STORE_UNAVAILABLE"))??;
@@ -282,7 +410,10 @@ mod authorization_tests {
 
     fn account() -> NetworkAccountSession {
         NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            binding_id: "test-binding".into(),
             connection_id: "connection".into(),
+            device_id: "00000000-0000-4000-8000-000000000004".into(),
+            session_bound: false,
             descriptor: crate::agent_network::owned_login::OwnedInstance {
                 version: 1,
                 profile: "owned-device-relay-v1".into(),
@@ -318,6 +449,38 @@ mod authorization_tests {
             "keyGeneration": 2,
             "keyFingerprint": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
         })
+    }
+
+    #[test]
+    fn cli_background_seed_is_scope_and_fingerprint_bound_and_never_writes() {
+        struct Backend(std::sync::Mutex<Option<DevicePrivateKey>>);
+        impl IdentityStore for Backend {
+            fn load(&self, _: &KeyScope) -> Result<DevicePrivateKey, super::super::crypto::CryptoError> {
+                self.0.lock().unwrap().take().ok_or(super::super::crypto::CryptoError::CredentialMissing)
+            }
+            fn save_pending(&self, _: &KeyScope, _: &DevicePrivateKey) -> Result<(),super::super::crypto::CryptoError> {panic!("write must not reach backend")}
+            fn delete(&self, _: &KeyScope) -> Result<(),super::super::crypto::CryptoError> {panic!("delete must not reach backend")}
+        }
+        let NetworkAccountSession::Owned(account) = account() else {unreachable!()};
+        let value = state(&account.descriptor.service_id, &account.descriptor.environment, &account.device_id);
+        let (scope, _) = existing_scope(&account.descriptor, &account.session.principal_id, &account.device_id, value.clone()).unwrap();
+        let key = DevicePrivateKey::generate().unwrap();
+        let store = ExistingScopeStore {scope:scope.clone(), fingerprint:key.public_fingerprint().unwrap(), inner:Arc::new(Backend(std::sync::Mutex::new(Some(key))))};
+        for field in 0..6 {
+            let mut changed=scope.clone();
+            match field {0=>changed.issuer.push_str("other"),1=>changed.environment="production".into(),2=>changed.service_id.push('x'),3=>changed.principal_id.push('x'),4=>changed.device_id.push('x'),_=>changed.key_generation+=1}
+            assert!(store.load(&changed).is_err());
+        }
+        let key=store.load(&scope).unwrap();
+        assert!(store.save_pending(&scope,&key).is_err());
+        assert!(store.delete(&scope).is_err());
+        assert!(matches!(store.load(&scope),Err(super::super::crypto::CryptoError::CredentialUnavailable)));
+        let mut missing=value.clone();missing["keyGeneration"]=Value::Null;missing["keyFingerprint"]=Value::Null;
+        assert_eq!(existing_scope(&account.descriptor,&account.session.principal_id,&account.device_id,missing).err().unwrap().code,"NETWORK_PRIVATE_KEY_MISSING");
+        let mut wrong=value;wrong["deviceId"]=json!("00000000-0000-4000-8000-000000000009");
+        assert!(existing_scope(&account.descriptor,&account.session.principal_id,&account.device_id,wrong).is_err());
+        let mismatch=ExistingScopeStore {scope:scope.clone(),fingerprint:"mismatch".into(),inner:Arc::new(Backend(std::sync::Mutex::new(Some(DevicePrivateKey::generate().unwrap()))))};
+        assert!(mismatch.load(&scope).is_err());
     }
 
     #[test]
@@ -438,5 +601,109 @@ mod updater_qa_identity_tests {
             assert!(matches!(store.save_pending(&scope, &DevicePrivateKey::generate().unwrap()), Err(CryptoError::CredentialUnavailable)));
             assert!(matches!(store.delete(&scope), Err(CryptoError::CredentialUnavailable)));
         }
+    }
+}
+
+/// Model QA changes physical OS slots only. TLS/wire scopes remain the issuer's scope.
+#[cfg(myagents_model_qa)]
+struct ModelQaIdentityStore { inner: Arc<dyn IdentityStore> }
+#[cfg(myagents_model_qa)]
+fn model_qa_physical_scope(scope: &KeyScope) -> Result<KeyScope, super::crypto::CryptoError> {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(&("com.moxbot.modelqa.identity.v1", scope))
+        .map_err(|_| super::crypto::CryptoError::InvalidKey)?;
+    let digest = Sha256::digest(bytes);
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&digest[..16]);
+    id[6] = (id[6] & 0x0f) | 0x80;
+    id[8] = (id[8] & 0x3f) | 0x80;
+    let mut physical = scope.clone();
+    physical.service_id = uuid::Uuid::from_bytes(id).to_string();
+    Ok(physical)
+}
+#[cfg(myagents_model_qa)]
+impl IdentityStore for ModelQaIdentityStore {
+    fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.load(&model_qa_physical_scope(scope)?)
+    }
+    fn save_pending(&self, scope: &KeyScope, key: &DevicePrivateKey) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.save_pending(&model_qa_physical_scope(scope)?, key)
+    }
+    fn delete(&self, scope: &KeyScope) -> Result<(), super::crypto::CryptoError> {
+        #[cfg(all(target_os = "macos", not(test)))]
+        crate::modelqa_home::assert_private_default().map_err(|_| super::crypto::CryptoError::CredentialUnavailable)?;
+        self.inner.delete(&model_qa_physical_scope(scope)?)
+    }
+}
+#[cfg(all(test, myagents_model_qa))]
+mod model_qa_scope_tests {
+    #[test]
+    fn physical_namespace_is_distinct_and_never_mutates_wire_scope() {
+        let wire = super::KeyScope { issuer: "https://fixture.invalid".into(), environment: "production".into(), service_id: "98b5376a-4750-49e6-ae82-c5de39b7afef".into(), principal_id: "qa".into(), device_id: "cc8fc885-529b-43e9-8a58-ee7c5f2a4c58".into(), key_generation: 1 };
+        let physical = super::model_qa_physical_scope(&wire).unwrap();
+        assert_ne!(physical.service_id, wire.service_id);
+        assert_eq!(physical.service_id, super::model_qa_physical_scope(&wire).unwrap().service_id);
+        assert_eq!(physical.issuer, wire.issuer);
+        assert_eq!(wire.service_id, "98b5376a-4750-49e6-ae82-c5de39b7afef");
+        let mut next = wire.clone(); next.key_generation += 1;
+        assert_ne!(super::model_qa_physical_scope(&next).unwrap().service_id, physical.service_id);
+    }
+}
+
+#[cfg(myagents_model_qa)]
+fn authorize_model_qa_with(
+    scope: &KeyScope,
+    cancelled: &AtomicBool,
+    authorize: impl FnOnce(&KeyScope, &AtomicBool) -> Result<Arc<dyn IdentityStore>, super::crypto::CryptoError>,
+) -> Result<(Arc<dyn IdentityStore>, DevicePrivateKey), super::crypto::CryptoError> {
+    let physical = model_qa_physical_scope(scope)?;
+    let inner = authorize(&physical, cancelled)?;
+    let key = inner.load(&physical)?;
+    Ok((Arc::new(ModelQaIdentityStore { inner }), key))
+}
+#[cfg(all(test, myagents_model_qa))]
+mod model_qa_backend_tests {
+    use super::*;
+    use std::sync::Mutex;
+    use super::super::crypto::CryptoError;
+    struct Spy { calls: Arc<Mutex<Vec<(String, String)>>>, missing: bool }
+    impl IdentityStore for Spy {
+        fn load(&self, scope: &KeyScope) -> Result<DevicePrivateKey, CryptoError> {
+            self.calls.lock().unwrap().push(("load".into(), scope.service_id.clone()));
+            if self.missing { Err(CryptoError::CredentialMissing) } else { DevicePrivateKey::generate() }
+        }
+        fn save_pending(&self, scope: &KeyScope, _: &DevicePrivateKey) -> Result<(), CryptoError> { self.calls.lock().unwrap().push(("save".into(), scope.service_id.clone())); Ok(()) }
+        fn delete(&self, scope: &KeyScope) -> Result<(), CryptoError> { self.calls.lock().unwrap().push(("delete".into(), scope.service_id.clone())); Ok(()) }
+    }
+    fn scope() -> KeyScope { KeyScope { issuer: "https://fixture.invalid".into(), environment: "production".into(), service_id: "98b5376a-4750-49e6-ae82-c5de39b7afef".into(), principal_id: "qa".into(), device_id: "cc8fc885-529b-43e9-8a58-ee7c5f2a4c58".into(), key_generation: 1 } }
+    #[test]
+    fn all_operations_and_authorization_use_only_qa_physical_scope() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let wire = scope();
+        let physical = model_qa_physical_scope(&wire).unwrap();
+        let store = ModelQaIdentityStore { inner: Arc::new(Spy { calls: calls.clone(), missing: false }) };
+        store.load(&wire).unwrap();
+        store.save_pending(&wire, &DevicePrivateKey::generate().unwrap()).unwrap();
+        store.delete(&wire).unwrap();
+        let (authorized, _) = authorize_model_qa_with(&wire, &AtomicBool::new(false), |s, _| {
+            calls.lock().unwrap().push(("authorize".into(), s.service_id.clone()));
+            Ok(Arc::new(Spy { calls: calls.clone(), missing: false }))
+        }).unwrap();
+        authorized.load(&wire).unwrap();
+        let seen = calls.lock().unwrap();
+        assert_eq!(seen.len(), 6);
+        assert!(seen.iter().all(|(_, id)| id == &physical.service_id && id != &wire.service_id));
+    }
+    #[test]
+    fn missing_qa_slot_never_falls_back_to_daily_slot() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let store = ModelQaIdentityStore { inner: Arc::new(Spy { calls: calls.clone(), missing: true }) };
+        assert!(matches!(store.load(&scope()), Err(CryptoError::CredentialMissing)));
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_ne!(calls.lock().unwrap()[0].1, scope().service_id);
     }
 }

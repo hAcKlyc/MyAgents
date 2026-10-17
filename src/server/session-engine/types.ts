@@ -265,6 +265,8 @@ export type SessionEngineRuntimeIdentity = {
 export type SessionEngineLiveState = {
   sessionState: string;
   isBusy: boolean;
+  /** Work owned by the current Query that can outlive its root product turn. */
+  backgroundWorkActive?: boolean;
   /** Actual root-blocking human interaction, not an async child question. */
   waitingForUser?: boolean;
   /** Start of the current product transcript turn; absent during pre-warm. */
@@ -413,11 +415,14 @@ export type ConversationOperationErrorCode =
   | 'restore_failed';
 
 export interface SessionEngine {
+  /** Optional runtime-owned, tool-free auxiliary generation; never enqueues a turn. */
+  runTextUtility?(task: import('../runtimes/types').RuntimeTextUtilityTask): Promise<string | null>;
   publishTranscriptSaveStatus(status: import('../../shared/sessionTranscript').TranscriptSaveStatus): void;
   kind: SessionEngineKind;
   isBusy(): boolean;
   getRuntimeIdentity(): SessionEngineRuntimeIdentity;
   getLiveSessionState(): SessionEngineLiveState;
+  getWorkProgressSnapshot?(): import("../../shared/sessionWorkProgress").SessionWorkProgress;
   getLatestAssistantResult(): Promise<SessionEngineLatestResult>;
   getStreamReplaySnapshot(): SessionEngineStreamReplaySnapshot;
   getSessionConfigSnapshot(): SessionEngineConfigSnapshot;
@@ -445,7 +450,7 @@ export interface SessionEngine {
   enqueueInboxMessage(request: InboxMessageRequest): Promise<InboxAdmissionResult>;
   prepareScheduledTurn(request: ScheduledTurnPreparationRequest): Promise<ScheduledTurnPreparationResult>;
   runInjectedTurn(request: InjectedTurnRequest): Promise<InjectedTurnResult>;
-  stopTurn(options?: { preserveQueue?: boolean }): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
+  stopTurn(options?: { preserveQueue?: boolean; wholeSession?: boolean }): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
   stopOwnedTurn(owner: TurnOwner): Promise<{ success: boolean; alreadyStopped?: boolean; error?: string }>;
   cancelQueuedMessage(queueId: string): Promise<QueueCancelResult>;
   forceQueuedMessage(queueId: string): Promise<boolean>;

@@ -1,0 +1,33 @@
+{
+  "task": "MOXBOTS-UNIFIED-055-DOWNLOAD-20261015",
+  "status": "public-page-accepted-main-pending",
+  "artifactSource": "52bf61602522fb28715edf620d98ad8e3deee842",
+  "zipBytes": 344623193,
+  "zipSHA256": "b2bf83f464e7311869eb31a51db5427d67b7baf9099b6ab91de9672f53f8f4be",
+  "immutableRelease": "https://github.com/heavenzhang/MoXBots/releases/tag/moxbots-trial-0.5.5-52bf6160",
+  "website": "https://140.143.183.232/download/",
+  "releaseManifest": "releases.e9d3e01adbd5.json",
+  "files": {
+    "download/index.html": "d16765a5fe0cb1c58a1eb649a4bc0ec3a8522cb6ca800519a760953c570085b4",
+    "download/releases.e9d3e01adbd5.json": "e9d3e01adbd57ef83eb24f42bb4f16792175f72debcc9b3e5f7136d80f15ca62"
+  },
+  "changedFiles": [
+    "download/index.html",
+    "download/releases.e9d3e01adbd5.json"
+  ],
+  "allOtherWebsiteFilesUnchanged": true,
+  "nginxReloaded": false,
+  "cloudPidUnchanged": true,
+  "originalUpdateOwner056HandoffConfirmed": true,
+  "routeCount": 13,
+  "allRouteChecksPassed": true,
+  "strictHTTPS": true,
+  "browserDesktop": "1440x960",
+  "browserMobile": "390x844",
+  "screenshotsPrimaryReviewed": true,
+  "dailyClientOperated": false,
+  "hostBusinessAccepted": false,
+  "nativeInstallationAccepted": false,
+  "newWorkers": 0,
+  "externalModelCalls": 0
+}

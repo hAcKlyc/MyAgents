@@ -3,12 +3,12 @@
   "channel": "trial",
   "macArm64": {
     "status": "ready",
-    "version": "0.5.4 · e5a05f76",
-    "sourceCommit": "e5a05f76974a4962beb0b7de259690daaef08fd5",
-    "bytes": 351866393,
-    "sha256": "9548da2b9e4d47a6fe30db15a244adc9822893a6eaf567aa8435d6e7a6ee1ff7",
+    "version": "0.5.6 · a81d2509",
+    "sourceCommit": "a81d2509fa92968ddaaed63416a2478d21b8a373",
+    "bytes": 344739590,
+    "sha256": "f9b31491e5bf15b3073c41cd483833ae9c58b99c246b099e3c8f1256d493bdb4",
     "signed": true,
     "notarized": true,
-    "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.4-e5a05f76/MoxBots-0.5.4-macOS-arm64.zip"
+    "url": "https://github.com/heavenzhang/MoXBots/releases/download/moxbots-trial-0.5.6-a81d2509/MoxBots-0.5.6-macOS-arm64.zip"
   }
 }

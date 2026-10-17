@@ -130,6 +130,27 @@ pub(crate) struct AgentNetwork {
 pub(crate) type ManagedConnection = Arc<AgentNetwork>;
 pub(crate) use super::registry::ManagedAgentNetwork;
 impl AgentNetwork {
+    pub(crate) async fn community_request(
+        &self,
+        scope: &super::community::CommunityScope,
+        request: &super::community::CommunityRequest,
+    ) -> Result<Value, NetworkError> {
+        self.account
+            .as_ref()
+            .ok_or_else(|| NetworkError::new("OWNED_SERVICE_UNAVAILABLE"))?
+            .community_request(scope, request)
+            .await
+    }
+    pub(crate) fn local_device_identity(
+        &self,
+    ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {
+        match &self.account {
+            Some(account) => account.device_identity(),
+            None => crate::device_identity::current_device_identity()
+                .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE")),
+        }
+    }
+
     /// Presentation metadata from the existing account owner. This never reads
     /// an OS credential item and does not infer account validity from transport.
     pub(crate) fn owned_session_metadata(&self) -> Option<(u64, bool)> {
@@ -927,6 +948,9 @@ async fn connect(
             account.ensure_current()?;
             identity
         }
+        // Explicit recovery already validated an existing key. Do not run the
+        // ordinary desktop credential migration after a read-only CLI restore.
+        _ if owner.authorized_identity_store.is_some() => NetworkIdentity::initialize_existing(account, identity_store).await?,
         _ => super::identity_desktop::initialize_selected(account, None, identity_store).await?,
     };
     let transport = Arc::new(NetworkTransport::new_with_public_ca(

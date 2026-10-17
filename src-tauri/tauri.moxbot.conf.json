@@ -71,7 +71,8 @@
             "global-shortcut:allow-unregister",
             "global-shortcut:allow-is-registered"
           ]
-        }
+        },
+        "ui-zoom"
       ]
     }
   },
@@ -121,5 +122,5 @@
       ]
     }
   },
-  "version": "0.5.4"
+  "version": "0.5.8"
 }

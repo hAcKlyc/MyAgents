@@ -137,6 +137,7 @@ pub async fn start_management_api() -> Result<u16, String> {
                 ))
                 .layer(middleware::from_fn(agent_network_body_budget)),
         )
+        .route("/api/agent-network/cli", post(agent_network_cli_handler).layer(DefaultBodyLimit::max(2048)))
         .route(
             "/api/agent-network/diagnose",
             post(agent_network_diagnose_handler),
@@ -456,24 +457,19 @@ async fn session_text_page_handler(
             "error": "Sidecar manager is not initialized",
         }));
     };
-    if matches!(request.projection, SessionReadProjection::Activity) {
-        let state = manager.lock().unwrap();
-        if state
-            .get_session_sidecar(&request.session_id)
-            .is_some_and(|sidecar| sidecar.state == crate::sidecar::SidecarState::Starting)
-        {
-            return no_store_json(serde_json::json!({"ok":false,"code":"session_owner_starting"}));
-        }
-    }
     for attempt in 1..=SESSION_OWNER_READ_ATTEMPTS {
         // Re-resolve the owner for each attempt. A failed request may have
         // raced a generation replacement; retrying the captured URL would
         // only pin the stale owner for longer.
-        let dispatch = match manager
-            .lock()
-            .unwrap()
-            .acquire_session_dispatch(&request.session_id)
-        {
+        let dispatch = {
+            let mut state = manager.lock().unwrap();
+            if matches!(request.projection, SessionReadProjection::Activity) {
+                state.acquire_session_activity_dispatch(&request.session_id)
+            } else {
+                state.acquire_session_dispatch(&request.session_id)
+            }
+        };
+        let dispatch = match dispatch {
             Ok(dispatch) => dispatch,
             Err(error) => {
                 return no_store_json(serde_json::json!({
@@ -958,6 +954,65 @@ async fn agent_network_discovery_handler(
     }
 }
 
+async fn agent_network_cli_handler(
+    headers: HeaderMap,
+    Json(request): Json<crate::agent_network::cli::Request>,
+) -> (HeaderMap, Json<serde_json::Value>) {
+    use crate::agent_network::{
+        actor::ManagedAgentNetwork, cli, registry::OwnedRegistryPoll, NetworkError,
+    };
+    use tauri::Manager;
+    if let Err(value) = validate_current_sidecar_request(&headers, request.sidecar_id()) {
+        return no_store_json(value);
+    }
+    if let Err(error) = request.validate() {
+        return no_store_json(serde_json::json!({"ok":false,"error":error}));
+    }
+    let result = async {
+        let app = crate::logger::get_app_handle().ok_or_else(|| NetworkError::new("CONNECTOR_UNAVAILABLE"))?;
+        let owner = app.try_state::<ManagedAgentNetwork>().ok_or_else(|| NetworkError::new("CONNECTOR_UNAVAILABLE"))?;
+        let manager = get_sidecar_state().ok_or_else(|| NetworkError::new("CONNECTOR_UNAVAILABLE"))?.clone();
+        let data = match request {
+            cli::Request::Status {..} => {
+                let mut view = cli::status(owner.view());
+                view["loginAttempts"] = serde_json::json!(owner.cli_attempts().await);
+                view
+            },
+            cli::Request::Login {connection_id,expected_revision,..} => {
+                let started=owner.owned_start_existing(&connection_id,expected_revision).await?;
+                serde_json::json!({"status":"authorization-required","started":started})
+            }
+            cli::Request::Poll {attempt_id,..} => {
+                owner.require_cli_attempt(&attempt_id).await?;
+                match owner.owned_poll(app.clone(),manager,&attempt_id).await? {
+                    OwnedRegistryPoll::Pending => serde_json::json!({"status":"pending","started":owner.cli_started(&attempt_id).await?}),
+                    OwnedRegistryPoll::Reauthorize(started) => serde_json::json!({"status":"authorization-required","started":started}),
+                    OwnedRegistryPoll::Authenticated(view) => serde_json::json!({"status":"authenticated","registry":cli::status(view)}),
+                }
+            }
+            cli::Request::Cancel {attempt_id,..} => {
+                owner.require_cli_attempt(&attempt_id).await?;
+                owner.owned_cancel(&attempt_id).await?;
+                serde_json::json!({"status":"cancelled"})
+            }
+            cli::Request::Restore {connection_id,expected_revision,operation_id,..} => {
+                let view=owner.owned_restore_background(app.clone(),manager,connection_id,expected_revision,operation_id).await?;
+                serde_json::json!({"status":"restore-accepted","registry":cli::status(view)})
+            }
+            cli::Request::CancelRestore {operation_id,..} => {
+                owner.owned_restore_cancel(&operation_id)?;
+                serde_json::json!({"status":"cancelled"})
+            }
+        };
+        Ok::<_,NetworkError>(data)
+    }.await;
+    match result {
+        Ok(data) => no_store_json(serde_json::json!({"ok":true,"data":data})),
+        Err(error) => no_store_json(
+            serde_json::json!({"ok":false,"error":{"code":error.code,"retryable":error.retryable}}),
+        ),
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkDiagnoseRequest {

@@ -123,8 +123,7 @@ pub(crate) async fn invoke(
         let network_id = snapshot
             .network_id
             .ok_or_else(|| NetworkError::new("CONNECTOR_NOT_READY"))?;
-        let device_id = crate::device_identity::get_or_create_device_id()
-            .map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        let device_id = owner.local_device_identity()?.device_id;
         let device = owner
             .request(MetadataRequest::DeviceName {
                 network_id: network_id.clone(),

@@ -176,6 +176,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   cronModeEnabled = false,
   cronConfig,
   goalDraftActive = false,
+  workflowDraft,
+  onRestoreWorkflowDraft,
   cronTask,
   sessionGoal,
   stoppedCronTask,
@@ -894,7 +896,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       text: inputValue,
       context: { agentMentions: activeAgentSnapshots(inputValue, agentMentions), primaryContext, requiredSystemSkill },
       imageCount: images.length, pendingAttachments: false, composing: false, sending: false,
-      stagedWorkflow: !!goalDraftActive || !!cronConfig,
+      stagedWorkflow: !!goalDraftActive || (cronModeEnabled && !cronTask && !!cronConfig),
+      ...(workflowDraft && onRestoreWorkflowDraft ? { workflowDraft } : {}),
     };
   });
   useLayoutEffect(() => {
@@ -903,13 +906,18 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       ...(composerDiscussionId ? { discussionId: composerDiscussionId } : {}) };
     const current = checkpointSnapshotRef.current!;
     const restored = restoreComposerUpdateDraft(scope, !inputValueRef.current && !getImageCount()
-      && !current.context.primaryContext && !current.context.requiredSystemSkill && !current.context.agentMentions?.length);
+      && !current.stagedWorkflow && !current.workflowDraft
+      && !current.context.primaryContext && !current.context.requiredSystemSkill && !current.context.agentMentions?.length, onRestoreWorkflowDraft);
     if (restored) {
       setInputValue(restored.text);
       setAgentMentions(restored.context.agentMentions ?? []);
       setPrimaryContext(restored.context.primaryContext);
       setRequiredSystemSkill(restored.context.requiredSystemSkill);
     }
+  }, [composerTabId, composerDiscussionId, sessionId, workspacePath, isLauncherMode, setInputValue,
+    getImageCount, goalDraftActive, cronModeEnabled, cronTask, onRestoreWorkflowDraft]);
+  useLayoutEffect(() => {
+    if (APP_BUILD_PROFILE !== 'moxbot') return;
     return registerComposerUpdateOwner({
       snapshot: () => ({ ...checkpointSnapshotRef.current!,
         text: textareaRef.current?.value ?? inputValueRef.current,
@@ -1505,9 +1513,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
           {/* Textarea area */}
           <div ref={textareaWrapperRef} className="relative px-4 pt-3">
-            <div className="grid">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)]">
             {visibleSuggestion && (
-              <div aria-hidden="true" data-testid="next-prompt-ghost" onMouseDown={event => { event.preventDefault(); textareaRef.current?.focus(); }} className="pointer-events-auto relative z-[1] col-start-1 row-start-1 whitespace-pre-wrap break-words text-base leading-relaxed text-[var(--ink-muted)]" style={{ maxHeight: `${LINE_HEIGHT * MAX_LINES}px`, overflowY: 'auto', overscrollBehaviorY: 'contain' }}>
+              <div aria-hidden="true" data-testid="next-prompt-ghost" onMouseDown={event => { event.preventDefault(); textareaRef.current?.focus(); }} className="pointer-events-auto relative z-[1] col-start-1 row-start-1 min-w-0 whitespace-pre-wrap break-words text-base leading-relaxed text-[var(--ink-muted)]" style={{ maxHeight: `${LINE_HEIGHT * MAX_LINES}px`, overflowX: 'hidden', overflowY: 'auto', overscrollBehaviorY: 'contain' }}>
                 {visibleSuggestion}
               </div>
             )}
@@ -1533,10 +1541,13 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                   : t('input.placeholder')
               }
               rows={effectiveMinLines}
-              className="col-start-1 row-start-1 block w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
+              className="col-start-1 row-start-1 block min-w-0 w-full resize-none bg-transparent text-base leading-relaxed text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)]"
               style={{
                 minHeight: `${LINE_HEIGHT * effectiveMinLines}px`,
                 maxHeight: `${LINE_HEIGHT * MAX_LINES}px`,
+                // Wrapped prose never scrolls sideways. WebView page zoom can
+                // leave a horizontal scrollbar when the implicit axis is auto.
+                overflowX: 'hidden',
                 overflowY: 'auto',
                 // The auto-resize effect imperatively writes `style.height`
                 // each keystroke; this transition smooths the visible

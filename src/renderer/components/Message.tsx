@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { track } from '@/analytics';
 import AttachmentPreviewList from '@/components/AttachmentPreviewList';
 import BlockGroup from '@/components/BlockGroup';
+import ExecutionQuality from '@/components/ExecutionQuality';
 import { projectCitationMarkdown, type CitationSources } from '@/utils/runtimeCitations';
 import Markdown from '@/components/Markdown';
 import { useToastOptional } from '@/components/Toast';
@@ -417,10 +418,11 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
               <span>via {SOURCE_LABELS[imSource as MessageSource] ?? imSource}</span>
             </div>
           )}
-          {/* 用户与 AI 正文都由 Markdown 默认变体承载 16px/1.7；article 的
-              text-base 只负责气泡内非 Markdown prose fallback。 */}
-          <div className="group/user-actions flex w-fit max-w-[85%] flex-col items-end">
-            <article className="relative w-fit max-w-full rounded-2xl bg-[var(--message-user-bg)] p-4 text-base text-[var(--ink)] select-text">
+          {/* Keep the selected Markdown reading size; user prose uses normal
+              weight while explicit Markdown emphasis retains its semantics. */}
+          <div className="group/user-actions relative flex w-fit min-w-0 max-w-[85%] flex-col items-end"
+               style={{ maxWidth: 'min(85%, calc(100% - 5rem))' }}>
+            <article className="relative w-fit min-w-0 max-w-full rounded-xl bg-[var(--message-user-bg)] px-3 py-2 text-base text-[var(--ink)] select-text">
               {/* System injection tag badge */}
               {systemTag && (
                 <div className="mb-2 -mt-0.5">
@@ -445,14 +447,14 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
                   </div>
                 )}
                 {hasText && (
-                  <div className="user-message-content text-[var(--ink)]">
+                  <div className="user-message-content text-[var(--ink)] [--font-weight-prose:var(--font-weight-normal)]">
                     <Markdown preserveNewlines allowSetextHeadings={false}>{userContent}</Markdown>
                   </div>
                 )}
               </div>
               {/* Expand button with gradient fade — gradient overlaps bottom of content */}
               {!userExpanded && userOverflows && (
-                <div className="relative z-10 -mx-4 -mb-4 -mt-14">
+                <div className="relative z-10 -mx-3 -mb-2 -mt-14">
                   <div className="pointer-events-none h-14 bg-gradient-to-t from-[var(--message-user-bg)] to-[var(--message-user-bg-a0)]" />
                   <button
                     type="button"
@@ -460,7 +462,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
                       notifyRowLayoutChanged('user-message-expand');
                       setUserExpanded(true);
                     }}
-                    className="flex w-full items-center justify-center gap-1 rounded-b-2xl bg-[var(--message-user-bg)] py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
+                    className="flex w-full items-center justify-center gap-1 rounded-b-xl bg-[var(--message-user-bg)] py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
                   >
                     <ChevronDownIcon className="size-3.5" />
                     {t('message.expand')}
@@ -471,9 +473,11 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
             {message.deliveryStatus === 'failed' && (
               <p className="mr-2 mt-1 text-xs text-[var(--error)]">{t('app:tabProvider.sendFailed')}</p>
             )}
-            {/* 操作栏：时间 + 图标按钮，随气泡/操作栏局部 hover 或键盘 focus 淡入 */}
-            <div className="mr-2 mt-1 flex items-center gap-2 opacity-0 transition-opacity duration-150 group-hover/user-actions:opacity-100 group-focus-within/user-actions:opacity-100">
-              <span className="mr-1 text-xs text-[var(--ink-muted)]">{formatTimestamp(message.timestamp)}</span>
+            {/* Actions occupy the reserved left gutter, not a blank line below
+                every bubble. Keyboard focus and touch keep them reachable. */}
+            <div title={formatTimestamp(message.timestamp)} data-user-message-actions
+                 className="pointer-events-none absolute inset-y-0 right-full flex items-start gap-1 pr-1 pt-1 opacity-0 transition-opacity duration-150 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-focus-within/user-actions:pointer-events-auto group-focus-within/user-actions:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
+              <span className="sr-only">{formatTimestamp(message.timestamp)}</span>
               {onRewind && !message.deliveryStatus && (
                 <span data-rewind-btn>
                   <Tip label={t('message.actions.rewind')}>
@@ -532,6 +536,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
               <Markdown citationSources={citationSources} streaming={isLoading && !!message.streamingTextActive}>{message.content}</Markdown>
             </div>
           )}
+          <ExecutionQuality message={message} live={isLoading} />
           {!isLoading && <AssistantActions citationSources={citationSources} message={message} onRetry={onRetry} onFork={onFork} />}
         </div>
       </div>
@@ -558,7 +563,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
       // Local tools can predate the explicit loading bit, so retain the legacy
       // result fallback for history compatibility.
       const subagentRunning = block.tool?.subagentCalls?.some((call) => call.isLoading);
-      return Boolean(block.tool?.isLoading) || Boolean(subagentRunning) || !block.tool?.result;
+      return Boolean(block.tool?.isLoading) || Boolean(subagentRunning) || block.tool?.result === undefined;
     }
     return false;
   });
@@ -658,6 +663,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
             })}
           </div>
         </article>
+        <ExecutionQuality message={message} live={isLoading} />
         {!isLoading && <AssistantActions citationSources={citationSources} className="px-4" message={message} onRetry={onRetry} onFork={onFork} />}
       </div>
     </div>

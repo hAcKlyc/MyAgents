@@ -85,7 +85,10 @@ pub(crate) struct SelfhostAccount {
     pub enrollment_key: Option<Zeroizing<String>>,
 }
 pub(crate) struct OwnedAccount {
+    pub binding_id: String,
     pub connection_id: String,
+    pub device_id: String,
+    pub session_bound: bool,
     pub descriptor: super::owned_login::OwnedInstance,
     pub active: Arc<AtomicBool>,
     pub session: super::owned_login::OwnedSession,
@@ -102,6 +105,36 @@ pub(crate) enum NetworkAccountSession {
 impl NetworkAccountSession {
     pub(crate) fn capture() -> Result<Self, NetworkError> {
         OfficialAccountSession::capture().map(Self::Official)
+    }
+    /// The owned login binds its token to a per-account device. Physical host
+    /// metadata remains shared, while official and legacy identities stay global.
+    pub(crate) fn device_identity(
+        &self,
+    ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {
+        self.device_identity_with(crate::device_identity::current_device_identity)
+    }
+    fn device_identity_with<E>(
+        &self,
+        physical: impl FnOnce() -> Result<crate::device_identity::DeviceIdentity, E>,
+    ) -> Result<crate::device_identity::DeviceIdentity, NetworkError> {
+        let owned_device = match self {
+            Self::Owned(account) => {
+                if uuid::Uuid::parse_str(&account.device_id)
+                    .map(|id| id.to_string())
+                    .as_deref()
+                    != Ok(account.device_id.as_str())
+                {
+                    return Err(NetworkError::new("IDENTITY_SCOPE_MISMATCH"));
+                }
+                Some(account.device_id.as_str())
+            }
+            Self::Official(_) | Self::Selfhost(_) => None,
+        };
+        let mut device = physical().map_err(|_| NetworkError::new("DEVICE_ID_UNAVAILABLE"))?;
+        if let Some(device_id) = owned_device {
+            device.device_id = device_id.to_owned();
+        }
+        Ok(device)
     }
     pub(crate) fn binding_id(&self) -> &str {
         match self {
@@ -195,6 +228,37 @@ impl NetworkAccountSession {
                 }
             }
         }
+    }
+    pub(crate) async fn community_request(
+        &self,
+        scope: &super::community::CommunityScope,
+        request: &super::community::CommunityRequest,
+    ) -> Result<Value, NetworkError> {
+        self.ensure_current()?;
+        let Self::Owned(account) = self else {
+            return Err(NetworkError::new("OWNED_SERVICE_UNAVAILABLE"));
+        };
+        if !scope.matches(
+            &account.connection_id,
+            &account.session.principal_id,
+            &account.binding_id,
+        ) {
+            return Err(NetworkError::new("ACCOUNT_BINDING_CHANGED"));
+        }
+        // Validate before discovery; a renderer cannot turn this into arbitrary HTTP.
+        request.route()?;
+        let (client, current) = super::owned_login::OwnedClient::discover(
+            &account.descriptor.issuer,
+            account.public_tls_ca.as_deref(),
+        )
+        .await?;
+        account.descriptor.ensure_same_trust(&current)?;
+        self.ensure_current()?;
+        let result = client
+            .community_request(request, &account.session.access_token)
+            .await;
+        self.ensure_current()?;
+        result
     }
     pub(crate) async fn request(
         &self,
@@ -359,23 +423,13 @@ mod tests {
             jwks: serde_json::json!({"keys":[jwk]}),
         }
     }
-    #[test]
-    fn revocation_probe_is_exclusive_to_committed_legacy_enrollment_key_owner() {
-        for enrollment_key in [None, Some(Zeroizing::new("test-enrollment".into()))] {
-            let eligible = enrollment_key.is_some();
-            let legacy = NetworkAccountSession::Selfhost(Arc::new(SelfhostAccount {
-                connection_id: "legacy-test".into(),
-                descriptor: sample(),
-                active: Arc::new(AtomicBool::new(true)),
-                enrollment_key,
-            }));
-            assert!(!legacy.requires_revocation_probe(None));
-            assert_eq!(legacy.requires_revocation_probe(Some(1)), eligible);
-            assert_eq!(legacy.has_enrollment_key(), eligible);
-        }
+    fn owned_account(device_id: &str, principal_id: &str) -> NetworkAccountSession {
         let d = sample();
-        let owned = NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+        NetworkAccountSession::Owned(Arc::new(OwnedAccount {
+            binding_id: "test-binding".into(),
             connection_id: "owned-test".into(),
+            device_id: device_id.into(),
+            session_bound: false,
             descriptor: super::super::owned_login::OwnedInstance {
                 version: 1,
                 profile: "owned-device-relay-v1".into(),
@@ -394,13 +448,95 @@ mod tests {
             session: super::super::owned_login::OwnedSession {
                 access_token: "x".repeat(43),
                 expires_at: jsonwebtoken::get_current_timestamp() + 600,
-                principal_id: d.principal_id,
+                principal_id: principal_id.into(),
                 network_id: d.network_id,
             },
             public_tls_ca: None,
             join_authorized: AtomicBool::new(false),
             guard: Arc::new(|| Ok(())),
+        }))
+    }
+    fn physical_device() -> crate::device_identity::DeviceIdentity {
+        crate::device_identity::DeviceIdentity {
+            device_id: "legacy-installation-id".into(),
+            device_name: Some("Fixture Mac".into()),
+            platform: "darwin-aarch64".into(),
+            os_version: Some("fixture-os".into()),
+            app_version: "fixture-version".into(),
+        }
+    }
+    #[test]
+    fn owned_accounts_use_login_devices_while_legacy_keeps_the_installation_device() {
+        let first = owned_account(
+            "00000000-0000-4000-8000-000000000004",
+            "00000000-0000-4000-8000-000000000005",
+        );
+        let second = owned_account(
+            "00000000-0000-4000-8000-000000000006",
+            "00000000-0000-4000-8000-000000000007",
+        );
+        for (account, expected_device) in [
+            (&first, "00000000-0000-4000-8000-000000000004"),
+            (&second, "00000000-0000-4000-8000-000000000006"),
+        ] {
+            let device = account
+                .device_identity_with(|| Ok::<_, ()>(physical_device()))
+                .unwrap();
+            assert_eq!(device.device_id, expected_device);
+            let physical = physical_device();
+            assert_eq!(device.device_name, physical.device_name);
+            assert_eq!(device.platform, physical.platform);
+            assert_eq!(device.os_version, physical.os_version);
+            assert_eq!(device.app_version, physical.app_version);
+        }
+        let legacy = NetworkAccountSession::Selfhost(Arc::new(SelfhostAccount {
+            connection_id: "legacy-fixture".into(),
+            descriptor: sample(),
+            active: Arc::new(AtomicBool::new(true)),
+            enrollment_key: None,
         }));
+        let device = legacy
+            .device_identity_with(|| Ok::<_, ()>(physical_device()))
+            .unwrap();
+        assert_eq!(device.device_id, physical_device().device_id);
+    }
+    #[test]
+    fn malformed_owned_device_fails_before_loading_physical_metadata() {
+        for device_id in ["", "not-a-device", "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"] {
+            let account = owned_account(device_id, "00000000-0000-4000-8000-000000000005");
+            let result = account.device_identity_with::<()>(|| {
+                panic!("invalid login device must not use the installation identity")
+            });
+            assert_eq!(result.err().unwrap().code, "IDENTITY_SCOPE_MISMATCH");
+        }
+    }
+    #[test]
+    fn physical_identity_failure_does_not_fall_back_to_another_account() {
+        let account = owned_account(
+            "00000000-0000-4000-8000-000000000004",
+            "00000000-0000-4000-8000-000000000005",
+        );
+        let result = account.device_identity_with(|| Err(()));
+        assert_eq!(result.err().unwrap().code, "DEVICE_ID_UNAVAILABLE");
+    }
+    #[test]
+    fn revocation_probe_is_exclusive_to_committed_legacy_enrollment_key_owner() {
+        for enrollment_key in [None, Some(Zeroizing::new("test-enrollment".into()))] {
+            let eligible = enrollment_key.is_some();
+            let legacy = NetworkAccountSession::Selfhost(Arc::new(SelfhostAccount {
+                connection_id: "legacy-test".into(),
+                descriptor: sample(),
+                active: Arc::new(AtomicBool::new(true)),
+                enrollment_key,
+            }));
+            assert!(!legacy.requires_revocation_probe(None));
+            assert_eq!(legacy.requires_revocation_probe(Some(1)), eligible);
+            assert_eq!(legacy.has_enrollment_key(), eligible);
+        }
+        let owned = owned_account(
+            "00000000-0000-4000-8000-000000000004",
+            "00000000-0000-4000-8000-000000000005",
+        );
         // Preserve enrollment/management policy while excluding the legacy probe.
         assert!(owned.has_enrollment_key());
         assert!(owned.is_selfhost());

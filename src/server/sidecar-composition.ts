@@ -1,3 +1,4 @@
+import { isModelQaRoute } from './modelqa/routes';
 import { parseSidecarRole, type SidecarRole } from './sidecar-role';
 
 export type SidecarCapability = 'common' | 'global' | 'session';
@@ -68,6 +69,8 @@ const SESSION_EXACT_PATHS = new Set([
   '/api/ask-user-question/respond',
   '/api/agents/set',
   '/api/cc-plugin/session-enable',
+  // Suggestions read the completed turn and use this Session's frozen model/credentials.
+  '/api/chat/next-prompt',
   '/api/enter-plan-mode/respond',
   '/api/exit-plan-mode/respond',
   '/api/generate-session-title',
@@ -204,6 +207,14 @@ const COMMON_ADMIN_ROUTES = new Set([
   'help',
   'status',
   'version',
+  // Network account control is a fixed common CLI surface. Unknown actions
+  // must remain unowned rather than inheriting authority from a prefix.
+  'network/status',
+  'network/login',
+  'network/poll',
+  'network/cancel',
+  'network/restore',
+  'network/cancel-restore',
   // Addressed Session operations resolve their explicit target through Rust;
   // they do not require the caller process to own a Product Session. This is
   // what lets the authenticated Global Host serve ordinary local programs.
@@ -244,6 +255,7 @@ export function classifySidecarRequest(request: Request): SidecarCapability | nu
   const method = request.method.toUpperCase();
 
   if (method === 'OPTIONS') return 'common';
+  if (isModelQaRoute(pathname, method)) return 'common';
 
   const sessionsCapability = classifySessionsRoute(pathname, method);
   if (sessionsCapability) return sessionsCapability;

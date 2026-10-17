@@ -82,6 +82,7 @@ it("MoxBots downloads in the background but never installs when an update become
 it.each([
   ["UPDATE_BUSY: task", "busy"],
   ["UPDATE_ACTIVITY_UNKNOWN: owner", "activity-unknown"],
+  ["UPDATE_WORKER_STILL_RUNNING: document", "blocked"],
 ])(
   "retains the downloaded update after %s without scheduling an automatic restart",
   async (error, expected) => {
@@ -159,5 +160,17 @@ it('allows re-downloading after a background handoff became ready but the saved 
   await act(async () => { expect(await result.current.restartAndUpdate()).toBe('signature-error'); });
   await act(async () => { await result.current.checkForUpdate(); });
   expect(mocks.invoke.mock.calls.filter(([command]) => command === 'test_update_connectivity')).toHaveLength(2);
+  unmount();
+});
+
+
+it('passes interruption permission only for an explicitly confirmed restart', async () => {
+  const { result, unmount } = renderHook(() => useUpdater());
+  expect(mocks.invoke).not.toHaveBeenCalledWith('install_pending_update', { interruptWork: true });
+  await act(async () => {
+    expect(await result.current.restartAndUpdate({ interruptWork: true })).toBe('ok');
+  });
+  expect(mocks.invoke).toHaveBeenCalledWith('install_pending_update', { interruptWork: true });
+  expect(mocks.relaunch).not.toHaveBeenCalled();
   unmount();
 });

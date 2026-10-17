@@ -817,6 +817,28 @@ impl SidecarManager {
         Ok(targets)
     }
 
+    /// Pin every exact generation until its restart checkpoint response has
+    /// been read. A stopped Task may concurrently release its final owner.
+    pub(super) fn acquire_update_restart_targets(
+        &mut self,
+    ) -> Result<Vec<(GlobalShutdownTarget, DispatchLease)>, String> {
+        let targets = self.update_restart_targets()?;
+        let mut admitted = Vec::new();
+        for target in targets {
+            let gate = self.sidecars.iter().find_map(|(id, sidecar)| {
+                (sidecar.port == target.port && self.generation_for(id) == Some(target.generation))
+                    .then_some(&sidecar.dispatch_gate)
+            }).or_else(|| self.instances.values().find_map(|instance| {
+                (instance.port == target.port && instance.generation == target.generation)
+                    .then_some(&instance.dispatch_gate)
+            })).ok_or_else(|| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+            let lease = DispatchGate::try_acquire(gate)
+                .ok_or_else(|| "UPDATE_ACTIVITY_UNKNOWN".to_string())?;
+            admitted.push((target, lease));
+        }
+        Ok(admitted)
+    }
+
     /// Stop all instances (session sidecars and global sidecar)
     pub(crate) fn prepare_stop_all(&mut self) -> SidecarShutdownPreparation {
         let mut drains = Vec::with_capacity(
@@ -971,6 +993,24 @@ impl SidecarManager {
             generation,
             _lease: lease,
         }))
+    }
+
+    /// Activity reads must distinguish an absent owner from one whose current
+    /// generation cannot be observed. Text reads may fall back to history;
+    /// activity must never turn a recovery/drain/readiness gap into idle.
+    pub(crate) fn acquire_session_activity_dispatch(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Option<SidecarHttpDispatch>, String> {
+        if self.recovering_sidecars.contains_key(session_id) {
+            return Err("Session owner is recovering".to_string());
+        }
+        if !self.sidecars.contains_key(session_id) {
+            return Ok(None);
+        }
+        self.acquire_session_dispatch(session_id)?
+            .map(Some)
+            .ok_or_else(|| "Session owner is not ready for activity observation".to_string())
     }
 
     /// Resolve the current ready Sidecar process for a renderer-owned
@@ -2327,6 +2367,110 @@ pub fn create_sidecar_state() -> ManagedSidecar {
 #[cfg(test)]
 mod completion_claim_tests {
     use super::*;
+
+    #[test]
+    fn activity_dispatch_only_reports_absent_for_a_truly_unowned_session() {
+        let mut manager = SidecarManager::new();
+        assert!(manager
+            .acquire_session_activity_dispatch("absent")
+            .unwrap()
+            .is_none());
+        manager.insert_test_ready_frontend_sidecar(
+            "session-a",
+            32001,
+            SidecarOwner::Tab("tab-a".to_string()),
+        );
+        let generation = manager.generation_for("session-a").unwrap();
+        let dispatch = manager
+            .acquire_session_activity_dispatch("session-a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dispatch.generation(), generation);
+        assert_eq!(
+            dispatch
+                .url_for_path("/api/internal/session/text-page")
+                .unwrap(),
+            "http://127.0.0.1:32001/api/internal/session/text-page"
+        );
+        drop(dispatch);
+
+        for state in [SidecarState::Starting, SidecarState::Dead] {
+            manager.sidecars.get_mut("session-a").unwrap().state = state;
+            assert!(manager
+                .acquire_session_activity_dispatch("session-a")
+                .is_err());
+            // Historical text remains readable through the existing fallback.
+            assert!(manager
+                .acquire_session_dispatch("session-a")
+                .unwrap()
+                .is_none());
+        }
+        manager.sidecars.get_mut("session-a").unwrap().state = SidecarState::Healthy;
+        let gate = manager
+            .sidecars
+            .get("session-a")
+            .unwrap()
+            .dispatch_gate
+            .clone();
+        let _drain = DispatchGate::close(&gate);
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+    }
+
+    #[test]
+    fn activity_dispatch_refuses_recovery_until_the_ready_generation_commits() {
+        let mut manager = SidecarManager::new();
+        let owner = SidecarOwner::Tab("tab-a".to_string());
+        manager.insert_test_ready_frontend_sidecar("session-a", 32001, owner.clone());
+        let old_generation = manager.generation_for("session-a").unwrap();
+        manager.begin_session_sidecar_replacement("session-a");
+        assert!(manager.sidecars.get("session-a").is_none());
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+
+        manager.insert_test_ready_frontend_sidecar("session-a", 32002, owner);
+        let generation = manager.generation_for("session-a").unwrap();
+        assert_ne!(generation, old_generation);
+        assert!(manager
+            .acquire_session_activity_dispatch("session-a")
+            .is_err());
+        manager
+            .recovering_sidecars
+            .get_mut("session-a")
+            .unwrap()
+            .candidate_generation = Some(generation);
+        assert!(manager.commit_ready_session_sidecar("session-a").is_some());
+        let dispatch = manager
+            .acquire_session_activity_dispatch("session-a")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dispatch.generation(), generation);
+    }
+
+    #[test]
+    fn update_checkpoint_pins_task_only_process_until_its_durable_response() {
+        let mut manager = SidecarManager::new();
+        manager.insert_test_ready_frontend_sidecar(
+            "task-checkpoint", 31428, SidecarOwner::Task("task".to_string()),
+        );
+        let admitted = manager.acquire_update_restart_targets().unwrap();
+        assert_eq!(admitted.len(), 1);
+        let drain = DispatchGate::close(&manager.sidecars.get("task-checkpoint").unwrap().dispatch_gate);
+        let (started, ready) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let retiring = std::thread::spawn(move || {
+            started.send(()).unwrap();
+            drain.wait();
+            finished.send(()).unwrap();
+        });
+        ready.recv().unwrap();
+        assert!(done.recv_timeout(std::time::Duration::from_millis(20)).is_err());
+        drop(admitted);
+        done.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+        retiring.join().unwrap();
+    }
 
     #[test]
     fn update_restart_snapshot_keeps_exact_generations_and_rejects_unready_owners() {

@@ -1,3 +1,4 @@
+import UpdateRestartConfirmation from '@/components/UpdateRestartConfirmation';
 import { restoreRemoteTabForAccount } from '@/features/remote-session/accountFence';
 import { currentNetworkSnapshot } from '@/features/agent-network/store';
 import type { RemoteSessionOpenIntent } from '@/features/remote-session/tabContract';
@@ -139,6 +140,7 @@ import { recordGet } from '@/api/taskCenter';
 import { createSession, getSessions, updateSession } from '@/api/sessionClient';
 import { dismissTopmost } from '@/utils/closeLayer';
 import { dispatchAppShortcut } from '@/utils/appShortcuts';
+import { changeAppZoom } from '@/utils/appZoom';
 import { handleSelectAllKeydown } from '@/utils/selectAllRouter';
 import {
   forceFlushLogs,
@@ -408,6 +410,7 @@ export default function App() {
   } = useConfig();
   const spaceBuildCapability = useSpaceBuildCapability(config.spaceEnvironment);
   const teamSpaceAvailable =
+    APP_BUILD_PROFILE !== 'moxbot' &&
     !configLoading &&
     spaceBuildCapability.available &&
     config.teamSpaceDevGate !== false;
@@ -564,6 +567,8 @@ export default function App() {
   );
 
   useEffect(() => {
+    // The owned community shares the Tab slot, not Cloud Space availability.
+    if (APP_BUILD_PROFILE === 'moxbot') return;
     if (configLoading || spaceBuildCapability.isLoading) return;
     const currentTabs = tabWorkspaceController.getSnapshot().tabs;
     const routeTabId = spaceRouteTabIdRef.current;
@@ -860,7 +865,7 @@ export default function App() {
   // does nothing" reports on Windows: a flaky network would kill the install
   // verification round-trip, the JS only console.warn-ed, and the user
   // assumed the button was broken.
-  const performRestartAndUpdate = useCallback(async (checkpoint?: ReturnType<typeof beginComposerUpdateCheckpoint>) => {
+  const performRestartAndUpdate = useCallback(async (checkpoint?: ReturnType<typeof beginComposerUpdateCheckpoint>, interruptWork = false) => {
     // Persist open-tab state before the install/relaunch exits the process from
     // Rust (Issue #232). flushOpenTabsNow() writes localStorage (the fast path),
     // but WebKit/WebView2 persist localStorage to disk ASYNCHRONOUSLY, so the
@@ -879,7 +884,7 @@ export default function App() {
       | undefined;
     try {
       checkpoint?.verify(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
-      outcome = await restartAndUpdateRef.current();
+      outcome = await restartAndUpdateRef.current(interruptWork ? { interruptWork: true } : undefined);
     } finally {
       // Drop the durable handoff UNLESS the restart is actually proceeding
       // (outcome 'ok' → the process is exiting and boot will consume it). Any
@@ -1836,6 +1841,7 @@ export default function App() {
             ),
           openSettings: () =>
             window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS)),
+          changeZoom: changeAppZoom,
         })
       )
         return;
@@ -3816,6 +3822,14 @@ export default function App() {
         if (!opened) return false;
         return true;
       }
+      if (APP_BUILD_PROFILE === 'moxbot') {
+        if (route.name !== 'space.home') {
+          toastRef.current.info(t('globalSidebar.legacySpaceUnavailable'));
+          return true;
+        }
+        tabWorkspaceController.open('space', { title: t('globalSidebar.community') });
+        return true;
+      }
       if (!configLoading && config.teamSpaceDevGate === false) {
         toastRef.current.info(t('titlebar.teamUnavailable'));
         return false;
@@ -3943,6 +3957,10 @@ export default function App() {
   }, [handleOpenAppRoute]);
 
   const handleOpenSpace = useCallback(() => {
+    if (APP_BUILD_PROFILE === 'moxbot') {
+      tabWorkspaceController.open('space', { title: t('globalSidebar.community') });
+      return;
+    }
     if (configLoading || spaceBuildCapability.isLoading) {
       toastRef.current.info(t('titlebar.teamLoading'));
       return;
@@ -3971,12 +3989,16 @@ export default function App() {
   ]);
 
   const handleOpenToolMarket = useCallback(() => {
+    if (APP_BUILD_PROFILE === 'moxbot') {
+      toastRef.current.info(t('globalSidebar.legacySpaceUnavailable'));
+      return;
+    }
     if (!teamSpaceAvailable) {
       handleOpenSpace();
       return;
     }
     handleOpenAppRoute(createSpaceToolsAppRoute(DEFAULT_SPACE_ID));
-  }, [handleOpenAppRoute, handleOpenSpace, teamSpaceAvailable]);
+  }, [handleOpenAppRoute, handleOpenSpace, teamSpaceAvailable, t]);
 
   useEffect(() => {
     window.addEventListener(CUSTOM_EVENTS.OPEN_SPACE, handleOpenSpace);
@@ -4703,9 +4725,11 @@ export default function App() {
       return true;
     }, []);
 
-  const handleRestartAndUpdate = useCallback(async (confirmed = false) => {
+  const handleRestartAndUpdate = useCallback(async (confirmed = false, interruptWork = false) => {
     if (APP_BUILD_PROFILE === 'moxbot') {
-      // Updates never offer to interrupt work; Rust rejects busy/unknown owners.
+      // The normal action keeps work running and lets Rust reject busy/unknown
+      // owners. Only the separately labelled stop action grants interruption;
+      // both actions save the same drafts before native admission.
       if (!confirmed) { setShowUpdateRestartConfirmation(true); return; }
       let checkpoint: ReturnType<typeof beginComposerUpdateCheckpoint> | undefined;
       let restarting = false;
@@ -4719,7 +4743,7 @@ export default function App() {
           if (!(await submit())) return;
         }
         await checkpoint.persist(tabWorkspaceController.getSnapshot().tabs, tabWorkspaceController.getSnapshot().activeTabId);
-        restarting = (await performRestartAndUpdate(checkpoint)) === 'ok';
+        restarting = (await performRestartAndUpdate(checkpoint, interruptWork)) === 'ok';
       } catch (error) {
         console.error('[App] Failed to save drafts before update:', error);
         toastRef.current?.error(error instanceof Error ? `更新已暂停：${error.message}` : t('appChrome.updateInstallFailed'));
@@ -4964,8 +4988,8 @@ export default function App() {
     ],
   );
   const spaceBinding = useMemo<BuiltinTabBindings['space']>(
-    () => ({ onRouteConsumed: handleSpaceRouteConsumed }),
-    [handleSpaceRouteConsumed],
+    () => ({ onRouteConsumed: handleSpaceRouteConsumed, onOpenAccount: () => tabWorkspaceController.open('agentnetwork', { title: t('tabs.agentNetwork') }) }),
+    [handleSpaceRouteConsumed, tabWorkspaceController, t],
   );
   const recordBinding = useMemo<BuiltinTabBindings['record']>(
     () => ({
@@ -5034,7 +5058,7 @@ export default function App() {
   return (
     <SessionDeletionContext.Provider value={handleDeleteSession}>
       <LinkContextMenuProvider>
-        <div className="flex h-screen bg-[var(--paper)]">
+        <div className="flex h-[var(--app-viewport-height,100vh)] bg-[var(--paper)]">
           <GlobalSidebar
             newAgentPanelOpen={newAgentPanelOpen}
             onNewAgentPanelOpenChange={setNewAgentPanelOpen}
@@ -5180,36 +5204,39 @@ export default function App() {
           download completes (the dialog reads pendingUpdateOnStartup, which
           is unchanged; only the visibility gate is `updatePreparing`). */}
           {showUpdateRestartConfirmation && !updatePreparing && (
-            <ConfirmDialog
-              title={t('appChrome.updateRestartTitle')}
-              message={t('appChrome.updateRestartMessage', { version: updateVersion })}
-              confirmText={t('appChrome.updateRestartConfirm')}
-              cancelText={t('appChrome.later')}
-              confirmVariant="primary"
-              onConfirm={() => {
+            <UpdateRestartConfirmation
+              version={updateVersion}
+              onConfirm={(interruptWork) => {
                 setShowUpdateRestartConfirmation(false);
-                void handleRestartAndUpdate(true);
+                void handleRestartAndUpdate(true, interruptWork);
               }}
               onCancel={() => setShowUpdateRestartConfirmation(false)}
             />
           )}
           {pendingUpdateOnStartup && !updatePreparing && (
-            <ConfirmDialog
-              title={t('appChrome.newVersionTitle')}
-              message={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartMessage' : 'appChrome.newVersionMessage', {
-                version: pendingUpdateOnStartup,
-              })}
-              confirmText={t(APP_BUILD_PROFILE === 'moxbot' ? 'appChrome.updateRestartConfirm' : 'appChrome.install')}
-              cancelText={t('appChrome.later')}
-              confirmVariant="primary"
-              onConfirm={() => {
-                dismissPendingUpdate();
-                // Route through handleRestartAndUpdate so toast feedback fires
-                // on failure modes (network error / version mismatch).
-                void handleRestartAndUpdate(true);
-              }}
-              onCancel={dismissPendingUpdate}
-            />
+            APP_BUILD_PROFILE === 'moxbot' ? (
+              <UpdateRestartConfirmation
+                version={pendingUpdateOnStartup}
+                onConfirm={(interruptWork) => {
+                  dismissPendingUpdate();
+                  void handleRestartAndUpdate(true, interruptWork);
+                }}
+                onCancel={dismissPendingUpdate}
+              />
+            ) : (
+              <ConfirmDialog
+                title={t('appChrome.newVersionTitle')}
+                message={t('appChrome.newVersionMessage', { version: pendingUpdateOnStartup })}
+                confirmText={t('appChrome.install')}
+                cancelText={t('appChrome.later')}
+                confirmVariant="primary"
+                onConfirm={() => {
+                  dismissPendingUpdate();
+                  void handleRestartAndUpdate(true);
+                }}
+                onCancel={dismissPendingUpdate}
+              />
+            )
           )}
 
           {/* Bug report overlay triggered from titlebar feedback button */}

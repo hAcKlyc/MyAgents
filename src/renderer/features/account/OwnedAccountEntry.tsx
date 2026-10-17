@@ -5,7 +5,9 @@ import {
   LoaderIcon,
   LogOutIcon,
   UserIcon,
+  TeamIcon,
 } from "@/components/icons";
+import { canonicalOwnedIssuer } from '@/utils/ownedCloud';
 import { openExternal } from "@/utils/openExternal";
 import { Popover } from "@/components/ui/Popover";
 import ConfirmDialog from "@/components/ConfirmDialog";
@@ -18,8 +20,6 @@ import {
   selectNetworkConnection,
   startOwnedNetworkLogin,
   cancelOwnedNetworkLogin,
-  type NetworkConnection,
-  type NetworkRegistry,
 } from "@/api/agentNetwork";
 import {
   acceptNetworkRegistry,
@@ -27,65 +27,27 @@ import {
 } from "@/features/agent-network/store";
 import { JoinNetworkDialog } from "@/features/agent-network/JoinNetworkDialog";
 
-export function canonicalOwnedIssuer(
-  value: string | null | undefined,
-): string | null {
-  if (!value) return null;
-  try {
-    const parsed = new URL(value);
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username !== "" ||
-      parsed.password !== "" ||
-      parsed.search !== "" ||
-      parsed.hash !== "" ||
-      (parsed.pathname !== "" && parsed.pathname !== "/")
-    )
-      return null;
-    return parsed.origin;
-  } catch {
-    return null;
-  }
-}
+import { ownedAccountCandidates, selectedOwnedAccount } from './ownedAccountSelection';
 
-function ownedConnection(
-  registry: NetworkRegistry,
-  issuer: string | null,
-): NetworkConnection | null {
-  if (!issuer) return null;
-  const connections = registry.connections;
-  const eligible = connections.filter(
-    (item) =>
-      !item.official &&
-      !item.removing &&
-      item.ownedAccount &&
-      canonicalOwnedIssuer(item.url) === issuer,
-  );
-  const selected = connections.find(
-    (item) =>
-      item.id === registry.selected &&
-      !item.official &&
-      !item.removing &&
-      item.ownedAccount &&
-      canonicalOwnedIssuer(item.url) === issuer,
-  );
-  return selected ?? eligible[0] ?? null;
-}
+export { canonicalOwnedIssuer } from '@/utils/ownedCloud';
 
 export default function OwnedAccountEntry({
   expanded,
   onOpenAgentNetwork,
   onOpenHelper,
+  onOpenCommunity,
 }: {
   expanded: boolean;
   onOpenAgentNetwork?: () => void;
   onOpenHelper?: () => void;
+  onOpenCommunity?: () => void;
 }) {
   const { t } = useTranslation("app");
   const toast = useToast();
   const registry = useAgentNetworkRegistry();
   const serviceUrl = canonicalOwnedIssuer(registry.ownedServiceUrl);
-  const owned = ownedConnection(registry, serviceUrl);
+  const owned = selectedOwnedAccount(registry);
+  const chooseAccount = !owned && ownedAccountCandidates(registry).length > 1;
   const state = owned?.ownedAccount?.state;
   const principalId = owned?.ownedAccount?.principalId ?? "";
   const expiresAt = owned?.ownedAccount?.expiresAt ?? null;
@@ -106,12 +68,14 @@ export default function OwnedAccountEntry({
     serviceUrl,
     owned?.id ?? null,
     principalId,
+    owned?.ownedAccount?.bindingId ?? null,
     owned?.snapshot.authGeneration ?? null,
   ]);
   const loginBoundary = JSON.stringify([
     serviceUrl,
     owned?.id ?? null,
     principalId,
+    owned?.ownedAccount?.bindingId ?? null,
     owned?.snapshot.authGeneration ?? null,
     state,
   ]);
@@ -270,7 +234,7 @@ export default function OwnedAccountEntry({
     }
   };
 
-  const label =
+  const label = chooseAccount ? t("community:chooseAccount") :
     state === "authenticated"
       ? t("ownedAccountEntry.signedInAs", {
           instance: owned?.name ?? t("ownedAccountEntry.instance"),
@@ -347,12 +311,13 @@ export default function OwnedAccountEntry({
                 disabled={
                   !serviceUrl ||
                   busy ||
-                  (state === "authorizationRequired" && !onOpenAgentNetwork)
+                  ((state === "authorizationRequired" || chooseAccount) && !onOpenAgentNetwork)
                 }
                 className="w-full rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
                 onClick={() => {
                   setMenuOpen(false);
-                  if (state === "authorizationRequired")
+                  if (chooseAccount) onOpenAgentNetwork?.();
+                  else if (state === "authorizationRequired")
                     void selectRecoveredConnection();
                   else if (state === "unavailable") onOpenAgentNetwork?.();
                   else startLogin();
@@ -372,6 +337,15 @@ export default function OwnedAccountEntry({
             >
               <HelperIcon className="h-4 w-4" />
               {t("globalSidebar.helper")}
+            </button>
+            <button
+              type="button"
+              disabled={!onOpenCommunity}
+              onClick={() => { setMenuOpen(false); onOpenCommunity?.(); }}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--hover-bg)] disabled:opacity-60"
+            >
+              <TeamIcon className="h-4 w-4" />
+              {t("globalSidebar.community")}
             </button>
             <button
               type="button"
@@ -431,8 +405,10 @@ export default function OwnedAccountEntry({
           }}
           onOwnedOpen={(attemptId) => openOwnedNetworkAuthorization(attemptId)}
           onOwnedCancel={async (attemptId) => {
-            generation.current += 1;
-            pendingAttemptId.current = null;
+            if (pendingAttemptId.current === attemptId) {
+              generation.current += 1;
+              pendingAttemptId.current = null;
+            }
             try {
               await cancelOwnedNetworkLogin(attemptId);
             } catch {
@@ -442,17 +418,16 @@ export default function OwnedAccountEntry({
           onOwnedPoll={async (attemptId) => {
             const epoch = openedLoginGeneration.current;
             const result = await pollOwnedNetworkLogin(attemptId);
-            if (
-              result.status !== "authenticated" ||
-              !loginEpochIsCurrent(epoch)
-            )
-              return "pending";
+            if (!loginEpochIsCurrent(epoch)) return "pending";
+            if (result.status === "reauthorize") return result.authorization;
+            if (result.status !== "authenticated") return "pending";
             const next = result.registry;
             pendingAttemptId.current = null;
             completedAttempt.current = true;
             acceptNetworkRegistry(next);
             const match = next.connections.find(
               (connection) =>
+                connection.id === next.selected &&
                 !connection.official &&
                 !connection.removing &&
                 canonicalOwnedIssuer(connection.url) === serviceUrl,

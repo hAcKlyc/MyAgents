@@ -130,7 +130,7 @@
       "empty": "Nothing here yet",
       "failed": "Could not load results",
       "unavailable": "Unavailable in this context",
-        "networkPartial": "Network Agent list is incomplete",
+      "networkPartial": "Network Agent list is incomplete",
       "partial": "Partial results. Refine your search."
     },
     "permissionModes": {
@@ -623,6 +623,8 @@
       "cancelFailed": "Could not cancel. Retry, or use the composer Stop button to end this turn."
     },
     "planPrompt": {
+      "missingPlanSubtitle": "Plan content is missing. Ask the AI to provide it first.",
+      "missingPlan": "The plan could not be loaded, so approval is disabled. Ask the AI below to provide the full plan and resubmit, or reject this review.",
       "submitFeedback": "Submit feedback",
       "rejectPlan": "Reject plan",
       "title": "Plan review",
@@ -1240,9 +1242,20 @@
     "taskOffered": "Offered to",
     "taskBlockedBy": "Blocked by",
     "interruptTurn": "Interrupt current turn",
-    "nativeModes": { "one-shot": "One-time delegation", "continuable": "Continuable Agent" },
-    "nativeStates": { "running": "Running", "inactive": "Inactive" },
-    "taskStates": { "pending": "Pending", "in_progress": "In progress", "completed": "Completed", "cancelled": "Cancelled" },
+    "nativeModes": {
+      "one-shot": "One-time delegation",
+      "continuable": "Continuable Agent"
+    },
+    "nativeStates": {
+      "running": "Running",
+      "inactive": "Inactive"
+    },
+    "taskStates": {
+      "pending": "Pending",
+      "in_progress": "In progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    },
     "title": "Agent work tree",
     "close": "Close",
     "unknown": "Unknown",
@@ -1295,5 +1308,128 @@
     "unavailable": "No recoverable original was saved for this discussion. Check the original Record or saved conversation.",
     "resend": "Confirm resend",
     "resendConfirm": "The send response was lost and the message may already have been admitted. Check history and the queue first; resending may create a duplicate."
+  },
+  "process": {
+    "resultFor": "Latest result for: {{action}}",
+    "thinkingRecord": "Reasoning record",
+    "exitCode": "Exit code {{code}}",
+    "phase": {
+      "plan": "Plan and organize",
+      "explore": "Read and research",
+      "change": "File changes",
+      "verify": "Tests and checks",
+      "execute": "Commands and tools",
+      "delegate": "Agent collaboration",
+      "think": "Analysis"
+    },
+    "status": {
+      "running": "Running",
+      "succeeded": "Result returned",
+      "failed": "Failed",
+      "stopped": "Interrupted",
+      "unknown": "Unconfirmed"
+    },
+    "summary": {
+      "tools": "{{count}} tool calls",
+      "records": "{{count}} reasoning records",
+      "succeeded": "{{count}} returned",
+      "running": "{{count}} running",
+      "failed": "{{count}} failed",
+      "stopped": "{{count}} interrupted",
+      "unknown": "{{count}} unconfirmed"
+    },
+    "latest": "Latest action: {{action}}",
+    "showDetails": "Show execution details ({{count}})",
+    "hideDetails": "Hide execution details ({{count}})",
+    "action": {
+      "Read": "Read {{target}}",
+      "Write": "Write {{target}}",
+      "Edit": "Edit {{target}}",
+      "MultiEdit": "Edit {{target}}",
+      "Grep": "Search {{target}}",
+      "Glob": "Find {{target}}",
+      "WebSearch": "Search {{target}}",
+      "command": "Run command"
+    },
+    "heading": {
+      "plan": "Task progress",
+      "explore": "Research results",
+      "change": "Changes",
+      "verify": "Check results",
+      "execute": "Results",
+      "delegate": "Collaboration",
+      "think": "Analysis"
+    },
+    "work": {
+      "plan": "Organizing tasks and progress",
+      "explore": "Reviewing relevant material",
+      "change": "Updating files",
+      "verify": "Checking changes",
+      "execute": "Working on the task",
+      "delegate": "Working with collaborators",
+      "think": "Analyzing the problem"
+    },
+    "result": {
+      "readFile": "Read {{target}}",
+      "unknown": "No confirmed result yet",
+      "stopped": "This item was interrupted",
+      "failed": "This item did not complete; review its result",
+      "file": "Updated {{target}}",
+      "files": "Updated {{count}} files",
+      "think": "Analysis ended",
+      "foundFiles": "Found {{count}} files",
+      "matches": "Returned {{count}} matching lines",
+      "verify": "This check returned",
+      "execute": "This execution returned",
+      "explore": "Relevant material returned",
+      "plan": "Task progress returned",
+      "delegate": "Collaboration result returned",
+      "needsAttention": "Some results need attention",
+      "returned": "{{count}} results returned",
+      "progress": "Succeeded {{completed}}/{{total}}",
+      "updates": "{{count}} updates",
+      "updateNumber": "Update result {{count}}",
+      "awaiting": "Waiting for a result",
+      "files_one": "Updated {{count}} file",
+      "files_other": "Updated {{count}} files",
+      "updates_one": "{{count}} update",
+      "updates_other": "{{count}} updates",
+      "foundFiles_one": "Found {{count}} file",
+      "foundFiles_other": "Found {{count}} files",
+      "matches_one": "Returned {{count}} matching line",
+      "matches_other": "Returned {{count}} matching lines"
+    },
+    "showResults": "Show results and timing ({{count}})",
+    "hideResults": "Hide results and timing ({{count}})",
+    "timing": {
+      "start": "Started",
+      "unrecorded": "Time not recorded",
+      "elapsed": "Waited {{time}}",
+      "duration": "Execution {{time}}",
+      "activity": "Last event {{time}}",
+      "sinceActivity": "No new event for {{time}}",
+      "observed": "Backend event observation time, not API latency; the timer does not establish service health",
+      "runtime": "Runtime lifecycle timestamps; tool execution duration comes only from runtime reports, not API latency",
+      "finish": "Finished",
+      "observedStart": "Observed start",
+      "observedSpan": "Observed span {{time}}",
+      "groupStart": "Phase start",
+      "groupSpan": "Phase span {{time}}",
+      "spanUnrecorded": "Phase span not recorded",
+      "durationUnrecorded": "Execution duration not recorded"
+    },
+    "quality": {
+      "label": "Quality reference",
+      "attention": "Items need confirmation",
+      "checks": "Checks",
+      "checkCounts": "{{returned}} succeeded · {{failed}} failed",
+      "execution": "Execution signals",
+      "executionCounts": "{{failed}} failed · {{stopped}} interrupted · {{unknown}} unconfirmed",
+      "tokens": "Input {{input}} · output {{output}}",
+      "model": "Model",
+      "content": "Content quality",
+      "notAssessed": "Not assessed",
+      "scope": "Returned checks describe execution results. Content quality and business acceptance require separate confirmation."
+    }
   }
 }

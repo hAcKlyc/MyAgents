@@ -227,6 +227,32 @@ export async function allDeviceAgents(
     cursor = page.nextCursor;
   }
 }
+/** Read the actual callable directory; enabled catalog entries alone are insufficient. */
+export async function allCallableAgents(networkId: string, connectionId = "official"): Promise<{
+  items: CallableAgent[];
+  complete: boolean;
+}> {
+  const items: CallableAgent[] = [];
+  const seen = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const page = metadataSchemas.callable.parse(await networkRequest({
+      kind: "callable", networkId, cursor, limit: NETWORK_BUDGETS.pageMax,
+    }, connectionId));
+    for (const agent of page.items) {
+      if (agent.source.networkId !== networkId || seen.has(agent.mountId)) throw new Error("NETWORK_PAGE_INVALID");
+      seen.add(agent.mountId);
+      items.push(agent);
+    }
+    if (page.complete) return { items, complete: true };
+    if (!page.nextCursor || cursors.has(page.nextCursor)) throw new Error("NETWORK_PAGE_INVALID");
+    cursors.add(page.nextCursor);
+    if (items.length >= NETWORK_BUDGETS.catalogItems) return { items, complete: false };
+    cursor = page.nextCursor;
+  }
+}
+
 export function networkErrorKey(
   error: unknown,
   operation: "read" | "mutation" = "read",
@@ -248,6 +274,11 @@ export function networkErrorKey(
   if (/^ENROLLMENT_KEY_|^KEY_(EXPIRED|REVOKED|BOUND)/.test(code))
     return "keyInvalid";
   if (code === "NETWORK_TRUST_CHANGED") return "trustChanged";
+  if (code === "KEY_GENERATION_CONFLICT" || code === "NETWORK_CREDENTIAL_GENERATION_CONFLICT")
+    return "identityConflict";
+  if (code === "OWNED_LOGIN_COMMIT_UNCONFIRMED") return "ownedLoginCommitUnconfirmed";
+  if (code === "OWNED_ACCOUNT_MISMATCH") return "ownedAccountMismatch";
+  if (code === "OWNED_IDENTITY_SELECTION_REQUIRED") return "ownedIdentitySelectionRequired";
   if (code === "NETWORK_REMOVAL_UNCONFIRMED") return "removalPending";
   if (code === "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED")
     return "credentialStoreAuthorizationRequired";
@@ -256,6 +287,8 @@ export function networkErrorKey(
   if (code === "NETWORK_CREDENTIAL_STORE_INVALID")
     return "credentialStoreInvalid";
   if (code === "OWNED_SESSION_RECORD_MISSING") return "ownedSessionMissing";
+  if (["OWNED_SESSION_INVALID", "SPACE_REAUTH_REQUIRED", "ACCOUNT_BINDING_CHANGED", "OWNED_ACCOUNT_REVOKED"].includes(code))
+    return "ownedSignInRequired";
   if (code === "NETWORK_PRIVATE_KEY_MISSING" || code === "DEVICE_REVOKED")
     return "privateKeyMissing";
   if (
@@ -278,6 +311,7 @@ export function networkErrorKey(
 }
 
 export interface NetworkConnection {
+  localDeviceId?: string | null;
   id: string;
   name: string;
   official: boolean;
@@ -288,6 +322,7 @@ export interface NetworkConnection {
   ownedAccount?: {
     state: 'authenticated' | 'authorizationRequired' | 'signInRequired' | 'unavailable';
     principalId: string;
+    bindingId?: string;
     expiresAt: number | null;
   };
 }
@@ -315,6 +350,7 @@ export interface OwnedLoginAttempt {
 }
 export type OwnedLoginPoll =
   | { status: "pending" }
+  | { status: "reauthorize"; authorization: OwnedLoginAttempt }
   | { status: "authenticated"; registry: NetworkRegistry };
 export const startOwnedNetworkLogin = (
   issuer: string,

@@ -2,6 +2,7 @@ import { broadcast } from "../sse";
 import { applySessionModelSelection } from '../agent-session';
 import { questionAnswersAsText } from '../../shared/types/askUserQuestion';
 import { retryDesktopRequest } from './retry';
+import { prepareDesktopQuery } from './query-reminder';
 import { randomUUID } from 'node:crypto';
 import {
   publishBuiltinTranscriptSaveStatus,
@@ -16,6 +17,7 @@ import {
   getAgents,
   getAgentState,
   getBuiltinExecutionStartedAt,
+  getBuiltinWorkProgressSnapshot,
   getBuiltinLiveSessionSnapshot,
   getBuiltinSessionCompletionTerminal,
   getCurrentMcpServers,
@@ -43,7 +45,9 @@ import {
   handleExitPlanModeResponse,
   handlePermissionResponse,
   interruptCurrentResponse,
+  stopBuiltinSessionForUpdate,
   isSessionBusy,
+  hasBuiltinBackgroundWork,
   freezeCurrentSessionMetadataForImDetach,
   materializeCurrentSessionMetadataForPublishedReset,
   materializePendingDesktopSession as materializeBuiltinPendingDesktopSession,
@@ -274,10 +278,12 @@ export function createBuiltinSessionEngine(): SessionEngine {
     },
 
     publishTranscriptSaveStatus(status) { publishBuiltinTranscriptSaveStatus(status); },
+    getWorkProgressSnapshot() { return getBuiltinWorkProgressSnapshot(); },
     getLiveSessionState() {
       const executionStartedAt = getBuiltinExecutionStartedAt();
       return {
         ...(executionStartedAt ? { executionStartedAt } : {}),
+        ...(hasBuiltinBackgroundWork() ? { backgroundWorkActive: true } : {}),
         sessionState: getAgentState().sessionState,
         isBusy: isSessionBusy(),
         waitingForUser: isBuiltinWaitingForUser(),
@@ -864,7 +870,11 @@ export function createBuiltinSessionEngine(): SessionEngine {
       return { ...decideBuiltinInjectedTurnResult({ idleCompleted: true, outcome }), enqueued: true };
     },
 
-    async stopTurn() {
+    async stopTurn(options) {
+      if (options?.wholeSession) {
+        await stopBuiltinSessionForUpdate();
+        return { success: true };
+      }
       const stopped = await interruptCurrentResponse();
       return stopped ? { success: true } : { success: true, alreadyStopped: true };
     },
@@ -956,7 +966,8 @@ export function createBuiltinSessionEngine(): SessionEngine {
       return retryBuiltinUserMessage(userMessageId, async rewound => {
         const context = this.getCurrentSessionContext();
         try {
-          const sent = await this.sendDesktopMessage(retryDesktopRequest(context, rewound, options));
+          const prepared = await prepareDesktopQuery(retryDesktopRequest(context, rewound, options));
+          const sent = await this.sendDesktopMessage(prepared.request);
           return { ...rewound, success: sent.success, conversationCommitted: true, retryQueued: sent.success, error: sent.error };
         } catch (error) {
           return { ...rewound, success: false, conversationCommitted: true, retryQueued: false, error: String(error) };

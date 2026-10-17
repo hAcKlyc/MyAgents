@@ -70,6 +70,7 @@ export function TurnFileEditSummary({ content }: { content: Message['content'] }
           <span className="truncate">{capsuleLabel}</span>
           {showTotals && (
             <span className="shrink-0 font-mono text-xs text-[var(--ink-muted)]/80">
+              {t('message.turnFileEdits.accumulated')}{' '}
               <span className="text-[var(--success)]">+{summary.totalAdded}</span>
               {' '}
               <span className="text-[var(--error)]">−{summary.totalRemoved}</span>

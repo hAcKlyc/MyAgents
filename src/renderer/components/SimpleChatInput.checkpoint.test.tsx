@@ -1,6 +1,7 @@
 import { serializeTabs, deserializeTabs } from '@/utils/tabPersistence';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { createRef } from 'react';
+import { createRef, useCallback, useState } from 'react';
+import type { ComposerWorkflowDraft } from '@/utils/composerWorkflowDraft';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImagePreviewProvider } from '@/context/ImagePreviewContext';
 import { ToastProvider } from './Toast';
@@ -72,6 +73,40 @@ describe('SimpleChatInput update checkpoint owner', () => {
     const { ref, textarea, onSend } = input();
     expect(textarea).toHaveValue(snapshot.text); expect(ref.current?.getQueryContext()).toMatchObject(context);
     expect(onSend).not.toHaveBeenCalled();
+  });
+  it.each(['running', 'stopped'] as const)('does not mistake a saved %s task configuration for an unsaved draft', async status => {
+    const { textarea } = input({ cronModeEnabled: true, cronConfig: { taskKind: 'cron', intervalMinutes: 5 }, cronTask: { status, intervalMinutes: 5, executionCount: 2 } });
+    fireEvent.change(textarea, { target: { value: 'ordinary text survives' } });
+    act(() => { lease = beginComposerUpdateCheckpoint(serializeTabs); });
+    await lease!.persist([tab], tab.id); lease!.verify([tab], tab.id);
+    expect(fixture.values.get('/synthetic/qa/update-composer-drafts.json')).toMatchObject({ version: 1, drafts: [{ text: 'ordinary text survives' }] });
+  });
+  it.each(['goal', 'scheduled'] as const)('restores a %s settings-only draft into the visible composer without sending', async kind => {
+    const workflowDraft: ComposerWorkflowDraft = kind === 'goal'
+      ? { kind: 'goal', config: { taskKind: 'goal', prompt: '', endConditions: { aiCanExit: false, maxExecutions: 7 }, notifyEnabled: false, runtime: 'codex', permissionMode: 'full-auto' } }
+      : { kind: 'scheduled', config: { taskKind: 'cron', prompt: '', intervalMinutes: 17, endConditions: { aiCanExit: false }, runMode: 'new_session', notifyEnabled: true, schedule: { kind: 'every', minutes: 17 }, executionTarget: 'new_task' } };
+    const { unmount, onSend } = input({ goalDraftActive: kind === 'goal', cronModeEnabled: kind === 'scheduled', cronConfig: kind === 'scheduled' ? workflowDraft.config as { taskKind: 'cron'; intervalMinutes: number } : undefined,
+      workflowDraft, onRestoreWorkflowDraft: () => true });
+    act(() => { lease = beginComposerUpdateCheckpoint(serializeTabs); });
+    await lease!.persist([tab], tab.id); lease!.release(); lease = undefined; unmount();
+    await loadComposerUpdateHandoff(deserializeTabs);
+    const accepted = vi.fn();
+    function RestoredOwner({ ready }: { ready: boolean }) {
+      const [workflow, setWorkflow] = useState<ComposerWorkflowDraft>();
+      const restore = useCallback((draft: ComposerWorkflowDraft) => {
+        if (!ready) return false;
+        accepted(draft); setWorkflow(draft); return true;
+      }, [ready]);
+      return <ToastProvider><ImagePreviewProvider><SimpleChatInput composerTabId="tab-a" sessionId="session-a" workspacePath="/synthetic/workspace-a" runtime="codex" usesExternalRuntimeControls isLoading={false} onSend={onSend}
+        goalDraftActive={workflow?.kind === 'goal'} cronModeEnabled={workflow?.kind === 'scheduled'} cronConfig={workflow?.kind === 'scheduled' ? workflow.config : undefined}
+        workflowDraft={workflow} onRestoreWorkflowDraft={restore} /></ImagePreviewProvider></ToastProvider>;
+    }
+    const view = render(<RestoredOwner ready={false} />);
+    expect(accepted).not.toHaveBeenCalled(); expect(fixture.values.size).toBe(1);
+    view.rerender(<RestoredOwner ready />);
+    expect(accepted).toHaveBeenCalledExactlyOnceWith(workflowDraft);
+    expect(screen.getByRole('textbox')).toHaveValue(''); expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText(kind === 'goal' ? /目标模式/ : /定时模式/)).toBeInTheDocument();
   });
   it('rejects live IME without making the input readOnly or losing its draft', () => {
     const { textarea } = input(); fireEvent.change(textarea, { target: { value: '组合输入' } }); fireEvent.compositionStart(textarea);

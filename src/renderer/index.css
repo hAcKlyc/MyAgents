@@ -839,7 +839,7 @@ body {
   font-family: var(--font-body);
   color: var(--ink);
   background: var(--theme-body-background);
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
   /* Cross-platform font rendering */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -861,7 +861,7 @@ body::before {
 
 
 #root {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
   position: relative;
   z-index: 1;
 }

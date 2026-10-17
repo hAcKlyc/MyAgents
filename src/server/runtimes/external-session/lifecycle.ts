@@ -1,3 +1,4 @@
+import type { ProgressTodo } from '../../../shared/sessionWorkProgress';
 import type { InteractionScenario } from '../../system-prompt';
 import type { TurnAnalyticsSource } from '../../types/session';
 import type { RuntimeType } from '../../../shared/types/runtime';
@@ -31,8 +32,12 @@ let externalMcpEffectiveRevision = 0;
 let externalRuntimeGeneration = 0;
 let isPrewarmingSession = false;
 let liveRevision = 0;
+let agentPlanTodos: readonly ProgressTodo[] | null = null;
+export function setExternalAgentPlan(todos: readonly ProgressTodo[]): void { agentPlanTodos = todos.map(todo => ({ ...todo })); }
+export function getExternalAgentPlan(): readonly ProgressTodo[] | null { return agentPlanTodos; }
 
 export function resetExternalLifecycleState(): void {
+  agentPlanTodos = null;
   activeProcess = null;
   activeRuntime = null;
   activeOfficialToolIds = null;
@@ -162,6 +167,7 @@ export function bindExternalSessionContext(input: {
   analyticsOrigin?: SessionOrigin | null;
 }): void {
   if (lastSessionId !== input.sessionId) {
+    agentPlanTodos = null;
     liveRevision = 0;
     externalMcpEffectiveRevision = 0;
     externalMcpEffectiveSnapshot = null;

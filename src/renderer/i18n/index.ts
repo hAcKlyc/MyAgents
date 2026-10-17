@@ -1,8 +1,11 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { moxbotsCopy } from './moxbotsCopy';
 import { APP_BUILD_PROFILE, APP_DISPLAY_NAME } from '../../shared/appProfile';
 
 import { resolveEffectiveLocale, type SupportedLocale } from '../../shared/i18n';
+import communityEn from './locales/en-US/community.json';
+import communityZh from './locales/zh-CN/community.json';
 import appEn from './locales/en-US/app.json';
 import chatEn from './locales/en-US/chat.json';
 import commonEn from './locales/en-US/common.json';
@@ -18,19 +21,35 @@ import taskZh from './locales/zh-CN/task.json';
 
 export const resources = {
   'zh-CN': {
-    app: appZh,
+    community: communityZh,
+    app: {
+      ...appZh,
+      ...(APP_BUILD_PROFILE === 'moxbot' ? {
+        tabs: { ...appZh.tabs, ...moxbotsCopy['zh-CN'].tabs },
+        globalSidebar: { ...appZh.globalSidebar, ...moxbotsCopy['zh-CN'].globalSidebar },
+        agentNetwork: { ...appZh.agentNetwork, ...moxbotsCopy['zh-CN'].agentNetwork },
+      } : {}),
+    },
     chat: chatZh,
     common: commonZh,
     launcher: launcherZh,
-    settings: settingsZh,
+    settings: { ...settingsZh, about: { ...settingsZh.about, ...(APP_BUILD_PROFILE === 'moxbot' ? moxbotsCopy['zh-CN'].about : {}) } },
     task: taskZh,
   },
   'en-US': {
-    app: appEn,
+    community: communityEn,
+    app: {
+      ...appEn,
+      ...(APP_BUILD_PROFILE === 'moxbot' ? {
+        tabs: { ...appEn.tabs, ...moxbotsCopy['en-US'].tabs },
+        globalSidebar: { ...appEn.globalSidebar, ...moxbotsCopy['en-US'].globalSidebar },
+        agentNetwork: { ...appEn.agentNetwork, ...moxbotsCopy['en-US'].agentNetwork },
+      } : {}),
+    },
     chat: chatEn,
     common: commonEn,
     launcher: launcherEn,
-    settings: settingsEn,
+    settings: { ...settingsEn, about: { ...settingsEn.about, ...(APP_BUILD_PROFILE === 'moxbot' ? moxbotsCopy['en-US'].about : {}) } },
     task: taskEn,
   },
 } as const;
@@ -57,7 +76,7 @@ void i18n
       // their own identities; only local application prose is rebranded.
       const upstreamText = /^(?:[^:]+:)?(?:about\.(?:licensing|developer)|community\.|account\.|agentNetwork\.(?:info|officialNetwork)|space\.)/;
       if (APP_BUILD_PROFILE !== 'moxbot' || keys.some((key) => upstreamText.test(key))) return value;
-      return value.replaceAll('MyAgents', APP_DISPLAY_NAME);
+      return value.replaceAll('MyAgents', APP_DISPLAY_NAME).replaceAll('MA 小助理', 'MoX 小助理');
     },
   })
   .init({

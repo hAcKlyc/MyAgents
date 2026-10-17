@@ -50,12 +50,15 @@ describe('App Shell chrome contract', () => {
     const moxbotUpdateGuard = updateGuard.slice(0, updateGuard.indexOf('if (!(await requestLifecycleExitConfirmation()))'));
     expect(moxbotUpdateGuard).not.toContain('requestLifecycleExitConfirmation()');
     const checkpoint = moxbotUpdateGuard.indexOf('await checkpoint.persist(');
-    const restart = moxbotUpdateGuard.indexOf('await performRestartAndUpdate(checkpoint)');
+    const restart = moxbotUpdateGuard.indexOf('await performRestartAndUpdate(checkpoint, interruptWork)');
     const recordSave = moxbotUpdateGuard.indexOf('pendingRecordNoteSubmittersRef.current.values()');
     const fileSave = moxbotUpdateGuard.indexOf('fileEditSubmittersRef.current.values()');
     expect(recordSave).toBeGreaterThanOrEqual(0);
     expect(fileSave).toBeGreaterThanOrEqual(0);
     expect(checkpoint).toBeGreaterThanOrEqual(0);
+    const confirmation = moxbotUpdateGuard.indexOf('if (!confirmed)');
+    expect(confirmation).toBeGreaterThanOrEqual(0);
+    expect(confirmation).toBeLessThan(recordSave);
     expect(restart).toBeGreaterThan(checkpoint);
     expect(recordSave).toBeLessThan(checkpoint);
     expect(fileSave).toBeLessThan(checkpoint);

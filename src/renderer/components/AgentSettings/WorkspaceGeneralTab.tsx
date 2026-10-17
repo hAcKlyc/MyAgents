@@ -17,6 +17,7 @@ import AgentTasksSection from './sections/AgentTasksSection';
 import { SlidersIcon, HeartPulseIcon } from '@/components/icons';
 import type { ChannelType } from '../../../shared/types/agent';
 import AgentIdentityConflicts from './AgentIdentityConflicts';
+import ProjectContextSection from './sections/ProjectContextSection';
 import { resolveAgentWorkspaceProjections } from '../../../shared/agentWorkspaceIdentity';
 
 interface WorkspaceGeneralTabProps {
@@ -118,6 +119,10 @@ export default function WorkspaceGeneralTab({
           <div className="mt-4">
             <WorkspaceBasicsSection project={project} agent={agent} agentDir={agentDir} />
           </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5">
+          <ProjectContextSection key={project.id} project={project} />
         </div>
 
         {/* Card 2: Channels — independent from Proactive Agent mode */}

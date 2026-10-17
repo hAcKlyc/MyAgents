@@ -207,6 +207,9 @@
       "title": "应用快捷键",
       "description": "以下快捷键在应用内全局生效（暂不支持自定义）",
       "items": {
+        "zoom-in": "放大界面文字与控件",
+        "zoom-out": "缩小界面文字与控件",
+        "zoom-reset": "恢复默认界面大小",
         "cycle-tab": "循环切换标签页（Shift 反向）",
         "jump-to-tab": "跳转到第 1–9 个标签页（9 为最后一个）",
         "new-tab": "新建标签页",
@@ -2240,6 +2243,11 @@
     "feedback": "反馈问题",
     "communityTitle": "加入用户交流群",
     "communityDescription": "扫码加入，与其他用户交流使用心得",
+    "maintainerLabel": "产品维护",
+    "websiteLabel": "官网",
+    "contactLabel": "联系与支持",
+    "repositoryLabel": "源码仓库",
+    "openCommunity": "进入社区",
     "communityQrAlt": "用户交流群二维码",
     "licensingTitle": "开源与商业授权",
     "licensingDescription": "MyAgents 采用 AGPL-3.0-only。个人和企业可以免费使用及商业使用；如果你不希望或无法履行适用的 AGPL 义务，可为闭源修改、嵌入、OEM、闭源分发或托管取得单独商业授权。",
@@ -2302,5 +2310,28 @@
     "timing": "协作消息生效时机",
     "timingHint": "仅控制 Agent 间消息与完成报告。默认实时：最近一次模型思考或工具步骤结束后注入。上方对话队列设置继续控制用户输入。",
     "unavailable": "模型当前不可用"
+  },
+  "modelFailover": {
+    "title": "备用模型",
+    "enable": "启用模型自动切换",
+    "description": "当前会话选定的模型作为主模型。重试后仍不可用时，在可安全续接的情况下由一个备用模型继续本轮；下一轮恢复使用主模型。",
+    "backup": "备用供应商与模型",
+    "none": "选择备用模型",
+    "unavailable": "不可用",
+    "chooseHint": "选择备用模型后，才能启用自动切换。",
+    "unavailableHint": "已保存的备用模型不可用，请重新选择已启用的 API 供应商与模型。当前备用无法接管。",
+    "keyHint": "请先在供应商设置中填写该供应商的 API Key，再启用自动切换。",
+    "readyHint": "备用模型已配置，切换前还会检查模型兼容性。",
+    "empty": "请先在下方配置并启用 API 供应商，再选择备用模型。",
+    "details": "切换规则与适用范围",
+    "scope": "仅支持 Claude Agent SDK 运行环境的 API 模型；DSH、订阅模型和外部 CLI 暂不支持。",
+    "safety": "保留已完成的工作。如果模型响应已开始交给智能体后发生中断，本轮会保留进度并停止，避免自动重复执行操作。",
+    "compatibility": "备用模型必须支持当前会话内容与工具；与主模型相同或不兼容时不会切换。认证、余额及权限问题需要单独处理。",
+    "saving": "正在保存…",
+    "saveFailed": "保存失败，原有设置未变更，请重试。"
+  },
+  "projectContext": {
+    "title": "新会话自动带入项目背景",
+    "description": "首次发送时，自动带入同项目其他桌面会话的近期进展与决策摘录。保留来源，不额外调用模型；会增加有限输入上下文。关闭后只影响后续新会话，已带入内容仍保留在原会话中。"
   }
 }

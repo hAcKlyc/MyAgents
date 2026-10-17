@@ -40,7 +40,7 @@ interface UseUpdaterResult {
     updateVersion: string | null;
     /** Restart the app to apply the update. Returns the outcome so the caller
      *  can surface a toast for failure modes. */
-    restartAndUpdate: () => Promise<RestartUpdateResult>;
+    restartAndUpdate: (options?: { interruptWork: boolean }) => Promise<RestartUpdateResult>;
     /** Whether a manual check is in progress */
     checking: boolean;
     /** Whether an update is being downloaded */
@@ -190,7 +190,7 @@ export function useUpdater(): UseUpdaterResult {
     // sidecars and then failing the install (e.g., flaky network) was the
     // root cause of the "click does nothing" reports — the user was left in
     // a broken state with the install never actually starting.
-    const restartAndUpdate = useCallback(async (): Promise<RestartUpdateResult> => {
+    const restartAndUpdate = useCallback(async (options?: { interruptWork: boolean }): Promise<RestartUpdateResult> => {
         if (isLinuxDesktop()) return 'blocked';
         if (!isTauriEnvironment()) return 'error';
         if (installingRef.current) return 'ok';  // already in flight
@@ -210,7 +210,11 @@ export function useUpdater(): UseUpdaterResult {
         // action: TCC cannot prompt a process whose executable was unlinked.
         if (usesDeferredInstall()) {
             try {
-                await invoke('install_pending_update');
+                if (options?.interruptWork === true) {
+                    await invoke('install_pending_update', { interruptWork: true });
+                } else {
+                    await invoke('install_pending_update');
+                }
                 // Windows exits via NSIS; macOS immediately requests restart.
                 return 'ok';
             } catch (err) {
@@ -245,6 +249,7 @@ export function useUpdater(): UseUpdaterResult {
                     || errStr.includes('UPDATE_FILES_STILL_LOCKED')
                     || errStr.includes('UPDATE_LOCK_PROBE_UNAVAILABLE')
                     || errStr.includes('UPDATE_TERMINALS_STILL_RUNNING')
+                    || errStr.includes('UPDATE_WORKER_STILL_RUNNING')
                     || errStr.includes('UPDATE_SHUTDOWN_IN_PROGRESS')
                     || errStr.includes('UPDATE_SHUTDOWN_ALREADY_IN_PROGRESS')
                 ) {

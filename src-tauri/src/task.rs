@@ -1505,6 +1505,8 @@ pub fn is_transition_legal(from: TaskStatus, to: TaskStatus) -> bool {
         | (Archived, Todo)
         // Archiving
         | (Done, Archived)
+        // Restore is organization only, not a rerun. Only Done can archive.
+        | (Archived, Done)
     )
 }
 
@@ -3639,7 +3641,9 @@ impl TaskStore {
         // 2. actor/source guard
         let actor = input.actor;
         let source = input.source;
-        if to == TaskStatus::Archived && actor != TransitionActor::User {
+        if (to == TaskStatus::Archived || from == TaskStatus::Archived && to == TaskStatus::Done)
+            && actor != TransitionActor::User
+        {
             return Err(String::from(TaskOpError::archive_user_only()));
         }
         if actor == TransitionActor::Agent && source != Some(TransitionSource::Cli) {
@@ -6010,6 +6014,7 @@ mod tests {
         assert!(is_transition_legal(Running, Done));
         assert!(is_transition_legal(Done, Archived));
         assert!(is_transition_legal(Archived, Todo));
+        assert!(is_transition_legal(Archived, Done));
     }
 
     #[test]
@@ -7003,6 +7008,30 @@ mod tests {
             updated.preselected_session_id.as_deref(),
             Some("attached-secondary")
         );
+    }
+
+    #[tokio::test]
+    async fn restore_archived_done_preserves_completion_without_rerunning() {
+        ensure_test_docs_root();
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        let store_dir = dir.path().join("data");
+        let store = TaskStore::new(store_dir.clone());
+        let task = store.create_direct(sample_direct_input(&ws)).await.unwrap();
+        for status in [TaskStatus::Running, TaskStatus::Done] {
+            store.update_status(status_input(&task.id, status, TransitionActor::User, Some(TransitionSource::Ui))).await.unwrap();
+        }
+        let done = store.get(&task.id).await.unwrap();
+        store.archive(&task.id, None).await.unwrap();
+        let rejected = store.update_status(status_input(&task.id, TaskStatus::Done, TransitionActor::Agent, Some(TransitionSource::Cli))).await.unwrap_err();
+        assert!(rejected.contains("archive_user_only"));
+        let (restored, transition) = store.update_status(status_input(&task.id, TaskStatus::Done, TransitionActor::User, Some(TransitionSource::Ui))).await.unwrap();
+        assert_eq!(transition.from, Some(TaskStatus::Archived));
+        assert_eq!(restored.status, TaskStatus::Done);
+        assert_eq!(restored.execution_count, done.execution_count);
+        assert_eq!(restored.last_executed_at, done.last_executed_at);
+        assert_eq!(TaskStore::new(store_dir).get(&task.id).await.unwrap().status, TaskStatus::Done);
     }
 
     #[tokio::test]

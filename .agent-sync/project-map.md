@@ -24,6 +24,7 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 | 多用户共享规划 | `services/agentnet/planning/` | 后续规划、共享权限、BOT-ADMIN-LIFECYCLE-V1 生命周期设计与 TODO；管理及有限执行控制面已发布；共享和扩展IAM仍待实现 |
 | 交互原型 | `dev-docs/prototypes/agentnets-bot-sharing-v1/` | HTML、设计约定、合成数据和原型验收；不接生产客户端 |
 | 项目看板 | `src/renderer/features/project-board/`、`pages/ProjectBoard.tsx`，`dev-docs/project-board.md` | 按真实Task/Session展示工作区执行概况；API、原生、生产验收分开追踪 |
+| 桌面协作社区 | `src/renderer/features/community/`、`features/account/ownedAccountSelection.ts`、`src-tauri/src/agent_network/community.rs` | 复用现有 Owned 账号，通过 Rust 闭集 HTTPS 接口浏览、发帖与回复；入口含个人菜单/更多，真实登录与原生发行另验 |
 | 远程 Agent 会话 | `src/renderer/features/remote-session/`、`src/server/remote-session/`、`src-tauri/src/agent_network/remote_*`、`src/host/remote-session.ts` | 同账号正式会话入口、快照同步、原Session owner/配置冻结、审批与未确认回执；机制见 `specs/tech_docs/remote_agent_session.md`，真实双端/原生发布另验 |
 | 测试 | 相邻 `*.test.*`、Rust crate tests、`scripts/host/*test*`；根 `package.json` 与 `.github/workflows/` | 命令以源码为准；文档任务不扩大为模型或生产测试 |
 | 运维与发布 | `services/agentnet/README.md`、`specs/guides/`、`dev-docs/moxbot-trial.md` | 非秘密说明；真实账号、备份和钥匙留在原 owner 私有目录 |
@@ -49,8 +50,32 @@ MoXBots 是用户拥有的 MyAgents fork，包含独立品牌桌面客户端、L
 
 ## IP website download channel
 
-User chose https://140.143.183.232/ directly. Accepted static design sourcea5cb41f0 remains immutable; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
+User chose https://140.143.183.232/ directly. Preserve the current static design and reread its live release pointer before each overlay; canonical public trial metadata and deployment boundaries live in `services/website/`. A new content-addressed download JSON plus HTML reference may overlay the static release under existing server locks. This self-hosted publication does not require the old Sites connector, and does not alter auth/admin/Host/updater routes.
 
 ## 个人菜单与反馈中心
 
 `OwnedAccountEntry`承接设置下方个人菜单的小助理和云端反馈入口。`services/agentnet/feedback-web/`、`src/feedback_http.rs`、`src/feedback_store.rs`为普通用户同源提单及私有历史；现有admin-web追加管理员处理。API、权限、发布/回滚边界见`services/agentnet/FEEDBACK.md`，验收见`dev-docs/feedback-independent-review.md`。
+
+## 账号管理与各端接入流程（设计）
+
+`services/agentnet/planning/ACCOUNT-EXPERIENCE-V1.md` 定义管理员开户/初始密码、首次改密、Web/桌面/Host、账号/会话/设备/连接/资源权限、兼容迁移及验收。用户已选择管理员直接开户；当前后台仍只有账号清单，设备隔离、用户写管理及首次改密尚待实现，不因文档存在视为已上线。进度见 `.agent-sync/tasks/codex-network-account-identities-20261016.md`。
+
+## MoXBots 协作社区与产品文案
+
+`services/agentnet/community-web/`、`src/community_http.rs`、`src/community_store.rs`（后两者相对服务目录）提供同源、需登录的话题/回复；`admin-web`同后台管理置顶、锁定与隐藏。使用现有AuthStore/AdminConfig及固定`/community` OIDC回跳，社区不使用上游Space账号/API，不迁移上游内容。合同及备份/回滚见`services/agentnet/COMMUNITY.md`。桌面导航经`utils/ownedCloud.ts`只取已配置owned issuer。MoXBots介绍由`i18n/moxbotsCopy.ts`及build profile拥有；内部兼容标识和许可/版权不全局替换。
+
+## 内置 API 主备模型
+
+`src/shared/modelFailover.ts`/`AppConfig.modelFailover`定义非秘密配置；设置组件`ModelFailoverSettings`复用原writer。`src/server/builtin-session/model-failover.ts`从原catalog/credential resolver选择兼容备用，`openai-bridge/model-failover.ts`在既有Query token上做有限HTTP恢复和防重放；原turn-lifecycle释放root。合同`specs/tech_docs/model_failover.md`，验收`dev-docs/model-failover-001-acceptance.md`。不新增Session/工具执行/持久化owner。
+
+## 项目背景自动接续
+
+`src/shared/projectContext.ts` 为有限来源/预算纯投影，`src/server/session-engine/project-context.ts` 经原SessionStore读取并在首轮query preparation注入，设置位于ProjectContextSection。合同 `specs/tech_docs/project_context.md`；合成/独立审阅与Token计数 `dev-docs/project-context-validation/`。不新增模型调用、存储writer或发布owner。
+
+## MOXBOTS-OUTPUT-002 — 结果、时间与质量参考
+
+聊天执行区沿原 BlockGroup/ProcessRow/ToolUse 呈现结果与当前工作；`ProductTranscriptContent`在原 transcript owner 记录可选 `executionTiming`，开始/结束精确毫秒，中间活动最多每秒采样。`processTiming.ts`只投影可信事实（子任务采用其生命周期），`ExecutionQuality`只展示当前执行证据和已有usage。实现、合成UI/持久化/主干与统一原生发行边界见 `dev-docs/output-results/acceptance.md` 及任务 `.agent-sync/tasks/codex-output-results-20261016-6853845f.md`。
+
+## MOXBOTS-OUTPUT-003 — 展开与时间口径修正
+
+沿原BlockGroup/ProcessRow/ToolUse投影，单条一次直达正文；`processTiming.ts`区分runtime报告duration与观测span/等待，不改transcript owner或存储格式。源码/回归及实际展开证据 `dev-docs/output-expanded/acceptance.md`，独立审阅见同目录review.md；原生统一发行另验。

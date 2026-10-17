@@ -8,7 +8,7 @@
 | -------------------------------------------------------- | ---------------------------------------------------------------------- |
 | 官方登录与 sessionBindingId；自部署账号 scope           | 官方沿原 Rust Space connector 与 Space 账号服务；自部署由固定 descriptor 与 Rust 连接生命周期裁决 |
 | 设备身份代次                                            | 当前网络的身份签发方；Rust 按连接验证与投影                              |
-| 稳定设备 ID、OS/默认主机名称                             | 原 `device_identity`                                                   |
+| 安装级设备 ID、OS/默认主机名称；Owned 连接设备 ID         | 原 `device_identity`；Owned 登录响应绑定的账号/网络身份，由原 registry 持久化 |
 | 用户指定的网络设备显示名称                               | 既有网络 SQLite DO 的设备记录；Rust 当前连接只读投影                  |
 | 工作区与 Agent 的本地身份、路径、生命周期                | `resolvePersistedAgentWorkspaceRegistry`；不得用网络设置反向创建工作区 |
 | 私钥、设备 WSS、内层 TLS、连接 epoch、传输分配           | Rust App `NetworkRegistry` / 各连接 `AgentNetwork`，不归 Tab 或 Session                             |
@@ -68,9 +68,21 @@ Rust App 在本机生成 P-256 身份密钥，以 ECDSA/SHA-256 签名证明持�
 
 外层是设备到云端的 HTTPS/WSS，接入以稳定设备公钥绑定的 DPoP 证明持有凭据对应的私钥。官方接入凭据不超过原 Space 登录剩余有效期与 30 天；自部署凭据由固定实例签发，客户端按协议最大有效期验证，不依赖 Space 登录。设备 leaf 有效 7 天，在到期前 48 小时窗口按需续签。活跃回程使用一项带 jitter 的约 6 小时检查，空闲不轮询凭据或证书。暂时签发不可用且现有 leaf 尚有效时保留当前关联，真实撤销与过期不能忽略。
 
+### 桌面协作社区与当前账号
+
+MoXBots 的“更多”、个人菜单和设置页社区入口统一打开内置 `space` Tab 的社区页面。非 MoXBots 的 Cloud Space 仍使用原页面。社区复用 `owned_account_desktop` 已验证的账号，不另外打开网页 OIDC 登录；独立网页入口的登录流程保持原样。
+
+Renderer 只发送闭集 `list/detail/create/reply` intent 和非秘密 `connectionId/principalId/bindingId`。Rust registry 校验配置的自有 HTTPS issuer、保存的账号绑定和当前 actor；账号 owner 在发现并校验原实例信任后，以内存中的 bearer 调用固定 `/api/community` 路由。返回前再次检查账号及 actor 边界，凭据不进入 Renderer、URL、浏览器存储或日志。社区不依赖设备 relay 为 ready 或已入网；多个同 issuer 账号且没有明确选中项时必须先选择账号。
+
+社区使用独立 64 KiB 请求、16 MiB 响应预算，身份接口原预算不变，返回仅投影已知业务字段。账号、binding 改变或退出后清空本地页面与草稿。写入结果不确定（包括请求后 owner 失效）时保留完全相同的 mutationId 和正文，只允许显式重试，避免新编号重复提交。实际账号登录、原生安装和发行验收分别记录于本任务及统一发行记录。
+
 ### 独立账号的桌面凭据访问
 
-`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期；浏览器登录完成后先写入 OS 凭据库，再发放进程内会话 guard。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
+登录弹窗的 `useOwnedLoginFlow` 只维护呈现生命周期：用户发起后自动调用原 browser-open、串行轮询原 poll，窗口恢复焦点时补查，成功由原 owner 发布 registry 后关闭。手动检查与浏览器重开保留为备用，完整授权链接默认折叠在高级信息中。轮询成功间隔 2 秒，失败有限退避到 15 秒；到期/取消/卸载停止计时，不并发轮询。现有身份重新授权仍使用 owner 返回的同一逻辑 attempt，不另建身份。各父入口在异步结果发布前核对 generation，取消只失效匹配的 pending attempt；凭据和成功持久化仍由 Rust owner 裁决。
+
+`owned_account_desktop.rs` 在首次恢复时从 OS 凭据库读取并验证完整实例、设备、principal、连接、binding、CA 和有效期。Owned 连接使用登录响应实际绑定的独立 device ID；identity、admission、discovery、来源和本机标记均使用同一 ID，官方/legacy 保持安装级 ID。浏览器首次以临时 ID 识别账号，完整查询同账号候选登记；已有登记时精确注销临时会话，并显式再次授权旧 ID，校验同一 principal；查询失败/不完整或多候选歧义均不新建身份。
+
+登录 poll 仅暂存结果。最终由原 registry mutation 和登录 manager 锁裁决取消/提交，再写入新的不可变 binding 凭据槽、原子切换配置，最后在与 stop 共享的发布锁内复核并发放 guard/启动 actor。旧槽不覆盖、不撤销；确认回滚才清理新槽。配置提交与回滚均未知时保留两个槽和 token，拒绝该 issuer 的继续登录，任务空闲后重启按磁盘指针恢复。新配置 `sessionBound: true` 选择原凭据路由下按 binding 哈希的槽，旧记录缺省 false 使用原槽；不扩展凭据 Reader 的闭集协议。旧版严格配置读取器不认识新字段，回退客户端必须恢复启用前的配置备份（保留迁移后业务数据），不得只换旧二进制。正常 actor 心跳与管理请求的 `ensure_current` 使用这个已验证 guard，不反复读取钥匙串；它仅保存 scope、binding、generation 和 expiry，不增加持久化 Token 副本或明文回退。
 
 同一持久槽位的新登录提交会失效旧 guard；取消尚未完成的新登录不撤销此前仍有效的登录。精确 binding 删除、账号 active 失效、会话过期和服务器拒绝仍停止旧权限。恢复、登录写入及精确删除由模块内同步存储锁串行化，锁不跨网络 await。正常路径不轮询 Keychain，用户在应用外手工编辑凭据的检测边界是下次恢复；这不代替服务器的过期或撤销检查。
 

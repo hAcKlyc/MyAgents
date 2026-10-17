@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NetworkDevice, NetworkSnapshot } from "@/api/agentNetwork";
+import type { NetworkConnection, NetworkDevice, NetworkSnapshot } from "@/api/agentNetwork";
 const mocks = vi.hoisted(() => ({
   session: vi.fn(),
   logout: vi.fn(),
@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   openExternal: vi.fn(),
   selected: "official",
+  localDeviceId: undefined as string | undefined,
+  ownedAccount: undefined as NetworkConnection["ownedAccount"],
   snapshot: {
     state: "ready",
     principalId: "account",
@@ -58,6 +60,8 @@ vi.mock("@/features/agent-network/store", async (original) => ({
         url: null,
         removing: false,
         snapshot: mocks.snapshot,
+        ownedAccount: mocks.ownedAccount,
+        localDeviceId: mocks.localDeviceId,
       },
     ],
   }),
@@ -100,6 +104,8 @@ const membership = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.selected = "official";
+  mocks.localDeviceId = undefined;
+  mocks.ownedAccount = undefined;
   mocks.snapshot = {
     state: "ready",
     principalId: "account",
@@ -130,6 +136,36 @@ beforeEach(() => {
   );
 });
 describe("Agent network account and device management", () => {
+  it("marks the connection-scoped owned identity as local instead of the installation ID", async () => {
+    mocks.selected = "owned";
+    mocks.ownedAccount = { state: "authenticated", principalId: "account", expiresAt: null };
+    mocks.localDeviceId = "44444444-4444-4444-8444-444444444444";
+    const scoped = { ...device, deviceId: mocks.localDeviceId, name: "Account-scoped Mac", joined: true };
+    mocks.devices.mockResolvedValue({ items: [device, scoped], complete: true });
+    render(<AgentNetwork />);
+    const scopedTitle = await screen.findByRole("heading", { name: "Account-scoped Mac" });
+    expect(within(scopedTitle.closest("article")!).getByText("本机")).toBeInTheDocument();
+    expect(within(screen.getByRole("heading", { name: device.name }).closest("article")!).queryByText("本机")).not.toBeInTheDocument();
+  });
+
+  it("does not guess the installation ID for an owned connection missing its identity projection", async () => {
+    mocks.selected = "owned";
+    mocks.ownedAccount = { state: "authenticated", principalId: "account", expiresAt: null };
+    mocks.devices.mockResolvedValue({ items: [{ ...device, joined: true }], complete: true });
+    render(<AgentNetwork />);
+    await screen.findByRole("heading", { name: device.name });
+    expect(screen.queryByText("本机")).not.toBeInTheDocument();
+  });
+  it("opens Add Host from the network page and closes without sending mutations", async () => {
+    render(<AgentNetwork />);
+    fireEvent.click(await screen.findByRole("button", { name: "+ 添加 Host" }));
+    const dialog = screen.getByRole("dialog", { name: "添加 Host" });
+    expect(within(dialog).getByRole("radio", { name: /桌面电脑/ })).toBeChecked();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "添加 Host" })).not.toBeInTheDocument();
+    expect(mocks.request.mock.calls.every(([request]) => request.kind === "network")).toBe(true);
+  });
+
   it.each([false, true])(
     "renames an offline remote device from its card, joined=%s",
     async (joined) => {
@@ -402,6 +438,8 @@ describe("Agent network account and device management", () => {
       "OWNED_SESSION_RECORD_MISSING",
       "未找到此连接对应的本机登录会话。连接已停止，需要显式登录后才能恢复。",
     ],
+    ...["OWNED_SESSION_INVALID", "SPACE_REAUTH_REQUIRED", "ACCOUNT_BINDING_CHANGED", "OWNED_ACCOUNT_REVOKED"].map((code) => [code, "此网络的登录已失效，请重新登录后恢复连接。"]),
+    ...["KEY_GENERATION_CONFLICT", "NETWORK_CREDENTIAL_GENERATION_CONFLICT"].map((code) => [code, "此设备的网络身份发生冲突，无法自动恢复。请核对登录账号与设备身份；现有连接和凭据已保留。"]),
   ])(
     "shows %s only as a stopped Owned-connection status",
     async (code, message) => {
@@ -418,6 +456,21 @@ describe("Agent network account and device management", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     },
   );
+  it("uses registry sign-in authority when the snapshot still reports a transport failure, and clears it after recovery", async () => {
+    mocks.selected = "owned-restore";
+    mocks.snapshot = { ...mocks.snapshot, connectionId: "owned-restore", state: "disconnected", error: { code: "NETWORK_TRANSPORT_FAILED", retryable: true } };
+    mocks.ownedAccount = { state: "signInRequired", principalId: "account", expiresAt: 100 };
+    const view = render(<AgentNetwork />);
+    expect(await screen.findByRole("status")).toHaveTextContent("此网络的登录已失效，请重新登录后恢复连接。");
+    expect(screen.queryByText(/正在自动重连/)).not.toBeInTheDocument();
+    expect(mocks.request).not.toHaveBeenCalled();
+    expect(mocks.logout).not.toHaveBeenCalled();
+    mocks.ownedAccount = { ...mocks.ownedAccount, state: "authenticated" };
+    mocks.snapshot = { ...mocks.snapshot, state: "ready", error: null, revision: 2 };
+    view.rerender(<AgentNetwork />);
+    await screen.findByRole("button", { name: "查看 Fixture Mac 的设备详情" });
+    expect(screen.queryByText(/此网络的登录已失效/)).not.toBeInTheDocument();
+  });
   it("does not project Owned credential-store errors onto the official connection", async () => {
     mocks.snapshot = {
       ...mocks.snapshot,

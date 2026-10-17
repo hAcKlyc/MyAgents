@@ -50,6 +50,25 @@ async function create(patch: Partial<SessionMetadata> = {}) {
 }
 
 describe('SessionStore V2 ownership and compatibility', () => {
+  it('flushes the live answer before restart and preserves it on a cold read', async () => {
+    const { metadata, active } = await create();
+    active.writer.observe({ kind: 'message-create', message: { id: 'restart-answer', role: 'assistant', content: 'saved before restart', timestamp: 't' } });
+    await store.flushSessionTranscriptsForUpdate();
+    expect(active.writer.status.liveRevision).toBe(active.writer.status.durableRevision);
+    await active.revoke();
+    vi.resetModules();
+    store = await import('../SessionStore');
+    expect((await store.getSessionData(metadata.id))?.messages[0].content).toBe('saved before restart');
+  });
+
+  it('does not approve a restart when the live transcript cannot flush', async () => {
+    const { active } = await create();
+    const flush = vi.spyOn(active.writer, 'flush').mockResolvedValueOnce(false);
+    await expect(store.flushSessionTranscriptsForUpdate()).rejects.toThrow('UPDATE_ACTIVITY_UNKNOWN');
+    flush.mockRestore();
+    await expect(store.flushSessionTranscriptsForUpdate()).resolves.toBeUndefined();
+  });
+
   it('does not create product directories during cold identity and empty transcript reads', async () => {
     testState.failSyncStorage = true;
     expect(store.getAllSessionMetadata()).toEqual([]);
@@ -261,13 +280,16 @@ describe('SessionStore V2 ownership and compatibility', () => {
   it('marks only orphaned cold work interrupted without dropping its observed results', async () => {
     const { metadata, active } = await create();
     active.writer.observe({ kind: 'message-create', message: { id: 'a', role: 'assistant', timestamp: 't', transcriptState: 'streaming', content: [
-      { id: 't', type: 'tool_use', tool: { id: 'tool', name: 'Agent', isLoading: true, result: 'partial', subagentCalls: [{ id: 'child', name: 'Read', isLoading: true, result: 'observed' }], subagentLifecycle: { status: 'running', startedAt: 1 } } },
+      { id: 't', type: 'tool_use', tool: { id: 'tool', name: 'Agent', isLoading: true, result: 'partial', executionTiming: { startedAt: 1_000, lastActivityAt: 1_100, source: 'observed' }, subagentCalls: [{ id: 'child', name: 'Read', isLoading: true, result: 'observed' }], subagentLifecycle: { status: 'running', startedAt: 1 } } },
     ] } });
     expect(await active.writer.flush()).toBe(true);
     await store.releaseSessionTranscriptForBinding(metadata.id);
     const restored = await store.activateSessionTranscript(metadata.id);
     const row = restored!.writer.projection.messages.get('a')!;
     expect(row.transcriptState).toBe('interrupted');
+    const tool = Array.isArray(row.content) ? row.content[0].tool as Record<string, unknown> : undefined;
+    expect(tool?.executionTiming).toEqual({ startedAt: 1_000, lastActivityAt: 1_100, source: 'observed' });
+    expect((tool?.subagentCalls as Record<string, unknown>[])[0].executionTiming).toBeUndefined();
     expect(Array.isArray(row.content) && row.content[0].tool).toMatchObject({ isLoading: false, result: 'partial', resultMeta: { status: 'interrupted' }, subagentLifecycle: { status: 'interrupted' }, subagentCalls: [{ isLoading: false, result: 'observed' }] });
   });
 

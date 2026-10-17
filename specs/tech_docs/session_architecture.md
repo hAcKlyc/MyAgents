@@ -8,7 +8,7 @@
 
 `POST /api/chat/next-prompt` 经当前 Tab 的 Session Sidecar 调用，只接收 `sessionId` 和最后一条 assistant 的 `anchorMessageId`。SessionEngine 校验实际绑定、idle、人类会话轮次、完成状态和最新 transcript；生成前后核对内容与配置，不能由 Renderer 提交历史、模型、Provider 或凭据。建议不写入 transcript、Session metadata 或任务队列，不改变执行会话。
 
-Builtin 的可选建议复用隔离 SDK 文本 utility：采用活动会话的模型和 Provider，无工具、MCP、设置加载或会话持久化，成功 terminal 后才接纳文本，超时/取消/失败返回空建议。最近 128 个完成结果（包含失败/空值）使用 LRU 缓存；在途请求合并且不淘汰，被淘汰的历史回复重新成为有效 anchor 时可重新生成。上下文为最近 6 条可见文本、每条最多 2,000 codepoints、总计最多 10,000 UTF-8 bytes；输出单行最多 420 codepoints。DSH、Claude Code 和 Codex 目前没有已验证的无工具、非持久化文本 utility，返回明确 `unsupported`，界面显示不可用；不能借用其它 Runtime 或系统 CLI 替代。
+Builtin 的可选建议复用隔离 SDK 文本 utility：采用活动会话的模型和 Provider，无工具、MCP、设置加载或会话持久化，成功 terminal 后才接纳文本，超时/取消/失败返回空建议。最近 128 个完成结果（包含失败/空值）使用 LRU 缓存；在途请求合并且不淘汰，被淘汰的历史回复重新成为有效 anchor 时可重新生成。上下文为最近 6 条可见文本、每条最多 2,000 codepoints、总计最多 10,000 UTF-8 bytes；输出单行最多 420 codepoints。外部建议经SessionEngine.runTextUtility进入本Runtime owner，不借用SDK或改变system/managed身份。DSH复用已prepare的原生进程utility/run，绑定冻结modelProfileRevision，不启动root turn，不写原生会话。Claude Code使用独立CLI、正向空工具、空MCP、禁hook/skills和会话保存；只从原CLI user/project配置投影精确认证/模型env字段，拒绝可执行helper及任意配置文件指针。Codex使用原source/provider/model的独立ephemeral线程与仅本次有效的loopback Responses网关；出站强制tools空/tool_choice none，入站完整缓冲并验证文本/推理/成功terminal，工具项或未知事件整次拒绝且不交给native执行。原provider目的地与网络策略不可等价保留时返回空建议，绝不借其它provider/source回退。CLI utility在临时空目录运行、无项目工具或MCP注入，进程树/gateway/临时目录在结束、取消和超时后清理。没有本Runtime utility能力时才返回明确unsupported。
 
 灰色建议与输入值分开。空输入框、无附件、可发送且会话 idle 时才显示；第一次无修饰 Enter 只接纳为可编辑草稿，随后使用已有发送快捷键或按钮才发送。重复 Enter 不接纳/发送，Shift+Enter 保持换行，中文 composition 和 keyCode 229 优先于接纳、菜单与发送。输入或 Esc 忽略当前建议，已接纳/忽略的回复不重复展示；切换 Session/Runtime/模型、回复内容修订、执行或等待审批都会隔离迟到结果。生成失败时保留普通输入，不显示固定替代提示。
 
@@ -344,3 +344,7 @@ Sidecar ready 而 External/DSH Product Session 尚未绑定 workspace owner 时�
 ### 4.4.1 Fork 中的旧 user UUID 失配
 
 native UUID 优先按 SDK-to-SDK 的精确映射复制。仅当旧 Product user UUID 在 SDK 源链完全不存在、纯文本正文在整个源链唯一且 native user 只含这一完整文本、并且匹配条目在被保留的 prefix 内时，新分支可使用该实际 native user 的新 UUID；原 Product/source 不写回。重复正文、附件、缺失正文、未知 assistant、正文混合其它 native blocks、源 UUID 仍存在但落在 prefix 外、或其它 Product 行已占该条目，均拒绝 Fork。该规则只修正复制快照的旧 stamp，不判断原回溯边界的 native resumability，也不允许移动边界或直接完整 resume 原会话。
+
+## 项目背景自动接续
+
+新桌面会话在实际 query preparation 时读取同项目近期来源，首轮重试沿同一入口刷新；后续轮次不重复注入。Scope、原文保真与Token预算见 [项目背景](project_context.md)。固定 pre-warm prompt 不拥有动态项目状态。

@@ -1,9 +1,11 @@
 import { updateExternalRuntimeConfig } from '../runtimes/external-session';
 import { retryDesktopRequest } from './retry';
+import { prepareDesktopQuery } from './query-reminder';
 import { randomUUID } from 'node:crypto';
 import { broadcast } from '../sse';
 import {
   addExternalPermissionRule,
+  runExternalTextUtility,
   publishExternalTranscriptSaveStatus,
   cancelExternalQueueItem,
   cancelExternalQueuedTurnsByOwner,
@@ -33,6 +35,7 @@ import {
   getExternalSessionReasoningEffort,
   getExternalSessionState,
   getExternalExecutionStartedAt,
+  getExternalWorkProgressSnapshot,
   getExternalSessionWorkspacePath,
   getExternalSystemInitPayload,
   getExternalMcpEffectiveSnapshot,
@@ -296,6 +299,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     publishTranscriptSaveStatus(status) { publishExternalTranscriptSaveStatus(status); },
+    getWorkProgressSnapshot() { return getExternalWorkProgressSnapshot(); },
     getLiveSessionState() {
       const executionStartedAt = getExternalExecutionStartedAt();
       return {
@@ -374,6 +378,14 @@ export function createExternalSessionEngine(): SessionEngine {
         providerExecutionIdentity: session?.providerExecutionIdentity ?? null,
         reasoningEffort: getExternalSessionReasoningEffort() ?? 'default',
       };
+    },
+
+    async runTextUtility(task) {
+      return runExternalTextUtility({
+        ...task, runtime: getActiveRuntimeType(), runtimeSource: getActiveRuntimeSource(),
+        model: getExternalSessionModel() ?? '',
+        workspacePath: getRuntimeWorkspacePath() || undefined,
+      });
     },
 
     getCurrentSessionContext() {
@@ -848,7 +860,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     async stopTurn(options) {
-      if (!isExternalSessionActive()) {
+      if (!isExternalSessionActive() && !(options?.wholeSession && (hasExternalRuntimeProcess() || isExternalSessionBusy()))) {
         return { success: true, alreadyStopped: true };
       }
       const stopped = options?.preserveQueue
@@ -1058,7 +1070,8 @@ export function createExternalSessionEngine(): SessionEngine {
           return { ...rewound, success: false, conversationCommitted: true, retryQueued: false };
         }
         try {
-          const sent = await this.sendDesktopMessage(retryDesktopRequest(context, rewound, options));
+          const prepared = await prepareDesktopQuery(retryDesktopRequest(context, rewound, options));
+          const sent = await this.sendDesktopMessage(prepared.request);
           if (sent.success && sent.queueId) await forceExecuteExternalQueueItem(sent.queueId);
           return { ...rewound, success: sent.success, conversationCommitted: true, retryQueued: sent.success, error: sent.error };
         } catch (error) {

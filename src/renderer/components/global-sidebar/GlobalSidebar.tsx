@@ -401,7 +401,7 @@ function SidebarMore({ expanded, activeView, onTeam }: {
         }}>
         <button type="button" role="menuitem" onClick={() => { close(); onTeam(); }}
           className="flex h-9 w-full items-center gap-2 rounded-md px-3 text-sm text-[var(--ink)] hover:bg-[var(--hover-bg)] focus:bg-[var(--hover-bg)]">
-          <TeamIcon className="h-4 w-4 text-[var(--ink-muted)]" /><span className="global-sidebar-label">{t('globalSidebar.team')}</span>
+          <TeamIcon className="h-4 w-4 text-[var(--ink-muted)]" /><span className="global-sidebar-label">{APP_BUILD_PROFILE === 'moxbot' ? t('globalSidebar.community') : t('globalSidebar.team')}</span>
         </button>
       </div>
     </Popover>
@@ -1158,7 +1158,7 @@ export default memo(function GlobalSidebar({
         data-global-sidebar-titlebar-follow={isWindows ? 'full' : 'toggle-slot'}
         data-global-sidebar-toggle-visible={forceRail ? 'false' : 'true'}
         data-global-sidebar-tabbar-toggle={!isWindows && !forceRail && !expanded ? 'true' : 'false'}
-        className={`global-sidebar relative z-40 flex h-screen shrink-0 flex-col [--global-sidebar-surface:var(--global-sidebar-bg)] text-[var(--ink)] ${
+        className={`global-sidebar relative z-40 flex h-full shrink-0 flex-col [--global-sidebar-surface:var(--global-sidebar-bg)] text-[var(--ink)] ${
           expanded ? 'w-[var(--global-sidebar-expanded-width)]' : 'w-[var(--global-sidebar-rail-width)]'
         }`}
       >
@@ -1293,7 +1293,7 @@ export default memo(function GlobalSidebar({
             label={t('globalSidebar.agentNetwork')}
             onClick={() => onOpenAgentNetwork?.()}
           />
-          {teamSpaceAvailable && (
+          {(APP_BUILD_PROFILE === 'moxbot' || teamSpaceAvailable) && (
             <SidebarMore key={activeView ?? 'launcher'} expanded={expanded} activeView={activeView} onTeam={onOpenSpace} />
           )}
         </nav>
@@ -1396,7 +1396,7 @@ export default memo(function GlobalSidebar({
           />
           <div className="global-sidebar-account-row grid grid-cols-[minmax(0,1fr)_var(--global-sidebar-action-size)]" data-global-sidebar-account-row data-owned-account-row={APP_BUILD_PROFILE === 'moxbot' ? 'true' : undefined}>
             {APP_BUILD_PROFILE === 'moxbot' ? (
-              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} onOpenHelper={() => { closeFlyout(); closeNotificationCenter(); onOpenBugReport(); }} />
+              <OwnedAccountEntry expanded={expanded} onOpenAgentNetwork={onOpenAgentNetwork} onOpenCommunity={() => { closeFlyout(); closeNotificationCenter(); onOpenSpace(); }} onOpenHelper={() => { closeFlyout(); closeNotificationCenter(); onOpenBugReport(); }} />
             ) : (
               <AccountEntry expanded={expanded} available={teamSpaceAvailable}
                 environment={config.spaceEnvironment ?? 'production'} onOpenSpace={onOpenSpace} />

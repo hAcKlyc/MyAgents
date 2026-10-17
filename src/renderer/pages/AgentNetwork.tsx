@@ -1,3 +1,4 @@
+import { APP_BUILD_PROFILE, APP_WEBSITE_URL } from '../../shared/appProfile';
 import {
   useCallback,
   useEffect,
@@ -20,6 +21,7 @@ import {
   type NetworkRequest,
   type NetworkDevice,
   type NetworkSnapshot,
+  type NetworkConnection,
 } from "@/api/agentNetwork";
 import { useMyAgentsLogin } from "@/hooks/useMyAgentsLogin";
 import { SpaceLogin } from "@/pages/space/SpaceChrome";
@@ -39,22 +41,33 @@ import {
   useAgentNetworkSnapshot,
 } from "@/features/agent-network/store";
 
+import { HostOnboarding } from "@/features/agent-network/HostOnboarding";
 import { NetworkHeader } from "@/features/agent-network/NetworkHeader";
 import { NetworkSelector } from "@/features/agent-network/NetworkSelector";
 
-const ownedCredentialStoreErrors = new Set([
+const stoppedOwnedConnectionErrors = new Set([
   "NETWORK_CREDENTIAL_STORE_AUTHORIZATION_REQUIRED",
   "NETWORK_CREDENTIAL_STORE_UNAVAILABLE",
   "NETWORK_CREDENTIAL_STORE_INVALID",
   "OWNED_SESSION_RECORD_MISSING",
+  "KEY_GENERATION_CONFLICT",
+  "NETWORK_CREDENTIAL_GENERATION_CONFLICT",
 ]);
 
-function networkStatusMessage(snapshot: NetworkSnapshot, official: boolean) {
+function networkStatusMessage(
+  snapshot: NetworkSnapshot,
+  official: boolean,
+  ownedAccount?: NetworkConnection["ownedAccount"],
+) {
+  // Registry owns credential/session validity, including expiry without an actor.
+  if (!official && ownedAccount?.state === "signInRequired")
+    return "agentNetwork.errors.ownedSignInRequired";
   if (
     !official &&
     snapshot.state === "disconnected" &&
     snapshot.error &&
-    ownedCredentialStoreErrors.has(snapshot.error.code)
+    (stoppedOwnedConnectionErrors.has(snapshot.error.code) ||
+      networkErrorKey(snapshot.error) === "ownedSignInRequired")
   ) {
     return `agentNetwork.errors.${networkErrorKey(snapshot.error)}`;
   }
@@ -86,6 +99,10 @@ export default function AgentNetwork({
       key={`${connection?.id}:${snapshot.authGeneration}`}
       connectionId={connection?.id ?? "official"}
       official={connection?.official ?? true}
+      networkName={connection?.name ?? ""}
+      ownedAccount={connection?.ownedAccount}
+      localDeviceId={connection?.localDeviceId}
+      serviceUrl={connection?.url ?? null}
       selector={<NetworkSelector registry={registry} />}
       isActive={isActive}
       snapshot={snapshot}
@@ -98,6 +115,10 @@ function AgentNetworkContent({
   snapshot,
   connectionId,
   official,
+  networkName,
+  ownedAccount,
+  localDeviceId,
+  serviceUrl,
   selector,
   onOpenRemoteSession,
 }: {
@@ -105,14 +126,20 @@ function AgentNetworkContent({
   snapshot: NetworkSnapshot;
   connectionId: string;
   official: boolean;
+  networkName: string;
+  ownedAccount?: NetworkConnection["ownedAccount"];
+  localDeviceId?: string | null;
+  serviceUrl: string | null;
   selector: ReactNode;
   onOpenRemoteSession?: import('@/features/remote-session/tabContract').RemoteSessionBinding['onOpen'];
 }) {
   const { t } = useTranslation("app");
+  const localId = localDeviceId ?? (ownedAccount ? "" : getDeviceId());
   const networkRequest = useCallback(
     (request: NetworkRequest) => requestNetwork(request, connectionId),
     [connectionId],
   );
+  const [addingHost, setAddingHost] = useState(false);
   const [session, setSession] = useState<SpaceSessionView | null>(null),
     [authLoading, setAuthLoading] = useState(true);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -192,7 +219,6 @@ function AgentNetworkContent({
       .then(async ([info, page]) => {
         if (!current()) return;
         metadataSchemas.network.parse(info);
-        const localId = getDeviceId();
         setDevices(
           page.items.sort(
             (a, b) =>
@@ -232,6 +258,7 @@ function AgentNetworkContent({
     official,
     connectionId,
     networkRequest,
+    localId,
   ]);
   async function retryCatalog(deviceId: string) {
     const generation = networkGeneration(connectionId);
@@ -398,7 +425,6 @@ function AgentNetworkContent({
       </NetworkPage>
     );
   }
-  const localId = getDeviceId();
   const joinedDevices = devices.filter((device) => device.joined);
   const pendingDevices = devices.filter((device) => !device.joined);
   const joinedCatalogs = joinedDevices.map(
@@ -449,6 +475,11 @@ function AgentNetworkContent({
       agentCount={directoryKnown && catalogsKnown ? openAgents : null}
     >
       <>
+        <div className="mb-5 flex justify-end">
+          <button type="button" onClick={() => setAddingHost(true)} className="rounded-lg bg-[var(--button-primary-bg)] px-4 py-2 text-sm font-semibold text-[var(--button-primary-text)] hover:bg-[var(--button-primary-bg-hover)]">
+            + {t("agentNetwork.hostOnboarding.add")}
+          </button>
+        </div>
         {(loadError || accountError) && (
           <p role="alert" className="mb-4 text-sm text-[var(--error)]">
             {loadError || accountError}{" "}
@@ -466,7 +497,7 @@ function AgentNetworkContent({
         )}
         {snapshot.state !== "ready" && (
           <p role="status" className="mb-4 text-sm text-[var(--ink-muted)]">
-            {t(networkStatusMessage(snapshot, official))}
+            {t(networkStatusMessage(snapshot, official, ownedAccount))}
           </p>
         )}
         {showSetup && (
@@ -476,11 +507,17 @@ function AgentNetworkContent({
               aria-label={t("agentNetwork.learnMore")}
               onClick={() => {
                 void openExternal(
-                  "https://myagents.io/blog/private-agent-network",
+                  APP_BUILD_PROFILE === 'moxbot' ? APP_WEBSITE_URL : "https://myagents.io/blog/private-agent-network",
                 );
               }}
               className="mb-4 block w-full overflow-hidden rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--paper)]"
             >
+              {APP_BUILD_PROFILE === 'moxbot' ? (
+                <div className="bg-[var(--paper-inset)] p-5 text-left">
+                  <h2 className="text-lg font-semibold text-[var(--ink)]">{t("agentNetwork.onboardingTitle")}</h2>
+                  <p className="mt-2 text-sm text-[var(--ink-secondary)]">{t('agentNetwork.infoIntro')}</p>
+                </div>
+              ) : (
               <img
                 src={agentNetworkBanner}
                 width={1980}
@@ -488,6 +525,7 @@ function AgentNetworkContent({
                 alt=""
                 className="block h-auto w-full"
               />
+              )}
             </button>
             <SetupGuide />
           </>
@@ -546,6 +584,26 @@ function AgentNetworkContent({
           </p>
         )}
       </>
+      {addingHost && (
+        <HostOnboarding
+          key={`${connectionId}:${snapshot.authGeneration}:${snapshot.principalId}:${snapshot.networkId}`}
+          connectionId={connectionId}
+          snapshot={snapshot}
+          networkName={networkName}
+          serviceUrl={serviceUrl}
+          official={official}
+          localDeviceId={localId}
+          onClose={() => setAddingHost(false)}
+          onManage={(device) => {
+            setDevices((current) => current.some((item) => item.deviceId === device.deviceId)
+              ? current.map((item) => item.deviceId === device.deviceId ? device : item)
+              : [...current, device]);
+            setAddingHost(false);
+            setSelected(device.deviceId);
+            setRefresh((value) => value + 1);
+          }}
+        />
+      )}
       {selectedDevice && (
         <DeviceDetails
           connectionId={connectionId}
