@@ -2917,6 +2917,26 @@ mod tests {
             unsupported_effect[0].control_json().unwrap()["code"],
             "UNSUPPORTED"
         );
+        // Protocol 1.2 schema acceptance must not confer permit/route authority
+        // on this device-only relay. Never advertise recovery until that owner exists.
+        let resume = client_control(
+            &hello,
+            "route.resume",
+            json!({"returnRouteId": Uuid::new_v4().to_string()}),
+        );
+        let effects = fixture
+            .core
+            .handle_control(
+                &connection_id,
+                &serde_json::to_vec(&resume).unwrap(),
+                None,
+                fixture.now,
+                1_104,
+            )
+            .unwrap();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].control_json().unwrap()["type"], "error");
+        assert_eq!(effects[0].control_json().unwrap()["code"], "UNSUPPORTED");
         assert_eq!(
             fixture.core.handle_control(
                 &connection_id,

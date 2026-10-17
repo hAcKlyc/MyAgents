@@ -269,7 +269,6 @@ type PendingDshMutationBase = {
   schemaVersion: 1;
   clientMutationId: string;
   sourceRuntimeSessionId: string;
-  sourceMessageCount: number;
   /** Persisted after prepare and deliberately optional for prepare-response crash recovery. */
   token?: string;
 };
@@ -277,6 +276,7 @@ type PendingDshMutationBase = {
 export type PendingDshMutation =
   | (PendingDshMutationBase & {
       kind: 'dsh-fork';
+      sourceMessageCount: number;
       sourceAssistantMessageId: string;
       sourceRuntimeTurnId: string;
       targetProductSessionId: string;
@@ -290,6 +290,7 @@ export type PendingDshMutation =
     })
   | (PendingDshMutationBase & {
       kind: 'dsh-rewind';
+      sourceMessageCount: number;
       transcript?: ConversationMutationTranscript;
       targetUserMessageId: string;
       /** The retained assistant turn before the removed user; null selects Runtime genesis. */
@@ -301,6 +302,8 @@ export type PendingDshMutation =
     })
   | (PendingDshMutationBase & {
       kind: 'dsh-delete';
+      /** Legacy journals may retain this; deletion never depends on transcript decoding. */
+      sourceMessageCount?: number;
       /** DSH has tombstoned native state; Product must finish purge and removal. */
       runtimeCommitted?: true;
     });

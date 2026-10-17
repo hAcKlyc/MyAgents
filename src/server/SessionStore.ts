@@ -1,4 +1,5 @@
 import { APP_DATA_DIR_NAME } from '../shared/appProfile';
+import { normalizeMcpSelection, normalizeMcpSelectionField } from '../shared/mcpSelection';
 /**
  * SessionStore - Handles persistence of session data using JSONL format.
  *
@@ -561,6 +562,13 @@ function atomicWriteSessionsFile(content: string): void {
     });
 }
 
+/** Session-owned compatibility; never consults current Agent defaults. */
+function normalizePersistedSessionMetadata(session: SessionMetadata): SessionMetadata {
+    const normalized = normalizeSessionRuntimeIdentity(session);
+    normalizeMcpSelectionField(normalized);
+    return normalized;
+}
+
 function parseSessionsIndexRaw(content: string): SessionMetadata[] {
     let parsed: unknown;
     try {
@@ -583,7 +591,7 @@ function parseSessionsIndexRaw(content: string): SessionMetadata[] {
 }
 
 function parseSessionsIndex(content: string): SessionMetadata[] {
-    return parseSessionsIndexRaw(content).map(normalizeSessionRuntimeIdentity);
+    return parseSessionsIndexRaw(content).map(normalizePersistedSessionMetadata);
 }
 
 function extractCompleteSessionMetadataObjects(content: string): SessionMetadata[] {
@@ -646,14 +654,14 @@ function recoverSessionsIndexFromContent(content: string): SessionMetadata[] {
     try {
         const parsed = JSON.parse(stripBom(content)) as unknown;
         if (Array.isArray(parsed)) {
-            return dedupeSessionMetadata(parsed.filter(isSessionMetadataLike).map(normalizeSessionRuntimeIdentity));
+            return dedupeSessionMetadata(parsed.filter(isSessionMetadataLike).map(normalizePersistedSessionMetadata));
         }
     } catch {
         // Fall through to structural scan for truncated or partially written JSON.
     }
 
     return dedupeSessionMetadata(
-        extractCompleteSessionMetadataObjects(content).map(normalizeSessionRuntimeIdentity),
+        extractCompleteSessionMetadataObjects(content).map(normalizePersistedSessionMetadata),
     );
 }
 
@@ -1394,6 +1402,7 @@ export async function ensureRegisteredAgentSessionOrigin(
  * Save session metadata (create or update)
  */
 export async function saveSessionMetadata(session: SessionMetadata): Promise<void> {
+    normalizeMcpSelectionField(session);
     if (session.transcriptFormat === 2) {
         let active = activeTranscripts.get(session.id);
         if (!active) {
@@ -2876,7 +2885,6 @@ export async function beginDshDeleteMutation(input: {
     ensureStorageDir();
     try {
         return await withSessionFileLock(input.sessionId, async () => {
-            const messages = await readDshMessagesForMutation(input.sessionId);
             return withSessionsLock(async () => {
                 const all = readDshSessionsIndexForWrite(input.sessionId);
                 const index = all.findIndex(session => session.id === input.sessionId);
@@ -2888,18 +2896,18 @@ export async function beginDshDeleteMutation(input: {
                     !sessionUsesDsh(current)
                     || !current.runtimeSessionId
                     || current.pendingDshMutation
-                    || current.pendingDshRootOperation
-                    || (current.pendingDshInputs?.length ?? 0) > 0
                     || isSystemMaintenanceSession(current)
                 ) {
                     return dshMutationFailure('precondition_failed', 'The DSH delete authority changed');
                 }
+                // Rust has retired execution owners. Pending inputs/operations
+                // remain intact until native purge succeeds and Product removal
+                // completes; deletion never needs to decode the transcript.
                 const intent: PendingDshDelete = {
                     schemaVersion: 1,
                     kind: 'dsh-delete',
                     clientMutationId: input.clientMutationId,
                     sourceRuntimeSessionId: current.runtimeSessionId,
-                    sourceMessageCount: messages.length,
                 };
                 all[index] = { ...current, pendingDshMutation: intent };
                 writeDshSessionsIndex(all, input.sessionId);
@@ -4415,6 +4423,9 @@ export async function updateSessionMetadata(
      */
     precondition?: (current: SessionMetadata) => boolean,
 ): Promise<SessionMetadata | null> {
+    if ('mcpEnabledServers' in updates) {
+        updates = { ...updates, mcpEnabledServers: normalizeMcpSelection(updates.mcpEnabledServers) };
+    }
     const active = activeTranscripts.get(sessionId);
     if (active && updates.pinned === undefined && !precondition) {
         if (active.isRevoked) return null;
@@ -4473,6 +4484,7 @@ export async function updateSessionMetadata(
             patch.lastActiveAt = monotonicLastActiveAt(current.lastActiveAt, patch.lastActiveAt);
         }
         const updated: SessionMetadata = { ...current, ...patch };
+        normalizeMcpSelectionField(updated);
         if (changesPendingDshAuthority(current, updated)) return;
         all[idx] = updated;
         try {

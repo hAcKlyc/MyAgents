@@ -23,7 +23,7 @@ Space IssueDelivery 在这层通用 envelope 内还有独立的 Registered Agent
 - 普通跨 session send/watch 事件仍走 `session_architecture.md` 的
   `<myagents-session-event>` 协议。协议整体位于隐藏 envelope 内；renderer 只对
   `send.request` 提取 `<payload>` 与 `source_label` 形成用户可见气泡，自动
-  `send.result` / watch 事件继续保持隐藏。不得把内部 summary / session id 暴露到气泡。
+  `send.result` / watch / 本地 `network.return_unavailable` 事件继续保持隐藏。不得把内部 summary / session id 暴露到气泡。
 - 工具产物、图片、文件不要塞进 prompt 字符串，走 `tool_attachment_pipeline.md`
   的 `ToolAttachment[]`。
 

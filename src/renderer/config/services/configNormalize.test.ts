@@ -158,3 +158,21 @@ describe('promoteAgentMcpJsonToGlobal (issue #398)', () => {
     expect(cfg.mcpEnabledServers).toEqual([]);
   });
 });
+
+import { applyBuiltinBrowserExecutionToolToggle } from '../../../shared/browserTools';
+
+describe('MCP selection settings regression', () => {
+  it('renderer load then settings toggle/save preserves IDs and serialized definitions', () => {
+    const config = {
+      mcpEnabledServers: '[]',
+      agents: [{ id: 'legacy', mcpEnabledServers: '[playwright,tavily-search]', mcpServersJson: '[]' }],
+    } as unknown as AppConfig;
+    normalizeStringifiedJsonFields(config);
+    const agent = config.agents![0];
+    agent.mcpEnabledServers = applyBuiltinBrowserExecutionToolToggle(agent.mcpEnabledServers!, 'tavily-search', false, true);
+    const saved = JSON.parse(JSON.stringify(config)) as AppConfig;
+    expect(saved.agents![0].mcpEnabledServers).toEqual(['playwright']);
+    expect(saved.agents![0].mcpServersJson).toBe('[]');
+    expect(saved.mcpEnabledServers).toEqual([]);
+  });
+});

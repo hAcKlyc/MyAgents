@@ -19,6 +19,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import { isTauriEnvironment } from '../utils/browserMock';
 import { isLiveRevisionEnvelope } from '../../shared/liveRevision';
+import { isSsePayloadRef } from '../../shared/ssePayloadRef';
+import { getSessionPort } from './tauriClient';
 
 // Event types that should be parsed as JSON
 // IMPORTANT: When adding new SSE events in backend, remember to add them here too!
@@ -151,10 +153,19 @@ export class SseConnection {
 
     // Reconnection state
     private reconnectAttempts = 0;
+    // A reopened transport (or an earlier ref) does not prove that the full
+    // snapshot loaded. Bound payload recovery for this logical connection.
+    private payloadRecoveryAttempts = 0;
+    private connecting: Promise<void> | null = null;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private isReconnecting = false;
     private shouldReconnect = true; // Set to false when intentionally disconnecting
     private connectionGeneration = 0;
+    private deliveryEpoch = 0;
+    private payloadAbort: AbortController | null = null;
+    private pendingEvents: Array<{ eventName: string; data: string }> = [];
+    private pendingBytes = 0;
+
 
     constructor(
         connectionId: string,
@@ -194,7 +205,7 @@ export class SseConnection {
      * This deliberately does not claim that an HTTP stream is currently live.
      */
     isActive(): boolean {
-        return this.eventSource !== null || this.tauriActive;
+        return this.eventSource !== null || this.tauriActive || this.isReconnecting;
     }
 
     /**
@@ -210,6 +221,91 @@ export class SseConnection {
                 console.warn(`[SSE ${this.connectionId}] unlisten failed:`, error);
             }
         }
+    }
+
+    private resetPendingDelivery(): void {
+        this.deliveryEpoch++;
+        this.payloadAbort?.abort();
+        this.payloadAbort = null;
+        this.pendingEvents = [];
+        this.pendingBytes = 0;
+    }
+
+    /** Decode at the connection owner so Tab and Companion share ordering/fences. */
+    private receiveSseEvent(eventName: string, data: string): void {
+        if (!this.shouldReconnect) return;
+        if (this.payloadAbort) {
+            // A stalled data-plane read must not create an unbounded second queue.
+            if (this.pendingEvents.length >= 10_000 || this.pendingBytes + data.length * 2 > 32 * 1024 * 1024) {
+                void this.recoverPayloadDelivery(this.deliveryEpoch);
+                return;
+            }
+            this.pendingEvents.push({ eventName, data });
+            this.pendingBytes += data.length * 2;
+            return;
+        }
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { /* legacy string */ }
+        if (!isSsePayloadRef(parsed)) {
+            this.handleSseEvent(eventName, data);
+            return;
+        }
+        const epoch = this.deliveryEpoch;
+        const sessionId = this.sessionIdRef?.current;
+        const abort = new AbortController();
+        this.payloadAbort = abort;
+        // Bound a missing/hung ref using the existing connection retry path.
+        const timeout = setTimeout(() => abort.abort(), 30_000);
+        void (async () => {
+            try {
+                const port = sessionId ? await getSessionPort(sessionId) : null;
+                if (epoch !== this.deliveryEpoch) return;
+                if (!port) throw new Error('SSE ref Sidecar is unavailable');
+                const response = await fetch(`http://127.0.0.1:${port}/refs/${parsed.ref.id}`, { signal: abort.signal });
+                if (!response.ok) throw new Error(`SSE payload ref returned ${response.status}`);
+                const body = await response.text();
+                if (epoch !== this.deliveryEpoch || !this.shouldReconnect) return;
+                // Validate before admission: a corrupt ref must not become a null
+                // business event followed by deltas against an absent baseline.
+                JSON.parse(body);
+                this.payloadAbort = null;
+                this.handleSseEvent(eventName, body);
+                while (epoch === this.deliveryEpoch && !this.payloadAbort && this.pendingEvents.length > 0) {
+                    const next = this.pendingEvents.shift()!;
+                    this.pendingBytes -= next.data.length * 2;
+                    this.receiveSseEvent(next.eventName, next.data);
+                }
+            } catch {
+                if (epoch === this.deliveryEpoch && this.shouldReconnect) {
+                    await this.recoverPayloadDelivery(epoch);
+                }
+            } finally { clearTimeout(timeout); }
+        })();
+    }
+
+    private async recoverPayloadDelivery(epoch: number): Promise<void> {
+        if (epoch !== this.deliveryEpoch || !this.shouldReconnect) return;
+        console.warn(`[SSE ${this.connectionId}] Full payload unavailable; reconnecting for a fresh snapshot`);
+        const starting = this.connecting;
+        const disconnected = this.disconnect(); // Revokes this queue synchronously.
+        const recoveryEpoch = this.deliveryEpoch;
+        // Recovery retains this logical attachment while the physical start
+        // is being cancelled. The connect caller must not dispose its owner.
+        this.isReconnecting = true;
+        // A first event can precede start_sse_proxy's acknowledgement. Keep
+        // cancellation asserted until that attempt has stopped/unlistened.
+        await Promise.allSettled([disconnected, starting]);
+        // A user disconnect or a replacement connection during teardown wins.
+        if (recoveryEpoch !== this.deliveryEpoch) return;
+        this.payloadRecoveryAttempts++;
+        if (this.payloadRecoveryAttempts > RECONNECT_MAX_ATTEMPTS) {
+            this.isReconnecting = false;
+            this.notifyStatus('failed');
+            return;
+        }
+        this.shouldReconnect = true;
+        this.reconnectAttempts = Math.max(this.reconnectAttempts, this.payloadRecoveryAttempts - 1);
+        this.scheduleReconnect();
     }
 
     /**
@@ -311,13 +407,14 @@ export class SseConnection {
         }
 
         if (envelope.transportGeneration > this.connectionGeneration) {
+            this.resetPendingDelivery();
             this.connectionGeneration = envelope.transportGeneration;
             // Establish the restore fence before applying the first business
             // event from this physical stream.
             this.notifyStatus('connected');
         }
 
-        this.handleSseEvent(eventName, envelope.data);
+        this.receiveSseEvent(eventName, envelope.data);
     }
 
     /**
@@ -332,6 +429,8 @@ export class SseConnection {
 
         console.debug(`[SSE ${this.connectionId}] Connecting browser EventSource:`, sseUrl);
 
+        if (!this.shouldReconnect) return;
+        this.resetPendingDelivery();
         this.connectionGeneration += 1;
         this.eventSource = new EventSource(sseUrl);
 
@@ -344,12 +443,13 @@ export class SseConnection {
 
         for (const eventName of ALL_EVENTS) {
             this.eventSource.addEventListener(eventName, ((event: MessageEvent<string>) => {
-                this.handleSseEvent(event.type, event.data);
+                this.receiveSseEvent(event.type, event.data);
             }) as EventListener);
         }
 
         this.eventSource.onerror = () => {
             console.warn(`[SSE ${this.connectionId}] Connection error`);
+            this.resetPendingDelivery();
 
             // Only attempt reconnection if not intentionally disconnected
             if (this.shouldReconnect && !this.isReconnecting) {
@@ -433,14 +533,13 @@ export class SseConnection {
      * Connect to SSE stream
      */
     async connect(): Promise<void> {
-        // Reset state for new connection
+        if (!this.isReconnecting) this.payloadRecoveryAttempts = 0;
+        this.resetPendingDelivery();
         this.shouldReconnect = true;
-
-        if (isTauriEnvironment()) {
-            await this.connectTauri();
-        } else {
-            await this.connectBrowser();
-        }
+        const attempt = isTauriEnvironment() ? this.connectTauri() : this.connectBrowser();
+        this.connecting = attempt;
+        try { await attempt; }
+        finally { if (this.connecting === attempt) this.connecting = null; }
     }
 
     /**
@@ -455,6 +554,12 @@ export class SseConnection {
         // signal that cancels it. A subsequent connect() will set it back
         // to true at the top of its own body.
         this.shouldReconnect = false;
+        this.isReconnecting = false;
+        this.resetPendingDelivery();
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
 
         // Idempotent guard: only skip when there is genuinely nothing to clean
         // up. Note tauriUnlisteners.length: connectTauri() may have already
@@ -561,6 +666,7 @@ export class SseConnection {
      * Reset reconnection state (call when intentionally connecting)
      */
     resetReconnectState(): void {
+        this.payloadRecoveryAttempts = 0;
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
         this.shouldReconnect = true;

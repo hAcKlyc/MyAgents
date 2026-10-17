@@ -326,3 +326,7 @@ User requested the new Linux Host reuse of current desktop main-Agent model and 
 ## MOXBOTS-CONTEXT-RECOVERY-20261017
 
 Builtin API operational compaction budget, native compact failure correction, inference-only bounded recovery, private archives and durable business-action replay ledger; Rust pauses/resumes original Goal instead of blind10 retries. Contract `specs/tech_docs/context_recovery.md`, acceptance `dev-docs/context-recovery-20261017/acceptance.md`, task `.agent-sync/tasks/codex-context-recovery-20261017-4895668c.md`. Real SDK manual/auto compact and Query restart counter=1 passed; source/CI/main and next unfrozen signed release tracked separately. Sole existing deployment owner remains unchanged; do not alter frozen058 or interrupt daily tasks.
+
+## MOXBOTS-UPSTREAM-INTEGRATION-20261017
+
+User authorized nine upstream repairs and consumed-settings-navigation state only; preserve existing MoXBots menu/sidebar and context recovery safeguards. Source integration includes protocol1.2 client with legacy owned relay negotiation, DSH6.2 contracts/paired release selector0.1.18, MCP/Goal/history/plugin/QR/build repairs. Combined test/main delivery tracked in `.agent-sync/tasks/codex-upstream-integration-20261017-ff567bc3.md` and `dev-docs/upstream-integration-20261017/acceptance.md`. No product version/changelog copy and no new cloud authority. Desktop release request queued to the existing sole owner for the next unfrozen batch; this source task does not install, publish, restart or message another chat.

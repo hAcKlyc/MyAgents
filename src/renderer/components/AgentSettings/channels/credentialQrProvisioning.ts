@@ -24,9 +24,21 @@ export interface CredentialQrRunSuccess {
 
 export interface CredentialQrRunFailure {
   kind: 'error';
-  reason: 'expired' | 'denied' | 'cancelled' | 'network' | 'invalid-response';
+  reason: 'expired' | 'denied' | 'cancelled' | 'start-failed' | 'poll-failed' | 'invalid-response';
   refreshCount: number;
   message?: string;
+}
+
+/** Both setup surfaces show the failed operation, never infer it from refresh count. */
+export function credentialQrFailureMessageKey(reason: CredentialQrRunFailure['reason'] | undefined) {
+  switch (reason) {
+    case 'denied':
+    case 'cancelled': return 'agentSettings.channelWizard.dual.scanDenied';
+    case 'expired': return 'agentSettings.channelWizard.dual.qrExpiredMultiple';
+    case 'poll-failed': return 'agentSettings.channelWizard.dual.qrPollFailed';
+    case 'invalid-response': return 'agentSettings.channelWizard.dual.qrInvalidResponse';
+    default: return 'agentSettings.channelWizard.qr.loadFailed';
+  }
 }
 
 export type CredentialQrRunResult =
@@ -129,7 +141,7 @@ export async function runCredentialQrProvisioning({
       if (isCancelled()) return { kind: 'cancelled', refreshCount };
       await onQrUrl(start.qrUrl, refreshCount);
     } catch (error) {
-      return { kind: 'error', reason: 'network', refreshCount, message: errorMessage(error) };
+      return { kind: 'error', reason: 'start-failed', refreshCount, message: errorMessage(error) };
     }
 
     if (isCancelled()) return { kind: 'cancelled', refreshCount };
@@ -155,7 +167,7 @@ export async function runCredentialQrProvisioning({
           pollIndex: globalPollIndex,
         });
       } catch (error) {
-        return { kind: 'error', reason: 'network', refreshCount, message: errorMessage(error) };
+        return { kind: 'error', reason: 'poll-failed', refreshCount, message: errorMessage(error) };
       }
       globalPollIndex += 1;
       pollsThisQr += 1;

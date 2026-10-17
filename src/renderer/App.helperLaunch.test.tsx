@@ -1924,7 +1924,7 @@ describe('App helper launch', () => {
       sessionId !== failedSessionId
     ));
     render(<App />);
-    act(() => latestSidebarProps().onOpenSettings());
+    await act(async () => latestSidebarProps().onOpenSettings());
     await waitFor(() => {
       const latest = mocks.tabbarProps.at(-1);
       const active = (latest?.tabs as Array<{ id: string; view?: string }>).find(
@@ -1976,7 +1976,7 @@ describe('App helper launch', () => {
     });
     await waitFor(() => expect(screen.getByTestId('tabbar-active')).toHaveTextContent('Background ready history'));
 
-    act(() => latestSidebarProps().onOpenSettings());
+    await act(async () => latestSidebarProps().onOpenSettings());
     await waitFor(() => {
       const latest = mocks.tabbarProps.at(-1);
       const active = (latest?.tabs as Array<{ id: string; view?: string }>).find(

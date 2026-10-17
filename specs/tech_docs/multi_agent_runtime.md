@@ -306,6 +306,10 @@ Codex 在 Session 启动后异步收集 auth、feature、MCP 与 app 状态，�
 
 Runtime tool catalog 是独立的可变 capability snapshot；只包含当前 native Runtime 已确认可用的工具。查询暂时失败保留仍健康的上一 snapshot，明确 failed/cancelled 才撤回对应 server。广播前必须校验 process generation，避免退出进程的迟到诊断污染新 Session。
 
+Codex process 退出必须清空当前可调用目录，但不改 Session 的 desired MCP 选择。主动 stop/recycle 在 exact process teardown 前记录 intent，effective MCP 投影为 `stopped`；非预期退出及协议故障清理仍为 `failed / MCP_RUNTIME_EXITED`，不能仅凭 exit code 0 判断正常。`stopped` 环境可随下一条消息启动，也可显式启动；`failed` 可显式重试，两者共用 SessionEngine 的 MCP retry、既有 mutation lease 与 idle prewarm，不重发已取消消息。`POST /api/mcp/retry` 属于 Session role，Global role 不接纳。Renderer 等待真实 owner snapshot，不把请求接受视为工具 ready；重连失败在当前工具行显示有界原因。
+
+外层 Session 的 watchdog、启动后 send 失败也必须把 failure teardown intent 传给 adapter，不能让调用 `stopSession` 本身成为“用户停止”的证据。显式 MCP retry 在 invalidation 后、首份 native snapshot 前启动失败时，由持有 mutation lease 的 Session owner 发布当前 desired 集合的无工具 failed snapshot；不恢复旧 ready 目录，也不覆盖已有 native 失败/授权诊断。
+
 CLI 诊断命令与真实 Session 启动使用同一个 env resolver 和 adapter probe。命令入口见 [`cli_architecture.md`](cli_architecture.md)。
 
 外部 CLI 选择遵循用户 Shell 的 PATH 顺序；检测、查询与启动等待同一次异步环境发现，并以子进程实际 env 解析绝对路径。平台目录只用于兜底，不抢占用户版本管理器。顺序、超时和平台边界见 [Bundled Node 的 Runtime locator 与 PATH](bundled_node.md#runtime-locator-与-path)。

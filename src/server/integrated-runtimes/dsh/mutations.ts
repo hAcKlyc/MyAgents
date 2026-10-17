@@ -537,6 +537,10 @@ export class DshMutationController {
     return this.prepare('session/delete/prepare', { clientMutationId }, signal);
   }
 
+  prepareStoredDelete(clientMutationId: string, signal?: AbortSignal): Promise<DshMutationResult> {
+    return this.prepare('session/delete/prepare', { clientMutationId, runtimeSessionId: this.expectedRuntimeSessionId }, signal);
+  }
+
   commitFork(clientMutationId: string, token: string, signal?: AbortSignal): Promise<DshMutationResult> {
     return this.settle('session/fork/commit', clientMutationId, token, signal);
   }

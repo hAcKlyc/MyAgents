@@ -1,0 +1,9 @@
+{
+  "head": "ceed6006fcbaee95d492e12b2c74dfb6a69174f7",
+  "files": {
+    "src/renderer/features/settings/tabModule.tsx": "0fb67ca9de6bd5a31dcc7055cb27fc3af0fce198d85fc2420062c7c1ea1d6479",
+    "src/renderer/features/capabilities/tabModule.tsx": "f40c1bbc3a031be0ca7eb79bba06492264b619af2df6439b6affead08d04d5b0",
+    "src/renderer/pages/settings/SettingsPage.tsx": "a70f340d053373bbb0f87098881ded40dad6efca36328600dafbf02b8dec51ce",
+    "src/renderer/pages/settings/hooks/useSettingsNavigation.ts": "52ea1c9cd7edad5e3ed7bfc3d77d532a3d0d588cc1d50165778d642a9197dddd"
+  }
+}

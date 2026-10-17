@@ -227,12 +227,13 @@ async function recoverDelete(
   if (mutation.state === 'prepared') {
     mutation = await controller.commitDelete(intent.clientMutationId, mutation.token);
   }
-  if (mutation.state === 'committed') {
+  if (mutation.state === 'committed' || mutation.state === 'purged') {
     intent = requireStoreSuccess(await recordCommittedDshDelete({
       sessionId: productSessionId,
       clientMutationId: intent.clientMutationId,
       token: mutation.token,
     }));
+    // A durable purge receipt may precede physical generation collection.
     mutation = await controller.purgeDelete(intent.clientMutationId, mutation.token);
   }
   if (mutation.state !== 'purged') {

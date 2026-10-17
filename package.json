@@ -129,7 +129,7 @@
     "@lezer/highlight": "^1.2.3",
     "@lezer/markdown": "^1.7.2",
     "@monaco-editor/react": "^4.7.0",
-    "@myagents/agent-network-protocol": "file:vendor/agent-network-protocol/myagents-agent-network-protocol-1.1.0-445fb9d0e1e1e9f8.tgz",
+    "@myagents/agent-network-protocol": "file:vendor/agent-network-protocol/myagents-agent-network-protocol-1.2.0-240dc3b654ab221d.tgz",
     "@playwright/mcp": "0.0.68",
     "@tauri-apps/api": "~2.11",
     "@tauri-apps/plugin-autostart": "^2.5.1",

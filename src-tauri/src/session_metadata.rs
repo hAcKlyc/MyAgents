@@ -20,6 +20,7 @@ fn sessions_path() -> Result<std::path::PathBuf, String> {
 }
 
 pub(crate) fn redact_session_metadata(mut session: Value) -> Option<Value> {
+    crate::mcp_selection::normalize_mcp_selection_field(&mut session);
     let obj = session.as_object_mut()?;
     if obj
         .get("materializationState")
@@ -332,6 +333,21 @@ mod tests {
     };
     use serde_json::{json, Value};
     use std::path::Path;
+
+    #[test]
+    fn projects_legacy_mcp_selection_without_changing_snapshot_authority() {
+        let value = redact_session_metadata(json!({
+            "id": "session-1",
+            "configSnapshotAt": "frozen",
+            "mcpEnabledServers": "[playwright,tavily-search]"
+        }))
+        .unwrap();
+        assert_eq!(value["configSnapshotAt"], "frozen");
+        assert_eq!(
+            value["mcpEnabledServers"],
+            json!(["playwright", "tavily-search"])
+        );
+    }
 
     #[test]
     fn redacts_provider_env_json() {

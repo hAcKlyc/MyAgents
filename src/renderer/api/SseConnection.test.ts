@@ -54,7 +54,7 @@ vi.mock('../utils/browserMock', () => ({
 }));
 vi.mock('./tauriClient', () => ({
     getTabServerUrl: vi.fn(async () => 'http://127.0.0.1:31426'),
-    getSessionPort: vi.fn(async () => null),
+    getSessionPort: vi.fn(async () => 31426),
 }));
 
 import { SseConnection } from './SseConnection';
@@ -419,6 +419,156 @@ describe('SseConnection — listener cleanup invariants', () => {
             connectionGeneration: 2,
         });
         expect(mocks.invokeImpl).not.toHaveBeenCalled();
+        await conn.disconnect();
+    });
+});
+
+describe('SseConnection — full transcript ref delivery', () => {
+    const ref = JSON.stringify({ kind: 'sse-payload-ref', ref: {
+        kind: 'ref', id: 'a'.repeat(32), mimetype: 'application/json', sizeBytes: 300_000,
+    } });
+    async function fixture() {
+        const callbacks = new Map<string, (event: { payload: unknown }) => void>();
+        const realListen = mocks.defaultListenImpl;
+        mocks.listenImpl.mockImplementation(async (name: string, ...args: unknown[]) => {
+            callbacks.set(name, args[0] as (event: { payload: unknown }) => void);
+            return realListen(name);
+        });
+        const conn = new SseConnection('ref-tab', { current: 'session-a' });
+        const handler = vi.fn();
+        conn.setEventHandler(handler);
+        await conn.connect();
+        const send = (event: string, data: string, generation = 1) => {
+            callbacks.get(`sse:ref-tab:${event}`)!({ payload: { data, transportGeneration: generation } });
+        };
+        return { conn, handler, send };
+    }
+
+    it('automatically loads full body before following revisions', async () => {
+        let finish!: (value: Response) => void;
+        vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+        const { conn, handler, send } = await fixture();
+        try {
+            send('chat:message-replay', ref);
+            send('chat:transcript-operation', JSON.stringify({ revision: 11 }));
+            await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+            expect(handler).not.toHaveBeenCalled();
+            const body = { sessionId: 'session-a', liveRevision: 10, payload: { text: '正文'.repeat(150_000) } };
+            finish(new Response(JSON.stringify(body)));
+            await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(2));
+            expect(handler.mock.calls[0]).toEqual(['chat:message-replay', body.payload, {
+                connectionGeneration: 1, sessionId: 'session-a', liveRevision: 10,
+            }]);
+            expect(handler.mock.calls[1][1]).toEqual({ revision: 11 });
+        } finally { await conn.disconnect(); }
+    });
+
+    it.each(['disconnect', 'replacement'] as const)('rejects late body and queued deltas after %s', async boundary => {
+        let finish!: (value: Response) => void;
+        vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve; })));
+        const { conn, handler, send } = await fixture();
+        try {
+            send('chat:message-replay', ref);
+            send('chat:transcript-operation', '{"old":true}');
+            await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+            if (boundary === 'disconnect') await conn.disconnect();
+            else send('chat:init', '{"fresh":true}', 2);
+            finish(new Response('{"oldBody":true}'));
+            await new Promise(resolve => setTimeout(resolve, 10));
+            expect(handler.mock.calls).toEqual(boundary === 'disconnect' ? [] : [
+                ['chat:init', { fresh: true }, { connectionGeneration: 2 }],
+            ]);
+        } finally { await conn.disconnect(); }
+    });
+
+    it('discards queued deltas on unavailable ref, and user disconnect cancels recovery', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })));
+        const { conn, handler, send } = await fixture();
+        const statuses = vi.fn();
+        conn.setStatusHandler(statuses);
+        send('chat:message-replay', ref);
+        send('chat:transcript-operation', '{"unbased":true}');
+        await vi.waitFor(() => expect(statuses).toHaveBeenCalledWith('reconnecting'));
+        expect(handler).not.toHaveBeenCalled();
+        await conn.disconnect();
+        expect(conn.isActive()).toBe(false);
+    });
+});
+
+describe('SseConnection — payload recovery lifecycle', () => {
+    const ref = JSON.stringify({ kind: 'sse-payload-ref', ref: {
+        kind: 'ref', id: 'b'.repeat(32), mimetype: 'application/json',
+    } });
+
+    it('bounds browser payload retries even when every transport and an earlier ref succeed', async () => {
+        vi.useFakeTimers();
+        mocks.state.isTauri = false;
+        const sources: FakeSource[] = [];
+        class FakeSource {
+            onopen: (() => void) | null = null;
+            onerror: (() => void) | null = null;
+            listeners = new Map<string, (event: unknown) => void>();
+            constructor() { sources.push(this); }
+            addEventListener(name: string, callback: (event: unknown) => void) { this.listeners.set(name, callback); }
+            close() {}
+            send(data: string) { this.listeners.get('chat:message-replay')!({ type: 'chat:message-replay', data }); }
+        }
+        vi.stubGlobal('EventSource', FakeSource);
+        let reads = 0;
+        vi.stubGlobal('fetch', vi.fn(async () => ++reads % 2 === 1
+            ? new Response('{"earlierBody":true}') : new Response('', { status: 404 })));
+        const conn = new SseConnection('browser', { current: 'session-a' });
+        const statuses = vi.fn();
+        conn.setStatusHandler(statuses);
+        conn.setEventHandler(vi.fn());
+        try {
+            await conn.connect();
+            for (let attempt = 0; attempt < 4; attempt++) {
+                sources.at(-1)!.onopen!();
+                sources.at(-1)!.send(ref);
+                sources.at(-1)!.send(ref);
+                await vi.advanceTimersByTimeAsync(0);
+                if (attempt < 3) await vi.advanceTimersByTimeAsync(1000 * 2 ** attempt);
+            }
+            expect(sources).toHaveLength(4);
+            expect(statuses).toHaveBeenLastCalledWith('failed');
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(sources).toHaveLength(4);
+            expect(conn.isActive()).toBe(false);
+        } finally { await conn.disconnect(); }
+    });
+
+    it.each([false, true])('waits for initial proxy acknowledgement before recovery (user cancel=%s)', async userCancel => {
+        vi.useFakeTimers();
+        let acknowledge!: () => void;
+        let firstStart = true;
+        mocks.invokeImpl.mockImplementation(async (command: string) => {
+            if (command === 'start_sse_proxy' && firstStart) {
+                firstStart = false;
+                await new Promise<void>(resolve => { acknowledge = resolve; });
+            }
+        });
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })));
+        const conn = new SseConnection('starting', { current: 'session-a' });
+        conn.setEventHandler(vi.fn());
+        const connecting = conn.connect().then(async () => {
+            // Exact TabProvider attachment acceptance boundary.
+            if (!conn.isActive()) await conn.disconnect();
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(acknowledge).toBeDefined();
+        const receive = (conn as unknown as { handleTauriEnvelope(event: string, data: unknown): void });
+        receive.handleTauriEnvelope('chat:message-replay', { transportGeneration: 1, data: ref });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(totalListeners()).toBe(0);
+        if (userCancel) await conn.disconnect();
+        acknowledge();
+        await connecting;
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(mocks.invokeImpl).toHaveBeenCalledWith('stop_sse_proxy', { connectionKey: 'starting' });
+        expect(mocks.invokeImpl.mock.calls.filter(call => call[0] === 'start_sse_proxy')).toHaveLength(userCancel ? 1 : 2);
+        expect(conn.isActive()).toBe(!userCancel);
+        if (!userCancel) expect(totalListeners()).toBeGreaterThan(0);
         await conn.disconnect();
     });
 });

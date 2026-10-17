@@ -1,0 +1,46 @@
+[
+  {
+    "mode": "settings",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "consumed": "consumed=4; intent=none",
+    "defaultSelection": "Model Providers",
+    "horizontalOverflow": false,
+    "result": "PASS"
+  },
+  {
+    "mode": "capabilities",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "consumed": "consumed=3; intent=none",
+    "defaultSelection": "Plugins",
+    "horizontalOverflow": false,
+    "result": "PASS"
+  },
+  {
+    "mode": "settings",
+    "viewport": {
+      "width": 800,
+      "height": 700
+    },
+    "consumed": "consumed=4; intent=none",
+    "defaultSelection": "Model Providers",
+    "horizontalOverflow": false,
+    "result": "PASS"
+  },
+  {
+    "mode": "capabilities",
+    "viewport": {
+      "width": 800,
+      "height": 700
+    },
+    "consumed": "consumed=3; intent=none",
+    "defaultSelection": "Plugins",
+    "horizontalOverflow": false,
+    "result": "PASS"
+  }
+]

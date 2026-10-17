@@ -84,3 +84,30 @@ fn typed_control_contracts_include_fresh_peer_bindings_and_credits() {
         assert_eq!(ServerEnvelope::parse(&encoded).is_ok(),case["valid"].as_bool().unwrap(),"{}",case["name"]);
     }
 }
+
+#[test]
+fn negotiated_return_recovery_controls_match_the_fixed_schema() {
+    use myagents_agent_network_protocol::{ClientEnvelope, ClientMessage, ConnectionScope, ServerMessage};
+    use serde_json::json;
+    let scope = ConnectionScope {
+        service_id: "00000000-0000-4000-8000-000000000001".into(),
+        network_id: "00000000-0000-4000-8000-000000000002".into(),
+        boot_epoch: "00000000-0000-4000-8000-000000000003".into(),
+        connection_epoch: "00000000-0000-4000-8000-000000000004".into(),
+    };
+    let route = "00000000-0000-4000-8000-000000000005";
+    let resume = ClientEnvelope { version: 1, control_id: route.into(), message: ClientMessage::Resume { scope: scope.clone(), return_route_id: route.into() } };
+    let value = serde_json::to_value(resume).unwrap();
+    validate_control(&value).unwrap();
+    for (kind, extra) in [
+        ("route.suspended", json!({"remainingMs":900000})),
+        ("route.resumed", json!({"sourceConnectionEpoch":scope.connection_epoch,"targetConnectionEpoch":scope.boot_epoch})),
+    ] {
+        let mut value = serde_json::to_value(&scope).unwrap();
+        let obj = value.as_object_mut().unwrap();
+        obj.extend(json!({"version":1,"controlId":route,"type":kind,"returnRouteId":route}).as_object().unwrap().clone());
+        obj.extend(extra.as_object().unwrap().clone());
+        let typed = ServerEnvelope::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(matches!(typed.message, ServerMessage::RouteSuspended {..} | ServerMessage::RouteResumed {..}));
+    }
+}

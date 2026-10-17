@@ -30,7 +30,7 @@ export const CONTRACT_PATHS = Object.freeze([
   "contracts/public-contract.generated.ts",
   "contracts/myagents-dsh-compatibility-v1.json",
   "contracts/official-product-profile-v1.json",
-  "contracts/protocol-6.1.0-evidence.json",
+  "contracts/protocol-6.2.0-evidence.json",
   "contracts/protocol-fixtures.json",
   "contracts/protocol-meta.json",
   "contracts/protocol.schema.json",
@@ -347,7 +347,7 @@ export function compareOrAcceptContracts(
   }
   if (acceptContracts) {
     // Evidence belongs to the accepted generated projection.
-    for (const version of ["5.0.0", "6.0.0"]) {
+    for (const version of ["5.0.0", "6.0.0", "6.1.0"]) {
       rmSync(resolve(targetRoot, `protocol-${version}-evidence.json`), { force: true });
     }
   }

@@ -49,6 +49,11 @@ type RuntimeExit = Readonly<{
   signal: NodeJS.Signals | null;
 }>;
 
+type HostTermination = Readonly<{
+  reason: 'protocol_failure' | 'startup_failed' | 'host_shutdown';
+  signal: NodeJS.Signals | null;
+}>;
+
 export type DshRuntimeProcessIdentity = Readonly<{
   productSessionId: string;
   runtimeGeneration: string;
@@ -82,6 +87,7 @@ export type DshRuntimeProcessHostOptions = Readonly<{
   onStderrLine?: (redactedLine: string) => void;
   redactStderrLine?: (line: string) => string;
   onFailure?: (error: Error) => void;
+  onExit?: (exit: RuntimeExit & { hostTermination: HostTermination | null }) => void;
   loadProtocolRuntime?: (
     runtimeArtifactRoot: string,
   ) => Promise<LoadedDshProtocolRuntime>;
@@ -129,11 +135,12 @@ function assertRuntimeStatus(
 
 export function redactDshDiagnosticLine(line: string): string {
   return line
-    .replace(/\bBearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
     .replace(
-      /((?:api.?key|authorization|credential|password|secret|token|cookie)\s*[=:]\s*)[^\s,;}]+/gi,
+      /((?:api.?key|authorization|credential|password|secret|token|cookie)["']?\s*[=:]\s*)(?:"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|(?:Bearer|Basic)\s+[^\s,"';}]+|[^\s,;}]+)/gi,
       "$1[REDACTED]",
     )
+    .replace(/\bBearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[REDACTED]@')
     .slice(0, 4_096);
 }
 
@@ -192,6 +199,8 @@ export class DshRuntimeProcessHost {
   private stopPromise: Promise<void> | undefined;
   private failureReported = false;
   private stderrBuffer = "";
+  private observedExit = false;
+  private hostTermination: HostTermination | null = null;
 
   constructor(private readonly options: DshRuntimeProcessHostOptions) {
     assertHostProtocolSelection(options.initialize);
@@ -288,7 +297,13 @@ export class DshRuntimeProcessHost {
       const child = this.spawnRuntime();
       this.child = child;
       this.exitPromise = new Promise((resolve) => {
-        child.once("exit", (code, signal) => resolve({ code, signal }));
+        child.once("exit", (code, signal) => {
+          this.observedExit = true;
+          resolve({ code, signal });
+          // Exit evidence is independent of transport/admission state. EOF may
+          // already have failed the protocol and caused Host cleanup.
+          this.options.onExit?.({ code, signal, hostTermination: this.hostTermination });
+        });
       });
       this.attachChildDiagnostics(child);
       child.once("error", (error) => this.fail(error));
@@ -438,7 +453,7 @@ export class DshRuntimeProcessHost {
     if (this.stateValue === "stopped") return;
     if (this.stateValue === "starting") {
       this.stateValue = "stopping";
-      this.child?.kill("SIGTERM");
+      this.terminateChild('host_shutdown', 'SIGTERM');
       await this.startPromise?.catch(() => undefined);
       this.disposeProtocolHandlers();
       this.client?.peer.close();
@@ -450,6 +465,7 @@ export class DshRuntimeProcessHost {
     const graceMs = boundedTimeout(this.options.shutdownGraceMs, 5_000);
     const client = this.client;
     if (wasReady && client) {
+      this.hostTermination = { reason: 'host_shutdown', signal: null };
       try {
         await withTimeout(graceMs, async (signal) =>
           client.runtimeShutdown({ reason }, { signal }),
@@ -460,9 +476,9 @@ export class DshRuntimeProcessHost {
       }
     }
     if (this.exitPromise && !(await waitForExit(this.exitPromise, graceMs))) {
-      this.child?.kill("SIGTERM");
+      this.terminateChild('host_shutdown', 'SIGTERM');
       if (!(await waitForExit(this.exitPromise, Math.min(graceMs, 2_000)))) {
-        this.child?.kill("SIGKILL");
+        this.terminateChild('host_shutdown', 'SIGKILL');
         await waitForExit(this.exitPromise, 1_000);
       }
     }
@@ -473,9 +489,9 @@ export class DshRuntimeProcessHost {
 
   private async forceStopChild(): Promise<void> {
     if (!this.child || !this.exitPromise) return;
-    this.child.kill("SIGTERM");
+    this.terminateChild('startup_failed', 'SIGTERM');
     if (!(await waitForExit(this.exitPromise, 500))) {
-      this.child.kill("SIGKILL");
+      this.terminateChild('startup_failed', 'SIGKILL');
       await waitForExit(this.exitPromise, 500);
     }
   }
@@ -484,24 +500,45 @@ export class DshRuntimeProcessHost {
     for (const dispose of this.handlerDisposers.splice(0).reverse()) dispose();
   }
 
+  private terminateChild(reason: HostTermination['reason'], signal: NodeJS.Signals): void {
+    if (!this.child || this.observedExit) return;
+    // This records an attempted Host signal, not a claim about the native cause.
+    this.hostTermination = { reason, signal };
+    this.child.kill(signal);
+  }
+
   private attachChildDiagnostics(child: ChildProcessWithoutNullStreams): void {
     const sink = this.options.onStderrLine;
     const redactor = this.options.redactStderrLine;
     if (!sink || !redactor) return;
     child.stderr.setEncoding("utf8");
+    const deliver = () => {
+      // Do not redact a truncated representation: its closing quote or URL @
+      // may have been cut away. One extra character marks an oversized line.
+      sink(this.stderrBuffer.length > 16_384
+        ? '[DSH stderr line omitted: exceeds 16384 characters]'
+        : redactor(this.stderrBuffer));
+      this.stderrBuffer = '';
+    };
     child.stderr.on("data", (chunk: string) => {
-      this.stderrBuffer += chunk;
-      while (true) {
-        const newline = this.stderrBuffer.indexOf("\n");
+      let offset = 0;
+      while (offset < chunk.length) {
+        const newline = chunk.indexOf('\n', offset);
+        const end = newline < 0 ? chunk.length : newline;
+        this.stderrBuffer += chunk.slice(offset, Math.min(end, offset + 16_385 - this.stderrBuffer.length));
         if (newline < 0) break;
-        const line = this.stderrBuffer.slice(0, newline);
-        this.stderrBuffer = this.stderrBuffer.slice(newline + 1);
-        sink(redactor(line));
-      }
-      if (this.stderrBuffer.length > 16_384) {
-        this.stderrBuffer = this.stderrBuffer.slice(-4_096);
+        deliver();
+        offset = newline + 1;
       }
     });
+    const flush = () => {
+      if (!this.stderrBuffer) return;
+      deliver();
+    };
+    // Streams may still deliver bytes after child 'exit'. Flush at their own
+    // boundary rather than prematurely at process exit or Host stop.
+    child.stderr.once('end', flush);
+    child.stderr.once('close', flush);
   }
 
   private fail(error: Error): void {
@@ -509,7 +546,7 @@ export class DshRuntimeProcessHost {
     this.stateValue = "failed";
     this.disposeProtocolHandlers();
     this.client?.peer.close(error);
-    this.child?.kill("SIGTERM");
+    this.terminateChild('protocol_failure', 'SIGTERM');
     if (!this.failureReported) {
       this.failureReported = true;
       this.options.onFailure?.(error);

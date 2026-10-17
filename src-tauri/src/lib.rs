@@ -43,6 +43,7 @@ mod macos_edit_menu;
 mod macos_traffic_light;
 pub mod managed_codex;
 pub mod management_api;
+mod mcp_selection;
 pub mod mcp_startup_admission;
 pub mod tokendance;
 pub use myagents_media_worker_protocol as media_worker_protocol;

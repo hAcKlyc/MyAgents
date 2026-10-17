@@ -708,7 +708,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
 
     await runtime.interruptTurn(correlation as never);
 
-    expect(stopSession).toHaveBeenCalledWith(correlation);
+    expect(stopSession).toHaveBeenCalledWith(correlation, 'failure');
     expect(correlation.releaseHeldMainTurnOnExit).toBe(true);
   });
 
@@ -789,7 +789,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
       threadId: 'child',
       turnId: 'late-child-turn',
     }, 3_000);
-    await vi.waitFor(() => expect(stopSession).toHaveBeenCalledWith(correlation));
+    await vi.waitFor(() => expect(stopSession).toHaveBeenCalledWith(correlation, 'failure'));
     expect(correlation.releaseHeldMainTurnOnExit).toBe(true);
   });
 
@@ -1300,7 +1300,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
       turn: { id: 'root-turn', status: 'completed' },
     }, () => {})).toBeNull();
 
-    expect(stopSession).toHaveBeenCalledWith(correlation);
+    expect(stopSession).toHaveBeenCalledWith(correlation, 'failure');
     expect(correlation.releaseHeldMainTurnOnExit).toBe(true);
     expect(correlation.pendingMainTurnCompletion?.[0]).toMatchObject({
       kind: 'turn_complete',
@@ -1340,7 +1340,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
       turn: { id: 'root-turn', status: 'completed' },
     }, () => {})).toBeNull();
 
-    expect(stopSession).toHaveBeenCalledWith(correlation);
+    expect(stopSession).toHaveBeenCalledWith(correlation, 'failure');
     const takeHeld = (runtime as unknown as {
       takeHeldMainTurnForProcessExit: (proc: typeof correlation) => UnifiedEvent[] | null;
     }).takeHeldMainTurnForProcessExit.bind(runtime);
@@ -1377,7 +1377,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
         turn: { id: 'root-turn', status },
       }, () => {})).toBeNull();
 
-      expect(stopSession).toHaveBeenCalledWith(correlation);
+      expect(stopSession).toHaveBeenCalledWith(correlation, 'failure');
       expect(correlation.releaseHeldMainTurnOnExit).toBe(true);
       expect(correlation.pendingMainTurnCompletion?.[0]).toMatchObject({
         kind: 'turn_complete',
@@ -1559,7 +1559,7 @@ describe('applyCodexSubAgentActivity (Codex 0.144.1 multi-agent v2)', () => {
       kind: 'turn_complete',
       status: 'completed',
     });
-    expect(stopSession).toHaveBeenCalledWith(correlation);
+    expect(stopSession).toHaveBeenCalledWith(correlation, 'failure');
   });
 });
 

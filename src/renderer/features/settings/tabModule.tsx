@@ -33,7 +33,8 @@ const SettingsTabRenderer = memo(function SettingsTabRenderer({
     <Suspense fallback={PAGE_FALLBACK}>
       <Settings
         mode="settings"
-        initialSection={tab.navigationIntent?.section ?? 'providers'}
+        // A consumed intent is no navigation; an explicit untargeted open still selects the default.
+        initialSection={tab.navigationIntent ? (tab.navigationIntent.section ?? 'providers') : undefined}
         navigationNonce={generation}
         onSectionChange={generation === undefined ? undefined : () => binding.onNavigationConsumed(tab.id, generation)}
         isActive={isActive}

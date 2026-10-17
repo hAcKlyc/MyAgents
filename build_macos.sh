@@ -634,17 +634,20 @@ for TARGET in "${BUILD_TARGETS[@]}"; do
     echo -e "${GREEN}✓ $TARGET 构建完成${NC}"
 done
 
-# 双架构发布构建会按 target 重写 resources/nodejs。产物已经在各自
-# target 构建时复制完毕，收尾时把本地 staging 恢复成当前主机架构，
-# 避免后续 build_dev.sh / npm rebuild 先碰到另一种架构的 Node。
+# 产物已在各自 target 构建时复制完毕。收尾时一起恢复主机架构的
+# Node、DSH 和绑定其身份的业务 bundle，避免本地启动把主机 Node
+# 与最后一个 target 的原生 DSH 混用。这里不修改已打包的产物。
 if [[ "$(uname -m)" == "arm64" ]]; then
     HOST_NODE_TARGET_ARCH="arm64"
 else
     HOST_NODE_TARGET_ARCH="x64"
 fi
 echo ""
-echo -e "${CYAN}恢复 Node.js staging 到当前主机架构 (${HOST_NODE_TARGET_ARCH})...${NC}"
+echo -e "${CYAN}恢复本地运行资源到当前主机架构 (${HOST_NODE_TARGET_ARCH})...${NC}"
 "${PROJECT_DIR}/scripts/download_nodejs.sh" --target "$HOST_NODE_TARGET_ARCH"
+node "${PROJECT_DIR}/scripts/integrated-runtimes/prepare-dsh-runtime.mjs" \
+    --source release --target "darwin-${HOST_NODE_TARGET_ARCH}"
+npm run build:assets
 node "${PROJECT_DIR}/scripts/prepare-cliproxy.mjs" "darwin-${HOST_NODE_TARGET_ARCH}"
 
 echo ""

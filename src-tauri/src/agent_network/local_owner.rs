@@ -284,6 +284,40 @@ pub(crate) async fn read(
 
 /// The original caller's Agent/Session owner resolves the local path again.
 /// Remote event fields are never workspace or Session creation authority.
+/// A local transport outcome, never a claim that the remote turn failed.
+pub(crate) async fn deliver_return_unavailable(
+    app: &tauri::AppHandle,
+    manager: &ManagedSidecarManager,
+    intent: super::returns::ReturnIntent,
+    reason: &str,
+) {
+    let event = return_unavailable_event(&intent, reason);
+    let settlement = deliver_return(app, manager, intent, event).await;
+    crate::ulog_info!(
+        "[agent-network/return] stage=source_unavailable settlement={}",
+        match settlement {
+            myagents_agent_network_protocol::ReturnSettlement::Delivered => "delivered",
+            myagents_agent_network_protocol::ReturnSettlement::Unconfirmed => "unconfirmed",
+            myagents_agent_network_protocol::ReturnSettlement::Dropped => "dropped",
+        }
+    );
+}
+fn return_unavailable_event(intent: &super::returns::ReturnIntent, reason: &str) -> Value {
+    let mut event = json!({"version":2,"type":"network.return_unavailable",
+        "eventId":uuid::Uuid::new_v4().to_string(),"createdAt":chrono::Utc::now().to_rfc3339(),
+        "targetSessionId":intent.source_session,"sourceLabel":"Agent Network",
+        "reason":super::NetworkError::cloud(reason,400).code,
+        "payload":"Automatic result delivery is no longer available for the original remote request. The remote task may still be running or may have completed. When the connection is available, inspect the original remote session with session state/get; do not resend the accepted request just to retrieve its result."});
+    if let Some(session) = &intent.target_session {
+        event["sourceSessionId"] = json!(session);
+    }
+    match &intent.correlation {
+        super::returns::Correlation::Reply(id) => event["requestEventId"] = json!(id),
+        super::returns::Correlation::Watch(id) => event["watchId"] = json!(id),
+    }
+    event
+}
+
 pub(crate) async fn deliver_return(
     app: &tauri::AppHandle,
     manager: &ManagedSidecarManager,
@@ -305,24 +339,26 @@ pub(crate) async fn deliver_return(
         return ReturnSettlement::Dropped;
     };
     if let Some(agent) = intent.target_agent.as_ref() {
-        let Some(session) = event["sourceSessionId"].as_str() else {
+        if let Some(session) = event["sourceSessionId"].as_str() {
+            let Ok(selector) = (myagents_agent_network_protocol::SessionReference {
+                agent: agent.clone(),
+                local_session_id: session.into(),
+            })
+            .encode() else {
+                return ReturnSettlement::Dropped;
+            };
+            event["sourceSessionId"] = json!(selector);
+        } else if event["type"] != "network.return_unavailable" {
             return ReturnSettlement::Dropped;
-        };
-        let Ok(selector) = (myagents_agent_network_protocol::SessionReference {
-            agent: agent.clone(),
-            local_session_id: session.into(),
-        })
-        .encode() else {
-            return ReturnSettlement::Dropped;
-        };
-        event["sourceSessionId"] = json!(selector);
+        }
     }
     let Some(event_id) = event["eventId"].as_str().map(str::to_owned) else {
         return ReturnSettlement::Dropped;
     };
-    let Some(from) = event["sourceSessionId"].as_str().map(str::to_owned) else {
+    let from = event["sourceSessionId"].as_str().map(str::to_owned);
+    if from.is_none() && event["type"] != "network.return_unavailable" {
         return ReturnSettlement::Dropped;
-    };
+    }
     let text = event["payload"]
         .as_str()
         .or_else(|| event["latestResult"].as_str())
@@ -342,14 +378,16 @@ pub(crate) async fn deliver_return(
     };
     let message = PendingInboxMessage {
         message_id: event_id.into(),
-        from_session_id: Some(from.into()),
+        from_session_id: from.map(Into::into),
         source_kind: crate::inbox::InboxSourceKind::InternalSession,
         from_label,
         to_session_id: intent.source_session,
         text,
         reply_back: false,
         timestamp_ms: chrono::Utc::now().timestamp_millis(),
-        kind: if matches!(intent.correlation, super::returns::Correlation::Reply(_)) {
+        kind: if event["type"] != "network.return_unavailable"
+            && matches!(intent.correlation, super::returns::Correlation::Reply(_))
+        {
             InboxMessageKind::Reply
         } else {
             InboxMessageKind::Event
@@ -382,6 +420,7 @@ pub(crate) async fn watch<G: Fn() -> Result<(), String> + Send + 'static>(
     invocation: &Invocation,
     memory: super::memory::MemoryBudget,
     connection_id: String,
+    return_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
     guard: G,
 ) -> (Outcome, Option<super::memory::Allocation>) {
     let Operation::Watch(params) = &invocation.operation else {
@@ -430,8 +469,8 @@ pub(crate) async fn watch<G: Fn() -> Result<(), String> + Send + 'static>(
         invocation.source.device_id,
         invocation.source.key_generation
     );
-    // The original watcher must settle registration even if the connector
-    // disappears after the final handoff, then precisely undo its own watch.
+    // Admission requires the current connection. Once handed off, the logical
+    // return owner decides cleanup: a temporary socket loss is not cancellation.
     let result = tauri::async_runtime::spawn(async move {
         let result = crate::inbox::watch::register_session_watch(
             app,
@@ -447,7 +486,7 @@ pub(crate) async fn watch<G: Fn() -> Result<(), String> + Send + 'static>(
             },
         )
         .await;
-        if guard().is_err_and(|reason| reason != "PERMIT_EXPIRED") {
+        if !return_alive.load(std::sync::atomic::Ordering::Acquire) {
             crate::inbox::watch::remove_network_watch(
                 &owned_manager,
                 &target,

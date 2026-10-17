@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import { localTimestamp } from '../shared/logTime';
 import { isLiveRevisionEnvelope, type LiveRevisionEnvelope } from '../shared/liveRevision';
 import { summarizeSensitiveValueForLog } from './utils/log-summary';
+import { maybeSpill, releaseLargeValueRef } from './utils/large-value-store';
+import { SSE_PAYLOAD_INLINE_MAX_BYTES, type SsePayloadRef } from '../shared/ssePayloadRef';
 
 type SseClient = {
   id: string;
@@ -529,73 +531,85 @@ export function createSseClient(onClose: (client: SseClient) => void): {
 } {
   let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
   let client: SseClient | null = null;
-  // `pending` holds payloads queued before the stream's start() handler hooks
-  // up the controller. `queue` is the post-start backpressure-aware buffer;
-  // its entries are tagged with the event name + priority so we can do
-  // priority-aware dispositions when downstream stalls.
-  const pending: Uint8Array[] = [];
-  type QueueEntry = { event: string; priority: SseEventPriority; chunk: Uint8Array };
+  // Reserve queue order synchronously; only the head may perform async ref IO.
+  type QueueEntry = { event: string; priority: SseEventPriority; chunk: Uint8Array | null; data?: string; spilling?: boolean };
+  let closing = false;
   const queue: QueueEntry[] = [];
   let slowConsumerLogged = false;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-  /**
-   * Drain as many queued entries as `controller.desiredSize` permits. Called
-   * after every enqueue and after `pull()` (which fires when downstream
-   * actually consumed bytes — i.e. desiredSize bumped back into positive).
-   *
-   * `force=true` ignores the desiredSize hint and pushes everything through;
-   * used at close-time so a paused downstream still receives any tail of
-   * queued criticals before EOF.
-   */
-  const drainQueue = (force: boolean = false): void => {
+  const detach = (): void => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    if (client) {
+      clients.delete(client);
+      onClose(client);
+      client = null;
+    }
+  };
+
+  const abort = (error: unknown): void => {
+    closing = true;
+    queue.length = 0;
+    controller?.error(error);
+    controller = null;
+    detach();
+  };
+
+  const drainQueue = (force = closing): void => {
     if (!controller) return;
     while (queue.length > 0) {
-      if (!force) {
-        const desired = controller.desiredSize;
-        if (desired === null || desired <= 0) break;
-      }
-      const entry = queue.shift()!;
-      try {
-        controller.enqueue(entry.chunk);
-      } catch {
-        // Controller closed — drop the rest; cancel handler will clean up.
-        queue.length = 0;
+      if (!force && (controller.desiredSize ?? 0) <= 0) break;
+      const entry = queue[0];
+      if (!entry.chunk) {
+        if (!entry.spilling) {
+          entry.spilling = true;
+          // Keep the snapshot capture + subscription synchronous. Spilling at
+          // the transport owner cannot let live deltas overtake their baseline.
+          void maybeSpill(entry.data!, {
+            inlineMaxBytes: 0, previewBytes: 0, mimetype: 'application/json',
+          }).then(async ref => {
+            if (!('kind' in ref)) throw new Error('SSE spill unexpectedly stayed inline');
+            if (!controller || queue[0] !== entry) {
+              await releaseLargeValueRef(ref.id);
+              return;
+            }
+            const envelope: SsePayloadRef = { kind: 'sse-payload-ref', ref };
+            entry.chunk = formatSse(entry.event, envelope);
+            entry.data = undefined;
+            drainQueue();
+          }).catch(error => {
+            if (controller && queue[0] === entry) abort(error);
+          });
+        }
         return;
       }
+      queue.shift();
+      try { controller.enqueue(entry.chunk); }
+      catch (error) { abort(error); return; }
+    }
+    if (closing && queue.length === 0) {
+      controller.close();
+      controller = null;
     }
   };
 
   const stream = new ReadableStream<Uint8Array>({
     start(nextController) {
       controller = nextController;
-      if (pending.length > 0) {
-        pending.forEach((chunk) => {
-          controller?.enqueue(chunk);
-        });
-        pending.length = 0;
-      }
+
     },
     pull() {
       // Downstream consumed; try to flush any backlog we coalesced/queued.
       drainQueue();
     },
     cancel() {
-      if (controller) {
-        controller = null;
-      }
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
+      controller = null;
+      closing = true;
       queue.length = 0;
-      if (client) {
-        clients.delete(client);
-        onClose(client);
-        console.log(`[sse] client disconnected id=${client.id} total=${clients.size}`);
-        client = null;
-      }
+      detach();
     }
+
   });
 
   /**
@@ -604,21 +618,17 @@ export function createSseClient(onClose: (client: SseClient) => void): {
    * Returns true if the entry was added to the live queue (or the controller
    * directly), false if it was dropped.
    */
-  const dispatchWithBackpressure = (event: string, payload: Uint8Array): boolean => {
-    const priority = resolvePriority(event);
+  const dispatchWithBackpressure = (entry: QueueEntry): boolean => {
+    const { event, priority } = entry;
 
-    if (!controller) {
-      // Pre-start: buffer raw payloads — start() flushes them.
-      pending.push(payload);
-      return true;
-    }
+    if (!controller || closing) return false;
 
     const desired = controller.desiredSize;
 
     // Hot path: downstream is consuming, queue is empty.
-    if (queue.length === 0 && (desired === null || desired > 0)) {
+    if (entry.chunk && queue.length === 0 && (desired === null || desired > 0)) {
       try {
-        controller.enqueue(payload);
+        controller.enqueue(entry.chunk);
         return true;
       } catch {
         return false;
@@ -634,7 +644,7 @@ export function createSseClient(onClose: (client: SseClient) => void): {
       // Find the most recent same-event entry and replace its chunk in place.
       for (let i = queue.length - 1; i >= 0; i--) {
         if (queue[i].event === event) {
-          queue[i].chunk = payload;
+          queue[i] = entry;
           sseMetrics.coalesceReplace += 1;
           drainQueue();
           return true;
@@ -658,7 +668,7 @@ export function createSseClient(onClose: (client: SseClient) => void): {
       );
       // Evict immediately so subsequent broadcasts don't try to enqueue.
       bumpDropped(event);
-      try { client?.close?.(); } catch { /* ignore */ }
+      abort(new Error('SSE client queue limit exceeded'));
       return false;
     }
 
@@ -683,7 +693,7 @@ export function createSseClient(onClose: (client: SseClient) => void): {
       return false;
     }
 
-    queue.push({ event, priority, chunk: payload });
+    queue.push(entry);
 
     if (priority === 'critical' && (desired === null || desired > 0)) {
       drainQueue();
@@ -715,41 +725,27 @@ export function createSseClient(onClose: (client: SseClient) => void): {
   client = {
     id: randomUUID(),
     send: (event, data) => {
+      if (closing || !controller) return;
       try {
-        const payload = formatSse(event, data);
-        dispatchWithBackpressure(event, payload);
-      } catch {
-        if (client) {
-          clients.delete(client);
-          onClose(client);
-          console.log(`[sse] client disconnected id=${client.id} total=${clients.size}`);
-          client = null;
-        }
-      }
+        const chunk = formatSse(event, data);
+        // Only transcript-bearing JSON events need full-body refs. Terminal
+        // events remain inline for the Rust notification owner to inspect.
+        const spill = (event === 'chat:init' || event === 'chat:message-replay' || event === 'chat:transcript-operation')
+          && chunk.byteLength > SSE_PAYLOAD_INLINE_MAX_BYTES;
+        dispatchWithBackpressure({
+          event, priority: resolvePriority(event), chunk: spill ? null : chunk,
+          ...(spill ? { data: JSON.stringify(data) } : {}),
+        });
+      } catch (error) { abort(error); }
     },
     close: () => {
-      if (!controller) {
-        return;
-      }
-      // Force-flush any queued backlog before closing. Without `force`, a
-      // paused downstream (desiredSize ≤ 0) would lose tail criticals on EOF;
-      // here we want every queued event to land in the readable side's
-      // internal buffer so the consumer's last `read()`s return them.
-      try { drainQueue(true); } catch { /* ignore */ }
-      controller.close();
-      controller = null;
-      queue.length = 0;
-      if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = null;
-      }
-      if (client) {
-        clients.delete(client);
-        onClose(client);
-        console.log(`[sse] client disconnected id=${client.id} total=${clients.size}`);
-        client = null;
-      }
+      if (closing || !controller) return;
+      closing = true;
+      detach();
+      // Preserve queued criticals through async spill completion before EOF.
+      drainQueue(true);
     }
+
   };
 
   clients.add(client);

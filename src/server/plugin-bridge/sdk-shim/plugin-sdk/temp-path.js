@@ -12,6 +12,9 @@ import path from 'node:path';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 
+// SDK relocation: keep the same root as released infra-runtime consumers.
+export { resolvePreferredOpenClawTmpDir } from './infra-runtime.js';
+
 function sanitizePrefix(prefix) {
   const normalized = prefix.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
   return normalized || 'tmp';
@@ -26,10 +29,10 @@ function sanitizeExtension(extension) {
   return `.${token}`;
 }
 
-function sanitizeFileName(fileName) {
-  const base = path.basename(fileName).replace(/[^a-zA-Z0-9._-]+/g, '-');
+function sanitizeTempFileName(fileName) {
+  const base = path.basename(fileName.replace(/\\/g, '/')).replace(/[^a-zA-Z0-9._-]+/g, '-');
   const normalized = base.replace(/^-+|-+$/g, '');
-  return normalized || 'download.bin';
+  return !normalized || normalized === '.' || normalized === '..' ? 'download.bin' : normalized;
 }
 
 function resolveTempRoot(tmpDir) {
@@ -47,14 +50,12 @@ function buildRandomTempFilePath(params) {
   return path.join(root, `${prefix}-${now}-${uuid}${extension}`);
 }
 
-async function withTempDownloadPath(params, fn) {
+async function createTempDownloadTarget(params) {
   const tempRoot = resolveTempRoot(params.tmpDir);
-  const prefix = `${sanitizePrefix(params.prefix)}-`;
+  const prefix = `${sanitizePrefix(params.prefix || 'tmp')}-`;
   const dir = mkdtempSync(path.join(tempRoot, prefix));
-  const tmpPath = path.join(dir, sanitizeFileName(params.fileName ?? 'download.bin'));
-  try {
-    return await fn(tmpPath);
-  } finally {
+  const file = (fileName) => path.join(dir, sanitizeTempFileName(fileName ?? params.fileName ?? 'download.bin'));
+  const cleanup = async () => {
     try {
       await rm(dir, { recursive: true, force: true });
     } catch (err) {
@@ -62,10 +63,22 @@ async function withTempDownloadPath(params, fn) {
         console.warn(`temp-path cleanup failed for ${dir}: ${String(err)}`);
       }
     }
+  };
+  return { dir, path: file(), file, cleanup, [Symbol.asyncDispose]: cleanup };
+}
+
+async function withTempDownloadPath(params, fn) {
+  const target = await createTempDownloadTarget(params);
+  try {
+    return await fn(target.path);
+  } finally {
+    await target.cleanup();
   }
 }
 
 export {
   buildRandomTempFilePath,
+  createTempDownloadTarget,
+  sanitizeTempFileName,
   withTempDownloadPath,
 };

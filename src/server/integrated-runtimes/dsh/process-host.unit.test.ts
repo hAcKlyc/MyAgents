@@ -217,14 +217,16 @@ function harness(
     return { ok: true };
   };
   const client = clientRecord as DshGeneratedHostClient;
+  let fatal: ((error: Error) => void) | undefined;
   const protocolRuntime: LoadedDshProtocolRuntime = {
     protocolEntryPath: "/verified/protocol.js",
     generatedClientEntryPath: "/verified/host-client.js",
     ProtocolError: TestProtocolError,
-    createHostClient: () => client,
+    createHostClient: options => { fatal = options.onFatalError; return client; },
   };
   const diagnostics: string[] = [];
   const failures: Error[] = [];
+  const exits: unknown[] = [];
   const host = new DshRuntimeProcessHost({
     installation,
     childEnvironment: buildDshChildEnvironment({
@@ -252,6 +254,7 @@ function harness(
     onStderrLine: (line) => diagnostics.push(line),
     redactStderrLine: redactDshDiagnosticLine,
     onFailure: (error) => failures.push(error),
+    onExit: details => exits.push(details),
     handshakeTimeoutMs: 1_000,
     shutdownGraceMs: 1_000,
   });
@@ -261,6 +264,8 @@ function harness(
     order,
     diagnostics,
     failures,
+    exits,
+    fatal: (error: Error) => fatal?.(error),
     get spawnedEnvironment() {
       return spawnedEnvironment;
     },
@@ -274,6 +279,69 @@ function harness(
 }
 
 describe("DSH RuntimeProcessHost", () => {
+  it('redacts quoted credentials, bearer material and URL userinfo before bounding output', () => {
+    const redacted = redactDshDiagnosticLine('{"apiKey":"private key value","token":"private-token"} authorization=Bearer private-bearer https://private-user:private-pass@example.test/path');
+    expect(redacted).not.toMatch(/private-/);
+    expect(redacted).not.toContain('private key value');
+    expect(redactDshDiagnosticLine(JSON.stringify({ password: 'Bearer abc"PRIVATE_TAIL' }))).not.toContain('PRIVATE_TAIL');
+    expect(redactDshDiagnosticLine('x'.repeat(5000))).toHaveLength(4096);
+  });
+
+  it('redacts across chunks and omits oversized lines without exposing incomplete credentials', async () => {
+    const test = harness();
+    await test.host.start();
+    test.child.stderr.write('api');
+    test.child.stderr.write('Key="chunk-secret"\napiKey="');
+    test.child.stderr.write('s'.repeat(20_000));
+    test.child.stderr.write('secret-tail"\nnext diagnostic\n');
+    test.child.stderr.write('https://user:PRIVATE_PREFIX' + 's'.repeat(17000) + '@example.test/\n');
+    expect(test.diagnostics).toEqual(['apiKey=[REDACTED]', '[DSH stderr line omitted: exceeds 16384 characters]', 'next diagnostic', '[DSH stderr line omitted: exceeds 16384 characters]']);
+    await test.host.stop();
+  });
+
+  it('retains exit facts after EOF and identifies Host termination separately', async () => {
+    const test = harness();
+    await test.host.start();
+    test.fatal(new Error('Protocol input reached EOF'));
+    expect(test.failures.map(error => error.message)).toEqual(['Protocol input reached EOF']);
+    expect(test.exits).toEqual([{ code: 0, signal: 'SIGTERM', hostTermination: { reason: 'protocol_failure', signal: 'SIGTERM' } }]);
+    await test.host.stop();
+    expect(test.exits).toHaveLength(1);
+  });
+
+  it('retains native exit facts without inventing a Host termination', async () => {
+    const test = harness();
+    await test.host.start();
+    test.child.exit(23, null);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(test.exits).toEqual([{ code: 23, signal: null, hostTermination: null }]);
+  });
+
+  it('identifies graceful Host shutdown even when no signal was needed', async () => {
+    const test = harness();
+    await test.host.start();
+    await test.host.stop();
+    expect(test.exits).toEqual([{ code: 0, signal: null, hostTermination: { reason: 'host_shutdown', signal: null } }]);
+  });
+
+  it('flushes late unterminated stderr once on stream close after process exit', async () => {
+    const test = harness();
+    await test.host.start();
+    test.child.exit(23, null);
+    test.child.stderr.write('resume failed: {"apiKey":"private key value"}');
+    test.child.stderr.end();
+    test.child.stderr.resume();
+    await new Promise(resolve => setImmediate(resolve));
+    test.child.stderr.emit('close');
+    expect(test.diagnostics).toEqual(['resume failed: {"apiKey":[REDACTED]}']);
+  });
+
+  it('retains handshake rejection teardown facts', async () => {
+    const test = harness(initializeResult({ profileDigest: '0'.repeat(64) }));
+    await expect(test.host.start()).rejects.toThrow(/identity/);
+    expect(test.exits).toEqual([{ code: 0, signal: 'SIGTERM', hostTermination: { reason: 'startup_failed', signal: 'SIGTERM' } }]);
+  });
+
   it("starts a Session child with the App-owned internal CLI capability without exposing its value in diagnostics", async () => {
     const test = harness(initializeResult(), undefined, {
       productSessionId: "product-session-1",

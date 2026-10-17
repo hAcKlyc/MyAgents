@@ -1,5 +1,5 @@
 import { GENERATED_PROTOCOL_VERSION } from '../../../../contracts/myagents-dsh/public-contract.generated';
-import { createServer } from "node:http";
+import { createServer, type RequestListener } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { execFileSync } from "node:child_process";
 import { connect, type Socket } from "node:net";
@@ -11,6 +11,7 @@ import { buildDshChildEnvironment } from "./child-environment";
 import type { MethodParams, DshRpcObject } from "./protocol-types";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  glob,
   mkdir,
   mkdtemp,
   readFile,
@@ -97,11 +98,13 @@ async function createNativeHostFixture(
   );
   const installation = await resolveDshRuntimeInstallation({
     resourceRoot,
-    nodeExecutablePath: join(resourceRoot, "nodejs/bin/node"),
+    nodeExecutablePath: join(resourceRoot, process.platform === 'win32' ? 'nodejs/node.exe' : 'nodejs/bin/node'),
   });
   const launchEnvironment = buildDshChildEnvironment({
-    nodeExecutablePath: installation.nodeExecutablePath, commandDirectories: ["/bin", "/usr/bin"],
-    inheritedEnvironment: { HOME: temporaryRoot, USERPROFILE: temporaryRoot, LANG: 'en_US.UTF-8' },
+    nodeExecutablePath: installation.nodeExecutablePath,
+    commandDirectories: process.platform === 'win32' ? [] : ["/bin", "/usr/bin"],
+    inheritedEnvironment: { HOME: temporaryRoot, USERPROFILE: temporaryRoot, LANG: 'en_US.UTF-8',
+      SystemRoot: process.env.SystemRoot, TEMP: temporaryRoot, TMP: temporaryRoot },
     proxyEnvironment,
     sessionCli: route === undefined ? null : { ...route, internalCliToken: 'fixture-capability' },
   });
@@ -121,7 +124,7 @@ async function createNativeHostFixture(
       bundledNodeRef: "bundled-node",
       shellRef: "runtime-shell",
       ripgrepRef: "bundled-ripgrep",
-      shellDialect: "bash",
+      shellDialect: process.platform === 'win32' ? 'pwsh' : 'bash',
       allowedCommandRefs: ["runtime-shell", "bundled-node", "bundled-ripgrep"],
       pathPolicy: "sealed",
     },
@@ -206,6 +209,157 @@ async function createNativeHostFixture(
 describe.runIf(nativeSmokeEnabled)(
   "DSH RuntimeProcessHost native smoke",
   () => {
+    it.each(['anthropic', 'deepseek'].flatMap(providerKind => ['interrupt', 'kill'].flatMap(stopKind => ['resend', 'prewarm'].map(mode => ({ providerKind, stopKind, mode })))))('restores $providerKind history after $stopKind before $mode and deletes unreadable state', async ({ providerKind, stopKind, mode }) => {
+      const inputs: string[] = [];
+      const respond: RequestListener = async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        inputs.push(Buffer.concat(chunks).toString('utf8'));
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        const emit = (event: string, data: unknown) => response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        emit('message_start', { type: 'message_start', message: { id: `stop-${inputs.length}`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-6', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0 } } });
+        emit('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+        emit('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: inputs.length === 1 ? 'INTERRUPTED_PARTIAL' : 'RESUMED_REPLY' } });
+        if (inputs.length === 1) return; // Hold the first turn until the Host stops it.
+        emit('content_block_stop', { type: 'content_block_stop', index: 0 });
+        emit('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 10 } });
+        emit('message_stop', { type: 'message_stop' });
+        response.end();
+      };
+      const certificateRoot = providerKind === 'deepseek' ? await mkdtemp(join(tmpdir(), 'myagents-dsh-recovery-tls-')) : undefined;
+      const certificate = certificateRoot ? join(certificateRoot, 'certificate.pem') : undefined;
+      const key = certificateRoot ? join(certificateRoot, 'key.pem') : undefined;
+      if (certificate && key) {
+        execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+          '-subj', '/CN=api.deepseek.com', '-addext', 'subjectAltName=DNS:api.deepseek.com',
+          '-keyout', key, '-out', certificate], { stdio: 'ignore' });
+      }
+      const server = certificate && key
+        ? createHttpsServer({ key: await readFile(key), cert: await readFile(certificate) }, respond)
+        : createServer(respond);
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Fixture did not bind');
+      const sockets = new Set<Socket | Duplex>();
+      const proxy = certificate ? createServer((_request, response) => { response.writeHead(502); response.end(); }) : undefined;
+      let httpsProxy: string | undefined;
+      if (proxy) {
+        proxy.on('connect', (request, downstream, head) => {
+          // Keep the approved DeepSeek URL and native adapter. Only this child
+          // trusts this fixture's certificate, and the proxy cannot forward
+          // traffic anywhere except the loopback server.
+          if (request.url !== 'api.deepseek.com:443') { downstream.destroy(); return; }
+          const upstream = connect({ host: '127.0.0.1', port: address.port });
+          for (const socket of [downstream, upstream]) {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+            socket.on('error', () => { downstream.destroy(); upstream.destroy(); });
+          }
+          upstream.once('connect', () => {
+            downstream.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            if (head.length) upstream.write(head);
+            downstream.pipe(upstream); upstream.pipe(downstream);
+          });
+        });
+        await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+        const proxyAddress = proxy.address();
+        if (!proxyAddress || typeof proxyAddress === 'string') throw new Error('Proxy did not bind');
+        httpsProxy = `http://127.0.0.1:${proxyAddress.port}`;
+      }
+      const fixture = await createNativeHostFixture(`stop-${providerKind}-${stopKind}-${mode}`, undefined,
+        httpsProxy ? { HTTPS_PROXY: httpsProxy, HTTP_PROXY: httpsProxy, NO_PROXY: '' } : undefined, certificate);
+      const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
+      await registry.initialize();
+      const events: DshRpcObject[] = [];
+      const handlers: DshHostRequestHandlers = { ...fixture.hostHandlers,
+        'host/credential/resolve': params => params.purpose === 'availability'
+          ? { kind: 'availability', available: true, authoritativeCredentialRevision: params.profileRevision }
+          : { kind: 'material', authoritativeCredentialRevision: params.profileRevision, material: { apiKey: 'synthetic-stop-key' },
+            ...(httpsProxy ? { providerNetwork: { httpsProxy, noProxy: '' } } : {}) },
+        'host/hook/execute': () => ({ state: 'continue' }),
+        'host/attachment/acquire': params => registry.acquire(params),
+        'host/attachment/release': params => { registry.release(params); return { ok: true }; },
+      };
+      const notifications: DshRuntimeNotificationHandlers = { 'runtime/event': params => { events.push(params); }, 'host/interaction/cancel': () => undefined };
+      let host = fixture.createHost(handlers, notifications);
+      try {
+        const provider = structuredClone(PRESET_PROVIDERS.find(({ id }) => id === (providerKind === 'deepseek' ? 'deepseek' : 'anthropic-api')))!;
+        if (providerKind === 'anthropic') {
+          provider.id = 'native-stop-fixture'; provider.config.baseUrl = `http://127.0.0.1:${address.port}`;
+        }
+        const profile = compileDshModelExecutionProfile({ provider, modelId: providerKind === 'deepseek' ? 'deepseek-flash' : 'claude-sonnet-4-6' });
+        const plane = compileDshProductExtensionPlane({ revision: 'stop-extensions', skills: [], commands: [], agents: [], mcpServers: [], dynamicTools: [] });
+        const extension = { snapshotAttachment: await registry.publishJson(plane.snapshot) };
+        await host.start();
+        await host.request('extension/replace', extension);
+        const catalog = await host.request('extension/catalog', {});
+        const binding = { persistenceRef: 'stop-persistence', provider: profile, configRevision: 'stop-config', extensionDigest: catalog.digest,
+          systemPrompt: '', permissionMode: 'full-autonomous' as const, interactionScenario: 'host-interaction-v1' as const };
+        const created = await host.request('session/create', { ...binding, clientOperationId: 'stop-create' });
+        const runtimeSessionId = String(created.runtimeSessionId);
+        const digest = createDshInitializeParams({ productSessionId: `native-stop-${mode}-product-session`, productVersion: '0.5.2',
+          runtimeHome: fixture.runtimeHome, workspace: { path: fixture.workspace, identity: fixture.executionEnvironment.workspace.identity },
+          executionEnvironment: fixture.executionEnvironment, interaction: 'deterministic-headless' }).executionEnvironment.digest;
+        const startTurn = (id: string, text: string) => host.request('turn/start', { clientOperationId: id, clientUserMessageId: `${id}-input`,
+          input: { parts: [{ kind: 'text', text }] }, configRevision: binding.configRevision, extensionDigest: catalog.digest,
+          executionEnvironmentRevision: fixture.executionEnvironment.revision, executionEnvironmentDigest: digest,
+          limits: { maxTurns: 2 }, origin: { kind: 'headless', scenario: 'stop-resume' } });
+        await startTurn('interrupted-turn', 'ORIGINAL_HISTORY_MARKER');
+        await expect.poll(() => JSON.stringify(events), { timeout: 20_000 }).toContain('INTERRUPTED_PARTIAL');
+        if (stopKind === 'interrupt') {
+          await host.request('turn/interrupt', { clientOperationId: 'interrupted-turn', cancelQueued: true });
+          await host.request('session/close', { clientOperationId: 'stop-close' });
+        } else {
+          if (!host.pid) throw new Error('Native child has no PID');
+          process.kill(host.pid, 'SIGKILL');
+          await host.waitForExit();
+        }
+        await host.stop();
+        host = fixture.createHost(handlers, notifications);
+        await host.start();
+        await host.request('extension/replace', extension);
+        expect(await host.request('session/resume', { ...binding, clientOperationId: 'resume-bind', runtimeSessionId })).toMatchObject({ state: 'ready', runtimeSessionId });
+        const recovered = new DshMutationController(host, runtimeSessionId);
+        expect(JSON.stringify(await recovered.readHistory())).toContain('ORIGINAL_HISTORY_MARKER');
+        expect((await recovered.getTurn('interrupted-turn')).terminal).toBeDefined();
+        if (mode === 'prewarm') {
+          expect(inputs).toHaveLength(1); // Cold binding/reconciliation did not send a prompt.
+          expect((await host.request('runtime/status', {})).initialized).toBe(true);
+        }
+        await startTurn('resumed-turn', 'RESEND_MARKER');
+        await expect.poll(async () => (await host.request('turn/get', { clientOperationId: 'resumed-turn' })).terminal?.kind, { timeout: 20_000 }).toBe('succeeded');
+        expect(inputs).toHaveLength(2);
+        expect(inputs[1]).toContain('ORIGINAL_HISTORY_MARKER');
+        expect(inputs[1]).toContain('RESEND_MARKER');
+        await host.request('session/close', { clientOperationId: 'before-storage-delete' });
+        await host.stop();
+        const nativeLogs: string[] = [];
+        for await (const path of glob(join(fixture.runtimeHome, 'sessions', '**', '*.jsonl.zstd'))) nativeLogs.push(path);
+        expect(nativeLogs.length).toBeGreaterThan(0);
+        for (const path of nativeLogs) await writeFile(path, 'invalid compressed history');
+        host = fixture.createHost(Object.fromEntries(DSH_REVERSE_METHOD_NAMES.map(method => [method, () => { throw new Error('Storage delete requested execution'); }])) as unknown as DshHostRequestHandlers, {
+          'runtime/event': () => { throw new Error('Storage delete emitted a business event'); },
+          'host/interaction/cancel': () => { throw new Error('Storage delete emitted an interaction'); },
+        });
+        await host.start();
+        const deletion = new DshMutationController(host, runtimeSessionId);
+        const prepared = await deletion.prepareStoredDelete('delete-unreadable');
+        expect((await deletion.commitDelete('delete-unreadable', prepared.token)).state).toBe('committed');
+        expect((await deletion.purgeDelete('delete-unreadable', prepared.token)).state).toBe('purged');
+        expect(inputs).toHaveLength(2);
+        for (const path of nativeLogs) await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+      } catch (error) {
+        throw new Error(`Stop/resume (${mode}) failed; stderr=${fixture.stderr.join(' | ')}`, { cause: error });
+      } finally {
+        await host.stop(); registry.close(); server.closeAllConnections();
+        for (const socket of sockets) socket.destroy();
+        if (proxy) { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy.close(() => resolve())); }
+        await new Promise<void>(resolve => server.close(() => resolve()));
+        await rm(fixture.temporaryRoot, { recursive: true, force: true });
+        if (certificateRoot) await rm(certificateRoot, { recursive: true, force: true });
+      }
+    }, 120_000);
+
     it('applies a complete oversized Skill snapshot through an attachment before Session binding', async () => {
       const fixture = await createNativeHostFixture('large-extensions');
       const registry = new DshAttachmentRegistry(fixture.executionEnvironment.attachmentStagingRoot);
@@ -642,7 +796,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         { id: 'fixture-create-call', name: 'TaskCreate', input: { subject: 'Verify approval progress', description: 'Synthetic native regression' } },
         { id: 'fixture-update-call', name: 'TaskUpdate', input: { taskId: 'task-1', status: 'completed' } },
         { id: 'fixture-skill-call', name: 'Skill', input: { skill: 'permission-review' } },
-        { id: 'fixture-agent-call', name: 'Agent', input: { subagent_type: 'permission-helper', description: 'Verify child approval', prompt: 'Return the synthetic fixture completion.', run_in_background: false } },
+        { id: 'fixture-agent-call', name: 'subagent', input: { description: 'Verify child approval', prompt: 'Return the synthetic fixture completion.', run_in_background: false } },
         { id: 'fixture-child-inherited-call', name: 'bash', input: { command: 'printf inherited-child', workdir: 'child', description: 'Verify the shared directory grant' } },
         { id: 'fixture-child-review-call', name: 'bash', input: { command: `printf approved-child; ${curl} http://dsh-shell-fixture.invalid/child`, description: 'Verify child approval at another directory' } },
         undefined, // The foreground child completes before the root continues.
@@ -654,6 +808,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       ];
       let requests = 0;
       let childSystemPrompt = '';
+      let childModelId: string | undefined;
+      let childAgentId: string | undefined;
+      let advertisedDelegation: Record<string, unknown> | undefined;
       let planSystemPrompt = '';
       let resumedRootInput = '';
       const proxyRequests: string[] = [];
@@ -687,13 +844,17 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         }
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
-        const modelRequest = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { messages: { content: unknown }[]; system?: unknown };
+        const modelRequest = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { model?: string; tools?: Array<Record<string, unknown>>; messages: { content: unknown }[]; system?: unknown };
         for (const block of modelRequest.messages.flatMap(message => Array.isArray(message.content) ? message.content as { type: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[] : [])) {
           if (block.type === 'tool_result' && block.tool_use_id) modelToolResults.set(block.tool_use_id, block);
           if (block.type === 'tool_result' && (block.tool_use_id === 'fixture-child-inherited-call' || block.tool_use_id === 'fixture-child-review-call')) childResults.set(block.tool_use_id, block);
         }
         const tool = calls[requests++];
-        if (tool?.id === 'fixture-child-inherited-call') childSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
+        if (tool?.id === 'fixture-agent-call') advertisedDelegation = modelRequest.tools?.find(candidate => candidate.name === 'subagent');
+        if (tool?.id === 'fixture-child-inherited-call') {
+          childSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
+          childModelId = modelRequest.model;
+        }
         if (tool?.id === 'fixture-plan-shell-call') planSystemPrompt = JSON.stringify({ system: modelRequest.system, messages: modelRequest.messages });
         if (tool?.id === 'fixture-question-call') resumedRootInput = JSON.stringify(modelRequest.messages);
         let input: Record<string, unknown> | undefined = tool?.input;
@@ -776,6 +937,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         const profile = compileDshModelExecutionProfile({ provider, modelId: 'claude-sonnet-4-6' });
         const binding = await host.request('session/create', { clientOperationId: 'native-shell-review-bind', persistenceRef: 'native-shell-review', provider: profile, configRevision: 'native-shell-review-config', extensionDigest: catalog.digest, systemPrompt: '', permissionMode: 'approval-required', interactionScenario: 'host-interaction-v1' });
         expect(binding.state).toBe('ready');
+        if (binding.state !== 'ready') throw new Error('Native Session was not admitted');
+        expect(binding.toolCatalog).toMatchObject({ effectiveTools: expect.arrayContaining(['subagent', 'fork_agent']) });
+        expect(binding.toolCatalog.effectiveTools).not.toContain('Agent');
         const environmentDigest = createDshInitializeParams({ productSessionId, productVersion: '0.4.11', runtimeHome: fixture.runtimeHome, workspace: { path: fixture.workspace, identity: fixture.executionEnvironment.workspace.identity }, executionEnvironment: fixture.executionEnvironment, interaction: 'deterministic-headless' }).executionEnvironment.digest;
         const configured = await host.request('config/apply', { revision: 'native-shell-review-auto', provider: profile, permissionMode: 'approval-required', interactionScenario: 'host-interaction-v1', systemPrompt: '', executionEnvironmentRevision: fixture.executionEnvironment.revision, executionEnvironmentDigest: environmentDigest });
         expect(configured.state).toBe('applied');
@@ -796,8 +960,18 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           const next = approvals[approvalIndex++]!;
           const call = calls.find(candidate => candidate?.id === callId)!;
           expect(next.kind).toBe('permission');
-          expect((next.schema as Record<string, unknown>).tool).toBe(call.name);
+          // Native delegation exposes subagent to the model and Agent to the
+          // shared product permission owner; neither surface is a role compiler.
+          expect((next.schema as Record<string, unknown>).tool).toBe(call.name === 'subagent' ? 'Agent' : call.name);
           expect(next.review?.actor.origin).toBe(origin);
+          if (origin === 'foreground_child') {
+            childAgentId = next.review!.actor.agentId;
+            expect(childAgentId).not.toBe(binding.runtimeSessionId);
+            expect((await host.requestNativeSubagent('subagent/list', {})).items).toEqual(expect.arrayContaining([
+              expect.objectContaining({ id: childAgentId, parentId: binding.runtimeSessionId, depth: 1, mode: 'one-shot', activity: 'running' }),
+            ]));
+            expect(next.review?.scope).toMatchObject({ tool: 'bash', permissionClass: 'process.execute', owner: 'session_tree' });
+          }
           expect(next.authority).toMatchObject({ callId: call.id, rootCallId: call.id });
           expect(next.desiredPolicyRevision).toBe(expectedRevision);
           expect(childResults.has(call.id)).toBe(false);
@@ -898,14 +1072,18 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           : Array.isArray(childInput.system) ? childInput.system.map(block => block.text ?? '').join('\n') : '';
         const childText = [systemText, ...childInput.messages.flatMap(message => typeof message.content === 'string'
           ? [message.content] : message.content.map(block => block.text ?? ''))].join('\n');
-        const identityText = /Your execution identity \(Runtime authority\): (\{[^\n]*\})/.exec(childText)?.[1];
-        expect(identityText).toBeDefined();
-        expect(JSON.parse(identityText!)).toMatchObject({ model: profile.modelId, provider: profile.providerRouteId, role: 'permission-helper', depth: 1, remainingDepth: 0, canDelegate: false });
+        // Native spawn uses the Runtime-owned child identity rather than the
+        // unsupported Product Agent descriptor's role/depth prompt compiler.
+        expect(childAgentId).toBeDefined();
+        expect(childText).toContain(`Your Agent id is "${childAgentId}" (DSH runtime identity)`);
+        expect(childModelId).toBe(profile.modelId);
+        expect(advertisedDelegation).toMatchObject({ name: 'subagent', input_schema: {
+          required: expect.arrayContaining(['description', 'prompt']),
+          properties: { run_in_background: { type: 'boolean' } },
+        } });
         expect(resumedRootInput).toContain('fixture-agent-call');
         expect(resumedRootInput).not.toContain('activation_completion');
         expect(resumedRootInput).not.toContain('Your execution identity (Runtime authority)');
-        expect(childSystemPrompt).toContain('Product permissions and shared exact grants apply');
-        expect(childSystemPrompt).not.toContain('operations that require approval are rejected automatically');
         // This Provider omits cache buckets, so the native terminal intentionally
         // has no complete usage summary. Reopening must still recover the reply.
         const mutationController = new DshMutationController(host, String(binding.runtimeSessionId));
@@ -916,6 +1094,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         expect(recovered.assistantTurns).toHaveLength(1);
         expect(recovered.assistantTurns[0]!.assistantMessage.content).toContain('Fixture complete.');
         expect(recovered.assistantTurns[0]!.assistantMessage.usage).toBeUndefined();
+        // Host approval actually succeeded above. The model must not be told
+        // that all child approval requests are rejected without interaction.
+        expect(childSystemPrompt).not.toContain('operations that require approval are rejected automatically');
       } catch (error) {
         const progress = { requests, results: [...modelToolResults].map(([id, result]) => ({ id, isError: result.is_error, content: JSON.stringify(result.content).slice(0, 1500) })), terminal: await host.request('turn/get', { clientOperationId: 'native-shell-review-turn' }).catch(() => undefined), stderr: fixture.stderr.slice(-5) };
         throw new Error(`Native tool sequence failed: ${JSON.stringify(progress)}`, { cause: error });
@@ -1022,13 +1203,20 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
           state: "applied",
           effectiveRevision: extension.revision,
         });
+        // The selected Runtime accepts Agent descriptors but has no role compiler;
+        // the unsupported component must not prevent supported extensions loading.
+        expect(extensionResult.components).toContainEqual({
+          key: "agent:native-reviewer",
+          state: "unsupported",
+          reason: "implementation_batch_pending",
+        });
         const extensionCatalog = await host.request("extension/catalog", {});
         expect(extensionCatalog.skills).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ name: "native-review" }),
           ]),
         );
-        expect(extensionCatalog.agents).toContain("native-reviewer");
+        expect(extensionCatalog.agents).not.toContain("native-reviewer");
         expect(extensionCatalog.tools).toContain(
           "mcp__myagents_host__native_fixture",
         );

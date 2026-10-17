@@ -271,7 +271,7 @@ sdk-shim/
 | 维度 | 手写模块 | 自动生成 stub |
 |------|---------|-------------|
 | 保护机制 | `_handwritten.json` 清单 | `AUTO-GENERATED STUB` header |
-| 函数行为 | 真实逻辑（简化版） | 首次调用打印警告，返回安全默认值 |
+| 函数行为 | 真实逻辑（Bridge 合同） | 首次调用打印警告，返回启发式默认值；不保证调用契约成立 |
 | 维护方式 | 手动编写和更新 | `npm run generate:sdk-shims` 自动生成 |
 | 用途 | 插件实际调用的核心 API | 防止 `Cannot find module` 崩溃 |
 
@@ -327,9 +327,25 @@ git diff src/server/plugin-bridge/sdk-shim/  # 审查变更
 2. 编辑 `.js` 文件实现真实逻辑
 3. 重跑生成器（它会跳过该文件）
 
-插件引入尚未手写适配的 SDK export 时，生成 stub 让单项功能按兼容合同降级并记录未实现警告；不能因一个缺失 module 使整个 Bridge 在 import 阶段崩溃。需要真实行为时再把对应模块升级为受保护的手写实现。
+自动 stub 只解决 module / symbol linking，不能证明调用安全。路径、dispatcher、事务 mutation 等必需返回值或副作用不能用 `undefined` 降级；必须检查真实消费者，并把可达入口升级为受保护的手写实现。`compat=ok` 只比较声明的最低 host 版本，不是行为兼容性认证。
 
 插件使用的兼容子路径可能已不在当前上游源码的 exports 中，仍需登记到 `_handwritten.json` 才能在生成时保留。例如微信 2.4.8 的 `channel-message.createTypingCallbacks` 复用 `channel-runtime` 的既有实现，与 2.4.6 保持相同的 Bridge typing 行为。
+
+### SDK 契约迁移与旧插件兼容
+
+OpenClaw [#162333](https://github.com/openclaw/openclaw/pull/162333) 移除了五个 deprecated facade；微信 [#338](https://github.com/Tencent/openclaw-weixin/pull/338) 在 2.4.10 迁移到聚焦子路径。MyAgents 同时保留旧入口和新入口，不跟随上游删除已发布插件依赖的 facade。
+
+| 能力 | 新入口 | Bridge owner / 历史行为 |
+|---|---|---|
+| 临时目录 | `temp-path.resolvePreferredOpenClawTmpDir` | 复用 `infra-runtime` 的 `~/.myagents/tmp`；媒体、消息和日志消费者一致。其他同名 stub 子路径也复用它；根 SDK 与 `zalouser` 的既有目录不迁移 |
+| 下载临时文件 | `temp-path.createTempDownloadTarget` | 独立临时目录、限制文件名、显式 cleanup / asyncDispose；`withTempDownloadPath` 复用相同清理生命周期 |
+| 输入状态 | `channel-outbound.createTypingCallbacks` | 与 `channel-message` / `channel-runtime` 使用同一 Bridge 实现，不改变此前无操作 typing 行为 |
+| 配置 mutation | `config-mutation.mutateConfigFile` | 与旧 `config-runtime` 共用 normalized 内存 snapshot；支持 `{ mutate(draft, context), afterWrite }` 调用形状（`afterWrite` 只作为兼容元数据接受，不执行重启或落盘），callback 返回业务 result，draft 才是配置；串行执行，异常不提交，外部/旧式写入使待提交 mutation 冲突失败 |
+| 消息准入投影 | `channel-ingress-runtime.resolveChannelMessageIngress` | 复用旧 `command-auth` 的 Bridge 行为；提供插件消费的 senderAccess / commandAccess，Rust 的 BIND、allowedUsers、群规则仍是最终准入 owner |
+
+配置 helper 的 `File` 名字不授予 Bridge 写 MyAgents `config.json` 或创建 `openclaw.json` 的权限。当前支持运行时 mutation，返回 `nextConfig/result/attempts`；不实现 OpenClaw 的文件 hash、磁盘事务、host restart 和完整 access graph / ingress monitor。旧 `config-runtime.loadConfig/writeConfigFile` 与同步函数式 mutation 保持兼容。不得将 OpenClaw pairing store 变成 Rust 白名单之前的第二套准入 authority。
+
+迁移回归需验证 **Node package exports → 实际函数调用 → 返回值 / 副作用**，并覆盖旧入口；仅测试 `typeof fn === 'function'` 会漏掉占位实现。契约回归在 `plugin-bridge-sdk-contracts.integration.test.ts`；真实插件 smoke 需隔离 HOME / state / credentials，并禁止真实网络，不能把用户账号当默认测试数据。
 
 ## HTTP 端点一览
 
@@ -422,7 +438,7 @@ Bridge 消费；Builtin SDK、Managed Codex 与用户原生外部 Runtime 仍保
 | `src/server/plugin-bridge/lark-admission.ts` | 官方 Lark 同 chat task 的 admission scope/token owner |
 | `src/server/plugin-bridge/plugin-compat-patches.ts` | 已知官方 Lark queue 源码的 fail-closed 窄变换 |
 | `src/server/plugin-bridge/pending-dispatch.ts` | requestId → OpenClaw dispatcher 的有序传输队列 |
-| `src/server/plugin-bridge/sdk-shim/` | SDK shim 包（293 个 exports） |
+| `src/server/plugin-bridge/sdk-shim/` | SDK shim 包（入口以 package.json exports 为准） |
 | `src/server/plugin-bridge/sdk-shim/plugin-sdk/_handwritten.json` | 手写模块保护清单 |
 | `scripts/generate-sdk-shims.ts` | Stub 自动生成器 |
 | `src-tauri/tauri.conf.json` (resources) | shim 打包配置 |

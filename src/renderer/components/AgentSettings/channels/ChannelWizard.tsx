@@ -62,6 +62,8 @@ import {
     type OpenClawSchemaProperties,
 } from './openclawConfigScalars';
 import {
+    credentialQrFailureMessageKey,
+    type CredentialQrRunFailure,
     hasProvisionedCredentials,
     runCredentialQrProvisioning,
 } from './credentialQrProvisioning';
@@ -299,7 +301,7 @@ export default function ChannelWizard({
     const credentialQrRunIdRef = useRef(0);
     const credentialQrCompletedRef = useRef(false);
     const [credentialQrRetryTrigger, setCredentialQrRetryTrigger] = useState(0);
-    const [credentialQrErrorReason, setCredentialQrErrorReason] = useState<'expired' | 'denied' | 'cancelled' | 'network' | 'invalid-response' | undefined>();
+    const [credentialQrErrorReason, setCredentialQrErrorReason] = useState<CredentialQrRunFailure['reason'] | undefined>();
     // Rendered QR image from the provider verification URL.
     const [credentialQrImageUrl, setCredentialQrImageUrl] = useState<string | null>(null);
     // QR refresh count for display (e.g., "二维码已刷新 (2/5)")
@@ -1204,11 +1206,7 @@ export default function ChannelWizard({
                                 {credentialQrStatus === 'error' && (
                                     <div className="flex h-[200px] w-[200px] flex-col items-center justify-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--paper-inset)]">
                                         <p className="text-sm text-[var(--ink-muted)]">
-                                            {credentialQrErrorReason === 'denied' || credentialQrErrorReason === 'cancelled'
-                                                ? t('agentSettings.channelWizard.dual.scanDenied')
-                                                : credentialQrRefreshCount > 0
-                                                    ? t('agentSettings.channelWizard.dual.qrExpiredMultiple')
-                                                    : t('agentSettings.channelWizard.qr.loadFailed')}
+                                            {t(credentialQrFailureMessageKey(credentialQrErrorReason))}
                                         </p>
                                         <button
                                             onClick={() => {
@@ -1237,9 +1235,9 @@ export default function ChannelWizard({
                                         : t('agentSettings.channelWizard.qr.loading'))}
                                     {credentialQrStatus === 'waiting' && t('agentSettings.channelWizard.dual.scanWithApp', { app: promoted?.name ?? openclawPluginName })}
                                     {credentialQrStatus === 'success' && t('agentSettings.channelWizard.dual.credentialsReady')}
-                                    {credentialQrStatus === 'error' && (credentialQrRefreshCount > 0
+                                    {credentialQrStatus === 'error' && (credentialQrErrorReason === 'expired'
                                         ? t('agentSettings.channelWizard.dual.qrExpiredRetry')
-                                        : t('agentSettings.channelWizard.dual.networkRetry'))}
+                                        : t('agentSettings.channelWizard.dual.qrRetryHint'))}
                                 </p>
                             </div>
 

@@ -523,8 +523,8 @@ export default function Settings({
     navigateToProxySettings,
     notifySectionChange,
   } = useSettingsNavigation({
-    initialSection:
-      mode === 'capabilities' ? (initialSection ?? 'skills') : initialSection,
+    initialSection,
+    defaultSection: mode === 'capabilities' ? 'skills' : 'providers',
     navigationNonce,
     floatingBallDevGate: linuxDesktop ? false : config.floatingBallDevGate,
     onSectionChange,

@@ -10,11 +10,11 @@ import {
   recordPreparedDshDelete,
   type SessionDeleteResult,
 } from '../SessionStore';
-import {
-  DshRuntime,
-  getDshConversationMutationContext,
-} from '../integrated-runtimes/dsh/runtime';
-import type { RuntimeProcess } from '../runtimes/types';
+import { startDshStorageManagement } from '../integrated-runtimes/dsh/runtime';
+import { DshMutationController } from '../integrated-runtimes/dsh/mutations';
+import type { DshRuntimeProcessHost } from '../integrated-runtimes/dsh/process-host';
+import { redactDshDiagnosticLine } from '../integrated-runtimes/dsh/process-host';
+import { withLogContext } from '../logger-context';
 
 function failedDelete(reason: Exclude<SessionDeleteResult, { deleted: true }>['reason']): SessionDeleteResult {
   return { deleted: false, reason };
@@ -39,31 +39,8 @@ export async function deleteDshProductSession(sessionId: string): Promise<Sessio
   }
   if (!metadata.runtimeSessionId) return failedDelete('precondition-failed');
 
-  const runtime = new DshRuntime();
-  let process: RuntimeProcess | undefined;
+  let host: DshRuntimeProcessHost | undefined;
   try {
-    process = await runtime.startSession({
-      sessionId,
-      workspacePath: metadata.agentDir,
-      systemPromptAppend: '',
-      model: metadata.model,
-      permissionMode: metadata.permissionMode,
-      reasoningEffort: metadata.reasoningEffort,
-      runtimeSource: 'integrated',
-      resumeSessionId: metadata.runtimeSessionId,
-      scenario: { type: 'desktop', surface: 'chat' },
-    }, () => undefined);
-  } catch {
-    // Admission recovery can finish an interrupted delete and intentionally
-    // leave no resumable Product Session.
-    return getSessionMetadata(sessionId) ? failedDelete('io-error') : { deleted: true };
-  }
-
-  try {
-    const context = getDshConversationMutationContext(process);
-    if (context.runtimeSessionId !== metadata.runtimeSessionId) {
-      return failedDelete('precondition-failed');
-    }
     const existing = getSessionMetadata(sessionId)?.pendingDshMutation;
     const clientMutationId = existing?.kind === 'dsh-delete'
       ? existing.clientMutationId
@@ -72,9 +49,12 @@ export async function deleteDshProductSession(sessionId: string): Promise<Sessio
       sessionId,
       clientMutationId,
     }));
-    let mutation = intent.token
-      ? await context.controller.deleteStatus(intent.token)
-      : await context.controller.prepareDelete(clientMutationId);
+    host = await startDshStorageManagement({ sessionId, workspacePath: metadata.agentDir });
+    const controller = new DshMutationController(host, intent.sourceRuntimeSessionId);
+    // Replaying prepare also reserves this new process for the exact stored
+    // identity; the native journal returns prepared/committed/purged receipts.
+    let mutation = await controller.prepareStoredDelete(clientMutationId);
+    if (intent.token && intent.token !== mutation.token) throw new Error('DSH stored delete token changed');
     if (!intent.token) {
       intent = requireStoreSuccess(await recordPreparedDshDelete({
         sessionId,
@@ -83,15 +63,17 @@ export async function deleteDshProductSession(sessionId: string): Promise<Sessio
       }));
     }
     if (mutation.state === 'prepared') {
-      mutation = await context.controller.commitDelete(clientMutationId, mutation.token);
+      mutation = await controller.commitDelete(clientMutationId, mutation.token);
     }
-    if (mutation.state === 'committed') {
+    if (mutation.state === 'committed' || mutation.state === 'purged') {
       intent = requireStoreSuccess(await recordCommittedDshDelete({
         sessionId,
         clientMutationId,
         token: mutation.token,
       }));
-      mutation = await context.controller.purgeDelete(clientMutationId, mutation.token);
+      // Native status can be purged before physical generation collection has
+      // finished. Always replay purge before removing the Product journal.
+      mutation = await controller.purgeDelete(clientMutationId, mutation.token);
     }
     if (mutation.state !== 'purged') {
       throw new Error(`DSH delete settled as ${mutation.state}`);
@@ -109,10 +91,13 @@ export async function deleteDshProductSession(sessionId: string): Promise<Sessio
       token: mutation.token,
     }));
     return { deleted: true };
-  } catch {
+  } catch (error) {
+    withLogContext({ sessionId, runtime: 'dsh' }, () => {
+      console.error(`[dsh] phase=storage-delete failed: ${redactDshDiagnosticLine(error instanceof Error ? error.message : String(error))}`);
+    });
     return failedDelete('io-error');
   } finally {
-    await runtime.stopSession(process).catch(() => undefined);
+    await host?.stop('storage_management_complete').catch(() => undefined);
   }
 }
 
