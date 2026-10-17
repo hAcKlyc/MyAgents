@@ -12,9 +12,7 @@ import { toClientSessionMetadata } from '../utils/session-metadata-wire';
 import type { SessionMessage, SessionMetadata } from '../types/session';
 import { projectSessionActivity } from '../session-engine/observation';
 import { watchStreamManager } from '../inbox/watch-stream';
-import { deliverInboxReply } from '../inbox/reply-deliver';
 import type { WatchSubscriber } from '../../shared/session-watch-protocol';
-import { randomUUID } from 'crypto';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -94,11 +92,12 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
     return jsonResponse({ accepted: false, reason: 'invalid body' }, 400);
   }
 
-  // Default to continuous mode (new behavior)
-  const mode = body.mode ?? 'continuous';
+  // Existing CLI/network callers omit mode and retain one-turn settlement.
+  // Continuous clients opt in explicitly, including useContinuousWatch.
+  const mode = body.mode ?? 'single-turn';
 
   // Validate mode-specific requirements
-  if (mode === 'single-turn' && !body.turnId) {
+  if (body.mode === 'single-turn' && !body.turnId) {
     return jsonResponse({ accepted: false, reason: 'turnId required for single-turn mode' }, 400);
   }
 

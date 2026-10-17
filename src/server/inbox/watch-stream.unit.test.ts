@@ -231,7 +231,7 @@ describe('WatchStreamManager', () => {
   });
 
   it('should cleanup inactive streams', () => {
-    const stream1 = manager.getStream('session-1');
+    manager.getStream('session-1');
     const stream2 = manager.getStream('session-2');
 
     // Add subscriber to stream2 only

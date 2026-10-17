@@ -1,146 +1,76 @@
-/**
- * Integration tests for continuous session watch
- */
+/** Real route handlers and loopback delivery; no pre-existing server or user data. */
+import { createServer, type Server } from 'node:http';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { handleSessionReadRoute } from './session-read';
+import { watchStreamManager } from '../inbox/watch-stream';
+import { manageLocalSessionWatches } from '../inbox/watch-registry';
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { ContinuousWatchEvent } from '../../shared/session-watch-protocol';
+const sessionId = 'test-session-integration';
+vi.mock('../session-engine', () => ({ getSessionEngine: () => ({
+  getRuntimeIdentity: () => ({ sessionId: 'test-session-integration' }),
+  getLiveSessionState: () => ({ isBusy: true, sessionState: 'running' }),
+  getExecutionTurnId: () => 'turn-1',
+}) }));
+vi.mock('../SessionStore', () => ({
+  getSessionMetadata: () => null, getSessionData: async () => null, isHistoryVisibleSession: () => true,
+}));
+let server: Server;
+const delivered: Array<{ message: { sessionEvent: { type: string; turnId?: string } } }> = [];
+async function post(action: string, body: Record<string, unknown>) {
+  const url = new URL(`http://127.0.0.1/api/session-watch/${action}`);
+  const response = await handleSessionReadRoute(url.pathname,
+    new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), url);
+  expect(response).not.toBeNull();
+  return response!.json();
+}
+const registration = (extra = {}) => ({ watchId: 'watch-fixture', watcherSessionId: sessionId, targetSessionId: sessionId, mode: 'continuous', ...extra });
 
-describe('Session Watch Integration', () => {
-  // Note: These tests require a running server instance
-  // They verify the end-to-end flow of watch registration and event delivery
-
-  const sessionId = 'test-session-integration';
-  let watchId: string;
-
-  beforeAll(async () => {
-    // Placeholder: In real integration tests, start server or ensure it's running
+beforeAll(async () => {
+  server = createServer(async (request, response) => {
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    delivered.push(JSON.parse(Buffer.concat(chunks).toString()));
+    response.writeHead(200, { 'content-type': 'application/json' }); response.end('{"ok":true}');
   });
-
-  afterAll(async () => {
-    // Placeholder: Cleanup
-  });
-
-  it('should register continuous watch subscription', async () => {
-    watchId = `watch-${Date.now()}`;
-
-    const response = await fetch('http://127.0.0.1:9999/api/session-watch/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        watchId,
-        watcherSessionId: sessionId,
-        targetSessionId: sessionId,
-        mode: 'continuous',
-      }),
-    });
-
-    const result = await response.json();
-    expect(result.accepted).toBe(true);
-    expect(result.mode).toBe('continuous');
-  });
-
-  it('should receive turn.started event', async () => {
-    // This test would need actual session execution
-    // Placeholder for demonstration
-    expect(true).toBe(true);
-  });
-
-  it('should receive turn.completed event', async () => {
-    // This test would need actual session execution
-    // Placeholder for demonstration
-    expect(true).toBe(true);
-  });
-
-  it('should handle multi-turn execution', async () => {
-    // Test scenario:
-    // 1. Start session
-    // 2. Execute turn 1 → receive turn.started → receive turn.completed
-    // 3. Model decides to continue → turn 2 starts automatically
-    // 4. Receive turn.started for turn 2 → receive turn.completed
-    // 5. Session becomes idle → receive session.idle
-    //
-    // This verifies the core fix: continuous subscribers receive events for ALL turns
-    expect(true).toBe(true);
-  });
-
-  it('should unsubscribe successfully', async () => {
-    const response = await fetch('http://127.0.0.1:9999/api/session-watch/unsubscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        watchId,
-        targetSessionId: sessionId,
-      }),
-    });
-
-    const result = await response.json();
-    expect(result.accepted).toBe(true);
-    expect(result.removed).toBe(true);
-  });
-
-  it('should support backward compatibility with single-turn mode', async () => {
-    const singleTurnWatchId = `watch-single-${Date.now()}`;
-
-    const response = await fetch('http://127.0.0.1:9999/api/session-watch/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        watchId: singleTurnWatchId,
-        watcherSessionId: sessionId,
-        targetSessionId: sessionId,
-        mode: 'single-turn',
-        turnId: 'turn-1',
-      }),
-    });
-
-    const result = await response.json();
-    expect(result.accepted).toBe(true);
-    expect(result.mode).toBe('single-turn');
-  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing fixture port');
+  vi.stubEnv('MYAGENTS_MANAGEMENT_PORT', String(address.port));
+});
+afterEach(() => {
+  watchStreamManager.removeStream(sessionId);
+  manageLocalSessionWatches(sessionId, undefined, true);
+  delivered.length = 0;
+});
+afterAll(async () => {
+  vi.unstubAllEnvs(); server.closeAllConnections();
+  await new Promise<void>(resolve => server.close(() => resolve()));
 });
 
-/**
- * End-to-end test scenarios (manual verification)
- *
- * Scenario 1: Multi-turn tool chain
- * -------------------------------
- * User: "Read file A, then read file B"
- * Expected:
- *   - turn.started (turn 1)
- *   - turn.completed (turn 1) → calls read_file tool for A
- *   - turn.started (turn 2) → model decides to continue
- *   - turn.completed (turn 2) → calls read_file tool for B
- *   - turn.started (turn 3) → model synthesizes response
- *   - turn.completed (turn 3)
- *   - session.idle
- *
- * OLD BEHAVIOR: Frontend only sees turn 1, misses turns 2 and 3
- * NEW BEHAVIOR: Frontend receives all events
- *
- * Scenario 2: API timeout with retry
- * ----------------------------------
- * User: "Do something" (API is slow)
- * Expected:
- *   - turn.started (turn 1)
- *   - turn.timeout (turn 1) → API timeout after 120s
- *   - turn.started (turn 2) → automatic retry
- *   - turn.completed (turn 2) → success
- *   - session.idle
- *
- * OLD BEHAVIOR: Frontend shows "no response" after turn 1 timeout
- * NEW BEHAVIOR: Frontend shows timeout warning, then shows retry and success
- *
- * Scenario 3: Network interruption
- * --------------------------------
- * User: "Long task" (network drops during execution)
- * Expected:
- *   - turn.started (turn 1)
- *   - [network disconnect]
- *   - [network reconnect]
- *   - Frontend requests high-water mark replay
- *   - Receives buffered events: turn.progress, turn.completed
- *   - Frontend catches up to current state
- *
- * OLD BEHAVIOR: Lost events, frontend stuck on "executing..."
- * NEW BEHAVIOR: Events replayed from buffer, frontend recovers
- */
+describe('Session Watch Integration', () => {
+  it('registers continuous subscriptions through the real route', async () => {
+    expect(await post('register', registration({ mode: 'continuous' }))).toMatchObject({ accepted: true, mode: 'continuous' });
+  });
+  it('delivers turn.started through a real loopback receiver', async () => {
+    await post('register', registration());
+    await watchStreamManager.getStream(sessionId).notifyTurnStarted('turn-1', 0);
+    expect(delivered.at(-1)?.message.sessionEvent).toMatchObject({ type: 'turn.started', turnId: 'turn-1' });
+  });
+  it('keeps continuous delivery across multiple completed turns', async () => {
+    await post('register', registration());
+    const stream = watchStreamManager.getStream(sessionId);
+    await stream.notifyTurnCompleted('turn-1', { text: 'first' }, 'success');
+    await stream.notifyTurnCompleted('turn-2', { text: 'second' }, 'success');
+    expect(delivered.map(value => value.message.sessionEvent.turnId)).toEqual(['turn-1', 'turn-2']);
+  });
+  it('unsubscribes without further event delivery', async () => {
+    await post('register', registration());
+    expect(await post('unsubscribe', { watchId: 'watch-fixture', targetSessionId: sessionId })).toMatchObject({ accepted: true, removed: true });
+    await watchStreamManager.getStream(sessionId).notifyTurnStarted('turn-2', 1);
+    expect(delivered).toHaveLength(0);
+  });
+  it('retains explicit single-turn registration', async () => {
+    expect(await post('register', registration({ mode: 'single-turn', turnId: 'turn-1' }))).toMatchObject({ accepted: true, mode: 'single-turn', turnId: 'turn-1' });
+  });
+  it('rejects a different session identity', async () => {
+    expect(await post('register', registration({ targetSessionId: 'other-session' }))).toMatchObject({ accepted: false, reason: 'target session mismatch' });
+  });
+});

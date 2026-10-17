@@ -4,7 +4,7 @@
  * Subscribes to continuous session watch events and provides real-time updates.
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import type { ContinuousWatchEvent } from '../../shared/session-watch-protocol';
 
 export interface WatchEventHandlers {
@@ -30,6 +30,7 @@ export function useContinuousWatch(options: UseContinuousWatchOptions) {
   const { sessionId, enabled = true, mode = 'continuous', turnId, handlers } = options;
   const watchIdRef = useRef<string | null>(null);
   const subscribedRef = useRef(false);
+  const [subscription, setSubscription] = useState<{ isSubscribed: boolean; watchId: string | null }>({ isSubscribed: false, watchId: null });
 
   const subscribe = useCallback(async () => {
     if (!enabled || subscribedRef.current) return;
@@ -54,6 +55,7 @@ export function useContinuousWatch(options: UseContinuousWatchOptions) {
 
       if (result.accepted) {
         subscribedRef.current = true;
+        setSubscription({ isSubscribed: true, watchId });
         console.log(`[useContinuousWatch] subscribed in ${mode} mode:`, result);
       } else {
         console.warn('[useContinuousWatch] subscription rejected:', result.reason);
@@ -80,6 +82,7 @@ export function useContinuousWatch(options: UseContinuousWatchOptions) {
 
       subscribedRef.current = false;
       watchIdRef.current = null;
+      setSubscription({ isSubscribed: false, watchId: null });
       console.log('[useContinuousWatch] unsubscribed');
     } catch (error) {
       console.error('[useContinuousWatch] unsubscribe failed:', error);
@@ -122,11 +125,11 @@ export function useContinuousWatch(options: UseContinuousWatchOptions) {
   }, [handlers]);
 
   useEffect(() => {
-    if (enabled) {
-      subscribe();
-    }
+    let active = true;
+    if (enabled) queueMicrotask(() => { if (active) void subscribe(); });
 
     return () => {
+      active = false;
       if (subscribedRef.current) {
         unsubscribe();
       }
@@ -134,8 +137,7 @@ export function useContinuousWatch(options: UseContinuousWatchOptions) {
   }, [enabled, subscribe, unsubscribe]);
 
   return {
-    isSubscribed: subscribedRef.current,
-    watchId: watchIdRef.current,
+    ...subscription,
     handleWatchEvent,
     subscribe,
     unsubscribe,
