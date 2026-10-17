@@ -40,11 +40,13 @@ Do not install, quit, launch or restart the daily MoxBots app; do not interrupt 
 - `npm run lint`: passed with 18 existing non-fatal no-orphan warnings.
 - `cargo test --bin moxbots-credential-reader --features fixed-macos-reader`: exit 0, zero tests discovered; not treated as behavior coverage.
 - Independent reader artifact review: passed SHA, CDHash, source closure, fixed signing identity, architecture, strict signature and release-manifest consistency.
-- `git diff --check`: passed before commit. Git handoff gate will be rerun after pushing this exact record.
+- After adding the root-owned sticky `/tmp` allowance, the focused reader suite again passed 18/18. A subsequent full local build-script run exited 1 with 281 passed, 15 skipped and 4 cancelled; cancellation reported unresolved Promise work in speech-quality tests, separate from reader tests. The earlier complete serial run on the pin/test changes passed 286 tests with 14 skipped. Require the fresh PR CI result before merge.
+- `git diff --check`: passed before the initial commit. Git handoff gate will be rerun after pushing the `/tmp` correction and this exact record.
 
 ## Blockers and unknowns
 
-- Follow-up PR checks and normal merge are pending.
+- PR #99 check run `39016566546` exposed a portability issue: the Linux runner's root-owned sticky `/tmp` was rejected as a group/world-writable ancestor when source-closure tests used OS temp fixtures. The production path guard allowed only macOS `/private/tmp`; the follow-up change allows `/tmp` only when root-owned with exact mode `1777`. Local focused tests pass; fresh exact-head PR checks must confirm the Linux suite.
+- Follow-up PR checks and normal merge are pending; all checks except the `test:build-scripts` job had passed or were still running when diagnosed.
 - The `v0.5.9` tag currently points to the initial 0.5.9 main commit `343b37e6`; it was created in this release attempt, but must be corrected only after the reader fix reaches main. No 0.5.9 package or server publication exists.
 - Final Tauri build, signing/notarization, external transfer, stable promotion and public checks have not completed. The original end-to-end timer remains active and must not be reset.
 - The signed reader artifact is local to the release host at `/private/tmp/moxbots-059-reader-artifact-343b`; it is not part of the Git commit. Recompute the packaged source closure after merge before reuse.
