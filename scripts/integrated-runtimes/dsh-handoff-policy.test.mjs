@@ -297,6 +297,13 @@ test("sealed handoff evidence can be packaged without changing source bytes or m
         const oldBundle = resolve(root, "old.app");
         cpSync(source, oldBundle, { recursive: true });
         try {
+          // An empty xattr inventory can be cleared without writing the sealed
+          // file. Seed one explicitly so this proves the permission failure on
+          // clean checkouts as well as machines with inherited Finder metadata.
+          const oldEvidence = resolve(oldBundle, "evidence.json");
+          chmodSync(oldEvidence, 0o600);
+          execFileSync("/usr/bin/xattr", ["-w", "com.myagents.test-sealed-handoff", "fixture", oldEvidence]);
+          chmodSync(oldEvidence, 0o400);
           const result = spawnSync("/usr/bin/xattr", ["-crs", oldBundle], { encoding: "utf8" });
           assert.equal(result.status, 1);
           assert.match(result.stderr, /Permission denied/);
