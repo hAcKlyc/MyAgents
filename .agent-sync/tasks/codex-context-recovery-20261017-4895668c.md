@@ -48,3 +48,5 @@ Six exact-head CI checks are required before main merge. Local Rust is blocked b
 Wait for PR96 exact-head six checks; repair any real failures, merge normally, verify fresh remote main contains the accepted commits. Then hand the concrete release record to the existing publisher with explicit messaging authorization and retain all active-session/install gates.
 
 Integration repair: incoming main continuous-watch lint/legacy-route/receipt regressions fixed without disabling checks; real loopback route tests replace fixed-port placeholders. Related73+48 tests, merged full lint/typecheck passed. Recovery finalization cleanup now rechecks paused control revision under lifecycle lock; SDK thrown-error path retains the structured recovery code. Exact-head CI rerun required.
+
+Synced concurrent main a2dd1730 (resizable panels) into the isolated branch without conflicts; preserve its code and re-run merged lint/type/CI. Continuous-watch documentation now distinguishes explicit new clients from omitted-mode legacy calls. No release or daily client change.
