@@ -399,7 +399,7 @@ test('macOS release prepares and validates Sharp inside each target build', () =
 
   const prepareFunctionAt = buildMacos.indexOf('prepare_sharp_runtime() {');
   const nextFunctionAt = buildMacos.indexOf(
-    '\nvalidate_claude_sdk_package() {',
+    '\nREQUIRED_SDK_ARCHES=()',
     prepareFunctionAt,
   );
   const prepareFunction = buildMacos.slice(prepareFunctionAt, nextFunctionAt);

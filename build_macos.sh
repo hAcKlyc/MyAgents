@@ -262,55 +262,8 @@ echo ""
 # Node.js staging 目录（每个构建目标在循环中按架构从 cache 同步）
 NODEJS_DIR="${PROJECT_DIR}/src-tauri/resources/nodejs"
 
-# ========================================
-# 签名 Vendor 二进制文件 (ripgrep)
-# ========================================
-echo -e "${BLUE}[6/7] 签名 Vendor 二进制文件 (ripgrep, .node)...${NC}"
-
-# 签名所有 macOS 二进制文件
-VENDOR_DIR="${SDK_DEST}/vendor"
-SIGNED_COUNT=0
-FAILED_COUNT=0
-
-# 使用 process substitution 避免子 shell 问题
-while IFS= read -r binary; do
-    echo -e "    ${CYAN}签名: $(basename "$binary")${NC}"
-    if codesign --force --options runtime --timestamp \
-        --sign "$APPLE_SIGNING_IDENTITY" "$binary" 2>/dev/null; then
-        ((SIGNED_COUNT++))
-    else
-        echo -e "    ${YELLOW}警告: 签名失败 - $binary${NC}"
-        ((FAILED_COUNT++))
-    fi
-done < <(find "$VENDOR_DIR" -type f \( -name "*.node" -o -name "rg" \) -path "*darwin*")
-
-echo -e "${GREEN}✓ Vendor 签名完成 (成功: ${SIGNED_COUNT}, 失败: ${FAILED_COUNT})${NC}"
-echo ""
-
-# 构建 Tauri 应用
-echo -e "${BLUE}[7/7] 构建 Tauri 应用 (Release + 签名 + 公证)...${NC}"
-echo -e "${YELLOW}这可能需要 5-10 分钟 (包含公证等待时间)...${NC}"
-
-# ---- 补齐 Claude Agent SDK 的跨架构 native 包 ----
-# `@anthropic-ai/claude-agent-sdk-darwin-{arm64,x64}` 在 package.json 里
-# 是 optionalDependencies；npm 默认只装匹配 host 架构的那一份，所以
-# arm64 Mac 上 `npm install` 后通常只有 darwin-arm64。这里只补齐本次
-# 选择的 target 需要的 arch；build "Both" 模式会校验 arm64 + x64。
-#
-# 强制安装非 host 架构 platform package 必须带 `--force`。npm 10+ 对
-# direct install 仍会按 host CPU 做 EBADPLATFORM 校验；`--os` / `--cpu`
-# 只作为 optional dep 过滤输入保留，真正允许 darwin-x64 在 arm64 host
-# 上落盘的是 `--force`。每个 arch 必须用各自的 flag 单独装一次。
-#
-# `--no-save` 不写回 package.json（仓库 optionalDeps 形态保持不变）；
-# `--ignore-scripts` 同 setup-tsx-runtime 的逻辑（避免跨平台 postinstall
-# 触发自检失败）。
-SDK_VERSION=$(grep '"@anthropic-ai/claude-agent-sdk-darwin-arm64"' "${PROJECT_DIR}/package.json" | sed 's/.*: "\([0-9][0-9.]*\)".*/\1/')
-if [ -z "$SDK_VERSION" ]; then
-    echo -e "${RED}✗ 无法从 package.json 解析 Claude SDK 版本号${NC}"
-    exit 1
-fi
-
+# SDK acquisition and source validation are shared with setup/dev. Target
+# staging and Developer ID signing remain owned by this release script.
 expected_macho_arch() {
     case "$1" in
         arm64) echo "arm64" ;;
@@ -430,75 +383,7 @@ prepare_sharp_runtime() {
     echo -e "  ${GREEN}✓ sharp-runtime 就绪 (darwin-${ARCH}, ${SHARP_SIGNED_COUNT} 个原生文件)${NC}"
 }
 
-validate_claude_sdk_package() {
-    local ARCH="$1"
-    local EXPECTED_ARCH
-    EXPECTED_ARCH=$(expected_macho_arch "$ARCH")
-    local PKG_NAME="@anthropic-ai/claude-agent-sdk-darwin-${ARCH}"
-    local PKG_DIR="${PROJECT_DIR}/node_modules/${PKG_NAME}"
-    local PKG_JSON="${PKG_DIR}/package.json"
-    local SDK_PKG_BIN="${PKG_DIR}/claude"
-
-    if [ ! -f "$PKG_JSON" ]; then
-        echo -e "    ${YELLOW}⚠ ${PKG_NAME} package.json 缺失${NC}"
-        return 1
-    fi
-    if ! node -e '
-const fs = require("fs");
-const [pkgPath, expectedName, expectedVersion] = process.argv.slice(1);
-try {
-  const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-  process.exit(pkg.name === expectedName && pkg.version === expectedVersion ? 0 : 1);
-} catch {
-  process.exit(1);
-}
-' "$PKG_JSON" "$PKG_NAME" "$SDK_VERSION"; then
-        echo -e "    ${YELLOW}⚠ ${PKG_NAME} package.json 与期望版本不匹配${NC}"
-        return 1
-    fi
-
-    validate_macho_binary "$SDK_PKG_BIN" "$EXPECTED_ARCH" "${PKG_NAME}/claude"
-}
-
-ensure_claude_sdk_package() {
-    local ARCH="$1"
-    local PKG_NAME="@anthropic-ai/claude-agent-sdk-darwin-${ARCH}"
-    local PKG_DIR="${PROJECT_DIR}/node_modules/${PKG_NAME}"
-
-    if validate_claude_sdk_package "$ARCH"; then
-        echo -e "${GREEN}  ✓ darwin-${ARCH} 已验证${NC}"
-        return
-    fi
-
-    echo -e "${BLUE}[7.0/7] 修复 Claude SDK darwin-${ARCH}@${SDK_VERSION}...${NC}"
-    local TMP_DIR="${PROJECT_DIR}/.tmp-claude-sdk-${ARCH}-$$"
-    rm -rf "$TMP_DIR"
-    mkdir -p "$TMP_DIR"
-    if ! npm install --prefix "$TMP_DIR" --force --no-save --package-lock=false --no-audit --no-fund --ignore-scripts \
-        --os=darwin --cpu="$ARCH" \
-        "${PKG_NAME}@${SDK_VERSION}"; then
-        rm -rf "$TMP_DIR"
-        echo -e "${RED}✗ darwin-${ARCH} 临时安装失败${NC}"
-        exit 1
-    fi
-
-    if [ ! -d "${TMP_DIR}/node_modules/${PKG_NAME}" ]; then
-        rm -rf "$TMP_DIR"
-        echo -e "${RED}✗ darwin-${ARCH} 临时安装未产出 ${PKG_NAME}${NC}"
-        exit 1
-    fi
-
-    rm -rf "$PKG_DIR"
-    mkdir -p "$(dirname "$PKG_DIR")"
-    cp -R "${TMP_DIR}/node_modules/${PKG_NAME}" "$PKG_DIR"
-    rm -rf "$TMP_DIR"
-    if ! validate_claude_sdk_package "$ARCH"; then
-        echo -e "${RED}✗ darwin-${ARCH} 安装后仍未通过完整性校验: ${PKG_DIR}/claude${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}  ✓ darwin-${ARCH} 就绪${NC}"
-}
-
+echo -e "${BLUE}[6/7] 准备目标架构的 Claude SDK...${NC}"
 REQUIRED_SDK_ARCHES=()
 for TARGET in "${BUILD_TARGETS[@]}"; do
     if [[ "$TARGET" == "aarch64-apple-darwin" ]]; then
@@ -508,9 +393,11 @@ for TARGET in "${BUILD_TARGETS[@]}"; do
     fi
 done
 
-for ARCH in "${REQUIRED_SDK_ARCHES[@]}"; do
-    ensure_claude_sdk_package "$ARCH"
-done
+"${PROJECT_DIR}/scripts/ensure_claude_sdk_package.sh" "${REQUIRED_SDK_ARCHES[@]}"
+
+echo ""
+echo -e "${BLUE}[7/7] 构建 Tauri 应用 (Release + 签名 + 公证)...${NC}"
+echo -e "${YELLOW}这可能需要 5-10 分钟 (包含公证等待时间)...${NC}"
 
 for TARGET in "${BUILD_TARGETS[@]}"; do
     echo ""
@@ -603,10 +490,6 @@ for TARGET in "${BUILD_TARGETS[@]}"; do
     CLAUDE_DEST="${PROJECT_DIR}/src-tauri/resources/claude-agent-sdk/claude"
     CLAUDE_EXPECTED_ARCH=$(expected_macho_arch "$SDK_ARCH")
     echo -e "  ${CYAN}拷贝 Claude native binary (${SDK_TRIPLE})...${NC}"
-    if ! validate_claude_sdk_package "$SDK_ARCH"; then
-        echo -e "    ${RED}✗ Claude native binary 未通过完整性校验: $CLAUDE_SRC${NC}"
-        exit 1
-    fi
     rm -f "$CLAUDE_DEST"
     cp "$CLAUDE_SRC" "$CLAUDE_DEST"
     chmod +x "$CLAUDE_DEST"

@@ -78,8 +78,8 @@ myagents-releases/
 3. 配置生产环境 CSP
 4. TypeScript 类型检查
 5. 通过 `build:assets` 一次构建前端、Sidecar、Bridge 与 CLI，双架构共用该结果；后续 Tauri 调用关闭本次业务构建钩子
-6. 签名 Vendor 二进制文件 (ripgrep 等)
-7. 构建 Tauri 应用 (Release + 签名 + 公证)
+6. 通过共享 SDK 准备脚本校验所选架构的原生包，缺失或损坏时用 npm 补装（首次下载可能较慢，显示目标、版本和 npm 下载日志）
+7. 按目标复制并签名原生资源，构建 Tauri 应用 (Release + 签名 + 公证)
 8. 恢复开发配置
 
 **产物检查**：

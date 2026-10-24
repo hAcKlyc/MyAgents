@@ -38,7 +38,7 @@ Windows Dev 与 Release 都通过 `ensure_claude_sdk_package.ps1 -Stage` 校验�
 
 Linux 的 `--prepare`、Debug 和 Release 入口共用 `build_linux.sh`，由 `stage-claude-sdk-linux.mjs` 对照根 manifest、lock、已安装的 JS wrapper/native 包版本与 x64 ELF 身份后暂存。已安装包版本不符时立即失败并提示重新安装依赖，不把旧 `node_modules` 视为绑定版本。
 
-macOS Dev / Release 在构建业务 bundle 前检查已安装的 SDK JS wrapper；此检查同时核对根 manifest 和 lock 中的八个平台原生包版本。原生 Mach-O 的目标架构、文件完整性与签名仍由既有平台校验入口负责。
+macOS Dev / Release 在构建业务 bundle 前检查已安装的 SDK JS wrapper；此检查同时核对根 manifest 和 lock 中的八个平台原生包版本。macOS setup、Dev 与 Release 统一调用 `scripts/ensure_claude_sdk_package.sh` 校验和补齐原生包：setup/Dev 默认主机架构，Release 显式传入所选目标架构。共享脚本负责源包版本、Mach-O 完整性和原始签名校验，补装时说明目标/版本并显示 npm HTTP 日志；网络与缓存仍由 npm 管理。正式构建随后按目标复制 `claude`、校验 staging 并签名打包副本，不签名 node_modules 中的源包，也不再扫描旧 SDK 的 vendor 目录。
 
 Linux 的 setup 通过 `build_linux.sh --install-deps` 和 `--prepare` 复用资源路径，debug/release 也走该脚本。macOS/Windows 的开发版仍可使用项目 node_modules 提供 sharp/tsx；正式包必须携带自包含资源。
 

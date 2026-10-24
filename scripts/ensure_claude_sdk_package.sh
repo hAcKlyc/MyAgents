@@ -140,12 +140,15 @@ repair_package() {
     local pkg_dir="${PROJECT_DIR}/node_modules/${pkg_name}"
     local tmp_dir=""
 
-    echo -e "${BLUE}Repairing ${pkg_name}@${SDK_VERSION}...${NC}"
+    echo -e "${BLUE}准备下载并安装 Claude SDK darwin-${arch}@${SDK_VERSION}（首次下载可能较慢）...${NC}"
+    echo "  npm 将显示下载日志；完成前可能只有转圈提示，当前尚未进入编译或公证。"
     tmp_dir=$(mktemp -d "${PROJECT_DIR}/.tmp-claude-sdk-${arch}.XXXXXX")
     CURRENT_TMP_DIR="$tmp_dir"
 
+    # --force permits an Intel package on an ARM host; --ignore-scripts avoids
+    # executing the target binary during cross-architecture preparation.
     if ! npm install --prefix "$tmp_dir" --force --prefer-online --no-save --package-lock=false \
-        --no-audit --no-fund --ignore-scripts \
+        --no-audit --no-fund --ignore-scripts --loglevel=http \
         --os=darwin --cpu="$arch" \
         "${pkg_name}@${SDK_VERSION}"; then
         rm -rf "$tmp_dir"
