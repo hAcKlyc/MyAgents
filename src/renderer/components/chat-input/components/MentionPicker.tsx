@@ -1,7 +1,7 @@
 import { ChevronDownIcon, ChevronUpIcon } from "@/components/icons";
 import { useLayoutEffect, useRef, type KeyboardEventHandler } from "react";
 import { useTranslation } from "react-i18next";
-import { WORKSPACE_ICON_GLYPHS } from "@/assets/workspace-icons";
+import { resolveWorkspaceIconId } from "@/assets/workspace-icons";
 import WorkspaceIcon from "@/components/launcher/WorkspaceIcon";
 import { FileIcon } from "@/components/file-icon";
 import {
@@ -105,13 +105,7 @@ export function MentionPicker({
                           icon={
                             option.value.agent.isLocal
                               ? localWorkspaceIcons[option.value.agent.selector]
-                              : option.value.agent.icon &&
-                                  Object.hasOwn(
-                                    WORKSPACE_ICON_GLYPHS,
-                                    option.value.agent.icon,
-                                  )
-                                ? option.value.agent.icon
-                                : "robot"
+                              : resolveWorkspaceIconId(option.value.agent.icon || "robot") ?? "robot"
                           }
                           size={16}
                           className="shrink-0"

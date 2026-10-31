@@ -245,7 +245,7 @@ describe("unified mention picker", () => {
     ).toEqual([false, false, true]);
   });
 
-  it("uses one loading view, then renders the remote workspace icon", async () => {
+  it.each(["lightning", "companion-star"])("uses one loading view, then renders the remote workspace icon %s", async (icon) => {
     let resolve!: (value: unknown) => void;
     mocks.invoke.mockImplementationOnce(
       () =>
@@ -276,7 +276,7 @@ describe("unified mention picker", () => {
             selector: "remote",
             name: "Remote Agent",
             isLocal: false,
-            icon: "lightning",
+            icon,
           },
         ],
       }),
@@ -286,7 +286,7 @@ describe("unified mention picker", () => {
       screen
         .getByText("Remote Agent")
         .closest("button")
-        ?.querySelector('[data-workspace-icon="lightning"]'),
+        ?.querySelector(`[data-workspace-icon="${icon}"]`),
     ).toBeInTheDocument();
   });
 
