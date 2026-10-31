@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { AlertIcon, PlusIcon, TeamIcon } from '@/components/icons';
+import { AlertIcon, PlusIcon } from '@/components/icons';
+import { GROUP_AVATAR_IMAGES } from '@/assets/team-avatars';
 import { ChannelPlatformIcon, getChannelPlatformLabel } from '@/components/AgentSettings/channelPlatform';
 import { formatPastRelativeTime } from '@/i18n/format';
 import type { TeamChannel, TeamPeer } from '@/../shared/teamAi';
@@ -12,16 +13,24 @@ export function PeerAvatar({ peer, platform, size = 32 }: { peer: Pick<TeamPeer,
       <ChannelPlatformIcon type={platform} className="h-3.5 w-3.5" />
     </span>
   ) : null;
+  const seed = [...peer.sourceId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   if (peer.sourceType === 'group') {
     return (
       <span className="relative flex shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--paper-inset)] text-[var(--ink-muted)]" style={{ width: size, height: size }}>
-        <TeamIcon className="h-[55%] w-[55%]" />
+        <img
+          src={GROUP_AVATAR_IMAGES[seed % GROUP_AVATAR_IMAGES.length]}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          width={size}
+          height={size}
+          className="h-full w-full rounded-[inherit] object-cover"
+        />
         {badge}
       </span>
     );
   }
   const name = peerLabel(peer);
-  const seed = [...peer.sourceId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   const colors = PEER_AVATAR_PALETTE[seed % PEER_AVATAR_PALETTE.length];
   return (
     <span

@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { GROUP_AVATAR_IMAGES } from '@/assets/team-avatars';
 import { PeerAvatar } from './PeerList';
 import { PEER_AVATAR_PALETTE } from './peerAvatarPalette';
 
@@ -37,5 +40,49 @@ describe('Team AI private contact avatars', () => {
     expect(avatar).toHaveStyle({ width: '40px', height: '40px' });
     rerender(<PeerAvatar peer={{ ...peer, name: peer.sourceId }} />);
     expect(avatar).toHaveTextContent('?');
+  });
+});
+
+describe('Team AI group avatars', () => {
+  it('renders all three locally packaged multi-person variants', () => {
+    const renderedSources = new Set<string>();
+    for (const sourceId of ['group:a', 'group:b', 'group:c']) {
+      const { container, unmount } = render(<PeerAvatar peer={{ sourceType: 'group', sourceId, name: '讨论组' }} />);
+      const image = container.querySelector('img')!;
+      renderedSources.add(image.getAttribute('src')!);
+      expect(image).toHaveAttribute('alt', '');
+      expect(image).toHaveAttribute('aria-hidden', 'true');
+      expect(image).toHaveAttribute('draggable', 'false');
+      expect(image).toHaveAttribute('width', '32');
+      expect(image).toHaveAttribute('height', '32');
+      expect(container.querySelector('svg')).toBeNull();
+      unmount();
+    }
+    expect(renderedSources).toEqual(new Set(GROUP_AVATAR_IMAGES));
+    for (const src of GROUP_AVATAR_IMAGES) {
+      const png = readFileSync(resolve(import.meta.dirname, '../../assets/team-avatars', src.split('/').at(-1)!));
+      expect(png.readUInt32BE(16)).toBe(128);
+      expect(png.readUInt32BE(20)).toBe(128);
+    }
+  });
+
+  it('keeps the same image in the list and detail after renaming, with an unclipped platform badge', () => {
+    const peer = { sourceType: 'group' as const, sourceId: 'group:stable', name: '设计讨论组' };
+    const { container, rerender } = render(<PeerAvatar peer={peer} platform="telegram" />);
+    const avatar = container.firstElementChild as HTMLElement;
+    const image = avatar.querySelector('img[alt=""]')!;
+    const source = image.getAttribute('src');
+    expect(avatar).toHaveStyle({ width: '32px', height: '32px' });
+    expect(image).toHaveClass('rounded-[inherit]');
+    const badge = avatar.querySelector('.absolute')!;
+    expect(badge.parentElement).toBe(avatar);
+    expect(badge).toContainElement(avatar.querySelector('img[alt="Telegram"]'));
+    expect(image.parentElement).toBe(avatar);
+    expect(avatar).not.toHaveClass('overflow-hidden');
+    rerender(<PeerAvatar peer={{ ...peer, name: '新的组名' }} size={40} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', source);
+    expect(container.firstElementChild).toHaveStyle({ width: '40px', height: '40px' });
+    expect(container.querySelector('img')).toHaveAttribute('width', '40');
+    expect(container.querySelector('.absolute')).toBeNull();
   });
 });
