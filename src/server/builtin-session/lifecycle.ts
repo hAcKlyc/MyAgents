@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Query, SDKBackgroundTasksChangedMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { SystemInitInfo } from '../../shared/types/system';
 import type { SdkEffortLevel } from '../../shared/reasoningEffort';
+import type { McpFailureCode } from '../../shared/mcpFailure';
 import { compareBackgroundTaskRuns } from '../../shared/backgroundTaskRun';
 import {
   MCP_PREWARM_GRACE_MS,
@@ -30,6 +31,7 @@ let queryMcpPrewarmOwner: {
   revision: number;
   fingerprint: string;
   requiredServerIds: readonly string[];
+  buildFailures?: Readonly<Record<string, McpFailureCode>>;
   startedAt: number;
   deadlineAt: number;
   outcome?: McpPrewarmOutcome;
@@ -406,6 +408,7 @@ export function setQueryMcpPrewarmOwner(params: {
   query: Query;
   fingerprint: string;
   requiredServerIds: readonly string[];
+  buildFailures?: Readonly<Record<string, McpFailureCode>>;
   startedAt?: number;
   deadlineAt?: number;
 }): boolean {
@@ -418,6 +421,7 @@ export function setQueryMcpPrewarmOwner(params: {
     revision: queryMcpRevision,
     fingerprint: params.fingerprint,
     requiredServerIds: [...params.requiredServerIds].sort(),
+    buildFailures: { ...params.buildFailures },
     startedAt,
     deadlineAt: params.deadlineAt ?? startedAt + MCP_PREWARM_GRACE_MS,
   };
@@ -435,6 +439,7 @@ export function getQueryMcpPrewarmOwner(): {
   revision: number;
   fingerprint: string;
   requiredServerIds: readonly string[];
+  buildFailures?: Readonly<Record<string, McpFailureCode>>;
   startedAt: number;
   deadlineAt: number;
   outcome?: McpPrewarmOutcome;
@@ -442,6 +447,7 @@ export function getQueryMcpPrewarmOwner(): {
   if (!queryMcpPrewarmOwner || queryMcpPrewarmOwner.query !== querySession) return null;
   return {
     ...queryMcpPrewarmOwner,
+    buildFailures: { ...queryMcpPrewarmOwner.buildFailures },
     requiredServerIds: [...queryMcpPrewarmOwner.requiredServerIds],
   };
 }
@@ -476,7 +482,12 @@ export function readQueryMcpStatuses(query: Query): ReturnType<Query['mcpServerS
     return Promise.reject(new Error('MCP pre-warm owner is no longer current'));
   }
   if (owner.statusRead) return owner.statusRead;
-  const read = query.mcpServerStatus();
+  const read = query.mcpServerStatus().then(statuses => [
+    ...statuses.filter(status => !Object.hasOwn(owner.buildFailures ?? {}, status.name)),
+    ...Object.entries(owner.buildFailures ?? {}).map(([name, error]) => ({
+      name, status: 'failed' as const, error,
+    })),
+  ]);
   owner.statusRead = read.finally(() => {
     if (queryMcpPrewarmOwner === owner) owner.statusRead = undefined;
   });

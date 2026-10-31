@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getAllMcpServers, resolveWorkspaceConfig } from './admin-config';
+import { getAllMcpServers, getEffectiveMcpServers, resolveWorkspaceConfig } from './admin-config';
 
 const scratchDirs: string[] = [];
 
@@ -16,6 +16,29 @@ afterEach(() => {
 });
 
 describe('server MCP catalogue merge', () => {
+  it('uses Agent defaults rather than a divergent Project mirror for new and legacy execution', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'myagents-mcp-default-owner-'));
+    scratchDirs.push(scratch);
+    const configDir = join(scratch, '.myagents');
+    mkdirSync(configDir);
+    vi.stubEnv('HOME', scratch);
+    const configPath = join(configDir, 'config.json');
+    const config = {
+      mcpServers: ['agent-only', 'project-only'].map(id => ({ id, name: id, type: 'stdio', command: 'node' })),
+      mcpEnabledServers: ['agent-only', 'project-only'],
+      agents: [{ id: 'owner', name: 'Owner', workspacePath: '/workspace', mcpEnabledServers: ['agent-only'] }],
+    };
+    writeFileSync(configPath, JSON.stringify(config));
+    writeFileSync(join(configDir, 'projects.json'), JSON.stringify([
+      { id: 'project', path: '/workspace', agentId: 'owner', mcpEnabledServers: ['project-only'] },
+    ]));
+    expect(getEffectiveMcpServers('/workspace').map(server => server.id)).toEqual(['agent-only']);
+    expect(resolveWorkspaceConfig('/workspace').mcpServers.map(server => server.id)).toEqual(['agent-only']);
+    config.agents[0].mcpEnabledServers = [];
+    writeFileSync(configPath, JSON.stringify(config));
+    expect(getEffectiveMcpServers('/workspace')).toEqual([]);
+  });
+
   it('preserves explicit Playwright args on the generic stdio preset', () => {
     const servers = getAllMcpServers({
       mcpServers: [],

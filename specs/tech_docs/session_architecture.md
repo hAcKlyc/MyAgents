@@ -92,7 +92,7 @@ session selected IDs
 ∩ current server definitions
 ```
 
-同 ID definition 变化需要更新 Runtime MCP surface；Project 默认变化不能改写已有 Session 的选择。
+同 ID definition 变化需要更新 Runtime MCP surface；Project 默认变化不能改写已有 Session 的选择。 新会话与无 snapshot 的兼容解析统一读取 Agent 的选择；Agent 存在时其缺省/空选择不会回落到旧 Project 镜像，只有无 Agent 才使用 Project。桌面 pending、reset、Companion、Task 的默认解析遵循相同规则。MCP 在进入 SDK 前构建失败时，由该 Query/map owner 保存有界失败码并进入现有 effective snapshot 与 pre-warm 裁决，不能从 desired 集合中消失。
 
 ### 3.2 活跃时间、置顶与 Tag
 
@@ -164,7 +164,9 @@ MCP pre-warm 是 soft readiness observation，不是 AI turn 的 admission autho
 
 ### 4.4 Rewind、Fork、Retry 与 reload anchor
 
-SDK 输入的 queue UUID 只用于关联准入和消费。Replay、assistant-start 与 result handoff 不证明该 UUID 是持久 native chain entry，因此这些路径不能写入 `sdkUuid` 或 native UUID 集；恢复点只取原生 user/assistant 内容事件提供的 UUID。缺少精确边界时沿既有 mutation 校验明确拒绝，不猜测更早历史。旧数据中的同值 UUID 也可能是真实 native entry，不能按“等于 queueId”批量删除；已失效的显式边界仍通过用户选定的更早 Rewind/Retry 恢复。
+SDK 输入的 queue UUID 只用于关联准入和消费。Replay、assistant-start 与 result handoff 不证明该 UUID 是持久 native chain entry，因此这些路径不能写入 `sdkUuid` 或 native UUID 集；恢复点只取原生 user/assistant 内容事件，或 SDK 历史中验证后的普通 root user 记录提供的 UUID。缺少精确边界时沿既有 mutation 校验明确拒绝，不猜测更早历史。旧数据中的同值 UUID 也可能是真实 native entry，不能按“等于 queueId”批量删除；已失效的显式边界仍通过用户选定的更早 Rewind/Retry 恢复。
+
+Builtin 用户消息的 `sdkInputUuid` 只持有提交关联，不是恢复锚点。普通 native user 事件只能按此关联精确绑定产品消息；tool_result、child、local command、synthetic 与 replay 不得向历史未绑定用户反向补位。Fork/Rewind 在原 mutation owner 中读取 SDK 历史，验证用户候选；`isQueuedCommand` 投影仍是别名，不能充当真实 user 锚点。历史错误/缺失的可选用户锚点在 fork 目标保持未绑定，不改源历史、不按产品行与 SDK 行的位置猜配；assistant 边界与 native→native remap 仍严格校验。文件 checkpoint 同样只使用验证后的 root user UUID，由 SDK 返回实际恢复结果。
 
 三种操作统一进入 SessionEngine，adapter 拥有 native history 操作与执行顺序，SessionStore 拥有产品 transcript、metadata 和提交裁决。Renderer 不自行选择 Runtime 路径或补做重发。
 

@@ -102,7 +102,7 @@ import {
 } from './config';
 import {
   addCurrentSessionUuid,
-  bindSdkUuidToLatestUnboundUserMessage,
+  bindSdkUuidToUserInput,
   bindSdkUuidToMessage,
   clearTranscriptState,
   getCurrentSessionUuids,
@@ -819,12 +819,14 @@ describe('builtin-session owners', () => {
     expect(nextMessageSequence()).toBe(1);
     const assistant = { id: 'm2', role: 'assistant' as const, content: 'hi', timestamp: 'now' };
     replaceMessages([
-      { id: 'm1', role: 'user', content: 'hello', timestamp: 'now' },
+      { id: 'm1', role: 'user', content: 'hello', timestamp: 'now', sdkInputUuid: 'input-1' },
       assistant,
     ]);
     addCurrentSessionUuid('uuid-1');
 
-    expect(bindSdkUuidToLatestUnboundUserMessage('user-uuid')).toBe('m1');
+    expect(bindSdkUuidToUserInput('input-1', 'user-uuid')).toBe('m1');
+    expect(bindSdkUuidToUserInput('input-1', 'user-uuid')).toBeNull();
+    expect(bindSdkUuidToUserInput('unrelated-input', 'unrelated-uuid')).toBeNull();
     expect(bindSdkUuidToMessage(assistant, 'assistant-uuid')).toBe('m2');
     expect(getMessages()).toHaveLength(2);
     expect(getMessages().map(message => message.sdkUuid)).toEqual(['user-uuid', 'assistant-uuid']);
