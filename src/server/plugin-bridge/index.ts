@@ -143,8 +143,11 @@ registerHooks({
     }
     if (url.endsWith('/@wecom/wecom-openclaw-plugin/dist/src/chat-queue.js')) {
       const patched = patchWecomChatQueueSource(src);
-      if (patched) return { ...next(url, context), source: patched, shortCircuit: true };
-      console.warn('[plugin-bridge] WeCom admission patch target not found; retaining upstream queue');
+      if (patched) {
+        console.log('[plugin-bridge] WeCom admission patch applied; input admission is independent of reply completion');
+        return { ...next(url, context), source: patched, shortCircuit: true };
+      }
+      console.warn('[plugin-bridge] WeCom admission patch target not found; retaining upstream queue; subsequent input waits for reply completion');
     }
     const admissionKind = url.endsWith('/@tencent-weixin/openclaw-weixin/src/monitor/monitor.ts') ? 'weixin'
       : url.endsWith('/@sliverp/qqbot/src/gateway.ts') ? 'qq' : null;

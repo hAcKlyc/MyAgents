@@ -215,6 +215,10 @@ OpenClaw reply：
 
 enqueue 的未知 HTTP ACK（连接/响应解析失败或 HTTP 5xx）不触发 buffer 重放：保留 slot/lease、核对同一 requestId；5xx 可能发生在 Runtime 已接纳之后，不能推断为拒绝。明确拒绝仍立即收尾。Bridge start/partial 投递失败不会结束执行关联。terminal handoff 是有界、幂等接纳，投递失败与 producer terminal 分别处理。
 
+OpenClaw terminal 首次到达时，ReplySlot 固定该次 outcome、payload 与发送策略。每轮最多三次的有界交接失败后，slot/lease 继续持有原终态，由既有 15 秒核对周期重新交接；等待下次核对不占 router 锁，不重跑 AI、不重发工具媒体。已有终态直接使用本地快照，不再依赖 producer receipt 的容量、TTL 或当前可达性；后来的 partial、policy 或 unknown/error receipt 不能覆盖它。只有 Bridge 接纳终态，或结构化 `protocol_dispatch_missing` 明确证明原 dispatcher 已消失时，才结束正常交接责任；后者记录 delivery unknown，不能声称平台发送成功。Channel stop / generation 丢失仍按既有有界 teardown 收口。
+
+渠道状态从 live ReplySlot 派生未完成交接提示，恢复后自动消失，不另建持久化投递状态，也不修改 WebSocket 的 online / error 事实。已有连接错误优先展示；渠道详情可在 online 状态同时显示回复投递待恢复。
+
 ### 5.2 Session binding delivery
 
 ReplySlot只服务产生它的Channel user request。一个request结束后，Desktop、Session Inbox或后台触发的新turn不能复用旧slot。

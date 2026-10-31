@@ -28,6 +28,18 @@ function expectBefore(first: Element, second: Element) {
 }
 
 describe('Channel detail layout', () => {
+  it('shows a reply delivery warning while the transport remains online', async () => {
+    mocks.tauri = true;
+    mocks.invoke.mockImplementation(async command => command === 'cmd_agent_channel_status' ? {
+      channelId: 'c', channelType: 'openclaw:wecom', status: 'online', uptimeSeconds: 1,
+      activeSessions: [], restartCount: 0, bufferedMessages: 0,
+      errorMessage: '有 1 条回复投递暂未完成，正在自动恢复。',
+    } : null);
+    show();
+    expect(await screen.findByRole('alert')).toHaveTextContent('有 1 条回复投递暂未完成，正在自动恢复。');
+    expect(screen.getByText('运行中')).toBeInTheDocument();
+  });
+
   it('separates permission mode, expands user management and orders the management blocks', () => {
     show();
     const permission = screen.getByRole('region', { name: '权限模式' });

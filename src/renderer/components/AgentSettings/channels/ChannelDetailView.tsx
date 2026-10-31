@@ -749,6 +749,12 @@ export default function ChannelDetailView({
                 </button>
             </div>
 
+            {botStatus?.errorMessage && (
+                <div role="alert" className="rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-3 text-sm text-[var(--warning)]">
+                    {botStatus.errorMessage}
+                </div>
+            )}
+
             {/* Plugin missing warning */}
             {pluginMissing && (
                 <div className="flex items-center gap-3 rounded-xl border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-3">

@@ -1370,6 +1370,73 @@ function runInjectedTurn(harness: Harness, request: TestInjectedTurnRequest) {
 }
 
 describe('external SessionEngine with fake runtime', () => {
+  it('settles a 45-minute media-only Codex turn with 94 tools and drains a queued IM follow-up', async () => {
+    // Exercise watchdog ticks and wall-clock duration without waiting 45 minutes.
+    // Keep file IO and the fake Runtime's setTimeout callbacks on real timers.
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const harness = await createHarness([
+      { kind: 'silent' },
+      { kind: 'success', text: 'follow-up answer' },
+    ], { runtimeSource: 'managed-provider', config: { chatQueueResponseMode: 'turn' } });
+    const { imEventBus } = await import('../utils/im-event-bus');
+    const { imRequestRegistry } = await import('../utils/im-request-registry');
+    const sessionId = 'long-media-im';
+    const workspacePath = join(harness.home, 'workspace');
+    await expect(harness.externalSession.restoreExternalSessionState(sessionId, workspacePath,
+      { type: 'agent-channel', platform: 'wecom', sourceType: 'private' })).resolves.toEqual({ success: true });
+    const events: Array<{ requestId: string | null; type: string; data?: unknown }> = [];
+    const unsubscribe = imEventBus.subscribe(imEventBus.currentSeq(), event => events.push(event));
+    const request = (message: string, requestId: string) => {
+      imRequestRegistry.register(requestId, sessionId, 'wecom_private');
+      return {
+        message, requestId, sessionId, workspacePath,
+        scenario: { type: 'agent-channel' as const, platform: 'wecom', sourceType: 'private' as const },
+        permissionMode: getMaxPermissionForRuntime('codex'), model: 'gpt-6.1-sol', reasoningEffort: 'high',
+        metadataBirthPending: true,
+      };
+    };
+    try {
+      const first = await harness.engine.enqueueImMessage(request('produce and upload media', 'media-first'));
+      expect(first).toMatchObject({ success: true });
+      if (first.dispatchAcceptance) await expect(first.dispatchAcceptance).resolves.toEqual({ accepted: true });
+      await waitFor(() => harness.runtime.sentMessages.length === 1, 'first IM dispatch');
+      expect(harness.sessionStore.getActiveSessionTranscript(sessionId)).toBeDefined();
+      const followUp = await harness.engine.enqueueImMessage(request('follow-up', 'media-next'));
+      expect(followUp).toMatchObject({ success: true, queued: true });
+      const startedAt = Date.now();
+      for (let index = 0; index < 94; index += 1) {
+        await vi.advanceTimersByTimeAsync(45 * 60_000 / 94);
+        const toolUseId = `media-tool-${index}`;
+        harness.runtime.emitForTest({ kind: 'tool_use_start', toolUseId, toolName: 'UploadMedia', input: { index } });
+        harness.runtime.emitForTest({ kind: 'tool_use_stop', toolUseId });
+        harness.runtime.emitForTest({ kind: 'tool_result', toolUseId, content: 'uploaded' });
+      }
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(45 * 60_000 - 100);
+      expect(harness.runtime.sentMessages).toEqual(['produce and upload media']);
+      expect(imRequestRegistry.get('media-first')).toBeDefined();
+      expect(events.some(event => ['complete', 'error', 'cancelled'].includes(event.type))).toBe(false);
+      harness.runtime.emitForTest({ kind: 'turn_complete', status: 'success', result: '' });
+      await vi.waitFor(() => expect(events.filter(event => event.requestId === 'media-first' && event.type === 'complete')).toEqual([
+        expect.objectContaining({ data: { finalPayloads: [] } }),
+      ]));
+      const completion = broadcastEvents.find(event => event.event === 'chat:message-complete')?.data as { tool_count?: number; duration_ms?: number };
+      expect(completion.tool_count).toBe(94);
+      expect(completion.duration_ms).toBeGreaterThanOrEqual(45 * 60_000 - 100);
+      expect(imRequestRegistry.get('media-first')).toBeUndefined();
+      expect(imRequestRegistry.outcome('media-first')).toMatchObject({ state: 'terminal' });
+      vi.useRealTimers();
+      if (followUp.dispatchAcceptance) await expect(followUp.dispatchAcceptance).resolves.toEqual({ accepted: true });
+      await expect(harness.engine.waitIdle(2_000, 10)).resolves.toBe(true);
+      expect(harness.runtime.sentMessages).toEqual(['produce and upload media', 'follow-up']);
+      expect(events.filter(event => event.requestId === 'media-next' && event.type === 'complete')).toEqual([
+        expect.objectContaining({ data: { finalPayloads: [{ text: 'follow-up answer' }] } }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+      unsubscribe();
+    }
+  });
+
 
   const externalIdentities = [
     { runtimeType: 'claude-code', runtimeSource: 'system-cli' },

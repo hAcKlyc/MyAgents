@@ -103,7 +103,8 @@ pub struct ReplySlot {
 
     // Result session_id (carried out via 'complete' event for the caller)
     pub completed_session_id: Option<String>,
-    /// Whether the slot has reached a terminal state (complete / error / cancelled).
+    /// Whether reply settlement is finished. A producer terminal alone does
+    /// not finish an OpenClaw slot until the Bridge acknowledges its handoff.
     pub is_done: bool,
     interaction_ids: Vec<String>,
     _lease: Option<ReplyLease>,
@@ -239,7 +240,7 @@ impl ReplyRouter {
         mode: super::types::ChannelDeliveryMode,
     ) {
         if let Some(slot) = self.slots.get_mut(request_id) {
-            if !slot.policy_admitted {
+            if !slot.policy_admitted && slot.producer_terminal.is_none() {
                 slot.delivery_mode = mode;
             }
         }
@@ -287,6 +288,16 @@ impl ReplyRouter {
         if already_done {
             return None;
         }
+        let uses_openclaw_reply = self.uses_idempotent_terminal(&request_id);
+        let is_terminal = matches!(event_type, "complete" | "error" | "cancelled");
+        if uses_openclaw_reply
+            && self.producer_terminal(&request_id).is_some()
+            && !is_terminal
+        {
+            // Late partial/policy/interaction events cannot reopen an already
+            // terminal execution while its original handoff is being recovered.
+            return None;
+        }
         // Preserve producer authority before any cancellable delivery await.
         // Shutdown may interrupt transport, but cannot replace this outcome.
         if matches!(event_type, "complete" | "error" | "cancelled") {
@@ -295,6 +306,15 @@ impl ReplyRouter {
                 .producer_terminal
                 .get_or_insert_with(|| event.clone());
         }
+        // Retried receipts (including a later registry-expired error) must
+        // never replace the original outcome, payload or delivery policy.
+        let retained_terminal = if uses_openclaw_reply && is_terminal {
+            self.producer_terminal(&request_id).cloned()
+        } else {
+            None
+        };
+        let event = retained_terminal.as_ref().unwrap_or(event);
+        let event_type = event["type"].as_str().unwrap_or("");
 
         if let Some(mode) = event
             .get("channelDeliveryMode")
@@ -345,20 +365,7 @@ impl ReplyRouter {
                     slot.delivery_protocol,
                     Some(ImDeliveryProtocol::OpenClawReply)
                 ) {
-                    // An empty final is a lifecycle barrier, never a visible
-                    // placeholder. The plugin receives the same policy first.
-                    let _ = adapter
-                        .set_reply_delivery_mode(&request_id, slot.delivery_mode)
-                        .await;
-                    if event_type == "complete" {
-                        let _ = adapter
-                            .complete_reply_dispatch(&request_id, &json!([]))
-                            .await;
-                    } else {
-                        let _ = adapter
-                            .abort_reply_dispatch(&request_id, event_type, &json!({}))
-                            .await;
-                    }
+                    return self.dispatch_openclaw_terminal(event, &request_id, adapter).await;
                 }
                 slot.is_done = true;
                 return Some(TerminalOutcome {
@@ -372,12 +379,6 @@ impl ReplyRouter {
             return None;
         }
 
-        let uses_openclaw_reply = matches!(
-            self.slots
-                .get(&request_id)
-                .and_then(|slot| slot.delivery_protocol.as_ref()),
-            Some(ImDeliveryProtocol::OpenClawReply)
-        );
         // The producer's explicit empty terminal is a lifecycle receipt, for
         // example an IM input merged into an already replying runtime turn.
         // Do not manufacture a second "No response"/error/cancelled message.
@@ -903,68 +904,88 @@ impl ReplyRouter {
                 None
             }
 
-            "complete" => {
-                let final_payloads = data
-                    .and_then(|value| value.get("finalPayloads"))
-                    .filter(|value| value.is_array())
-                    .cloned()
-                    .unwrap_or_else(|| Value::Array(Vec::new()));
-                let silent = slot.group_activation_always
-                    && final_payloads.as_array().is_some_and(|payloads| {
-                        payloads.iter().any(|payload| {
-                            matches!(
-                                payload.get("text").and_then(Value::as_str).map(str::trim),
-                                Some("<NO_REPLY>" | "NO_REPLY")
-                            )
-                        })
-                    });
-                if let Err(error) = adapter
-                    .complete_reply_dispatch(request_id, &final_payloads)
-                    .await
-                {
-                    ulog_error!(
-                        "[reply-router] OpenClaw complete handoff failed requestId={}: {}",
-                        request_id,
-                        error
-                    );
-                }
-                // Execution is terminal regardless of transport delivery. Failed
-                // handoff is logged as unknown, never as successful delivery.
-                slot.is_done = true;
-                Some(TerminalOutcome {
-                    session_id: None,
-                    silent,
-                })
-            }
-
-            "error" | "cancelled" => {
-                let terminal_payload = data
-                    .and_then(|value| value.get("finalPayloads"))
-                    .and_then(Value::as_array)
-                    .and_then(|payloads| payloads.first())
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-                if let Err(error) = adapter
-                    .abort_reply_dispatch(request_id, event_type, &terminal_payload)
-                    .await
-                {
-                    ulog_error!(
-                        "[reply-router] OpenClaw abort handoff failed requestId={}: {}",
-                        request_id,
-                        error
-                    );
-                }
-                // This is the producer's real terminal, not a delivery outcome.
-                slot.is_done = true;
-                Some(TerminalOutcome {
-                    session_id: None,
-                    silent: false,
-                })
-            }
+            "complete" | "error" | "cancelled" => self.dispatch_openclaw_terminal(event, request_id, adapter).await,
 
             "activity" => None,
             _ => None,
         }
+    }
+
+    async fn dispatch_openclaw_terminal<A: ImStreamAdapter>(
+        &mut self,
+        event: &Value,
+        request_id: &str,
+        adapter: &A,
+    ) -> Option<TerminalOutcome> {
+        let slot = self.slots.get_mut(request_id)?;
+        let event_type = event["type"].as_str()?;
+        let automatic = slot.delivery_mode.allows_automatic();
+        let payloads = if automatic {
+            event
+                .pointer("/data/finalPayloads")
+                .filter(|value| value.is_array())
+                .cloned()
+                .unwrap_or_else(|| json!([]))
+        } else {
+            // An empty terminal settles tool-only input without another reply.
+            let _ = adapter
+                .set_reply_delivery_mode(request_id, slot.delivery_mode)
+                .await;
+            json!([])
+        };
+        let admission = if event_type == "complete" {
+            adapter.complete_reply_dispatch(request_id, &payloads).await
+        } else {
+            let payload = payloads
+                .as_array()
+                .and_then(|values| values.first())
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            adapter
+                .abort_reply_dispatch(request_id, event_type, &payload)
+                .await
+        };
+        match admission {
+            Err(error) => {
+                ulog_warn!("[reply-router] OpenClaw terminal handoff pending requestId={} terminal={}: {}; retaining original outcome for recovery",
+                    request_id, event_type, error);
+                return None;
+            }
+            Ok(adapter::ReplyDispatchAdmission::DispatchMissing) => {
+                ulog_warn!("[reply-router] OpenClaw delivery unknown requestId={} terminal={}: original dispatcher no longer exists",
+                    request_id, event_type);
+            }
+            Ok(adapter::ReplyDispatchAdmission::Accepted) => {
+                ulog_info!(
+                    "[reply-router] OpenClaw terminal handoff accepted requestId={} terminal={}",
+                    request_id,
+                    event_type
+                );
+            }
+        }
+        slot.is_done = true;
+        let silent = !automatic
+            || (event_type == "complete"
+                && slot.group_activation_always
+                && payloads.as_array().is_some_and(|values| {
+                    values.iter().any(|payload| {
+                        matches!(
+                            payload.get("text").and_then(Value::as_str).map(str::trim),
+                            Some("<NO_REPLY>" | "NO_REPLY")
+                        )
+                    })
+                }));
+        Some(TerminalOutcome {
+            session_id: if automatic {
+                None
+            } else {
+                event
+                    .pointer("/data/sessionId")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+            },
+            silent,
+        })
     }
 
     async fn dispatch_streaming<A: ImStreamAdapter>(
@@ -1374,6 +1395,17 @@ impl ReplyRouter {
             .collect()
     }
 
+    pub(crate) fn pending_terminal_handoff_count(&self) -> usize {
+        self.slots
+            .values()
+            .filter(|slot| {
+                !slot.is_done
+                    && slot.producer_terminal.is_some()
+                    && slot.delivery_protocol == Some(ImDeliveryProtocol::OpenClawReply)
+            })
+            .count()
+    }
+
     /// Diagnostic.
     pub fn slot_count(&self) -> usize {
         self.slots.len()
@@ -1644,7 +1676,7 @@ mod tests {
             &self,
             request_id: &str,
             final_payloads: &serde_json::Value,
-        ) -> AdapterResult<()> {
+        ) -> AdapterResult<crate::im::adapter::ReplyDispatchAdmission> {
             let pause = self
                 .terminal_pause
                 .as_ref()
@@ -1667,7 +1699,7 @@ mod tests {
                 pause.entered.notify_one();
                 pause.release.notified().await;
             }
-            Ok(())
+            Ok(crate::im::adapter::ReplyDispatchAdmission::Accepted)
         }
 
         async fn abort_reply_dispatch(
@@ -1675,14 +1707,14 @@ mod tests {
             request_id: &str,
             reason: &str,
             terminal_payload: &serde_json::Value,
-        ) -> AdapterResult<()> {
+        ) -> AdapterResult<crate::im::adapter::ReplyDispatchAdmission> {
             self.reply_operations.lock().unwrap().push(json!({
                 "kind": "abort",
                 "requestId": request_id,
                 "reason": reason,
                 "terminalPayload": terminal_payload,
             }));
-            Ok(())
+            Ok(crate::im::adapter::ReplyDispatchAdmission::Accepted)
         }
     }
 

@@ -453,7 +453,7 @@ async fn send_immediate_reply<A: adapter::ImStreamAdapter>(
             .collect::<Vec<_>>();
         return adapter
             .complete_reply_dispatch(&msg.request_id, &json!(payloads))
-            .await;
+            .await.map(|_| ());
     }
     for chunk in adapter::split_message(text, adapter.max_message_length()) {
         adapter.send_message(&msg.chat_id, &chunk).await?;
@@ -495,7 +495,7 @@ async fn abort_immediate_reply<A: adapter::ImStreamAdapter>(
                 .await?;
             return adapter
                 .abort_reply_dispatch(&msg.request_id, reason, &json!({}))
-                .await;
+                .await.map(|_| ());
         }
         return Ok(());
     }
@@ -506,7 +506,7 @@ async fn abort_immediate_reply<A: adapter::ImStreamAdapter>(
                 reason,
                 &json!({ "text": text, "isError": true }),
             )
-            .await;
+            .await.map(|_| ());
     }
     adapter.send_message(&msg.chat_id, text).await
 }
@@ -3212,6 +3212,9 @@ pub async fn get_im_bot_status(im_state: &ManagedImBots, bot_id: &str) -> ImBotS
         status.uptime_seconds = instance.started_at.elapsed().as_secs();
         status.buffered_messages = instance.buffer.lock().await.len();
         status.active_sessions = instance.router.lock().await.active_sessions();
+        if status.error_message.is_none() {
+            status.error_message = health::reply_handoff_warning(&instance.im_consumers).await;
+        }
 
         let (bind_url, bind_code_opt) = match instance.platform {
             ImPlatform::Telegram => {
@@ -3253,6 +3256,9 @@ pub async fn get_all_bots_status(im_state: &ManagedImBots) -> HashMap<String, Im
         status.uptime_seconds = instance.started_at.elapsed().as_secs();
         status.buffered_messages = instance.buffer.lock().await.len();
         status.active_sessions = instance.router.lock().await.active_sessions();
+        if status.error_message.is_none() {
+            status.error_message = health::reply_handoff_warning(&instance.im_consumers).await;
+        }
 
         let (bind_url, bind_code_opt) = match instance.platform {
             ImPlatform::Telegram => {
