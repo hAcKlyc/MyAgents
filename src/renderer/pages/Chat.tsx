@@ -1,4 +1,5 @@
 import { useChatWorkspaceLayout } from '@/hooks/useChatWorkspaceLayout';
+import { resolveDefaultMcpSelection } from '../../shared/mcpSelection';
 import { useChatDraftScope } from "@/hooks/useChatDraftScope";
 import type { Message } from "@/types/chat";
 import TaskDiscussionRecovery from "@/components/TaskDiscussionRecovery";
@@ -2837,8 +2838,11 @@ export default function Chat({
   // MCP state
   const [mcpServers, setMcpServers] = useState<McpServerDefinition[]>([]);
   const [globalMcpEnabled, setGlobalMcpEnabled] = useState<string[]>([]);
+  const hasMcpDefaultAgent = currentAgent !== undefined;
+  const agentMcpDefaults = currentAgent?.mcpEnabledServers;
+  const projectMcpDefaults = currentProject?.mcpEnabledServers;
   const [workspaceMcpEnabled, setWorkspaceMcpEnabled] = useState<string[]>(
-    currentAgent?.mcpEnabledServers ?? currentProject?.mcpEnabledServers ?? [],
+    resolveDefaultMcpSelection(currentAgent, currentProject),
   );
   const runtimeMcpTools = useMemo(
     () =>
@@ -3128,13 +3132,14 @@ export default function Chat({
     workspaceRefreshTrigger,
   ]);
 
-  // Sync workspace MCP to project config when it changes
+  // Future defaults follow their Agent owner until the Session freezes them.
   useEffect(() => {
     if (sessionMeta?.configSnapshotAt) return;
-    if (currentProject?.mcpEnabledServers) {
-      setWorkspaceMcpEnabled(currentProject.mcpEnabledServers);
-    }
-  }, [currentProject?.mcpEnabledServers, sessionMeta?.configSnapshotAt]);
+    setWorkspaceMcpEnabled(resolveDefaultMcpSelection(
+      hasMcpDefaultAgent ? { mcpEnabledServers: agentMcpDefaults } : undefined,
+      { mcpEnabledServers: projectMcpDefaults },
+    ));
+  }, [agentMcpDefaults, projectMcpDefaults, hasMcpDefaultAgent, sessionMeta?.configSnapshotAt]);
 
   useEffect(() => {
     if (sessionMeta?.configSnapshotAt) return;
@@ -3684,7 +3689,7 @@ export default function Chat({
       : (sessionMeta.providerId ?? currentAgent?.providerId);
     const mcp = snapshotOwnsConfig
       ? sessionMeta.mcpEnabledServers
-      : (sessionMeta.mcpEnabledServers ?? currentAgent?.mcpEnabledServers);
+      : (sessionMeta.mcpEnabledServers ?? resolveDefaultMcpSelection(currentAgent, currentProject));
     const plugins = snapshotOwnsConfig
       ? (sessionMeta.enabledPluginIds ?? [])
       : (sessionMeta.enabledPluginIds ??
@@ -3753,7 +3758,7 @@ export default function Chat({
     ) {
       setSelectedProviderId(undefined);
     }
-    if (mcp) setWorkspaceMcpEnabled(mcp);
+    setWorkspaceMcpEnabled(mcp ?? []);
     setWorkspaceEnabledPlugins(plugins);
     setWorkspaceOfficialToolEnabled(normalizeOfficialToolIds(officialTools));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- currentAgent derived from config, listening to its identity would re-fire on unrelated agent changes

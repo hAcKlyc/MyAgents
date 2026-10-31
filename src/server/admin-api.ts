@@ -70,6 +70,8 @@ import {
   withAgentConfigIntentLock,
   getAllMcpServers,
   getEnabledMcpServerIds,
+  getEffectiveMcpServers,
+  findProjectAgentByWorkspacePath,
   loadProjects,
   atomicModifyProjects,
   redactSecret,
@@ -557,14 +559,20 @@ export async function handleMcpEnable(payload: {
   }
 
   let projectMutation: ProjectMcpMutationResult | null = null;
-  if (scope === 'project' || scope === 'both') {
-    projectMutation = await enableMcpForCurrentProject(id);
-    if (scope === 'project' && projectMutation.status !== 'updated') {
-      return projectMcpMutationFailure('enable', id, projectMutation);
+  try {
+    if (scope === 'project' || scope === 'both') {
+      projectMutation = await enableMcpForCurrentProject(id);
+      if (projectMutation.status === 'failed' || (scope === 'project' && projectMutation.status !== 'updated')) {
+        return projectMcpMutationFailure('enable', id, projectMutation);
+      }
     }
+  } finally {
+    // The global commit already happened. Project rejection/rollback must not
+    // leave active Sessions and the UI on the previous safety-gate value.
+    if (scope === 'both') await notifyMcpChange('enable', id);
   }
 
-  await notifyMcpChange('enable', id);
+  if (scope !== 'both') await notifyMcpChange('enable', id);
   const scopeLabel = scope === 'both' ? 'global + project' : scope;
   const skipHint =
     projectMutation && projectMutation.status !== 'updated'
@@ -600,14 +608,20 @@ export async function handleMcpDisable(payload: {
   }
 
   let projectMutation: ProjectMcpMutationResult | null = null;
-  if (scope === 'project' || scope === 'both') {
-    projectMutation = await disableMcpForCurrentProject(id);
-    if (scope === 'project' && projectMutation.status !== 'updated') {
-      return projectMcpMutationFailure('disable', id, projectMutation);
+  try {
+    if (scope === 'project' || scope === 'both') {
+      projectMutation = await disableMcpForCurrentProject(id);
+      if (projectMutation.status === 'failed' || (scope === 'project' && projectMutation.status !== 'updated')) {
+        return projectMcpMutationFailure('disable', id, projectMutation);
+      }
     }
+  } finally {
+    // The global commit already happened. Project rejection/rollback must not
+    // leave active Sessions and the UI on the previous safety-gate value.
+    if (scope === 'both') await notifyMcpChange('disable', id);
   }
 
-  await notifyMcpChange('disable', id);
+  if (scope !== 'both') await notifyMcpChange('disable', id);
   const skipHint =
     projectMutation && projectMutation.status !== 'updated'
       ? ` Project scope skipped: ${projectMcpMutationReason(projectMutation)}.`
@@ -2129,6 +2143,7 @@ const AGENT_SET_FIELDS = [
   'providerId',
   'model',
   'permissionMode',
+  'mcpEnabledServers',
 ] as const;
 
 export async function handleAgentSet(payload: {
@@ -2168,6 +2183,18 @@ export async function handleAgentSet(payload: {
       return { success: false, error: 'enabled must be a boolean' };
     }
     return value ? handleAgentEnable({ id }) : handleAgentDisable({ id });
+  }
+
+  if (key === 'mcpEnabledServers') {
+    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+      return { success: false, error: 'mcpEnabledServers must be a JSON array of server IDs' };
+    }
+    return modifyAgentConfigIntent(id, (agent, config) => {
+      const catalogue = getAllMcpServers(config);
+      const unknown = value.filter(serverId => !catalogue.some(server => server.id === serverId));
+      if (unknown.length) return { ok: false, response: { success: false, error: `Unknown MCP server IDs: ${unknown.join(', ')}` } };
+      return agentMcpSelectionIntent(agent, config, value);
+    }, 'set');
   }
 
   // `runtime` field has a cross-runtime scrub policy (see
@@ -2790,10 +2817,7 @@ function resolveEffectiveMcpServersForWorkspace(
     return globallyEnabledServers();
   }
 
-  const projectEnabled = new Set(project.mcpEnabledServers ?? []);
-  return allServers.filter(
-    (s) => globalEnabled.has(s.id) && projectEnabled.has(s.id),
-  );
+  return getEffectiveMcpServers(workspacePath, config);
 }
 
 export async function handleReload(workspacePath?: string): Promise<AdminResponse> {
@@ -4805,11 +4829,13 @@ Restores its workspace visibility through the lifecycle owner. --json returns
 the result. Inspect agent show for the resulting configuration.`,
   'agent/set': `myagents agent set <agentId> <key> <value> — Change local Agent configuration
 
-Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode.
+Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode, mcpEnabledServers.
 Values are parsed as JSON when valid; quote strings/JSON for your shell.
 Use runtime list/describe before selecting runtime-specific values.
 Configuration intent is validated by the Agent owner; providerId/model/permissionMode
-also update the Project mirror and live channels. Existing Session configuration
+also update the Project mirror and live channels. mcpEnabledServers accepts a JSON
+array of catalogue IDs and changes future defaults; globally disabled servers remain
+unavailable. Existing Session configuration
 has its own lifecycle; Agent defaults do not prove its effective permissions.
 --json returns the result. Read agent show first; network references and unknown
 keys are not supported. There is no --dry-run.`,
@@ -9160,10 +9186,12 @@ async function notifyMcpChange(action: string, id: string): Promise<void> {
 
 type ProjectMcpMutationResult =
   | { status: 'updated'; workspacePath: string }
+  | { status: 'failed'; workspacePath: string; error: string }
   | { status: 'no-workspace' }
   | { status: 'project-not-found'; workspacePath: string };
 
 function projectMcpMutationReason(result: ProjectMcpMutationResult): string {
+  if (result.status === 'failed') return result.error;
   if (result.status === 'no-workspace')
     return 'current session has no workspace';
   if (result.status === 'project-not-found') {
@@ -9188,66 +9216,56 @@ function projectMcpMutationFailure(
   };
 }
 
-/** Enable MCP for the current workspace project */
-async function enableMcpForCurrentProject(
-  serverId: string,
-): Promise<ProjectMcpMutationResult> {
-  // The workspace path is set via process-global; use it to find the project
+/** Legacy `project` scope means this workspace's future defaults. Its Agent
+ * remains authoritative; the Project record is a compatibility mirror.
+ */
+async function mutateMcpForCurrentProject(serverId: string, enabled: boolean): Promise<ProjectMcpMutationResult> {
   const workspacePath = getCurrentWorkspacePath();
   if (!workspacePath) return { status: 'no-workspace' };
+  const agent = findProjectAgentByWorkspacePath(workspacePath);
+  if (agent) {
+    const response = await modifyAgentConfigIntent(agent.id, (current, config) => {
+      const project = findProjectForAgent(loadProjects(), current)?.project;
+      if (!project || !workspacePathsEqual(project.path, workspacePath)) {
+        return { ok: false, response: { success: false, error: 'Workspace ownership changed; retry the MCP command' } };
+      }
+      const selection = new Set(current.mcpEnabledServers ?? []);
+      if (enabled && !getAllMcpServers(config).some(server => server.id === serverId)) {
+        return { ok: false, response: { success: false, error: `MCP server '${serverId}' is no longer available` } };
+      }
+      if (enabled) selection.add(serverId);
+      else selection.delete(serverId);
+      return agentMcpSelectionIntent(current, config, [...selection]);
+    }, enabled ? 'mcp-enable' : 'mcp-disable');
+    return response.success ? { status: 'updated', workspacePath }
+      : { status: 'failed', workspacePath, error: response.error ?? 'Agent MCP configuration failed' };
+  }
 
-  let result: ProjectMcpMutationResult = {
-    status: 'project-not-found',
-    workspacePath,
-  };
-  await atomicModifyProjects((projects) => {
-    const idx = projects.findIndex(
-      (p) =>
-        typeof p.path === 'string' &&
-        workspacePathsEqual(p.path, workspacePath),
-    );
-    if (idx < 0) return projects;
-
-    const project = projects[idx];
-    const enabled = new Set(project.mcpEnabledServers ?? []);
-    enabled.add(serverId);
-    const next = [...projects];
-    next[idx] = { ...project, mcpEnabledServers: Array.from(enabled) };
-    result = { status: 'updated', workspacePath };
-    return next;
+  let result: ProjectMcpMutationResult = { status: 'project-not-found', workspacePath };
+  await withAgentConfigIntentLock(async () => {
+    if (findProjectAgentByWorkspacePath(workspacePath)) {
+      result = { status: 'failed', workspacePath, error: 'Workspace ownership changed; retry the MCP command' };
+      return;
+    }
+    await atomicModifyProjects(projects => {
+      const matches = projects.map((project, index) => ({ project, index }))
+        .filter(({ project }) => workspacePathsEqual(project.path, workspacePath));
+      if (matches.length !== 1) return projects;
+      const { project, index } = matches[0];
+      const selection = new Set(project.mcpEnabledServers ?? []);
+      if (enabled) selection.add(serverId);
+      else selection.delete(serverId);
+      const next = [...projects];
+      next[index] = { ...project, mcpEnabledServers: [...selection] };
+      result = { status: 'updated', workspacePath };
+      return next;
+    });
   });
   return result;
 }
 
-/** Disable MCP for the current workspace project */
-async function disableMcpForCurrentProject(
-  serverId: string,
-): Promise<ProjectMcpMutationResult> {
-  const workspacePath = getCurrentWorkspacePath();
-  if (!workspacePath) return { status: 'no-workspace' };
-
-  let result: ProjectMcpMutationResult = {
-    status: 'project-not-found',
-    workspacePath,
-  };
-  await atomicModifyProjects((projects) => {
-    const idx = projects.findIndex(
-      (p) =>
-        typeof p.path === 'string' &&
-        workspacePathsEqual(p.path, workspacePath),
-    );
-    if (idx < 0) return projects;
-
-    const project = projects[idx];
-    const enabled = new Set(project.mcpEnabledServers ?? []);
-    enabled.delete(serverId);
-    const next = [...projects];
-    next[idx] = { ...project, mcpEnabledServers: Array.from(enabled) };
-    result = { status: 'updated', workspacePath };
-    return next;
-  });
-  return result;
-}
+const enableMcpForCurrentProject = (serverId: string) => mutateMcpForCurrentProject(serverId, true);
+const disableMcpForCurrentProject = (serverId: string) => mutateMcpForCurrentProject(serverId, false);
 
 /** The selected adapter owns the current workspace for every Runtime. */
 function getCurrentWorkspacePath(): string | undefined {
@@ -9293,6 +9311,20 @@ type AgentConfigIntentResolution =
       livePatch?: Record<string, unknown>;
     }
   | { ok: false; response: AdminResponse };
+
+function agentMcpSelectionIntent(agent: AgentConfigSlim, config: AdminAppConfig, selection: readonly string[]): AgentConfigIntentResolution {
+  const ids = [...new Set(selection)];
+  const catalogue = getAllMcpServers(config);
+  const globalEnabled = new Set(getEnabledMcpServerIds(config));
+  const servers = catalogue.filter(server => ids.includes(server.id) && globalEnabled.has(server.id));
+  const mcpServersJson = servers.length ? JSON.stringify(servers) : undefined;
+  return {
+    ok: true,
+    agent: { ...agent, mcpEnabledServers: ids, mcpServersJson },
+    projectPatch: { mcpEnabledServers: ids },
+    livePatch: { mcpEnabledServers: ids, mcpServersJson: mcpServersJson ?? null },
+  };
+}
 
 async function commitAgentConfigIntent(
   id: string,

@@ -118,17 +118,18 @@ export function appendMessage(message: MessageWire): void {
   messages.push(message);
 }
 
-export function bindSdkUuidToLatestUnboundUserMessage(sdkUuid: string): string | null {
+export function bindSdkUuidToUserInput(inputUuid: string, sdkUuid: string): string | null {
   const product = getBuiltinProductContent();
   if (product) {
-    const message = [...product.writer.projection.messages.values()].reverse()
-      .find(candidate => candidate.role === 'user' && !candidate.sdkUuid);
-    if (!message) return null;
+    const message = [...product.writer.projection.messages.values()]
+      .find(candidate => candidate.role === 'user' && candidate.sdkInputUuid === inputUuid);
+    if (!message || message.sdkUuid === sdkUuid) return null;
     product.writer.observe({ kind: 'message-update', messageId: message.id, details: { sdkUuid } });
     return message.id;
   }
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'user' && !messages[i].sdkUuid) {
+    if (messages[i].role === 'user' && messages[i].sdkInputUuid === inputUuid) {
+      if (messages[i].sdkUuid === sdkUuid) return null;
       messages[i].sdkUuid = sdkUuid;
       return messages[i].id;
     }

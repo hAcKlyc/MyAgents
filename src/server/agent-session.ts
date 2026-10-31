@@ -30,7 +30,7 @@ import { registerBridge as registerBridgeInRegistry, unregisterBridge as unregis
 import { getScriptDir } from './utils/runtime';
 import { getSidecarPort } from './session-core/sidecar-port';
 import { buildMcpStdioLaunchConfig } from './utils/mcp-command';
-import { resolveRemoteMcpTransportConfig } from './session-core/mcp-template-resolution';
+import { McpTemplateResolutionError, resolveRemoteMcpTransportConfig } from './session-core/mcp-template-resolution';
 import { getCrossPlatformEnv } from './utils/platform';
 import { ensureDirSync } from './utils/fs-utils';
 import { getMyAgentsNpmGlobalBinDir, getMyAgentsNpmGlobalPrefix, scrubMyAgentsNpmPrefixEnv } from './utils/npm-prefix-env';
@@ -50,6 +50,7 @@ import { nativeResumeBoundaryRecoveryMessage } from '../shared/nativeResumeBound
 import { attemptFileRewind, type FileRewindStatus } from './utils/rewind-file-result';
 import { summarizeSensitiveSdkMessage } from './utils/sdk-log-summary';
 import { buildForkUuidRemap, remapStoredSdkUuids } from './utils/fork-remap';
+import { isBuiltinNativeUserRecord, resolveBuiltinUserAnchors } from './utils/builtin-user-anchors';
 import {
   decideInFlightCancelSettlement,
   terminalEventMatchesInFlight,
@@ -174,7 +175,7 @@ import {
   type McpEffectiveServerSnapshot,
   type McpEffectiveSnapshot,
 } from '../shared/mcpEffectiveState';
-import { classifyMcpFailure, type McpRetryResult } from '../shared/mcpFailure';
+import { classifyMcpFailure, type McpFailureCode, type McpRetryResult } from '../shared/mcpFailure';
 import { broadcast as broadcastSse, broadcastLive, flushPendingLiveEvents } from './sse';
 import { participatesInLiveRestore } from '../shared/liveRevision';
 import { toClientTranscriptOperation } from './session-transcript/client';
@@ -474,14 +475,13 @@ import {
   addLiveSessionUuid,
   allocateMessageId,
   appendMessage,
-  bindSdkUuidToLatestUnboundUserMessage,
+  bindSdkUuidToUserInput,
   bindSdkUuidToMessage,
   clearCurrentSessionUuids,
   clearLiveSessionUuids,
   clearMessages,
   deleteCurrentSessionUuid,
   deleteLiveSessionUuid,
-  getCurrentSessionUuids,
   getLastAssistantMessageId,
   getBuiltinProductContent,
   getMessages as getBuiltinMessages,
@@ -1129,6 +1129,7 @@ async function surfaceInFlightQueueItem(
     timestamp: new Date().toISOString(),
     attachments: meta?.attachments,
     sdkUuid: options.sdkUuid,
+    sdkInputUuid: queueId,
     metadata: meta?.metadata ?? (meta?.source ? { source: meta.source } : undefined),
   };
   appendMessage(userMessage);
@@ -2107,6 +2108,7 @@ function startNextTurnQueuedItem(
     id: allocateMessageId(),
     role: 'user',
     content: item.messageText,
+    sdkInputUuid: item.queueId,
     desktopQuery: item.sourceItem?.desktopQuery,
     timestamp: new Date().toISOString(),
     attachments: item.attachments,
@@ -2846,12 +2848,14 @@ function projectBuiltinMcpStatuses(
   const now = Date.now();
   const servers = owner.requiredServerIds.map((id): McpEffectiveServerSnapshot => {
     const status = byName.get(id);
+    const buildFailure = owner.buildFailures && Object.hasOwn(owner.buildFailures, id)
+      ? owner.buildFailures[id] : undefined;
     const admissionOwnsServer = builtinMcpAdmissionOwner?.serverIds.includes(id) === true;
-    const serverTools = status?.status === 'connected'
+    const serverTools = !buildFailure && status?.status === 'connected'
       ? (status.tools ?? []).map(tool => sdkMcpToolName(id, tool.name))
       : [];
     tools.push(...serverTools);
-    const state: McpEffectiveServerSnapshot['state'] = status?.status === 'connected'
+    const state: McpEffectiveServerSnapshot['state'] = buildFailure ? 'failed' : status?.status === 'connected'
       ? 'ready'
       : status?.status === 'needs-auth'
         ? 'needs_auth'
@@ -2867,7 +2871,7 @@ function projectBuiltinMcpStatuses(
       desired: true,
       state,
       toolCount: serverTools.length,
-      ...(state === 'failed' ? { errorCode: classifyMcpFailure(status?.error) } : {}),
+      ...(state === 'failed' ? { errorCode: buildFailure ?? classifyMcpFailure(status?.error) } : {}),
       ...(state === 'needs_auth' ? { errorCode: 'MCP_NEEDS_AUTH' } : {}),
       attemptGeneration: owner.revision,
       updatedAt: now,
@@ -4094,13 +4098,14 @@ function buildSettingSources(): ('user' | 'project')[] {
 async function buildSdkMcpServers(
   browserProductSessionIdOverride?: string,
   targetQuery?: Query,
-): Promise<Record<string, McpServerEntry>> {
+): Promise<{ servers: Record<string, McpServerEntry>; failures: Record<string, McpFailureCode> }> {
+  const failures: Record<string, McpFailureCode> = Object.create(null);
   // Live mutation builds can outlive their Query while resolving capability,
   // registry or auth data. Check the lifecycle owner before shared side effects,
   // especially Browser Host observation and startup-admission acquisition.
   const isCurrent = () => !targetQuery
     || (lifecycleState.query === targetQuery && !lifecycleState.abortRequested);
-  if (!isCurrent()) return {};
+  if (!isCurrent()) return { servers: {}, failures: {} };
   // null = MCP not yet configured (e.g. Global sidecar, or Tab pre-warm before /api/mcp/set)
   // [] = explicitly no MCP (user has none enabled)
   // [...]= user's enabled MCP servers
@@ -4110,9 +4115,10 @@ async function buildSdkMcpServers(
   // "Invalid MCP configuration: X is a reserved MCP name." → exit code 1
   const allServers: McpServerDefinition[] = configState.currentMcpServers ?? [];
   const servers = allServers.filter(s => {
-    if (isRetiredBundledMcpServer(s)) return false;
+    if (isRetiredBundledMcpServer(s)) { failures[s.id] = 'MCP_CONFIG_INVALID'; return false; }
     const normalized = s.id.replace(/[^a-zA-Z0-9_-]/g, '_');
     if (SDK_RESERVED_MCP_NAMES.includes(normalized)) {
+      failures[s.id] = 'MCP_CONFIG_INVALID';
       console.warn(`[agent] MCP "${s.id}" skipped: conflicts with SDK reserved name. Rename to avoid this.`);
       return false;
     }
@@ -4120,6 +4126,7 @@ async function buildSdkMcpServers(
     // would otherwise overwrite the builtin in result[id] and inherit its
     // auto-trust in canUseTool — see issue #148.
     if ((MYAGENTS_CONTEXT_INJECTED_MCP_IDS as readonly string[]).includes(normalized)) {
+      failures[s.id] = 'MCP_CONFIG_INVALID';
       console.warn(`[agent] MCP "${s.id}" skipped: id is reserved by MyAgents (context-injected builtin). Rename to avoid this.`);
       return false;
     }
@@ -4127,7 +4134,7 @@ async function buildSdkMcpServers(
   });
   if (isDebugMode) console.log(`[agent] MCP servers: ${servers.map(s => s.id).join(', ') || 'none'}`);
 
-  const result: Record<string, McpServerEntry> = {};
+  const result: Record<string, McpServerEntry> = Object.create(null);
   const stagedStdio: StagedBuiltinStdio[] = [];
 
   // --- Pattern 1: Context-injected MCPs (always present based on sidecar context) ---
@@ -4146,16 +4153,23 @@ async function buildSdkMcpServers(
   // --- Pattern 2: Builtin registry MCPs (in-process, user-toggled) ---
   for (const server of servers) {
     if (server.command !== '__builtin__') continue;
+    try {
     const entryPromise = getBuiltinMcpInstance(server.id);
     if (!entryPromise) {
+      failures[server.id] = 'MCP_CONFIG_INVALID';
       console.warn(`[agent] Builtin MCP '${server.id}' not registered — skipping`);
       continue;
     }
     const entry = await entryPromise;
-    if (!isCurrent()) return {};
+    if (!isCurrent()) return { servers: {}, failures: {} };
     entry.configure?.(server.env || {}, { sessionId: sessionId || 'default', workspace: agentDir });
     result[server.id] = entry.server as McpSdkServerConfigWithInstance;
     console.log(`[agent] Added builtin MCP: ${server.id}`);
+    } catch (error) {
+      if (!isCurrent()) return { servers: {}, failures: {} };
+      failures[server.id] = classifyMcpFailure(error);
+      console.error(`[agent] MCP ${server.id}: initialization failed (${failures[server.id]})`);
+    }
   }
 
   // --- Pattern 3: External MCPs (stdio/sse/http subprocess or remote) ---
@@ -4167,7 +4181,7 @@ async function buildSdkMcpServers(
     if (Object.keys(result).length > 0) {
       console.log(`[agent] Built SDK MCP servers: ${Object.keys(result).join(', ')}`);
     }
-    return result;
+    return { servers: result, failures };
   }
 
   for (const server of externalServers) {
@@ -4186,10 +4200,10 @@ async function buildSdkMcpServers(
       }
       if (browserProductSessionIdOverride) {
         await adoptBrowserProductSession(browserProductSessionIdOverride);
-        if (!isCurrent()) return {};
+        if (!isCurrent()) return { servers: {}, failures: {} };
       }
       const capability = await acquireBrowserCapability();
-      if (!isCurrent()) return {};
+      if (!isCurrent()) return { servers: {}, failures: {} };
       observeBuiltinBrowserCapability(capability);
       result[server.id] = {
         type: 'http',
@@ -4216,7 +4230,7 @@ async function buildSdkMcpServers(
       const headers = { ...remote.headers };
       if (!headers['Authorization'] && !headers['authorization']) {
         const oauthHeaders = await resolveAuthHeaders(server.id);
-        if (!isCurrent()) return {};
+        if (!isCurrent()) return { servers: {}, failures: {} };
         if (oauthHeaders['Authorization']) {
           Object.assign(headers, oauthHeaders);
           console.log(`[agent] MCP ${server.id}: OAuth token injected`);
@@ -4231,18 +4245,19 @@ async function buildSdkMcpServers(
       // Log URL with API key masked for security
       const maskedUrl = remote.url.replace(/([?&]\w*[Kk]ey=)[^&]+/g, '$1***');
       console.log(`[agent] MCP ${server.id}: ${server.type} → ${maskedUrl}`);
-    } else if (server.type === 'sse' || server.type === 'http') {
-      console.warn(`[agent] MCP ${server.id}: Missing url for ${server.type} server, skipping`);
+    } else {
+      failures[server.id] = 'MCP_CONFIG_INVALID';
+      console.warn(`[agent] MCP ${server.id}: missing or unsupported transport configuration`);
     }
     } catch (err) {
-      if (!isCurrent()) return {};
+      if (!isCurrent()) return { servers: {}, failures: {} };
       // Isolate individual MCP errors — one bad config must not take down all MCPs
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[agent] MCP ${server.id}: initialization failed, skipping: ${msg}`);
+      failures[server.id] = err instanceof McpTemplateResolutionError ? 'MCP_CONFIG_INVALID' : classifyMcpFailure(err);
+      console.error(`[agent] MCP ${server.id}: initialization failed (${failures[server.id]})`);
     }
   }
 
-  if (!isCurrent()) return {};
+  if (!isCurrent()) return { servers: {}, failures: {} };
   if (await shouldInstallBuiltinStdioWave(stagedStdio)) {
     for (const entry of stagedStdio) result[entry.id] = entry.config;
   } else if (stagedStdio.length > 0) {
@@ -4255,7 +4270,7 @@ async function buildSdkMcpServers(
 
   console.log(`[agent] Built SDK MCP servers: ${Object.keys(result).join(', ') || 'none'}`);
   // Always return result (even if empty) to prevent SDK from using default config
-  return result;
+  return { servers: result, failures };
 }
 
 /**
@@ -4264,13 +4279,14 @@ async function buildSdkMcpServers(
  * Bridge server additionally needs its stable surface identity because its
  * SDK key remains `im-bridge-tools` across a real port/plugin/group change.
  */
-function sdkMcpMapFingerprint(servers: Record<string, unknown>): string {
+function sdkMcpMapFingerprint(servers: Record<string, unknown>, failures: Readonly<Record<string, McpFailureCode>> = {}): string {
   const keys = Object.keys(servers).sort().join(',');
   const surface = getImBridgeToolSurface();
   const browserHost = Object.hasOwn(servers, MANAGED_BROWSER_MCP_ID)
     ? `|browserHost=${builtBrowserHostGeneration}:${builtBrowserCapabilityRevision}`
     : '';
-  return `${keys}${surface ? `|bridge=${imBridgeToolSurfaceIdentity(surface)}` : ''}${browserHost}`;
+  const failed = Object.entries(failures).sort(([a], [b]) => a.localeCompare(b)).map(([id, code]) => `${id}:${code}`).join(',');
+  return `${keys}${failed ? `|buildFailures=${failed}` : ''}${surface ? `|bridge=${imBridgeToolSurfaceIdentity(surface)}` : ''}${browserHost}`;
 }
 
 /** True only when the live Query already owns the current stable Bridge surface. */
@@ -4297,9 +4313,10 @@ function getMcpPrewarmWindowForMap(
   return getImBridgeToolPrewarmWindow();
 }
 
-function getDesiredMcpServerIdsForMap(servers: Record<string, unknown>): string[] {
+function getDesiredMcpServerIdsForMap(servers: Record<string, unknown>, failures: Readonly<Record<string, McpFailureCode>> = {}): string[] {
   return [...new Set([
     ...Object.keys(servers),
+    ...Object.keys(failures),
     ...(builtinMcpAdmissionOwner?.serverIds ?? []),
   ])].sort();
 }
@@ -4349,8 +4366,9 @@ function latchMcpMutationRecovery(targetQuery: Query): void {
 
 async function mutateSdkMcpForQuery(targetQuery: Query): Promise<QueryMcpMutationResult> {
   let newServers: Record<string, McpServerEntry>;
+  let buildFailures: Record<string, McpFailureCode>;
   try {
-    newServers = await buildSdkMcpServers(undefined, targetQuery);
+    ({ servers: newServers, failures: buildFailures } = await buildSdkMcpServers(undefined, targetQuery));
   } catch (error) {
     if (lifecycleState.query !== targetQuery) {
       return {
@@ -4371,7 +4389,7 @@ async function mutateSdkMcpForQuery(targetQuery: Query): Promise<QueryMcpMutatio
       error: 'Query was replaced before MCP transport mutation',
     };
   }
-  const newFingerprint = sdkMcpMapFingerprint(newServers);
+  const newFingerprint = sdkMcpMapFingerprint(newServers, buildFailures);
   if (newFingerprint === configState.frozenSdkMcpFingerprint) return { ok: true };
 
   console.log(`[agent] SDK MCP set drift detected, syncing live session: was=[${configState.frozenSdkMcpFingerprint || '(empty)'}] now=[${newFingerprint || '(empty)'}]`);
@@ -4443,7 +4461,8 @@ async function mutateSdkMcpForQuery(targetQuery: Query): Promise<QueryMcpMutatio
     installQueryMcpOwner({
       query: targetQuery,
       fingerprint: newFingerprint,
-      requiredServerIds: getDesiredMcpServerIdsForMap(newServers),
+      requiredServerIds: getDesiredMcpServerIdsForMap(newServers, buildFailures),
+      buildFailures,
       ...(prewarmWindow ?? {}),
     });
     console.log(`[agent] SDK setMcpServers ok: added=[${outcome.result.added.join(',')}] removed=[${outcome.result.removed.join(',')}]`);
@@ -9840,6 +9859,7 @@ export async function enqueueUserMessage(
     id: allocateMessageId(),
     role: 'user',
     content: trimmed,
+    sdkInputUuid: queueId,
     desktopQuery: options?.desktopQuery,
     timestamp: new Date().toISOString(),
     attachments: savedAttachments.length > 0 ? savedAttachments : undefined,
@@ -10534,13 +10554,20 @@ export async function rewindSession(userMessageId: string): Promise<{
   let fileOutcome: { fileRewindStatus?: FileRewindStatus; skippedLinks?: number } = {};
   const doRewind = async () => {
     const productSessionId = sessionId;
-    const history = getBuiltinMessages();
+    const observedHistory = getBuiltinMessages();
     // 1. 找到目标 user message
-    const targetIndex = history.findIndex(m => m.id === userMessageId && m.role === 'user');
+    const targetIndex = observedHistory.findIndex(m => m.id === userMessageId && m.role === 'user');
     if (targetIndex < 0) return { success: false as const, error: 'Message not found' };
+    const sourceMeta = getSessionMetadata(productSessionId);
+    const sourceSdkSessionId = sourceMeta ? resolveBuiltinSdkSessionId(sourceMeta) ?? null : null;
+    const hasUserCandidate = observedHistory.slice(0, targetIndex + 1)
+      .some(message => message.role === 'user' && (message.sdkInputUuid || message.sdkUuid));
+    const nativeHistory = hasUserCandidate && sourceSdkSessionId
+      ? await sdkGetSessionMessages(sourceSdkSessionId, { dir: sourceMeta!.agentDir }) : [];
+    const history = resolveBuiltinUserAnchors(observedHistory, nativeHistory);
     const targetMessage = history[targetIndex];
     const product = getBuiltinProductContent();
-    const prefix = product ? [...product.writer.projection.messages.values()].slice(0, targetIndex)
+    const prefix = product ? resolveBuiltinUserAnchors([...product.writer.projection.messages.values()].slice(0, targetIndex), nativeHistory)
       : history.slice(0, targetIndex);
     const boundary = selectBuiltinRewindBoundary(prefix);
     if (boundary.kind === 'unavailable') {
@@ -10548,24 +10575,21 @@ export async function rewindSession(userMessageId: string): Promise<{
     }
     const resumeSessionAt = boundary.kind === 'exact' ? boundary.sdkUuid : undefined;
 
-    const sourceMeta = getSessionMetadata(productSessionId);
-    const sourceSdkSessionId = sourceMeta ? resolveBuiltinSdkSessionId(sourceMeta) ?? null : null;
     const targetUserUuid = targetMessage.sdkUuid;
     const sourceFailure = await prepareSessionTranscriptMutation(productSessionId);
     if (sourceFailure) throw new Error(`${sourceFailure.reason}: ${sourceFailure.error}`);
 
     // 3. 在活跃 session 上执行 rewindFiles（文件检查点关联 user message UUID）
     //    跳过已被 force-abort 的 session：subprocess 正在死亡，发 IPC 会阻塞到超时（~100s）。
-    //    跳过不属于当前 session 的 UUID：SDK 不认识，调用必定失败且日志噪声。
-    //    跳过无 sdkUuid 的用户消息：旧存储加载或 SDK 尚未回传 UUID。
+    //    Only the root user record verified in this Session's native history
+    //    may name its optional file checkpoint. A receipt or tool-result UUID cannot.
     const fileRewind = await attemptFileRewind({
       query: lifecycleState.query,
       targetUserUuid,
       abortRequested: lifecycleState.abortRequested,
-      // This set only scopes the optional live Query checkpoint call. It does
-      // not authorize the conversation boundary: native resume remains the
-      // sole judge of whether `resumeSessionAt` is on its durable head.
-      isCurrentSessionUuid: Boolean(targetUserUuid && getCurrentSessionUuids().has(targetUserUuid)),
+      // Candidate provenance was checked above; the SDK still owns checkpoint
+      // availability and native resume owns the conversation boundary.
+      isCurrentSessionUuid: Boolean(targetUserUuid),
     });
     const { skippedLinks, fileRewindStatus } = fileRewind;
     fileOutcome = { skippedLinks, fileRewindStatus };
@@ -10707,9 +10731,10 @@ async function materializeBuiltinFork(opts: {
   const remap = buildForkUuidRemap(srcSliced, forkSdk);
   if (!remap.ok) return fail(`uuid remap failed: ${remap.reason}`);
 
-  const applied = remapStoredSdkUuids(forkedMessages.map(m => m.sdkUuid), remap.map);
+  const reconciled = resolveBuiltinUserAnchors(forkedMessages, srcSliced);
+  const applied = remapStoredSdkUuids(reconciled.map(m => m.sdkUuid), remap.map);
   if (!applied.ok) return fail(`stored uuid re-stamp failed: ${applied.reason}`);
-  const remapped = forkedMessages.map((m, i) => ({ ...m, sdkUuid: applied.remapped[i] }));
+  const remapped = reconciled.map((m, i) => ({ ...m, sdkInputUuid: undefined, sdkUuid: applied.remapped[i] }));
 
   return { ok: true, newSid, remapped };
 }
@@ -11318,7 +11343,7 @@ async function startStreamingSession(preWarm = false): Promise<void> {
     const browserProductSessionId = isPendingSessionId(queryProductSessionId)
       ? effectiveSdkSessionId
       : queryProductSessionId;
-    const sdkMcpServersInitial = await buildSdkMcpServers(browserProductSessionId);
+    const { servers: sdkMcpServersInitial, failures: initialMcpBuildFailures } = await buildSdkMcpServers(browserProductSessionId);
 
     // Claude default follows the selected model. OpenAI bridge retains its
     // existing SDK-side high setting and resolves upstream effort per request.
@@ -12045,13 +12070,14 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       if (rewindInputGate) {
         rewoundQueryInputGates.set(activeQuery, rewindInputGate);
       }
-      const initialMcpFingerprint = sdkMcpMapFingerprint(sdkMcpServersInitial);
+      const initialMcpFingerprint = sdkMcpMapFingerprint(sdkMcpServersInitial, initialMcpBuildFailures);
       setFrozenSdkMcpFingerprint(initialMcpFingerprint);
       const prewarmWindow = getMcpPrewarmWindowForMap(sdkMcpServersInitial);
       installQueryMcpOwner({
         query: activeQuery,
         fingerprint: initialMcpFingerprint,
-        requiredServerIds: getDesiredMcpServerIdsForMap(sdkMcpServersInitial),
+        requiredServerIds: getDesiredMcpServerIdsForMap(sdkMcpServersInitial, initialMcpBuildFailures),
+        buildFailures: initialMcpBuildFailures,
         ...(prewarmWindow ?? {}),
       });
     }
@@ -13123,7 +13149,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         if (sdkMessage.uuid) {
           addCurrentSessionUuid(sdkMessage.uuid);
           addLiveSessionUuid(sdkMessage.uuid);
-          const boundMessageId = bindSdkUuidToLatestUnboundUserMessage(sdkMessage.uuid);
+          const boundMessageId = isBuiltinNativeUserRecord(sdkMessage)
+            ? bindSdkUuidToUserInput(sdkMessage.uuid, sdkMessage.uuid) : null;
           if (boundMessageId) {
             broadcast('chat:message-sdk-uuid', { messageId: boundMessageId, sdkUuid: sdkMessage.uuid });
           }

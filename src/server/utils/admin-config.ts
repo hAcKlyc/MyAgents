@@ -21,7 +21,7 @@ import {
 } from 'fs';
 import { resolve } from 'path';
 import { getHomeDirOrNull } from './platform';
-import { normalizeConfigMcpSelections, normalizeProjectMcpSelections } from '../../shared/mcpSelection';
+import { normalizeConfigMcpSelections, normalizeProjectMcpSelections, resolveDefaultMcpSelection } from '../../shared/mcpSelection';
 import { stripBom } from '../../shared/utils';
 import { resolveProviderForModel } from '../../shared/provider-model-routing';
 import { workspacePathsEqual } from '../../shared/workspacePath';
@@ -195,6 +195,8 @@ export interface AdminAppConfig {
 
 /** Minimal Agent config shape for admin operations */
 export interface AgentConfigSlim {
+  mcpEnabledServers?: string[];
+  mcpServersJson?: string;
   id: string;
   name: string;
   enabled: boolean;
@@ -854,24 +856,26 @@ export function getEffectiveOfficialToolIdsForSession(
 }
 
 /**
- * Get effective MCP servers for a specific project (global enabled ∩ project enabled)
+ * Resolve workspace defaults from the Agent owner, or the legacy Project.
  */
 export function getEffectiveMcpServers(
   projectPath: string,
+  config: AdminAppConfig = loadConfig(),
 ): McpServerDefinition[] {
   if (!projectPath) return [];
 
-  const config = loadConfig();
   const allServers = getAllMcpServers(config);
   const globalEnabled = new Set(getEnabledMcpServerIds(config));
 
   // Find project by path
   const projects = loadProjects();
-  const project = projects.find(
+  const matchingProjects = projects.filter(
     (p) =>
       typeof p.path === 'string' && workspacePathsEqual(p.path, projectPath),
   );
-  const projectEnabled = new Set(project?.mcpEnabledServers ?? []);
+  const project = matchingProjects.length === 1 ? matchingProjects[0] : undefined;
+  const agent = findRuntimeAgentForWorkspace(config, projects, projectPath);
+  const projectEnabled = new Set(resolveDefaultMcpSelection(agent, project));
 
   if (projectEnabled.size === 0) return [];
 
@@ -1770,10 +1774,8 @@ function asBuiltinPermissionMode(value: unknown): string | undefined {
  * Agent/Project defaults. Agent fallback is only for legacy sessions without a
  * snapshot marker, and is still read-only.
  *
- * IM sessions deliberately don't snapshot model/permission/mcp (D4 live-follow), so
- * the session-meta merge is a no-op for them — `meta?.<field>` is undefined and we
- * fall through to the existing agent path. The IM channel-overrides merge happens
- * elsewhere (at the IM bot delivery layer where `channel` context is available).
+ * Desktop and IM owned Sessions both retain complete birth snapshots. Agent/Project
+ * defaults apply only to future Sessions or legacy metadata without the marker.
  */
 export function resolveWorkspaceConfig(
   agentDir: string,
@@ -1812,14 +1814,14 @@ export function resolveWorkspaceConfig(
         (s) => globalEnabled.has(s.id) && sessionEnabled.has(s.id),
       );
     } else if (!snapshotOwnsConfig) {
-      // Lazy fallback for legacy / IM sessions — uses project ∩ global as before.
+      // Legacy metadata has no snapshot owner yet; resolve Agent defaults (or Project compatibility).
       mcpServers = getEffectiveMcpServers(agentDir);
     }
   }
   console.log(
     includeMcp
       ? `[config] mcpResolution=resolved mcpCount=${mcpServers.length}`
-      : '[config] mcpResolution=skipped',
+      : '[config] mcpResolution=skipped reason=caller-excluded-mcp',
   );
 
   // --- Resolve MyAgents official CLI tools ---

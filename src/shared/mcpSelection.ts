@@ -6,6 +6,16 @@
  * Missing/null retain the existing unspecified-selection semantics.
  * Rust parity: mcp_selection.rs; fixtures: __fixtures__/mcpSelection.json.
  */
+/** Agent owns future defaults; Project is a compatibility source only when
+ * no Agent exists. Global availability and an owned Session are separate.
+ */
+export function resolveDefaultMcpSelection(
+  agent: { mcpEnabledServers?: string[] } | undefined,
+  project: { mcpEnabledServers?: string[] } | undefined,
+): string[] {
+  return (agent ? agent.mcpEnabledServers : project?.mcpEnabledServers) ?? [];
+}
+
 export function normalizeMcpSelection(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   let parsed: unknown = value;

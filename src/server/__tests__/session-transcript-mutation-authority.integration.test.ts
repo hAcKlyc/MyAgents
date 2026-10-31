@@ -130,6 +130,7 @@ describe('Session transcript mutation authority', () => {
     const session = await createLegacySession(store, '/tmp/transcript-sdk-retraction');
     const snapshot = await store.loadSessionTranscript(session.id);
     const rows = [
+      { ...message('human-with-old-wrong-anchor', 'user'), sdkUuid: 'sdk-1' },
       { ...message('named-1', 'assistant'), sdkUuid: 'sdk-1' },
       { ...message('keep', 'assistant'), sdkUuid: 'sdk-2' },
       message('streaming-tail', 'assistant'),
@@ -144,7 +145,7 @@ describe('Session transcript mutation authority', () => {
       streamingTailMessageId: 'streaming-tail',
     });
     expect(result.ok).toBe(true);
-    expect((await store.loadSessionTranscript(session.id)).messages.map(row => row.id)).toEqual(['keep']);
+    expect((await store.loadSessionTranscript(session.id)).messages.map(row => row.id)).toEqual(['human-with-old-wrong-anchor', 'keep']);
   });
 
   it('atomically migrates legacy JSON before the first cursor append', async () => {

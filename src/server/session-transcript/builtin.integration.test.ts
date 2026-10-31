@@ -294,7 +294,8 @@ beforeEach(async () => {
   // rows as the synthetic native current chain.
   state.sdkRead.mockImplementation(async () => agent.getMessages()
     .filter(message => Boolean(message.sdkUuid))
-    .map(message => ({ type: message.role, uuid: message.sdkUuid })));
+    .map(message => ({ type: message.role, uuid: message.sdkUuid,
+      message: { role: message.role, content: message.content } })));
 });
 
 afterEach(async () => {
@@ -963,16 +964,15 @@ it('preserves completed file restoration when later transcript persistence fails
     undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
   await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
   await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
-  const transcript = await import('../builtin-session/transcript');
   const user = agent.getMessages()[0];
-  transcript.bindSdkUuidToMessage(user, 'native-user');
-  transcript.addCurrentSessionUuid('native-user');
+  state.sdkRead.mockResolvedValue([{ type: 'user', uuid: user.sdkInputUuid,
+    message: { role: 'user', content: user.content } }]);
   expect(await store.getActiveSessionTranscript(metadata.id)!.writer.flush()).toBe(true);
   const persistence = await import('../builtin-session/transcript-persistence');
   vi.spyOn(persistence, 'truncateTranscriptPersistenceForRewind').mockRejectedValue(new Error('injected persistence failure'));
   state.rewindFiles.mockResolvedValue({ canRewind: true, filesChanged: ['synthetic-file'] });
   const response = await agent.rewindSession(user.id);
-  expect(state.rewindFiles).toHaveBeenCalledWith('native-user');
+  expect(state.rewindFiles).toHaveBeenCalledWith(user.sdkInputUuid);
   expect(response.success).toBe(false);
   expect(response.fileRewindStatus).toBe('complete');
   expect(response.error).toContain('injected persistence failure');
@@ -1135,10 +1135,9 @@ it('admits the replay before a desktop send arriving during rewind', async () =>
   await engine.sendDesktopMessage(request('original'));
   await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
   await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
-  const transcript = await import('../builtin-session/transcript');
   const user = agent.getMessages()[0];
-  transcript.bindSdkUuidToMessage(user, 'native-user');
-  transcript.addCurrentSessionUuid('native-user');
+  state.sdkRead.mockResolvedValue([{ type: 'user', uuid: user.sdkInputUuid,
+    message: { role: 'user', content: user.content } }]);
   let release!: () => void;
   let entered!: () => void;
   const started = new Promise<void>(resolve => { entered = resolve; });
@@ -1505,6 +1504,82 @@ it('does not promote a queued consumption id into a native rewind anchor', async
   expect(store.getSessionMetadata(meta.id)?.sdkResumeSessionAt).toBeUndefined();
 });
 
+it('never binds tool-result or child-user UUIDs to admitted Product users', async () => {
+  const workspace = join(state.home, 'user-anchor-provenance');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.toolFrames = true;
+  state.protocolFrames = [{ type: 'user', parent_tool_use_id: 'child-tool', uuid: 'child-user',
+    message: { role: 'user', content: 'child input' } }];
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('human question', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  const users = agent.getMessages().filter(message => message.role === 'user');
+  expect(users).toHaveLength(1);
+  expect(users[0].sdkUuid).toBeUndefined();
+  expect(users[0].sdkInputUuid).toBe((state.sdkInputs[0] as { uuid: string }).uuid);
+  const active = store.getActiveSessionTranscript(meta.id)!;
+  await active.writer.flush();
+  expect((await active.file.read()).projection.messages.get(users[0].id)?.sdkUuid).toBeUndefined();
+});
+
+it.each(['later-tool', 'absent', 'queued-alias', 'exact-input'])(
+  'forks a cold historical prefix with a %s user binding without guessing or rewriting the source', async shape => {
+    const workspace = join(state.home, `historical-user-${shape}`);
+    await mkdir(workspace);
+    const meta = await store.createSession(workspace, { runtime: 'builtin' });
+    const rows = [
+      { id: 'u1', role: 'user' as const, content: 'original question', timestamp: 't',
+        sdkUuid: shape === 'exact-input' ? 'later-tool' : shape,
+        ...(shape === 'exact-input' ? { sdkInputUuid: 'native-u1' } : {}) },
+      { id: 'a1', role: 'assistant' as const, content: 'first answer', timestamp: 't', sdkUuid: 'native-a1' },
+      { id: 'u2', role: 'user' as const, content: 'next question', timestamp: 't' },
+      { id: 'a2', role: 'assistant' as const, content: 'next answer', timestamp: 't', sdkUuid: 'native-a2' },
+    ];
+    const snapshot = await store.loadSessionTranscript(meta.id);
+    expect(await store.appendSessionMessages(meta.id, snapshot.cursor, rows)).toMatchObject({ ok: true });
+    await store.releaseSessionTranscriptForBinding(meta.id);
+    await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+    const native = [
+      { type: 'user', uuid: shape === 'queued-alias' ? 'queued-alias' : 'native-u1',
+        message: { role: 'user', content: 'original question' }, ...(shape === 'queued-alias' ? { isQueuedCommand: true } : {}) },
+      { type: 'assistant', uuid: 'native-a1' },
+      { type: 'user', uuid: 'later-tool', message: { role: 'user', content: [{ type: 'tool_result' }] } },
+      { type: 'assistant', uuid: 'native-a2' },
+    ];
+    const newSid = randomUUID();
+    state.sdkRead.mockImplementation(async (id: string) => id === newSid
+      ? native.slice(0, 2).map(row => ({ ...row, uuid: `fork-${row.uuid}` })) : native);
+    state.sdkFork.mockResolvedValue({ sessionId: newSid });
+    expect(await agent.forkSession('a1')).toMatchObject({ success: true, newSessionId: newSid });
+    const fork = (await store.getSessionData(newSid))!;
+    expect(fork.messages.map(row => row.content)).toEqual(['original question', 'first answer']);
+    expect(fork.messages[0].sdkUuid).toBe(shape === 'exact-input' ? 'fork-native-u1' : undefined);
+    expect(fork.messages[0].sdkInputUuid).toBeUndefined();
+    expect(fork.messages[1].sdkUuid).toBe('fork-native-a1');
+    expect((await store.getSessionData(meta.id))!.messages[0].sdkUuid).toBe(rows[0].sdkUuid);
+  },
+);
+
+it('verifies a submitted input against native history before restoring its file checkpoint', async () => {
+  const workspace = join(state.home, 'verified-input-checkpoint');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('question', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  const user = agent.getMessages()[0];
+  expect(user.sdkUuid).toBeUndefined();
+  expect(user.sdkInputUuid).toBe((state.sdkInputs[0] as { uuid: string }).uuid);
+  state.sdkRead.mockResolvedValue([{ type: 'user', uuid: user.sdkInputUuid,
+    message: { role: 'user', content: 'question' } }]);
+  state.rewindFiles.mockResolvedValue({ canRewind: true, filesChanged: [] });
+  expect(await agent.rewindSession(user.id)).toMatchObject({ success: true, fileRewindStatus: 'complete' });
+  expect(state.rewindFiles).toHaveBeenCalledWith(user.sdkInputUuid);
+});
+
 it.each(['unconfirmed-user', 'partial-assistant', 'legacy-error', 'conflicting-diagnostic', 'runtime-anchor'] as const)(
   'refuses retry past %s without truncating history or replaying', async shape => {
     const workspace = join(state.home, shape);
@@ -1581,8 +1656,8 @@ it('preserves diagnostics through native fork and cold retry using remapped user
   expect(state.sdkFork).not.toHaveBeenCalled();
   const nativeFork = randomUUID();
   state.sdkRead.mockImplementation(async (id: string) => [
-    { type: 'user', uuid: `${id === nativeFork ? 'fork-' : ''}native-u1` },
-    { type: 'user', uuid: `${id === nativeFork ? 'fork-' : ''}native-u2` },
+    { type: 'user', uuid: `${id === nativeFork ? 'fork-' : ''}native-u1`, message: { role: 'user', content: 'one' } },
+    { type: 'user', uuid: `${id === nativeFork ? 'fork-' : ''}native-u2`, message: { role: 'user', content: 'two' } },
     { type: 'assistant', uuid: `${id === nativeFork ? 'fork-' : ''}native-a2` },
   ]);
   state.sdkFork.mockResolvedValue({ sessionId: nativeFork });

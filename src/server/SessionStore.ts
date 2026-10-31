@@ -4060,7 +4060,7 @@ function deriveTranscriptMutationTarget(
     if (intent.kind === 'sdk-retraction') {
         const sdkUuids = new Set(intent.sdkUuids);
         const target = messages.filter(message => (
-            (!message.sdkUuid || !sdkUuids.has(message.sdkUuid))
+            (message.role !== 'assistant' || !message.sdkUuid || !sdkUuids.has(message.sdkUuid))
             && message.id !== intent.streamingTailMessageId
         ));
         return { ok: true, target: target.length === messages.length ? null : target };

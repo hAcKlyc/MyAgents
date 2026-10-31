@@ -2,6 +2,7 @@
   "asyncQuestionReply": null,
   "desktopQuery": null,
   "sdkUuid": null,
+  "sdkInputUuid": null,
   "runtimeTurnAnchor": null,
   "runtimeOperationAnchor": null,
   "completionState": null,

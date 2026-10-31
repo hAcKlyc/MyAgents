@@ -134,6 +134,8 @@ Agent-facing system prompt、Required Skills 与 help 只推荐 canonical `myage
 
 `mcp add` 是 create-only 操作：自定义 MCP ID 已存在时明确失败并保持原定义不变；需要替换时先检查并显式 `mcp remove`，避免省略的 `args/env/description` 被一次不完整 add 静默清空。
 
+MCP 的 global scope 只控制目录可用性；`mcp enable/disable --scope project|both` 的工作区选择由现有 Agent 配置 intent 提交，并同步 Project 镜像。只有没有 Agent 的兼容工作区才直接保存 Project。`agent set <id> mcpEnabledServers '["server-id"]'` 可直接选择未来会话的 MCP，接受空数组但拒绝未知 ID，不会自动打开全局安全总闸。已有 Session snapshot 不被默认配置更新覆盖。
+
 ### 请求-响应模式
 
 CLI 统一向 loopback `/api/admin/<canonical-route>` 发送 JSON POST；route 经 CLI 路由解析，不能假设用户输入的 group/action 可直接拼接。公共请求入口优先使用继承的 App 内部 capability，否则使用 `MYAGENTS_API_TOKEN` 的 Bearer header；无有效凭据的业务请求由 admission 拒绝。命令 handler 不单独构造另一套鉴权方式，具体实现以 `src/cli/myagents.ts` 的 `callApi()` 为准。

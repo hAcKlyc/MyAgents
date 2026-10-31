@@ -77,13 +77,13 @@ export function planRetraction(
   const uuidSet = new Set(retractedUuids);
   const removedMessageIds: string[] = [];
   for (const m of messages) {
-    if (m.sdkUuid && uuidSet.has(m.sdkUuid)) {
+    if (m.role === 'assistant' && m.sdkUuid && uuidSet.has(m.sdkUuid)) {
       removedMessageIds.push(m.id);
     }
   }
   const tail = messages[messages.length - 1];
   let removedStreamingTail =
-    removedMessageIds.length > 0 &&
+    removedMessageIds.includes(tail.id) &&
     tail.sdkUuid !== undefined &&
     uuidSet.has(tail.sdkUuid);
   if (

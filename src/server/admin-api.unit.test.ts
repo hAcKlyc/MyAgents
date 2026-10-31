@@ -3766,6 +3766,81 @@ describe('admin-api MCP connectivity test', () => {
 });
 
 describe('admin-api MCP project scope', () => {
+  it.each(['enable', 'disable'] as const)('reconciles a committed global %s when the Project mirror fails', async action => {
+    const api = await import('./admin-api');
+    const workspacePath = join(scratch, 'partial-mcp');
+    agentSessionMocks.agentDir = workspacePath;
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      mcpServers: [{ id: 'custom', name: 'Custom', type: 'stdio', command: 'node' }],
+      mcpEnabledServers: action === 'enable' ? [] : ['custom'],
+      agents: [{ id: 'owner', name: 'Owner', enabled: true, workspacePath, mcpEnabledServers: ['custom'] }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{
+      id: 'project', path: workspacePath, agentId: 'owner', mcpEnabledServers: ['custom'],
+    }]);
+    adminConfigBehavior.failProjectWrite = true;
+    const result = await (action === 'enable' ? api.handleMcpEnable : api.handleMcpDisable)({ id: 'custom', scope: 'both' });
+    expect(result.success).toBe(false);
+    expect(readConfig().mcpEnabledServers).toEqual(action === 'enable' ? ['custom'] : []);
+    expect(sessionEngineMocks.updateMcpServers).toHaveBeenCalledWith(action === 'enable'
+      ? [expect.objectContaining({ id: 'custom' })] : []);
+    expect(managementApiMocks.managementApi.mock.calls.some(([path]) => path === '/api/app/config-changed')).toBe(true);
+  });
+
+  it('preserves unrelated legacy selection IDs when changing one workspace default', async () => {
+    const { handleMcpEnable } = await import('./admin-api');
+    const workspacePath = join(scratch, 'legacy-mcp');
+    agentSessionMocks.agentDir = workspacePath;
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      mcpServers: [{ id: 'custom', name: 'Custom', type: 'stdio', command: 'node' }],
+      mcpEnabledServers: ['custom'],
+      agents: [{ id: 'owner', name: 'Owner', enabled: true, workspacePath, mcpEnabledServers: ['legacy-unavailable'] }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{ id: 'project', path: workspacePath, agentId: 'owner' }]);
+    expect(await handleMcpEnable({ id: 'custom', scope: 'project' })).toMatchObject({ success: true });
+    expect(readConfig()).toMatchObject({ agents: [{ mcpEnabledServers: ['legacy-unavailable', 'custom'] }] });
+    expect(sessionEngineMocks.updateMcpServers).toHaveBeenCalledWith([expect.objectContaining({ id: 'custom' })]);
+  });
+
+  it('supports an explicit Agent MCP selection without changing globally disabled availability', async () => {
+    const { handleAgentSet } = await import('./admin-api');
+    const workspacePath = join(scratch, 'agent-mcp-set');
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      mcpServers: [{ id: 'custom', name: 'Custom', type: 'stdio', command: 'node' }],
+      mcpEnabledServers: [], agents: [{ id: 'owner', name: 'Owner', enabled: true, workspacePath }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{ id: 'project', path: workspacePath, agentId: 'owner' }]);
+    expect(await handleAgentSet({ id: 'owner', key: 'mcpEnabledServers', value: ['custom', 'custom'] })).toMatchObject({ success: true });
+    expect(readConfig()).toMatchObject({ mcpEnabledServers: [], agents: [{ mcpEnabledServers: ['custom'] }] });
+    expect(JSON.parse(readFileSync(join(scratch, '.myagents', 'projects.json'), 'utf8'))[0].mcpEnabledServers).toEqual(['custom']);
+    const before = readConfig();
+    expect(await handleAgentSet({ id: 'owner', key: 'mcpEnabledServers', value: ['unknown'] })).toMatchObject({ success: false });
+    expect(readConfig()).toEqual(before);
+    expect(await handleAgentSet({ id: 'owner', key: 'mcpEnabledServers', value: 'custom' })).toMatchObject({ success: false });
+    expect(await handleAgentSet({ id: 'owner', key: 'mcpEnabledServers', value: [] })).toMatchObject({ success: true });
+    expect(readConfig()).toMatchObject({ agents: [{ mcpEnabledServers: [] }] });
+  });
+
+  it.each(['enable', 'disable'] as const)('commits project-scoped %s to Agent defaults and its Project mirror', async action => {
+    const api = await import('./admin-api');
+    const workspacePath = join(scratch, 'mcp-owner');
+    agentSessionMocks.agentDir = workspacePath;
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      mcpServers: [{ id: 'custom', name: 'Custom', type: 'stdio', command: 'node' }],
+      mcpEnabledServers: ['custom'],
+      agents: [{ id: 'owner', name: 'Owner', enabled: true, workspacePath,
+        mcpEnabledServers: action === 'enable' ? [] : ['custom'] }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{
+      id: 'project', path: workspacePath, agentId: 'owner', mcpEnabledServers: ['stale-mirror'],
+    }]);
+    const result = await (action === 'enable' ? api.handleMcpEnable : api.handleMcpDisable)({ id: 'custom', scope: 'project' });
+    expect(result.success).toBe(true);
+    const selection = action === 'enable' ? ['custom'] : [];
+    expect(readConfig()).toMatchObject({ agents: [{ mcpEnabledServers: selection }] });
+    expect(JSON.parse(readFileSync(join(scratch, '.myagents', 'projects.json'), 'utf8'))[0].mcpEnabledServers).toEqual(selection);
+  });
+
   it('fails project-only enable when the current workspace is not registered', async () => {
     const { handleMcpEnable } = await import('./admin-api');
     agentSessionMocks.agentDir = 'c:/users/me/project/';
