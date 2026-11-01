@@ -1042,28 +1042,33 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     }
 
     try {
-      // Delegate thought-mode persistence to the caller (Launcher
-      // BrandSection owns `thoughtCreate` + refresh-key bump). The
-      // boolean-return protocol (`return true` = saved, clear textarea)
-      // lets the parent signal when to reset input state here.
-      const mentions = activeAgentSnapshots(text, agentMentions);
-      const result = mentions.length || primaryContext || requiredSystemSkill
-        ? onSend(text, images.length > 0 ? images : undefined, undefined, { agentMentions: mentions, primaryContext, requiredSystemSkill })
-        : onSend(text, images.length > 0 ? images : undefined);
-      // If onSend returns a promise, await it; if sync, use directly
-      const accepted = result instanceof Promise ? await result : result;
-      // Only clear input if not explicitly rejected (false)
-      if (accepted !== false) {
-        // Admission may take time. Clear the submitted draft only if the user
-        // has not started the next one while awaiting the response.
+      // Chat transfers the draft with its immediate local projection. Other
+      // callers can keep using the final receipt (e.g. Launcher persistence).
+      // Clear at most once: a later receipt must not erase even an identical
+      // next draft or its newly attached context/images.
+      let submitted = false;
+      const clearSubmittedDraft = () => {
+        if (submitted) return;
+        submitted = true;
         if (inputValueRef.current === inputValue) {
           setInputValue('');
           setAgentMentions([]);
           setPrimaryContext(undefined);
           setRequiredSystemSkill(undefined);
         }
-        const submitted = new Set(images.map(image => image.id));
-        setImages(current => current.filter(image => !submitted.has(image.id)));
+        const submittedImages = new Set(images.map(image => image.id));
+        setImages(current => current.filter(image => !submittedImages.has(image.id)));
+      };
+      const mentions = activeAgentSnapshots(text, agentMentions);
+      const context = mentions.length || primaryContext || requiredSystemSkill
+        ? { agentMentions: mentions, primaryContext, requiredSystemSkill }
+        : undefined;
+      const result = onSend(text, images.length > 0 ? images : undefined, undefined, context, clearSubmittedDraft);
+      // If onSend returns a promise, await it; if sync, use directly
+      const accepted = result instanceof Promise ? await result : result;
+      // Only clear input if not explicitly rejected (false)
+      if (accepted !== false) {
+        clearSubmittedDraft();
       }
     } finally {
       sendingRef.current = false;

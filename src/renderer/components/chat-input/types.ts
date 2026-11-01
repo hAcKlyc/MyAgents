@@ -49,6 +49,9 @@ export interface SimpleChatInputProps {
     images?: ImageAttachment[],
     permissionMode?: PermissionMode,
     context?: import("../../../shared/agentMentions").QueryMentionContext,
+    /** Call synchronously when a local message/pill takes ownership of the draft.
+     * The return value still reports backend admission (or non-chat persistence). */
+    onSubmitted?: () => void,
   ) => boolean | void | Promise<boolean | void>;
   active?: boolean;
   /** Blocks both keyboard and button send while the owning Session is not authoritative. */

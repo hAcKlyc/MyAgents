@@ -16,6 +16,7 @@ import {
   DSH_PERMISSION_MODES,
 } from '../../shared/types/runtime';
 import SimpleChatInput, { type SimpleChatInputHandle } from './SimpleChatInput';
+import type { SimpleChatInputProps } from './chat-input/types';
 import { ToastProvider } from './Toast';
 
 const workspaceMocks = vi.hoisted(() => ({
@@ -128,10 +129,58 @@ describe('SimpleChatInput send paths', () => {
     renderInput({ value: 'first query', onSend });
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith('first query', undefined);
+    expect(onSend).toHaveBeenCalledWith('first query', undefined, undefined, undefined, expect.any(Function));
     fireEvent.change(input, { target: { value: 'next query' } });
     await act(async () => admission.resolve(true));
     expect(input.value).toBe('next query');
+  });
+
+  it.each(['keyboard', 'button'] as const)('clears the handed-off draft before admission via %s, only once', async trigger => {
+    const admission = deferred<boolean>();
+    const onSend: SimpleChatInputProps['onSend'] = (_text, _images, _mode, _context, onSubmitted) => {
+      onSubmitted?.();
+      return admission.promise;
+    };
+    const text = Array.from({ length: 20 }, (_, index) => `Paragraph ${index}: a query with distinct details for item ${index}.`).join('\n');
+    renderInput({ value: text, onSend });
+    const input = screen.getByRole('textbox');
+    if (trigger === 'keyboard') fireEvent.keyDown(input, { key: 'Enter' });
+    else fireEvent.click(screen.getByTitle(/发送/));
+    expect(input).toHaveValue('');
+    // Even identical text belongs to the next draft after local handoff.
+    fireEvent.change(input, { target: { value: text } });
+    await act(async () => admission.resolve(true));
+    expect(input).toHaveValue(text);
+  });
+
+  it('hands off images and typed context together and keeps the next draft on rejection', async () => {
+    const admission = deferred<boolean>();
+    const ref = createRef<SimpleChatInputHandle>();
+    const onSend = vi.fn<SimpleChatInputProps['onSend']>((_text, _images, _mode, _context, onSubmitted) => {
+      onSubmitted?.();
+      return admission.promise;
+    });
+    renderInput({ ref, onSend });
+    const image = { id: 'submitted-image', preview: 'data:image/png;base64,aW1hZ2U=', file: new File(['image'], 'first.png', { type: 'image/png' }) };
+    const primaryContext = { kind: 'task-discussion' as const, input: { candidatesDir: '/data/candidates', workspaceId: 'ws', workspacePath: '/ws', visibleUserMessage: 'query' } };
+    act(() => {
+      ref.current!.setValue('query', { primaryContext, requiredSystemSkill: TASK_ALIGNMENT_SKILL_REQUIREMENT });
+      ref.current!.setImages([image]);
+    });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    expect(ref.current!.getCurrentValue()).toBe('');
+    expect(ref.current!.getImages()).toEqual([]);
+    expect(ref.current!.getQueryContext()).toMatchObject({ primaryContext: undefined, requiredSystemSkill: undefined });
+    expect(onSend.mock.calls[0].slice(0, 4)).toEqual(['query', [image], undefined, { agentMentions: [], primaryContext, requiredSystemSkill: TASK_ALIGNMENT_SKILL_REQUIREMENT }]);
+    const nextImage = { ...image, id: 'next-image' };
+    act(() => {
+      ref.current!.setValue('next query', { primaryContext });
+      ref.current!.setImages([nextImage]);
+    });
+    await act(async () => admission.resolve(false));
+    expect(ref.current!.getCurrentValue()).toBe('next query');
+    expect(ref.current!.getImages()).toEqual([nextImage]);
+    expect(ref.current!.getQueryContext().primaryContext).toEqual(primaryContext);
   });
 
   it('restores typed launcher context and retains it on failed admission', async () => {
@@ -143,7 +192,7 @@ describe('SimpleChatInput send paths', () => {
     act(() => ref.current!.setValue('query', { primaryContext, requiredSystemSkill }));
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
     fireEvent.keyDown(input, { key: 'Enter' });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith('query', undefined, undefined, { agentMentions: [], primaryContext, requiredSystemSkill }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('query', undefined, undefined, { agentMentions: [], primaryContext, requiredSystemSkill }, expect.any(Function)));
     expect(input.value).toBe('query');
     expect(ref.current!.getQueryContext()).toEqual({ agentMentions: [], primaryContext, requiredSystemSkill });
   });
@@ -157,7 +206,7 @@ describe('SimpleChatInput send paths', () => {
     expect(ref.current!.getCurrentValue()).toBe('query');
     expect(ref.current!.getQueryContext()).toMatchObject({ primaryContext: undefined, requiredSystemSkill: undefined });
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith('query', undefined));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('query', undefined, undefined, undefined, expect.any(Function)));
   });
 
   it('replaces the exact @ fragment, preserves the tail/caret and keeps typed mentions on rejected send', async () => {
@@ -174,12 +223,12 @@ describe('SimpleChatInput send paths', () => {
     await waitFor(() => expect(input.selectionStart).toBe(23));
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await waitFor(() => expect(onSend).toHaveBeenCalled());
-    expect(onSend).toHaveBeenLastCalledWith('before @Agent-id:local  after', undefined, undefined, { agentMentions: [{ agent, authGeneration: 0, principalId: null, networkId: null }] });
+    expect(onSend).toHaveBeenLastCalledWith('before @Agent-id:local  after', undefined, undefined, { agentMentions: [{ agent, authGeneration: 0, principalId: null, networkId: null }] }, expect.any(Function));
     expect(input.value).toBe('before @Agent-id:local  after');
     fireEvent.change(input, { target: { value: 'no mention' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
-    expect(onSend).toHaveBeenLastCalledWith('no mention', undefined);
+    expect(onSend).toHaveBeenLastCalledWith('no mention', undefined, undefined, undefined, expect.any(Function));
   });
 
   it('keeps Runtime selection out of the Chat composer', async () => {
@@ -691,7 +740,7 @@ describe('SimpleChatInput send paths', () => {
     await user.type(textarea, 'chat hello');
     await user.click(screen.getByTitle(/发送/));
 
-    expect(onSend).toHaveBeenCalledWith('chat hello', undefined);
+    expect(onSend).toHaveBeenCalledWith('chat hello', undefined, undefined, undefined, expect.any(Function));
   });
 
   it('shows external runtime MCP servers as a read-only discovered catalog', async () => {
@@ -946,7 +995,7 @@ describe('SimpleChatInput send paths', () => {
     await user.type(textarea, 'subscription hello');
     await user.click(screen.getByTitle(/发送/));
 
-    expect(onSend).toHaveBeenCalledWith('subscription hello', undefined);
+    expect(onSend).toHaveBeenCalledWith('subscription hello', undefined, undefined, undefined, expect.any(Function));
   });
 
   it('uses subscription provider names verbatim in the model menu', async () => {
@@ -1136,7 +1185,7 @@ describe('SimpleChatInput send paths', () => {
     await user.type(textarea, 'launcher hello');
     await user.click(screen.getByTitle(/发送/));
 
-    expect(onSend).toHaveBeenCalledWith('launcher hello', undefined);
+    expect(onSend).toHaveBeenCalledWith('launcher hello', undefined, undefined, undefined, expect.any(Function));
   });
 
   it('renders launcher input chrome in English when the UI language is English', async () => {
