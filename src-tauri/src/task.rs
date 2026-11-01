@@ -140,6 +140,8 @@ pub struct TaskLastExecution {
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification: Option<notification::NotificationDecision>,
 }
 
 #[derive(Debug, Clone)]
@@ -286,8 +288,8 @@ pub struct NotificationConfig {
     pub bot_channel_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_thread: Option<String>,
-    /// Defaults to `['done', 'blocked', 'endCondition']` when absent; keep as
-    /// `Option<Vec>` so omitted-means-default is distinguishable from explicit empty.
+    /// Creation inherits the parent policy when available; otherwise absence
+    /// uses `notification::DEFAULT_EVENTS`. `Some([])` subscribes to no events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<Vec<String>>,
 }
@@ -4181,6 +4183,7 @@ impl TaskStore {
             duration_ms: settlement.duration_ms,
             session_id: settlement.session_id,
             error: settlement.error,
+            notification: None,
         });
         if let Some(event_id) = activation_event_id {
             updated.last_activation_event_id = Some(event_id.to_string());
@@ -8797,6 +8800,143 @@ mod tests {
     // append_progress_line). Test code was stale dead reference blocking the
     // workspace test binary from compiling. Cleaned up incidentally during
     // PRD 0.2.7 Phase A so workspace_files unit tests can run.
+    #[tokio::test]
+    async fn notification_natural_completion_matches_done_once() {
+        use notification::{ConversationRef, NotificationTarget};
+        ensure_test_docs_root();
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        let store = TaskStore::new(dir.path().join("data"));
+        let mut input = sample_direct_input(&ws);
+        input.notification = Some(NotificationConfig {
+            desktop: false,
+            im: Some(NotificationTarget::Conversation { address: ConversationRef {
+                channel_id: "channel".into(), session_key: "private:peer".into(),
+            }}),
+            events: Some(vec!["done".into(), "blocked".into()]),
+            ..Default::default()
+        });
+        let task = store.create_direct(input).await.unwrap();
+        store.update_status(status_input(&task.id, TaskStatus::Running, TransitionActor::User, Some(TransitionSource::Ui))).await.unwrap();
+        let completed = store.settle_execution_if_status(
+            &task.id, None, TaskExecutionTrigger::Scheduled, TaskStatus::Running,
+            successful_settlement(), Some(TaskExecutionTerminalTransition {
+                status: TaskStatus::Done, message: "Task execution completed".into(),
+                source: TransitionSource::EndCondition,
+            }),
+        ).await.unwrap().unwrap();
+        assert_eq!(completed.notification_deliveries.len(), 1);
+        assert_eq!(completed.notification_deliveries[0].events, vec!["execution", "done", "endCondition"]);
+        let decision = completed.last_execution.as_ref().unwrap().notification.as_ref().unwrap();
+        assert_eq!(decision.reason, notification::DecisionReason::DeliveryRecorded);
+        assert_eq!(decision.delivery_id.as_deref(), Some(completed.notification_deliveries[0].id.as_str()));
+        assert_eq!(decision.subscribed_events, vec!["done", "blocked"]);
+    }
+
+    #[tokio::test]
+    async fn notification_event_matrix_covers_execution_state_and_cause() {
+        use notification::*;
+        ensure_test_docs_root();
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        let store = TaskStore::new(dir.path().join("data"));
+        let base = store.create_direct(sample_direct_input(&ws)).await.unwrap();
+        // All execution modes enter the same settlement owner; ordinary recurring
+        // runs do not have a terminal transition, while final runs do.
+        for mode in [TaskExecutionMode::Once, TaskExecutionMode::Scheduled, TaskExecutionMode::Recurring] {
+            for filter in [None, Some(vec![]), Some(vec!["done"]), Some(vec!["execution"]), Some(vec!["endCondition"])] {
+                let mut task = base.clone();
+                task.execution_mode = mode;
+                task.notification = Some(NotificationConfig {
+                    desktop: false,
+                    im: Some(NotificationTarget::Conversation { address: ConversationRef {
+                        channel_id: "channel".into(), session_key: "private:peer".into(),
+                    }}),
+                    events: filter.as_ref().map(|events| events.iter().map(|s| (*s).into()).collect()),
+                    ..Default::default()
+                });
+                task.last_execution = Some(serde_json::from_value(serde_json::json!({
+                    "at":1, "trigger":"scheduled", "success":true, "durationMs":1
+                })).unwrap());
+                let transition = StatusTransition {
+                    from: Some(TaskStatus::Running), to: TaskStatus::Done, at: 1,
+                    actor: TransitionActor::System, source: Some(TransitionSource::EndCondition), message: None,
+                };
+                let expected = filter.as_ref().is_none_or(|events| !events.is_empty());
+                let delivery = record_event(&mut task, Some(&transition), Some(("result", Some("session"))));
+                assert_eq!(delivery.is_some(), expected, "{mode:?} {filter:?}");
+                assert_eq!(task.notification_deliveries.len(), usize::from(expected));
+                assert_eq!(task.last_execution.as_ref().unwrap().notification.as_ref().unwrap().events, vec!["execution", "done", "endCondition"]);
+                // Pure state completion must not overwrite the prior AI execution decision.
+                let snapshot = task.last_execution.clone();
+                task.notification_deliveries.clear();
+                let delivery = record_event(&mut task, Some(&transition), None);
+                let state_expected = expected && filter.as_ref().is_none_or(|events| !events.contains(&"execution"));
+                assert_eq!(delivery.is_some(), state_expected);
+                if let Some(delivery) = delivery { assert_eq!(delivery.events, vec!["done", "endCondition"]); }
+                assert_eq!(task.last_execution, snapshot);
+            }
+        }
+        let mut task = base;
+        task.notification = Some(NotificationConfig { desktop: true, events: Some(vec!["done".into()]), ..Default::default() });
+        let manual = StatusTransition { from: Some(TaskStatus::Running), to: TaskStatus::Done, at: 1,
+            actor: TransitionActor::User, source: Some(TransitionSource::Ui), message: None };
+        assert_eq!(record_event(&mut task, Some(&manual), None).unwrap().events, vec!["done"]);
+        assert!(record_event(&mut task, None, Some(("ordinary recurring result", Some("session")))).is_none());
+        task.notification.as_mut().unwrap().events = Some(vec!["blocked".into()]);
+        let blocked = StatusTransition { to: TaskStatus::Blocked, source: Some(TransitionSource::Scheduler), ..manual };
+        assert_eq!(record_event(&mut task, Some(&blocked), Some(("failed", Some("session")))).unwrap().events, vec!["execution", "blocked"]);
+    }
+
+    #[tokio::test]
+    async fn notification_decision_is_durable_and_independent_of_current_policy() {
+        use notification::*;
+        ensure_test_docs_root();
+        let dir = tempdir().unwrap();
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        let store = TaskStore::new(dir.path().join("data"));
+        let mut input = sample_direct_input(&ws);
+        input.notification = Some(NotificationConfig { desktop: false, events: Some(vec![]), ..Default::default() });
+        let task = store.create_direct(input).await.unwrap();
+        store.update_status(status_input(&task.id, TaskStatus::Running, TransitionActor::User, Some(TransitionSource::Ui))).await.unwrap();
+        let completed = store.settle_execution_if_status(&task.id, None, TaskExecutionTrigger::Scheduled,
+            TaskStatus::Running, successful_settlement(), Some(TaskExecutionTerminalTransition {
+                status: TaskStatus::Done, message: "completed".into(), source: TransitionSource::EndCondition,
+            })).await.unwrap().unwrap();
+        let decision = completed.last_execution.as_ref().unwrap().notification.clone().unwrap();
+        assert_eq!(decision.reason, DecisionReason::NotSubscribed);
+        assert!(decision.delivery_id.is_none());
+        assert!(completed.notification_deliveries.is_empty());
+        let edited = store.update(serde_json::from_value(serde_json::json!({
+            "id":task.id, "notificationPatch":{"version":1,"events":["execution"]}
+        })).unwrap()).await.unwrap();
+        assert_eq!(edited.last_execution.as_ref().unwrap().notification.as_ref(), Some(&decision));
+        let reloaded = TaskStore::new(dir.path().join("data")).get(&task.id).await.unwrap();
+        assert_eq!(reloaded.last_execution.as_ref().unwrap().notification.as_ref(), Some(&decision));
+        let mut value = serde_json::to_value(&reloaded.last_execution).unwrap();
+        value.as_object_mut().unwrap().remove("notification");
+        let legacy: TaskLastExecution = serde_json::from_value(value).unwrap();
+        assert!(legacy.notification.is_none());
+
+        let mut quiet = reloaded;
+        for (desktop, internal, reason) in [
+            (false, false, DecisionReason::Disabled),
+            (true, false, DecisionReason::DesktopOnly),
+            (true, true, DecisionReason::InternalTask),
+        ] {
+            quiet.notification = Some(NotificationConfig { desktop, ..Default::default() });
+            quiet.managed_kind = internal.then(|| MANAGED_KIND_MEMORY_GARDENER.into());
+            record_event(&mut quiet, None, Some(("result", Some("session"))));
+            let decision = quiet.last_execution.as_ref().unwrap().notification.as_ref().unwrap();
+            assert_eq!(decision.reason, reason);
+            assert!(decision.delivery_id.is_none());
+            assert!(quiet.notification_deliveries.is_empty());
+        }
+    }
+
     #[tokio::test]
     async fn notification_result_commit_is_atomic_and_recovery_never_reexecutes() {
         use notification::{DeliveryState, NotificationTarget, RecentPrivate};

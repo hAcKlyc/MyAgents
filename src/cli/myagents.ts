@@ -2733,9 +2733,18 @@ function printTaskDetail(task: Record<string, unknown>): void {
   console.log(`  IM target:      ${JSON.stringify(notif?.im ?? { type: 'off' })}`);
   console.log(`  Default source: ${notif?.source ?? 'default'}`);
   if (notif?.error) console.log(`  Unavailable:    ${notif.error}`);
-  if (Array.isArray(notif?.events)) console.log(`  Events:         ${notif.events.join(', ') || '(none)'}`);
-  const destination = task.notificationDestination as { label?: string; availability?: string; reason?: string } | undefined;
+  const destination = task.notificationDestination as { label?: string; availability?: string; reason?: string; events?: string[]; executionResultsSubscribed?: boolean } | undefined;
+  const events = destination?.events ?? notif?.events;
+  if (Array.isArray(events)) console.log(`  Events:         ${events.join(', ') || '(none)'}`);
+  if (typeof destination?.executionResultsSubscribed === 'boolean') {
+    console.log(`  Every execution: ${destination.executionResultsSubscribed ? 'subscribed' : 'not subscribed'} (event filter; delivery is separate)`);
+  }
   if (destination) console.log(`  Destination:    ${destination.label} (${destination.availability})${destination.reason ? ` — ${destination.reason}` : ''}`);
+  const lastExecution = task.lastExecution as Record<string, unknown> | undefined;
+  const decision = lastExecution?.notification as { reason: string; events: string[]; subscribedEvents: string[]; deliveryId?: string } | undefined;
+  if (lastExecution) {
+    console.log(`  Last execution: ${decision ? `${decision.reason}; events=${decision.events.join(', ')}; subscribed=${decision.subscribedEvents.join(', ') || '(none)'}${decision.deliveryId ? `; delivery=${decision.deliveryId}` : ''}` : 'notification decision not recorded (older execution)'}`);
+  }
   const notifications = task.notificationDeliveries as Array<Record<string, unknown>> | undefined;
   if (notifications?.length) {
     const latest = notifications[notifications.length - 1];
@@ -6975,7 +6984,8 @@ function buildTaskEndConditions(
  *   --notificationBotChannelId <bot-id>     IM bot id (see `myagents im channels`)
  *   --notificationBotThread <chat-id>       Override bot routing thread / channel
  *   --notificationDesktop true|false        Toggle desktop notification (default true)
- *   --notificationEvents done,blocked,...   Comma-separated event filter
+ *   --notificationEvents execution,...     Optional replacement event filter;
+ *                                         omit to use the host's defaults/inheritance
  */
 function buildNotificationFromFlags(
   flags: Record<string, unknown>,
@@ -7048,7 +7058,7 @@ function buildNotificationFromFlags(
       return exitAgentCliError(flags, {
         code: 'NOTIFICATION_EVENTS_INVALID',
         error:
-          '--notificationEvents must be a comma-separated string (e.g. done,blocked,endCondition)',
+          '--notificationEvents must be a comma-separated string (e.g. execution,done,blocked,endCondition), or [] to subscribe to none. Omit it on create to use default/inherited events; omit it on update to keep existing events.',
       });
     }
     const eventsList = events === '[]' ? [] : events.split(',').map(s => s.trim()).filter(Boolean);

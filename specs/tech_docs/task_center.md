@@ -258,6 +258,14 @@ Rust `task::notification` 统一处理通知策略与 Task 内的投递记录。
 
 Node 只从内部调用当前轮次的 SessionEngine 快照生成来源上下文，丢弃调用者自报的 `notificationContext`；Management API 再校验 Sidecar 代次、父 Task、队列项与执行 Session。CLI 接入边界见 [CLI 架构](cli_architecture.md#task-通知)。
 
+事件与目标分别解析。创建时未指定 `notification.events` 则继承父 Task 本轮已确定的订阅（包括空数组）；没有可继承的订阅时使用 `notification::DEFAULT_EVENTS`，当前为 `execution,done,blocked,endCondition`，覆盖每轮成功或失败的 AI 执行结果。显式列表替换默认／继承订阅，空数组不订阅任何事件；更新时省略字段保持原值。普通委托通常省略 CLI 的 `--notificationEvents`，只在需要筛选时设置；IM 回报仍需启用目标。
+
+`execution` 是每轮 AI 执行结算，`done/blocked/stopped/verifying` 是目标状态，`endCondition` 是结束原因；状态和原因同时保留。once/scheduled 自然完成及周期任务达到结束条件的执行发布 `execution,done,endCondition`；没有 AI 执行的条件终止发布 `done,endCondition`。一次结算的多个命中事件合并为一条通知。只关心 Task 最终完成／阻塞可订阅 `done,blocked`；每轮结果订阅 `execution`。Agent-facing Skill 与 `task --help` 明确这些语义。
+
+TaskStore 在同一结算事务的 `lastExecution.notification` 保存本轮通知决策：事件、当时订阅、`reason` 和可选 `deliveryId`。原因区分 `not-subscribed/disabled/internal-task/desktop-only/delivery-recorded`；后者只表示已有持久投递记录，进度和错误仍以 `notificationDeliveries` 为准。后续状态变更或策略编辑不得改写这份执行快照；旧数据缺失时保持未知，不按当前策略重建。它只审计最近一次 AI 执行，不建立第二份历史运行或投递存储。
+
+现有 `notificationDestination` 只读投影增加有效 `events` 与 `executionResultsSubscribed`，`configured` 仍只描述目标地址。Node 的 `data.receipt.notification` 在 create/get/run/rerun 中直接转述该投影和最近执行决策；CLI human 输出区分当前订阅、历史决策和实际投递进度，不自行推算通知策略。
+
 版本 1 的 `notification.im` 使用以下互斥目标，`current` 仅为输入简写，保存前必须解析：
 
 | 目标 | 含义 |

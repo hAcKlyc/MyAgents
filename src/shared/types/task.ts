@@ -258,11 +258,18 @@ export interface TaskLastExecution {
   durationMs: number;
   sessionId?: string;
   error?: string;
+  /** Immutable notification decision at settlement; absent on older executions. */
+  notification?: {
+    events: string[];
+    subscribedEvents: string[];
+    reason: 'delivery-recorded' | 'desktop-only' | 'not-subscribed' | 'disabled' | 'internal-task';
+    deliveryId?: string;
+  };
 }
 
 /** A Task — workspace-scoped execution unit. */
 export interface Task {
-  notificationDestination?: { label: string; availability: string; reason?: string };
+  notificationDestination?: { label: string; availability: string; reason?: string; events?: string[]; executionResultsSubscribed?: boolean };
   id: string;
   name: string;
   executor: TaskExecutor;

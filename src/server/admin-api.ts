@@ -4064,9 +4064,20 @@ IM / desktop notification:
            {"type":"recent-private","scope":"channel","channelId":"…"};
            {"type":"recent-private","scope":"agent","agentId":"…"}
   --notificationDesktop true|false        Independent desktop toggle
-  --notificationEvents execution,done,blocked,endCondition  Events; [] subscribes to none
+  --notificationEvents <comma-separated events>  Optional filter; explicit lists replace the default/inherited events; [] subscribes to none
+  For ordinary delegation without a parent Task, omit --notificationEvents to receive every successful/failed AI execution result through enabled notification targets.
+  On create, omitted events inherit the parent Task execution's events (including []), or default to execution,done,blocked,endCondition when there are no events to inherit. On update, omission leaves events unchanged.
+  Events:
+    execution     Every AI execution settles, successfully or unsuccessfully, including each recurring run
+    done          Task enters done, including natural/end-condition completion and manual completion; recurring runs need not finish the Task
+    endCondition  Natural once/scheduled completion or an end condition (deadline, max executions, AI exit); may occur without an AI execution
+    blocked       Task enters blocked; an individual retryable recurring failure may only emit execution
+    stopped       Task enters stopped (not subscribed by default)
+    verifying     Task enters verifying (not subscribed by default)
+  Use execution for every AI execution result, or done,blocked for Task completion/blocking only. State and end-condition events may coexist; multiple matches in one settlement produce one notification.
   Legacy --notificationBotChannelId/--notificationBotThread remain accepted; thread was never used as an exact destination. Do not mix old and new target flags.
-  Inspect effective notification + notificationDeliveries using task get.
+  Inspect data.receipt.notification using task create-direct/get/run/rerun --json: destination.events/executionResultsSubscribed describe the current filter; configured only describes the address.
+  lastExecutionDecision records the last execution's events, subscribedEvents, reason and optional deliveryId; null means no execution decision is available (not yet executed or an older execution without a decision). not-subscribed/disabled/internal-task explain a missing IM delivery; desktop-only plans a desktop notification; delivery-recorded links to notificationDeliveries for progress (handed-off means Session admission, not IM sent).
   task notification <taskId> --deliveryId <id> --action retry|resend|cancel
   retry never repeats a sent/unknown notification; resend explicitly accepts possible duplicates. Neither reruns the business Task.
 
@@ -5994,6 +6005,9 @@ function withTaskAgentReceipt(
   const boundSession =
     task.runMode === 'single-session' ||
     task.dispatchOrigin === 'attached-session';
+  const lastExecution = task.lastExecution && typeof task.lastExecution === 'object'
+    ? task.lastExecution as Record<string, unknown>
+    : undefined;
 
   return {
     ...response,
@@ -6007,6 +6021,10 @@ function withTaskAgentReceipt(
         changed,
         nextExecutionAt,
         executionState,
+        notification: {
+          destination: task.notificationDestination ?? null,
+          lastExecutionDecision: lastExecution?.notification ?? null,
+        },
         resultAccess: {
           mode: boundSession ? 'bound-session' : 'execution-session',
           summary: boundSession

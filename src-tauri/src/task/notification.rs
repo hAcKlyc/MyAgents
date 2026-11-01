@@ -397,15 +397,48 @@ pub struct NotificationDelivery {
     pub retry_at: Option<i64>,
 }
 
-pub fn transition_event(t: &StatusTransition) -> Option<&'static str> {
-    match (t.source, t.to) {
-        (Some(TransitionSource::EndCondition), _) => Some("endCondition"),
-        (_, TaskStatus::Done) => Some("done"),
-        (_, TaskStatus::Blocked) => Some("blocked"),
-        (_, TaskStatus::Stopped) => Some("stopped"),
-        (_, TaskStatus::Verifying) => Some("verifying"),
+pub fn effective_events(policy: Option<&NotificationConfig>) -> Vec<String> {
+    policy.and_then(|p| p.events.clone())
+        .unwrap_or_else(|| DEFAULT_EVENTS.iter().map(|s| (*s).into()).collect())
+}
+
+/// State and cause are independent facts of one transition, not competing events.
+pub fn transition_events(t: &StatusTransition) -> Vec<&'static str> {
+    let mut events = Vec::new();
+    if let Some(event) = match t.to {
+        TaskStatus::Done => Some("done"),
+        TaskStatus::Blocked => Some("blocked"),
+        TaskStatus::Stopped => Some("stopped"),
+        TaskStatus::Verifying => Some("verifying"),
         _ => None,
+    } {
+        events.push(event);
     }
+    if t.source == Some(TransitionSource::EndCondition) {
+        events.push("endCondition");
+    }
+    events
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DecisionReason {
+    DeliveryRecorded,
+    DesktopOnly,
+    NotSubscribed,
+    Disabled,
+    InternalTask,
+}
+
+/// Immutable settlement evidence; delivery progress stays in notificationDeliveries.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDecision {
+    pub events: Vec<String>,
+    pub subscribed_events: Vec<String>,
+    pub reason: DecisionReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_id: Option<String>,
 }
 
 /// Called inside the original Task mutation, before its atomic persist. This
@@ -427,6 +460,29 @@ pub fn record_event(
         .clone()
         .map(migrate_legacy)
         .unwrap_or_default();
+    let subscribed = effective_events(Some(&policy));
+    let mut events = Vec::new();
+    if execution.is_some() {
+        events.push("execution".to_string());
+    }
+    if let Some(transition) = transition {
+        events.extend(transition_events(transition).into_iter().map(str::to_string));
+    }
+    let finish = |task: &mut Task, reason, delivery: Option<NotificationDelivery>| {
+        if execution.is_some() {
+            if let Some(run) = task.last_execution.as_mut() {
+                run.notification = Some(NotificationDecision {
+                    events: events.clone(),
+                    subscribed_events: subscribed.clone(),
+                    reason,
+                    delivery_id: delivery.as_ref()
+                        .filter(|_| reason == DecisionReason::DeliveryRecorded)
+                        .map(|d| d.id.clone()),
+                });
+            }
+        }
+        delivery
+    };
     if internal {
         // Keep domain-managed jobs quiet unless an existing explicit IM policy
         // opted in. Public source defaults never enter these creation paths.
@@ -435,23 +491,12 @@ pub fn record_event(
             .as_ref()
             .is_none_or(|target| matches!(target, NotificationTarget::Off))
         {
-            return None;
+            return finish(task, DecisionReason::InternalTask, None);
         }
         policy.desktop = false;
     }
-    let subscribed = policy
-        .events
-        .clone()
-        .unwrap_or_else(|| DEFAULT_EVENTS.iter().map(|s| (*s).into()).collect());
-    let mut events = Vec::new();
-    if execution.is_some() {
-        events.push("execution".to_string());
-    }
-    if let Some(event) = transition.and_then(transition_event) {
-        events.push(event.into());
-    }
     if !events.iter().any(|e| subscribed.contains(e)) {
-        return None;
+        return finish(task, DecisionReason::NotSubscribed, None);
     }
     let now = now_ms();
     let result = execution
@@ -485,7 +530,7 @@ pub fn record_event(
     );
     let mut delivery = NotificationDelivery {
         id: Uuid::new_v4().to_string(),
-        events,
+        events: events.clone(),
         policy,
         state: DeliveryState::Waiting,
         created_at: now,
@@ -510,7 +555,11 @@ pub fn record_event(
         .is_none_or(|t| matches!(t, NotificationTarget::Off))
         && delivery.policy.error.is_none()
     {
-        return Some(delivery);
+        return if delivery.policy.desktop {
+            finish(task, DecisionReason::DesktopOnly, Some(delivery))
+        } else {
+            finish(task, DecisionReason::Disabled, None)
+        };
     }
     if delivery.result.len() > MAX_TEXT_BYTES
         || task
@@ -545,7 +594,7 @@ pub fn record_event(
         }
     });
     task.notification_deliveries.push(delivery.clone());
-    Some(delivery)
+    finish(task, DecisionReason::DeliveryRecorded, Some(delivery))
 }
 
 pub fn recover(task: &mut Task) -> bool {

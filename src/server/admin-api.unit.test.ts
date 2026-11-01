@@ -1371,6 +1371,7 @@ describe('admin-api accepted task attempt analytics', () => {
       status: 'todo',
       runMode: 'new-session',
       nextExecutionAt: null,
+      notificationDestination: { label: 'Origin chat', availability: 'configured', events: ['execution', 'done', 'blocked', 'endCondition'], executionResultsSubscribed: true },
     };
     managementApiMocks.managementApi
       .mockResolvedValueOnce({ ok: true, task: persistedTask })
@@ -1394,6 +1395,7 @@ describe('admin-api accepted task attempt analytics', () => {
           status: 'todo',
           changed: true,
           resultAccess: { mode: 'execution-session' },
+          notification: { destination: persistedTask.notificationDestination, lastExecutionDecision: null },
         },
       },
     });
@@ -1405,9 +1407,24 @@ describe('admin-api accepted task attempt analytics', () => {
           taskId: 'task-receipt',
           status: 'todo',
           changed: false,
+          notification: { destination: persistedTask.notificationDestination, lastExecutionDecision: null },
         },
       },
     });
+  });
+
+  it.each(['run', 'rerun'] as const)('preserves the Rust notification policy and historical decision in %s receipts', async (operation) => {
+    const destination = { label: 'Origin chat', availability: 'configured', events: ['execution'], executionResultsSubscribed: true };
+    const decision = { events: ['execution', 'done', 'endCondition'], subscribedEvents: [], reason: 'not-subscribed' };
+    managementApiMocks.managementApi.mockResolvedValueOnce({ ok: true, changed: false, task: {
+      id: 'task-notification', status: 'running', notificationDestination: destination,
+      lastExecution: { notification: decision },
+    } });
+    const { handleTaskRun, handleTaskRerun } = await import('./admin-api');
+    const response = await (operation === 'run' ? handleTaskRun : handleTaskRerun)({ id: 'task-notification' });
+    expect(response).toMatchObject({ data: { receipt: { notification: {
+      destination, lastExecutionDecision: decision,
+    } } } });
   });
 
   it('describes Attached Task results as staying in the bound Session', async () => {
