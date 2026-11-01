@@ -58,9 +58,6 @@ function domainArray(value: unknown, name: string): readonly string[] | undefine
 
 function contentPolicy(): ConstructorParameters<typeof DshSafeHttpClient>[0] {
   return Object.freeze({
-    allowedHosts: Object.freeze([]),
-    allowedPorts: Object.freeze([80, 443]),
-    deniedHosts: Object.freeze(['metadata.google.internal']),
     maxCompressedBytes: MAX_FETCH_BYTES,
     maxCompressionRatio: 20,
     maxConcurrent: 4,

@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { DshCanonicalWebError, dshCanonicalWebTransportError } from './canonical-web-errors';
+import { dshCanonicalWebTransportError } from './canonical-web-errors';
 import {
   DshSafeHttpClient,
   DshNodeProxyHttpTransport,
@@ -17,9 +17,6 @@ import {
 } from './safe-http';
 
 const policy: DshSafeHttpPolicy = Object.freeze({
-  allowedHosts: Object.freeze([]),
-  allowedPorts: Object.freeze([80, 443]),
-  deniedHosts: Object.freeze(['metadata.google.internal']),
   maxCompressedBytes: 1024,
   maxCompressionRatio: 20,
   maxConcurrent: 2,
@@ -44,6 +41,64 @@ function publicLookup(address = '93.184.216.34') {
 }
 
 describe('DshSafeHttpClient', () => {
+  it.each(['127.0.0.1', '::1'])('reaches a real %s development server through OS localhost resolution', async host => {
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      requests.push(request.method ?? '');
+      response.end('local development');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen({ host, port: 0, ipv6Only: true }, resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing local server address');
+    const client = new DshSafeHttpClient(policy);
+    try {
+      for (const hostname of ['localhost', host === '::1' ? '[::1]' : host]) {
+        for (const method of ['GET', 'POST'] as const) {
+          const result = await client.request(`http://${hostname}:${address.port}/development`, {
+            method, signal: AbortSignal.timeout(2000),
+          });
+          expect(Buffer.from(result.bytes).toString()).toBe('local development');
+        }
+      }
+      expect(requests).toEqual(['GET', 'POST', 'GET', 'POST']);
+    } finally {
+      await client.close();
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
+  it.each([
+    ['http://localhost:3000/page', '127.0.0.1', 4],
+    ['http://[::1]:8080/page', '::1', 6],
+    ['http://service.local:9000/page', '192.168.1.2', 4],
+    ['http://service.lan:1234/page', '10.0.0.2', 4],
+    ['https://service.internal:8443/page', '198.18.2.98', 4],
+    ['http://metadata.google.internal/page', '169.254.169.254', 4],
+    ['http://service.home/page', '::ffff:127.0.0.1', 6],
+  ] as const)('admits %s for content GET and Provider POST', async (url, address, family) => {
+    const lookup = vi.fn(async () => [{ address, family }]);
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async () => raw(200, Buffer.from('local content')));
+    const client = new DshSafeHttpClient(policy, { lookup, transport: { dispatch } });
+    try {
+      for (const method of ['GET', 'POST'] as const) {
+        const result = await client.request(url, {
+          method, ...(method === 'POST' ? { body: Buffer.from('local request') } : {}),
+          signal: new AbortController().signal,
+        });
+        expect(Buffer.from(result.bytes).toString()).toBe('local content');
+      }
+      expect(dispatch).toHaveBeenCalledTimes(2);
+      for (const call of dispatch.mock.calls) expect(call[1]).toEqual({ address, family });
+      expect(lookup).toHaveBeenCalledTimes(2);
+    } finally {
+      await client.close();
+    }
+  });
+
   it('keeps frozen GET and Provider POST headers isolated through real proxy reuse, concurrency and rotation', async () => {
     const sockets = new Set<Duplex>();
     const received: Array<{ method: string; host: string; credential: string; body: string }> = [];
@@ -248,8 +303,8 @@ describe('DshSafeHttpClient', () => {
     await expect(client.request('http://127.0.0.1/', {
       method: 'GET',
       signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'unsafe_destination' });
-    expect(proxyTransport.dispatch).toHaveBeenCalledOnce();
+    })).resolves.toMatchObject({ statusCode: 200 });
+    expect(proxyTransport.dispatch).toHaveBeenCalledTimes(2);
   });
 
   it('identifies the configured proxy path when its transport cannot connect', async () => {
@@ -343,53 +398,77 @@ describe('DshSafeHttpClient', () => {
     }
   });
 
-  it('revalidates every redirect and refuses a redirect that resolves privately', async () => {
-    const dispatch = vi.fn(async () => raw(302, new Uint8Array(), {
-      location: 'http://private.example/secret',
-    }));
+  it('follows redirects to local services and pins each resolved address', async () => {
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async url => url.pathname === '/start'
+      ? raw(302, new Uint8Array(), { location: 'http://private.example:3000/final' })
+      : raw(200, Buffer.from('local page')));
     const lookup = vi.fn(async (hostname: string): Promise<readonly DshDnsAnswer[]> => (
-      hostname === 'private.example'
-        ? [{ address: '127.0.0.1', family: 4 }]
+      hostname === 'private.example' ? [{ address: '127.0.0.1', family: 4 }]
         : [{ address: '93.184.216.34', family: 4 }]
     ));
-    const client = new DshSafeHttpClient(policy, {
-      lookup,
-      transport: { dispatch } as DshSafeHttpTransport,
-    });
-
-    await expect(client.request('https://example.com/start', {
-      method: 'GET',
-      signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'unsafe_destination' } satisfies Partial<DshCanonicalWebError>);
-    expect(dispatch).toHaveBeenCalledOnce();
+    const client = new DshSafeHttpClient(policy, { lookup, transport: { dispatch } });
+    const result = await client.request('https://example.com/start', { method: 'GET', signal: new AbortController().signal });
+    expect(Buffer.from(result.bytes).toString()).toBe('local page');
+    expect(result.finalUrl).toBe('http://private.example:3000/final');
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch.mock.calls[1]?.[1]).toEqual({ address: '127.0.0.1', family: 4 });
     expect(lookup).toHaveBeenNthCalledWith(2, 'private.example', expect.any(AbortSignal));
   });
 
-  it('fails closed when any DNS answer or embedded IPv4 destination is non-public', async () => {
-    const dispatch = vi.fn();
-    const mixed = new DshSafeHttpClient(policy, {
-      lookup: vi.fn(async () => [
-        { address: '93.184.216.34', family: 4 as const },
-        { address: '10.0.0.2', family: 4 as const },
-      ]),
-      transport: { dispatch } as DshSafeHttpTransport,
-    });
-    await expect(mixed.request('https://example.com', {
-      method: 'GET',
-      signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'unsafe_destination' } satisfies Partial<DshCanonicalWebError>);
+  it('accepts mixed DNS answers, Fake-IP and IPv6 translation addresses', async () => {
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async () => raw(200));
+    for (const answers of [
+      [{ address: '93.184.216.34', family: 4 as const }, { address: '10.0.0.2', family: 4 as const }],
+      [{ address: '198.18.2.98', family: 4 as const }],
+      [{ address: '::ffff:127.0.0.1', family: 6 as const }],
+      [{ address: '64:ff9b:1::c0a8:1', family: 6 as const }],
+    ]) {
+      const lookup = vi.fn(async () => answers);
+      const client = new DshSafeHttpClient(policy, { lookup, transport: { dispatch } });
+      await expect(client.request('https://example.com', { method: 'GET', signal: new AbortController().signal }))
+        .resolves.toMatchObject({ statusCode: 200 });
+      expect(lookup).toHaveBeenCalledOnce();
+    }
+    expect(dispatch).toHaveBeenCalledTimes(4);
+  });
 
-    const embedded = new DshSafeHttpClient(policy, {
-      lookup: vi.fn(async (hostname: string) => hostname === 'ipv4only.arpa'
-        ? []
-        : [{ address: '::ffff:127.0.0.1', family: 6 as const }]),
-      transport: { dispatch } as DshSafeHttpTransport,
+  it.each(['cancellation', 'deadline'] as const)('waits for DNS settlement after %s without dispatching HTTP', async mode => {
+    const dns = Promise.withResolvers<readonly DshDnsAnswer[]>();
+    const started = Promise.withResolvers<AbortSignal>();
+    const controller = new AbortController();
+    const reason = new Error('cancel DNS');
+    let resolutions = 0;
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async () => raw(200));
+    const client = new DshSafeHttpClient({ ...policy, maxConcurrent: 1, maxQueued: 0,
+      timeoutMs: mode === 'deadline' ? 10 : policy.timeoutMs }, {
+      lookup: async (_hostname, signal) => {
+        resolutions += 1;
+        if (resolutions > 1) return [{ address: '127.0.0.1', family: 4 }];
+        started.resolve(signal);
+        return dns.promise;
+      },
+      transport: { dispatch },
     });
-    await expect(embedded.request('https://example.com', {
-      method: 'GET',
-      signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'unsafe_destination' } satisfies Partial<DshCanonicalWebError>);
-    expect(dispatch).not.toHaveBeenCalled();
+    try {
+      const pending = client.request('http://localhost:3000/', { method: 'GET', signal: controller.signal });
+      const signal = await started.promise;
+      let settled = false;
+      void pending.finally(() => { settled = true; }).catch(() => undefined);
+      const aborted = new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+      if (mode === 'cancellation') controller.abort(reason);
+      await aborted;
+      expect(settled).toBe(false);
+      await expect(client.request('http://localhost:3000/queued', { method: 'GET', signal: new AbortController().signal }))
+        .rejects.toMatchObject({ code: 'network_policy_denied' });
+      dns.resolve([{ address: '127.0.0.1', family: 4 }]);
+      if (mode === 'cancellation') await expect(pending).rejects.toBe(reason);
+      else await expect(pending).rejects.toMatchObject({ code: 'web_request_timeout' });
+      expect(dispatch).not.toHaveBeenCalled();
+      await expect(client.request('http://localhost:3000/next', { method: 'GET', signal: new AbortController().signal }))
+        .resolves.toMatchObject({ statusCode: 200 });
+    } finally {
+      await client.close();
+    }
   });
 
   it('propagates caller cancellation through the owned transport', async () => {

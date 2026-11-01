@@ -142,7 +142,7 @@ function normalizeDomain(value: string): string {
   } catch {
     throw new DshCanonicalWebError('domain_policy_invalid', 'WebSearch domain constraint is invalid');
   }
-  if (normalized !== value.toLowerCase().replace(/\.$/u, '') || normalized === 'localhost') {
+  if (normalized !== value.toLowerCase().replace(/\.$/u, '')) {
     throw new DshCanonicalWebError('domain_policy_invalid', 'WebSearch domain constraint is not canonical');
   }
   return normalized;
@@ -265,9 +265,6 @@ function parseJsonResponse(response: DshSafeHttpResponse, errorCode: 'provider_s
 
 function providerPolicy(): ConstructorParameters<typeof DshSafeHttpClient>[0] {
   return Object.freeze({
-    allowedHosts: Object.freeze([]),
-    allowedPorts: Object.freeze([443]),
-    deniedHosts: Object.freeze(['metadata.google.internal']),
     maxCompressedBytes: MAX_PROVIDER_RESPONSE_BYTES,
     maxCompressionRatio: 20,
     maxConcurrent: 4,

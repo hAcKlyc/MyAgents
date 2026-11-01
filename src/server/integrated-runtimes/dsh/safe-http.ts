@@ -1,7 +1,7 @@
-import { Resolver } from 'node:dns/promises';
+import { lookup as lookupOsHostname } from 'node:dns/promises';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { BlockList, isIP, type LookupFunction } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { ProxyAgent, request as undiciRequest } from 'undici';
 
@@ -10,9 +10,6 @@ import { DshCanonicalWebError, dshCanonicalWebTransportError } from './canonical
 export type DshDnsAnswer = Readonly<{ address: string; family: 4 | 6 }>;
 
 export type DshSafeHttpPolicy = Readonly<{
-  allowedHosts: readonly string[];
-  allowedPorts: readonly number[];
-  deniedHosts: readonly string[];
   maxCompressedBytes: number;
   maxCompressionRatio: number;
   maxConcurrent: number;
@@ -70,32 +67,7 @@ export type DshSafeHttpConfig = Readonly<{
   transport?: DshSafeHttpTransport;
 }>;
 
-type Pref64 = Readonly<{ length: 32 | 40 | 48 | 56 | 64 | 96; prefix: Uint8Array }>;
-
-const blockedAddresses = new BlockList();
-const nonGlobalIpv4 = [
-  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
-  ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
-  ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24],
-  ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
-] as const;
-for (const [network, prefix] of nonGlobalIpv4) {
-  blockedAddresses.addSubnet(network, prefix, 'ipv4');
-  blockedAddresses.addSubnet(`::ffff:${network}`, 96 + prefix, 'ipv6');
-}
-for (const [network, prefix] of [
-  ['::', 128], ['::1', 128], ['64:ff9b:1::', 48], ['100::', 64], ['2001:2::', 48],
-  ['2001:10::', 28], ['2001:20::', 28], ['2001:db8::', 32], ['3fff::', 20],
-  ['5f00::', 16], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8],
-] as const) {
-  blockedAddresses.addSubnet(network, prefix, 'ipv6');
-}
-
-function hostMatches(hostname: string, rule: string): boolean {
-  return hostname === rule || hostname.endsWith(`.${rule}`);
-}
-
-function parseSafeUrl(rawUrl: string, policy: DshSafeHttpPolicy): URL {
+function parseHttpUrl(rawUrl: string): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -108,203 +80,27 @@ function parseSafeUrl(rawUrl: string, policy: DshSafeHttpPolicy): URL {
   if (url.username || url.password) {
     throw new DshCanonicalWebError('unsafe_destination', 'Web destination must not contain credentials');
   }
-  const hostname = url.hostname.toLowerCase().replace(/\.$/u, '');
-  if (
-    !hostname
-    || hostname === 'localhost'
-    || hostname.endsWith('.localhost')
-    || hostname.endsWith('.local')
-    || hostname.endsWith('.internal')
-    || hostname.endsWith('.home')
-    || hostname.endsWith('.lan')
-    || policy.deniedHosts.some(rule => hostMatches(hostname, rule))
-    || (policy.allowedHosts.length > 0 && !policy.allowedHosts.some(rule => hostMatches(hostname, rule)))
-  ) {
-    throw new DshCanonicalWebError('unsafe_destination', 'Web destination host is denied');
-  }
-  const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
-  if (!Number.isSafeInteger(port) || !policy.allowedPorts.includes(port)) {
-    throw new DshCanonicalWebError('unsafe_destination', 'Web destination port is denied');
-  }
-  url.hostname = hostname;
   url.hash = '';
   return url;
-}
-
-function isDnsNoData(error: unknown): boolean {
-  return !!error && typeof error === 'object'
-    && ('code' in error)
-    && (error.code === 'ENODATA' || error.code === 'ENOTFOUND');
-}
-
-async function settleDnsLookups(
-  ipv4: Promise<readonly DshDnsAnswer[]>,
-  ipv6: Promise<readonly DshDnsAnswer[]>,
-): Promise<readonly DshDnsAnswer[]> {
-  const [v4, v6] = await Promise.allSettled([ipv4, ipv6]);
-  if (v4.status === 'rejected') throw v4.reason;
-  if (v6.status === 'rejected') throw v6.reason;
-  return Object.freeze([...v4.value, ...v6.value]);
 }
 
 async function systemLookup(hostname: string, signal: AbortSignal): Promise<readonly DshDnsAnswer[]> {
   signal.throwIfAborted();
   const literal = hostname.replace(/^\[|\]$/g, '');
-  const literalFamily = isIP(literal);
-  if (literalFamily === 4 || literalFamily === 6) {
-    return Object.freeze([{ address: literal, family: literalFamily }]);
-  }
-  const resolver = new Resolver();
-  const abort = (): void => resolver.cancel();
-  signal.addEventListener('abort', abort, { once: true });
-  if (signal.aborted) abort();
-  const resolve = async (family: 4 | 6): Promise<readonly DshDnsAnswer[]> => {
-    try {
-      const values = family === 4
-        ? await resolver.resolve4(hostname)
-        : await resolver.resolve6(hostname);
-      return values.map(address => Object.freeze({ address, family }));
-    } catch (error) {
-      if (isDnsNoData(error)) return [];
-      throw error;
-    }
-  };
-  try {
-    const answers = await settleDnsLookups(resolve(4), resolve(6));
-    signal.throwIfAborted();
-    return answers;
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
+  const family = isIP(literal);
+  if (family === 4 || family === 6) return Object.freeze([{ address: literal, family }]);
+  const answers = await lookupOsHostname(hostname, { all: true });
+  signal.throwIfAborted();
+  return Object.freeze(answers.map(answer => Object.freeze({ address: answer.address, family: answer.family as 4 | 6 })));
 }
 
-function ipv6Parts(address: string): readonly number[] | undefined {
-  const normalized = address.toLowerCase().split('%')[0] ?? address;
-  const sides = normalized.split('::');
-  if (sides.length > 2) return undefined;
-  const parseSide = (side: string): number[] | undefined => {
-    if (!side) return [];
-    const result: number[] = [];
-    for (const token of side.split(':')) {
-      if (token.includes('.')) {
-        const bytes = token.split('.').map(Number);
-        if (bytes.length !== 4 || bytes.some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
-          return undefined;
-        }
-        result.push(((bytes[0] ?? 0) << 8) | (bytes[1] ?? 0));
-        result.push(((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0));
-      } else {
-        if (!/^[0-9a-f]{1,4}$/u.test(token)) return undefined;
-        result.push(Number.parseInt(token, 16));
-      }
-    }
-    return result;
-  };
-  const left = parseSide(sides[0] ?? '');
-  const right = parseSide(sides[1] ?? '');
-  if (!left || !right) return undefined;
-  const missing = 8 - left.length - right.length;
-  if (missing < 0 || (sides.length === 1 && missing !== 0) || (sides.length === 2 && missing < 1)) {
-    return undefined;
-  }
-  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
-}
-
-function ipv6Bytes(parts: readonly number[]): Uint8Array {
-  const bytes = new Uint8Array(16);
-  for (let index = 0; index < 8; index += 1) {
-    const value = parts[index] ?? 0;
-    bytes[index * 2] = value >>> 8;
-    bytes[index * 2 + 1] = value & 0xff;
-  }
-  return bytes;
-}
-
-function ipv4FromBytes(bytes: Uint8Array): string {
-  return `${bytes[0] ?? 0}.${bytes[1] ?? 0}.${bytes[2] ?? 0}.${bytes[3] ?? 0}`;
-}
-
-function extractRfc6052(bytes: Uint8Array, prefixLength: Pref64['length']): Uint8Array | undefined {
-  if (prefixLength === 96) return bytes.slice(12, 16);
-  if (bytes[8] !== 0) return undefined;
-  const prefixBytes = prefixLength / 8;
-  const beforeU = 8 - prefixBytes;
-  const result = new Uint8Array(4);
-  result.set(bytes.slice(prefixBytes, 8), 0);
-  result.set(bytes.slice(9, 9 + 4 - beforeU), beforeU);
-  if (bytes.slice(9 + 4 - beforeU).some(byte => byte !== 0)) return undefined;
-  return result;
-}
-
-function discoverPref64(answers: readonly DshDnsAnswer[]): readonly Pref64[] {
-  const found = new Map<string, Pref64>();
-  for (const answer of answers) {
-    if (answer.family !== 6) continue;
-    const parts = ipv6Parts(answer.address);
-    if (!parts) continue;
-    const bytes = ipv6Bytes(parts);
-    for (const length of [32, 40, 48, 56, 64, 96] as const) {
-      const extracted = extractRfc6052(bytes, length);
-      if (!extracted) continue;
-      const ipv4 = ipv4FromBytes(extracted);
-      if (ipv4 !== '192.0.0.170' && ipv4 !== '192.0.0.171') continue;
-      const prefix = bytes.slice(0, length / 8);
-      found.set(`${length}:${Buffer.from(prefix).toString('hex')}`, { length, prefix });
-    }
-  }
-  return Object.freeze([...found.values()]);
-}
-
-function embeddedIpv4(address: string, pref64s: readonly Pref64[]): string | undefined {
-  const parts = ipv6Parts(address);
-  if (!parts) return undefined;
-  const bytes = ipv6Bytes(parts);
-  for (const pref64 of pref64s) {
-    if (!pref64.prefix.every((byte, index) => bytes[index] === byte)) continue;
-    const extracted = extractRfc6052(bytes, pref64.length);
-    if (extracted) return ipv4FromBytes(extracted);
-  }
-  const [p0, p1, p2, p3, p4, p5, p6, p7] = parts as [number, number, number, number, number, number, number, number];
-  let value: number | undefined;
-  if (
-    (p0 === 0x64 && p1 === 0xff9b && parts.slice(2, 6).every(part => part === 0))
-    || (parts.slice(0, 5).every(part => part === 0) && (p5 === 0 || p5 === 0xffff))
-    || (parts.slice(0, 4).every(part => part === 0) && p4 === 0xffff && p5 === 0)
-    || (p4 === 0 && p5 === 0x5efe)
-  ) {
-    value = p6 * 0x10000 + p7;
-  } else if (p0 === 0x2002) {
-    value = p1 * 0x10000 + p2;
-  } else if (p0 === 0x2001 && p1 === 0) {
-    value = (p6 * 0x10000 + p7) ^ 0xffffffff;
-  } else if (p0 === 0x64 && p1 === 0xff9b && p2 === 1 && (p4 >>> 8) === 0
-    && (p5 & 0xff) === 0 && p6 === 0 && p7 === 0) {
-    value = p3 * 0x10000 + ((p4 & 0xff) * 0x100) + (p5 >>> 8);
-  }
-  if (value === undefined) return undefined;
-  const normalized = value >>> 0;
-  return `${normalized >>> 24}.${(normalized >>> 16) & 0xff}.${(normalized >>> 8) & 0xff}.${normalized & 0xff}`;
-}
-
-function selectPublicAddresses(
-  answers: readonly DshDnsAnswer[],
-  pref64s: readonly Pref64[],
-): readonly DshDnsAnswer[] {
+function validateAddresses(answers: readonly DshDnsAnswer[]): readonly DshDnsAnswer[] {
   if (answers.length === 0) {
     throw new DshCanonicalWebError('unsafe_destination', 'Web destination has no DNS address');
   }
   for (const answer of answers) {
-    const normalizedAddress = answer.address.split('%')[0] ?? answer.address;
-    if (isIP(normalizedAddress) !== answer.family) {
+    if (isIP(answer.address) !== answer.family) {
       throw new DshCanonicalWebError('unsafe_destination', 'Web destination returned malformed DNS data');
-    }
-    const family = answer.family === 4 ? 'ipv4' : 'ipv6';
-    const embedded = answer.family === 6 ? embeddedIpv4(normalizedAddress, pref64s) : undefined;
-    if (
-      blockedAddresses.check(normalizedAddress, family)
-      || (embedded && blockedAddresses.check(embedded, 'ipv4'))
-    ) {
-      throw new DshCanonicalWebError('unsafe_destination', 'Web destination resolved to a non-public address');
     }
   }
   return answers;
@@ -546,7 +342,7 @@ export class DshSafeHttpClient {
     const deadline = AbortSignal.timeout(this.policy.timeoutMs);
     const signal = AbortSignal.any([request.signal, deadline]);
     try {
-      let current = parseSafeUrl(rawUrl, this.policy);
+      let current = parseHttpUrl(rawUrl);
       const redirectOrigins: string[] = [];
       for (let redirectCount = 0; ; redirectCount += 1) {
         signal.throwIfAborted();
@@ -558,11 +354,6 @@ export class DshSafeHttpClient {
           body: request.body,
         } as const;
         if (proxy) {
-          const literal = current.hostname.replace(/^\[|\]$/g, '');
-          const family = isIP(literal);
-          if (family === 4 || family === 6) {
-            selectPublicAddresses([{ address: literal, family }], []);
-          }
           try {
             response = await this.proxyTransport.dispatch(
               current,
@@ -581,13 +372,7 @@ export class DshSafeHttpClient {
             throw new DshCanonicalWebError('unsafe_destination', 'Web destination returned invalid DNS data');
           }
           signal.throwIfAborted();
-          const pref64s = answers.some(answer => answer.family === 6) && isIP(current.hostname) === 0
-            ? discoverPref64(await this.lookup('ipv4only.arpa', signal).catch((error: unknown) => {
-                if (isDnsNoData(error)) return [];
-                throw error;
-              }))
-            : [];
-          const addresses = selectPublicAddresses(answers, pref64s);
+          const addresses = validateAddresses(answers);
           let lastConnectionError: unknown;
           for (const address of addresses) {
             const attemptDeadline = addresses.length > 1 ? AbortSignal.timeout(15_000) : undefined;
@@ -614,7 +399,7 @@ export class DshSafeHttpClient {
           if (!location) {
             throw new DshCanonicalWebError('unsafe_destination', 'Web response redirect has no Location header');
           }
-          const next = parseSafeUrl(new URL(location, current).toString(), this.policy);
+          const next = parseHttpUrl(new URL(location, current).toString());
           if (next.origin !== current.origin) redirectOrigins.push(next.origin);
           current = next;
           continue;

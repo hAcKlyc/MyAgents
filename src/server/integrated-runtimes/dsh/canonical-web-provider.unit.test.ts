@@ -66,6 +66,29 @@ function providerWith(dispatch: DshSafeHttpTransport['dispatch']): DshCanonicalW
 }
 
 describe('DshCanonicalWebProvider', () => {
+  it('uses local Provider endpoints and accepts explicit localhost search domains', async () => {
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async () => json({
+      stop_reason: 'end_turn', content: [{ type: 'web_search_tool_result', content: [
+        { title: 'Local documentation', url: 'http://localhost:3000/docs', snippet: 'Local evidence' },
+      ] }],
+    }));
+    const provider = new DshCanonicalWebProvider({
+      lookup: vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }]),
+      transport: { dispatch },
+    });
+    try {
+      const result = await provider.runSearch({
+        profile: { ...anthropicProfile, baseUrl: 'http://localhost:3000' },
+        apiKey: 'synthetic-key', authType: 'api_key', query: 'Local documentation',
+        allowedDomains: ['localhost'], operationId: 'local-search', signal: new AbortController().signal,
+      });
+      expect(result.results).toEqual([expect.objectContaining({ url: 'http://localhost:3000/docs' })]);
+      expect(dispatch.mock.calls[0]?.[0].origin).toBe('http://localhost:3000');
+    } finally {
+      await provider.close();
+    }
+  });
+
   it.each(['anthropic-messages', 'openai-completions', 'openai-responses'] as const)(
     'keeps a valid WebFetch answer without usage on %s', async api => {
       const payload = {

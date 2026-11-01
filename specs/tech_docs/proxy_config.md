@@ -81,9 +81,9 @@ Provider 选中时从 overlay 构造 env，未选中时从 immutable inherited s
 
 Node generic HTTP 必须走 `fetchWithGeneralProxy()`；需要 cancellation/deadline 时走 `cancellableFetch()`。这些 helper 使用 package-pinned dispatcher，并在 baseline 改变后退休旧连接池。普通 `fetch` 不保证消费 `HTTP_PROXY`。
 
-Integrated DSH canonical Web 是另一条显式路径：`WebFetch` 使用 general 代理决策，Provider utility/WebSearch 使用 Provider scope 决策。直连时 Host 校验并 pin 全部 public DNS answer，首个地址连接失败后继续尝试其余地址；用户显式选择代理时仍执行 URL/hostname/literal-IP policy，但远端 DNS 交给该代理。这与 Claude Code/普通 CLI 的显式代理语义一致，也允许在本地 DNS 被代理软件接管或不可直达时工作。
+Integrated DSH canonical Web 是另一条显式路径：`WebFetch` 使用 general 代理决策，Provider utility/WebSearch 使用 Provider scope 决策。直连时使用 OS resolver（包含 hosts 与本地名称），校验 DNS 地址格式并 pin，首个地址连接失败后继续尝试其余地址；显式代理负责远端 DNS。Web 请求不按 hostname、端口或公网/私网/Fake-IP 地址分类设置禁令，所有权限模式一致；工具审批、HTTP(S)/无 userinfo、TLS、重定向次数和资源限制仍生效。这与 Claude Code/普通 CLI 的显式代理语义一致，也允许在本地 DNS 被代理软件接管或不可直达时工作。 OS DNS 查询不可中断：超时或取消后不再发送 HTTP，但调用与并发槽等待查询结算后才清理并返回原超时/取消原因，因此 DNS 阶段不承诺硬性返回时限。
 
-模型可见的原生 `web_fetch` 由 DSH Runtime 内的 `ProductSafeHttpClient` 执行；其代理入口是 DSH composition 安装的 general network transport，来源为 Host 创建子进程时冻结的 general 代理快照。Host 的 canonical `WebFetch` 选路不覆盖该原生工具。两条路径均保留 URL 与公网字面量 IP 检查；仅明确选中代理的域名请求由代理解析 DNS。
+模型可见的原生 `web_fetch` 由 DSH Runtime 内的 `ProductSafeHttpClient` 执行；其代理入口是 DSH composition 安装的 general network transport，来源为 Host 创建子进程时冻结的 general 代理快照。Host 的 canonical `WebFetch` 选路不覆盖该原生工具。两条路径均保留 HTTP(S) URL 与资源校验，并允许 localhost、IPv4/IPv6 私网、Fake-IP 和自定义端口；明确选中代理的请求由代理解析 DNS。
 
 Integrated DSH 的已接纳协议通过既有 `host/credential/resolve` 返回有界 `providerNetwork`，由 Runtime 的模型请求 scope 消费；代理认证 URL 仅在请求生命周期中存在，不写入 profile、Session 或日志。该策略与 `getProviderProxyEnvironment` 共用 immutable inherited baseline / app overlay 决策；不是从 general process.env 反推。后续请求可使用新设置，并发请求不互相切换全局 dispatcher。精确协议版本和交付身份以本次构建的 effective lock 与生成契约为准，构建选择见 [Integrated DSH 构建来源](build_resource_preparation.md#integrated-dsh-构建来源)。
 
