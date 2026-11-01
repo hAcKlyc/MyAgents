@@ -95,6 +95,10 @@ Provider credential 由 Host 的既有配置或认证 owner 管理，每个模�
 
 官方 DeepSeek WebSearch 经既有 canonical Host capability 调用独立 `POST https://api.deepseek.com/v1/tools/search`，不再启动辅助 Messages 模型轮次或使用 `max_uses`。每次请求携带 query、count=8、need_content=false；域约束转为搜索语法并再次过滤返回 URL，包含域约束的 query 超过官方 128 Unicode 字符上限时明确要求缩短，不静默截断。结果优先采用面向模型的 summary，引用只来自真实结构化结果；该 API 按请求计费，不产生辅助模型 token usage。凭据与 Provider 代理策略仍由当前 operation 的 profile owner 提供，失败不切换后端或绕过代理。Runtime 独立运行的 direct backend遵循相同协议；其它 Provider 的兼容服务器搜索保持各自协议。
 
+兼容搜索响应可以同时包含成功结果与失败块。Host 分别收集两者，保留真实来源及引用，在既有 `answer` 中说明部分失败；只有没有完成的搜索时才整体失败，完成但零命中仍是有效结果。智谱的已识别业务错误码（包括被 `invalid_tool_input` 包装的 1301）投影为明确原因并进入诊断；未知四位业务码保留码值，不直接回显任意服务端错误正文。Runtime 将验证过的解释和验证范围提示交给原生 `content`，由原生搜索卡片和历史回放共同展示。多查询聚合等待各查询结束，保留完成项并列出失败项；全部失败仍报错，取消或超时排空在途工作后终止，不发布迟到的部分成功。该行为需要包含原生聚合修复的 DSH handoff，单独更新 Host 不能改变旧 Runtime 的整批失败规则。
+
+已完成的搜索也不会因后续 `pause_turn` 续页的普通服务/连接失败或续页次数上限而丢失；这些情况保留已完成结果并明确标记未完成，失败请求缺少可信计量时省略总 usage。权限、资源限制及取消仍优先。解析节点、深度、字节或片段达到上限时只写固定的省略说明，未理解的结构化容器不会整包序列化进结果，避免夹带服务端错误正文。
+
 ## 6. Prompt 与扩展
 
 扩展完整快照经既有 `DshAttachmentRegistry` 发布为不可变 JSON；`extension/replace` 只传摘要引用。Runtime 在进入原有组件事务前通过 generation-scoped lease 校验大小、字节 SHA-256 与 canonical snapshot digest，并释放 lease。启动和 live replacement 共用这条路径，不能把全部技能正文重新塞进有界协议帧。协议精确版本仍由所选 handoff 决定；新的资源表示需要匹配的 Runtime。stdio 与带凭据的 remote MCP 使用 native credential owner 接受的环境变量名格式引用；启动环境与 secret 仍留在 Host reverse plane。
