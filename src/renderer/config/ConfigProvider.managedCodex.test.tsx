@@ -227,4 +227,38 @@ describe('ConfigProvider Managed Codex startup update lifecycle', () => {
             command === 'cmd_managed_codex_download'
         ))).toHaveLength(1);
     });
+    it('saves the editable proxy subset against current disk membership on supported platforms', async () => {
+        let disk: AppConfig = { ...DEFAULT_CONFIG, agents: [],
+            proxySettings: { ...PROXY_DEFAULTS, enabled: true, scope: {
+                mode: 'custom', generalRequests: false, providerIds: ['codex-sub', 'anthropic'],
+            } },
+        };
+        mocks.loadAppConfig.mockImplementation(async () => disk);
+        mocks.atomicModifyConfig.mockImplementation(async modify => {
+            disk = await modify(disk);
+            return disk;
+        });
+        function ProxyProbe() {
+            const { isLoading } = useConfigData();
+            const { patchProxySettings } = useConfigActions();
+            return <><span data-testid="proxy-loaded">{String(!isLoading)}</span>
+                <button onClick={() => void patchProxySettings({ scope: {
+                    mode: 'custom', generalRequests: true, providerIds: ['codex-sub', 'deepseek'],
+                } }, ['anthropic', 'deepseek'])}>save proxy subset</button></>;
+        }
+        const view = render(<ConfigProvider><ProxyProbe /></ConfigProvider>);
+        await waitFor(() => expect(screen.getByTestId('proxy-loaded')).toHaveTextContent('true'));
+        // The dialog captured Codex selected. A different writer deselects it
+        // and selects a currently missing provider before this save obtains the lock.
+        disk = { ...disk, proxySettings: { ...PROXY_DEFAULTS, enabled: true, port: 9001,
+            scope: { mode: 'custom', generalRequests: false, providerIds: ['antigravity-sub', 'new-hidden', 'anthropic'] },
+        } };
+        fireEvent.click(screen.getByRole('button', { name: 'save proxy subset' }));
+        await waitFor(() => expect(disk.proxySettings?.scope?.generalRequests).toBe(true));
+        expect(disk.proxySettings?.scope?.providerIds).toEqual(['antigravity-sub', 'new-hidden', 'deepseek']);
+        expect(disk.proxySettings?.port).toBe(9001);
+        view.unmount();
+    });
+
+
 });

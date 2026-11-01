@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import AsyncQuestionCard from './AsyncQuestionCard';
-import { AsyncQuestionContext, type AsyncQuestionActions } from '@/context/AsyncQuestionContext';
+import { acceptedAsyncQuestionReplies, AsyncQuestionContext, useAsyncQuestionComposerDraft, type AsyncQuestionActions } from '@/context/AsyncQuestionContext';
 
 vi.mock('@/components/Markdown', () => ({ default: ({ children }: { children: string }) => <div>{children}</div> }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -13,6 +13,58 @@ function surface(actions: Partial<AsyncQuestionActions> = {}) {
 }
 
 describe('async question interaction', () => {
+  it('hands off the reply target with the composer before a delayed failed receipt', async () => {
+    const { result } = renderHook(() => useAsyncQuestionComposerDraft('session'));
+    act(() => result.current.setDraft({ sessionId: 'session', reply, title: '去哪？' }));
+    const submitted = result.current.capture();
+    let rejectAdmission!: (error: Error) => void;
+    const admission = new Promise<boolean>((_resolve, reject) => { rejectAdmission = reject; });
+    const clearComposer = vi.fn();
+    act(() => result.current.handoff(submitted, clearComposer));
+    expect(clearComposer).toHaveBeenCalledOnce();
+    expect(result.current.target).toBeNull();
+    expect(result.current.capture()).toBeNull();
+    await act(async () => {
+      rejectAdmission(new Error('rejected'));
+      await admission.catch(() => false);
+    });
+    // A plain new query has no inherited reply identity after rejection.
+    expect(result.current.capture()).toBeNull();
+  });
+
+  it('preserves a newer draft for the same question and keeps targets Session-scoped', () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useAsyncQuestionComposerDraft(sessionId), { initialProps: { sessionId: 'first' } });
+    act(() => result.current.setDraft({ sessionId: 'first', reply, title: 'original' }));
+    const submitted = result.current.target;
+    act(() => result.current.setDraft({ sessionId: 'first', reply, title: 'new draft' }));
+    act(() => result.current.handoff(submitted));
+    expect(result.current.target?.title).toBe('new draft');
+    rerender({ sessionId: 'second' });
+    expect(result.current.capture()).toBeNull();
+  });
+
+  it('does not capture or consume an independent target when retrying an ordinary failed row', () => {
+    const { result } = renderHook(() => useAsyncQuestionComposerDraft('session'));
+    act(() => result.current.setDraft({ sessionId: 'session', reply, title: 'independent draft' }));
+    const independentDraft = result.current.target;
+    const retriedDraft = result.current.capture(undefined, 'failed-ordinary-row');
+    expect(retriedDraft).toBeNull();
+    expect(retriedDraft?.reply).toBeUndefined();
+    act(() => result.current.handoff(retriedDraft));
+    expect(result.current.target).toBe(independentDraft);
+    expect(result.current.capture(reply)).toBeNull();
+    expect(result.current.capture()).toBe(independentDraft);
+  });
+
+  it('keeps a locally failed answer retryable until canonical user acceptance', () => {
+    const local = { role: 'user' as const, asyncQuestionReply: reply, deliveryStatus: 'failed' as const };
+    const view = render(surface({ answered: acceptedAsyncQuestionReplies([local]) }));
+    expect(screen.queryByText('asyncQuestion.answered')).toBeNull();
+    expect(screen.getAllByText('asyncQuestion.compose')[0]).toBeEnabled();
+    view.rerender(surface({ answered: acceptedAsyncQuestionReplies([{ ...local, deliveryStatus: undefined }]) }));
+    expect(screen.getByText('asyncQuestion.answered')).toBeTruthy();
+  });
+
   it('sends to the same question once and separates HTTP pending, queue, and acceptance', async () => {
     let resolve!: (value: boolean) => void;
     const onReply = vi.fn(() => new Promise<boolean>(done => { resolve = done; }));

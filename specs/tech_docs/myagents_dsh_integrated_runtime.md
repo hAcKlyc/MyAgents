@@ -89,11 +89,15 @@ Provider credential 由 Host 的既有配置或认证 owner 管理，每个模�
 
 代理有两个 scope：模型请求采用 Provider policy；普通网络与 Shell 使用 Host 创建进程时冻结的 general snapshot。并发模型请求各自拥有连接池，不能切换进程全局 dispatcher。general 配置变化沿共享 config lifecycle 在 idle 边界换代，当前 turn 不被中断。
 
-原生 `web_fetch` 由 Runtime 的安全 HTTP 与内容转换链执行，包含 PDF 转换；`web_search` 消费准入的 Host 搜索 backend。Host canonical Web 工具仍有自己的 dispatcher。直连校验并 pin 公网 DNS answer；显式代理仍检查 URL、hostname 和字面量 IP，域名解析交给代理。不能把代理路径描述为本地 DNS pinning，详见 [代理配置](proxy_config.md)。
+原生 `web_fetch` 由 Runtime 的安全 HTTP 与内容转换链执行，包含 PDF 转换；`web_search` 消费准入的 Host 搜索 backend。Host canonical Web 工具仍有自己的 dispatcher。直连使用 OS resolver 并校验/pin 有效 DNS answer；显式代理负责域名解析。两边的 Web 请求均不再按 hostname、目标端口或地址类别限制 localhost、内网和 Fake-IP，所有权限模式一致；HTTP(S) URL、TLS、工具审批和资源限制各归原 owner。不能把代理路径描述为本地 DNS pinning，详见 [代理配置](proxy_config.md)。
 
 子进程环境采用 allowlist。PATH 使用应用工具入口和已发现的用户执行环境；只准入 OS、用户目录、locale、临时目录和标准 proxy 等必要变量；bundled Node 目录排在 PATH 首位。内部 CLI capability 通过专用 token 注入，Provider/MCP secret 不因继承整个 `process.env` 泄漏给 Shell。
 
 官方 DeepSeek WebSearch 经既有 canonical Host capability 调用独立 `POST https://api.deepseek.com/v1/tools/search`，不再启动辅助 Messages 模型轮次或使用 `max_uses`。每次请求携带 query、count=8、need_content=false；域约束转为搜索语法并再次过滤返回 URL，包含域约束的 query 超过官方 128 Unicode 字符上限时明确要求缩短，不静默截断。结果优先采用面向模型的 summary，引用只来自真实结构化结果；该 API 按请求计费，不产生辅助模型 token usage。凭据与 Provider 代理策略仍由当前 operation 的 profile owner 提供，失败不切换后端或绕过代理。Runtime 独立运行的 direct backend遵循相同协议；其它 Provider 的兼容服务器搜索保持各自协议。
+
+兼容搜索响应可以同时包含成功结果与失败块。Host 分别收集两者，保留真实来源及引用，在既有 `answer` 中说明部分失败；只有没有完成的搜索时才整体失败，完成但零命中仍是有效结果。智谱的已识别业务错误码（包括被 `invalid_tool_input` 包装的 1301）投影为明确原因并进入诊断；未知四位业务码保留码值，不直接回显任意服务端错误正文。Runtime 将验证过的解释和验证范围提示交给原生 `content`，由原生搜索卡片和历史回放共同展示。多查询聚合等待各查询结束，保留完成项并列出失败项；全部失败仍报错，取消或超时排空在途工作后终止，不发布迟到的部分成功。该行为需要包含原生聚合修复的 DSH handoff，单独更新 Host 不能改变旧 Runtime 的整批失败规则。
+
+已完成的搜索也不会因后续 `pause_turn` 续页的普通服务/连接失败或续页次数上限而丢失；这些情况保留已完成结果并明确标记未完成，失败请求缺少可信计量时省略总 usage。权限、资源限制及取消仍优先。解析节点、深度、字节或片段达到上限时只写固定的省略说明，未理解的结构化容器不会整包序列化进结果，避免夹带服务端错误正文。
 
 ## 6. Prompt 与扩展
 
@@ -101,7 +105,7 @@ Provider credential 由 Host 的既有配置或认证 owner 管理，每个模�
 
 产品托管浏览器在 adapter 编译前通过 Rust capability authority 投影为认证 HTTP MCP。首次启动、恢复、live replacement 与下一 Root turn 使用同一 extension owner；临时 endpoint/token 不写回产品配置，凭据轮换通过既有 generation/credential plane 生效。获取失败降级为该 MCP 的诊断，下一边界重新投影。详见 [托管浏览器的 Runtime 接入](managed_browser.md#runtime-接入与侧栏边界)。
 
-托管浏览器要求所选 DSH 产物支持 Host 声明的本地 HTTP MCP（localhost、IPv4/IPv6、内网地址与自定义端口）。旧产物的公网准入限制会返回组件失败，客户端投影不能绕过；开发集成使用已验证的本地 handoff，正式构建须选择包含上游修复的 Release，流程见 [构建资源准备](build_resource_preparation.md)。MCP 的同 origin 凭据、禁止重定向与资源释放约束仍保留；模型 WebFetch/WebSearch 的公网策略独立。
+托管浏览器要求所选 DSH 产物支持 Host 声明的本地 HTTP MCP（localhost、IPv4/IPv6、内网地址与自定义端口）。旧产物的公网准入限制会返回组件失败，客户端投影不能绕过；开发集成使用已验证的本地 handoff，正式构建须选择包含上游修复的 Release，流程见 [构建资源准备](build_resource_preparation.md)。MCP 的同 origin 凭据、禁止重定向与资源释放约束仍保留；WebFetch/WebSearch 使用同样允许本机网络目标的 HTTP 传输，各自的工具审批与请求 owner 保持独立。
 
 Host 以结构化 `systemContext` 提供 global/root contributions；DSH 的 literal-context seam 保留文本语义，不将产品提示词改写成组件摘要。主项目指令由 DSH 原生 instruction plugin 加载，每层目录按 `CLAUDE.md`、`AGENTS.override.md`、`AGENTS.md` 的优先级选择。Host 只补充其拥有的 companion/rules 内容，不重复读取原生主指令。
 

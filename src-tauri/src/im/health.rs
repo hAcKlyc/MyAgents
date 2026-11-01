@@ -16,6 +16,23 @@ use crate::{ulog_info, ulog_warn};
 /// Persist interval (seconds)
 const PERSIST_INTERVAL_SECS: u64 = 5;
 
+/// ReplySlot remains the authority for pending terminal handoffs. Project the
+/// warning from live consumers so recovery clears it without a second store,
+/// and keep transport errors/online status owned by their existing lifecycle.
+pub(crate) async fn reply_handoff_warning(consumers: &super::ImConsumers) -> Option<String> {
+    let routers: Vec<_> = consumers
+        .lock()
+        .await
+        .values()
+        .map(|consumer| Arc::clone(&consumer.reply_router))
+        .collect();
+    let mut count = 0;
+    for router in routers {
+        count += router.lock().await.pending_terminal_handoff_count();
+    }
+    (count > 0).then(|| format!("有 {} 条回复投递暂未完成，正在自动恢复。", count))
+}
+
 /// Managed health state with periodic persistence
 pub struct HealthManager {
     state: Arc<Mutex<ImHealthState>>,

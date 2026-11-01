@@ -1,12 +1,12 @@
 /**
- * WorkspaceIcon — renders an Agent workspace identity glyph (or a legacy emoji).
+ * WorkspaceIcon — renders an Agent identity glyph, portrait or legacy emoji.
  * Glyphs are inline SVG in the "Accent" style: hue-coloured line work, a 14%
  * body tint and one solid focal detail. Colour comes from `--agent-icon-<hue>`
  * tokens so light and dark Themes both keep the identity legible.
  */
 
 import { memo } from 'react';
-import { WORKSPACE_ICON_GLYPHS, resolveWorkspaceIconId, type WorkspaceIconGlyph } from '@/assets/workspace-icons';
+import { WORKSPACE_ICONS, resolveWorkspaceIconId, type WorkspaceIconGlyph } from '@/assets/workspace-icons';
 
 interface WorkspaceIconProps {
     icon?: string;
@@ -34,7 +34,22 @@ export default memo(function WorkspaceIcon({ icon, size = 24, className = '' }: 
         );
     }
 
-    const glyph: WorkspaceIconGlyph = WORKSPACE_ICON_GLYPHS[iconId];
+    const identity = WORKSPACE_ICONS[iconId];
+    if ('src' in identity) {
+        return (
+            <img
+                src={identity.src}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                width={size}
+                height={size}
+                className={`shrink-0 rounded-[25%] object-contain${className ? ` ${className}` : ''}`}
+                data-workspace-icon={iconId}
+            />
+        );
+    }
+    const glyph: WorkspaceIconGlyph = identity;
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"

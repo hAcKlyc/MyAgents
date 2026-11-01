@@ -47,6 +47,44 @@ export class DshCanonicalWebError extends Error {
   }
 }
 
+// Only project known business causes. Provider prose can contain request data,
+// credentials or instructions and must not become a tool result or log entry.
+const ZHIPU_SEARCH_CAUSES: Readonly<Record<string, string>> = Object.freeze({
+  '1113': 'account balance is insufficient',
+  '1301': 'content safety checks rejected the input or generated content',
+  '1302': 'account rate limit was reached',
+  '1305': 'the model service is overloaded',
+  '1308': 'the current usage allowance was exhausted',
+  '1309': 'the Coding Plan subscription has expired',
+  '1310': 'the weekly or monthly usage allowance was exhausted',
+  '1311': 'the subscription does not include this model',
+  '1313': 'account request frequency was restricted by the provider fair-use policy',
+});
+
+export function zhipuProviderSearchError(
+  value: Record<string, unknown>,
+  provider?: string,
+): DshCanonicalWebError | undefined {
+  if (provider !== 'zhipu' && provider !== 'zhipu-ai') return undefined;
+  const nested = value.error && typeof value.error === 'object' && !Array.isArray(value.error)
+    ? value.error as Record<string, unknown> : undefined;
+  const structuredCodes = [value.error_code, value.code, nested?.code]
+    .filter((code): code is string | number => typeof code === 'string' || typeof code === 'number')
+    .map(String);
+  let code = structuredCodes.find(candidate => /^\d{4}$/u.test(candidate));
+  // The Anthropic-compatible endpoint nests the actual business code at the
+  // end of error_message, under the otherwise misleading invalid_tool_input.
+  if (!code && value.error_code === 'invalid_tool_input' && typeof value.error_message === 'string'
+    && value.error_message.length <= 4096) {
+    const suffix = /\((\d{4})\)\s*$/u.exec(value.error_message)?.[1];
+    if (suffix) code = suffix;
+  }
+  if (!code) return undefined;
+  return new DshCanonicalWebError('provider_search_failed',
+    `Zhipu WebSearch: ${ZHIPU_SEARCH_CAUSES[code] ?? 'the provider rejected the search request'} (${code}).`,
+    { phase: 'provider_response', providerErrorCode: code });
+}
+
 export function dshCanonicalWebError(
   error: unknown,
   fallbackCode: DshCanonicalWebErrorCode,

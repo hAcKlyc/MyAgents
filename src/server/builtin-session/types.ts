@@ -93,6 +93,7 @@ export type MessageWire = {
   transcriptState?: 'streaming' | 'complete' | 'interrupted';
   messageKind?: 'diagnostic';
   sdkUuid?: string;
+  sdkInputUuid?: string;
   attachments?: MessageWireAttachment[];
   metadata?: {
     clientRequestId?: string;

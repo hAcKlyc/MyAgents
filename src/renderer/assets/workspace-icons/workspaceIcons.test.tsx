@@ -2,10 +2,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { render } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import WorkspaceIcon from '@/components/launcher/WorkspaceIcon';
+import WorkspaceIconGrid from '@/components/launcher/WorkspaceIconGrid';
 import { getSystemPresetProjectMetadata, PRESET_TEMPLATES } from '../../../shared/config-types';
 
 import {
@@ -13,9 +14,12 @@ import {
   DEFAULT_WORKSPACE_ICON,
   LEGACY_WORKSPACE_ICON_IDS,
   WORKSPACE_ICON_GLYPHS,
+  WORKSPACE_ICON_PORTRAITS,
   WORKSPACE_ICON_HUES,
   resolveWorkspaceIconId,
 } from './index';
+
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 
 // Every ID the previous Phosphor set could have written into a saved config.
 const PREVIOUS_IDS = [
@@ -65,12 +69,54 @@ describe('workspace identity icons', () => {
     expect(container).toHaveTextContent('🚀');
   });
 
+  it.each(['constructor', '__proto__', 'toString', 'future-icon'])('does not resolve unsupported ID %s via inherited properties', id => {
+    expect(resolveWorkspaceIconId(id)).toBeUndefined();
+  });
+
   it('renders legacy IDs as the mapped glyph coloured by its hue token', () => {
     const { container } = render(<WorkspaceIcon icon="moon-stars" size={20} />);
     const svg = container.querySelector('svg')!;
     expect(svg).toHaveAttribute('data-workspace-icon', 'moon');
     expect(svg).toHaveAttribute('width', '20');
     expect(svg.style.color).toBe(`var(--agent-icon-${WORKSPACE_ICON_GLYPHS.moon.hue})`);
+  });
+
+  it('renders all nine portrait IDs locally at the requested size', () => {
+    expect(Object.keys(WORKSPACE_ICON_PORTRAITS)).toHaveLength(9);
+    for (const [id, portrait] of Object.entries(WORKSPACE_ICON_PORTRAITS)) {
+      expect(resolveWorkspaceIconId(id)).toBe(id);
+      expect(ALL_WORKSPACE_ICON_IDS).toContain(id);
+      const { container, unmount } = render(<WorkspaceIcon icon={id} size={16} className="test-icon" />);
+      const img = container.querySelector('img')!;
+      expect(img).toHaveAttribute('src', portrait.src);
+      expect(img).toHaveAttribute('width', '16');
+      expect(img).toHaveAttribute('height', '16');
+      expect(img).toHaveAttribute('alt', '');
+      expect(img).toHaveClass('test-icon', 'shrink-0');
+      expect(container.querySelector('svg')).toBeNull();
+      expect(container.textContent).toBe('');
+      // Ensure the assets referenced by the registry are actually packaged,
+      // with enough resolution for the 44px detail view at 2x density.
+      const png = readFileSync(resolve(import.meta.dirname, 'portraits', portrait.src.split('/').at(-1)!));
+      expect(png.readUInt32BE(16)).toBeGreaterThanOrEqual(88);
+      expect(png.readUInt32BE(20)).toBe(png.readUInt32BE(16));
+      unmount();
+    }
+  });
+
+  it('selects portraits through the same grid and keeps the default first', () => {
+    const onSelect = vi.fn();
+    const { container, rerender } = render(<WorkspaceIconGrid value={undefined} onSelect={onSelect} />);
+    const buttons = container.querySelectorAll('button');
+    expect(buttons).toHaveLength(ALL_WORKSPACE_ICON_IDS.length);
+    expect(buttons[0].querySelector('[data-workspace-icon]')).toHaveAttribute('data-workspace-icon', DEFAULT_WORKSPACE_ICON);
+    const portraitButton = container.querySelector('button[title="companion-star"]')!;
+    fireEvent.click(portraitButton);
+    expect(onSelect).toHaveBeenLastCalledWith('companion-star');
+    rerender(<WorkspaceIconGrid value="companion-star" onSelect={onSelect} />);
+    expect(portraitButton).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(buttons[0]);
+    expect(onSelect).toHaveBeenLastCalledWith('');
   });
 
   it('defines every hue token for both color schemes', () => {

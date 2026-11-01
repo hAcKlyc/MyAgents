@@ -66,6 +66,150 @@ function providerWith(dispatch: DshSafeHttpTransport['dispatch']): DshCanonicalW
 }
 
 describe('DshCanonicalWebProvider', () => {
+  const blockedSearch = {
+    type: 'web_search_tool_result', tool_use_id: 'blocked-search',
+    content: { type: 'web_search_tool_result_error', error_code: 'invalid_tool_input',
+      error_message: 'Provider detected sensitive input or generated content. (1301)' },
+  };
+  const successfulSearch = {
+    type: 'web_search_tool_result', tool_use_id: 'successful-search',
+    content: [{ type: 'web_search_result', title: 'Verified source', url: 'https://example.com/source' }],
+  };
+
+  it.each(['failure', 'continuation-bound'] as const)('keeps completed sources when a later continuation reaches %s', async mode => {
+    let calls = 0;
+    const provider = providerWith(async () => {
+      calls += 1;
+      return calls === 1 || mode === 'continuation-bound'
+        ? json({ stop_reason: 'pause_turn', content: [successfulSearch], usage: { input_tokens: 4, output_tokens: 3 } })
+        : jsonStatus(400, { error: { code: '1301', message: 'private continuation details' } });
+    });
+    try {
+      const result = await provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'continuation-partial', signal: new AbortController().signal });
+      expect(result.results).toEqual([expect.objectContaining({ url: 'https://example.com/source' })]);
+      expect(result.answer).toContain(mode === 'failure' ? '1301' : 'continuation bounds');
+      if (mode === 'failure') expect(result.usage).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain('private continuation details');
+      expect(calls).toBeLessThanOrEqual(4);
+    } finally { await provider.close(); }
+  });
+
+  it('keeps bounded sources without forwarding an over-budget Provider error body', async () => {
+    const provider = providerWith(async () => json({ stop_reason: 'end_turn', content: [
+      { ...successfulSearch, content: [blockedSearch.content,
+        ...Array.from({ length: 1998 }, (_, index) => ({ title: 'Source', url: `https://example.com/${index}` })),
+        { ...blockedSearch.content, error_message: 'synthetic-error-secret-canary (1301)' },
+      ] },
+    ] }));
+    try {
+      const result = await provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'bounded-private-error', signal: new AbortController().signal });
+      expect(result.results).toHaveLength(100);
+      expect(result.answer).toContain('1301');
+      expect(JSON.stringify(result)).not.toContain('synthetic-error-secret-canary');
+    } finally { await provider.close(); }
+  });
+
+  it('does not return a completed source after caller cancellation during continuation', async () => {
+    const controller = new AbortController();
+    let calls = 0;
+    const provider = providerWith(async () => {
+      calls += 1;
+      if (calls === 1) return json({ stop_reason: 'pause_turn', content: [successfulSearch] });
+      controller.abort(new Error('cancel continuation'));
+      return json({ stop_reason: 'end_turn', content: [successfulSearch] });
+    });
+    try {
+      await expect(provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'continuation-cancel', signal: controller.signal }))
+        .rejects.toThrow('cancel continuation');
+    } finally { await provider.close(); }
+  });
+
+
+  it.each([false, true])('keeps successful server-search blocks alongside a Zhipu rejection (error first: %s)', async errorFirst => {
+    const provider = providerWith(async () => json({ stop_reason: 'end_turn',
+      content: errorFirst ? [blockedSearch, successfulSearch] : [successfulSearch, blockedSearch] }));
+    try {
+      const result = await provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'partial-search', signal: new AbortController().signal });
+      expect(result.results).toEqual([expect.objectContaining({ url: 'https://example.com/source' })]);
+      expect(result.citations).toEqual([{ title: 'Verified source', url: 'https://example.com/source' }]);
+      expect(result.answer).toMatch(/1301/);
+      expect(result.answer).toMatch(/input or generated content/i);
+      expect(result.answer).toMatch(/successful results/i);
+      expect(result.answer).not.toContain('Retry later');
+    } finally { await provider.close(); }
+  });
+
+  it('retains results mixed with errors inside one compatible result container', async () => {
+    const provider = providerWith(async () => json({ stop_reason: 'end_turn', content: [
+      { ...successfulSearch, content: [blockedSearch.content, ...successfulSearch.content] },
+    ] }));
+    try {
+      const result = await provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'mixed-content', signal: new AbortController().signal });
+      expect(result.results).toEqual([expect.objectContaining({ url: 'https://example.com/source' })]);
+      expect(result.answer).toContain('1301');
+    } finally { await provider.close(); }
+  });
+
+  it('reports a clear Zhipu content rejection when every server search fails', async () => {
+    const provider = providerWith(async () => json({ stop_reason: 'end_turn', content: [blockedSearch] }));
+    try {
+      await expect(provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'all-blocked', signal: new AbortController().signal }))
+        .rejects.toMatchObject({ code: 'provider_search_failed', providerErrorCode: '1301',
+          message: expect.stringMatching(/Zhipu.*input or generated content.*1301/i) });
+    } finally { await provider.close(); }
+  });
+
+  it('distinguishes a completed empty search from failed sibling server searches', async () => {
+    const provider = providerWith(async () => json({ stop_reason: 'end_turn',
+      content: [blockedSearch, { ...successfulSearch, content: [] }] }));
+    try {
+      const result = await provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+        authType: 'auth_token', query: 'fixture', operationId: 'empty-completed', signal: new AbortController().signal });
+      expect(result.results).toEqual([]);
+      expect(result.answer).toContain('1301');
+    } finally { await provider.close(); }
+  });
+
+  it.each([[400, '1301', /input or generated content/i], [429, '1302', /rate limit/i]] as const)(
+    'preserves a recognized Zhipu business cause from HTTP%s', async (status, code, reason) => {
+      const provider = providerWith(async () => jsonStatus(status, { error: { code, message: 'synthetic private provider details' } }));
+      try {
+        await expect(provider.runSearch({ profile: zhipuAnthropicProfile, apiKey: 'synthetic-key',
+          authType: 'auth_token', query: 'fixture', operationId: 'business-error', signal: new AbortController().signal }))
+          .rejects.toMatchObject({ providerErrorCode: code, message: expect.stringMatching(reason) });
+      } finally { await provider.close(); }
+    },
+  );
+
+  it('uses local Provider endpoints and accepts explicit localhost search domains', async () => {
+    const dispatch = vi.fn<DshSafeHttpTransport['dispatch']>(async () => json({
+      stop_reason: 'end_turn', content: [{ type: 'web_search_tool_result', content: [
+        { title: 'Local documentation', url: 'http://localhost:3000/docs', snippet: 'Local evidence' },
+      ] }],
+    }));
+    const provider = new DshCanonicalWebProvider({
+      lookup: vi.fn(async () => [{ address: '127.0.0.1', family: 4 as const }]),
+      transport: { dispatch },
+    });
+    try {
+      const result = await provider.runSearch({
+        profile: { ...anthropicProfile, baseUrl: 'http://localhost:3000' },
+        apiKey: 'synthetic-key', authType: 'api_key', query: 'Local documentation',
+        allowedDomains: ['localhost'], operationId: 'local-search', signal: new AbortController().signal,
+      });
+      expect(result.results).toEqual([expect.objectContaining({ url: 'http://localhost:3000/docs' })]);
+      expect(dispatch.mock.calls[0]?.[0].origin).toBe('http://localhost:3000');
+    } finally {
+      await provider.close();
+    }
+  });
+
   it.each(['anthropic-messages', 'openai-completions', 'openai-responses'] as const)(
     'keeps a valid WebFetch answer without usage on %s', async api => {
       const payload = {
@@ -569,7 +713,7 @@ describe('DshCanonicalWebProvider', () => {
       signal: new AbortController().signal,
     })).rejects.toMatchObject({
       code: 'provider_search_failed',
-      message: 'Zhipu WebSearch has no available search resource package or balance',
+      message: 'Zhipu WebSearch: account balance is insufficient (1113).',
     });
   });
 

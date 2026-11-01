@@ -6,6 +6,14 @@ const msg = (id: string, sdkUuid?: string, role: string = 'assistant'): Retracti
 const user = (id: string, sdkUuid?: string): RetractionCandidate => msg(id, sdkUuid, 'user');
 
 describe('planRetraction', () => {
+  it('preserves human inputs whose legacy anchor was incorrectly bound to a tool result', () => {
+    const messages = [user('human', 'tool-result'), msg('answer', 'refused-answer')];
+    expect(planRetraction(messages, ['tool-result', 'refused-answer']).removedMessageIds).toEqual(['answer']);
+    expect(planRetraction([user('human', 'tool-result')], ['tool-result'])).toEqual({
+      removedMessageIds: [], removedStreamingTail: false,
+    });
+  });
+
   it('removes the bubble whose sdkUuid is retracted (refused streaming tail)', () => {
     const messages = [user('1', 'u-user'), msg('2', 'u-refused')];
     const plan = planRetraction(messages, ['u-refused']);

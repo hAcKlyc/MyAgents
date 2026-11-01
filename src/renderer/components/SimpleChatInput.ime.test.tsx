@@ -65,6 +65,6 @@ describe('SimpleChatInput IME submission guard', () => {
     fireEvent.compositionEnd(textarea);
     fireEvent.click(screen.getByTitle(/发送/));
 
-    expect(onSend).toHaveBeenCalledWith('输入法提交测试', undefined);
+    expect(onSend).toHaveBeenCalledWith('输入法提交测试', undefined, undefined, undefined, expect.any(Function));
   });
 });

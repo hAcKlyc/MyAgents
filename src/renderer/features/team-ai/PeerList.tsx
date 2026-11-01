@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import { AlertIcon, PlusIcon, TeamIcon } from '@/components/icons';
+import { AlertIcon, PlusIcon } from '@/components/icons';
+import { GROUP_AVATAR_IMAGES } from '@/assets/team-avatars';
 import { ChannelPlatformIcon, getChannelPlatformLabel } from '@/components/AgentSettings/channelPlatform';
 import { formatPastRelativeTime } from '@/i18n/format';
 import type { TeamChannel, TeamPeer } from '@/../shared/teamAi';
 import { channelOffline, hasPeerName, isBusyActivity, peerLabel, peerRowKey, type PeerRow } from './model';
-
-const AVATAR_COLORS = ['#c9734f', '#5b8fd4', '#4aa37a', '#9b6bd1', '#c99a3c', '#cf5f7a', '#3f9ea6'];
+import { PEER_AVATAR_PALETTE } from './peerAvatarPalette';
 
 export function PeerAvatar({ peer, platform, size = 32 }: { peer: Pick<TeamPeer, 'name' | 'sourceId' | 'sourceType'>; platform?: string; size?: number }) {
   const badge = platform ? (
@@ -13,20 +13,29 @@ export function PeerAvatar({ peer, platform, size = 32 }: { peer: Pick<TeamPeer,
       <ChannelPlatformIcon type={platform} className="h-3.5 w-3.5" />
     </span>
   ) : null;
+  const seed = [...peer.sourceId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
   if (peer.sourceType === 'group') {
     return (
       <span className="relative flex shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--paper-inset)] text-[var(--ink-muted)]" style={{ width: size, height: size }}>
-        <TeamIcon className="h-[55%] w-[55%]" />
+        <img
+          src={GROUP_AVATAR_IMAGES[seed % GROUP_AVATAR_IMAGES.length]}
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          width={size}
+          height={size}
+          className="h-full w-full rounded-[inherit] object-cover"
+        />
         {badge}
       </span>
     );
   }
   const name = peerLabel(peer);
-  const seed = [...peer.sourceId].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const colors = PEER_AVATAR_PALETTE[seed % PEER_AVATAR_PALETTE.length];
   return (
     <span
-      className="relative flex shrink-0 items-center justify-center rounded-full font-medium text-white"
-      style={{ width: size, height: size, background: AVATAR_COLORS[seed % AVATAR_COLORS.length], fontSize: Math.round(size * 0.42) }}
+      className="relative flex shrink-0 items-center justify-center rounded-full font-medium"
+      style={{ width: size, height: size, background: colors.background, color: colors.foreground, fontSize: Math.round(size * 0.42) }}
       aria-hidden="true"
     >
       {hasPeerName(peer) ? Array.from(name).slice(-1)[0] : '?'}

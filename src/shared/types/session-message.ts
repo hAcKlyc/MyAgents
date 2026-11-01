@@ -73,6 +73,8 @@ export interface SessionMessage {
     /** Independent product diagnostic; never represents native conversation content. */
     messageKind?: 'diagnostic';
     sdkUuid?: string;  // SDK 分配的 UUID，用于 resumeSessionAt / rewindFiles
+    /** Submitted builtin input correlation. A receipt does not make it a native history anchor. */
+    sdkInputUuid?: string;
     /** Exact runtime-native root Turn represented by this terminal assistant row. */
     runtimeTurnAnchor?: RuntimeTurnAnchor;
     runtimeOperationAnchor?: RuntimeOperationAnchor;

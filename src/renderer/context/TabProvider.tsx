@@ -5809,9 +5809,9 @@ export default function TabProvider({
   }, [tabId, beginPersistedRestore]);
 
   // Send message with optional images, permission mode, and model
-  // Returns true immediately (optimistic) to clear the input without waiting for HTTP response.
-  // The actual API call runs in the background — backend may take time for provider changes,
-  // session startup, etc. but the user shouldn't be blocked.
+  // onSubmitted joins the composer handoff to the immediate local projection.
+  // The returned promise remains the backend admission receipt for callers
+  // such as startup recovery and async question replies.
   const sendMessage = useCallback(
     async (
       text: string,
@@ -5853,6 +5853,7 @@ export default function TabProvider({
       primaryContext?: import('../../shared/agentMentions').DesktopPrimaryContext,
       retryFailedMessageId?: string,
       suppliedClientRequestId?: string,
+      onSubmitted?: () => void,
     ): Promise<boolean> => {
       const trimmed = text.trim();
       if (sidecarConfigDisposition === 'pending' && (!currentSessionIdRef.current || isPendingSessionId(currentSessionIdRef.current))) return false;
@@ -5950,6 +5951,7 @@ export default function TabProvider({
         id: `pending-send-${clientRequestId}`, role: 'user', content: trimmed,
         timestamp: new Date(), metadata: { source: 'desktop', clientRequestId },
         desktopQuery: { visibleText: trimmed, primaryContext, agentMentions, requiredSystemSkill },
+        asyncQuestionReply,
         attachments: images?.map(img => ({ id: img.id, name: imageAttachmentName(img), size: imageAttachmentSize(img), mimeType: imageAttachmentMimeType(img), previewUrl: img.preview, relativePath: img.relativePath, isImage: true })),
         deliveryStatus: 'sending',
       };
@@ -5967,9 +5969,9 @@ export default function TabProvider({
         setIsLoading(true);
         setPendingDesktopMessages(previous => [...previous, pendingMessage]);
       }
+      onSubmitted?.();
 
-      // Project immediately, but retain the composer until the HTTP admission
-      // receipt. Queue admission still does not prove dispatch or persistence.
+      // Local ownership does not prove backend admission, dispatch or persistence.
       // Desktop is the ONLY caller that should trigger provider switches per-message.
       // When no providerEnv is given (subscription mode), send 'subscription' explicitly
       // so enqueueUserMessage knows this is an intentional switch, not "I don't know".

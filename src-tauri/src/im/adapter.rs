@@ -7,6 +7,15 @@
 /// mapped to String at the impl boundary).
 pub type AdapterResult<T> = Result<T, String>;
 
+/// A terminal handoff ACK is distinct from the producer's execution outcome
+/// and from the plugin's eventual platform delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplyDispatchAdmission {
+    Accepted,
+    /// The Bridge explicitly confirmed that the original dispatcher is gone.
+    DispatchMissing,
+}
+
 use super::types::{AskUserQuestionPayload, ImSourceType};
 use serde_json::Value;
 
@@ -247,7 +256,7 @@ pub trait ImStreamAdapter: ImAdapter {
         &self,
         _request_id: &str,
         _final_payloads: &Value,
-    ) -> impl std::future::Future<Output = AdapterResult<()>> + Send {
+    ) -> impl std::future::Future<Output = AdapterResult<ReplyDispatchAdmission>> + Send {
         async { Err("request-scoped reply dispatch is not supported".to_string()) }
     }
 
@@ -256,7 +265,7 @@ pub trait ImStreamAdapter: ImAdapter {
         _request_id: &str,
         _reason: &str,
         _terminal_payload: &Value,
-    ) -> impl std::future::Future<Output = AdapterResult<()>> + Send {
+    ) -> impl std::future::Future<Output = AdapterResult<ReplyDispatchAdmission>> + Send {
         async { Err("request-scoped reply dispatch is not supported".to_string()) }
     }
 

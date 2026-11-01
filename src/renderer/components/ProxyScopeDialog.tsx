@@ -4,14 +4,15 @@ import { useTranslation } from 'react-i18next';
 
 import OverlayBackdrop from '@/components/OverlayBackdrop';
 import type { Provider } from '@/config/types';
+import type { ProxyScopeSettings } from '../../shared/config-types';
 import { isRuntimeBackedProvider } from '../../shared/providerExecution';
+import { normalizeProxyScope } from '../../shared/proxyScope';
 
 interface ProxyScopeDialogProps {
   providers: Provider[];
-  initialGeneralRequests: boolean;
-  initialProviderIds: string[];
+  initialScope: ProxyScopeSettings;
   onClose: () => void;
-  onSave: (selection: { generalRequests: boolean; providerIds: string[] }) => void;
+  onSave: (scope: ProxyScopeSettings, editableProviderIds: string[]) => void;
 }
 
 function providerKindKey(provider: Provider): string {
@@ -21,34 +22,27 @@ function providerKindKey(provider: Provider): string {
 }
 
 export default function ProxyScopeDialog({
-  providers,
-  initialGeneralRequests,
-  initialProviderIds,
+  providers: configuredProviders,
+  initialScope,
   onClose,
   onSave,
 }: ProxyScopeDialogProps) {
   const { t } = useTranslation('settings');
+  // One edit owns one catalog snapshot. Background discovery/gate changes
+  // must not change which choices this open dialog displays or can commit.
+  const [providers] = useState(() => [...configuredProviders]);
   const providerIds = useMemo(() => providers.map(provider => provider.id), [providers]);
-  const [generalRequests, setGeneralRequests] = useState(initialGeneralRequests);
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
-    const allowed = new Set(providerIds);
-    const seen = new Set<string>();
-    return initialProviderIds.filter(id => {
-      if (!allowed.has(id) || seen.has(id)) return false;
-      seen.add(id);
-      return true;
-    });
-  });
+  const [scope, setScope] = useState(() => normalizeProxyScope(initialScope));
+  const generalRequests = scope.mode === 'all' || scope.generalRequests === true;
+  const selectedIds = useMemo(() => scope.mode === 'all' ? providerIds : (scope.providerIds ?? []), [scope, providerIds]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const allSelected = generalRequests && selectedIds.length === providerIds.length;
-  const selectedCount = selectedIds.length + (generalRequests ? 1 : 0);
+  const allSelected = generalRequests && providerIds.every(id => selectedSet.has(id));
+  const selectedCount = providerIds.filter(id => selectedSet.has(id)).length + (generalRequests ? 1 : 0);
 
   const toggle = (providerId: string) => {
-    setSelectedIds(prev => (
-      prev.includes(providerId)
-        ? prev.filter(id => id !== providerId)
-        : [...prev, providerId]
-    ));
+    setScope({ mode: 'custom', generalRequests, providerIds: selectedSet.has(providerId)
+      ? selectedIds.filter(id => id !== providerId)
+      : [...selectedIds, providerId] });
   };
 
   return (
@@ -80,8 +74,13 @@ export default function ProxyScopeDialog({
             <button
               type="button"
               onClick={() => {
-                setGeneralRequests(!allSelected);
-                setSelectedIds(allSelected ? [] : providerIds);
+                // Bulk actions only edit the displayed subset. Hidden IDs
+                // remain selected if the catalog changes during this dialog.
+                setScope({ mode: 'custom', generalRequests: !allSelected,
+                  providerIds: allSelected
+                    ? selectedIds.filter(id => !providerIds.includes(id))
+                    : [...new Set([...selectedIds, ...providerIds])],
+                });
               }}
               className="rounded-md border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--ink)] transition-colors hover:bg-[var(--hover-bg)] active:scale-[0.98]"
             >
@@ -95,7 +94,7 @@ export default function ProxyScopeDialog({
             type="button"
             role="checkbox"
             aria-checked={generalRequests}
-            onClick={() => setGeneralRequests(selected => !selected)}
+            onClick={() => setScope({ mode: 'custom', generalRequests: !generalRequests, providerIds: selectedIds })}
             className="flex w-full items-center gap-3 border-b border-[var(--line-subtle)] px-5 py-3 text-left transition-colors hover:bg-[var(--hover-bg)]"
           >
             <span
@@ -164,7 +163,7 @@ export default function ProxyScopeDialog({
           </button>
           <button
             type="button"
-            onClick={() => onSave({ generalRequests, providerIds: selectedIds })}
+            onClick={() => onSave(scope, providerIds)}
             className="inline-flex items-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--on-accent)] transition-transform active:scale-[0.98]"
           >
             <CheckIcon size={16} />

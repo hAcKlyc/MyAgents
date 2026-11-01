@@ -140,6 +140,14 @@ pub(crate) async fn resolve_target(
 pub(crate) fn describe_policy(
     policy: Option<&crate::task::NotificationConfig>,
 ) -> serde_json::Value {
+    let events = crate::task::notification::effective_events(policy);
+    let mut description = describe_destination(policy);
+    description["executionResultsSubscribed"] = serde_json::json!(events.iter().any(|e| e == "execution"));
+    description["events"] = serde_json::json!(events);
+    description
+}
+
+fn describe_destination(policy: Option<&crate::task::NotificationConfig>) -> serde_json::Value {
     use serde_json::json;
     let Some(policy) = policy else {
         return json!({"label":"IM off","availability":"off"});
@@ -202,4 +210,25 @@ pub(crate) fn describe_policy(
         _ => format!("{name} / recent private chat"),
     };
     json!({"label":label,"availability":"configured","deliveryMode":channel.mode})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task::NotificationConfig;
+
+    #[test]
+    fn notification_policy_projection_separates_target_and_event_filter() {
+        let default = describe_policy(None);
+        assert_eq!(default["availability"], "off");
+        assert_eq!(default["executionResultsSubscribed"], true);
+        assert_eq!(default["events"], serde_json::json!(["execution", "done", "blocked", "endCondition"]));
+        for events in [vec![], vec!["done".into()], vec!["execution".into()]] {
+            let policy = NotificationConfig { events: Some(events.clone()), ..Default::default() };
+            let projection = describe_policy(Some(&policy));
+            assert_eq!(projection["availability"], "off");
+            assert_eq!(projection["executionResultsSubscribed"], events.iter().any(|e| e == "execution"));
+            assert_eq!(projection["events"], serde_json::json!(events));
+        }
+    }
 }

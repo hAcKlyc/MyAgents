@@ -1,6 +1,6 @@
 import { TASK_ALIGNMENT_SKILL_REQUIREMENT } from "../../shared/systemSkills";
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { track } from '@/analytics';
@@ -11,8 +11,11 @@ import {
   tryClaimSessionResourceTransition,
 } from '@/utils/sessionDeletionCoordinator';
 import { useTabState } from './TabContext';
+import { acceptedAsyncQuestionReplies } from './AsyncQuestionContext';
 import type { Message } from '@/types/chat';
 import { ToastProvider } from '@/components/Toast';
+import SimpleChatInput, { type SimpleChatInputHandle } from '@/components/SimpleChatInput';
+import { ImagePreviewProvider } from '@/context/ImagePreviewContext';
 import { NATIVE_RESUME_BOUNDARY_MESSAGE } from '../../shared/nativeResumeBoundary';
 import TabProvider, {
   applySubagentLifecycleUpdate,
@@ -64,6 +67,11 @@ const tauriHarness = vi.hoisted(() => ({
   listeners: new Map<string, (event: { payload: unknown }) => void>(),
 }));
 
+const composerHarness = vi.hoisted(() => ({
+  configData: { config: {}, projects: [] },
+  fileService: { isAvailable: true, listSlashCommands: async () => [] },
+}));
+
 vi.mock('@/api/sessionHandoverClient', () => ({ newDesktopSession: tauriHarness.newDesktopSession }));
 
 vi.mock('@/api/SseConnection', () => ({
@@ -71,7 +79,11 @@ vi.mock('@/api/SseConnection', () => ({
 }));
 
 vi.mock('@/config/useConfigData', () => ({
-  useConfigData: () => ({ config: {  } }),
+  useConfigData: () => composerHarness.configData,
+}));
+
+vi.mock('@/hooks/useWorkspaceFileService', () => ({
+  useWorkspaceFileService: () => composerHarness.fileService,
 }));
 
 vi.mock('@/config/services/agentConfigService', () => ({
@@ -132,7 +144,7 @@ vi.mock('@/utils/tauriListen', () => ({
   }),
 }));
 
-function Probe() {
+function Probe({ onSubmitted }: { onSubmitted?: () => void }) {
   const {
     sessionId,
     isLoading,
@@ -193,9 +205,10 @@ function Probe() {
         runtimeTurnAnchor: message.runtimeTurnAnchor ?? null,
       })))}</output>
       <output data-testid="answer-receipt">{JSON.stringify(answerReceipt)}</output>
-      <output data-testid="question-replies">{JSON.stringify(historyMessages.flatMap(message => message.asyncQuestionReply ? [message.asyncQuestionReply] : []))}</output>
+      <output data-testid="question-replies">{JSON.stringify(acceptedAsyncQuestionReplies(historyMessages))}</output>
+      <output data-testid="retry-replies">{JSON.stringify(historyMessages.map(message => message.asyncQuestionReply ?? null))}</output>
       <output data-testid="question-queue">{JSON.stringify(queuedMessages)}</output>
-      <button type="button" onClick={() => { void sendMessage('看海', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { questionId: 'q', questionIndex: 0 }).then(setAnswerReceipt); }}>send async answer</button>
+      <button type="button" onClick={() => { void sendMessage('看海', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { questionId: 'q', questionIndex: 0 }, undefined, undefined, undefined, undefined, onSubmitted).then(setAnswerReceipt); }}>send async answer</button>
       <output data-testid="queue-ids">{JSON.stringify(queuedMessages.map(item => item.queueId))}</output>
       <output data-testid="agent-error">{agentError ?? ''}</output>
       <output data-testid="agent-error-user-message-id">{agentErrorUserMessageId ?? ''}</output>
@@ -203,7 +216,7 @@ function Probe() {
       <output data-testid="retry-restore-target-present">{JSON.stringify(retryRestoreTargetPresent)}</output>
       <button type="button" onClick={() => void sendMessage('hello', undefined, undefined, undefined, undefined, undefined, undefined, undefined, TASK_ALIGNMENT_SKILL_REQUIREMENT, undefined, undefined, { kind: 'task-discussion', input: { candidatesDir: '/data/discussion/candidates', workspaceId: 'ws', workspacePath: '/workspace', visibleUserMessage: 'hello' } }).then(setSendReceipt)}>send discussion</button>
       <output data-testid="send-receipt">{JSON.stringify(sendReceipt)}</output>
-      <button type="button" onClick={() => void sendMessage('hello').then(setSendReceipt)}>send message</button>
+      <button type="button" onClick={() => void sendMessage('hello', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, onSubmitted).then(setSendReceipt)}>send message</button>
       <button type="button" onClick={() => {
         const failed = historyMessages.find(message => message.deliveryStatus === 'failed');
         if (failed) void sendMessage('hello', undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, failed.id);
@@ -700,14 +713,72 @@ describe('TabProvider session activity ownership', () => {
     },
   );
 
+  it.each(['idle', 'running'] as const)('commits the real composer and %s message projection together with delayed admission', async state => {
+    let respond!: (response: Response) => void;
+    tauriHarness.proxyFetch.mockImplementation(() => new Promise<Response>(resolve => { respond = resolve; }));
+    const commits: { draft: string; projected: boolean }[] = [];
+    function ComposerProbe() {
+      const { sendMessage, historyMessages, queuedMessages, isLoading } = useTabState();
+      const input = useRef<SimpleChatInputHandle>(null);
+      useLayoutEffect(() => {
+        commits.push({ draft: input.current?.getCurrentValue() ?? '', projected: historyMessages.length + queuedMessages.length > 0 });
+      });
+      return <>
+        <output data-testid="submitted-query">{historyMessages[0]?.content as string ?? queuedMessages[0]?.text ?? ''}</output>
+        <SimpleChatInput ref={input} runtime="codex" value="submitted query" isLoading={isLoading}
+          onSend={(text, images, mode, context, onSubmitted) => sendMessage(text, images, mode, undefined, undefined, undefined, undefined, undefined, context?.requiredSystemSkill, undefined, context?.agentMentions, context?.primaryContext, undefined, undefined, onSubmitted)} />
+      </>;
+    }
+    render(<ToastProvider><ImagePreviewProvider><TabProvider tabId="joint-handoff" agentDir="/tmp/workspace" sessionId="pending-joint-handoff" claimSessionOpeningTransition={allowSessionOpening}><ComposerProbe /></TabProvider></ImagePreviewProvider></ToastProvider>);
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    if (state === 'running') emit('chat:status', { sessionState: state });
+    const textbox = screen.getByRole('textbox');
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    expect(screen.getByTestId('submitted-query')).toHaveTextContent('submitted query');
+    expect(textbox).toHaveValue('');
+    expect(commits.filter(commit => commit.projected).every(commit => commit.draft === '')).toBe(true);
+    fireEvent.change(textbox, { target: { value: 'submitted query' } });
+    await waitFor(() => expect(respond).toBeDefined());
+    await act(async () => respond(new Response(JSON.stringify({ success: false, error: 'rejected' }))));
+    expect(screen.getByTestId('submitted-query')).toHaveTextContent('submitted query');
+    expect(textbox).toHaveValue('submitted query');
+  });
+
+  it.each(['idle', 'starting', 'running', 'question'] as const)('hands off the draft with its local %s projection before the receipt', async state => {
+    let respond!: (response: Response) => void;
+    tauriHarness.proxyFetch.mockImplementation(() => new Promise<Response>(resolve => { respond = resolve; }));
+    const onSubmitted = vi.fn();
+    render(<TabProvider tabId="handoff" agentDir="/tmp/workspace" sessionId="pending-handoff" claimSessionOpeningTransition={allowSessionOpening}><Probe onSubmitted={onSubmitted} /></TabProvider>);
+    await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
+    if (state === 'starting' || state === 'running') emit('chat:status', { sessionState: state });
+    const question = state === 'question';
+    fireEvent.click(screen.getByRole('button', { name: question ? 'send async answer' : 'send message' }));
+    expect(onSubmitted).toHaveBeenCalledOnce();
+    if (state === 'idle') expect(readActivity().historyCount).toBe(1);
+    else expect(readQueueIds()).toEqual([expect.stringMatching(/^opt-/)]);
+    const receipt = screen.getByTestId(question ? 'answer-receipt' : 'send-receipt');
+    expect(receipt).toHaveTextContent('null');
+    await waitFor(() => expect(respond).toBeDefined());
+    await act(async () => respond(new Response(JSON.stringify({ success: false, error: 'rejected' }))));
+    expect(onSubmitted).toHaveBeenCalledOnce();
+    expect(receipt).toHaveTextContent('false');
+    expect(screen.getByTestId('history-delivery')).toHaveTextContent('failed');
+    if (question) {
+      expect(screen.getByTestId('question-replies')).toHaveTextContent('[]');
+      expect(screen.getByTestId('retry-replies')).toHaveTextContent('"questionId":"q"');
+    }
+  });
+
   it('holds attachment and sends until pending Session birth has been reconciled', async () => {
+    const onSubmitted = vi.fn();
     const props = { tabId: 'pending-birth', agentDir: '/tmp/workspace', sessionId: 'pending-birth', claimSessionOpeningTransition: allowSessionOpening };
-    const view = render(<TabProvider {...props} sidecarConfigDisposition="pending"><Probe /></TabProvider>);
+    const view = render(<TabProvider {...props} sidecarConfigDisposition="pending"><Probe onSubmitted={onSubmitted} /></TabProvider>);
     await act(async () => undefined);
     expect(sseHarness.state.eventHandler).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'send message' }));
     await waitFor(() => expect(screen.getByTestId('send-receipt')).toHaveTextContent('false'));
     expect(tauriHarness.proxyFetch).not.toHaveBeenCalled();
+    expect(onSubmitted).not.toHaveBeenCalled();
     view.rerender(<TabProvider {...props} sessionId="prepared-birth" sidecarConfigDisposition="push"><Probe /></TabProvider>);
     await waitFor(() => expect(sseHarness.state.eventHandler).not.toBeNull());
   });

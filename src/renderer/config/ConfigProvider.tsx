@@ -238,7 +238,7 @@ export interface ConfigDataValue {
 export interface ConfigActionsValue {
     updateConfig: (updates: Partial<AppConfig>) => Promise<void>;
     /** Merge-aware proxy update — see ConfigProvider for the lost-update rationale (#230). */
-    patchProxySettings: (partial: Partial<ProxySettings>) => Promise<void>;
+    patchProxySettings: (partial: Partial<ProxySettings>, editableScopeProviderIds?: readonly string[]) => Promise<void>;
     refreshConfig: () => Promise<void>;
     reload: () => Promise<void>;
     refreshProviderData: () => Promise<void>;
@@ -810,7 +810,9 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     // base and the last writer clobbering the other's field. The base layering
     // (`enabled:false` → PROXY_DEFAULTS → c.proxySettings → partial) also yields a
     // complete ProxySettings even when proxySettings was previously undefined.
-    const patchProxySettings = useCallback(async (partial: Partial<ProxySettings>) => {
+    // A scope editor supplies its editable IDs so the existing hidden-preference
+    // merge preserves the latest disk membership outside that subset.
+    const patchProxySettings = useCallback(async (partial: Partial<ProxySettings>, editableScopeProviderIds?: readonly string[]) => {
         const newConfig = await atomicModifyConfig(c => ({
             ...c,
             ...preserveHiddenProviderSettings(c, { proxySettings: {
@@ -818,7 +820,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
                 ...PROXY_DEFAULTS,
                 ...c.proxySettings,
                 ...partial,
-            } }, getPlatformHiddenProviderIds()),
+            } }, getPlatformHiddenProviderIds(), editableScopeProviderIds),
         }));
         if (acceptLocalDiskWrite()) setConfig(newConfig);
     }, [acceptLocalDiskWrite]);

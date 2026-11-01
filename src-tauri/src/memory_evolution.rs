@@ -954,6 +954,7 @@ mod tests {
             duration_ms: 1,
             session_id: None,
             error: (!success).then(|| "failed".to_string()),
+            notification: None,
         }
     }
 

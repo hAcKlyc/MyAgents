@@ -1035,6 +1035,7 @@ mod tests {
             duration_ms: 321,
             session_id: Some("session-1".to_string()),
             error: Some("provider configuration failed".to_string()),
+            notification: None,
         });
 
         let projected = task_to_cron(&source);

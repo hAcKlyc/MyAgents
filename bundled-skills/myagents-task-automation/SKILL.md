@@ -146,6 +146,20 @@ myagents task run <taskId> --json
 
 执行 Session 与通知收件人是两个独立选择。普通 Agent 和 Team AI 都默认回发起的 Channel + sessionKey；GUI 或无宿主上下文的 CLI 默认关闭 IM。创建后从 `task get` 核对最终规则、来源和可用性，不能从 prompt 中猜来源 ID。
 
+普通委托希望每轮执行结束都回报时，通常省略 `--notificationEvents` 即可：没有可继承的父 Task 事件订阅时，默认订阅 `execution,done,blocked,endCondition`，覆盖每轮成功或失败的执行结果。执行 Task 中创建后续 Task 时，省略该参数会继承父 Task 本轮已确定的事件订阅（包括空数组）；更新时省略则保持原值。IM 回报仍需通知目标已启用。
+
+只有需要筛选通知时才显式设置 `--notificationEvents`。显式列表会替换默认或继承的事件订阅；`'[]'` 关闭所有事件。同一次结算命中多个订阅只生成一条通知。
+
+| 事件 | 覆盖范围 |
+|---|---|
+| `execution` | 每轮 AI 执行结束，包含成功和失败；周期 Task 的每轮结果也在此列 |
+| `done` | Task 进入完成状态，包含自然完成、结束条件触发和手动完成；周期 Task 每轮结束不一定完成整个 Task |
+| `endCondition` | 一次性／定时 Task 自然完成，或达到截止时间、执行次数、AI 主动结束等结束条件；可能没有本轮 AI 执行 |
+| `blocked` | Task 进入阻塞状态；周期 Task 尚未达到阻塞条件的单次失败只触发 `execution` |
+| `stopped` / `verifying` | Task 进入停止／验收状态；默认未订阅，需要时显式加入 |
+
+需要每轮结果时保留默认订阅，或显式包含 `execution`；只关心整个 Task 完成或阻塞时，可显式订阅 `done,blocked`。
+
 需要覆盖默认时用 `--notificationTarget off`、`--notificationTarget current`，或 `--notificationTargetFile target.json`。文件内容例如：
 
 ```json
@@ -154,7 +168,7 @@ myagents task run <taskId> --json
 
 固定某连接最近私聊用 `{"type":"recent-private","scope":"channel","channelId":"..."}`；明确允许跨平台跟随同 Agent 最近私聊用 `{"type":"recent-private","scope":"agent","agentId":"..."}`。`current` 必须有确定来源，否则报错。`--notificationDesktop false` 只关闭桌面，`--notificationEvents '[]'` 不订阅事件；更新省略字段保持原值。
 
-Task 结果由目标聊天当前 Session 转述，自动通知遵守 `auto/tool_only`。`task get` 的 `notificationDeliveries` 是投递状态，排队不等于已发。失败用 `task notification <taskId> --deliveryId <id> --action retry` 重试回报；unknown/partial 先核对目标，只有明确接受可能重复时才 `resend`；`cancel` 取消该条回报。以上操作均不重跑 Task。改规则只影响后续产生的回报。
+Task 结果由目标聊天当前 Session 转述，自动通知遵守 `auto/tool_only`。`data.receipt.notification.destination` 提供当前有效事件及 `executionResultsSubscribed`；`configured` 只表示目标已配置。`lastExecutionDecision` 是最近一次执行结算时的通知决策，包含当时事件、订阅、原因和可选 `deliveryId`；旧执行缺失时表示未记录，不能按当前配置猜历史。`not-subscribed/disabled/internal-task` 解释为何没有 IM 投递记录；`desktop-only` 仅计划桌面通知；`delivery-recorded` 表示已生成投递记录，实际进度查 `notificationDeliveries`，`handed-off` 只代表主 Session 已接纳。失败用 `task notification <taskId> --deliveryId <id> --action retry` 重试回报；unknown/partial 先核对目标，只有明确接受可能重复时才 `resend`；`cancel` 取消该条回报。以上操作均不重跑 Task。改规则只影响后续产生的回报。
 
 ## 治理
 

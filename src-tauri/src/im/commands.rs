@@ -1380,6 +1380,7 @@ struct ChannelStatusRef {
     channel_type: ImPlatform,
     name: Option<String>,
     health: Arc<HealthManager>,
+    consumers: ImConsumers,
     router: Arc<Mutex<SessionRouter>>,
     started_at: Instant,
     bind_code: String,
@@ -1390,6 +1391,7 @@ async fn collect_channel_statuses(refs: Vec<ChannelStatusRef>) -> Vec<ChannelSta
     let mut out = Vec::with_capacity(refs.len());
     for r in refs {
         let health_state = r.health.get_state().await;
+        let delivery_warning = health::reply_handoff_warning(&r.consumers).await;
         let active_sessions = r.router.lock().await.active_sessions();
         out.push(ChannelStatus {
             channel_id: r.channel_id,
@@ -1400,7 +1402,7 @@ async fn collect_channel_statuses(refs: Vec<ChannelStatusRef>) -> Vec<ChannelSta
             uptime_seconds: r.started_at.elapsed().as_secs(),
             last_message_at: health_state.last_message_at,
             active_sessions,
-            error_message: health_state.error_message,
+            error_message: health_state.error_message.or(delivery_warning),
             restart_count: health_state.restart_count,
             buffered_messages: health_state.buffered_messages,
             bind_url: None,
@@ -1513,6 +1515,7 @@ pub async fn cmd_agent_channel_status(
                     channel_type: ch_inst.bot_instance.config.platform.clone(),
                     name: ch_inst.bot_instance.config.name.clone(),
                     health: Arc::clone(&ch_inst.bot_instance.health),
+                    consumers: Arc::clone(&ch_inst.bot_instance.im_consumers),
                     router: Arc::clone(&ch_inst.bot_instance.router),
                     started_at: ch_inst.bot_instance.started_at,
                     bind_code: ch_inst.bot_instance.bind_code.clone(),
@@ -1565,6 +1568,7 @@ pub async fn cmd_agent_status(
                     channel_type: ch_inst.bot_instance.config.platform.clone(),
                     name: ch_inst.bot_instance.config.name.clone(),
                     health: Arc::clone(&ch_inst.bot_instance.health),
+                    consumers: Arc::clone(&ch_inst.bot_instance.im_consumers),
                     router: Arc::clone(&ch_inst.bot_instance.router),
                     started_at: ch_inst.bot_instance.started_at,
                     bind_code: ch_inst.bot_instance.bind_code.clone(),
@@ -1635,6 +1639,7 @@ pub async fn cmd_all_agents_status(
                         channel_type: ch_inst.bot_instance.config.platform.clone(),
                         name: ch_inst.bot_instance.config.name.clone(),
                         health: Arc::clone(&ch_inst.bot_instance.health),
+                        consumers: Arc::clone(&ch_inst.bot_instance.im_consumers),
                         router: Arc::clone(&ch_inst.bot_instance.router),
                         started_at: ch_inst.bot_instance.started_at,
                         bind_code: ch_inst.bot_instance.bind_code.clone(),

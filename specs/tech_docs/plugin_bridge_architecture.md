@@ -225,7 +225,7 @@ Bridge 的 `dispatcher_delivery_idle` 只表示 core dispatcher queue 已 drain�
 
 一旦 Bridge 注册 pending dispatcher，Rust 就必须为该 request 产生且仅产生一个 terminal：进入模型的请求由 Sidecar outcome 完成；命令、白名单拒绝、群聊 activation 拒绝等 admission 分支用空 `complete` 或带提示的 `abort` 收口。协议请求不能落入磁盘 buffer，也不能只发送普通 `/send-text` 后悬空 dispatcher。
 
-Bridge 对 complete/abort 保存独立接纳回执（最多 1,000 条、6 小时）；相同 terminal 重复提交返回相同语义 ACK，冲突 terminal 拒绝，不重复调用 renderer。Rust 只对这些幂等 terminal 在 transport/5xx 不确定时进行最多三次有界交接，start/partial 和模型 enqueue 不套用重试。
+Bridge 对 complete/abort 保存独立接纳回执（最多 1,000 条、6 小时）；相同 terminal 重复提交返回相同语义 ACK，冲突 terminal 拒绝，不重复调用 renderer。Rust 只对这些幂等 terminal 在 transport/5xx 不确定时，每轮进行最多三次有界交接；耗尽后保留原 ReplySlot 终态，在既有 consumer 核对周期重新交接。已观察终态不再查询 producer 的易过期回执，start/partial 和模型 enqueue 不套用重试。接纳回执与 AI 执行结果、平台发送结果分别归各自 owner；结构化 `protocol_dispatch_missing` 才能确认原 renderer 已消失并以 delivery unknown 释放责任，普通 404 或网络错误不能作此推断。
 
 producer terminal 被接纳后，若 renderer callback 超过 5 分钟仍不返回，pending transport 清除后续待调用操作并以 `deliveryOutcome: unknown` 释放自己的完成义务。此 deadline 不是模型执行上限，也不表示任意插件 Promise 或已发出的平台 I/O 被取消；插件自身的 finally/平台收尾仍由插件拥有。dispatcher idle 的等待同样有界；外层 `withReplyDispatcher` 沿用已返回的 unknown 结果，继续 markComplete/onSettled，不再次进入同一个无期限等待。后续输入已在 admission 边界独立放行，不依赖这类不可合作 renderer 的结束。
 

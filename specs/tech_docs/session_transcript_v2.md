@@ -80,7 +80,9 @@ REST 返回同一 revision 的历史、live overlay 与保存状态。恢复刷�
 
 V2 用户正文只由 canonical `message-create` / 内容操作建立；较早的 live-user-echo 只投影受理状态，不能成为正文基线。若首次连接尚未识别 V2、legacy 回声已显示同 ID，canonical 创建仍接管正文。前端本地附件预览在用户创建时合并，晚到回声不能丢掉预览；不要用显示层 offset 去重掩盖两种基线混用。SSE 建连不再全量重放冷历史；`getStreamReplaySnapshot({ includeHistory: false })` 不复制历史正文，只捕获状态、live row 和 `snapshotRevision`。`chat:init` 携带该 revision：与已采用基线一致时继续增量，否则通过既有 REST restore/fence 恢复分页历史，即使后端已 idle、没有后续事件也能发现缺口。新会话的首次实时输出仍立即显示；其后重连走同一分页恢复。若 reconnect 先于 pending→real identity 接纳，`chat:system-init` 携带同一快照的 Session/revision，在 App 接受出生身份后才恢复。内部需要完整 replay 的读取调用保持默认行为，磁盘格式不变。
 
-Desktop 接纳本地发送后，TabProvider 立即投影用户气泡与 loading；执行中的插话沿用立即显示的 queue pill。尚未收到后台接纳时不等待 HTTP、Runtime 启动或 SSE。请求中的 `clientRequestId` 由既有 SessionEngine 路径带入服务端用户消息 metadata，前端按该身份接替临时气泡，不能按正文或附件名称匹配。临时正文只用于显示，不写入 canonical history ref；canonical 创建的空正文与后续 offset 仍由 V2 操作维护。发送失败保留带失败标记的临时气泡，停止本次等待；临时 ID 不提供 native rewind。错误提示的显式重发对本地失败消息走普通发送并替换该失败投影，不调用依赖 native history anchor 的 retry；正式消息仍走 SessionEngine retry。该投影只属于当前 Tab，Session 切换时清除，pending Session 出生时保留。
+Desktop 接纳本地发送后，TabProvider 立即投影用户气泡与 loading；执行中的插话沿用立即显示的 queue pill。尚未收到后台接纳时不等待 HTTP、Runtime 启动或 SSE。本地投影同时同步调用 `onSubmitted`，由 Composer 一次性释放本次正文、附件与上下文，使气泡/排队条上屏和清空草稿属于同一次 React 提交；本地校验或 Session authority 拒绝不触发交接。`sendMessage` 的返回 promise 仍只表示后台 admission，供启动恢复与异步问题状态使用，迟到回执不能再次清理新草稿。请求中的 `clientRequestId` 由既有 SessionEngine 路径带入服务端用户消息 metadata，前端按该身份接替临时气泡，不能按正文或附件名称匹配。临时正文只用于显示，不写入 canonical history ref；canonical 创建的空正文与后续 offset 仍由 V2 操作维护。发送失败保留带失败标记的临时气泡及完整重试上下文（包括异步问题回复身份），停止本次等待；临时 ID 不提供 native rewind。错误提示的显式重发对本地失败消息走普通发送并替换该失败投影，不调用依赖 native history anchor 的 retry；正式消息仍走 SessionEngine retry。该投影只属于当前 Tab，Session 切换时清除，pending Session 出生时保留。
+
+自行回复问题的 target 同样属于当前 Chat 草稿，由 `useAsyncQuestionComposerDraft` 在上述本地交接时消费精确快照，不能等 HTTP 再清理。问题卡片动作与失败行重发只使用它们自己携带的回复身份，不捕获或消费独立 Composer 的 target；本地失败行保留的回复身份不表示问题已经回答，answered 只从 canonical 用户行派生。
 
 Chat Tab 与桌宠复用 `transcriptDisplay`、`transcriptToolDisplay`、`liveRevisionFence` 和 toast consumer。桌宠只转换自身的 `ai`/`text` 展示形状，不另定义 V2 内容语义；连接/重连从 REST 建立 baseline，revision gap 刷新已展示范围。旧格式继续 legacy chunk 路径；复用的 Sidecar 不重新推送工作区 MCP/Agent 默认配置。
 

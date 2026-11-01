@@ -696,7 +696,7 @@ impl adapter::ImStreamAdapter for AnyAdapter {
         &self,
         request_id: &str,
         final_payloads: &serde_json::Value,
-    ) -> adapter::AdapterResult<()> {
+    ) -> adapter::AdapterResult<adapter::ReplyDispatchAdmission> {
         match self {
             Self::Telegram(a) => a.complete_reply_dispatch(request_id, final_payloads).await,
             Self::Feishu(a) => a.complete_reply_dispatch(request_id, final_payloads).await,
@@ -709,7 +709,7 @@ impl adapter::ImStreamAdapter for AnyAdapter {
         request_id: &str,
         reason: &str,
         terminal_payload: &serde_json::Value,
-    ) -> adapter::AdapterResult<()> {
+    ) -> adapter::AdapterResult<adapter::ReplyDispatchAdmission> {
         match self {
             Self::Telegram(a) => {
                 a.abort_reply_dispatch(request_id, reason, terminal_payload)

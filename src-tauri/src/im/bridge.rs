@@ -204,6 +204,20 @@ pub struct BridgeAdapter {
     commands: Vec<(String, String)>,
 }
 
+enum ReplyOperationAck {
+    Accepted(serde_json::Value),
+    DispatchMissing,
+}
+
+impl ReplyOperationAck {
+    fn terminal_admission(self) -> super::adapter::ReplyDispatchAdmission {
+        match self {
+            Self::Accepted(_) => super::adapter::ReplyDispatchAdmission::Accepted,
+            Self::DispatchMissing => super::adapter::ReplyDispatchAdmission::DispatchMissing,
+        }
+    }
+}
+
 fn registered_protocol_id(body: &serde_json::Value) -> Option<String> {
     body["pluginId"]
         .as_str()
@@ -326,11 +340,12 @@ impl BridgeAdapter {
         path: &str,
         operation: &str,
         body: &serde_json::Value,
-    ) -> AdapterResult<serde_json::Value> {
+    ) -> AdapterResult<ReplyOperationAck> {
         // Only terminal handoffs are idempotent. A transport/5xx failure is
         // unknown admission, so retry the SAME terminal; never retry a partial
         // or turn enqueue and never infer execution completion from RPC failure.
-        let attempts = if matches!(path, "/complete-dispatch" | "/abort-dispatch") {
+        let terminal = matches!(path, "/complete-dispatch" | "/abort-dispatch");
+        let attempts = if terminal {
             3
         } else {
             1
@@ -345,12 +360,22 @@ impl BridgeAdapter {
                 .await;
             match response {
                 Ok(resp) if resp.status().is_success() => {
-                    return Ok(resp.json().await.unwrap_or_default())
+                    return Ok(ReplyOperationAck::Accepted(resp.json().await.unwrap_or_default()))
                 }
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_server_error() && attempt + 1 < attempts {
                         continue;
+                    }
+                    if terminal && status == reqwest::StatusCode::NOT_FOUND {
+                        // Only the structured request-scoped response proves
+                        // the original renderer is gone. A generic HTTP 404
+                        // (or an unreadable response) remains an unconfirmed ACK.
+                        if resp.json::<serde_json::Value>().await.ok()
+                            .is_some_and(|body| body["error"] == "protocol_dispatch_missing")
+                        {
+                            return Ok(ReplyOperationAck::DispatchMissing);
+                        }
                     }
                     return Err(format!("Bridge {} rejected status={}", operation, status));
                 }
@@ -1138,9 +1163,11 @@ impl ImStreamAdapter for BridgeAdapter {
             "chatId": chat_id,
             "initialContent": initial_text,
         });
-        let resp_body = self
+        let ReplyOperationAck::Accepted(resp_body) = self
             .post_reply_operation("/start-stream", "start-stream", &body)
-            .await?;
+            .await? else {
+                return Err("Bridge start-stream dispatcher missing".to_string());
+            };
         Ok(resp_body["streamId"].as_str().unwrap_or("").to_string())
     }
 
@@ -1176,7 +1203,7 @@ impl ImStreamAdapter for BridgeAdapter {
         &self,
         request_id: &str,
         final_payloads: &serde_json::Value,
-    ) -> AdapterResult<()> {
+    ) -> AdapterResult<super::adapter::ReplyDispatchAdmission> {
         self.post_reply_operation(
             "/complete-dispatch",
             "complete-dispatch",
@@ -1185,8 +1212,7 @@ impl ImStreamAdapter for BridgeAdapter {
                 "finalPayloads": final_payloads,
             }),
         )
-        .await?;
-        Ok(())
+        .await.map(ReplyOperationAck::terminal_admission)
     }
 
     async fn set_reply_delivery_mode(
@@ -1208,7 +1234,7 @@ impl ImStreamAdapter for BridgeAdapter {
         request_id: &str,
         reason: &str,
         terminal_payload: &serde_json::Value,
-    ) -> AdapterResult<()> {
+    ) -> AdapterResult<super::adapter::ReplyDispatchAdmission> {
         self.post_reply_operation(
             "/abort-dispatch",
             "abort-dispatch",
@@ -1218,8 +1244,7 @@ impl ImStreamAdapter for BridgeAdapter {
                 "terminalPayload": terminal_payload,
             }),
         )
-        .await?;
-        Ok(())
+        .await.map(ReplyOperationAck::terminal_admission)
     }
 }
 

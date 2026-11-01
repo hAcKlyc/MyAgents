@@ -116,4 +116,20 @@ describe('#513 — reset uses current MCP authority before pre-warm', () => {
       expect.objectContaining({ id: 'current', command: 'current-command' }),
     ]);
   });
+
+  it('resets from Agent defaults even when the compatibility Project selects a different server', async () => {
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      agents: [{ id: 'owner', name: 'Owner', workspacePath, mcpEnabledServers: ['agent-selected'] }],
+      mcpServers: [
+        { id: 'agent-selected', name: 'Agent', type: 'stdio', command: 'agent-command' },
+        { id: 'project-selected', name: 'Project', type: 'stdio', command: 'project-command' },
+      ],
+      mcpEnabledServers: ['agent-selected', 'project-selected'],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{
+      id: 'project', name: 'Project', path: workspacePath, agentId: 'owner', mcpEnabledServers: ['project-selected'],
+    }]);
+    await resetSession();
+    expect(getMcpServers()).toEqual([expect.objectContaining({ id: 'agent-selected', command: 'agent-command' })]);
+  });
 });

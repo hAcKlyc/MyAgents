@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import fixtures from './__fixtures__/mcpSelection.json';
-import { normalizeConfigMcpSelections, normalizeMcpSelectionField, normalizeProjectMcpSelections } from './mcpSelection';
+import { normalizeConfigMcpSelections, normalizeMcpSelectionField, normalizeProjectMcpSelections, resolveDefaultMcpSelection } from './mcpSelection';
 
 describe('persisted MCP selection compatibility', () => {
+  it('keeps Agent defaults authoritative over a stale Project mirror, including empty/missing selections', () => {
+    const project = { mcpEnabledServers: ['project-only'] };
+    expect(resolveDefaultMcpSelection({ mcpEnabledServers: ['agent-only'] }, project)).toEqual(['agent-only']);
+    expect(resolveDefaultMcpSelection({ mcpEnabledServers: [] }, project)).toEqual([]);
+    expect(resolveDefaultMcpSelection({}, project)).toEqual([]);
+    expect(resolveDefaultMcpSelection(undefined, project)).toEqual(['project-only']);
+  });
+
   for (const fixture of fixtures) {
     it(fixture.name, () => {
       const holder = structuredClone(fixture.input);

@@ -1516,6 +1516,21 @@ describe('myagents CLI Space issue contracts', () => {
     }
   });
 
+  it('shows current subscriptions separately from the last execution notification decision', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printResult('task', 'get', { success: true, data: {
+        id: 'task-notification', name: 'Task', status: 'done',
+        notificationDestination: { label: 'Origin chat', availability: 'configured', events: ['execution'], executionResultsSubscribed: true },
+        lastExecution: { notification: { events: ['execution', 'done', 'endCondition'], subscribedEvents: [], reason: 'not-subscribed' } },
+      } }, false);
+      const output = log.mock.calls.map(([line]) => String(line)).join('\n');
+      expect(output).toContain('Every execution: subscribed');
+      expect(output).toContain('Origin chat (configured)');
+      expect(output).toContain('Last execution: not-subscribed; events=execution, done, endCondition; subscribed=(none)');
+    } finally { log.mockRestore(); }
+  });
+
   it('prints Task mutation receipts with their task id and resulting status', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     try {

@@ -14,16 +14,14 @@ export const PROXY_ENV_KEYS = [
 
 export const DEFAULT_PROXY_SCOPE: ProxyScopeSettings = Object.freeze({ mode: 'all' });
 
-function cleanProviderIds(ids: unknown, visibleProviderIds?: readonly string[]): string[] {
+function cleanProviderIds(ids: unknown): string[] {
   if (!Array.isArray(ids)) return [];
-  const visible = visibleProviderIds ? new Set(visibleProviderIds) : null;
   const seen = new Set<string>();
   const result: string[] = [];
   for (const raw of ids) {
     if (typeof raw !== 'string') continue;
     const id = raw.trim();
     if (!id) continue;
-    if (visible && !visible.has(id)) continue;
     if (seen.has(id)) continue;
     seen.add(id);
     result.push(id);
@@ -31,10 +29,8 @@ function cleanProviderIds(ids: unknown, visibleProviderIds?: readonly string[]):
   return result;
 }
 
-export function normalizeProxyScope(
-  raw: unknown,
-  visibleProviderIds?: readonly string[],
-): ProxyScopeSettings {
+/** Normalize persisted intent, never membership in a runtime/display catalog. */
+export function normalizeProxyScope(raw: unknown): ProxyScopeSettings {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return DEFAULT_PROXY_SCOPE;
   }
@@ -44,7 +40,7 @@ export function normalizeProxyScope(
   }
   const hasGeneralRequests = Object.prototype.hasOwnProperty.call(scope, 'generalRequests');
   const generalRequests = hasGeneralRequests ? scope.generalRequests === true : true;
-  const providerIds = cleanProviderIds(scope.providerIds, visibleProviderIds);
+  const providerIds = cleanProviderIds(scope.providerIds);
   // Historical empty custom scopes were treated as invalid and fell back to
   // all. Once the new field is present, an empty provider list is an explicit
   // and valid selection (general-only or no app-proxy owners).
@@ -101,11 +97,8 @@ export function effectiveGeneralProxyScopeKey(
   return `myagents-proxy:general:${protocol}://${host}:${port}`;
 }
 
-export function normalizeProxySettingsScope(
-  proxySettings: ProxySettings,
-  visibleProviderIds?: readonly string[],
-): ProxySettings {
-  const scope = normalizeProxyScope(proxySettings.scope, visibleProviderIds);
+export function normalizeProxySettingsScope(proxySettings: ProxySettings): ProxySettings {
+  const scope = normalizeProxyScope(proxySettings.scope);
   return {
     ...proxySettings,
     scope,

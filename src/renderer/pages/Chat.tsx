@@ -1,17 +1,19 @@
 import { useChatWorkspaceLayout } from '@/hooks/useChatWorkspaceLayout';
+import { resolveDefaultMcpSelection } from '../../shared/mcpSelection';
 import { useChatDraftScope } from "@/hooks/useChatDraftScope";
 import type { Message } from "@/types/chat";
 import TaskDiscussionRecovery from "@/components/TaskDiscussionRecovery";
 import { desktopContextOf } from "../../shared/agentMentions";
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
 import {
+  acceptedAsyncQuestionReplies,
   AsyncQuestionContext,
+  useAsyncQuestionComposerDraft,
   type AsyncQuestionActions,
 } from '@/context/AsyncQuestionContext';
 import { AsyncQuestionComposerTarget } from '@/components/AsyncQuestionCard';
 import {
   restoreAsyncQuestionAnswerDraft,
-  sameAsyncQuestionReply,
   type AsyncQuestionReply,
 } from '../../shared/asyncUserQuestions';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
@@ -2837,8 +2839,11 @@ export default function Chat({
   // MCP state
   const [mcpServers, setMcpServers] = useState<McpServerDefinition[]>([]);
   const [globalMcpEnabled, setGlobalMcpEnabled] = useState<string[]>([]);
+  const hasMcpDefaultAgent = currentAgent !== undefined;
+  const agentMcpDefaults = currentAgent?.mcpEnabledServers;
+  const projectMcpDefaults = currentProject?.mcpEnabledServers;
   const [workspaceMcpEnabled, setWorkspaceMcpEnabled] = useState<string[]>(
-    currentAgent?.mcpEnabledServers ?? currentProject?.mcpEnabledServers ?? [],
+    resolveDefaultMcpSelection(currentAgent, currentProject),
   );
   const runtimeMcpTools = useMemo(
     () =>
@@ -3128,13 +3133,14 @@ export default function Chat({
     workspaceRefreshTrigger,
   ]);
 
-  // Sync workspace MCP to project config when it changes
+  // Future defaults follow their Agent owner until the Session freezes them.
   useEffect(() => {
     if (sessionMeta?.configSnapshotAt) return;
-    if (currentProject?.mcpEnabledServers) {
-      setWorkspaceMcpEnabled(currentProject.mcpEnabledServers);
-    }
-  }, [currentProject?.mcpEnabledServers, sessionMeta?.configSnapshotAt]);
+    setWorkspaceMcpEnabled(resolveDefaultMcpSelection(
+      hasMcpDefaultAgent ? { mcpEnabledServers: agentMcpDefaults } : undefined,
+      { mcpEnabledServers: projectMcpDefaults },
+    ));
+  }, [agentMcpDefaults, projectMcpDefaults, hasMcpDefaultAgent, sessionMeta?.configSnapshotAt]);
 
   useEffect(() => {
     if (sessionMeta?.configSnapshotAt) return;
@@ -3684,7 +3690,7 @@ export default function Chat({
       : (sessionMeta.providerId ?? currentAgent?.providerId);
     const mcp = snapshotOwnsConfig
       ? sessionMeta.mcpEnabledServers
-      : (sessionMeta.mcpEnabledServers ?? currentAgent?.mcpEnabledServers);
+      : (sessionMeta.mcpEnabledServers ?? resolveDefaultMcpSelection(currentAgent, currentProject));
     const plugins = snapshotOwnsConfig
       ? (sessionMeta.enabledPluginIds ?? [])
       : (sessionMeta.enabledPluginIds ??
@@ -3753,7 +3759,7 @@ export default function Chat({
     ) {
       setSelectedProviderId(undefined);
     }
-    if (mcp) setWorkspaceMcpEnabled(mcp);
+    setWorkspaceMcpEnabled(mcp ?? []);
     setWorkspaceEnabledPlugins(plugins);
     setWorkspaceOfficialToolEnabled(normalizeOfficialToolIds(officialTools));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- currentAgent derived from config, listening to its identity would re-fire on unrelated agent changes
@@ -4623,15 +4629,12 @@ export default function Chat({
     ? permissionMode
     : effectivePermissionMode;
 
-  const [questionDraft, setQuestionDraft] = useState<{
-    sessionId: string | null;
-    reply: AsyncQuestionReply;
-    title: string;
-  } | null>(null);
-  const questionTarget =
-    questionDraft?.sessionId === sessionId ? questionDraft : null;
-  const questionTargetRef = useRef(questionTarget);
-  questionTargetRef.current = questionTarget;
+  const {
+    target: questionTarget,
+    capture: captureQuestionDraft,
+    setDraft: setQuestionDraft,
+    handoff: handoffQuestionDraft,
+  } = useAsyncQuestionComposerDraft(sessionId);
 
   // PERFORMANCE: text is now passed from SimpleChatInput (which manages its own state)
   // This avoids re-rendering Chat on every keystroke.
@@ -4642,6 +4645,7 @@ export default function Chat({
       images?: ImageAttachment[],
       _permissionMode?: PermissionMode,
       context?: import('../../shared/agentMentions').QueryMentionContext,
+      onSubmitted?: () => void,
       explicitReply?: AsyncQuestionReply,
       retryFailedMessageId?: string,
     ): Promise<boolean | void> => {
@@ -4649,7 +4653,7 @@ export default function Chat({
         const uncertain = messagesRef.current.find(message => message.role === 'user' && message.deliveryUnconfirmed && typeof message.content === 'string' && message.content === text.trim());
         if (uncertain) { setUnconfirmedRetry(uncertain); return false; }
       }
-      const draft = explicitReply ? null : questionTargetRef.current;
+      const draft = captureQuestionDraft(explicitReply, retryFailedMessageId);
       const reply = explicitReply ?? draft?.reply;
       // Must have content and not be in stopping state
       if (
@@ -4782,7 +4786,8 @@ export default function Chat({
           // and all streaming blocks arrive live.
         }
 
-        // Keep the submitted composer until the HTTP admission receipt.
+        // Hand off the composer with the local projection; keep awaiting the
+        // real admission receipt for action results and startup recovery.
         // Use effective model/permission (runtime-aware) — not the builtin values
         const admitted = await sendMessage(
           draft?.title ? `${draft.title}\n\n${text}` : text,
@@ -4799,13 +4804,9 @@ export default function Chat({
           context?.agentMentions,
           context?.primaryContext,
           retryFailedMessageId,
+          undefined,
+          () => handoffQuestionDraft(draft, onSubmitted),
         );
-        if (admitted && reply)
-          setQuestionDraft((current) =>
-            current && sameAsyncQuestionReply(current.reply, reply)
-              ? null
-              : current,
-          );
         if (!admitted && !isAiBusy) setIsLoading(false);
         return admitted;
       } catch (error) {
@@ -4832,6 +4833,8 @@ export default function Chat({
       queuedMessages.length,
       startScheduledTask,
       sendMessage,
+      captureQuestionDraft,
+      handoffQuestionDraft,
       effectivePermissionMode,
       effectiveModel,
       reasoningEffort,
@@ -4853,15 +4856,15 @@ export default function Chat({
   handleSendMessageRef.current = handleSendMessage;
 
   const questionActions = useMemo<AsyncQuestionActions>(() => ({
-    answered: [...historyMessages, ...messages].flatMap(message => message.role === 'user' && message.asyncQuestionReply ? [message.asyncQuestionReply] : []),
+    answered: acceptedAsyncQuestionReplies([...historyMessages, ...messages]),
     queued: queuedMessages.flatMap(message => message.asyncQuestionReply ? [message.asyncQuestionReply] : []),
     disabled: isSessionLoading || !isConnected || sessionState === 'stopping',
-    onReply: async (reply, text) => (await handleSendMessageRef.current(text, undefined, undefined, undefined, reply)) === true,
+    onReply: async (reply, text) => (await handleSendMessageRef.current(text, undefined, undefined, undefined, undefined, reply)) === true,
     onCompose: (reply, title) => {
       setQuestionDraft({ sessionId, reply, title });
       inputRef.current?.focus();
     },
-  }), [historyMessages, messages, queuedMessages, isSessionLoading, isConnected, sessionState, sessionId]);
+  }), [historyMessages, messages, queuedMessages, isSessionLoading, isConnected, sessionState, sessionId, setQuestionDraft]);
 
   // Triggered from the SystemPromptsPanel empty state ("智能生成" card). Closes the
   // workspace settings overlay and dispatches `/init` to the current Tab so the user
@@ -4929,6 +4932,7 @@ export default function Chat({
     [
       cancelQueuedMessage,
       queuedMessages,
+      setQuestionDraft,
       sessionId,
       historyMessages,
       messages,
@@ -5971,8 +5975,9 @@ export default function Chat({
       message.role === 'user' && message.deliveryStatus === undefined &&
       message.metadata?.clientRequestId === userMsg.metadata?.clientRequestId)) return;
     const text = typeof userMsg.content === 'string' ? userMsg.content : '';
-    const admitted = await handleSendMessageRef.current(text, restoreMessageImages(userMsg.attachments), undefined, { agentMentions: userMsg.desktopQuery?.agentMentions, primaryContext: desktopContextOf(userMsg.desktopQuery?.primaryContext), requiredSystemSkill: userMsg.desktopQuery?.requiredSystemSkill }, undefined, userMsg.id);
-    if (admitted === true && chatInputRef.current?.getCurrentValue().trim() === text) chatInputRef.current.setValue('');
+    // This action resends the failed row, not the current composer draft.
+    // Equal text typed later is still a different draft and must be preserved.
+    await handleSendMessageRef.current(text, restoreMessageImages(userMsg.attachments), undefined, { agentMentions: userMsg.desktopQuery?.agentMentions, primaryContext: desktopContextOf(userMsg.desktopQuery?.primaryContext), requiredSystemSkill: userMsg.desktopQuery?.requiredSystemSkill }, undefined, userMsg.asyncQuestionReply, userMsg.id);
   }, []);
   const handleRetryLastUserMessage = useCallback(() => {
     const msgs = messagesRef.current;

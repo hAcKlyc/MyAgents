@@ -199,26 +199,7 @@ where
                                     }
                                     break 'inner;
                                 }
-                                let mut router_guard = router.lock().await;
-                                let outcome = router_guard
-                                    .dispatch(&bus_event, adapter.as_ref(), sidecar_port)
-                                    .await;
-                                if let Some(outcome) = outcome {
-                                    let request_id = bus_event
-                                        .get("requestId")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
-                                    let claimed = router_guard.claim_terminal_callback(&request_id);
-                                    drop(router_guard);
-                                    // The terminal callback synchronously acquires its
-                                    // model-work guard before ReplyRouter ownership is
-                                    // released, so proxy reconnect cannot observe a gap.
-                                    if claimed { on_terminal(request_id.clone(), outcome); }
-                                    let mut replies = router.lock().await;
-                                    replies.clear_interactions(&request_id).await;
-                                    replies.unregister(&request_id).await;
-                                }
+                                dispatch_event(&bus_event, &router, adapter.as_ref(), sidecar_port, &on_terminal).await;
                             }
                         }
                         Some(Err(e)) => {
@@ -298,7 +279,7 @@ where
             } else {
                 None
             };
-            if !matches!(result, Some(Ok(_))) {
+            if !matches!(result, Some(Ok(Some(_)))) {
                 ulog_warn!(
                     "[event-consumer] Interrupted reply delivery unknown requestId={}",
                     request_id
@@ -323,6 +304,29 @@ where
     })
 }
 
+async fn dispatch_event<A: ImStreamAdapter>(
+    event: &Value,
+    router: &Arc<Mutex<ReplyRouter>>,
+    adapter: &A,
+    port: u16,
+    on_terminal: &Arc<dyn Fn(String, TerminalOutcome) + Send + Sync>,
+) {
+    let mut replies = router.lock().await;
+    if let Some(outcome) = replies.dispatch(event, adapter, port).await {
+        let request_id = event["requestId"].as_str().unwrap_or("").to_string();
+        let claimed = replies.claim_terminal_callback(&request_id);
+        drop(replies);
+        // The callback acquires its model-work guard before the reply lease is
+        // released. Never call it under the router lock (also on recovery).
+        if claimed {
+            on_terminal(request_id.clone(), outcome);
+        }
+        let mut replies = router.lock().await;
+        replies.clear_interactions(&request_id).await;
+        replies.unregister(&request_id).await;
+    }
+}
+
 /// Recovery stays inside the existing consumer and request registry. The
 /// producer atomically seals truly missing IDs, fencing delayed enqueue POSTs.
 async fn reconcile_requests<A: ImStreamAdapter>(
@@ -332,10 +336,27 @@ async fn reconcile_requests<A: ImStreamAdapter>(
     adapter: &A,
     on_terminal: &Arc<dyn Fn(String, TerminalOutcome) + Send + Sync>,
 ) {
-    let (ids, settle_unknown) = {
+    let (retained, ids, settle_unknown) = {
         let replies = router.lock().await;
-        (replies.request_ids(), replies.reconcilable_request_ids())
+        let mut retained = Vec::new();
+        let mut ids = Vec::new();
+        for id in replies.request_ids() {
+            if replies.uses_idempotent_terminal(&id) {
+                if let Some(terminal) = replies.producer_terminal(&id) {
+                    retained.push(terminal.clone());
+                    continue;
+                }
+            }
+            ids.push(id);
+        }
+        (retained, ids, replies.reconcilable_request_ids())
     };
+    // A known producer terminal no longer depends on its delta ring, retained
+    // receipt TTL or even a reachable producer. Retry the original handoff
+    // inside this consumer's existing recovery cycle, outside the wait loop.
+    for event in retained {
+        dispatch_event(&event, router, adapter, port, on_terminal).await;
+    }
     for ids in ids.chunks(200) {
         let response = client
             .post(format!("http://127.0.0.1:{port}/api/im/requests"))
@@ -357,16 +378,9 @@ async fn reconcile_requests<A: ImStreamAdapter>(
             if outcome["state"] != "terminal" {
                 continue;
             }
-            let mut replies = router.lock().await;
             let mut event = outcome["event"].clone();
             event["reconciled"] = Value::Bool(true);
-            if let Some(terminal) = replies.dispatch(&event, adapter, port).await {
-                if replies.claim_terminal_callback(id) {
-                    on_terminal(id.clone(), terminal);
-                }
-                replies.clear_interactions(id).await;
-                replies.unregister(id).await;
-            }
+            dispatch_event(&event, router, adapter, port, on_terminal).await;
         }
     }
 }
@@ -397,7 +411,269 @@ async fn sleep_with_cancel(cancel: &CancelFlag, ms: u64) {
 
 #[cfg(test)]
 mod tests {
-    use super::events_url;
+    use super::*;
+    use crate::im::bridge::BridgeAdapter;
+    use crate::im::types::{ChannelDeliveryMode, ImDeliveryProtocol, ImSourceType};
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Clone, Default)]
+    struct TerminalBridge {
+        fail: Arc<AtomicBool>,
+        accept_before_failure: bool,
+        attempts: Arc<StdMutex<Vec<(String, Value)>>>,
+        accepted: Arc<StdMutex<std::collections::HashMap<String, Value>>>,
+    }
+
+    async fn terminal_bridge_request(
+        axum::extract::State(state): axum::extract::State<TerminalBridge>,
+        uri: axum::http::Uri,
+        axum::Json(body): axum::Json<Value>,
+    ) -> (axum::http::StatusCode, axum::Json<Value>) {
+        let path = uri.path();
+        if !matches!(path, "/complete-dispatch" | "/abort-dispatch") {
+            return (
+                axum::http::StatusCode::OK,
+                axum::Json(serde_json::json!({"ok":true})),
+            );
+        }
+        state
+            .attempts
+            .lock()
+            .unwrap()
+            .push((path.to_string(), body.clone()));
+        let fail = state.fail.load(Ordering::SeqCst);
+        if !fail || state.accept_before_failure {
+            let mut accepted = state.accepted.lock().unwrap();
+            let id = body["requestId"].as_str().unwrap().to_string();
+            if let Some(first) = accepted.get(&id) {
+                assert_eq!(
+                    first, &body,
+                    "terminal retries must preserve the original payload"
+                );
+            } else {
+                accepted.insert(id, body);
+            }
+        }
+        (
+            if fail {
+                axum::http::StatusCode::SERVICE_UNAVAILABLE
+            } else {
+                axum::http::StatusCode::OK
+            },
+            axum::Json(serde_json::json!({"ok":!fail})),
+        )
+    }
+
+    #[tokio::test]
+    async fn failed_terminal_handoffs_recover_without_producer_receipts_or_model_replay() {
+        for mode in [ChannelDeliveryMode::Auto, ChannelDeliveryMode::ToolOnly] {
+            for terminal in ["complete", "error", "cancelled"] {
+                for payloads in [
+                    serde_json::json!([]),
+                    serde_json::json!([{"text":"original answer"}]),
+                ] {
+                    let state = TerminalBridge::default();
+                    state.fail.store(true, Ordering::SeqCst);
+                    let server = axum::Router::new()
+                        .route("/{*path}", axum::routing::post(terminal_bridge_request))
+                        .with_state(state.clone());
+                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    let port = listener.local_addr().unwrap().port();
+                    let task = tauri::async_runtime::spawn(async move {
+                        axum::serve(listener, server).await.unwrap();
+                    });
+                    let adapter = BridgeAdapter::new("wecom".into(), port);
+                    let router = Arc::new(Mutex::new(ReplyRouter::new(
+                        Default::default(),
+                        Default::default(),
+                    )));
+                    let consumers = super::super::ImConsumers::default();
+                    consumers.lock().await.insert(
+                        "chat".into(),
+                        super::super::ImConsumerHandle {
+                            retire_when_idle: Arc::new(AtomicBool::new(false)),
+                            cancel: Arc::new(AtomicBool::new(false)),
+                            reply_router: router.clone(),
+                            sidecar_port: 0,
+                            sidecar_session_id: "fixture".into(),
+                            sidecar_generation: 0,
+                            _join: tauri::async_runtime::spawn(async {}),
+                        },
+                    );
+                    assert!(super::super::health::reply_handoff_warning(&consumers)
+                        .await
+                        .is_none());
+                    let event = serde_json::json!({"requestId":"first","type":terminal,"data":{"finalPayloads":payloads}});
+                    {
+                        let mut replies = router.lock().await;
+                        replies.register(
+                            "first".into(),
+                            "chat".into(),
+                            "message".into(),
+                            ImSourceType::Private,
+                            Some("sender".into()),
+                            None,
+                            Some(ImDeliveryProtocol::OpenClawReply),
+                        );
+                        replies.set_pending_delivery_mode("first", mode);
+                        replies.finish_admission("first");
+                        assert!(
+                            replies.dispatch(&event, &adapter, 0).await.is_none(),
+                            "an unacknowledged terminal must retain its delivery obligation"
+                        );
+                        assert_eq!(replies.producer_terminal("first"), Some(&event));
+                        // A later receipt/expiry must not replace the producer's first terminal.
+                        assert!(replies.dispatch(&serde_json::json!({"requestId":"first","type":"error",
+                            "channelDeliveryMode":"auto","data":{"finalPayloads":[{"text":"conflicting later result"}]}}), &adapter, 0).await.is_none());
+                    }
+                    assert_eq!(state.attempts.lock().unwrap().len(), 6);
+                    assert_eq!(
+                        super::super::health::reply_handoff_warning(&consumers)
+                            .await
+                            .as_deref(),
+                        Some("有 1 条回复投递暂未完成，正在自动恢复。")
+                    );
+                    let first_body = state.attempts.lock().unwrap()[0].clone();
+                    assert!(state
+                        .attempts
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .all(|attempt| attempt == &first_body));
+                    state.fail.store(false, Ordering::SeqCst);
+                    let completions = Arc::new(StdMutex::new(Vec::new()));
+                    let observed = completions.clone();
+                    let callback: Arc<dyn Fn(String, TerminalOutcome) + Send + Sync> =
+                        Arc::new(move |id, _| observed.lock().unwrap().push(id));
+                    // Port zero deliberately has no producer. Recovery must use the retained
+                    // terminal even after its original registry receipt has expired/disappeared.
+                    let client = crate::local_http::json_client(Duration::from_secs(1));
+                    reconcile_requests(&client, 0, &router, &adapter, &callback).await;
+                    assert_eq!(*completions.lock().unwrap(), vec!["first"]);
+                    assert!(router.lock().await.request_ids().is_empty());
+                    assert!(super::super::health::reply_handoff_warning(&consumers)
+                        .await
+                        .is_none());
+                    assert_eq!(state.accepted.lock().unwrap().len(), 1);
+                    // A following same-chat request can complete and the old request is not replayed.
+                    {
+                        let mut replies = router.lock().await;
+                        replies.register(
+                            "next".into(),
+                            "chat".into(),
+                            "next-message".into(),
+                            ImSourceType::Private,
+                            Some("sender".into()),
+                            None,
+                            Some(ImDeliveryProtocol::OpenClawReply),
+                        );
+                    }
+                    dispatch_event(&serde_json::json!({"requestId":"next","type":"complete","data":{"finalPayloads":[]}}),
+                        &router, &adapter, 0, &callback).await;
+                    reconcile_requests(&client, 0, &router, &adapter, &callback).await;
+                    assert_eq!(*completions.lock().unwrap(), vec!["first", "next"]);
+                    assert!(router.lock().await.request_ids().is_empty());
+                    task.abort();
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn lost_terminal_ack_is_retried_without_duplicate_delivery() {
+        let state = TerminalBridge {
+            accept_before_failure: true,
+            ..Default::default()
+        };
+        state.fail.store(true, Ordering::SeqCst);
+        let server = axum::Router::new()
+            .route("/{*path}", axum::routing::post(terminal_bridge_request))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tauri::async_runtime::spawn(async move {
+            axum::serve(listener, server).await.unwrap();
+        });
+        let adapter = BridgeAdapter::new("wecom".into(), port);
+        let router = Arc::new(Mutex::new(ReplyRouter::new(
+            Default::default(),
+            Default::default(),
+        )));
+        {
+            let mut replies = router.lock().await;
+            replies.register(
+                "first".into(),
+                "chat".into(),
+                "message".into(),
+                ImSourceType::Private,
+                Some("sender".into()),
+                None,
+                Some(ImDeliveryProtocol::OpenClawReply),
+            );
+            assert!(replies.dispatch(&serde_json::json!({"requestId":"first","type":"complete","data":{"finalPayloads":[{"text":"answer"}]}}), &adapter, 0).await.is_none());
+        }
+        assert_eq!(state.accepted.lock().unwrap().len(), 1);
+        state.fail.store(false, Ordering::SeqCst);
+        let callback: Arc<dyn Fn(String, TerminalOutcome) + Send + Sync> = Arc::new(|_, _| {});
+        reconcile_requests(
+            &crate::local_http::json_client(Duration::from_secs(1)),
+            0,
+            &router,
+            &adapter,
+            &callback,
+        )
+        .await;
+        assert_eq!(state.attempts.lock().unwrap().len(), 4);
+        assert_eq!(state.accepted.lock().unwrap().len(), 1);
+        assert!(router.lock().await.request_ids().is_empty());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn only_explicit_missing_dispatcher_receipts_retire_an_unaccepted_terminal() {
+        for missing_dispatcher in [true, false] {
+            let server = axum::Router::new().route(
+                "/{*path}",
+                axum::routing::post(move || async move {
+                    (
+                        axum::http::StatusCode::NOT_FOUND,
+                        axum::Json(serde_json::json!({"error":
+                    if missing_dispatcher { "protocol_dispatch_missing" } else { "route_not_found" }})),
+                    )
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let task = tauri::async_runtime::spawn(async move {
+                axum::serve(listener, server).await.unwrap();
+            });
+            let adapter = BridgeAdapter::new("wecom".into(), port);
+            let mut replies = ReplyRouter::new(Default::default(), Default::default());
+            replies.register(
+                "first".into(),
+                "chat".into(),
+                "message".into(),
+                ImSourceType::Private,
+                Some("sender".into()),
+                None,
+                Some(ImDeliveryProtocol::OpenClawReply),
+            );
+            let outcome = replies
+                .dispatch(
+                    &serde_json::json!({"requestId":"first","type":"complete",
+                "data":{"finalPayloads":[]}}),
+                    &adapter,
+                    0,
+                )
+                .await;
+            assert_eq!(outcome.is_some(), missing_dispatcher);
+            assert_eq!(
+                replies.pending_terminal_handoff_count(),
+                usize::from(!missing_dispatcher)
+            );
+            task.abort();
+        }
+    }
 
     #[test]
     fn first_connection_replays_only_the_initial_request() {

@@ -35,7 +35,7 @@ const ready = [{ name: 'playwright', status: 'connected', tools: [{ name: 'brows
 function query(read: () => Promise<unknown>) {
   return {
     mcpServerStatus: vi.fn(read),
-    setMcpServers: vi.fn(async () => ({ added: ['playwright'], removed: [], errors: {} })),
+    setMcpServers: vi.fn(async (_servers?: unknown) => ({ added: ['playwright'], removed: [], errors: {} })),
     interrupt: vi.fn(async () => {}),
     close: vi.fn(),
   };
@@ -61,6 +61,48 @@ describe('effective MCP observer owns every asynchronous completion', () => {
     forceReloadActiveSession();
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('keeps a selected server visible when configuration fails before SDK installation', async () => {
+    setCurrentMcpServers([{ id: 'broken', name: 'Broken', isBuiltin: false, type: 'http',
+      url: 'https://example.invalid/{{MYAGENTS_TEST_MISSING_MCP_ENV}}/mcp' }]);
+    await install(query(async () => []), 'before-build');
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers).toEqual([
+      expect.objectContaining({ id: 'broken', desired: true, state: 'failed', errorCode: 'MCP_CONFIG_INVALID' }),
+    ]);
+    setCurrentMcpServers([{ id: 'broken', name: 'Fixed', isBuiltin: false, type: 'http', url: 'https://example.invalid/mcp' }]);
+    const fixed = query(async () => [{ name: 'broken', status: 'connected', tools: [{ name: 'test' }] }]);
+    await install(fixed, 'config-corrected');
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers).toEqual([
+      expect.objectContaining({ id: 'broken', desired: true, state: 'ready', toolCount: 1 }),
+    ]);
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers[0].errorCode).toBeUndefined();
+  });
+
+  it.each(['constructor', 'toString'])('handles the opaque server ID %s without prototype lookups', async id => {
+    setCurrentMcpServers([{ id, name: 'Custom', isBuiltin: false, type: 'http', url: 'https://example.invalid/mcp' }]);
+    const target = query(async () => [{ name: id, status: 'connected', tools: [{ name: 'tool' }] }]);
+    await install(target, 'new-map');
+    expect(Object.hasOwn(target.setMcpServers.mock.calls[0][0] as object, id)).toBe(true);
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers).toEqual([
+      expect.objectContaining({ id, state: 'ready', toolCount: 1 }),
+    ]);
+    setCurrentMcpServers([{ id, name: 'Custom', isBuiltin: false, type: 'http', url: 'https://example.invalid/{{MISSING}}' }]);
+    await ensureSdkMcpInSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers).toEqual([
+      expect.objectContaining({ id, state: 'failed', errorCode: 'MCP_CONFIG_INVALID', toolCount: 0 }),
+    ]);
+  });
+
+  it('reports a prototype-named reserved server as a bounded configuration failure', async () => {
+    setCurrentMcpServers([{ id: '__proto__', name: 'Reserved', isBuiltin: false, type: 'http', url: 'https://example.invalid/mcp' }]);
+    const target = query(async () => []);
+    await install(target, 'reserved-map');
+    expect(Object.hasOwn(target.setMcpServers.mock.calls[0][0] as object, '__proto__')).toBe(false);
+    expect(getBuiltinMcpEffectiveSnapshot()?.servers).toEqual([
+      expect.objectContaining({ id: '__proto__', state: 'failed', errorCode: 'MCP_CONFIG_INVALID', toolCount: 0 }),
+    ]);
   });
 
   it.each(['resolve', 'reject', 'timeout'] as const)('ignores a retired Query status %s', async completion => {

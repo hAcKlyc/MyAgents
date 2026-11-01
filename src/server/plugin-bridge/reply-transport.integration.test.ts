@@ -167,6 +167,99 @@ async function postJson(baseUrl: string, path: string, body: unknown): Promise<R
 }
 
 describe('Plugin Bridge request-scoped reply transport', () => {
+  it.each([true, false])('recovers same-chat input after a failed empty terminal handoff (admission patch: %s)', async patchMatches => {
+    const scratch = mkdtempSync(join(tmpdir(), 'myagents-wecom-terminal-'));
+    const eventsPath = join(scratch, 'events.ndjson');
+    const pluginDir = join(scratch, 'openclaw-plugins', 'fixture-install');
+    const packageDir = join(pluginDir, 'node_modules', '@fixture', 'wecom-terminal');
+    const vendorDir = join(pluginDir, 'node_modules', '@wecom', 'wecom-openclaw-plugin');
+    mkdirSync(packageDir, { recursive: true });
+    mkdirSync(join(vendorDir, 'dist', 'src'), { recursive: true });
+    writeFileSync(join(pluginDir, 'package.json'), JSON.stringify({ private: true, dependencies: { '@fixture/wecom-terminal': '1.0.0' } }));
+    writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: '@fixture/wecom-terminal', version: '1.0.0', type: 'module', keywords: ['openclaw'], openclaw: { extensions: ['./index.mjs'], channel: { id: 'fixture' } } }));
+    writeFileSync(join(vendorDir, 'package.json'), JSON.stringify({ type: 'module' }));
+    const source = readFileSync(new URL('./fixtures/wecom-chat-queue-2026.9.15.txt', import.meta.url), 'utf8');
+    writeFileSync(join(vendorDir, 'dist', 'src', 'chat-queue.js'), patchMatches ? source : source.replace('prev.then(task, task)', 'prev.then(() => task(), () => task())'));
+    writeFileSync(join(packageDir, 'index.mjs'), String.raw`
+      import { appendFileSync } from 'node:fs';
+      import { enqueueWeComChatTask } from '@wecom/wecom-openclaw-plugin/dist/src/chat-queue.js';
+      const record = event => appendFileSync(process.env.FIXTURE_EVENTS_PATH, JSON.stringify(event) + '\n');
+      export default { register(api) { api.registerChannel({
+        id: 'fixture', name: 'WeCom terminal fixture',
+        config: { isConfigured: () => true, resolveAccount: () => ({ accountId: 'default', enabled: true }) },
+        gateway: { startAccount: async ctx => {
+          ctx.setStatus({ running: true, connected: true });
+          const run = async mode => {
+            record({ mode, event: 'reply-start' });
+            const result = await api.runtime.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+              ctx: { To: 'wecom:same-chat', SenderId: 'sender', Body: mode, AccountId: 'default', ChatType: 'direct' },
+              dispatcherOptions: { deliver: async payload => record({ mode, event: 'deliver', payload }) },
+            });
+            record({ mode, event: 'done', result });
+          };
+          const first = enqueueWeComChatTask({ accountId: 'default', chatId: 'same-chat', task: () => run('static') });
+          const next = enqueueWeComChatTask({ accountId: 'default', chatId: 'same-chat', task: () => run('stream') });
+          await Promise.all([first.promise, next.promise]);
+        }, stopAccount: async () => {} },
+      }); } };
+    `);
+    const inputs: Array<Record<string, unknown>> = [];
+    const rustServer = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      req.on('end', () => {
+        inputs.push(JSON.parse(Buffer.concat(chunks).toString()) as Record<string, unknown>);
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}');
+      });
+    });
+    let child: ChildProcess | undefined;
+    let output = '';
+    try {
+      const rustPort = await listenOnRandomPort(rustServer);
+      const bridgePort = await reservePort();
+      child = spawn(process.execPath, ['--import', 'tsx/esm', resolve('src/server/plugin-bridge/index.ts'),
+        '--plugin-dir', pluginDir, '--port', String(bridgePort), '--rust-port', String(rustPort), '--bot-id', 'fixture-bot'], {
+        cwd: process.cwd(), env: { ...process.env, HOME: scratch, BRIDGE_PLUGIN_CONFIG: '{}', FIXTURE_EVENTS_PATH: eventsPath, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout?.on('data', chunk => { output += chunk.toString(); });
+      child.stderr?.on('data', chunk => { output += chunk.toString(); });
+      await waitFor(() => inputs.length >= (patchMatches ? 2 : 1), `initial ingress\n${output}`);
+      expect(output.includes('WeCom admission patch target not found')).toBe(!patchMatches);
+      expect(readFixtureEvents(eventsPath).some(event => event.event === 'done')).toBe(false);
+      // No terminal reached the Bridge during the failed handoff. Rust owns
+      // retrying this same request; the Bridge must keep its dispatcher alive.
+      expect(output).not.toContain('canonical_final');
+      const firstId = String(inputs.find(body => body.text === 'static')?.requestId);
+      const complete = async (requestId: string, finalPayloads: unknown[]) => {
+        const response = await postJson(`http://127.0.0.1:${bridgePort}`, '/complete-dispatch', { requestId, finalPayloads });
+        expect(response.status).toBe(200);
+        await response.arrayBuffer();
+      };
+      if (patchMatches) {
+        // The input lane is independent of the missing first terminal.
+        await complete(String(inputs.find(body => body.text === 'stream')?.requestId), [{ text: 'next answer' }]);
+        await waitFor(() => readFixtureEvents(eventsPath).some(event => event.mode === 'stream' && event.event === 'done'), 'independent follow-up completion');
+      }
+      await complete(firstId, []);
+      await complete(firstId, []); // Lost ACK retry must not run the renderer twice.
+      await waitFor(() => inputs.length === 2, 'serial fallback releases the next input');
+      if (!patchMatches) await complete(String(inputs[1].requestId), [{ text: 'next answer' }]);
+      await waitFor(() => readFixtureEvents(eventsPath).filter(event => event.event === 'done').length === 2, 'both dispatchers settle');
+      expect(readFixtureEvents(eventsPath).filter(event => event.mode === 'static' && event.event === 'deliver')).toEqual([]);
+      expect(readFixtureEvents(eventsPath).filter(event => event.mode === 'stream' && event.event === 'deliver')).toHaveLength(1);
+      expect(output.match(new RegExp(`canonical_final[^\\n]*requestId=${firstId}`, 'g'))).toHaveLength(1);
+    } finally {
+      if (child && child.exitCode === null) {
+        child.kill('SIGTERM');
+        await waitForExit(child);
+      }
+      rustServer.closeAllConnections();
+      await closeServer(rustServer);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
   it('ACKs slow partials, isolates same-chat requests, and preserves canonical finals', async () => {
     const scratch = mkdtempSync(join(tmpdir(), 'myagents-reply-transport-'));
     const eventsPath = join(scratch, 'events.ndjson');

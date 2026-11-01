@@ -1,4 +1,4 @@
-import type { AppConfig } from './types';
+import { CODEX_SUBSCRIPTION_PROVIDER_ID, PRESET_PROVIDERS, type AppConfig } from './types';
 import { normalizeProxyScope } from '../../shared/proxyScope';
 
 /** Replace the editable subset while keeping hidden entries in their old slots. */
@@ -22,8 +22,9 @@ export function preserveHiddenProviderSettings(
   current: AppConfig,
   updates: Partial<AppConfig>,
   hiddenIds: readonly string[],
+  editableScopeProviderIds?: readonly string[],
 ): Partial<AppConfig> {
-  if (hiddenIds.length === 0) return updates;
+  if (hiddenIds.length === 0 && editableScopeProviderIds === undefined) return updates;
   const hidden = new Set(hiddenIds);
   const merged = { ...updates };
   if ('providerOrder' in updates) {
@@ -36,10 +37,24 @@ export function preserveHiddenProviderSettings(
   if (updates.proxySettings?.scope?.mode === 'custom') {
     const previous = normalizeProxyScope(current.proxySettings?.scope);
     const next = normalizeProxyScope(updates.proxySettings.scope);
+    const proxyHidden = new Set(hidden);
+    if (editableScopeProviderIds !== undefined) {
+      const editable = new Set(editableScopeProviderIds);
+      // A missing/gated provider remains a valid identity. Preserve its latest
+      // disk membership, including when an All scope becomes Custom.
+      for (const id of [
+        ...PRESET_PROVIDERS.map(provider => provider.id),
+        CODEX_SUBSCRIPTION_PROVIDER_ID,
+        ...(previous.providerIds ?? []),
+        ...(next.providerIds ?? []),
+      ]) {
+        if (!editable.has(id)) proxyHidden.add(id);
+      }
+    }
     merged.proxySettings = { ...updates.proxySettings, scope: {
       ...next,
-      providerIds: mergeHiddenIds(previous.mode === 'all' ? [...hiddenIds] : previous.providerIds,
-        next.providerIds, hidden),
+      providerIds: mergeHiddenIds(previous.mode === 'all' ? [...proxyHidden] : previous.providerIds,
+        next.providerIds, proxyHidden),
     } };
   }
   return merged;

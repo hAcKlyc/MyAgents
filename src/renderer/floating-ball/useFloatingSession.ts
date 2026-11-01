@@ -1,4 +1,6 @@
 import { messageCompletionParams, type MessageCompletionTelemetry } from '@/analytics/conversation';
+import { resolveDefaultMcpSelection } from '../../shared/mcpSelection';
+import { getProjectAgent } from '@/config/services/agentConfigService';
 import { LOG_SESSION_HEADER } from '../../shared/types/log';
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
 import type { QueuedMessageInfo } from '@/types/queue';
@@ -452,7 +454,7 @@ async function syncFloatingSidecarConfig(
     try {
         const project = projects.find((p) => workspacePathsEqual(p.path, workspacePath));
         const globalEnabled = new Set(Array.isArray(config.mcpEnabledServers) ? config.mcpEnabledServers : []);
-        const workspaceEnabled = project?.mcpEnabledServers ?? [];
+        const workspaceEnabled = resolveDefaultMcpSelection(getProjectAgent(config, projects, workspacePath), project);
         const allServers = getAllMcpServersFromConfig(config);
         const effectiveServers = allServers.filter((s) =>
             globalEnabled.has(s.id) && workspaceEnabled.includes(s.id),

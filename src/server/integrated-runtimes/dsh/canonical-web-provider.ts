@@ -4,7 +4,7 @@ import type { ProviderAuthType } from '../../../shared/config-types';
 import { OFFICIAL_DEEPSEEK_ANTHROPIC_BASE_URL } from '../../../shared/integrated-runtimes/provider-constraints';
 import { anthropicAuthHeaders } from '../../provider-probe';
 import type { DshModelExecutionProfile } from './profile-compiler';
-import { DshCanonicalWebError } from './canonical-web-errors';
+import { DshCanonicalWebError, zhipuProviderSearchError } from './canonical-web-errors';
 import { truncateDshWebText } from './canonical-web-content';
 import { DshSafeHttpClient, type DshSafeHttpConfig, type DshSafeHttpResponse } from './safe-http';
 import { parseCompatibleServerSearchContent } from './canonical-web-search-content';
@@ -142,7 +142,7 @@ function normalizeDomain(value: string): string {
   } catch {
     throw new DshCanonicalWebError('domain_policy_invalid', 'WebSearch domain constraint is invalid');
   }
-  if (normalized !== value.toLowerCase().replace(/\.$/u, '') || normalized === 'localhost') {
+  if (normalized !== value.toLowerCase().replace(/\.$/u, '')) {
     throw new DshCanonicalWebError('domain_policy_invalid', 'WebSearch domain constraint is not canonical');
   }
   return normalized;
@@ -221,28 +221,19 @@ function providerEndpoint(baseUrl: string | undefined, path: string): string {
   return base.toString();
 }
 
-function parseJsonResponse(response: DshSafeHttpResponse, errorCode: 'provider_search_failed' | 'utility_model_failed'): Record<string, unknown> {
+function parseJsonResponse(response: DshSafeHttpResponse, errorCode: 'provider_search_failed' | 'utility_model_failed', provider?: string): Record<string, unknown> {
   if (response.statusCode < 200 || response.statusCode > 299) {
-    let vendorCode: string | undefined;
+    let providerFailure: DshCanonicalWebError | undefined;
     try {
       const payload = JSON.parse(Buffer.from(response.bytes).toString('utf8')) as unknown;
       if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
         const record = payload as Record<string, unknown>;
-        const nested = record.error && typeof record.error === 'object' && !Array.isArray(record.error)
-          ? record.error as Record<string, unknown>
-          : undefined;
-        const value = nested?.code ?? record.code;
-        if (typeof value === 'string' || typeof value === 'number') vendorCode = String(value);
+        if (errorCode === 'provider_search_failed') providerFailure = zhipuProviderSearchError(record, provider);
       }
     } catch {
       // The status is sufficient; provider response bytes are never surfaced.
     }
-    if (response.statusCode === 429 && vendorCode === '1113') {
-      throw new DshCanonicalWebError(
-        errorCode,
-        'Zhipu WebSearch has no available search resource package or balance',
-      );
-    }
+    if (providerFailure) throw providerFailure;
     if (response.statusCode === 401 || response.statusCode === 403) {
       throw new DshCanonicalWebError(errorCode, 'Provider rejected the configured credential');
     }
@@ -265,9 +256,6 @@ function parseJsonResponse(response: DshSafeHttpResponse, errorCode: 'provider_s
 
 function providerPolicy(): ConstructorParameters<typeof DshSafeHttpClient>[0] {
   return Object.freeze({
-    allowedHosts: Object.freeze([]),
-    allowedPorts: Object.freeze([443]),
-    deniedHosts: Object.freeze(['metadata.google.internal']),
     maxCompressedBytes: MAX_PROVIDER_RESPONSE_BYTES,
     maxCompressionRatio: 20,
     maxConcurrent: 4,
@@ -523,19 +511,34 @@ export class DshCanonicalWebProvider implements DshCanonicalWebProviderPort {
     }];
     const payloads: Record<string, unknown>[] = [];
     let usage: DshCanonicalTokenUsage | undefined = ZERO_USAGE;
+    const failures: DshCanonicalWebError[] = [];
+    let incompleteContinuation = false;
     for (let pause = 0; pause <= MAX_ANTHROPIC_PAUSES; pause += 1) {
-      const response = await this.post(target, input.apiKey, input.authType, 'v1/messages', {
-        model: input.profile.modelId,
-        max_tokens: Math.min(input.profile.maxTokens, MAX_SEARCH_TOKENS),
-        messages,
-        tools,
-      }, input.signal);
-      const payload = parseJsonResponse(response, 'provider_search_failed');
+      let payload: Record<string, unknown>;
+      try {
+        const response = await this.post(target, input.apiKey, input.authType, 'v1/messages', {
+          model: input.profile.modelId,
+          max_tokens: Math.min(input.profile.maxTokens, MAX_SEARCH_TOKENS),
+          messages,
+          tools,
+        }, input.signal);
+        payload = parseJsonResponse(response, 'provider_search_failed', input.profile.provider);
+      } catch (error) {
+        input.signal.throwIfAborted();
+        if (!payloads.length || !(error instanceof DshCanonicalWebError)
+          || !['provider_search_failed', 'web_dns_failed', 'web_connect_failed', 'web_request_failed', 'web_request_timeout'].includes(error.code)) throw error;
+        failures.push(error);
+        incompleteContinuation = true;
+        usage = undefined; // The failed request supplied no trustworthy total.
+        break;
+      }
       payloads.push(payload);
       usage = addUsage(usage, anthropicUsage(payload));
       if (payload.stop_reason !== 'pause_turn') break;
       if (pause === MAX_ANTHROPIC_PAUSES || !Array.isArray(payload.content)) {
-        throw new DshCanonicalWebError('provider_search_failed', 'Anthropic WebSearch exceeded continuation bounds');
+        failures.push(new DshCanonicalWebError('provider_search_failed', 'Anthropic WebSearch exceeded continuation bounds', { phase: 'provider_response' }));
+        incompleteContinuation = true;
+        break;
       }
       messages.push({ role: 'assistant', content: payload.content });
     }
@@ -556,6 +559,7 @@ export class DshCanonicalWebProvider implements DshCanonicalWebProviderPort {
     const resultIds = new Set<string>();
     let resultBlockCount = 0;
     let searchCount = 0;
+    let completedSearches = 0;
     for (const payload of payloads) {
       const serverUsage = telemetryRecord(telemetryRecord(payload.usage)?.server_tool_use);
       searchCount += tokenCount(serverUsage?.web_search_requests) ?? 0;
@@ -578,26 +582,29 @@ export class DshCanonicalWebProvider implements DshCanonicalWebProviderPort {
         const compatibleResult = block.type === 'tool_result' && typeof block.tool_use_id === 'string'
           && searchCallIds.has(block.tool_use_id);
         if (block.type !== 'web_search_tool_result' && !compatibleResult) continue;
-        if (block.is_error === true) {
-          // Compatible Providers can carry the failure code inside content
-          // while marking the outer block as failed. Preserve that bounded
-          // code, never arbitrary Provider prose or request details.
-          parseCompatibleServerSearchContent(block.content);
-          throw new DshCanonicalWebError(
-            'provider_search_failed',
-            'Provider WebSearch failed. Retry later, or use WebFetch when you already have a source URL.',
-            { phase: 'provider_response' },
-          );
-        }
         if (typeof block.tool_use_id !== 'string' || !resultIds.has(block.tool_use_id)) {
           resultBlockCount += 1;
           if (typeof block.tool_use_id === 'string') resultIds.add(block.tool_use_id);
         }
-        const normalized = parseCompatibleServerSearchContent(block.content);
+        const normalized = parseCompatibleServerSearchContent(block.content, input.profile.provider);
+        failures.push(...normalized.failures ?? []);
+        if (block.is_error === true) {
+          if (!normalized.failures?.length) failures.push(new DshCanonicalWebError(
+            'provider_search_failed', 'Provider WebSearch failed.', { phase: 'provider_response' },
+          ));
+          continue;
+        }
+        if (normalized.results.length > 0 || !normalized.failures?.length) completedSearches += 1;
         rawResults.push(...normalized.results);
         fallbackContent.push(...normalized.text);
         unverified ||= normalized.unverified;
       }
+    }
+    const failureMessages = [...new Set(failures.map(error => error.message))];
+    if (failures.length && completedSearches === 0) {
+      throw new DshCanonicalWebError(failures[0]?.code ?? 'provider_search_failed', failureMessages.join('\n').slice(0, 4096),
+        { phase: failures[0]?.phase ?? 'provider_response', providerErrorCode: failures[0]?.providerErrorCode,
+          systemErrorClass: failures[0]?.systemErrorClass });
     }
     if (resultBlockCount === 0) {
       unverified = true;
@@ -623,15 +630,21 @@ export class DshCanonicalWebProvider implements DshCanonicalWebProviderPort {
         `[dsh-web] search-quality route=${input.profile.providerRouteId} results=${results.length} emptySnippets=${emptySnippets} malformedSourceTitles=${malformedSourceTitles} citationExcerpts=${snippets.size}`,
       );
     }
+    if (failures.length) console.warn(
+      `[dsh-web] search-partial route=${input.profile.providerRouteId} results=${results.length} failures=${failures.length} providerErrors=${[...new Set(failures.map(error => error.providerErrorCode ?? 'unknown'))].join(',')}`,
+    );
     return searchOutput(
       input.query,
       results,
       usage,
       searchCount || resultBlockCount,
       startedAt,
-      payloads.some(payload => payload.stop_reason === 'max_tokens'),
-      unverified || commentary.length > 0 ? {
-        answer: [...fallbackContent, ...commentary].join('\n\n'),
+      incompleteContinuation || payloads.some(payload => payload.stop_reason === 'max_tokens'),
+      unverified || commentary.length > 0 || failures.length > 0 ? {
+        answer: [
+          ...(failures.length ? [`Some searches failed; ${results.length ? 'successful results are retained' : 'completed searches returned no matching results'}:\n${failureMessages.map(message => `- ${message}`).join('\n')}`] : []),
+          ...fallbackContent, ...commentary,
+        ].join('\n\n'),
         unverified,
         domainFilterUnverified: domains.allowed !== undefined || domains.blocked !== undefined,
       } : undefined,
@@ -675,7 +688,7 @@ export class DshCanonicalWebProvider implements DshCanonicalWebProviderPort {
         }),
         signal: input.signal,
       });
-      return parseJsonResponse(response, 'provider_search_failed');
+      return parseJsonResponse(response, 'provider_search_failed', input.profile.provider);
     }));
     const seen = new Set<string>();
     const results = payloads.flatMap(payload => {
