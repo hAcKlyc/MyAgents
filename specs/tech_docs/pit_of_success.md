@@ -465,7 +465,7 @@ ConfigProvider 的 `config/projects/providers/apiKeys/verifyStatus` 属于一个
 - `GET /health/functional` —— sidecar 等同 ready；plugin bridge 检"过去 60s 是否成功 forward 到 Rust"
 - failed readiness 不提供进程内 retry route；由 Sidecar 进程重启重新建立初始化 owner
 - 普通 Route gate 改成查状态机并返回结构化 503 + `Retry-After: 1`，不再 await indefinitely 或 rethrow
-- Rust `wait_for_readiness`（30s timeout / 250ms cadence）wired 到 `ensure_session_sidecar`，启动 loading 自然覆盖 warm-up
+- Rust `wait_for_readiness`（30s timeout / 250ms cadence）由 Session ensure 与 Global startup / replacement 共用；Global 在锁外完成 readiness 等待后才由 manager 发布 healthy，启动 loading 自然覆盖 warm-up
 
 **Invariants enforced.**
 - Liveness ≠ readiness ≠ functional——三个语义独立
