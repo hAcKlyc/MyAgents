@@ -62,7 +62,7 @@ export interface UseConfigResult {
     // Config updates
     updateConfig: (updates: Partial<AppConfig>) => Promise<void>;
     /** Merge-aware proxy update — pass only changed fields; merges against disk-latest config (#230) */
-    patchProxySettings: (partial: Partial<ProxySettings>) => Promise<void>;
+    patchProxySettings: (partial: Partial<ProxySettings>, editableScopeProviderIds?: readonly string[]) => Promise<void>;
 
     /** Lightweight config-only refresh from disk (no loading state, no projects/providers reload) */
     refreshConfig: () => Promise<void>;

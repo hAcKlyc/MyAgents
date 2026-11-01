@@ -27,6 +27,10 @@ MyAgents 的代理不是一个 process-global 开关，而是按网络请求 own
 
 读取旧 custom scope 时，如果缺少 `generalRequests`，默认视为 `true`；缺字段且 Provider 列表也为空的旧空 scope 归一化为 `all`。这是仍在生效的磁盘兼容规则，新写入必须使用完整 current shape。
 
+`providerIds` 是用户的持久选择，不是当前可用或可见 Provider 的缓存。`normalizeProxyScope` 只整理字段、空值和重复项，不接受展示目录作为允许集合。Settings / Capabilities 的挂载、CLIProxy 状态轮询、组件替换或平台/功能隐藏都不能裁剪或自动写回 scope；真正删除自定义 Provider 时由既有删除入口移除其 ID。
+
+代理范围弹窗在打开时固定本次编辑的配置目录，而不是使用 CLIProxy 卡片的实时展示过滤；后台目录变化在下次打开时体现，避免编辑期间选项消失或准入集合变化。初始化保留不可见 ID，全选/取消全选只编辑当前展示项；保存通过 `patchProxySettings(partial, editableScopeProviderIds)` 在配置锁内保留不可编辑项的最新磁盘选择，包括从 `all` 转为 `custom` 时仍存在的隐藏内置 Provider。自定义范围即使勾选了当前所有项目仍为 `custom`；只有显式“全部”设置 `all`，原有 `all` 无修改保存仍保留。已经被旧版本删除的选择无法推断还原，需要用户重新勾选。
+
 ## Owner 模型
 
 ```text

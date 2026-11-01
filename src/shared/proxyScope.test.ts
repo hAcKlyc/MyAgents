@@ -32,19 +32,25 @@ describe('proxy scope normalization', () => {
   });
 
   it('keeps legacy general behavior and only falls back for legacy empty custom scopes', () => {
-    expect(normalizeProxyScope({ mode: 'custom', providerIds: ['stale', 'deepseek'] }, ['deepseek']))
-      .toEqual({ mode: 'custom', generalRequests: true, providerIds: ['deepseek'] });
-    expect(normalizeProxyScope({ mode: 'custom', providerIds: ['stale'] }, ['deepseek']))
+    expect(normalizeProxyScope({ mode: 'custom', providerIds: ['antigravity-sub'] }))
+      .toEqual({ mode: 'custom', generalRequests: true, providerIds: ['antigravity-sub'] });
+    expect(normalizeProxyScope({ mode: 'custom', providerIds: [] }))
       .toEqual({ mode: 'all' });
   });
 
   it('preserves explicit general selection and allows zero providers', () => {
-    expect(normalizeProxyScope({ mode: 'custom', generalRequests: false, providerIds: ['stale'] }, ['deepseek']))
-      .toEqual({ mode: 'custom', generalRequests: false, providerIds: [] });
+    expect(normalizeProxyScope({ mode: 'custom', generalRequests: false, providerIds: ['temporarily-unloaded'] }))
+      .toEqual({ mode: 'custom', generalRequests: false, providerIds: ['temporarily-unloaded'] });
     expect(normalizeProxyScope({ mode: 'custom', generalRequests: true, providerIds: [] }))
       .toEqual({ mode: 'custom', generalRequests: true, providerIds: [] });
     expect(normalizeProxyScope({ mode: 'custom', generalRequests: false, providerIds: [] }))
       .toEqual({ mode: 'custom', generalRequests: false, providerIds: [] });
+  });
+
+  it('preserves unknown identities while cleaning only invalid values and duplicates', () => {
+    expect(normalizeProxyScope({ mode: 'custom', generalRequests: true,
+      providerIds: [' antigravity-sub ', null, 'gated-provider', 'antigravity-sub', 7, ''] }))
+      .toEqual({ mode: 'custom', generalRequests: true, providerIds: ['antigravity-sub', 'gated-provider'] });
   });
 });
 
