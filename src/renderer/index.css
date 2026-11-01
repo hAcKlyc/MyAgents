@@ -46,7 +46,7 @@
    emitted even when Tailwind cannot discover their use in a utility class. */
 @theme static {
   --font-weight-prose: 500;
-  --font-weight-emphasis: 600;
+  --font-weight-emphasis: 700;
   --font-weight-normal: 400;
 }
 
