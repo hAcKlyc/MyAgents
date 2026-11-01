@@ -301,8 +301,10 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
   // Ref for current provider availability — used in handleKeyDown without adding deps
   const isCurrentProviderAvailable = providerAvailable ?? (provider ? isProviderAvailable(provider, apiKeys, providerVerifyStatus) : false);
+  const currentModelId = selectedModel ?? provider?.primaryModel;
+  const managedModelSelectionMissing = !isExternalRuntime && isRuntimeBackedProvider(provider) && !currentModelId?.trim();
   // External runtimes (Claude Code / Codex) authenticate via their own CLI — no MyAgents provider required.
-  const canSendMessage = !sendBlocked && (isExternalRuntime || isCurrentProviderAvailable);
+  const canSendMessage = !sendBlocked && !managedModelSelectionMissing && (isExternalRuntime || isCurrentProviderAvailable);
   const canSendMessageRef = useRef(canSendMessage);
   canSendMessageRef.current = canSendMessage;
   const availableProviderIdSet = useMemo(
@@ -313,7 +315,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // Send-key preference (Enter vs ⌘/Ctrl+Enter). Shared with AI 小助理 / 问题反馈
   // via @/utils/chatSendKey. Mirrored to a ref so the big handleKeyDown callback
   // reads the latest value without re-binding (its deps are intentionally pinned).
-  const { config, projects } = useConfigData();
+  const { config, projects, managedCodexModelCatalogStatus } = useConfigData();
   const localWorkspaceIcons = useMemo(() => Object.fromEntries(
     resolveAgentWorkspaceProjections(projects, config.agents ?? []).agentProjections
       .map(identity => [identity.agentId, identity.project?.icon]),
@@ -483,7 +485,6 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     if (effortCloseTimerRef.current) clearTimeout(effortCloseTimerRef.current);
   }, []);
   // Derive current model ID from prop or provider default — no hardcoded fallback
-  const currentModelId = selectedModel ?? provider?.primaryModel;
   // Get display name for current model (runtime-aware)
   const currentModelName = isExternalRuntime
     ? (runtimeModels?.find(m => m.value === selectedModel)?.displayName
@@ -2081,6 +2082,17 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                           </Tip>
                         )}
                       </div>
+                      {isRuntimeBackedProvider(p) && (p.models.length === 0 || managedCodexModelCatalogStatus === 'error') && (
+                        <div className="px-3 py-2 text-xs text-[var(--ink-muted)]" role="status">
+                          {t(managedCodexModelCatalogStatus === 'loading' ? 'input.modelCatalogLoading'
+                            : managedCodexModelCatalogStatus === 'error' ? 'input.modelCatalogFailed' : 'input.modelCatalogEmpty')}
+                          {onRefreshProviders && managedCodexModelCatalogStatus !== 'loading' && (
+                            <button type="button" className="ml-2 text-[var(--accent)]" onClick={() => onRefreshProviders()}>
+                              {t('input.refreshModelCatalog')}
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {p.models.map(model => {
                         const isSelected = provider?.id === p.id && currentModelId === model.model;
                         return (
@@ -2286,7 +2298,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                   disabled={!canSendMessage || (!inputValue.trim() && images.length === 0)}
                   className="rounded-lg bg-[var(--button-primary-bg)] p-2 text-[var(--button-primary-text)] transition-colors hover:bg-[var(--button-primary-bg-hover)] disabled:bg-[var(--ink-muted)]/15 disabled:text-[var(--ink-muted)]/60"
                   title={!canSendMessage
-                    ? (providerUnavailableMessage ?? t('input.providerUnavailableDefault'))
+                    ? (providerUnavailableMessage ?? t(managedModelSelectionMissing ? 'input.selectModel' : 'input.providerUnavailableDefault'))
                     : `${t('input.send')} (${sendKeyHint(sendShortcut, isMac).shortcut})`}
                 >
                   <SendIcon className="h-4 w-4" />

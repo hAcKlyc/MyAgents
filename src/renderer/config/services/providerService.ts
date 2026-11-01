@@ -331,7 +331,9 @@ export function isProviderAvailable(
 ): boolean {
     if (!isProviderEnabled(provider)) return false;
     if (isRuntimeBackedProvider(provider)) {
-        return provider.runtimeReady === true && (provider.models?.length ?? 0) > 0;
+        // Model discovery populates the picker; it does not decide whether a
+        // saved execution identity can run (including an existing Session).
+        return provider.runtimeReady === true;
     }
     if (provider.type === 'subscription') {
         // Issue #203: `accountEmail` is enrichment only — a valid SDK verify
@@ -379,7 +381,7 @@ export function resolveProvider(
 
 /** Paired (provider, model) result. Both fields are guaranteed valid by the helper:
  *  - provider satisfies isProviderAvailable
- *  - model is one of provider.models (or provider.primaryModel as fallback)
+ *  - model is concrete; managed runtime selections do not require catalogue membership
  *  This is the only correct way to construct InitialMessage.builtinSelection. */
 export interface ProviderModelPair {
     readonly provider: Provider;
@@ -395,7 +397,8 @@ export interface ProviderModelPair {
  * in an earlier iteration).
  *
  * Model priority (after provider is selected): agent.model → workspace.model → provider.primaryModel.
- * The first candidate that exists in provider.models is taken; otherwise primaryModel.
+ * API providers validate catalogue membership; managed providers preserve the saved
+ * model paired with that provider and let the native runtime validate it.
  * (provider.primaryModel already has the user's providerPrimaryModels override applied
  * by rebuildAndPersistAvailableProviders, so we don't read raw config here.)
  *
@@ -424,6 +427,15 @@ export function resolveBuiltinSelection(
     }
     provider ??= getFirstAvailableProvider(providers, apiKeys, verifyStatus);
     if (!provider) return undefined;
+
+    if (isRuntimeBackedProvider(provider)) {
+        const model = [
+            ctx.agent?.providerId === provider.id ? ctx.agent.model : undefined,
+            ctx.workspace?.providerId === provider.id ? ctx.workspace.model : undefined,
+            provider.primaryModel,
+        ].find(candidate => candidate?.trim());
+        return model ? { provider, model } : undefined;
+    }
 
     const modelSet = new Set(provider.models?.map(m => m.model) ?? []);
     const modelCandidates = [

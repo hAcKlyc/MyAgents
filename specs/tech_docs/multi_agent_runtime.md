@@ -138,6 +138,8 @@ Codex 使用 JSON-RPC 2.0 app-server，一个进程在 Product Session 生命周
 
 Managed Codex 的推理档位以实际 app-server `model/list` 返回的 `supportedReasoningEfforts` / `defaultReasoningEffort` 为权威，完整读取分页并透传到 RuntimeModelInfo 与 Provider 模型目录。聊天使用 Tab API 读取本 Session 已有进程的能力，不能借用 Global Sidecar 对新安装版本的目录。启动器与 Agent 配置使用安装版本的目录；刷新失败不改写用户选择。
 
+Managed Provider 的可执行前提是启用、安装可用与鉴权有效，不包括模型目录非空。目录属于 ConfigProvider 的临时发现状态：同一安装 / 账号刷新失败保留已发现模型，身份变化丢弃旧目录，输入框模型菜单展示加载 / 错误并提供显式刷新。保存的 Agent、Workspace、Provider 默认模型与 Session 执行模型不因目录失败而清空或替换；无具体模型的新选择须先选模型，实际模型有效性由原生 Runtime 裁决。
+
 推理强度存储保留原始字符串及 `default` sentinel，Codex transport 不使用固定枚举过滤未来档位。Managed adapter 在当前进程内解析每轮有效 effort：显式支持值原样传递，默认/已知不支持值解析为模型声明的默认并显式发送，避免 `turn/start` 省略字段而保留上轮覆盖。未知目录不删除显式选择；无法获知默认时报告错误而不伪装已恢复默认。用户主动切换模型时，UI 与模型选择一起持久化仍受支持的 effort 或 default；能力加载本身不写回 Agent/Session。系统 CLI 的菜单暂保留既有选项。
 
 权限 UI 与 native 参数按 runtime source 分流，保留历史持久化 ID：

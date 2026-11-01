@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "myagents-document-worker"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "anydoc",
  "image",

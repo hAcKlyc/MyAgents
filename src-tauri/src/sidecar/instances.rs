@@ -608,8 +608,9 @@ fn start_tab_sidecar_admitted<R: Runtime>(
         }
     });
 
-    // Wait for health
-    match wait_for_health(port, Some(alive_check)) {
+    // Keep the candidate undispatchable until the Node route owner is ready.
+    // This runs outside the manager lock, for both initial birth and replacement.
+    match health::wait_for_startup(port, Some(alive_check)) {
         Ok(()) => {
             // Mark as healthy
             let mut manager_guard = manager.lock().map_err(|e| e.to_string())?;
@@ -646,8 +647,8 @@ fn start_tab_sidecar_admitted<R: Runtime>(
             Ok((port, sidecar_generation))
         }
         Err(e) => {
-            // Health check failed — diagnostics go to unified log directly
-            ulog_error!("[sidecar] Health check failed: {}", e);
+            // Startup failed — diagnostics go to unified log directly
+            ulog_error!("[sidecar] Startup check failed: {}", e);
             let mut diag = e.clone();
 
             let mut manager_guard = manager.lock().map_err(|_| e.clone())?;
@@ -672,8 +673,7 @@ fn start_tab_sidecar_admitted<R: Runtime>(
                         diag.push_str(&detail);
                     }
                     Some(Ok(None)) => {
-                        let detail = " | process alive but not listening. \
-                            Possible causes: antivirus slow-scanning bun.exe, or port conflict";
+                        let detail = " | process alive but startup did not complete";
                         ulog_error!("[sidecar]{}", detail);
                         diag.push_str(detail);
                     }

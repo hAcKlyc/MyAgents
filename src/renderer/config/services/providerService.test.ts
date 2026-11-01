@@ -81,7 +81,7 @@ describe('provider availability with enablement', () => {
         expect(selection?.model).toBe('beta-primary');
     });
 
-    it('requires runtime-backed providers to be ready and have discovered models', () => {
+    it('uses runtime readiness independently of model catalogue discovery', () => {
         expect(isProviderAvailable(
             MANAGED_CODEX_PROVIDER,
             {},
@@ -92,7 +92,7 @@ describe('provider availability with enablement', () => {
             { ...MANAGED_CODEX_PROVIDER, runtimeReady: true },
             {},
             {},
-        )).toBe(false);
+        )).toBe(true);
 
         expect(isProviderAvailable(
             {
@@ -116,6 +116,18 @@ describe('provider availability with enablement', () => {
             {},
             {},
         )).toBe(false);
+    });
+
+    it('preserves a managed workspace model without a catalogue and never invents an empty model', () => {
+        const provider = { ...MANAGED_CODEX_PROVIDER, runtimeReady: true };
+        const config = { ...DEFAULT_CONFIG, defaultProviderId: provider.id };
+        const workspace = { id: 'workspace', name: 'Workspace', path: '/workspace', permissionMode: 'auto' as const,
+            providerId: provider.id, model: 'saved-native-model' };
+        expect(resolveBuiltinSelection({ workspace }, config, [provider], {}, {}))
+            .toEqual({ provider, model: 'saved-native-model' });
+        expect(resolveBuiltinSelection({}, config, [provider], {}, {})).toBeUndefined();
+        expect(resolveBuiltinSelection({ workspace: { ...workspace, providerId: 'another-provider' } },
+            config, [provider], {}, {})).toBeUndefined();
     });
 
     it('treats auth-required subscription verify status as unavailable', () => {

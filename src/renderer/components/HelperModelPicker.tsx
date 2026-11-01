@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { Provider, ProviderVerifyStatus } from '@/config/types';
 import { isProviderAvailable } from '@/config/configService';
+import { isRuntimeBackedProvider } from '../../shared/providerExecution';
 import { Popover, type PopoverPlacement } from '@/components/ui/Popover';
 import { ModalityBadges } from '@/components/ModalityBadges';
 
@@ -55,7 +56,7 @@ const DEFAULT_TRIGGER_CLASS =
  * Resolve a sensible default `(providerId, model)` for surfaces that mount
  * with no prior selection: prefer the helper Agent's persisted defaults if
  * (a) the provider is still usable AND (b) the model still exists in
- * provider.models — falling back to first available provider's primaryModel
+ * provider.models (managed runtime models are validated by the runtime) — falling back to first available provider's primaryModel
  * otherwise. The membership check matters when a user removes a model from
  * a provider while the helper Agent still references it: without it the
  * picker would show a stale name while App.tsx's handler silently rebases
@@ -76,12 +77,12 @@ export function resolveInitialHelperModel(
         if (
             p &&
             isProviderAvailable(p, apiKeys, verifyStatus) &&
-            p.models.some(m => m.model === persisted.model)
+            (isRuntimeBackedProvider(p) || p.models.some(m => m.model === persisted.model))
         ) {
             return { providerId: p.id, model: persisted.model };
         }
     }
-    const first = providers.find(p => isProviderAvailable(p, apiKeys, verifyStatus));
+    const first = providers.find(p => isProviderAvailable(p, apiKeys, verifyStatus) && p.primaryModel);
     return { providerId: first?.id ?? '', model: first?.primaryModel ?? '' };
 }
 

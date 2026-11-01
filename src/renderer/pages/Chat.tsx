@@ -739,6 +739,7 @@ export default function Chat({
     apiKeys,
     providerVerifyStatus,
     refreshProviderData,
+    refreshProviders,
     refreshConfig,
   } = useConfig();
   const currentProject = projects.find((p) =>
@@ -6773,7 +6774,7 @@ export default function Chat({
               workspaceEnabledPlugins={workspaceEnabledPlugins}
               onWorkspacePluginToggle={handleWorkspacePluginToggle}
                     onRefreshProviders={async () => {
-                      await refreshProviderData();
+                      await refreshProviders();
                       setWorkspaceRefreshTrigger((value) => value + 1);
                     }}
               onOpenAgentSettings={handleOpenAgentSettings}

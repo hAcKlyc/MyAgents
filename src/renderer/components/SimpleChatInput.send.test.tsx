@@ -10,6 +10,7 @@ import { i18n } from '@/i18n';
 import { CUSTOM_EVENTS } from '../../shared/constants';
 import { MANAGED_BROWSER_MCP_ID } from '../../shared/browserTools';
 import { OFFICIAL_TOOLS } from '../../shared/official-tools';
+import { MANAGED_CODEX_PROVIDER } from '../../shared/config-types';
 import {
   CC_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
@@ -20,6 +21,7 @@ import type { SimpleChatInputProps } from './chat-input/types';
 import { ToastProvider } from './Toast';
 
 const workspaceMocks = vi.hoisted(() => ({
+  modelCatalogStatus: 'ready' as 'ready' | 'loading' | 'error',
   discovery: vi.fn(),
   service: {
     isAvailable: true,
@@ -60,7 +62,7 @@ function deferred<T>() {
 vi.mock('@tauri-apps/api/core', () => ({ invoke: workspaceMocks.discovery }));
 
 vi.mock('@/config/useConfigData', () => ({
-  useConfigData: () => ({ config: { chatSendShortcut: 'enter' }, projects: [] }),
+  useConfigData: () => ({ config: { chatSendShortcut: 'enter' }, projects: [], managedCodexModelCatalogStatus: workspaceMocks.modelCatalogStatus }),
 }));
 
 vi.mock('@/hooks/useWorkspaceFileService', () => ({
@@ -85,8 +87,38 @@ function renderInput(props: Partial<React.ComponentProps<typeof SimpleChatInput>
 }
 
 describe('SimpleChatInput send paths', () => {
+  it.each([
+    ['launcher', 'keyboard'], ['launcher', 'button'], ['chat', 'keyboard'], ['chat', 'button'],
+  ] as const)('sends a saved managed model while its catalogue is empty in %s via %s', async (mode, method) => {
+    const onSend = renderInput({
+      mode, runtime: 'codex', usesExternalRuntimeControls: false,
+      provider: { ...MANAGED_CODEX_PROVIDER, runtimeReady: true },
+      selectedModel: 'saved-codex-model',
+    });
+    const textbox = screen.getByRole('textbox');
+    fireEvent.change(textbox, { target: { value: 'send with the saved model' } });
+    expect(screen.getAllByRole('button').at(-1)).not.toBeDisabled();
+    if (method === 'keyboard') fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' });
+    else fireEvent.click(screen.getAllByRole('button').at(-1)!);
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  });
+
+  it('requires a concrete model for a new managed selection even when the provider is ready', () => {
+    const onSend = renderInput({
+      runtime: 'codex', usesExternalRuntimeControls: false, providerAvailable: true,
+      provider: { ...MANAGED_CODEX_PROVIDER, runtimeReady: true },
+    });
+    const textbox = screen.getByRole('textbox');
+    fireEvent.change(textbox, { target: { value: 'keep this draft until a model is chosen' } });
+    expect(screen.getAllByRole('button').at(-1)).toBeDisabled();
+    fireEvent.keyDown(textbox, { key: 'Enter', code: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('keep this draft until a model is chosen');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    workspaceMocks.modelCatalogStatus = 'ready';
     workspaceMocks.discovery.mockResolvedValue({ items: [], complete: true, networkStatus: 'connecting', authGeneration: 0, principalId: null, networkId: null });
     workspaceMocks.service.searchFilesPage.mockResolvedValue({ items: [], complete: true, hasMore: false, scanLimitReached: false, nextCursor: null });
     workspaceMocks.service.importBase64Files.mockResolvedValue({
@@ -100,6 +132,23 @@ describe('SimpleChatInput send paths', () => {
     workspaceMocks.service.addGitignore.mockResolvedValue({ success: true });
     workspaceMocks.service.searchFiles.mockResolvedValue([]);
     workspaceMocks.service.listSlashCommands.mockResolvedValue([]);
+  });
+
+  it('shows a catalogue error and offers reload without discarding the selected model or draft', async () => {
+    await i18n.changeLanguage('zh-CN');
+    workspaceMocks.modelCatalogStatus = 'error';
+    const provider = { ...MANAGED_CODEX_PROVIDER, runtimeReady: true };
+    const refresh = vi.fn();
+    renderInput({ runtime: 'codex', usesExternalRuntimeControls: false, provider,
+      providers: [provider], selectedModel: 'saved-model', onRefreshProviders: refresh });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'my draft' } });
+    fireEvent.click(screen.getByTitle('切换模型'));
+    expect(screen.getByRole('status')).toHaveTextContent('模型列表加载失败');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('textbox')).toHaveValue('my draft');
+    expect(screen.getByTitle('切换模型')).toHaveTextContent('saved-model');
   });
 
   it('defers mention search and keeps expansion during IME composition', async () => {
