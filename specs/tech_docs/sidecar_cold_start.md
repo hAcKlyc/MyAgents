@@ -23,6 +23,7 @@
 
 - TCP health check 指数退避 50→500ms（前 5 次累计 1.25s 覆盖常见冷启动窗口），代替固定 500ms 轮询
 - `try_wait()` 非阻塞，crash 检测由 health loop 的 alive check 承担，不另加固定 guard sleep。
+- TCP 可连接只表示存活。Global 初次启动与 monitor replacement 均在 manager 锁外等待 `/health/ready`，完成后由 manager 校验当前 generation / desired owner，再发布 `healthy` 与 CLI port。Session 也在自己的生命周期入口等待 readiness；不得将 TCP 成功直接当作路由可用，否则启动期一次性模型查询会收到 503。
 
 ## Node Sidecar `main()` 重排序 (`src/server/index.ts`)
 

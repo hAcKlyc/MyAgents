@@ -1,10 +1,18 @@
 use super::*;
 
-/// Wait for a new sidecar to become healthy using TCP-level check.
-/// For initial startup, TCP check is sufficient and more reliable because:
-/// - Bun starts listening on TCP port before HTTP handler is fully ready
-/// - TCP check has been proven stable in production
-/// Note: For REUSING an existing sidecar, use check_sidecar_http_health() instead
+/// Wait for the new process to listen, then for its deferred initialization.
+/// Only after this returns may the manager publish a dispatchable instance.
+pub(super) fn wait_for_startup(
+    port: u16,
+    alive_check: Option<Box<dyn Fn() -> bool>>,
+) -> Result<(), String> {
+    wait_for_health(port, alive_check)?;
+    wait_for_readiness(port, 30)
+}
+
+/// Wait for a new sidecar to listen using a TCP-level check.
+/// Listening does not mean HTTP routes are ready: callers must also wait for
+/// deferred initialization before publishing the instance as healthy.
 ///
 /// `alive_check`: optional closure that returns `true` if the sidecar process is still alive.
 /// Checked every 20 iterations (~10s) to detect early crashes (e.g., AVX2 0xC0000005 on Windows
@@ -143,5 +151,96 @@ pub(super) fn check_sidecar_http_health(port: u16) -> bool {
             ulog_warn!("[sidecar] HTTP health check failed on port {}: {}", port, e);
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+
+    fn accept(listener: &TcpListener) -> TcpStream {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    return stream;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "startup did not connect"
+                    );
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("test accept: {error}"),
+            }
+        }
+    }
+
+    // Real loopback HTTP, with initialization controlled by the test. No Node
+    // process, real user directory or external service is needed.
+    fn startup_response(final_status: &str, final_body: &str) -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (result_tx, result_rx) = mpsc::channel();
+        let startup = thread::spawn(move || {
+            result_tx.send(wait_for_startup(port, None)).unwrap();
+        });
+        // The first connection is TCP liveness only.
+        let mut tcp = accept(&listener);
+        tcp.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        assert_eq!(tcp.read(&mut [0; 1]).unwrap(), 0);
+        drop(tcp);
+
+        for (status, body) in [
+            (
+                "503 Service Unavailable",
+                r#"{"state":"phase","phase":"cleanup"}"#,
+            ),
+            (final_status, final_body),
+        ] {
+            let mut stream = accept(&listener);
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 1024];
+            let n = stream.read(&mut request).unwrap();
+            assert!(String::from_utf8_lossy(&request[..n]).starts_with("GET /health/ready "));
+            // An open port and an in-progress init must not finish startup.
+            assert!(matches!(
+                result_rx.try_recv(),
+                Err(mpsc::TryRecvError::Empty)
+            ));
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+        let result = result_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        startup.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn startup_waits_for_deferred_init_after_tcp_listens() {
+        assert!(startup_response("200 OK", r#"{"state":"ready"}"#).is_ok());
+    }
+
+    #[test]
+    fn startup_surfaces_deferred_init_failure() {
+        let error = startup_response(
+            "503 Service Unavailable",
+            r#"{"state":"failed","phase":"cleanup","error":"test init failure"}"#,
+        )
+        .unwrap_err();
+        assert!(error.contains("test init failure"), "{error}");
+        assert!(error.contains("cleanup"), "{error}");
     }
 }

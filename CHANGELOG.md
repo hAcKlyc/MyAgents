@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.12] - 2026-11-01
+
+### Fixed
+
+- **Codex 消息发送**：修复应用启动或升级重启后，使用 Codex（订阅）时输入文字却无法点击发送、按回车也无效的问题，覆盖起始页和已有会话。模型列表暂时加载失败时保留已选模型，并提供失败提示和重新加载入口。
+
+---
+
 ## [0.5.11] - 2026-11-01
 
 ### Added

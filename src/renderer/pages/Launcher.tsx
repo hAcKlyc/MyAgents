@@ -135,7 +135,7 @@ export default function Launcher({
     touchProject,
     apiKeys,
     providerVerifyStatus,
-    refreshProviderData,
+    refreshProviders,
     updateConfig,
   } = useConfig();
 
@@ -400,12 +400,14 @@ export default function Launcher({
     providerVerifyStatus,
   ]);
   const launcherProviderModelIncomplete =
-    launcherRuntime === 'dsh' &&
-    !isProviderModelCompatibleWithRuntime(
-      launcherRuntime,
-      launcherProvider,
-      launcherSelectedModel ?? launcherProvider?.primaryModel,
-    );
+    (!isExternalRuntime && isRuntimeBackedProvider(launcherProvider) &&
+      !(launcherSelectedModel ?? launcherProvider?.primaryModel)?.trim()) ||
+    (launcherRuntime === 'dsh' &&
+      !isProviderModelCompatibleWithRuntime(
+        launcherRuntime,
+        launcherProvider,
+        launcherSelectedModel ?? launcherProvider?.primaryModel,
+      ));
   const imageUnderstandingConfiguredForInput = useMemo(() => {
     return isImageUnderstandingSelectionAvailable(
       providers,
@@ -1284,7 +1286,7 @@ export default function Launcher({
             }))}
           workspaceEnabledPlugins={launcherEnabledPlugins}
           onWorkspacePluginToggle={handleLauncherPluginToggle}
-          onRefreshProviders={refreshProviderData}
+          onRefreshProviders={refreshProviders}
           onGoToSettings={handleGoToSettings}
           runtime={
             launcherRuntime !== 'builtin' ? launcherRuntime : undefined

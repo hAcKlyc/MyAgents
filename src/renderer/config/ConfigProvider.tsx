@@ -25,6 +25,7 @@ import {
     withManagedCodexProviderCatalog,
 } from './types';
 import type { RuntimeModelInfo } from '../../shared/types/runtime';
+import { isRuntimeBackedProvider } from '../../shared/providerExecution';
 import type { TokenDanceAuthView } from '../../shared/tokendance';
 import type { AgentConfig } from '../../shared/types/agent';
 import { apiGetJson } from '@/api/apiFetch';
@@ -233,6 +234,7 @@ export interface ConfigDataValue {
     isLoading: boolean;
     error: string | null;
     managedCodexRuntimeUpdateInFlight: boolean;
+    managedCodexModelCatalogStatus: 'loading' | 'ready' | 'error';
 }
 
 export interface ConfigActionsValue {
@@ -297,7 +299,12 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
     const [projects, setProjects] = useState<Project[]>([]);
     const [rawProviders, setRawProviders] = useState<Provider[]>(PRESET_PROVIDERS);
-    const [managedCodexRuntimeModels, setManagedCodexRuntimeModels] = useState<RuntimeModelInfo[]>([]);
+    const [managedCodexCatalog, setManagedCodexCatalog] = useState<{
+        key: string;
+        models: RuntimeModelInfo[];
+        status: ConfigDataValue['managedCodexModelCatalogStatus'];
+    }>({ key: '', models: [], status: 'loading' });
+    const [managedCodexCatalogRefresh, setManagedCodexCatalogRefresh] = useState(0);
     const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
     const [providerVerifyStatus, setProviderVerifyStatus] = useState<Record<string, ProviderVerifyStatus>>({});
     const [isLoading, setIsLoading] = useState(true);
@@ -305,6 +312,22 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     const [managedCodexRuntimeUpdateInFlight, setManagedCodexRuntimeUpdateInFlight] = useState(
         () => managedCodexRuntimeUpdateRequest !== null,
     );
+    const managedCodexReadiness = getManagedCodexProviderReadiness(config);
+    // Installed identity owns the catalogue. A status check may revalidate it,
+    // but a new target download must not invalidate the still-installed runtime.
+    const managedCodexModelListKey = JSON.stringify([
+        config.managedCodexRuntimeInstall?.installedVersion,
+        config.managedCodexRuntimeInstall?.installedAt,
+        config.managedCodexRuntimeInstall?.platform,
+        config.managedCodexAuth?.status,
+        config.managedCodexAuth?.authMethod,
+        config.managedCodexAuth?.accountEmail,
+    ]);
+    const managedCodexRuntimeModels = useMemo(() =>
+        managedCodexCatalog.key === managedCodexModelListKey ? managedCodexCatalog.models : [],
+    [managedCodexCatalog, managedCodexModelListKey]);
+    const managedCodexModelCatalogStatus = managedCodexCatalog.key === managedCodexModelListKey
+        ? managedCodexCatalog.status : 'loading';
 
     // Derived: merge preset custom models + apply user primary model overrides
     const providers = useMemo(() => {
@@ -333,7 +356,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         // so ALL consumers see the correct value without needing getEffectivePrimaryModel()
         const withPrimaryOverrides = merged.map(p => {
             const userPrimary = overrides[p.id];
-            if (!userPrimary || !p.models?.some(m => m.model === userPrimary)) return p;
+            if (!userPrimary || (!isRuntimeBackedProvider(p) && !p.models?.some(m => m.model === userPrimary))) return p;
             return { ...p, primaryModel: userPrimary };
         });
         return applyManagedCodexProviderReadiness(
@@ -352,29 +375,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         rawProviders,
         managedCodexRuntimeModels,
     ]);
-    const managedCodexReadiness = useMemo(
-        () => getManagedCodexProviderReadiness(config),
-        [config],
-    );
     const managedCodexShouldAutoUpdate = !isLinuxDesktop() && shouldAutoUpdateManagedCodexRuntime(config);
-    const managedCodexModelListKey = useMemo(
-        () => [
-            managedCodexReadiness.reason,
-            config.managedCodexRuntimeInstall?.installedVersion ?? '',
-            config.managedCodexRuntimeInstall?.requiredVersion ?? '',
-            config.managedCodexAuth?.status ?? '',
-            config.managedCodexAuth?.authMethod ?? '',
-            config.managedCodexAuth?.verifiedAt ?? '',
-        ].join('|'),
-        [
-            managedCodexReadiness.reason,
-            config.managedCodexRuntimeInstall?.installedVersion,
-            config.managedCodexRuntimeInstall?.requiredVersion,
-            config.managedCodexAuth?.status,
-            config.managedCodexAuth?.authMethod,
-            config.managedCodexAuth?.verifiedAt,
-        ],
-    );
 
     // Mount guard
     const isMountedRef = useRef(true);
@@ -632,26 +633,36 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         if (isLinuxDesktop() || (managedCodexReadiness.reason !== 'ready' && managedCodexReadiness.reason !== 'provider-disabled')) {
-            setManagedCodexRuntimeModels([]);
+            setManagedCodexCatalog({ key: managedCodexModelListKey, models: [], status: 'ready' });
             return;
         }
 
         let cancelled = false;
+        setManagedCodexCatalog(previous => ({
+            key: managedCodexModelListKey,
+            models: previous.key === managedCodexModelListKey ? previous.models : [],
+            status: 'loading',
+        }));
         apiGetJson<{ models?: RuntimeModelInfo[] }>('/api/runtime/models?type=codex&source=managed-provider')
             .then((result) => {
                 if (cancelled) return;
-                setManagedCodexRuntimeModels(Array.isArray(result.models) ? result.models : []);
+                setManagedCodexCatalog({ key: managedCodexModelListKey,
+                    models: Array.isArray(result.models) ? result.models : [], status: 'ready' });
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.warn('[managed-codex] failed to load provider model list', err);
-                setManagedCodexRuntimeModels([]);
+                // A failed refresh is not evidence that the installed runtime
+                // lost its models. Only an identity change discards its snapshot.
+                setManagedCodexCatalog(previous => ({ ...previous, status: 'error' }));
             });
 
         return () => { cancelled = true; };
     }, [
         managedCodexReadiness.reason,
         managedCodexModelListKey,
+        config.managedCodexAuth?.verifiedAt,
+        managedCodexCatalogRefresh,
     ]);
 
     const syncNativeUiLanguageFromConfig = useCallback(async () => {
@@ -952,6 +963,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
 
     const refreshProviders = useCallback(async () => {
         await refreshConfigFromDisk('provider catalogue refresh', { syncNativeUiLanguage: false, readOnly: true });
+        setManagedCodexCatalogRefresh(revision => revision + 1);
     }, [refreshConfigFromDisk]);
 
     // --- Projects ---
@@ -1242,6 +1254,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         error,
         managedCodexRuntimeUpdateInFlight,
+        managedCodexModelCatalogStatus,
     }), [
         config,
         projects,
@@ -1251,6 +1264,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         error,
         managedCodexRuntimeUpdateInFlight,
+        managedCodexModelCatalogStatus,
     ]);
 
     const actions = useMemo<ConfigActionsValue>(() => ({
