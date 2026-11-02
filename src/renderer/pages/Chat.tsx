@@ -241,6 +241,7 @@ import {
 } from '../../shared/types/runtime';
 import type {
   RuntimeType,
+  RuntimeSource,
   RuntimeDetections,
   RuntimeConfig,
   RuntimeDiagnostics,
@@ -704,6 +705,8 @@ export default function Chat({
     forceExecuteQueuedMessage,
     isConnected,
   } = useTabState();
+  const sessionMetaRef = useRef(sessionMeta);
+  useLayoutEffect(() => { sessionMetaRef.current = sessionMeta; }, [sessionMeta]);
   const projectedSessionMeta = usePassiveSessionMetadata(agentDir, sessionId);
 
   useEffect(() => {
@@ -2255,7 +2258,14 @@ export default function Chat({
 
     // Resolved values hoisted out of `try` so the `catch` failure-recovery path
     // (PRD 0.2.7 §4.5) can reference them when restoring the launcher draft.
-    const builtinSel = launchMessage.builtinSelection;
+    // The launch selection already owns this first turn. Managed providers use
+    // the Provider picker too, but carry their pair in execution identity rather
+    // than builtinSelection; picker chrome must not select the model authority.
+    const launchProviderSelection =
+      launchMessage.providerExecutionIdentity ??
+      (currentRuntime === 'builtin' || currentRuntime === 'dsh'
+        ? launchMessage.builtinSelection
+        : undefined);
     // #244 (cross-review W2): when the initialMessage carries no explicit
     // permissionMode (internal producers — Task discussion / support / fork —
     // unlike the launcher, don't set it), derive the builtin mode from config
@@ -2282,17 +2292,19 @@ export default function Chat({
             defaultPermissionMode: config.defaultPermissionMode,
           })
     ) as PermissionMode;
-    const effectiveModel = inputUsesExternalRuntimeControls
-      ? (coerceExternalRuntimeModelForUi(
-          launchMessage.runtimeModel,
-          currentRuntime,
-        ) ??
-        effectiveRuntimeModel ??
-        runtimeModels?.find((m) => m.isDefault)?.value)
-      : (builtinSel?.model ?? selectedModel);
-    const provider = builtinSel
-      ? (providers.find((p) => p.id === builtinSel.providerId) ??
-        currentProvider)
+    const effectiveModel = launchProviderSelection
+      ? launchProviderSelection.model
+      : inputUsesExternalRuntimeControls
+        ? (coerceExternalRuntimeModelForUi(
+            launchMessage.runtimeModel,
+            currentRuntime,
+          ) ??
+          effectiveRuntimeModel ??
+          runtimeModels?.find((m) => m.isDefault)?.value)
+        : selectedModel;
+    const provider = launchProviderSelection
+      ? (providers.find((p) => p.id === launchProviderSelection.providerId) ??
+        (launchMessage.providerExecutionIdentity ? undefined : currentProvider))
       : currentProvider;
     const providerRoute = buildBuiltinProviderRoute(provider, effectiveModel);
     const providerEnv = providerRoute ? undefined : buildProviderEnv(provider);
@@ -2375,7 +2387,12 @@ export default function Chat({
             projectSyncedRef.current = true;
           }
         }
-        if (inputUsesExternalRuntimeControls) {
+        if (launchProviderSelection) {
+          // Use the same pair as the first send, before metadata hydration.
+          setSelectedProviderId(launchProviderSelection.providerId);
+          setSelectedModel(launchProviderSelection.model);
+          providerInitRef.current = true;
+        } else if (inputUsesExternalRuntimeControls) {
           if (launchMessage.runtimeModel) {
             setRuntimeModel(
               coerceExternalRuntimeModelForUi(
@@ -2384,11 +2401,6 @@ export default function Chat({
               ),
             );
           }
-        } else if (builtinSel) {
-          // Apply the paired (provider, model) atomically — type system guarantees both present.
-          setSelectedProviderId(builtinSel.providerId);
-          setSelectedModel(builtinSel.model);
-          providerInitRef.current = true; // suppress deferred provider-change effect
         }
         // #324 — launcher hand-carry (don't rely on the async agent-config
         // write having landed before this tab seeded from currentAgent).
@@ -3960,6 +3972,7 @@ export default function Chat({
     // have advanced (user switched again), and we must not record adoption
     // ownership for a session whose live config we never actually read.
     const adoptingSessionId = sessionId;
+    const adoptingSnapshot = sessionMetaRef.current;
     const isCurrentAdoption = () =>
       adoptingSessionId === sessionIdRef.current &&
       configDispositionRef.current === 'adopt';
@@ -3969,6 +3982,8 @@ export default function Chat({
         const config = await apiGet<{
           success: boolean;
           runtime?: RuntimeType;
+          runtimeSource?: RuntimeSource;
+          providerExecutionIdentity?: RuntimeBackedProviderIdentity | null;
           model?: string | null;
           mcpServerIds?: string[] | null;
           enabledOfficialToolIds?: OfficialToolId[] | null;
@@ -3982,27 +3997,75 @@ export default function Chat({
           // backward-compat hedge for older sidecars that pre-date the field.
           // Keep the fallback so a stale-binary sidecar doesn't crash adoption.
           const sidecarRuntime = config.runtime ?? currentRuntime;
-          const sidecarUsesExternalRuntimeControls =
-            sidecarRuntime !== 'builtin' && sidecarRuntime !== 'dsh';
-
-          if (config.model) {
-            if (sidecarUsesExternalRuntimeControls) {
-              setRuntimeModel(config.model);
-            } else {
-              setSelectedModel(config.model);
-            }
-          }
-          if (config.permissionMode) {
-            if (sidecarUsesExternalRuntimeControls) {
-              setRuntimePermissionMode(config.permissionMode);
-            } else {
-              setPermissionMode(config.permissionMode as PermissionMode);
-            }
-          }
-          const adoptedProviderId = resolveAdoptedBuiltinProviderId(
-            sidecarUsesExternalRuntimeControls,
-            config.providerId,
+          const sidecarIsManagedProvider =
+            isManagedProviderSessionSnapshot(config);
+          const latestSnapshot = sessionMetaRef.current;
+          const latestOwnedSnapshot =
+            sidecarIsManagedProvider &&
+            latestSnapshot?.id === adoptingSessionId &&
+            latestSnapshot.configSnapshotAt
+              ? latestSnapshot
+              : undefined;
+          // Preserve only fields changed in the owned snapshot during this read.
+          // Metadata/tag refreshes are not config edits; they must not discard
+          // the adoption or its independent permission/MCP/tool synchronization.
+          const preferChangedSnapshotValue = <T,>(
+            before: T,
+            latest: T,
+            adopted: T,
+          ): T => latestOwnedSnapshot && latest !== before ? latest : adopted;
+          const sidecarUsesProviderPicker = shouldSessionSnapshotUseProviderPicker({
+            session: config,
+            runtime: sidecarRuntime,
+          });
+          const adoptedModel = preferChangedSnapshotValue(
+            managedProviderSnapshotModel(
+              adoptingSnapshot ?? {}, adoptingSnapshot?.model,
+            ),
+            managedProviderSnapshotModel(
+              latestOwnedSnapshot ?? {}, latestOwnedSnapshot?.model,
+            ),
+            managedProviderSnapshotModel(config, config.model ?? undefined),
           );
+          const adoptedPermission = sidecarIsManagedProvider
+            ? preferChangedSnapshotValue(
+                projectManagedCodexPermissionToRuntime(adoptingSnapshot?.permissionMode),
+                projectManagedCodexPermissionToRuntime(latestOwnedSnapshot?.permissionMode),
+                projectManagedCodexPermissionToRuntime(config.permissionMode),
+              )
+            : config.permissionMode;
+          const adoptedEffort = preferChangedSnapshotValue(
+            adoptingSnapshot?.reasoningEffort ?? 'default',
+            latestOwnedSnapshot?.reasoningEffort ?? 'default',
+            config.reasoningEffort,
+          );
+
+          if (adoptedModel) {
+            if (sidecarUsesProviderPicker) {
+              setSelectedModel(adoptedModel);
+            } else {
+              setRuntimeModel(adoptedModel);
+            }
+          }
+          if (adoptedPermission) {
+            const providerPermission = sidecarIsManagedProvider
+              ? managedCodexRuntimePermissionToProviderPermission(
+                  adoptedPermission,
+                )
+              : adoptedPermission;
+            if (!sidecarUsesProviderPicker || sidecarIsManagedProvider) {
+              setRuntimePermissionMode(adoptedPermission);
+            }
+            if (sidecarUsesProviderPicker && providerPermission) {
+              setPermissionMode(providerPermission as PermissionMode);
+            }
+          }
+          const adoptedProviderId = sidecarIsManagedProvider
+            ? managedProviderSnapshotProviderId(config)
+            : resolveAdoptedBuiltinProviderId(
+                !sidecarUsesProviderPicker,
+                config.providerId,
+              );
           if (adoptedProviderId !== undefined) {
             setSelectedProviderId(adoptedProviderId);
           }
@@ -4015,8 +4078,8 @@ export default function Chat({
             );
           }
           // #324 — server returns 'default' when unset, so truthiness works.
-          if (config.reasoningEffort) {
-            setReasoningEffort(config.reasoningEffort);
+          if (adoptedEffort) {
+            setReasoningEffort(adoptedEffort);
           }
           if (adoptingSessionId) {
             adoptedSessionRef.current = adoptingSessionId;

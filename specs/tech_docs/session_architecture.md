@@ -308,6 +308,8 @@ Chat mount 必须明确当前 Tab 对 Sidecar 配置的方向：
 
 mount 期配置同步必须受 disposition 门控；用户主动修改配置可以先持久化 intent，但在 `pending` 期间延后 Runtime push。打开已有 Session 的所有入口都复用 App 的 materialization/reconcile 流程，以 exact Tab owner ensure 并在 replacement 时保持 Owner 集合。
 
+Managed Provider 的启动消息以 `providerExecutionIdentity` 中的 Provider/model 对决定首发参数及输入框初始化，不依赖异步 metadata 到达，也不能按输入框外观回落到工作区旧模型。adopt 与 metadata hydration 复用 `sessionSnapshotProviderProjection`，依据 `runtimeSource` / execution identity 选择投影；Managed Codex 的 Provider 权限词汇与 Runtime 权限词汇仍通过既有转换函数分别更新。Managed adopt 请求期间，owned Session 快照中实际改变的 model、permission、reasoningEffort 各自保留新值，其余字段正常采纳响应；metadata 对象重建或标签更新不应丢弃整个 adopt。`configSnapshotAt` 只标识快照归属，不充当更新版本。启动消息消费后，用户主动切换继续经过原 Session snapshot writer，不重新应用启动选择。
+
 Sidecar ready 而 External/DSH Product Session 尚未绑定 workspace owner 时，Agent/MCP setter 返回 `pending_next_start / awaiting_product_session_owner`；birth 从落盘 authority 编译扩展，不能伪造 live apply。DSH replacement resume 先恢复当前 Session 实际 permission/config，再校验持久 permission revision chain；mutation journal 只协调 fork/rewind/delete。
 
 ### 7.2 snapshot setter guard
