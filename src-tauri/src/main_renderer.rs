@@ -5,6 +5,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
+use crate::browser::BrowserManager;
 use crate::sidecar::ManagedSidecarManager;
 use crate::sse_proxy::SseProxyState;
 
@@ -28,11 +29,13 @@ pub struct MainRendererState {
 }
 
 impl MainRendererState {
-    async fn attach(
+    async fn attach<R: tauri::Runtime>(
         &self,
         renderer_id: String,
         manager: &ManagedSidecarManager,
         sse: &SseProxyState,
+        browsers: &BrowserManager,
+        app: &tauri::AppHandle<R>,
     ) -> Result<RendererAttachment, String> {
         let mut current = self.attachment.lock().await;
         if let Some((id, receipt)) = current.as_ref() {
@@ -54,6 +57,7 @@ impl MainRendererState {
         };
         if replacement {
             sse.stop_tab_subscriptions().await;
+            browsers.retire_renderer_resources(app).await?;
         }
         let receipt = RendererAttachment {
             replacement,
@@ -65,18 +69,28 @@ impl MainRendererState {
 }
 
 #[tauri::command]
-pub async fn cmd_attach_main_renderer(
-    window: tauri::WebviewWindow,
+pub async fn cmd_attach_main_renderer<R: tauri::Runtime>(
+    webview: tauri::Webview<R>,
+    app: tauri::AppHandle<R>,
     state: tauri::State<'_, MainRendererState>,
     manager: tauri::State<'_, ManagedSidecarManager>,
     sse: tauri::State<'_, Arc<SseProxyState>>,
+    browsers: tauri::State<'_, Arc<BrowserManager>>,
     renderer_id: String,
 ) -> Result<RendererAttachment, String> {
-    if window.label() != "main" || renderer_id.is_empty() {
+    // BrowserPanel adds native children to this Window. WebviewWindow command
+    // extraction rejects that topology before entering the command body.
+    if webview.label() != "main" || webview.window().label() != "main" || renderer_id.is_empty() {
         return Err("Renderer attachment requires the main window and an instance id".into());
     }
     state
-        .attach(renderer_id, manager.inner(), sse.inner())
+        .attach(
+            renderer_id,
+            manager.inner(),
+            sse.inner(),
+            browsers.inner(),
+            &app,
+        )
         .await
 }
 
@@ -84,13 +98,80 @@ pub async fn cmd_attach_main_renderer(
 mod tests {
     use super::*;
     use crate::sidecar::{create_sidecar_manager, SidecarOwner};
+    use tauri::Manager;
+
+    #[test]
+    fn main_renderer_can_attach_after_browser_child_is_added() {
+        let app = tauri::test::mock_builder()
+            .manage(MainRendererState::default())
+            .manage(create_sidecar_manager())
+            .manage(Arc::new(SseProxyState::default()))
+            .manage(BrowserManager::new())
+            .invoke_handler(tauri::generate_handler![cmd_attach_main_renderer])
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let attach = |webview: &tauri::Webview<tauri::test::MockRuntime>, renderer_id: &str| {
+            tauri::test::get_ipc_response(
+                &Arc::new(webview.clone()),
+                tauri::webview::InvokeRequest {
+                    cmd: "cmd_attach_main_renderer".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(serde_json::json!({
+                        "rendererId": renderer_id,
+                    })),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|body| body.deserialize::<serde_json::Value>().unwrap())
+        };
+        assert_eq!(attach(main.as_ref(), "cold").unwrap()["replacement"], false);
+        let browser = app
+            .get_window("main")
+            .unwrap()
+            .add_child(
+                tauri::webview::WebviewBuilder::new("browser-test", Default::default()),
+                tauri::LogicalPosition::new(0., 0.),
+                tauri::LogicalSize::new(200., 200.),
+            )
+            .unwrap();
+        assert!(app.get_webview_window("main").is_none());
+        tauri::async_runtime::block_on(
+            app.state::<Arc<BrowserManager>>().insert_test_live_browser(
+                "tab",
+                "generation",
+                "browser-test",
+            ),
+        );
+        assert!(attach(&browser, "child").is_err());
+        assert_eq!(
+            attach(main.as_ref(), "replacement").unwrap()["replacement"],
+            true
+        );
+        assert!(app.get_webview("browser-test").is_none());
+        assert!(app.get_webview("main").is_some());
+        assert_eq!(
+            attach(main.as_ref(), "replacement").unwrap()["replacement"],
+            true
+        );
+    }
 
     #[tokio::test]
     async fn replacement_keeps_exact_tab_owners_and_repeat_attach_is_idempotent() {
         let state = MainRendererState::default();
         let manager = create_sidecar_manager();
         let sse = SseProxyState::default();
-        let cold = state.attach("first".into(), &manager, &sse).await.unwrap();
+        let browsers = BrowserManager::new();
+        let app = tauri::test::mock_app();
+        let cold = state
+            .attach("first".into(), &manager, &sse, &browsers, app.handle())
+            .await
+            .unwrap();
         assert!(!cold.replacement);
         {
             let mut manager = manager.lock().unwrap();
@@ -106,7 +187,10 @@ mod tests {
                 SidecarOwner::Tab("tab-b".into()),
             );
         }
-        let recovered = state.attach("second".into(), &manager, &sse).await.unwrap();
+        let recovered = state
+            .attach("second".into(), &manager, &sse, &browsers, app.handle())
+            .await
+            .unwrap();
         assert!(recovered.replacement);
         assert_eq!(
             recovered.previous_tab_owners,
@@ -124,12 +208,15 @@ mod tests {
         // Native attachment only retires transport, never drops Session owners.
         assert_eq!(manager.lock().unwrap().tab_owner_bindings().len(), 2);
         assert_eq!(
-            state.attach("second".into(), &manager, &sse).await.unwrap(),
+            state
+                .attach("second".into(), &manager, &sse, &browsers, app.handle())
+                .await
+                .unwrap(),
             recovered
         );
         assert!(
             !MainRendererState::default()
-                .attach("third".into(), &manager, &sse)
+                .attach("third".into(), &manager, &sse, &browsers, app.handle())
                 .await
                 .unwrap()
                 .replacement

@@ -312,8 +312,9 @@ HTTP client 的错误文本通常携带完整请求 URL。若协议把凭据放�
 | `native-init-script` | Tauri initialization script | HTML 模块执行前的最早 JS 证据 |
 | `renderer-entry-evaluated` | renderer | `main.tsx` 已开始执行 |
 | `theme-native-bootstrap-*` / `theme-renderer-bootstrap-*` | native bridge / ThemeRuntime | 首帧快照和 renderer prime 是否完成 |
-| `react-root-created` / `react-commit` | renderer | React root 创建与真实 effect commit |
+| `react-root-created` / `react-commit` | renderer | React root 创建与入口 effect commit；不代表 lazy App 已成功挂载 |
 | `renderer-uncaught-error` / `renderer-unhandled-rejection` | initialization script | 模块加载或早期 promise 的有界错误 |
+| `renderer-react-error` | AppErrorBoundary | React 捕获的启动/渲染错误，包括 Tauri 的字符串 rejection；不依赖 App 日志 sink |
 
 所有阶段都带 `window=<label>`，并进入同一个 `~/.myagents/logs/unified-*.log`：Rust page-load 直接走 `ulog_*!`；initialization script 与 `main.tsx` 在 App/Sidecar logger 尚未可用时调用受限 Tauri command `cmd_record_renderer_boot_event`，由 Rust unified logger 持久化。该 command 只接受白名单 stage、有界单行 detail 和合法 window label，不是第二个通用日志 API；禁止绕回 raw `plugin:log|log`，否则阶段链会分裂到 OS LogDir。
 
@@ -379,17 +380,17 @@ grep -E '\[(record|recording|speech)\]|RECORDING_|SPEECH_' ~/.myagents/logs/unif
 
 ### 前端整页崩溃（「界面渲染出错」/ 白屏）
 
-`AppErrorBoundary`（`src/renderer/components/AppErrorBoundary.tsx`）挂在 `main.tsx` 的 React 根、**所有 provider 之外，且没有 per-tab / per-message 子边界**——所以任意一个组件 render 抛错就会冒泡到它、把**整个界面**替换成「界面渲染出错」卡片（不是局部某块）。它的 `componentDidCatch` 把 `error` + `componentStack` 经 `console.error('[AppErrorBoundary] ...')` 写进统一日志。
+`AppErrorBoundary`（`src/renderer/components/AppErrorBoundary.tsx`）挂在 `main.tsx` 的 React 根、**所有 provider 之外，且没有 per-tab / per-message 子边界**——所以任意一个组件 render 抛错就会冒泡到它、把**整个界面**替换成「界面渲染出错」卡片（不是局部某块）。`componentDidCatch` 通过受限 native boot ingress 记录有界的 `error` + `componentStack`，阶段为 `renderer-react-error`；同时保留 `console.error('[AppErrorBoundary] ...')` 供控制台诊断。启动失败时 App 的 console 日志 sink 可能尚未建立，不能只搜索 `[REACT]` 日志。
 
 排查：
 
 ```bash
-grep -E '\[AppErrorBoundary\]|\[REACT\] \[ERROR\]' ~/.myagents/logs/unified-*.log | tail -30
+rg '\[AppErrorBoundary\]|renderer-react-error|\[REACT\] \[ERROR\]' ~/.myagents/logs/unified-*.log | tail -30
 ```
 
-- **`error.message`** 保真（运行时字符串，如 `Cannot read properties of undefined (reading 'trim')`）——主要定位线索；配合时间线看崩前发生了什么（常见诱因：**恢复旧 session**、渲染恢复态/流式数据时把可选字段当必有 string）。
+- **错误文本** 同时保留 `Error.message` 和 Tauri 等来源的原始字符串 rejection。配合时间线区分恢复入口失败与组件 render 抛错；不要把「未知错误」直接归因于历史消息格式。
 - **`componentStack`** 只在 dev / 有 sourcemap 时能定位到组件；release 包被 minify 成 `at t` 这类乱码，别据此硬猜。
-- 这类几乎都是真前端 Bug（信任 restored / partial 数据导致 render 抛错），不是用户配置能修的。小助理侧的 triage→报 Bug 流程见 helper `/support` §1.6。
+- 若此前出现 `[WebView] content process terminated`，先检查终止原因，再追踪新 renderer 的 attach 与 App 挂载；`react-commit` 本身不保证 App 已启动。小助理侧的 triage→报 Bug 流程见 helper `/support` §1.6。
 
 ## 相关文件
 

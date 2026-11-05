@@ -21,10 +21,7 @@ const MENU_FORCE_WAKE_LOCK: &str = "force_wake_lock";
 const MENU_EXIT: &str = "exit";
 const MAIN_WINDOW_PRESENTATION_EVENT: &str = "main-window:presentation-changed";
 
-fn emit_main_window_presentation<R: Runtime>(
-    window: &tauri::WebviewWindow<R>,
-    surface_available: bool,
-) {
+fn emit_main_window_presentation<R: Runtime>(window: &tauri::Window<R>, surface_available: bool) {
     if let Err(error) = window.emit(MAIN_WINDOW_PRESENTATION_EVENT, surface_available) {
         ulog_warn!(
             "[Tray] Failed to emit main-window presentation={} error={}",
@@ -415,7 +412,7 @@ fn recording_dot_icon(base: &Image<'_>) -> Image<'static> {
 /// Pit-of-success: one helper, three callers; new entry points MUST call this
 /// rather than re-deriving show + unminimize + set_focus.
 pub fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         let before_visible = window.is_visible().unwrap_or(false);
         let before_focused = window.is_focused().unwrap_or(false);
         ulog_info!(
@@ -447,7 +444,7 @@ pub fn show_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
 /// this helper so a quick hide→show cannot collapse into one async JS sample.
 pub fn hide_main_window<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     let window = app
-        .get_webview_window("main")
+        .get_window("main")
         .ok_or_else(|| "main window is missing".to_string())?;
     emit_main_window_presentation(&window, false);
     if let Err(error) = window.hide() {
@@ -502,6 +499,34 @@ pub fn should_minimize_to_tray() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_window_can_be_hidden_and_shown_with_a_browser_child() {
+        use tauri::Listener;
+        let app = tauri::test::mock_app();
+        tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        app.get_window("main")
+            .unwrap()
+            .add_child(
+                tauri::webview::WebviewBuilder::new("browser-test", Default::default()),
+                tauri::LogicalPosition::new(0., 0.),
+                tauri::LogicalSize::new(200., 200.),
+            )
+            .unwrap();
+        assert!(app.get_webview_window("main").is_none());
+        let presentations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = presentations.clone();
+        app.listen(MAIN_WINDOW_PRESENTATION_EVENT, move |event| {
+            captured.lock().unwrap().push(event.payload().to_string());
+        });
+        hide_main_window(app.handle()).unwrap();
+        show_main_window(app.handle());
+        // MockRuntime does not model OS visibility. The real helper must still
+        // resolve the Window and publish both presentation transitions.
+        assert_eq!(*presentations.lock().unwrap(), vec!["false", "true"]);
+    }
 
     #[test]
     fn recording_dot_is_visible_without_replacing_the_base_icon() {
