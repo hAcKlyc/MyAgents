@@ -478,6 +478,25 @@ impl BrowserLifecycleRegistry {
         labels
     }
 
+    /// A replacement renderer cannot run the old BrowserPanel effect cleanup.
+    /// Retire exact generations through the normal close transition, including
+    /// admitted births which must close themselves when add_child settles.
+    fn retire_renderer(&mut self) -> Vec<(String, NativeClose)> {
+        let generations: Vec<_> = self
+            .tabs
+            .iter()
+            .flat_map(|(tab_id, tab)| {
+                tab.generations
+                    .keys()
+                    .map(move |token| (tab_id.clone(), token.clone()))
+            })
+            .collect();
+        generations
+            .into_iter()
+            .filter_map(|(tab_id, token)| self.close(&tab_id, &token).map(|close| (tab_id, close)))
+            .collect()
+    }
+
     fn native_count(&self) -> usize {
         self.tabs
             .values()
@@ -525,6 +544,43 @@ impl BrowserManager {
             lifecycle: Mutex::new(BrowserLifecycleRegistry::default()),
         })
     }
+
+    pub(crate) async fn retire_renderer_resources<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+    ) -> Result<(), String> {
+        let retiring = self.lifecycle.lock().await.retire_renderer();
+        for (tab_id, close) in retiring {
+            close_webview_label(app, &close.webview_label)?;
+            self.lifecycle
+                .lock()
+                .await
+                .settle_native_close_success(&tab_id, &close);
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn insert_test_live_browser(&self, tab_id: &str, token: &str, label: &str) {
+        let mut lifecycle = self.lifecycle.lock().await;
+        lifecycle.admit_create(tab_id, token, label).unwrap();
+        assert_eq!(
+            lifecycle.settle_create_success(
+                tab_id,
+                token,
+                BrowserSession {
+                    webview_label: label.into(),
+                    tab_id: tab_id.into(),
+                    visible: true,
+                    last_x: 0.,
+                    last_y: 0.,
+                    last_width: 200.,
+                    last_height: 200.,
+                }
+            ),
+            CreateSettlement::Publish
+        );
+    }
 }
 
 fn validate_lifecycle_token(lifecycle_token: &str) -> Result<(), String> {
@@ -547,7 +603,7 @@ fn describe_url_for_log(url: &Url) -> String {
     }
 }
 
-fn close_webview_label(app: &AppHandle, label: &str) -> Result<(), String> {
+fn close_webview_label<R: tauri::Runtime>(app: &AppHandle<R>, label: &str) -> Result<(), String> {
     if let Some(webview) = app.get_webview(label) {
         webview.close().map_err(|error| {
             ulog_warn!("[browser] close failed label={}: {}", label, error);
@@ -1204,6 +1260,40 @@ mod tests {
     fn real_bounds_are_accepted() {
         assert!(!is_degenerate_bounds(694.0, 662.0));
         assert!(!is_degenerate_bounds(1.0, 1.0));
+    }
+
+    #[test]
+    fn renderer_retirement_covers_live_and_pending_births_without_touching_replacements() {
+        let mut registry = BrowserLifecycleRegistry::default();
+        registry
+            .admit_create("live", "old-live", "browser-live")
+            .unwrap();
+        registry.settle_create_success("live", "old-live", session("browser-live"));
+        registry
+            .admit_create("pending", "old-pending", "browser-pending")
+            .unwrap();
+
+        let retiring = registry.retire_renderer();
+        assert_eq!(retiring.len(), 1);
+        assert_eq!(retiring[0].0, "live");
+        assert!(registry.live_session("live", "old-live").is_none());
+        // An unsuccessful native close remains tracked and is retryable.
+        assert_eq!(registry.retire_renderer(), retiring);
+
+        registry.admit_create("live", "new", "browser-new").unwrap();
+        registry.settle_create_success("live", "new", session("browser-new"));
+        registry.settle_native_close_success("live", &retiring[0].1);
+        assert!(registry.live_session("live", "new").is_some());
+        let late_close = match registry.settle_create_success(
+            "pending",
+            "old-pending",
+            session("browser-pending"),
+        ) {
+            CreateSettlement::Retire(close) => close,
+            CreateSettlement::Publish => panic!("old renderer birth must not publish"),
+        };
+        registry.settle_native_close_success("pending", &late_close);
+        assert!(!registry.has_generation("pending", "old-pending"));
     }
 
     #[test]

@@ -229,7 +229,7 @@ fn parse_code(s: &str) -> Result<Code, String> {
 
 /// Handler fired on shortcut Pressed event — toggle or summon.
 fn on_summon_pressed<R: Runtime>(app: &AppHandle<R>) {
-    let Some(window) = app.get_webview_window("main") else {
+    let Some(window) = app.get_window("main") else {
         ulog_warn!("[global-shortcut] no main window, ignoring");
         return;
     };

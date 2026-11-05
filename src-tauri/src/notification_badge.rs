@@ -48,7 +48,7 @@ fn apply_notification_badge<R: Runtime>(app: &AppHandle<R>, count: u32, enabled:
 
     #[cfg(target_os = "macos")]
     {
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             if let Err(e) = window.set_badge_label(label.clone()) {
                 ulog_warn!("[NotificationBadge] Failed to set macOS Dock badge: {}", e);
             }
@@ -57,7 +57,7 @@ fn apply_notification_badge<R: Runtime>(app: &AppHandle<R>, count: u32, enabled:
 
     #[cfg(target_os = "windows")]
     {
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             let icon = label
                 .as_ref()
                 .map(|_| build_windows_badge_icon(visible_count));
@@ -72,7 +72,7 @@ fn apply_notification_badge<R: Runtime>(app: &AppHandle<R>, count: u32, enabled:
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     {
-        if let Some(window) = app.get_webview_window("main") {
+        if let Some(window) = app.get_window("main") {
             let badge_count = label
                 .as_ref()
                 .map(|_| visible_count.min(MAX_VISIBLE_BADGE_COUNT) as i64);

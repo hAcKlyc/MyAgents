@@ -998,7 +998,7 @@ fn toast_text(item: &NotificationItem) -> (String, String) {
 }
 
 fn main_window_unfocused<R: tauri::Runtime>(app: &AppHandle<R>) -> bool {
-    app.get_webview_window("main")
+    app.get_window("main")
         .map(|window| {
             !window.is_visible().unwrap_or(false) || !window.is_focused().unwrap_or(false)
         })
