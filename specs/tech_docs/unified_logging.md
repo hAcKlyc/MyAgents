@@ -392,6 +392,16 @@ rg '\[AppErrorBoundary\]|renderer-react-error|\[REACT\] \[ERROR\]' ~/.myagents/l
 - **`componentStack`** 只在 dev / 有 sourcemap 时能定位到组件；release 包被 minify 成 `at t` 这类乱码，别据此硬猜。
 - 若此前出现 `[WebView] content process terminated`，先检查终止原因，再追踪新 renderer 的 attach 与 App 挂载；`react-commit` 本身不保证 App 已启动。小助理侧的 triage→报 Bug 流程见 helper `/support` §1.6。
 
+### 主界面内存增长：轻量计数与按需堆快照
+
+主窗口的 `frontendLogger` 初始化时及每 5 分钟写一条 `[renderer-health]`，复用现有统一日志队列、容量上限和持久化路径。它只读取已有容器的 `size` / `length`：`appTabs`、`mountedChats`、`tauriCallbacks`、`logEntries`、`logSubscribers`、`pendingLogs`，并带 `uptimeSec` 和页面 `visibility`。不保存正文、DOM 或 callback 对象，不遍历消息或 DOM，不触发 GC，也不决定重载、限流或会话生命周期。每次采样工作量固定；日志正常运行时约 288 条/天。后台定时器可能被 WebKit 延后，因此不是精确定时心跳。
+
+`tauriCallbacks` 只读固定版本 Tauri 已暴露的调试 Map；不可用时为 `null`，不能解释为零。计数没有另建注册表，logger 还原或 HMR dispose 会清理采样定时器。日志 sink 尚未就绪或不可用时沿用原有有界缓冲/失败语义，不增加独立落盘通道。
+
+排查时先把 `[renderer-health]` 与同一时段 macOS `com.apple.WebKit:MemoryPressure` 日志对齐。Tab 数稳定而 callback 数持续上涨可指向 IPC/监听生命周期；日志数量上涨到既有上限属于预期，不能直接判为泄漏。这些计数不测量 JS 堆大小，不覆盖所有对象；计数稳定而进程内存上涨时，需要对象引用证据，不能仅凭计数给模块定责。
+
+需要精确定位时，使用 Safari 自带 Web Inspector，正常加载后取一份 JavaScript heap snapshot，内存增长后再取一份，比较新增对象及其到 root 的引用路径。该操作仅由排障人员按需手动执行，不在产品中自动采集。快照会触发 GC、消耗内存并可能暂停页面，不能常驻录制。项目已启用 Tauri `devtools` feature，Wry 会将相应 WKWebView 设为 inspectable；在 Safari 的开发菜单中选择 MyAgents 的主界面，进入 Timelines / JavaScript Allocations 手动拍两份快照即可。选择主界面，避免抓到网页预览或悬浮窗。参考 [WebKit 堆快照说明](https://webkit.org/blog/6425/memory-debugging-with-web-inspector/) 和 [Timelines 操作说明](https://webkit.org/web-inspector/timelines-tab/)。
+
 ## 相关文件
 
 | 文件 | 说明 |
