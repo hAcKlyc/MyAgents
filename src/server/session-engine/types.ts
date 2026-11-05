@@ -163,7 +163,8 @@ export type InjectedTurnRequest = {
   analyticsOrigin?: SessionOrigin;
   /** Explicit owner of any public assistant response produced by this injected turn. */
   assistantChannelDelivery: AssistantChannelDelivery;
-  timeoutMs: number;
+  /** null waits for the exact terminal outcome without a wall-clock deadline. */
+  timeoutMs: number | null;
   pollMs?: number;
   queueId?: string;
   turnOwner?: TurnOwner;

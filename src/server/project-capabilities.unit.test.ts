@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REQUIRED_SYSTEM_SKILLS } from '../shared/systemSkills';
+import { assertProductSystemSkillCandidate } from '../shared/projectCapabilities';
+import { TASK_ALIGNMENT_SKILL_REQUIREMENT, REQUIRED_SYSTEM_SKILLS } from '../shared/systemSkills';
 
 import {
   projectCapabilitySnapshotForWire,
@@ -51,6 +52,18 @@ afterEach(() => {
 });
 
 describe('effective project capabilities', () => {
+  it.each(['LF', 'CRLF', 'mixed'])('admits bundled product Skill with %s line endings but rejects content changes', (ending) => {
+    const { home, workspace } = makeFixture();
+    const bundled = readFileSync('bundled-skills/myagents-task-alignment/SKILL.md', 'utf8').replace(/\r\n/g, '\n');
+    const content = ending === 'LF' ? bundled : ending === 'CRLF'
+      ? bundled.replace(/\n/g, '\r\n') : bundled.replace('\n', '\r\n');
+    const path = join(home, '.myagents', 'skills', 'myagents-task-alignment', 'SKILL.md');
+    write(path, content);
+    expect(() => assertProductSystemSkillCandidate(resolveEffectiveProjectCapabilities(workspace), TASK_ALIGNMENT_SKILL_REQUIREMENT)).not.toThrow();
+    write(path, content + 'Changed instructions.');
+    expect(() => assertProductSystemSkillCandidate(resolveEffectiveProjectCapabilities(workspace), TASK_ALIGNMENT_SKILL_REQUIREMENT)).toThrow('does not match');
+  });
+
   it('keeps display metadata separate from a Unicode filename-derived invocation identity', () => {
     const { home, workspace } = makeFixture();
     write(

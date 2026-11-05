@@ -162,6 +162,7 @@ describe('Task turn orchestrator', () => {
     }));
     expect(runInjectedTurn).toHaveBeenCalledWith(expect.objectContaining({
       queueId: 'queue-1',
+      timeoutMs: null,
       turnOwner: { kind: 'task', id: 'task-1' },
       providerRoutingRecovery: "Session 'session-1' owns this frozen route.",
     }));

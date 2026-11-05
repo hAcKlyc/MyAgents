@@ -10,3 +10,6 @@ vendor/tauri/** -text
 .github/cliproxy/manifest-v1.json.sig text eol=lf
 src-tauri/src/cliproxy/fixtures/internal-manifest.json text eol=lf
 src-tauri/src/cliproxy/fixtures/internal-manifest.json.sig text eol=lf
+
+# Product Skill requirements are authored against canonical LF text.
+bundled-skills/** text eol=lf

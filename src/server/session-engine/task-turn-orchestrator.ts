@@ -332,7 +332,9 @@ export function createTaskTurnOrchestrator() {
               runtimeConfig: prepared.runtimeConfig ?? null,
               analyticsOrigin: origin,
               assistantChannelDelivery: 'caller-owned',
-              timeoutMs: 3_600_000,
+              // Ordinary Tasks are bounded by their owner cancellation and Runtime
+              // liveness, not elapsed productive work. Maintenance keeps its budget.
+              timeoutMs: payload.managedKind ? 3_600_000 : null,
               pollMs: 1_000,
               queueId: payload.queueId,
               turnOwner: { kind: 'task', id: payload.taskId },

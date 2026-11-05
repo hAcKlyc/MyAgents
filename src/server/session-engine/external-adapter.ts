@@ -136,6 +136,7 @@ import { resolveScheduledTurnPermissionMode } from '../../shared/types/runtime';
 import { runtimeConfigModel, runtimeConfigSource } from './scheduled-turn-preparation';
 
 function waitForDeadline<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  if (timeoutMs === Number.POSITIVE_INFINITY) return promise;
   if (timeoutMs <= 0) return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => resolve(null), timeoutMs);
@@ -708,7 +709,7 @@ export function createExternalSessionEngine(): SessionEngine {
     },
 
     async runInjectedTurn(request: InjectedTurnRequest): Promise<InjectedTurnResult> {
-      const deadline = Date.now() + request.timeoutMs;
+      const deadline = request.timeoutMs === null ? Number.POSITIVE_INFINITY : Date.now() + request.timeoutMs;
       const queueId = request.queueId ?? `xq-${randomUUID()}`;
       let observedOutcome: TurnTerminalOutcome | undefined;
       let resolveTerminal!: (outcome: TurnTerminalOutcome) => void;

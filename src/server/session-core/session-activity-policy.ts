@@ -57,3 +57,11 @@ export function shouldRecordTerminalActivity(
   return heartbeatHasVisibleWork(facts.inputText)
     || heartbeatAcknowledgementHasSubstantiveRemainder(outcome.text);
 }
+
+/** Auto maintenance waits for meaningful work to settle, including failed/stopped turns.
+ * Memory turns do not advance lastActiveAt, so this cannot extend their own cooldown.
+ */
+export function hasRecentSessionActivity(lastActiveAt: string | undefined, now = Date.now()): boolean {
+  const at = lastActiveAt ? Date.parse(lastActiveAt) : Number.NaN;
+  return Number.isFinite(at) && at > now - 30 * 60 * 1000;
+}
