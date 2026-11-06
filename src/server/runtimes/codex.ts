@@ -257,6 +257,8 @@ function adoptCodexThreadPermissions(proc: CodexProcess, result: CodexThreadPerm
 export const CODEX_INITIALIZE_CAPABILITIES = Object.freeze({
   experimentalApi: false,
   requestAttestation: false,
+  // Do not opt into requiredHumanApproval until the host supports human-only,
+  // one-shot decisions. Enabling raw events alone must not enable checkpoints.
   optOutNotificationMethods: [
     'remoteControl/status/changed',
     'thread/goal/cleared',

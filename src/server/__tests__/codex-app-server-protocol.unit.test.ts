@@ -4,6 +4,8 @@ import { dirname, join } from 'path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { McpServerDefinition } from '../../shared/config-types';
+import managedCodexRuntimeLock from '../../shared/managed-codex-runtime.json';
+import managedCodexProtocol from './fixtures/managed-codex-protocol.json';
 import * as mcpCommand from '../utils/mcp-command';
 
 import {
@@ -534,19 +536,18 @@ describe('Codex app-server protocol helpers', () => {
   });
 
   it('keeps the known Codex server request allowlist in sync with app-server schema', () => {
-    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual([
-      'item/commandExecution/requestApproval',
-      'item/fileChange/requestApproval',
-      'item/tool/requestUserInput',
-      'mcpServer/elicitation/request',
-      'item/permissions/requestApproval',
-      'item/tool/call',
-      'account/chatgptAuthTokens/refresh',
-      'attestation/generate',
-      'currentTime/read',
-      'applyPatchApproval',
-      'execCommandApproval',
-    ]);
+    expect(managedCodexProtocol.version).toBe(managedCodexRuntimeLock.version);
+    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual(managedCodexProtocol.serverRequestMethods);
+  });
+
+  it.each([false, true])('negotiates only supported capabilities without opting into human checkpoints (experimental=%s)', experimental => {
+    const { capabilities } = buildCodexInitializeParams(experimental) as { capabilities: Record<string, unknown> };
+    for (const name of Object.keys(capabilities)) {
+      expect(managedCodexProtocol.initializeCapabilityNames).toContain(name);
+    }
+    // Raw events need experimentalApi, but do not imply support for the new
+    // humanCommand workflow, whose decisions must always be human and one-shot.
+    expect(capabilities.requiredHumanApproval).not.toBe(true);
   });
 
   it('invalidates managed model discovery when the installed runtime pointer changes', () => {
