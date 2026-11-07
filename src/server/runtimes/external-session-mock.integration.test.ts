@@ -6196,6 +6196,11 @@ describe('external SessionEngine with fake runtime', () => {
         usage: { inputTokens: 900, outputTokens: 120 },
       }),
     );
+    const persisted = await harness.sessionStore.getSessionData('session-measured-goal');
+    const completedAt = persisted?.messages.filter(row => row.role === 'assistant').at(-1)?.completedAt;
+    expect(completedAt).toEqual(expect.any(String));
+    expect(broadcastEvents.find(event => event.event === 'chat:message-complete')?.data)
+      .toMatchObject({ completed_at: completedAt });
   });
 
 

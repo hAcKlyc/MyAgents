@@ -166,6 +166,7 @@ export function stampTurnUsageOnPendingAssistant(options: {
   toolCount: number;
   durationMs?: number;
   providerId?: string;
+  completedAt?: string;
 }): void {
   const product = getBuiltinProductContent();
   if (product) {
@@ -206,6 +207,7 @@ export function stampTurnUsageOnPendingAssistant(options: {
   };
   completedAssistant.toolCount = options.toolCount;
   completedAssistant.durationMs = options.durationMs;
+  if (options.completedAt) completedAssistant.completedAt = options.completedAt;
 }
 
 export function resetTranscriptPersistenceForSession(sessionId: string): void {

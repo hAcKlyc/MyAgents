@@ -3,6 +3,17 @@ import { recoverDshSegmentTail, reconcileDshV2Assistant } from './dsh-product-pr
 import type { SessionMessage } from '../types/session';
 const message = (id: string, text: string): SessionMessage => ({ id, role: 'assistant', timestamp: 't', content: JSON.stringify([{ type: 'text', text, id: `${id}-block` }]) });
 describe('DSH V2 native recovery preserves Product segments', () => {
+  it('preserves a live completion instant when native recovery runs later', () => {
+    const completedAt = '2026-11-07T05:00:05.000Z';
+    const rows: SessionMessage[] = [{ id: 'user', role: 'user', content: 'hello', timestamp: 't', turnId: 'user' },
+      { ...message('last', 'answer'), completedAt, turnId: 'user', transcriptState: 'complete',
+        runtimeTurnAnchor: { turnId: 'native-turn', rootUserMessageId: 'user' } }];
+    const recovered = { ...message('full', 'answer'), completedAt: '2026-11-07T05:00:04.000Z',
+      runtimeTurnAnchor: { turnId: 'native-turn', rootUserMessageId: 'user' } };
+    reconcileDshV2Assistant(rows, recovered, { clientUserMessageId: 'user', productTurnId: 'native-turn' });
+    expect(rows[1].completedAt).toBe(completedAt);
+    expect(reconcileDshV2Assistant(rows, recovered, { clientUserMessageId: 'user', productTurnId: 'native-turn' })).toBe(false);
+  });
   it.each(['tool_use', 'server_tool_use'])(
     'retains registered attachments by exact tool identity during terminal reconciliation: %s', type => {
       const attachment = { kind: 'image', mimeType: 'image/png', refPath: '/api/attachment/tool/session/turn/image.png' };

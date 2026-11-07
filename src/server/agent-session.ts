@@ -420,6 +420,7 @@ import {
   popPendingOutputOwner as turnPopPendingOutputOwner,
   admitPendingOutputOwnerForYield as turnAdmitPendingOutputOwnerForYield,
   removePendingOutputOwnerByQueueId as turnRemovePendingOutputOwnerByQueueId,
+  resetTurnAccounting,
   resetTurnUsage as resetBuiltinTurnUsage,
   setAssistantMessagePresent,
   setCurrentPlanFileMinMtimeMs,
@@ -1112,6 +1113,10 @@ async function surfaceInFlightQueueItem(
 ): Promise<void> {
   const product = getBuiltinProductContent();
   const authority = getCurrentQueryAuthority();
+  // Reset synchronously before legacy plan IO: assistant-start callers continue
+  // assembling the first tool/text frame without awaiting this surface operation.
+  // Realtime inputs within an active turn retain its accounting.
+  if (options.joinsCurrentTurn !== true) resetTurnAccounting(Date.now());
   // This path only advances an in-memory plan timestamp. V2 must surface
   // the acknowledged user before the first native assistant block is created.
   if (product) setCurrentPlanFileMinMtimeMs(Date.now());
@@ -2193,7 +2198,7 @@ async function handleQueuedCommandReplay(): Promise<void> {
   await surfaceInFlightQueueItem(queueId, meta, {
     midTurnBreak: true,
     reason: 'SDKUserMessageReplay consumed by AI',
-    joinsCurrentTurn: true,
+    joinsCurrentTurn: queueState.awaitingAssistantStartAckQueueId !== queueId,
     awaitPersist: true,
   });
 }
@@ -14469,7 +14474,12 @@ async function* messageGenerator(
       const turnId = randomUUID().replace(/-/g, '').slice(0, 8);
       traceTurnId = turnId;
       setAmbientLogContext(sessionId, { turnId, sessionId });
-    } else if (getInFlightQueueId() === null) {
+    } else if (!isTurnInFlight()) {
+      // Query replacement can deliver an independently executing input that
+      // was queued during teardown. Delivery history is not a turn boundary.
+      resetTurnAccounting(Date.now());
+    }
+    if (item.wasQueued && getInFlightQueueId() === null) {
       // (v0.2.12 Codex review fix #1) wasQueued item arrived without an
       // existing in-flight tracker. Two paths reach here:
       //   - Recovery: finally-block rescue moved a queueState.pendingMidTurnQueue item

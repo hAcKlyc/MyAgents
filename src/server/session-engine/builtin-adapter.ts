@@ -259,6 +259,7 @@ function messageWireToReplayMessage(message: MessageWire | SessionMessage): Sess
     usage: message.usage,
     toolCount: message.toolCount,
     durationMs: message.durationMs,
+    completedAt: message.completedAt,
   };
 }
 

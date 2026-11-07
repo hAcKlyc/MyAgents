@@ -346,6 +346,7 @@ export interface ExternalAssistantTurnPersistInput {
   sessionId: string | null;
   content: string | null;
   durationMs?: number;
+  completedAt?: string;
   usage: MessageUsage | null | undefined;
   toolCount: number;
   contextUsage: ContextUsage | null;
@@ -370,6 +371,7 @@ export async function appendAndPersistExternalAssistantTurn(
   const product = active ? getExternalProductContent() : undefined;
   if (active && product) {
     const assistantMessageId = product.finishTurn(input.terminalStatus ?? 'complete', {
+      completedAt: input.completedAt,
       durationMs: input.durationMs, usage: input.usage ?? undefined, toolCount: input.toolCount,
       runtimeTurnAnchor: input.runtimeTurnAnchor,
       completionState: input.completionState,
@@ -391,6 +393,7 @@ export async function appendAndPersistExternalAssistantTurn(
       role: 'assistant',
       content: input.content,
       timestamp: new Date().toISOString(),
+      completedAt: input.completedAt,
       durationMs: input.durationMs,
       usage: input.usage || undefined,
       toolCount: input.toolCount || undefined,

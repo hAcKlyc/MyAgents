@@ -10,6 +10,12 @@ import {
 import type { MessageWire } from "./types";
 
 describe("desktop mention query annotations", () => {
+  it("retains the successful completion instant across wire, disk and cold projection", () => {
+    const message: MessageWire = { id: 'answer', role: 'assistant', content: 'done',
+      timestamp: '2026-11-07T05:00:00Z', completedAt: '2026-11-07T05:00:05Z' };
+    expect(sessionMessageToMessageWire(toStoredTranscriptMessage(fromStoredTranscriptMessage(messageWireToSessionMessage(message)))))
+      .toMatchObject(message);
+  });
   it("preserves an independent diagnostic through both builtin codecs and stored transcript", () => {
     const message: MessageWire = {
       id: "diagnostic", role: "assistant", content: "Error: runtime exited",

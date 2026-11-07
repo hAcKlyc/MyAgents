@@ -22,6 +22,7 @@ Rust 在 metadata 尚未发布的窗口，沿 active 或 recovering SessionSidec
 - 同一 native 文本块跨插话时记录片段边界，完整帧按边界确认各产品段；只有末段可取得该 native delivery 的末端锚点，中间段的 fork/rewind 明确拒绝。Codex item 的 `nativeText` 保留缩短/更正/空字符串；native item id 不伪装为 SDK UUID。
 - Builtin 的产品错误提示通过 `ProductTranscriptContent.appendDiagnostic` 创建独立 assistant 记录，携带 `messageKind: diagnostic`，无 native UUID/anchor，不改变当前 native assistant、block/tool 目标和 usage。字段从创建操作进入 canonical 历史，并经 wire、冷恢复和 fork 保留；诊断自身不是 native fork 点。旧无标记 Error 不按正文猜来源或自动拆分。
 - 工具 JSON 输入以 `inputJson` + `inputComplete` 表达，旧 wire 的 `input` 在读取时派生。结果/输入大字符串分块入日志；媒体字节仍走既有附件管线。
+- 成功终态的最后一个 assistant 展示段可携带 `completedAt`（ISO 时间）。Product terminal owner 只写一次，并经既有 message-update/持久化/回放传递；停止、失败不标成完成。DSH 原生恢复为缺失的完成记录使用 durable terminalAt，已有 Product 完成时间保留。消息创建 timestamp 与耗时不用于反推完成时间；旧记录缺失字段直接不展示，fork 保留已有值。
 - 列表 stats 从 canonical message 的角色与 usage 标量派生，预览沿用最后可见用户 query 的既有语义；不序列化 assistant 工具正文计算统计。Turn 的 root user、状态、usage 与 message 分开，同一 turn 多个展示段不重复计费。native success/Stop/error 输出读当前 projection，不读旧磁盘结果。
 
 每行 batch 包含连续 revision、唯一 batch ID、操作及原始 batch JSON 字节的 SHA-256。替换文件使用 header 中的 generation 与完整 baseline 结束标记。Node codec 和 Rust `session_transcript.rs` 共享 `src/shared/fixtures/session-transcript-v2.json`。冷读只 fold 有效连续前缀，不跳过损坏中间行；未完成 baseline 不可当成会话历史。

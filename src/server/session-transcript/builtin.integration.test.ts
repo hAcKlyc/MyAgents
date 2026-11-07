@@ -7,7 +7,7 @@ import { NO_CHANNEL_DELIVERY } from '../session-core/channel-delivery';
 import type { TurnTerminalOutcome } from '../session-core/turn-queue';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 
-const state = vi.hoisted(() => ({ home: '', failProductIo: false, publicationGate: null as Promise<void> | null, publicationBlocked: false, queryExitGate: null as Promise<void> | null, queryInputEnded: 0, backgroundTask: false, backgroundTaskGate: null as Promise<void> | null, independentInputPump: false, sdkInputs: [] as unknown[], resultMode: 'success' as 'success' | 'error', rejectedResumeAt: null as string | null, sdkCumulativeBase: null as { input: number; output: number } | null, compactAtTurn: null as number | null, resetAtTurn: null as number | null, sdkCommands: [] as unknown[], interruptCloses: false, throwAfterInputEnd: false, beforeTurn: vi.fn(), query: vi.fn(), sdkRead: vi.fn(), sdkFork: vi.fn(), sdkDelete: vi.fn(), rewindFiles: vi.fn(), beforeResult: vi.fn(), events: [] as [string, unknown][], queuedFollowup: false, exitWithoutResult: false, toolFrames: false, childFrames: false, protocolFrames: [] as Record<string, unknown>[], beforeFrame: vi.fn(), media: vi.fn() }));
+const state = vi.hoisted(() => ({ home: '', failProductIo: false, publicationGate: null as Promise<void> | null, publicationBlocked: false, queryExitGate: null as Promise<void> | null, queryInputEnded: 0, backgroundTask: false, backgroundTaskGate: null as Promise<void> | null, independentInputPump: false, sdkInputs: [] as unknown[], resultMode: 'success' as 'success' | 'error', rejectedResumeAt: null as string | null, sdkCumulativeBase: null as { input: number; output: number } | null, compactAtTurn: null as number | null, resetAtTurn: null as number | null, sdkCommands: [] as unknown[], interruptCloses: false, throwAfterInputEnd: false, beforeTurn: vi.fn(), query: vi.fn(), sdkRead: vi.fn(), sdkFork: vi.fn(), sdkDelete: vi.fn(), rewindFiles: vi.fn(), beforeResult: vi.fn(), events: [] as [string, unknown][], replayInputs: false, queuedFollowup: false, exitWithoutResult: false, toolFrames: false, childFrames: false, protocolFrames: [] as Record<string, unknown>[], beforeFrame: vi.fn(), media: vi.fn() }));
 vi.mock('os', async original => ({ ...await original<typeof import('os')>(), homedir: () => state.home }));
 vi.mock('../utils/fs-utils', async original => {
   const actual = await original<typeof import('../utils/fs-utils')>();
@@ -140,6 +140,10 @@ function fakeQuery(args: { prompt: AsyncIterable<unknown>; options: { sessionId?
       const assistant = (content: unknown[], uuid: string) => ({ ...envelope, type: 'assistant', uuid,
         message: { id: responseId, role: 'assistant', model: 'test-model', content, usage: { input_tokens: 4, output_tokens: 5 } },
       });
+      if (state.replayInputs && next.value) {
+        const input = next.value as { uuid: string; message: unknown };
+        pending.push({ ...envelope, type: 'user', isReplay: true, uuid: input.uuid, message: input.message });
+      }
       pending.push(
         { type: 'system', subtype: 'init', session_id: sessionId, uuid: randomUUID(), model: 'test-model', tools: [], mcp_servers: [] },
         stream({ type: 'message_start', message: { id: responseId } }),
@@ -271,6 +275,7 @@ beforeEach(async () => {
   state.sdkCommands = [];
   state.interruptCloses = false;
   state.throwAfterInputEnd = false;
+  state.replayInputs = false;
   state.queuedFollowup = false;
   state.exitWithoutResult = false;
   state.toolFrames = false;
@@ -2407,4 +2412,106 @@ it('releases a deferred rebuild when the SDK background snapshot becomes empty (
   await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
   expect(state.query).toHaveBeenCalledTimes(2);
   expect(state.query.mock.calls[1][0].options.resume).toBe(meta.id);
+});
+
+it.each(['capability-rebuild', 'assistant-boundary'] as const)(
+  'starts fresh turn accounting for %s instead of inheriting prior metrics', async boundary => {
+    const workspace = join(state.home, 'turn-accounting');
+    await mkdir(workspace);
+    const meta = await store.createSession(workspace, { runtime: 'builtin' });
+    const clockBase = Date.now();
+  let now = clockBase;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    state.toolFrames = true;
+    state.independentInputPump = boundary === 'capability-rebuild';
+    state.queuedFollowup = boundary === 'assistant-boundary';
+    state.beforeResult.mockImplementationOnce(() => {
+      now = clockBase + 1_000;
+      state.toolFrames = false;
+    }).mockImplementationOnce(() => { now = clockBase + 191_000; });
+    if (boundary === 'assistant-boundary') {
+      state.beforeFrame.mockImplementation((frame: { type?: string; subtype?: string }) => {
+        // The second assistant begins well after the previous result. No new
+        // generator yield: this input was already delivered during the old turn.
+        if (state.beforeResult.mock.calls.length === 1 && frame.type === 'stream_event') now = clockBase + 190_000;
+      });
+    }
+    await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+    const send = (text: string) => agent.enqueueUserMessage(text, [], undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      { channelDelivery: NO_CHANNEL_DELIVERY, queueResponseModeOverride: 'realtime' });
+    await send('first turn with a tool');
+    if (boundary === 'capability-rebuild') {
+      await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+      now = clockBase + 190_000;
+      state.replayInputs = true;
+      const skill = join(workspace, '.claude', 'skills', 'changed');
+      await mkdir(skill, { recursive: true });
+      await writeFile(join(skill, 'SKILL.md'), '---\nname: changed\ndescription: fixture\n---\nSynthetic.\n');
+      await send('new independent turn after capability change');
+    }
+    await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+    const replies = agent.getMessages().filter(row => row.role === 'assistant');
+    expect(replies[0].toolCount).toBe(1);
+    expect(replies.at(-1)?.toolCount).toBe(0);
+    expect(replies.at(-1)?.durationMs).toBe(1_000);
+    expect(replies.at(-1)?.completedAt).toEqual(expect.any(String));
+    const engine = (await import('../session-engine/builtin-adapter')).createBuiltinSessionEngine();
+    expect(engine.getStreamReplaySnapshot({ includeHistory: true }).replayMessages.filter(row => row.role === 'assistant').at(-1)?.completedAt)
+      .toBe(replies.at(-1)?.completedAt);
+    await store.releaseSessionTranscriptForBinding(meta.id);
+    const persisted = await store.getSessionData(meta.id);
+    expect(persisted).not.toBeNull();
+    expect(persisted?.messages.filter(row => row.role === 'assistant').at(-1)?.completedAt).toBe(replies.at(-1)?.completedAt);
+
+  },
+);
+
+it('retains active-turn accounting when a realtime input is consumed before its result', async () => {
+  const workspace = join(state.home, 'realtime-accounting');
+  await mkdir(workspace);
+  const meta = await store.createSession(workspace, { runtime: 'builtin' });
+  state.independentInputPump = true;
+  state.toolFrames = true;
+  const clockBase = Date.now();
+  let now = clockBase;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  await agent.initializeAgent(workspace, null, meta.id, { preWarmDisabled: false });
+  const send = (text: string) => agent.enqueueUserMessage(text, [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined,
+    { channelDelivery: NO_CHANNEL_DELIVERY, queueResponseModeOverride: 'realtime' });
+  state.beforeResult.mockImplementationOnce(async () => {
+    now = clockBase + 5_000;
+    expect(await send('same-turn followup')).toMatchObject({ queued: true });
+    await vi.waitFor(() => expect(state.sdkInputs).toHaveLength(2));
+    return true; // SDK consumption replay, before the original terminal.
+  }).mockImplementationOnce(() => { now = clockBase + 6_000; });
+  await send('root input');
+  await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  await vi.waitFor(() => expect(state.events.filter(([event]) => event === 'chat:message-complete').at(-1)?.[1])
+    .toMatchObject({ tool_count: 1, duration_ms: 6_000 }));
+});
+
+it('counts the first tool of a boundary-consumed legacy turn before async plan preparation', async () => {
+  const workspace = join(state.home, 'legacy-boundary-accounting');
+  await mkdir(workspace);
+  const sessionId = randomUUID();
+  await store.saveSessionMetadata({ id: sessionId, agentDir: workspace, title: 'legacy',
+    createdAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(), runtime: 'builtin' });
+  state.queuedFollowup = true;
+  state.protocolFrames = [
+    { type: 'stream_event', event: { type: 'content_block_start', index: 1,
+      content_block: { type: 'tool_use', id: 'boundary-tool', name: 'Read', input: {} } } },
+    { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } },
+  ];
+  await agent.initializeAgent(workspace, null, sessionId, { preWarmDisabled: true });
+  await agent.enqueueUserMessage('first question', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  await vi.waitFor(() => expect(state.events.filter(([event]) => event === 'chat:message-complete')).toHaveLength(2));
+  expect(state.events.filter(([event]) => event === 'chat:message-complete').at(-1)?.[1])
+    .toMatchObject({ tool_count: 1, completed_at: expect.any(String) });
 });

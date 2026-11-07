@@ -239,7 +239,9 @@ export class ProductTranscriptContent {
       }
     }
     if (messageId) this.writer.observe({ kind: 'message-update', messageId,
-      details: { ...details, transcriptState: status === 'complete' ? 'complete' : 'interrupted' } });
+      details: { ...details,
+        ...(status === 'complete' ? { completedAt: details.completedAt ?? new Date().toISOString() } : {}),
+        transcriptState: status === 'complete' ? 'complete' : 'interrupted' } });
     this.writer.observe({ kind: 'turn-update', turn: {
       ...turn, status, ...(details.usage ? { usage: details.usage } : {}),
       ...(details.durationMs !== undefined ? { durationMs: details.durationMs } : {}),

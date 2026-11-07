@@ -9622,6 +9622,7 @@ async function persistTurnResult(
   const { inboxMetas: turnInboxMetas, attachmentHints: turnAttachmentHints } =
     snapshotExternalTurnReplyState();
   const turnSucceededAtTerminal = didExternalLastTurnSucceed();
+  const completedAt = turnSucceededAtTerminal ? new Date().toISOString() : undefined;
   const turnActivityFacts = getExternalTurnActivityFacts();
   const terminalActivityAt =
     turnActivityFacts &&
@@ -9773,6 +9774,7 @@ async function persistTurnResult(
       sessionId: lifecycleSessionId,
       content: persistedContent,
       durationMs: turnDurationMs,
+      completedAt,
       usage: usageData,
       toolCount: turnToolCount,
       // PRD 0.2.32 — persist this turn's context snapshot only when the runtime
@@ -9873,6 +9875,7 @@ async function persistTurnResult(
               : {}),
             ...(turnToolCount > 0 ? { tool_count: turnToolCount } : {}),
             ...(turnDurationMs ? { duration_ms: turnDurationMs } : {}),
+            ...(completedAt ? { completed_at: completedAt } : {}),
             ...(runtimeTurnAnchor
               ? { runtime_turn_anchor: runtimeTurnAnchor }
               : {}),

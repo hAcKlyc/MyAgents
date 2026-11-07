@@ -19,6 +19,23 @@ function setup() {
 }
 
 describe('adapter product content identities', () => {
+  it.each(['complete', 'stopped', 'error', 'interrupted'] as const)(
+    'persists completion time only for successful terminal %s and never refreshes it', async status => {
+      const { writer, content, user, durable } = setup();
+      vi.setSystemTime(new Date('2026-11-07T05:00:00Z'));
+      user('u1');
+      content.append(content.block('answer', 'text'), 'text', 'answer');
+      vi.setSystemTime(new Date('2026-11-07T05:00:05Z'));
+      content.finishTurn(status);
+      vi.setSystemTime(new Date('2026-11-08T05:00:00Z'));
+      content.finishTurn('complete');
+      await vi.advanceTimersByTimeAsync(100);
+      const assistant = transcriptMessages(durable).find(row => row.role === 'assistant');
+      expect(assistant?.completedAt).toBe(status === 'complete' ? '2026-11-07T05:00:05.000Z' : undefined);
+      await writer.close();
+    },
+  );
+
   it('keeps diagnostics independent while native text, attachments and usage settle on their original targets', async () => {
     const { writer, content, user, durable } = setup();
     user('u1');

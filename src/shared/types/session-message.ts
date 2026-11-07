@@ -87,6 +87,8 @@ export interface SessionMessage {
     toolCount?: number;
     /** Response duration in milliseconds */
     durationMs?: number;
+    /** ISO instant when this assistant turn successfully completed; absent on older rows. */
+    completedAt?: string;
     /** Message source metadata (IM integration) */
     metadata?: MessageSourceMetadata;
 }

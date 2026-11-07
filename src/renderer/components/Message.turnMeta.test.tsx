@@ -33,6 +33,21 @@ function userMsg(): MessageType {
 }
 
 describe('Message — assistant turn meta footer', () => {
+  it('renders the successful completion instant in local time with duration and tokens', () => {
+    const completed = new Date(2026, 2, 4, 12, 33, 10);
+    render(<Message message={assistantMsg({ completedAt: completed.toISOString(), durationMs: 5_000,
+      usage: { inputTokens: 157_000, outputTokens: 900 } })} />);
+    expect(screen.getByText('本轮完成于 03-04 12:33 · 耗时 5.0s · 157.9k tokens'))
+      .toHaveAttribute('title', '本轮完成于 03-04 12:33 · 耗时 5.0s · 157.9k tokens');
+  });
+
+  it('updates a completion-only footer and ignores invalid historical timestamps', () => {
+    const { rerender } = render(<Message message={assistantMsg({ completedAt: 'invalid' })} />);
+    expect(screen.queryByText(/完成于/)).not.toBeInTheDocument();
+    rerender(<Message message={assistantMsg({ completedAt: new Date(2026, 2, 4, 12, 33).toISOString() })} />);
+    expect(screen.getByText('本轮完成于 03-04 12:33')).toBeInTheDocument();
+  });
+
   it('renders duration and total tokens in the hover-only action row', () => {
     render(
       <Message

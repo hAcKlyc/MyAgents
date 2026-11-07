@@ -281,6 +281,8 @@
   },
   "message": {
     "turnDuration": "本轮耗时 {{duration}}",
+    "turnCompletedAt": "本轮完成于 {{time}}",
+    "duration": "耗时 {{duration}}",
     "widgetUnclosed": "此组件未正常闭合，以下按原文显示。",
     "replyFileName": "{{date}}_回复.md",
     "actions": {

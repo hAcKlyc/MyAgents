@@ -64,15 +64,22 @@ function formatTimestamp(date: Date): string {
 
 function getTurnMetaLabel(message: MessageType, t: (key: string, options?: Record<string, unknown>) => string): string | null {
   const parts: string[] = [];
+  const completed = message.completedAt ? new Date(message.completedAt) : null;
+  const hasCompletionTime = completed !== null && Number.isFinite(completed.getTime());
+  if (hasCompletionTime) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const time = `${pad(completed.getMonth() + 1)}-${pad(completed.getDate())} ${pad(completed.getHours())}:${pad(completed.getMinutes())}`;
+    parts.push(t('message.turnCompletedAt', { time }));
+  }
   if (typeof message.durationMs === 'number' && Number.isFinite(message.durationMs) && message.durationMs > 0) {
-    parts.push(t('message.turnDuration', { duration: formatDuration(message.durationMs) }));
+    parts.push(t(hasCompletionTime ? 'message.duration' : 'message.turnDuration', { duration: formatDuration(message.durationMs) }));
   }
 
   const usage = message.usage;
   if (usage) {
     const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
     if (totalTokens > 0) {
-      parts.push(`${formatTokens(totalTokens)} tokens`);
+      parts.push(`${hasCompletionTime ? formatTokens(totalTokens).replace('K', 'k') : formatTokens(totalTokens)} tokens`);
     }
   }
 

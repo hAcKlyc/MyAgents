@@ -600,6 +600,7 @@ export function buildDshTurnProjectionSnapshot(
       role: 'assistant',
       content: projected.content,
       timestamp: new Date(terminal.terminalAt).toISOString(),
+      completedAt: new Date(terminal.terminalAt).toISOString(),
       durationMs: Math.max(0, terminal.terminalAt - operation.acceptedAt),
       ...(usage === undefined ? {} : { usage }),
       ...(projected.toolCount > 0 ? { toolCount: projected.toolCount } : {}),
