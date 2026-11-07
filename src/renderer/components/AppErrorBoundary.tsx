@@ -13,6 +13,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { i18n } from '@/i18n';
+import { describeRendererError, rendererErrorMessage, reportRendererBootEvent } from '@/utils/rendererDiagnostics';
 
 interface Props {
     children: ReactNode;
@@ -20,7 +21,7 @@ interface Props {
 
 interface State {
     hasError: boolean;
-    error: Error | null;
+    error: unknown;
 }
 
 export default class AppErrorBoundary extends Component<Props, State> {
@@ -29,12 +30,14 @@ export default class AppErrorBoundary extends Component<Props, State> {
         this.state = { hasError: false, error: null };
     }
 
-    static getDerivedStateFromError(error: Error): State {
+    static getDerivedStateFromError(error: unknown): State {
         return { hasError: true, error };
     }
 
-    componentDidCatch(error: Error, info: ErrorInfo) {
-        // frontendLogger captures console.error → unified log
+    componentDidCatch(error: unknown, info: ErrorInfo) {
+        // Startup errors can precede App's log sink; unmount also clears it.
+        // Use the existing native ingress to preserve these fatal diagnostics.
+        reportRendererBootEvent('renderer-react-error', `${describeRendererError(error)}\n${info.componentStack ?? ''}`);
         console.error('[AppErrorBoundary] Unhandled React error:', error, info.componentStack);
     }
 
@@ -75,7 +78,7 @@ export default class AppErrorBoundary extends Component<Props, State> {
                         color: 'var(--ink-muted, #666)',
                         lineHeight: 1.5,
                     }}>
-                        {this.state.error?.message || t('errorBoundary.unknown')}
+                        {rendererErrorMessage(this.state.error) || t('errorBoundary.unknown')}
                     </p>
                     <button
                         onClick={this.handleReload}

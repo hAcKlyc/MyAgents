@@ -104,6 +104,7 @@ export type MessageWire = {
   usage?: MessageUsage;
   toolCount?: number;
   durationMs?: number;
+  completedAt?: string;
 };
 
 type DeferredUserSurfaceBase = {

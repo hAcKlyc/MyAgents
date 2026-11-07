@@ -2521,7 +2521,8 @@ export async function reconcileDshTurnProjections(input: {
                             if (lastInputIndex !== undefined && existing.index !== lastInputIndex + 1) {
                                 return dshMutationFailure('storage_consistency_error', 'The collaboration assistant precedes its consumed Product input');
                             }
-                            const repaired = { ...structuredClone(assistant), id: existing.message.id };
+                            const repaired = { ...structuredClone(assistant), id: existing.message.id,
+                                completedAt: existing.message.completedAt ?? assistant.completedAt };
                             if (JSON.stringify(existing.message) !== JSON.stringify(repaired)) { target[existing.index] = repaired; transcriptChanged = true; }
                         } else {
                             if (target.some(message => message.id === assistant.id)) return dshMutationFailure('storage_consistency_error', 'The collaboration assistant id is already owned');
@@ -2591,7 +2592,8 @@ export async function reconcileDshTurnProjections(input: {
                         ) {
                             return dshMutationFailure('storage_consistency_error', 'The Product transcript changed a DSH terminal anchor');
                         }
-                        const repaired = { ...structuredClone(assistant), id: existing.message.id };
+                        const repaired = { ...structuredClone(assistant), id: existing.message.id,
+                                completedAt: existing.message.completedAt ?? assistant.completedAt };
                         if (JSON.stringify(existing.message) !== JSON.stringify(repaired)) {
                             target[existing.messageIndex] = repaired;
                             transcriptChanged = true;

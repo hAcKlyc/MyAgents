@@ -32,6 +32,8 @@ const originalConsole = {
 let initialized = false;
 let rendererLogLabel: string | null = null;
 let rustLogAbort: AbortController | null = null;
+let healthTimer: ReturnType<typeof setInterval> | null = null;
+const HEALTH_INTERVAL_MS = 5 * 60_000;
 
 // Custom event name for React logs (kept for back-compat with code that still
 // listens via window event; the global store is the canonical source going
@@ -394,6 +396,29 @@ function createAndDispatch(level: LogLevel, args: unknown[]): void {
   scheduleFlush();
 }
 
+/** O(1) observations only: never retain payloads, walk the DOM or measure the heap. */
+function recordRendererHealth(): void {
+  try {
+    const internals = (globalThis as typeof globalThis & {
+      __TAURI_INTERNALS__?: { callbacks?: Map<unknown, unknown> };
+    }).__TAURI_INTERNALS__;
+    createAndDispatch('info', ['[renderer-health]', JSON.stringify({
+      uptimeSec: Math.floor(performance.now() / 1000),
+      visibility: document.visibilityState,
+      appTabs: appTabIds.size,
+      mountedChats: mountedTabIds.size,
+      // Pinned Tauri exposes this existing Map for debugging. Its absence is
+      // unknown, not zero; no wrappers or mirrored callback registry needed.
+      tauriCallbacks: internals?.callbacks instanceof Map ? internals.callbacks.size : null,
+      logEntries: store.entries.length,
+      logSubscribers: store.listeners.size,
+      pendingLogs: logBuffer.length,
+    })]);
+  } catch {
+    // Diagnostic failure must not affect rendering or recursively emit logs.
+  }
+}
+
 /**
  * Initialize frontend logger - overrides console methods
  * Safe to call multiple times (will only initialize once)
@@ -428,6 +453,10 @@ export function initFrontendLogger(): void {
   };
 
   initialized = true;
+  if (rendererLogLabel === 'main') {
+    recordRendererHealth();
+    healthTimer = setInterval(recordRendererHealth, HEALTH_INTERVAL_MS);
+  }
   if (isTauriEnvironment()) {
     rustLogAbort = new AbortController();
     // One listener per renderer window, independent of mounted Chat/Settings
@@ -447,6 +476,8 @@ export function setRendererLogLabel(label: string | null | undefined): void {
 export function restoreFrontendLogger(): void {
   if (!initialized) return;
 
+  if (healthTimer !== null) clearInterval(healthTimer);
+  healthTimer = null;
   rustLogAbort?.abort();
   rustLogAbort = null;
 
@@ -457,6 +488,8 @@ export function restoreFrontendLogger(): void {
 
   initialized = false;
 }
+
+import.meta.hot?.dispose(restoreFrontendLogger);
 
 /**
  * Check if frontend logger is initialized

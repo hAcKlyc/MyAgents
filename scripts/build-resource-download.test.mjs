@@ -90,7 +90,7 @@ test('transient transport errors stop after five attempts with actionable diagno
   assert.equal(calls, 5);
 });
 
-for (const status of [401, 403, 404]) {
+for (const status of [401, 403, 404, 406]) {
   test(`HTTP ${status} fails immediately`, async () => {
     let calls = 0;
     await assert.rejects(downloadBuildResource('https://example.invalid/a', { ...quiet,

@@ -281,6 +281,8 @@
   },
   "message": {
     "turnDuration": "This turn took {{duration}}",
+    "turnCompletedAt": "Completed at {{time}}",
+    "duration": "Took {{duration}}",
     "widgetUnclosed": "This widget did not close. Its original text is shown below.",
     "replyFileName": "{{date}}_reply.md",
     "actions": {

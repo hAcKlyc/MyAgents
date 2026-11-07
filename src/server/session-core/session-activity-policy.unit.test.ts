@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  hasRecentSessionActivity,
   shouldRecordAdmissionActivity,
   shouldRecordTerminalActivity,
   type SessionActivityTurnFacts,
@@ -94,4 +95,13 @@ describe('session activity policy', () => {
   it.each(['complete', 'stopped', 'error'] as const)('records meaningful %s terminal outcomes', (status) => {
     expect(shouldRecordTerminalActivity(desktop, { text: status })).toBe(true);
   });
+});
+
+it('defers maintenance after recent work, with legacy timestamp compatibility', () => {
+  const now = Date.parse('2026-11-06T01:00:00Z');
+  expect(hasRecentSessionActivity('2026-11-06T00:59:41Z', now)).toBe(true);
+  expect(hasRecentSessionActivity('2026-11-06T00:30:00Z', now)).toBe(false);
+  expect(hasRecentSessionActivity('2026-11-06T01:01:00Z', now)).toBe(true);
+  expect(hasRecentSessionActivity(undefined, now)).toBe(false);
+  expect(hasRecentSessionActivity('invalid', now)).toBe(false);
 });

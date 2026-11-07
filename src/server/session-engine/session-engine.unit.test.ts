@@ -2319,6 +2319,35 @@ describe('session-engine selector and adapters', () => {
     expect(mocks.restoreExternalSessionState).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('waits beyond an hour for an unbounded exact turn (external=%s)', async (external) => {
+    vi.useFakeTimers();
+    try {
+      mocks.state.useExternal = external;
+      let terminal: ((outcome: { status: 'stopped'; text: string; assistantMessagePresent: boolean }) => void) | undefined;
+      const capture = async (...args: unknown[]) => {
+        const options = args[external ? 4 : 11] as { queueId: string; onTerminal: NonNullable<typeof terminal> };
+        terminal = options.onTerminal;
+        return { queued: true, queueId: options.queueId, dispatchAcceptance: Promise.resolve({ accepted: true }) };
+      };
+      if (external) mocks.sendExternalMessage.mockImplementationOnce(capture);
+      else mocks.enqueueUserMessage.mockImplementationOnce(capture);
+      let settled = false;
+      const result = runInjectedTurn({
+        prompt: 'long task', sessionId: 'sid', workspacePath: '/workspace',
+        scenario: { type: 'desktop' }, timeoutMs: null,
+      }).then(value => { settled = true; return value; });
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+      expect(settled).toBe(false);
+      expect(mocks.cancelQueueItem).not.toHaveBeenCalled();
+      expect(mocks.stopExternalSession).not.toHaveBeenCalled();
+      expect(terminal).toBeTypeOf('function');
+      terminal!({ status: 'stopped', text: '', assistantMessagePresent: false });
+      expect(await result).toMatchObject({ success: false, enqueued: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('propagates a builtin queue item terminal error without reading stale history', async () => {
     mocks.enqueueUserMessage.mockImplementationOnce(async (...args: unknown[]) => {
       const options = args[11] as {

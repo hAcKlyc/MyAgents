@@ -250,6 +250,7 @@ describe('DSH ordinary turn reconciliation', () => {
     expect(snapshot.assistantTurns).toHaveLength(1);
     const recovered = snapshot.assistantTurns[0]!.assistantMessage;
     expect(recovered.id).toMatch(/^assistant-dsh-[a-f0-9]{32}$/u);
+    expect(recovered.completedAt).toBe(new Date(2_000).toISOString());
     expect(recovered.runtimeTurnAnchor).toEqual({
       turnId: 'product-turn-1',
       rootUserMessageId: 'user-1',

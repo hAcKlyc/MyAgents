@@ -101,7 +101,9 @@ function canonicalFile(path: string, allowSymlink: boolean): string | null {
 }
 
 function contentSha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
+  // Product content identity ignores checkout line endings; Runtime resource
+  // hashes remain byte-exact in product-extensions/compiler.ts.
+  return createHash('sha256').update(content.replace(/\r\n/g, '\n')).digest('hex');
 }
 
 function candidate(params: {

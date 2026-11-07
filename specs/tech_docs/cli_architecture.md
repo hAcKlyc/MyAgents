@@ -309,6 +309,8 @@ Skill frontmatter 以 Agent Skills 标准为 canonical：作者写在 `metadata.
 
 `SYSTEM_SKILLS` 是版本化安装集合，`REQUIRED_SYSTEM_SKILLS` 是其中始终可用的产品契约子集，二者不能混为一谈。canonical 名单在 `src/shared/systemSkills.ts`，Rust workspace/slash 路径在 `src-tauri/src/workspace_files/skills_config.rs` 维护必要镜像，并由 cross-language test 锁定；改名单必须同步这两处，禁止 UI、CLI、文档或其它模块再复制第三份。读取旧 `skills-config.json` 和每次写回都会移除这些名称的 stale disabled 项；Skills API 以 `required:true, enabled:true` 投影，disable 请求返回 409。其它版本化或用户 Skill 仍可正常 enable/disable。
 
+Task discussion 的产品 Skill 内容身份按 CRLF → LF 后的 UTF-8 文本校验，兼容历史 Windows 安装副本；新 bundled-skills checkout 固定 LF。真实内容修改与来源冒用仍拒绝。Runtime extension 的资源哈希继续校验原始字节，不复用该内容身份哈希。
+
 内容所有权与启停权彼此独立：user scope 的 `SYSTEM_SKILLS` 内容一律由 MyAgents 持有并保持只读，不因是否 `required` 而改变；optional system Skill 仍可按现有策略 enable/disable。project scope 中同 canonical name 的实体 Skill 仍归项目所有，可独立编辑和删除；普通用户 Skill 的 CRUD 不变。
 
 系统同步成功之后，Runtime 还必须经过全局 Skill integrity admission：Node `global-skill-inventory.ts` 是 builtin / Managed Codex / System Codex 与 Claude Code 工作区兼容链接的唯一运行时 authority，一次完整根扫描同时喂给本次边界需要的 resolver、compiler 与 projection。强冲突证据项保留磁盘但不加载；Required 缺失或 blocked 拒绝 Runtime。Rust Launcher 不建立第二份注册表，只用共享 fixtures 镜像 classifier，并跳过指向全局根的 project junction。完整分类、投影收敛与 mutation-only 只读规则见 `pit_of_success.md#system-skill-sync` 和 `pit_of_success.md#workspace-files`。

@@ -239,4 +239,5 @@ export interface Message {
   toolCount?: number;
   /** Completed assistant turn duration in milliseconds. */
   durationMs?: number;
+  completedAt?: string;
 }

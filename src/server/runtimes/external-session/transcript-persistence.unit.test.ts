@@ -155,9 +155,11 @@ describe('external transcript persistence owner', () => {
       usage: null,
       toolCount: 0,
       contextUsage: null,
+      completedAt: '2026-11-07T05:00:05Z',
       runtimeTurnAnchor: { turnId: 'turn-1', rootUserMessageId: 'user-root' },
     });
 
+    expect(getExternalSessionMessagesSnapshot().at(-1)?.completedAt).toBe('2026-11-07T05:00:05Z');
     expect(result).toMatchObject({ ok: true, appendedAssistant: true, messageCount: 2 });
     expect(appendSessionMessages).toHaveBeenCalledWith(
       'session-a',

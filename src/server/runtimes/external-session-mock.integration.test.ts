@@ -6196,6 +6196,11 @@ describe('external SessionEngine with fake runtime', () => {
         usage: { inputTokens: 900, outputTokens: 120 },
       }),
     );
+    const persisted = await harness.sessionStore.getSessionData('session-measured-goal');
+    const completedAt = persisted?.messages.filter(row => row.role === 'assistant').at(-1)?.completedAt;
+    expect(completedAt).toEqual(expect.any(String));
+    expect(broadcastEvents.find(event => event.event === 'chat:message-complete')?.data)
+      .toMatchObject({ completed_at: completedAt });
   });
 
 
@@ -9059,6 +9064,79 @@ describe('external SessionEngine with fake runtime', () => {
     ]);
   });
 
+
+  it.each(['active-process', 'resumed-process'] as const)('persists DSH execution identity for %s root inputs', async path => {
+    const harness = await createHarness([{ kind: 'success', text: 'first answer' }, { kind: 'success', text: 'second answer' }], { runtimeType: 'dsh' });
+    const sessionId = `dsh-anchor-${path}`;
+    const workspacePath = join(harness.home, 'workspace');
+    await restorePersistedDshSession(harness, sessionId, workspacePath);
+    for (const prompt of ['first input', 'second input']) {
+      expect(await runInjectedTurn(harness, { prompt, sessionId, workspacePath, scenario: { type: 'desktop' }, timeoutMs: 2_000, pollMs: 10 }))
+        .toMatchObject({ success: true });
+      expect(await harness.engine.waitIdle(2_000, 10)).toBe(true);
+      if (prompt === 'first input' && path === 'resumed-process') await harness.externalSession.stopExternalSession();
+    }
+    const rows = (await harness.sessionStore.getSessionData(sessionId))!.messages.filter(row => row.role === 'user' && row.content.includes('input'));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.runtimeOperationAnchor).toEqual({ runtime: 'dsh', runtimeSessionId: `runtime-${sessionId}`, clientOperationId: expect.any(String) });
+    expect(rows[0].runtimeOperationAnchor?.clientOperationId).not.toBe(rows[1].runtimeOperationAnchor?.clientOperationId);
+  });
+
+  it.each(['missing', 'inherited', 'admitted', 'unadmitted', 'invalid-boundary', 'legacy-entry'] as const)(
+    'retries DSH history through the authoritative mutation path: %s', async mode => {
+      const harness = await createHarness([], { runtimeType: 'dsh' });
+      const sessionId = `dsh-retry-${mode}`;
+      const workspacePath = join(harness.home, 'workspace');
+      await restorePersistedDshSession(harness, sessionId, workspacePath);
+      await harness.externalSession.prewarmExternalSession({ sessionId, workspacePath, scenario: { type: 'desktop' } });
+      const persistence = await import('./external-session/transcript-persistence');
+      const target = persistence.getExternalSessionMessagesSnapshot().find(row => row.role === 'user')!;
+      const anchor = mode === 'inherited' || mode === 'admitted' || mode === 'unadmitted'
+        ? { runtime: 'dsh' as const, runtimeSessionId: mode === 'inherited' ? 'source-runtime' : `runtime-${sessionId}`, clientOperationId: 'original-operation' }
+        : undefined;
+      if (anchor) {
+        harness.sessionStore.getActiveSessionTranscript(sessionId)!.writer.observe({ kind: 'message-update', messageId: target.id, details: { runtimeOperationAnchor: anchor } });
+      }
+      const begin = vi.spyOn(harness.sessionStore, 'beginDshRewindMutation').mockResolvedValue({ success: true, value: {
+        targetUserMessage: target, intent: { targetRuntimeTurnId: mode === 'invalid-boundary' ? 'missing-turn' : null },
+      } } as Awaited<ReturnType<typeof harness.sessionStore.beginDshRewindMutation>>);
+      vi.spyOn(harness.sessionStore, 'recordPreparedDshRewind').mockResolvedValue({ success: true } as Awaited<ReturnType<typeof harness.sessionStore.recordPreparedDshRewind>>);
+      const commit = vi.spyOn(harness.sessionStore, 'commitDshRewindProduct').mockResolvedValue({ success: true } as Awaited<ReturnType<typeof harness.sessionStore.commitDshRewindProduct>>);
+      const unadmitted = vi.spyOn(persistence, 'retryUnadmittedDshTranscript').mockResolvedValue({ success: true, content: target.content });
+      const getTurn = vi.fn(async () => ({ admission: mode === 'admitted' ? { clientOperationId: 'original-operation' } : null }));
+      const prepareRewind = vi.fn(async () => ({ token: 'rewind-token', state: 'committed' }));
+      const runtime = await import('../integrated-runtimes/dsh/runtime');
+      vi.spyOn(runtime, 'getDshConversationMutationContext').mockReturnValue({ runtimeSessionId: `runtime-${sessionId}`, controller: {
+        getTurn,
+        readHistory: async () => ({ events: [], mutationBoundaries: [], genesisBoundary: { stableBoundaryId: 'genesis', transcriptPostcondition: 'before' }, transcriptPostcondition: 'after' }),
+        prepareRewind,
+      } } as unknown as ReturnType<typeof runtime.getDshConversationMutationContext>);
+      const replay = vi.fn(async (result: Awaited<ReturnType<typeof harness.externalSession.rewindExternalConversation>>) => ({ ...result, retryQueued: true }));
+      const result = mode === 'legacy-entry'
+        ? await harness.externalSession.retryLastExternalUserMessage(target.id)
+        : await harness.externalSession.retryDshConversation(target.id, replay);
+      if (mode === 'invalid-boundary') {
+        expect(result.success).toBe(false);
+        expect(prepareRewind).not.toHaveBeenCalled();
+        expect(commit).not.toHaveBeenCalled();
+        expect(replay).not.toHaveBeenCalled();
+      } else {
+        expect(result).toMatchObject({ success: true, content: target.content });
+        if (mode !== 'legacy-entry') expect(replay).toHaveBeenCalledOnce();
+        if (mode === 'unadmitted') {
+          expect(unadmitted).toHaveBeenCalledWith(sessionId, target.id);
+          expect(begin).not.toHaveBeenCalled();
+          expect(prepareRewind).not.toHaveBeenCalled();
+        } else {
+          expect(unadmitted).not.toHaveBeenCalled();
+          expect(begin).toHaveBeenCalledOnce();
+          expect(prepareRewind).toHaveBeenCalledOnce();
+          expect(commit).toHaveBeenCalledOnce();
+        }
+      }
+      expect(getTurn).toHaveBeenCalledTimes(mode === 'admitted' || mode === 'unadmitted' ? 1 : 0);
+    },
+  );
 
   it('keeps the saved desktop query through admitted DSH rewind', async () => {
     const harness = await createHarness([], { runtimeType: 'dsh' });

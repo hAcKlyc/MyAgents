@@ -43,6 +43,7 @@ export interface ProjectCapabilityCandidate {
   required: boolean;
   systemOwned: boolean;
   enabled: boolean;
+  /** SHA-256 of UTF-8 text with CRLF normalized to LF; not a resource byte hash. */
   contentSha256: string;
 }
 

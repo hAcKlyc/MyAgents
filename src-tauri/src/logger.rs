@@ -100,6 +100,7 @@ const RENDERER_BOOT_STAGES: &[&str] = &[
     "theme-native-bootstrap-failed",
     "renderer-uncaught-error",
     "renderer-unhandled-rejection",
+    "renderer-react-error",
     "renderer-entry-evaluated",
     "theme-renderer-bootstrap-complete",
     "theme-renderer-bootstrap-failed",
@@ -752,5 +753,11 @@ mod renderer_boot_tests {
         );
         assert!(format_renderer_boot_event("arbitrary-log", "main", None).is_err());
         assert!(format_renderer_boot_event("react-commit", "bad label", None).is_err());
+        assert_eq!(
+            format_renderer_boot_event("renderer-react-error", "main", Some("native rejection"))
+                .unwrap()
+                .0,
+            LogLevel::Error
+        );
     }
 }

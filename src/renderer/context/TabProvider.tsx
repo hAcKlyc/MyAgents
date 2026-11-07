@@ -319,6 +319,7 @@ type WireSessionMessage = {
   usage?: WireMessageUsage;
   toolCount?: number;
   durationMs?: number | null;
+  completedAt?: string;
 };
 
 type PersistedRestoreMode = 'initial' | 'live-recovery';
@@ -338,6 +339,7 @@ type AssistantCompletionPatch = {
   usage?: Message['usage'];
   toolCount?: number;
   durationMs?: number;
+  completedAt?: string;
   runtimeTurnAnchor?: Message['runtimeTurnAnchor'];
 };
 
@@ -353,6 +355,7 @@ function applyAssistantCompletionPatch(
     patch.toolCount !== undefined && message.toolCount !== patch.toolCount;
   const needsDuration =
     patch.durationMs !== undefined && message.durationMs !== patch.durationMs;
+  const needsCompletedAt = patch.completedAt !== undefined && message.completedAt !== patch.completedAt;
   const needsRuntimeTurnAnchor =
     patch.runtimeTurnAnchor !== undefined &&
     message.runtimeTurnAnchor !== patch.runtimeTurnAnchor;
@@ -362,6 +365,7 @@ function applyAssistantCompletionPatch(
     !needsUsage &&
     !needsToolCount &&
     !needsDuration &&
+    !needsCompletedAt &&
     !needsRuntimeTurnAnchor
   )
     return message;
@@ -372,6 +376,7 @@ function applyAssistantCompletionPatch(
     ...(patch.usage ? { usage: patch.usage } : {}),
     ...(patch.toolCount !== undefined ? { toolCount: patch.toolCount } : {}),
     ...(patch.durationMs !== undefined ? { durationMs: patch.durationMs } : {}),
+    ...(patch.completedAt !== undefined ? { completedAt: patch.completedAt } : {}),
     ...(patch.runtimeTurnAnchor
       ? { runtimeTurnAnchor: patch.runtimeTurnAnchor }
       : {}),
@@ -442,8 +447,8 @@ function normalizeTurnDurationMs(
 }
 
 function getAssistantTurnMetrics(
-  msg: Pick<WireSessionMessage, 'role' | 'usage' | 'toolCount' | 'durationMs'>,
-): Pick<Message, 'usage' | 'toolCount' | 'durationMs'> {
+  msg: Pick<WireSessionMessage, 'role' | 'usage' | 'toolCount' | 'durationMs' | 'completedAt'>,
+): Pick<Message, 'usage' | 'toolCount' | 'durationMs' | 'completedAt'> {
   if (msg.role !== 'assistant') return {};
   return {
     usage: msg.usage,
@@ -452,6 +457,7 @@ function getAssistantTurnMetrics(
         ? msg.toolCount
         : undefined,
     durationMs: normalizeTurnDurationMs(msg.durationMs),
+    completedAt: msg.completedAt,
   };
 }
 
@@ -3752,6 +3758,7 @@ export default function TabProvider({
             cache_creation_tokens?: number;
             tool_count?: number;
             duration_ms?: number;
+            completed_at?: string;
             terminal_reason?: TerminalReason;
             assistant_sdk_uuid?: string;
             assistant_message_id?: string;
@@ -3796,6 +3803,7 @@ export default function TabProvider({
             completedUsage ||
             completedToolCount !== undefined ||
             completedDurationMs !== undefined ||
+            completePayload?.completed_at ||
             completePayload?.runtime_turn_anchor
               ? {
                   sdkUuid: completePayload?.assistant_sdk_uuid,
@@ -3803,6 +3811,7 @@ export default function TabProvider({
                   usage: completedUsage,
                   toolCount: completedToolCount,
                   durationMs: completedDurationMs,
+                  completedAt: completePayload?.completed_at,
                   runtimeTurnAnchor: completePayload?.runtime_turn_anchor,
                 }
               : undefined;

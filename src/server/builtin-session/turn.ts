@@ -203,13 +203,18 @@ export function beginTurn(context: BuiltinTurnStartContext): void {
   currentTurnProviderAnalytics = context.providerAnalytics ?? null;
 }
 
-export function resetTurnUsage(): void {
+/** Numeric accounting belongs to a logical turn, independently of queue delivery. */
+export function resetTurnAccounting(startedAt: number | null): void {
   currentTurnUsage = emptyUsage();
   currentModelUsage.clear();
   latestMainAssistantUsage = null;
-  currentTurnStartTime = null;
-  currentPlanFileMinMtimeMs = null;
+  currentTurnStartTime = startedAt;
   currentTurnToolCount = 0;
+}
+
+export function resetTurnUsage(): void {
+  resetTurnAccounting(null);
+  currentPlanFileMinMtimeMs = null;
   currentTurnHasOutput = false;
   currentTurnHadAssistantMessageError = false;
   currentTurnLastAssistantMessageError = null;
@@ -656,12 +661,8 @@ export function snapshotTurn() {
 }
 
 export function resetTurnForTest(): void {
-  currentTurnUsage = emptyUsage();
-  currentModelUsage.clear();
-  latestMainAssistantUsage = null;
-  currentTurnStartTime = null;
+  resetTurnAccounting(null);
   currentPlanFileMinMtimeMs = null;
-  currentTurnToolCount = 0;
   currentTurnHasOutput = false;
   currentTurnHadAssistantMessageError = false;
   currentTurnLastAssistantMessageError = null;

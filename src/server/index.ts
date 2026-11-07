@@ -1,3 +1,5 @@
+import { createMemoryUpdateDispatchGuard } from './session-engine/memory-update-admission';
+import { hasRecentSessionActivity } from './session-core/session-activity-policy';
 import { normalizeImInbound } from './session-core/channel-context';
 import type { AskUserQuestionAnswers } from '../shared/types/askUserQuestion';
 import {
@@ -11278,17 +11280,14 @@ description: >
             );
           }
 
-          // (issue #190 v0.2.15) Busy gate — refuse auto-injection when the
-          // session is actively working. The Rust-side `lastActiveAt` cooldown
-          // is only a disk-timestamp proxy and ages past its 15-min threshold
-          // during a single long turn, so this check is the authoritative one.
-          // Manual updates (user clicked the button) bypass — explicit user
-          // intent is allowed to queue behind the active turn as expected.
-          // Busy gate is runtime-aware: external (Codex/CC) sessions track
-          // in-flight work via isExternalSessionActive(); builtin via isSessionBusy().
+          // Human-history eligibility is checked by Rust. Re-read meaningful
+          // activity here: a long Task/Goal/IM turn may have just settled since
+          // the batch collected its candidates. Manual requests remain explicit.
           const engine = getSessionEngine();
-          if (isAuto && engine.isBusy()) {
-            console.log('[memory-update] Skipped: session busy (auto)');
+          const hasRecentActivity = () => hasRecentSessionActivity(
+            getSessionMetadata(managementSessionId)?.lastActiveAt,
+          );
+          if (isAuto && (engine.isBusy() || hasRecentActivity())) {
             return jsonResponse({ status: 'skipped', reason: 'session_busy' });
           }
 
@@ -11347,6 +11346,12 @@ description: >
           const taskDispatchGuard = isAuto
             ? createTaskDispatchGuard(taskId, queueId, managementSessionId)
             : undefined;
+          let skippedRecentActivity = false;
+          const memoryDispatchGuard = taskDispatchGuard
+            ? createMemoryUpdateDispatchGuard(taskDispatchGuard, hasRecentActivity, () => {
+                skippedRecentActivity = true;
+              })
+            : undefined;
           const turnResult = await engine.runInjectedTurn({
             prompt,
             sessionId: runtimeSessionId,
@@ -11366,7 +11371,7 @@ description: >
             assistantChannelDelivery: 'none',
             timeoutMs: MEMORY_UPDATE_TIMEOUT_MS,
             pollMs: 1000,
-            beforeDispatch: taskDispatchGuard,
+            beforeDispatch: memoryDispatchGuard,
             requiredSystemSkill: 'myagents-memory-update',
             ...(isAuto
               ? {
@@ -11375,6 +11380,9 @@ description: >
                 }
               : {}),
           });
+          if (skippedRecentActivity && !turnResult.enqueued) {
+            return jsonResponse({ status: 'skipped', reason: 'session_busy' });
+          }
           if (!turnResult.success && turnResult.status === 408) {
             console.warn('[memory-update] AI memory update timed out (60 min)');
             return jsonResponse({

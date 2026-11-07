@@ -11,6 +11,7 @@
   "usage": null,
   "toolCount": null,
   "durationMs": null,
+  "completedAt": null,
   "metadata": null,
   "turnId": null,
   "transcriptState": null,

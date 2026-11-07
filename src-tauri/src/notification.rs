@@ -444,7 +444,7 @@ fn is_generic_session_completion_eligible(terminal: &SessionCompletionTerminal) 
 }
 
 fn should_show_session_completion<R: Runtime>(app: &AppHandle<R>) -> bool {
-    app.get_webview_window("main")
+    app.get_window("main")
         .map(|window| {
             !window.is_visible().unwrap_or(false) || !window.is_focused().unwrap_or(false)
         })

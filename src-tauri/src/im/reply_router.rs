@@ -2734,6 +2734,7 @@ mod tests {
         queried: Arc<tokio::sync::Notify>,
         cancellations: Arc<StdMutex<Vec<serde_json::Value>>>,
         terminal: tokio::sync::mpsc::UnboundedReceiver<String>,
+        connections: tokio::sync::mpsc::UnboundedReceiver<u64>,
         server: tauri::async_runtime::JoinHandle<()>,
         port: u16,
     }
@@ -2742,12 +2743,13 @@ mod tests {
         async fn start(adapter: Arc<RecordingAdapter>) -> Self {
             use crate::sidecar::{create_sidecar_manager, SidecarOwner};
             use axum::{
+                extract::Query,
                 response::sse::{Event, Sse},
                 routing::{get, post},
                 Json,
             };
             let (events, _) = tokio::sync::broadcast::channel::<serde_json::Value>(32);
-            let connected = Arc::new(tokio::sync::Notify::new());
+            let (connected, mut connections) = tokio::sync::mpsc::unbounded_channel();
             let receipt = Arc::new(StdMutex::new(json!({"outcomes":{"r":{"state":"active"}}})));
             let queries = Arc::new(StdMutex::new(Vec::new()));
             let queried = Arc::new(tokio::sync::Notify::new());
@@ -2758,9 +2760,11 @@ mod tests {
                     get({
                         let events = events.clone();
                         let connected = connected.clone();
-                        move || {
+                        move |Query(query): Query<HashMap<String, String>>| {
                             let receiver = events.subscribe();
-                            connected.notify_one();
+                            connected
+                                .send(query["since"].parse::<u64>().unwrap())
+                                .unwrap();
                             async move {
                                 Sse::new(futures_util::stream::unfold(receiver, |mut rx| async {
                                     rx.recv().await.ok().map(|event| {
@@ -2783,9 +2787,16 @@ mod tests {
                         let queries = queries.clone();
                         let queried = queried.clone();
                         move |Json(body): Json<serde_json::Value>| {
+                            // Pre-admission queries stay active in this scenario,
+                            // including an immediate interval query still in flight
+                            // when the test installs the post-admission terminal.
+                            let result = if body["settleUnknown"] == json!([]) {
+                                json!({"outcomes":{"r":{"state":"active"}}})
+                            } else {
+                                receipt.lock().unwrap().clone()
+                            };
                             queries.lock().unwrap().push(body);
                             queried.notify_one();
-                            let result = receipt.lock().unwrap().clone();
                             async move { Json(result) }
                         }
                     }),
@@ -2841,9 +2852,12 @@ mod tests {
                 None,
                 Some(ImDeliveryProtocol::OpenClawReply)
             ));
-            tokio::time::timeout(Duration::from_secs(3), connected.notified())
-                .await
-                .unwrap();
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(3), connections.recv())
+                    .await
+                    .unwrap(),
+                Some(0)
+            );
             Self {
                 replies,
                 consumers,
@@ -2854,6 +2868,7 @@ mod tests {
                 queried,
                 cancellations,
                 terminal,
+                connections,
                 server,
                 port,
             }
@@ -2954,6 +2969,13 @@ mod tests {
             .send(json!({"seq":20,"requestId":null,"type":"gap","data":{"droppedSeqs":[1,20]}}))
             .unwrap();
         probe.stopped().await;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(3), probe.connections.recv())
+                .await
+                .unwrap(),
+            Some(20),
+            "the gap must reconnect from its last dropped sequence"
+        );
         assert!(probe
             .queries
             .lock()

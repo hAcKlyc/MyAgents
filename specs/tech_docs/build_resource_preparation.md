@@ -119,6 +119,12 @@ Cuse 的原始 ZIP 使用同一 `acquireLockedResource` helper，缓存到 `reso
 
 尚无 Node 的引导阶段使用平台自带下载器：Unix Node curl 为 30 分钟/次、最多 5 次尝试；Windows Node/rustup/Git 共用 PowerShell 5.1 兼容的 `download-build-file.ps1`，30 分钟/次、最多 5 次尝试，仅重试临时故障，私有 partial 下载完成后才替换目标，失败清理 partial。Windows Git installer 不再仅判断文件存在，历史半包和新下载均须通过 Authenticode 完整性校验。npm 资源下载由项目 `.npmrc` 统一为 30 分钟、四次重试；在临时目录安装 SDK、tsx/sharp 的 helper 显式传入相同参数，避免丢失项目配置。Managed Codex 的 npm 打包下载先试一次镜像，回退官方源最多四次；直接使用官方源时最多五次。Cargo 使用项目 `.cargo/config.toml` 的原生 HTTP timeout 和 retry 配置（1800 秒、四次重试）；这些参数遵循包管理器自身的请求语义，不是整条编译命令的时限。Git 源码拉取、rustup 和系统包管理器仍由工具自身管理，不能把整项编译或工具安装当成单个文件下载。发布上传与 App 运行时下载不属于此策略。
 
+## Eigen 源码归档
+
+语音原生构建的 Eigen 归档由 `src-tauri/document-worker/resource-lock.json` 固定，所有目标共用同一下载入口。下载地址使用 [CP2K 官方依赖镜像](https://www.cp2k.org/static/downloads/eigen-5.0.1.tar.gz)；上游来源仍是 [Eigen 5.0.1 GitLab 归档](https://gitlab.com/libeigen/eigen/-/archive/5.0.1/eigen-5.0.1.tar.gz)。切换前已下载两份归档并确认逐字节一致，锁定的大小、SHA-256、版本和文件名均不变，也满足固定 Sherpa 源码内 `cmake/eigen.cmake` 的摘要要求。更换 URL 不改变内容寻址下载缓存身份；完整 lock 参与的 prepared fingerprint 会变化，现有入口按新指纹重建。
+
+v0.5.12 Ubuntu setup 曾收到原地址的 HTTP 406；本机后续请求能成功，尚无证据确定 GitLab 当时拒绝请求的具体策略。此修复只更换经过校验的资源位置，不将 406 归入临时故障、不扩展 curl 回退条件，也不接受重新打包后摘要不同的同版本归档。镜像可用性仍需真实网络与对应平台构建验证；默认测试保持离线。
+
 ## 修改时的验证与文档维护
 
 - **先确定影响面**：列出资源 owner、版本来源、host/target、缓存与 staging，以及调用该 helper 的 setup/dev/release 入口；修改公共 helper 时检查所有调用方。

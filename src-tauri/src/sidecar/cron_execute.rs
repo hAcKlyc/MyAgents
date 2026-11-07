@@ -186,6 +186,10 @@ pub async fn execute_cron_task<R: Runtime>(
             payload.task_id
         )
     })?;
+    let timeout = payload
+        .managed_kind
+        .as_ref()
+        .map(|_| Duration::from_secs(3660));
     let task_id = payload.task_id.clone();
     let owner = SidecarOwner::Task(task_id.clone());
     let runtime_override = payload
@@ -208,6 +212,7 @@ pub async fn execute_cron_task<R: Runtime>(
         payload,
         owner,
         "task_execute",
+        timeout,
         BackgroundSidecarAccess::Reserved(session_lifecycle),
     )
     .await
@@ -238,6 +243,7 @@ pub async fn execute_goal_turn<R: Runtime>(
         payload,
         owner,
         "goal_execute",
+        Some(Duration::from_secs(3660)),
         BackgroundSidecarAccess::Attached(port),
     )
     .await
@@ -256,6 +262,7 @@ async fn execute_background_turn<R: Runtime, P: serde::Serialize>(
     payload: P,
     owner: SidecarOwner,
     trace_operation: &'static str,
+    timeout: Option<Duration>,
     sidecar_access: BackgroundSidecarAccess,
 ) -> Result<BackgroundTurnResponse, String> {
     ulog_info!(
@@ -332,10 +339,15 @@ async fn execute_background_turn<R: Runtime, P: serde::Serialize>(
         url
     );
 
-    // Create HTTP client with generous timeout (cron tasks can take long)
-    let client = crate::local_http::builder()
-        .timeout(Duration::from_secs(3660)) // 60m business deadline + stop/finalize margin
-        .tcp_nodelay(true)
+    // Ordinary Tasks wait for their owner's terminal/cancel result. Goal and
+    // maintenance retain the margin above their existing 60m business deadline.
+    let mut builder = crate::local_http::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .tcp_nodelay(true);
+    if let Some(timeout) = timeout {
+        builder = builder.timeout(timeout);
+    }
+    let client = builder
         .build()
         .map_err(|e| format!("[sidecar] Failed to create HTTP client: {}", e))?;
 

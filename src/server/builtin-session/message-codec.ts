@@ -44,6 +44,7 @@ export function messageWireToSessionMessage(msg: MessageWire): SessionMessage {
     usage: isAssistant ? msg.usage : undefined,
     toolCount: isAssistant ? msg.toolCount : undefined,
     durationMs: isAssistant ? msg.durationMs : undefined,
+    completedAt: isAssistant ? msg.completedAt : undefined,
   };
 }
 
@@ -81,5 +82,6 @@ export function sessionMessageToMessageWire(storedMsg: SessionMessage): MessageW
     usage: storedMsg.usage,
     toolCount: storedMsg.toolCount,
     durationMs: storedMsg.durationMs,
+    completedAt: storedMsg.completedAt,
   };
 }

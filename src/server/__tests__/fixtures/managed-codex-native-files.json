@@ -1,5 +1,5 @@
 {
-  "version": "0.163.0",
+  "version": "0.167.0",
   "platforms": {
     "darwin-arm64": [
       "vendor/aarch64-apple-darwin/bin/codex",

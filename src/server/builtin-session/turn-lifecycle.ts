@@ -183,6 +183,7 @@ export type BuiltinTurnLifecycle = {
     terminalError?: string,
     afterPersist?: () => void,
     terminalKind?: 'complete' | 'cancelled',
+    completedAt?: string,
   ) => boolean;
   stopTurn: () => SessionCompletionTerminal | null;
   failTurn: (error: string, localizedError?: string) => SessionCompletionTerminal | null;
@@ -242,6 +243,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
     terminalError?: string,
     afterPersist?: () => void,
     terminalKind: 'complete' | 'cancelled' = 'complete',
+    completedAt = terminalKind === 'complete' && !terminalError ? new Date().toISOString() : undefined,
   ): boolean => {
     deps.setStreamingMessage(false);
     const turnStartTime = getCurrentTurnStartTime();
@@ -251,7 +253,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
     if (product) {
       stampTurnUsageOnPendingAssistant({ usage: getCurrentTurnUsage(),
         toolCount: getCurrentTurnToolCount(), durationMs: settledDurationMs });
-      product.finishTurn(terminalKind === 'cancelled' ? 'stopped' : (terminalError ? 'error' : 'complete'));
+      product.finishTurn(terminalKind === 'cancelled' ? 'stopped' : (terminalError ? 'error' : 'complete'), { completedAt });
     }
     let confirmedQueueTurnKeepStreaming = false;
     let surfaceNextInput: (() => void) | undefined;
@@ -311,6 +313,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
       usage: turnUsage,
       toolCount: turnToolCount,
       durationMs: settledDurationMs,
+      completedAt,
     });
 
     const terminalOutcome = snapshotCurrentTurnTerminalOutcome(
@@ -777,7 +780,9 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
         console.error('[session-watch] empty-result watch push failed:', err),
       );
     } else {
+      const completedAt = !isAbortResult && !terminalError ? new Date().toISOString() : undefined;
       const completionEvent = {
+        completed_at: completedAt,
         model: finalTurnUsage.model,
         input_tokens: finalTurnUsage.inputTokens,
         output_tokens: finalTurnUsage.outputTokens,
@@ -865,6 +870,7 @@ export function createBuiltinTurnLifecycle(deps: BuiltinTurnLifecycleDeps): Buil
           }
         },
         isAbortResult ? 'cancelled' : 'complete',
+        completedAt,
       );
 
       if (terminalDisposition === 'complete' && !isAbortResult

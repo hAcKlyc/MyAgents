@@ -1,0 +1,26 @@
+{
+  "version": "0.167.0",
+  "source": "Extracted from the pinned darwin-arm64 npm binary: codex app-server generate-json-schema --experimental --out <dir>",
+  "serverRequestMethods": [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/tool/requestUserInput",
+    "mcpServer/elicitation/request",
+    "item/permissions/requestApproval",
+    "item/tool/call",
+    "account/chatgptAuthTokens/refresh",
+    "attestation/generate",
+    "currentTime/read",
+    "applyPatchApproval",
+    "execCommandApproval"
+  ],
+  "initializeCapabilityNames": [
+    "experimentalApi",
+    "explicitGatewayOauth",
+    "extensions",
+    "mcpServerOpenaiFormElicitation",
+    "optOutNotificationMethods",
+    "requestAttestation",
+    "requiredHumanApproval"
+  ]
+}

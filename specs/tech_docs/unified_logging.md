@@ -312,8 +312,9 @@ HTTP client 的错误文本通常携带完整请求 URL。若协议把凭据放�
 | `native-init-script` | Tauri initialization script | HTML 模块执行前的最早 JS 证据 |
 | `renderer-entry-evaluated` | renderer | `main.tsx` 已开始执行 |
 | `theme-native-bootstrap-*` / `theme-renderer-bootstrap-*` | native bridge / ThemeRuntime | 首帧快照和 renderer prime 是否完成 |
-| `react-root-created` / `react-commit` | renderer | React root 创建与真实 effect commit |
+| `react-root-created` / `react-commit` | renderer | React root 创建与入口 effect commit；不代表 lazy App 已成功挂载 |
 | `renderer-uncaught-error` / `renderer-unhandled-rejection` | initialization script | 模块加载或早期 promise 的有界错误 |
+| `renderer-react-error` | AppErrorBoundary | React 捕获的启动/渲染错误，包括 Tauri 的字符串 rejection；不依赖 App 日志 sink |
 
 所有阶段都带 `window=<label>`，并进入同一个 `~/.myagents/logs/unified-*.log`：Rust page-load 直接走 `ulog_*!`；initialization script 与 `main.tsx` 在 App/Sidecar logger 尚未可用时调用受限 Tauri command `cmd_record_renderer_boot_event`，由 Rust unified logger 持久化。该 command 只接受白名单 stage、有界单行 detail 和合法 window label，不是第二个通用日志 API；禁止绕回 raw `plugin:log|log`，否则阶段链会分裂到 OS LogDir。
 
@@ -379,17 +380,27 @@ grep -E '\[(record|recording|speech)\]|RECORDING_|SPEECH_' ~/.myagents/logs/unif
 
 ### 前端整页崩溃（「界面渲染出错」/ 白屏）
 
-`AppErrorBoundary`（`src/renderer/components/AppErrorBoundary.tsx`）挂在 `main.tsx` 的 React 根、**所有 provider 之外，且没有 per-tab / per-message 子边界**——所以任意一个组件 render 抛错就会冒泡到它、把**整个界面**替换成「界面渲染出错」卡片（不是局部某块）。它的 `componentDidCatch` 把 `error` + `componentStack` 经 `console.error('[AppErrorBoundary] ...')` 写进统一日志。
+`AppErrorBoundary`（`src/renderer/components/AppErrorBoundary.tsx`）挂在 `main.tsx` 的 React 根、**所有 provider 之外，且没有 per-tab / per-message 子边界**——所以任意一个组件 render 抛错就会冒泡到它、把**整个界面**替换成「界面渲染出错」卡片（不是局部某块）。`componentDidCatch` 通过受限 native boot ingress 记录有界的 `error` + `componentStack`，阶段为 `renderer-react-error`；同时保留 `console.error('[AppErrorBoundary] ...')` 供控制台诊断。启动失败时 App 的 console 日志 sink 可能尚未建立，不能只搜索 `[REACT]` 日志。
 
 排查：
 
 ```bash
-grep -E '\[AppErrorBoundary\]|\[REACT\] \[ERROR\]' ~/.myagents/logs/unified-*.log | tail -30
+rg '\[AppErrorBoundary\]|renderer-react-error|\[REACT\] \[ERROR\]' ~/.myagents/logs/unified-*.log | tail -30
 ```
 
-- **`error.message`** 保真（运行时字符串，如 `Cannot read properties of undefined (reading 'trim')`）——主要定位线索；配合时间线看崩前发生了什么（常见诱因：**恢复旧 session**、渲染恢复态/流式数据时把可选字段当必有 string）。
+- **错误文本** 同时保留 `Error.message` 和 Tauri 等来源的原始字符串 rejection。配合时间线区分恢复入口失败与组件 render 抛错；不要把「未知错误」直接归因于历史消息格式。
 - **`componentStack`** 只在 dev / 有 sourcemap 时能定位到组件；release 包被 minify 成 `at t` 这类乱码，别据此硬猜。
-- 这类几乎都是真前端 Bug（信任 restored / partial 数据导致 render 抛错），不是用户配置能修的。小助理侧的 triage→报 Bug 流程见 helper `/support` §1.6。
+- 若此前出现 `[WebView] content process terminated`，先检查终止原因，再追踪新 renderer 的 attach 与 App 挂载；`react-commit` 本身不保证 App 已启动。小助理侧的 triage→报 Bug 流程见 helper `/support` §1.6。
+
+### 主界面内存增长：轻量计数与按需堆快照
+
+主窗口的 `frontendLogger` 初始化时及每 5 分钟写一条 `[renderer-health]`，复用现有统一日志队列、容量上限和持久化路径。它只读取已有容器的 `size` / `length`：`appTabs`、`mountedChats`、`tauriCallbacks`、`logEntries`、`logSubscribers`、`pendingLogs`，并带 `uptimeSec` 和页面 `visibility`。不保存正文、DOM 或 callback 对象，不遍历消息或 DOM，不触发 GC，也不决定重载、限流或会话生命周期。每次采样工作量固定；日志正常运行时约 288 条/天。后台定时器可能被 WebKit 延后，因此不是精确定时心跳。
+
+`tauriCallbacks` 只读固定版本 Tauri 已暴露的调试 Map；不可用时为 `null`，不能解释为零。计数没有另建注册表，logger 还原或 HMR dispose 会清理采样定时器。日志 sink 尚未就绪或不可用时沿用原有有界缓冲/失败语义，不增加独立落盘通道。
+
+排查时先把 `[renderer-health]` 与同一时段 macOS `com.apple.WebKit:MemoryPressure` 日志对齐。Tab 数稳定而 callback 数持续上涨可指向 IPC/监听生命周期；日志数量上涨到既有上限属于预期，不能直接判为泄漏。这些计数不测量 JS 堆大小，不覆盖所有对象；计数稳定而进程内存上涨时，需要对象引用证据，不能仅凭计数给模块定责。
+
+需要精确定位时，使用 Safari 自带 Web Inspector，正常加载后取一份 JavaScript heap snapshot，内存增长后再取一份，比较新增对象及其到 root 的引用路径。该操作仅由排障人员按需手动执行，不在产品中自动采集。快照会触发 GC、消耗内存并可能暂停页面，不能常驻录制。项目已启用 Tauri `devtools` feature，Wry 会将相应 WKWebView 设为 inspectable；在 Safari 的开发菜单中选择 MyAgents 的主界面，进入 Timelines / JavaScript Allocations 手动拍两份快照即可。选择主界面，避免抓到网页预览或悬浮窗。参考 [WebKit 堆快照说明](https://webkit.org/blog/6425/memory-debugging-with-web-inspector/) 和 [Timelines 操作说明](https://webkit.org/web-inspector/timelines-tab/)。
 
 ## 相关文件
 

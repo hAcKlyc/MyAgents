@@ -99,6 +99,7 @@ export function reconcileDshV2Assistant(
   const repaired: SessionMessage = {
     ...assistant, id: final.message.id, timestamp: final.message.timestamp, turnId,
     content, transcriptState: 'complete',
+    completedAt: final.message.completedAt ?? assistant.completedAt,
   };
   if (JSON.stringify(repaired) === JSON.stringify(final.message)) return changed;
   messages[final.index] = repaired;

@@ -129,6 +129,23 @@ test('speech build lock pins the complete audited native source graph', () => {
   assert.equal(validateSpeechBuildLock(drifted), false);
 });
 
+test('Eigen acquisition uses the audited mirror without changing the upstream archive identity', () => {
+  // Sherpa's pinned cmake/eigen.cmake independently requires this archive/hash.
+  // GitLab returned HTTP 406 on the v0.5.12 Ubuntu runner; CP2K serves identical bytes.
+  assert.deepEqual(
+    resourceLock.speechInference.dependencies.find((entry) => entry.id === 'eigen'),
+    {
+      id: 'eigen',
+      url: 'https://www.cp2k.org/static/downloads/eigen-5.0.1.tar.gz',
+      sha256: 'e9c326dc8c05cd1e044c71f30f1b2e34a6161a3b6ecf445d56b53ff1669e3dec',
+      size: 2967272,
+      archiveName: 'eigen-5.0.1.tar.gz',
+      license: 'MPL-2.0',
+      upstreamRevision: '5.0.1',
+    },
+  );
+});
+
 test('prepared speech bundle requires exact native and legal inventories', async () => {
   const fixture = await speechFixture();
   try {

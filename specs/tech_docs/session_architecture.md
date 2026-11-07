@@ -180,7 +180,7 @@ Builtin Rewind 以保留前缀末条 native 内容的精确 chain UUID 为边界
 
 新 Fork 统一先实体化 native history，builtin 同时映射 SDK UUID；完整执行配置复用 `snapshotForForkedSession`，不手工挑字段。Fork 不继承 source 的 Agent origin、Goal、置顶或 Tag。旧 lazy fork 通过记录的 binding/source 解析真实 native 来源，允许尚未启动的旧分支继续 fork；新请求不再生成 lazy fork 或通过设置切回旧路径。prepared 发布、附件复制和清理见 [V2 transcript](session_transcript_v2.md#生命周期与显式操作)。
 
-Retry 经 `POST /chat/retry` 进入 adapter，`/chat/external-retry` 仅保留同一语义的路由别名。Builtin 使用现有串行 mutation scope：内部重发可以重入，外部接纳等待该 scope 结束。External 的 mutation lease 覆盖重发接纳；期间新入队的消息保留，自身 replay 排到队首后才释放 dispatch。V1 复用既有删除事件、V2 由 writer 发布删除操作，先同步移除旧消息再接收 replay。不支持精确 native history 操作的 Runtime 返回明确能力错误，不以只截断产品记录代替。Codex 的边界选择见 [Runtime 文档](multi_agent_runtime.md#53-codex)。
+Retry 经 `POST /chat/retry` 进入 adapter，`/chat/external-retry` 仅保留同一语义的路由别名。Builtin 使用现有串行 mutation scope：内部重发可以重入，外部接纳等待该 scope 结束。External 的 mutation lease 覆盖重发接纳；期间新入队的消息保留，自身 replay 排到队首后才释放 dispatch。V1 复用既有删除事件、V2 由 writer 发布删除操作，先同步移除旧消息再接收 replay。不支持精确 native history 操作的 Runtime 返回明确能力错误，不以只截断产品记录代替。Codex 的边界选择见 [Runtime 文档](multi_agent_runtime.md#53-codex)。 DSH 新 root 输入的 operation identity 必须经 transcript owner 写入 canonical user 后再捕获 admission journal，不能依赖 adapter 原对象的后续修改。Retry 仅在同一 native Session 的精确 operation lookup 证明未接纳时使用产品记录截断；缺字段旧历史与分支继承的源 Session identity 走普通完整 native rewind 的边界校验/提交后重发，不推断未接纳、不补造标识。
 
 Retry 的 `model` / `reasoningEffort` 是与普通发送一致的可选发送意图：UI 传当前选项，adapter 在同一 mutation scope 内将其带入重新入队。不能只传消息 ID 后依赖预热进程默认模型，也不能把 Runtime 展示用的 reported model 反写成配置 authority。未传选项的旧调用仍采用既有后端默认语义。
 
@@ -290,7 +290,9 @@ Task、Goal、Agent Channel、Memory、Heartbeat 等领域使用自己的通知/
 
 `myagents.openTabs.v1` 中的 live Tabs 与可选 `pendingRestore` 分别表示当前布局和尚未接受的上次会话候选；后者同样使用 v1 白名单 codec，直到接受或主动忽略才消费。候选不占 live Tab 槽位；自动恢复因并发导航达到容量上限或 attach 失败的剩余项合入候选，不以 live 数量上限裁掉待恢复项。启动判定/自动恢复结算前不允许初始 Launcher 覆盖快照；手动恢复部分受容量限制或 attach 失败时保留剩余候选。冷启动优先采用本地 live 布局，其次采用更新重启的 durable live handoff，二者均为空时保留原候选。
 
-Renderer replacement 只停止主窗口 Tab 的旧 SSE transport，不动 Companion 或任何 Session owner。Rust 从 SidecarManager 当前及 recovering 的 owner 集合提供旧 Tab token 清单；恢复完成后，未接回的 exact token 复用正常关闭的 BackgroundCompletion → stop SSE → release Tab 顺序交接。旧 token 交接完成后才能公布/接受原候选及新增剩余候选，避免同 ID 重新接入与旧 release 竞争；复用 App 的恢复结算边界，不增加 native owner generation。SSE 重新订阅获取新的初始状态，不能因稳定 connection key 相同而沿用旧 JS listener 的流。这个窗口恢复机制不诊断或修复导致 WebContent 终止的内存根因。
+Renderer replacement 停止主窗口 Tab 的旧 SSE transport，并由 BrowserManager 按原有 exact generation close 转移退役旧 BrowserPanel 子窗口；已入册但尚未完成的 native birth 在完成时关闭，关闭失败的资源继续留在 registry，attach 不提交成功回执。不动 Companion 或任何 Session owner。Rust 从 SidecarManager 当前及 recovering 的 owner 集合提供旧 Tab token 清单；恢复完成后，未接回的 exact token 复用正常关闭的 BackgroundCompletion → stop SSE → release Tab 顺序交接。旧 token 交接完成后才能公布/接受原候选及新增剩余候选，避免同 ID 重新接入与旧 release 竞争；复用 App 的恢复结算边界，不增加 native owner generation。SSE 重新订阅获取新的初始状态，不能因稳定 connection key 相同而沿用旧 JS listener 的流。这个窗口恢复机制不诊断或修复导致 WebContent 终止的内存根因。
+
+主窗口可包含 BrowserPanel 原生子 WebView。Tauri `WebviewWindow` 的 command argument 与 `get_webview_window("main")` 只接受单 WebView 拓扑，不能用来判断原生主窗口是否存在。窗口显示、焦点、badge 使用 `get_window("main")`；renderer attach 从真实调用 `Webview` 验证其自身及所属 Window 的 label，防止子预览调用主界面恢复接口。
 
 ## 7. 配置写入方向
 
@@ -307,6 +309,8 @@ Chat mount 必须明确当前 Tab 对 Sidecar 配置的方向：
 `pending → push|adopt` 的唯一依据是 Rust manager 锁内 `ensureSessionSidecar().isNew`。端口探测、Renderer 缓存和事前 `hasSidecar` 都有 TOCTOU，不能决定配置方向。
 
 mount 期配置同步必须受 disposition 门控；用户主动修改配置可以先持久化 intent，但在 `pending` 期间延后 Runtime push。打开已有 Session 的所有入口都复用 App 的 materialization/reconcile 流程，以 exact Tab owner ensure 并在 replacement 时保持 Owner 集合。
+
+Managed Provider 的启动消息以 `providerExecutionIdentity` 中的 Provider/model 对决定首发参数及输入框初始化，不依赖异步 metadata 到达，也不能按输入框外观回落到工作区旧模型。adopt 与 metadata hydration 复用 `sessionSnapshotProviderProjection`，依据 `runtimeSource` / execution identity 选择投影；Managed Codex 的 Provider 权限词汇与 Runtime 权限词汇仍通过既有转换函数分别更新。Managed adopt 请求期间，owned Session 快照中实际改变的 model、permission、reasoningEffort 各自保留新值，其余字段正常采纳响应；metadata 对象重建或标签更新不应丢弃整个 adopt。`configSnapshotAt` 只标识快照归属，不充当更新版本。启动消息消费后，用户主动切换继续经过原 Session snapshot writer，不重新应用启动选择。
 
 Sidecar ready 而 External/DSH Product Session 尚未绑定 workspace owner 时，Agent/MCP setter 返回 `pending_next_start / awaiting_product_session_owner`；birth 从落盘 authority 编译扩展，不能伪造 live apply。DSH replacement resume 先恢复当前 Session 实际 permission/config，再校验持久 permission revision chain；mutation journal 只协调 fork/rewind/delete。
 

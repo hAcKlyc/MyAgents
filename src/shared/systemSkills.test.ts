@@ -49,7 +49,7 @@ describe('required system skill contract', () => {
       'utf8',
     );
     expect(TASK_ALIGNMENT_SKILL_REQUIREMENT.systemSkillsVersion).toBe(SYSTEM_SKILLS_VERSION);
-    expect(createHash('sha256').update(content).digest('hex'))
+    expect(createHash('sha256').update(content.replace(/\r\n/g, '\n')).digest('hex'))
       .toBe(TASK_ALIGNMENT_SKILL_REQUIREMENT.contentSha256);
   });
 });

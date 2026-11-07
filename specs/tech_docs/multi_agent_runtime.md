@@ -175,6 +175,8 @@ Retry 在同一 lease 内完成上述回溯与普通 desktop admission，不再�
 
 Codex Server → Client request 使用显式 allowlist。升级 app-server 时以当前 binary 生成的 schema 核对请求和 notification；未知 request fail closed。approval 与 structured question 可并发，后端按 request id 持有多个 pending，Renderer 以 FIFO queue 投影，不能使用单槽位覆盖。
 
+`requiredHumanApproval` 是独立的实验能力，不能因为 raw events 启用了 `experimentalApi` 就一起声明。当前 Host 未接入 `humanCommand` 的强制真人、单次决策交互，因此不声明此能力；原生 `prompt-user` 规则在没有支持该能力的连接时拒绝执行，不降级为自动或会话级批准。升级时同步更新从实际 binary schema 提取的 `managed-codex-protocol.json` 测试快照；原生文件清单以实际 npm 平台包为准，不能从上游其他发行包的更新说明推断。
+
 非阻塞问题来自 root `agentMessage` 的 `delivery: "async"` / `questions`，不是 permission RPC。Adapter 在 item 完成时校验结构，使用 thread/item identity，随 `text_stop` 写入既有 text block 的 `asyncQuestions`；文字仍用于纯文本消费者，旧历史不按 Markdown 猜测结构。已关闭文本块不能继续接后续 delta，聊天与 Companion 共用该边界。
 
 回答走普通 `sendDesktopMessage`，仅附加 `asyncQuestionReply` 关联。定义属于 Session transcript，待发状态属于现有 operation queue，已回答以真正受理的 user message 为准；HTTP queued 或 Codex steer RPC ack 都不代表已回答。普通 turn/start 回答在原生 send 成功后才进入 transcript，提前到达的 terminal 复用每个消息操作（直接发送及排队共有）的 dispatchAcceptance 保持 user → assistant 写入顺序；realtime 回答必须收到 native user echo，回合结束时只有 RPC ack 的回答释放为可重试。取消恢复输入同时恢复问题关联。Ingress 和排队后的 dispatch gate 校验同一 Session 的来源与重复回答；取消/失败释放队列项，历史与 reconnect snapshot 保留定义、关联和队列投影。子 Agent 事件保持嵌套 trace，不升级为主会话问题卡片。
