@@ -68,6 +68,30 @@ async function settle(session: Awaited<ReturnType<typeof birth>>, id: string) {
 }
 
 describe('DSH execution journals with V2 product history', () => {
+  it('publishes root operation identity into the V2 owner before journaling and retains it on cold read', async () => {
+    const session = await birth();
+    const persistence = await import('../runtimes/external-session/transcript-persistence');
+    persistence.setExternalSessionMessages(session.metadata.id, [], (await store.loadSessionTranscript(session.metadata.id)).cursor);
+    for (const id of ['first', 'continued']) {
+      const message = user(id);
+      persistence.pushExternalSessionMessage(message);
+      // Adapter fills execution identity after the user has already been surfaced.
+      message.runtimeOperationAnchor = { runtime: 'dsh', runtimeSessionId: session.metadata.runtimeSessionId!, clientOperationId: `op-${id}` };
+      await persistence.persistExternalUserMessageAppend(session.metadata.id, id, 'test admission', undefined, 'update', {
+        runtimeSessionId: session.metadata.runtimeSessionId!, clientOperationId: `op-${id}`, productImageSha256: [],
+      });
+      expect(persistence.getExternalSessionMessagesSnapshot().find(row => row.id === id)?.runtimeOperationAnchor)
+        .toEqual(message.runtimeOperationAnchor);
+      expect((await disk(session.metadata.id)).pendingDshRootOperation?.userMessage?.runtimeOperationAnchor)
+        .toEqual(message.runtimeOperationAnchor);
+      await store.settleDshRootOperation({ sessionId: session.metadata.id, clientOperationId: `op-${id}` });
+    }
+    await store.releaseSessionTranscriptForBinding(session.metadata.id);
+    const restored = await store.getSessionData(session.metadata.id);
+    expect(restored?.messages.filter(row => row.role === 'user').map(row => row.runtimeOperationAnchor?.clientOperationId))
+      .toEqual(['op-first', 'op-continued']);
+  });
+
   it('keeps execution updates when an older metadata publication finishes', async () => {
     const session = await birth();
     await admit(session, 'one');

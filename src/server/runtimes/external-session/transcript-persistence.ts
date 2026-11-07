@@ -202,9 +202,16 @@ export async function persistExternalUserMessageAppend(
     // admitted prefix once; V2 never installs the legacy history array.
     for (const message of allSessionMessages) if (message.role === 'user') product.admitUser(message);
     allSessionMessages = [];
-    const user = active.writer.projection.messages.get(_userMessageId);
+    let user = active.writer.projection.messages.get(_userMessageId);
     if (dshRootOperation) {
       if (!user || user.role !== 'user') throw new Error(`${failureContext}: Missing DSH Product user`);
+      // V2 owns a detached message: the adapter's later assignment cannot update
+      // it. Publish execution identity before capturing the durable input intent.
+      active.writer.observe({ kind: 'message-update', messageId: user.id, details: {
+        runtimeOperationAnchor: { runtime: 'dsh', runtimeSessionId: dshRootOperation.runtimeSessionId,
+          clientOperationId: dshRootOperation.clientOperationId },
+      } });
+      user = active.writer.projection.messages.get(_userMessageId)!;
       const begun = await beginDshRootOperation({
         sessionId, cursor: (await loadSessionTranscript(sessionId)).cursor,
         ...dshRootOperation, userMessage: toStoredTranscriptMessage(user),

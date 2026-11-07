@@ -1092,12 +1092,12 @@
       "codexRewindReconciled": "连接曾中断，已按本地历史重新同步对话；请确认当前记录后再继续。",
       "conversationError": {
         "session_busy": "当前会话仍有操作在执行，请稍后再试。",
-        "anchor_unavailable": "这个历史点缺少可用的 Codex 锚点，或原生历史已发生变化。",
+        "anchor_unavailable": "这个历史位置缺少可用的定位信息，或底层会话历史已发生变化。",
         "codex_update_required": "请将 Codex CLI 更新到 0.143.0 或更高版本。",
-        "native_fork_failed": "Codex 无法创建原生对话分支，请重试。",
+        "native_fork_failed": "当前运行时无法创建对话分支，请重试。",
         "persistence_failed": "分支已创建，但 MyAgents 无法安全保存本地会话。",
         "storage_consistency_error": "会话存储状态不一致，请重启 MyAgents 后再试。",
-        "restore_failed": "操作已生效，但 Codex 需要重启后才能继续。",
+        "restore_failed": "操作已生效，但当前运行时需要重启后才能继续。",
         "unsupported_runtime": "当前 Runtime 不支持此操作。"
       },
       "rewindPartialLinks": "对话已回溯，但为保证安全，有 {{count}} 个链接文件未恢复。",

@@ -1092,12 +1092,12 @@
       "codexRewindReconciled": "The connection was interrupted. The conversation was resynced from local history; review it before continuing.",
       "conversationError": {
         "session_busy": "This chat still has an operation in progress. Try again shortly.",
-        "anchor_unavailable": "This history point has no usable Codex anchor, or the native history has changed.",
+        "anchor_unavailable": "This history position cannot be located, or the underlying conversation history has changed.",
         "codex_update_required": "Update Codex CLI to version 0.143.0 or later.",
-        "native_fork_failed": "Codex could not create the native conversation branch. Try again.",
+        "native_fork_failed": "The current runtime could not create the conversation branch. Try again.",
         "persistence_failed": "The native branch was created, but MyAgents could not safely save the local chat.",
         "storage_consistency_error": "The chat storage is inconsistent. Restart MyAgents before trying again.",
-        "restore_failed": "The operation took effect, but Codex must restart before you continue.",
+        "restore_failed": "The operation took effect, but the current runtime must restart before you continue.",
         "unsupported_runtime": "The current Runtime does not support this operation."
       },
       "rewindPartialLinks": "Conversation rewound, but {{count}} linked file(s) were left unchanged for safety.",

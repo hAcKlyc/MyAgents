@@ -8744,14 +8744,19 @@ async function rewindDshConversation(
         message => message.id === userMessageId && message.role === 'user',
       );
       const anchor = target?.runtimeOperationAnchor;
-      if (!target || anchor?.runtime !== 'dsh' || anchor.runtimeSessionId !== context.runtimeSessionId) {
-        return { success: false, status: 409, errorCode: 'anchor_unavailable', error: 'The DSH retry target has no durable operation identity' };
+      if (!target) {
+        return { success: false, status: 409, errorCode: 'anchor_unavailable', error: 'The DSH retry target is unavailable' };
       }
-      try {
-        const lookup = await context.controller.getTurn(anchor.clientOperationId);
-        if (!lookup.admission) return retryUnadmittedDshTranscript(sessionId, userMessageId);
-      } catch (error) {
-        return dshMutationFailureResult(error);
+      // Only this execution's exact operation can prove non-admission. Older
+      // rows may lack the anchor; fork prefixes can retain their source identity.
+      // Both must use full native rewind below, never Product-only truncation.
+      if (anchor?.runtime === 'dsh' && anchor.runtimeSessionId === context.runtimeSessionId) {
+        try {
+          const lookup = await context.controller.getTurn(anchor.clientOperationId);
+          if (!lookup.admission) return retryUnadmittedDshTranscript(sessionId, userMessageId);
+        } catch (error) {
+          return dshMutationFailureResult(error);
+        }
       }
     }
     const clientMutationId = `dsh-rewind-${crypto.randomUUID()}`;
@@ -9242,52 +9247,7 @@ export async function retryLastExternalUserMessage(
     return rewindExternalConversation(userMessageId);
   }
 
-  const target = getExternalSessionMessagesSnapshot().find(
-    (message) => message.id === userMessageId && message.role === 'user',
-  );
-  const anchor = target?.runtimeOperationAnchor;
-  if (!target || anchor?.runtime !== 'dsh') {
-    return {
-      success: false,
-      error: 'The DSH retry target has no durable operation identity',
-    };
-  }
-  const active = await getDshConversationMutationPair();
-  if (!active)
-    return { success: false, error: 'The DSH Runtime is unavailable' };
-  const { getDshConversationMutationContext } = await import(
-    '../integrated-runtimes/dsh/runtime'
-  );
-  let context;
-  try {
-    context = getDshConversationMutationContext(active.process);
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-  if (context.runtimeSessionId !== anchor.runtimeSessionId) {
-    return {
-      success: false,
-      error: 'The DSH retry target belongs to a different Runtime Session',
-    };
-  }
-  try {
-    const lookup = await context.controller.getTurn(anchor.clientOperationId);
-    if (!lookup.admission) {
-      return retryUnadmittedDshTranscript(
-        lifecycleSessionId,
-        userMessageId,
-      );
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-  return rewindDshConversation(userMessageId);
+  return rewindDshConversation(userMessageId, undefined, true);
 }
 
 /**
