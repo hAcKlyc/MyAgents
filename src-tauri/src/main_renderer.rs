@@ -111,6 +111,7 @@ mod tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap();
         let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .scroll_bar_style(crate::webview_policy::scroll_bar_style())
             .build()
             .unwrap();
         let attach = |webview: &tauri::Webview<tauri::test::MockRuntime>, renderer_id: &str| {
@@ -135,7 +136,8 @@ mod tests {
             .get_window("main")
             .unwrap()
             .add_child(
-                tauri::webview::WebviewBuilder::new("browser-test", Default::default()),
+                tauri::webview::WebviewBuilder::new("browser-test", Default::default())
+                    .scroll_bar_style(crate::webview_policy::scroll_bar_style()),
                 tauri::LogicalPosition::new(0., 0.),
                 tauri::LogicalSize::new(200., 200.),
             )

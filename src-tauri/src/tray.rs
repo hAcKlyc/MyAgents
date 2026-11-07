@@ -505,12 +505,14 @@ mod tests {
         use tauri::Listener;
         let app = tauri::test::mock_app();
         tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+            .scroll_bar_style(crate::webview_policy::scroll_bar_style())
             .build()
             .unwrap();
         app.get_window("main")
             .unwrap()
             .add_child(
-                tauri::webview::WebviewBuilder::new("browser-test", Default::default()),
+                tauri::webview::WebviewBuilder::new("browser-test", Default::default())
+                    .scroll_bar_style(crate::webview_policy::scroll_bar_style()),
                 tauri::LogicalPosition::new(0., 0.),
                 tauri::LogicalSize::new(200., 200.),
             )
