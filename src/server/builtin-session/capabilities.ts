@@ -1,3 +1,4 @@
+import type { SlashCommand as SdkSlashCommand } from '@anthropic-ai/claude-agent-sdk';
 import type {
   EffectiveProjectCapabilitySnapshot,
   ProjectCapabilityCandidate,
@@ -91,6 +92,17 @@ export function findDisabledCapabilityForSlashInput(
   return snapshot.candidates.find(item => (
     item.kind === 'command' && !item.enabled && item.canonicalName === name
   )) ?? null;
+}
+
+export function channelContextFreeCommandName(text: string): string | undefined {
+  return /^\/(compact|context|usage|cost|stats)(?=\s|$)/.exec(text)?.[1];
+}
+
+export function isChannelContextFreeBuiltinCommand(name: string, commands: readonly SdkSlashCommand[]): boolean {
+  // A workspace command can take a builtin name or shadow a usage alias.
+  const named = commands.filter(command => command.name === name);
+  if (named.length) return named.some(command => command.builtin === true);
+  return commands.some(command => command.builtin === true && command.name === 'usage' && command.aliases?.includes(name));
 }
 
 export function filterSlashCommandsForCapabilities(

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CHANNEL_DELIVERY } from '../session-core/channel-delivery';
+import { parseLeadingSystemReminder } from '../../shared/systemReminder';
 import type { TurnTerminalOutcome } from '../session-core/turn-queue';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 
@@ -241,6 +242,7 @@ function fakeQuery(args: { prompt: AsyncIterable<unknown>; options: { sessionId?
     },
     [Symbol.asyncIterator]() { return this; },
     initializationResult: async () => ({ commands: state.sdkCommands }),
+    supportedCommands: async () => state.sdkCommands,
     interrupt: async () => { if (state.interruptCloses) close(); },
     close,
     rewindFiles: state.rewindFiles,
@@ -316,6 +318,91 @@ afterEach(async () => {
 });
 
 describe('builtin V2 execution independent of product storage', () => {
+  it('preserves native Claude commands across bound desktop and IM admissions', async () => {
+    const workspace = join(state.home, 'workspace');
+    await mkdir(workspace);
+    const sessionId = (await store.createSession(workspace, { runtime: 'builtin' })).id;
+    const channelMessaging = await import('../tools/channel-messaging');
+    const channelScope = {
+      channels: [{ channelId: 'c', platform: 'feishu', name: null, mode: 'tool_only', groupActivation: null, targetTypes: [], mediaTypes: [] }],
+      defaultTarget: { channelId: 'c', type: 'chat', id: 'chat', idType: 'chat_id' },
+      sourceType: 'private',
+    };
+    const readScope = vi.spyOn(channelMessaging, 'readChannelScope').mockResolvedValue(channelScope);
+    vi.spyOn(await import('../utils/admin-config'), 'loadConfig').mockReturnValue({ chatQueueResponseMode: 'turn' });
+    const builtinCommands = [
+      { name: 'compact', builtin: true },
+      { name: 'context', builtin: true },
+      { name: 'usage', aliases: ['cost', 'stats'], builtin: true },
+    ];
+    state.sdkCommands = builtinCommands;
+    await agent.initializeAgent(workspace, null, sessionId, { preWarmDisabled: true });
+    const engine = (await import('../session-engine/selector')).getSessionEngine();
+    const desktop = (text: string) => engine.sendDesktopMessage({
+      text, images: [], sessionId, workspacePath: workspace, scenario: { type: 'desktop' },
+    });
+    const waitIdle = () => expect(engine.waitIdle(2_000, 10)).resolves.toBe(true);
+    const { imRequestRegistry } = await import('../utils/im-request-registry');
+    const { normalizeImInbound } = await import('../session-core/channel-context');
+    const im = async (requestId: string, sourceType: 'private' | 'group', parts: string[] = []) => {
+      const request = imRequestRegistry.register(requestId, sessionId);
+      request.channelInbound = normalizeImInbound({
+        botId: 'c', requestId, receivedAt: '2026-11-14T02:00:00Z',
+        sourceMetadata: { parts: parts.map(eventId => ({
+          eventId, platformMessageId: null, senderId: 'user', senderName: null,
+          senderUsername: null, senderIsBot: false, sentAt: null,
+        })) },
+      });
+      const result = await engine.enqueueImMessage({ message: '/context', requestId, sessionId, workspacePath: workspace,
+        scenario: { type: 'agent-channel', platform: 'feishu', sourceType } });
+      return { request, result };
+    };
+    const firstResult = Promise.withResolvers<void>();
+    releaseWrite = () => firstResult.resolve();
+    state.beforeResult.mockImplementationOnce(() => firstResult.promise);
+    const compact = '/compact\t保留决策\n和后续计划';
+    await desktop(compact);
+    await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalled());
+    const privateCommand = await im('private-context', 'private');
+    expect(privateCommand.result).toMatchObject({ success: true, queued: true });
+    firstResult.resolve();
+    await waitIdle();
+    expect(privateCommand.request.channelDeliveryMode).toBe('tool_only');
+
+    for (const text of ['/usage', '/cost', '/stats']) {
+      await desktop(text);
+      await waitIdle();
+    }
+    state.sdkCommands = [...builtinCommands.filter(command => command.name !== 'context'),
+      { name: 'context' }, { name: 'stats' }];
+    const decorated = ['/context', '/stats', '/compact-extra', '/COMPACT', '解释 /compact'];
+    for (const text of decorated) {
+      await desktop(text);
+      await waitIdle();
+    }
+    state.sdkCommands = builtinCommands;
+    expect(await engine.runInjectedTurn({
+      prompt: '<system-reminder>\n<HEARTBEAT>scheduled check</HEARTBEAT>\n</system-reminder>\n/compact',
+      sessionId, workspacePath: workspace,
+      scenario: { type: 'cron', taskId: 'heartbeat', intervalMinutes: 15, aiCanExit: false },
+      assistantChannelDelivery: 'caller-owned', timeoutMs: 2_000, pollMs: 10,
+    })).toMatchObject({ success: true });
+    await im('combined-context', 'private', ['part-1', 'part-2']);
+    await waitIdle();
+    readScope.mockResolvedValue({ ...channelScope, sourceType: 'group' });
+    await im('group-context', 'group');
+    await waitIdle();
+    const sdkTexts = state.sdkInputs.map(input => (input as { message: { content: { text: string }[] } }).message.content.at(-1)?.text);
+    expect(sdkTexts.slice(0, 5)).toEqual([compact, '/context', '/usage', '/cost', '/stats']);
+    expect(sdkTexts.slice(5).map(text => parseLeadingSystemReminder(text ?? ''))).toEqual(
+      [
+        ...decorated.map(text => expect.objectContaining({ kind: 'CHANNEL_CONTEXT', visibleText: text })),
+        expect.objectContaining({ kind: 'HEARTBEAT', visibleText: '/compact', body: expect.stringContaining('<CHANNEL_CONTEXT ') }),
+        ...['combined-context', 'group-context'].map(eventId => expect.objectContaining({ kind: 'CHANNEL_CONTEXT', visibleText: '/context', body: expect.stringContaining(eventId) })),
+      ],
+    );
+  });
+
   it('persists a notification status once without a model turn, including a failed flush retry', async () => {
     const workspace = join(state.home,'workspace'); await mkdir(workspace);
     const metadata = await store.createSession(workspace,{runtime:'builtin'});

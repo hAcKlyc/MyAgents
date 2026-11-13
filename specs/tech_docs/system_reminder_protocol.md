@@ -155,7 +155,7 @@ Space 的内部 trust boundary 不改变通用 reminder wire protocol：Cloud �
 - `src/server/index.ts` memory update：纯
   `<system-reminder><MEMORY_UPDATE>...</MEMORY_UPDATE></system-reminder>`，内部维护用途；
   不要把它当成可复用用户气泡模板。
-- 当前具有精确渠道绑定的 Session：实际 admission 插入版本化 `CHANNEL_CONTEXT`；只有该段时使用“渠道消息” badge，与已有 primary 共存时仍使用原 primary kind。
+- 当前具有精确渠道绑定的 Session：实际 admission 按[渠道上下文规则](#channel-context)插入版本化 `CHANNEL_CONTEXT`；只有该段时使用“渠道消息” badge，与已有 primary 共存时仍使用原 primary kind。
 - `src/server/utils/watchdog-auto-resume.ts`：纯 reminder，没有 badge tag。
 
 ## 生成侧要求
@@ -223,6 +223,8 @@ Space 的内部 trust boundary 不改变通用 reminder wire protocol：Cloud �
 模型 facts 描述连接 scope、Bot 身份、当前发言者、容器与消息；connection 可附本轮 source/time。内部非 IM 输入 sender/message 为 null，投影后省略；内部无绑定时 mode/defaultTarget 为 null，不虚构收件人。所有 Runtime 固定提示 MyAgents CLI 命令，不注册独立发送工具。delivery 仅作为内部状态驱动短 instruction：未绑定不渲染；assistant owner 为 none 时投影 suppressed（即使配置 tool_only 也无需发送）；其余 tool_only 轮次使用显式发送指令；auto+caller_managed 由任务发起方处理投递；auto+forwarded 才说明自动推送。not_forwarded 不等于工具发送模式。必要提问仍按真实 host capability 处理。
 
 渠道提示词只属于 Rust 确认当前实际绑定的 Session：固定 system 段与逐轮 `CHANNEL_CONTEXT` 都按精确绑定准入，不能用 Agent 的渠道能力列表或入口 scenario 代替绑定。桌面打开已绑定 Session 保留渠道语义；未绑定桌面即使所属 Agent 有渠道也不注入。mode 切换不修改固定 system 前缀，实际执行轮快照与下一轮生效策略不变。
+
+内置 Claude SDK 的桌面直接输入和 IM 私聊单条纯文本可在实际 admission 省略本轮 `CHANNEL_CONTEXT`。仅当入队文本的首个完整词是 `/compact`、`/context`、`/usage`、`/cost` 或 `/stats`，且当前 SDK 命令清单确认它解析为相应原生命令时生效。入队后的命令及参数原样提交给 SDK。同名工作区命令、已有产品 envelope、群聊、合并入站、引用回复和附件仍按常规规则投影。渠道快照、绑定校验和投递策略仍在同一执行边界确定。
 
 内部 schema 保留完整状态与 null 进行校验；模型 facts 仅投影 connection/self/conversation/sender/message，递归省略未知字段、空对象及空数组。facts/context-data 的 JSON 位于 XML 元素文本内，只转义 `&`、`<`、`>`，不膨胀普通 JSON 引号；预算仍按实际 escaped UTF-8 计算。connection 存在时只补 source 和 time（本轮开始时刻与时区）两个执行信息；execution/delivery/projection 整组不进入模型。发送状态由一句自然语言 instruction 表达，参数与连接能力按需从 CLI 查询。
 

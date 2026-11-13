@@ -187,8 +187,10 @@ import {
 import { listPluginQualifiedSkillNames } from './plugins/manifest';
 import {
   buildBuiltinSkillAllowlist,
+  channelContextFreeCommandName,
   filterSlashCommandsForCapabilities,
   findDisabledCapabilityForSlashInput,
+  isChannelContextFreeBuiltinCommand,
   sanitizeSdkSkillAllowlist,
 } from './builtin-session/capabilities';
 import { initLogger, appendLog, getLogLines as getLogLinesFromLogger } from './AgentLogger';
@@ -14366,19 +14368,58 @@ async function* messageGenerator(
           const inbound = item.requestId ? imRequestRegistry.get(item.requestId)?.channelInbound : undefined;
           const context = channelContextForInput(item.channelSnapshot, item.channelDelivery, source, inbound);
           const ownedEnvelope = !!(item.desktopQuery?.primaryContext || item.desktopQuery?.agentMentions?.length) || !!item.channelPrimaryReminder || item.inputSource === 'inbox';
-          item.messageText = decorateChannelQuery(item.messageText, context, ownedEnvelope);
-          if (Array.isArray(item.message.content)) {
-            const textBlock = item.message.content.findLast(block => block.type === 'text');
-            if (textBlock?.type === 'text') textBlock.text = decorateChannelQuery(textBlock.text, context, ownedEnvelope);
-            else item.message.content.push({ type: 'text', text: decorateChannelQuery('', context, false) });
+          const content = item.message.content;
+          const textBlock = Array.isArray(content) ? content.findLast(block => block.type === 'text') : undefined;
+          // An IM group or combined media message is not a direct session command.
+          const directInput = source === 'desktop' || (source === 'im'
+            && item.channelSnapshot.scope.sourceType === 'private'
+            && (inbound?.data?.parts.length ?? 0) <= 1 && !inbound?.data?.reply
+            && !inbound?.data?.attachments.length);
+          const commandName = directInput && !ownedEnvelope && Array.isArray(content) && content.length === 1
+            && !item.attachments?.length && textBlock?.type === 'text'
+            && textBlock.text === item.messageText
+            ? channelContextFreeCommandName(textBlock.text)
+            : undefined;
+          let preserveCommand = false;
+          if (promotedQuery && commandName) {
+            // This reads the SDK's initialized catalog and latest commands_changed push.
+            const commands = await Promise.race([
+              promotedQuery.supportedCommands().catch(() => []),
+              ...(promotionCancellation ? [promotionCancellation.then(() => [])] : []),
+            ]);
+            if (isPromotedItemCanceled(item.id) || lifecycleState.abortRequested) {
+              await rejectPromotedMessageBeforeDispatch(item, {
+                accepted: false,
+                code: 'dispatch_canceled',
+                error: 'Queue item was cancelled before Claude command dispatch',
+                rollbackBeforeReject: Promise.resolve(item.beforeDispatch?.cancel?.()),
+              });
+              continue;
+            }
+            if (lifecycleState.query !== promotedQuery) {
+              item.channelSnapshot = undefined;
+              requeuePromotedItemBeforeSdkDispatch(item);
+              traceBuiltinInputProgress('input-retired', inputTrace);
+              return;
+            }
+            preserveCommand = isChannelContextFreeBuiltinCommand(commandName, commands);
+          }
+          if (!preserveCommand) {
+            item.messageText = decorateChannelQuery(item.messageText, context, ownedEnvelope);
+            if (Array.isArray(content)) {
+              if (textBlock?.type === 'text') textBlock.text = decorateChannelQuery(textBlock.text, context, ownedEnvelope);
+              else content.push({ type: 'text', text: decorateChannelQuery('', context, false) });
+            }
           }
           const inFlight = getInFlightMetadata();
           if (getInFlightQueueId() === item.id && inFlight) {
             inFlight.messageText = item.messageText;
             inFlight.channelDelivery = item.channelDelivery;
           }
-          if (item.deferredUserSurface) item.deferredUserSurface.message.content = item.messageText;
-          if (item.surfacedUserMessageId) confirmBuiltinUserContent(item.surfacedUserMessageId, item.messageText);
+          if (!preserveCommand) {
+            if (item.deferredUserSurface) item.deferredUserSurface.message.content = item.messageText;
+            if (item.surfacedUserMessageId) confirmBuiltinUserContent(item.surfacedUserMessageId, item.messageText);
+          }
         }
       }
     } catch (error) {
