@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const agentSessionMocks = vi.hoisted(() => ({
@@ -3779,6 +3780,123 @@ describe('admin-api MCP connectivity test', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("unsupported transport type 'websocket'");
+  });
+});
+
+describe('Claude plugin defaults', () => {
+  it('explains global availability and how to select plugins for future Sessions', async () => {
+    const { handleHelp } = await import('./admin-api');
+    const pluginHelp = handleHelp({ path: ['cc-plugin', 'install'] }).data as { text: string };
+    const agentHelp = handleHelp({ path: ['agent', 'set'] }).data as { text: string };
+    expect(pluginHelp.text).toContain('myagents agent set AGENT_ID enabledPluginIds');
+    expect(pluginHelp.text).toContain('globally available');
+    expect(agentHelp.text).toContain('enabledPluginIds replaces');
+  });
+
+  it.each([
+    [undefined, ['project-plugin@local']],
+    [[], []],
+  ])('shows the linked Project selection only when the Agent selection is absent (%j)', async (agentPluginIds, expected) => {
+    const { handleAgentShow } = await import('./admin-api');
+    const workspace = join(scratch, 'workspace');
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      agents: [{ id: 'target', name: 'Target', enabled: true, enabledPluginIds: agentPluginIds }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{
+      id: 'target-project', path: workspace, agentId: 'target', enabledPluginIds: ['project-plugin@local'],
+    }]);
+    expect(await handleAgentShow({ id: 'target' })).toMatchObject({
+      data: { effectiveDefaults: { enabledPluginIds: expected } },
+    });
+  });
+
+  it('rejects a selection for an Agent claimed by two workspaces', async () => {
+    const { handleAgentSet } = await import('./admin-api');
+    const configPath = join(scratch, '.myagents', 'config.json');
+    const projectsPath = join(scratch, '.myagents', 'projects.json');
+    const config = {
+      agents: [{ id: 'target', name: 'Target', enabled: true }],
+      plugins: [{ id: 'my-plugin@local' }],
+      enabledPlugins: { 'my-plugin@local': true },
+    };
+    const projects = ['workspace-one', 'workspace-two'].map(name => ({
+      id: name, path: join(scratch, name), agentId: 'target',
+    }));
+    writeJson(configPath, config);
+    writeJson(projectsPath, projects);
+    expect(await handleAgentSet({ id: 'target', key: 'enabledPluginIds', value: ['my-plugin@local'] }))
+      .toMatchObject({ success: false, code: 'AGENT_ASSIGNED_TO_MULTIPLE_PROJECTS' });
+    expect(readConfig()).toEqual(config);
+    expect(readJson(projectsPath)).toEqual(projects);
+  });
+
+  it('selects an already installed plugin for the exact Agent and its future Sessions', async () => {
+    // The plugin Store requires a canonical install path, including on macOS
+    // where the temporary home returned by mkdtemp can be under /var.
+    process.env.HOME = process.env.USERPROFILE = realpathSync(scratch);
+    const { handleAgentSet, handleAgentShow, handleCcPluginList } = await import('./admin-api');
+    const { installPlugin, getDefaultEnabledPluginIdsForWorkspace, getEnabledPluginSdkConfigs, togglePlugin } = await import('./plugins/store');
+    const workspace = join(scratch, 'workspace');
+    const otherWorkspace = join(scratch, 'other-workspace');
+    const projectsPath = join(scratch, '.myagents', 'projects.json');
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      agents: [
+        { id: 'target', name: 'Target', enabled: true },
+        { id: 'other', name: 'Other', enabled: true },
+      ],
+    });
+    const targetProject = { id: 'target-project', path: workspace, agentId: 'target', isAgent: true };
+    const otherProject = { id: 'other-project', path: otherWorkspace, agentId: 'other', isAgent: true };
+    writeJson(projectsPath, [targetProject, otherProject]);
+    // A different Agent is active when the command targets this workspace.
+    agentSessionMocks.agentDir = otherWorkspace;
+
+    const source = join(scratch, 'local-plugin');
+    mkdirSync(join(source, '.claude-plugin'), { recursive: true });
+    writeJson(join(source, '.claude-plugin', 'plugin.json'), { name: 'local-plugin' });
+    const { entry } = await installPlugin(pathToFileURL(source).href);
+    expect(await handleCcPluginList()).toMatchObject({
+      data: [{ id: entry.id, enabled: true }],
+    });
+    const previousSessionSelection = getDefaultEnabledPluginIdsForWorkspace(workspace);
+    expect(previousSessionSelection).toEqual([]);
+    expect(getEnabledPluginSdkConfigs(previousSessionSelection)).toEqual([]);
+
+    const select = (value: unknown) => handleAgentSet({ id: 'target', key: 'enabledPluginIds', value });
+    expect(await select([entry.id, entry.id])).toMatchObject({ success: true });
+    expect(await handleAgentShow({ id: 'target' })).toMatchObject({
+      data: { effectiveDefaults: { enabledPluginIds: [entry.id] } },
+    });
+    expect(readJson(projectsPath)).toEqual([
+      { ...targetProject, enabledPluginIds: [entry.id] },
+      otherProject,
+    ]);
+    const selection = getDefaultEnabledPluginIdsForWorkspace(workspace);
+    expect(getEnabledPluginSdkConfigs(selection)).toEqual([{ type: 'local', path: entry.installPath }]);
+    expect(getEnabledPluginSdkConfigs(previousSessionSelection)).toEqual([]);
+    expect(getDefaultEnabledPluginIdsForWorkspace(otherWorkspace)).toEqual([]);
+    expect(managementApiMocks.managementApi.mock.calls.map(([path]) => path)).not.toContain('/api/agent/reload-config');
+
+    const before = readConfig();
+    expect(await select([entry.id, 'unknown@local'])).toMatchObject({ success: false });
+    expect(await select([entry.id, false])).toMatchObject({ success: false });
+    expect(readConfig()).toEqual(before);
+
+    await togglePlugin(entry.id, false);
+    expect(await select([entry.id])).toMatchObject({ success: true });
+    expect(getDefaultEnabledPluginIdsForWorkspace(workspace)).toEqual([entry.id]);
+    expect(getEnabledPluginSdkConfigs(selection)).toEqual([]);
+
+    adminConfigBehavior.failProjectWrite = true;
+    expect(await select([])).toMatchObject({ success: false, error: expect.stringContaining('Project mirror') });
+    expect(getDefaultEnabledPluginIdsForWorkspace(workspace)).toEqual([entry.id]);
+    adminConfigBehavior.failProjectWrite = false;
+    expect(await select([])).toMatchObject({ success: true });
+    expect(readConfig()).toMatchObject({
+      agents: [{ enabledPluginIds: [] }, { id: 'other' }],
+      enabledPlugins: { [entry.id]: false },
+    });
+    expect(getDefaultEnabledPluginIdsForWorkspace(workspace)).toEqual([]);
   });
 });
 

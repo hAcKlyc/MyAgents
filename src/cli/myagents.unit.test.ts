@@ -54,6 +54,31 @@ afterEach(() => {
 });
 
 
+describe('Claude plugin CLI', () => {
+  it('prints the exact plugin ID and separates global availability from install status', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const id = 'a-long-plugin-name-for-copying@local';
+    try {
+      printResult('cc-plugin', 'list', { success: true, data: [{ id, enabled: true, status: 'missing' }] }, false);
+      expect(log.mock.calls[0][0]).toMatch(/ID\s+GLOBAL\s+INSTALL/);
+      expect(log.mock.calls[1][0]).toContain(id);
+      expect(log.mock.calls[1][0]).toMatch(/enabled\s+missing/);
+      expect(log.mock.calls.flat().join('\n')).toContain('myagents agent show <agentId>');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('passes the complete JSON selection through the existing Agent set command', () => {
+    const command = ['agent', 'set', 'target', 'enabledPluginIds', '["my-plugin@local"]'];
+    expect(validateCliCommand(command)).toBeUndefined();
+    expect(validateInternalCliInvocation(command, {})).toBeUndefined();
+    expect(buildRequestBody('agent', 'set', command.slice(2), {})).toEqual({
+      id: 'target', key: 'enabledPluginIds', value: ['my-plugin@local'],
+    });
+  });
+});
+
 describe('Session observation CLI', () => {
   it('prints the wrapped observation receipt in JSON and human output', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);

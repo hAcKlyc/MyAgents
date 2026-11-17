@@ -27,6 +27,14 @@ Builtin Runtime 不解析 Plugin 内部组件，也不复制 SDK 的 manifest、
 - Chat 内修改通过 `/api/cc-plugin/session-enable` 进入 `SessionEngine.updateEnabledPluginIds()`，成为当前 Product Session 的配置；
 - Plugin Store 与 Session enabled-id snapshot 是 authority，SDK initialization result 只是某次 Runtime generation 的诊断快照。
 
+内置 CLI 的 `cc-plugin install` 安装插件并打开其全局开关，`cc-plugin enable/disable` 管理全局可用性。用 `cc-plugin list` 查看完整插件 ID，用 `agent show <agentId>` 查看 Agent 当前选择。以下命令替换该 Agent 的完整插件名单，`'[]'` 清空名单。
+
+```sh
+myagents agent set <agentId> enabledPluginIds '["my-plugin@local"]'
+```
+
+这条命令通过 Agent 配置写入路径保存未来 Session 的默认选择并同步关联的 Project。已有配置快照的 Session 继续使用快照中的选择。全局关闭的插件仍可保留在默认名单里。
+
 所有 AppConfig 修改必须经过 `withConfigLock`。写入路径在锁内重读并合并磁盘状态，不能用 Renderer 的旧副本覆盖其它 writer。
 
 ## 模块布局
