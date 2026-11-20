@@ -535,9 +535,12 @@ describe('Codex app-server protocol helpers', () => {
     });
   });
 
-  it('keeps the known Codex server request allowlist in sync with app-server schema', () => {
+  it('accepts the pinned server requests and the legacy clock request', () => {
     expect(managedCodexProtocol.version).toBe(managedCodexRuntimeLock.version);
-    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual(managedCodexProtocol.serverRequestMethods);
+    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual([
+      ...managedCodexProtocol.serverRequestMethods,
+      'currentTime/read',
+    ]);
   });
 
   it.each([false, true])('negotiates only supported capabilities without opting into human checkpoints (experimental=%s)', experimental => {

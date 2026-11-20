@@ -910,9 +910,10 @@ export const KNOWN_CODEX_SERVER_REQUEST_METHODS = Object.freeze([
   'item/tool/call',
   'account/chatgptAuthTokens/refresh',
   'attestation/generate',
-  'currentTime/read',
   'applyPatchApproval',
   'execCommandApproval',
+  // Older installed and system CLIs still request the host clock.
+  'currentTime/read',
 ] as const);
 
 type KnownCodexServerRequestMethod = (typeof KNOWN_CODEX_SERVER_REQUEST_METHODS)[number];

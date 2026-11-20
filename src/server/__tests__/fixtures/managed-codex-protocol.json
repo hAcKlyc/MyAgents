@@ -1,5 +1,5 @@
 {
-  "version": "0.167.0",
+  "version": "0.171.0",
   "source": "Extracted from the pinned darwin-arm64 npm binary: codex app-server generate-json-schema --experimental --out <dir>",
   "serverRequestMethods": [
     "item/commandExecution/requestApproval",
@@ -10,7 +10,6 @@
     "item/tool/call",
     "account/chatgptAuthTokens/refresh",
     "attestation/generate",
-    "currentTime/read",
     "applyPatchApproval",
     "execCommandApproval"
   ],
