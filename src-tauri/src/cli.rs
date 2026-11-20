@@ -788,7 +788,7 @@ fn is_executable_regular_file(path: &Path, _platform: CliPlatform) -> bool {
 
 /// Read the Global Sidecar port from the product data directory.
 fn discover_sidecar_port() -> Option<String> {
-    let port_file = crate::app_dirs::myagents_data_dir()?.join("sidecar.port");
+    let port_file = crate::app_dirs::global_sidecar_port_file()?;
     let port = fs::read_to_string(port_file).ok()?.trim().to_string();
     let parsed = port.parse::<u16>().ok()?;
     (parsed != 0).then_some(port)

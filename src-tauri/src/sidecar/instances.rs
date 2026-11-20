@@ -78,10 +78,16 @@ fn retire_instance_handoff(
     replacement: DispatchReplacement,
 ) {
     replacement.wait_for_requests();
-    let mut retiring_process = manager
+    let (mut retiring_process, port_file) = manager
         .lock()
         .ok()
-        .and_then(|mut guard| guard.take_instance_process_for_replacement(tab_id, &replacement));
+        .map(|mut guard| {
+            (
+                guard.take_instance_process_for_replacement(tab_id, &replacement),
+                guard.global_port_file.clone(),
+            )
+        })
+        .unwrap_or_default();
     if let Some(process) = retiring_process.as_mut() {
         if let Err(error) = process.kill_and_wait() {
             ulog_warn!(
@@ -96,7 +102,7 @@ fn retire_instance_handoff(
     // projection is removed, so a newer Global cannot publish and then be
     // erased by this retirement.
     if tab_id == GLOBAL_SIDECAR_ID {
-        remove_global_port_file();
+        remove_global_port_file(port_file.as_deref());
     }
     let retired = manager
         .lock()
@@ -179,7 +185,7 @@ fn start_tab_sidecar_admitted<R: Runtime>(
     // old entry therefore remains the sole manager authority while request
     // drain and process creation happen outside the manager mutex. Explicit
     // stop closes/waits the same gate and cannot expose a singleton gap.
-    let (mut replacement, clear_global_port_projection) = {
+    let (mut replacement, global_port_file) = {
         let mut guard = manager.lock().map_err(|error| error.to_string())?;
         if is_global && !guard.global_sidecar_is_desired() {
             return Err(
@@ -211,20 +217,20 @@ fn start_tab_sidecar_admitted<R: Runtime>(
             let replacement = guard
                 .prepare_instance_replacement(tab_id)
                 .ok_or_else(|| "Sidecar replacement is already in progress".to_string())?;
-            (Some(replacement), is_global)
+            (Some(replacement), guard.global_port_file.clone())
         } else {
             if expected_replacement.is_some() {
                 return Err("Global Sidecar restart target disappeared".to_string());
             }
-            (None, false)
+            (None, None)
         }
     };
 
     if let Some(replacement) = &replacement {
         replacement.wait_for_requests();
     }
-    if clear_global_port_projection {
-        remove_global_port_file();
+    if is_global {
+        remove_global_port_file(global_port_file.as_deref());
     }
 
     ulog_info!(
@@ -847,7 +853,7 @@ fn publish_global_port_if_current(
     manager: &ManagedSidecarManager,
     identity: GlobalCandidateIdentity,
 ) -> Result<(), String> {
-    let lease = {
+    let (lease, port_file) = {
         let mut guard = manager.lock().map_err(|error| error.to_string())?;
         if !guard.global_sidecar_is_desired() {
             return Err("Global Sidecar stopped before publishing its CLI port".to_string());
@@ -863,10 +869,13 @@ fn publish_global_port_if_current(
                 "Global Sidecar candidate is not current and healthy for CLI publish".to_string(),
             );
         }
-        DispatchGate::try_acquire(&instance.dispatch_gate)
-            .ok_or_else(|| "Global Sidecar generation is draining before CLI publish".to_string())?
+        let lease = DispatchGate::try_acquire(&instance.dispatch_gate)
+            .ok_or_else(|| "Global Sidecar generation is draining before CLI publish".to_string())?;
+        (lease, guard.global_port_file.clone())
     };
-    write_global_port_file(identity.port);
+    if let Some(path) = port_file {
+        write_global_port_file(&path, identity.port);
+    }
     drop(lease);
     Ok(())
 }
@@ -1448,6 +1457,61 @@ pub async fn monitor_global_sidecar(
             &mut consecutive_restart_failures,
             &mut consecutive_health_failures,
         );
+    }
+}
+
+#[cfg(test)]
+mod global_port_file_tests {
+    use super::*;
+    use crate::sidecar::types::lifecycle_contract_tests::test_global_instance;
+
+    #[test]
+    fn dropping_temporary_manager_preserves_global_port_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sidecar.port");
+        std::fs::write(&path, "31415").unwrap();
+
+        let manager = create_sidecar_state(Some(path.clone()));
+        drop(manager);
+
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "31415");
+    }
+
+    #[test]
+    fn stopping_global_removes_published_port_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sidecar.port");
+        let manager = create_sidecar_state(Some(path.clone()));
+        let port = 31419;
+        for (generation, stop_all) in [(1, false), (2, true)] {
+            {
+                let mut guard = manager.lock().unwrap();
+                guard.request_global_sidecar_running("test-start");
+                guard.insert_instance(
+                    GLOBAL_SIDECAR_ID.to_owned(),
+                    test_global_instance(port, generation, true),
+                );
+            }
+            publish_global_port_if_current(&manager, GlobalCandidateIdentity { port, generation })
+                .unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), port.to_string());
+
+            if stop_all {
+                // A failed Global still owns its published file. Skip its HTTP checkpoint.
+                assert!(manager.lock().unwrap().mark_instance_unhealthy_if_current(
+                    GLOBAL_SIDECAR_ID,
+                    port,
+                    generation,
+                ));
+                stop_all_sidecars(&manager, "test-shutdown").unwrap();
+            } else {
+                stop_tab_sidecar(&manager, GLOBAL_SIDECAR_ID).unwrap();
+            }
+            assert_eq!(
+                std::fs::metadata(&path).unwrap_err().kind(),
+                std::io::ErrorKind::NotFound
+            );
+        }
     }
 }
 

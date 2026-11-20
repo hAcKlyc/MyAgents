@@ -113,6 +113,11 @@ pub fn myagents_data_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".myagents"))
 }
 
+/// Discovery address shared by the desktop Global Sidecar and terminal CLI.
+pub(crate) fn global_sidecar_port_file() -> Option<PathBuf> {
+    myagents_data_dir().map(|dir| dir.join("sidecar.port"))
+}
+
 /// Path to the PID lock file.
 fn lock_file_path() -> Option<PathBuf> {
     myagents_data_dir().map(|d| d.join("app.lock"))

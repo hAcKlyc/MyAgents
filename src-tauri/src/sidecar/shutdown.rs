@@ -177,10 +177,14 @@ pub fn stop_all_sidecars(manager: &ManagedSidecarManager, reason: &str) -> Resul
 
     // Only after the callback has settled do we revoke generation authority
     // and drop the retained process trees (the Windows hard-containment path).
-    let retirement = manager
-        .lock()
-        .map_err(|error| error.to_string())?
-        .stop_all();
+    let (retirement, port_file) = {
+        let mut guard = manager.lock().map_err(|error| error.to_string())?;
+        let retirement = guard.stop_all();
+        (retirement, guard.global_port_file.clone())
+    };
+    if retirement.globals.iter().any(|instance| instance.is_global) {
+        remove_global_port_file(port_file.as_deref());
+    }
     retirement.finish();
 
     ulog_info!(
@@ -713,7 +717,7 @@ mod tests {
             "test setup must start an external process"
         );
 
-        let manager = create_sidecar_state();
+        let manager = create_sidecar_state(None);
         stop_all_sidecars(&manager, "test-normal-shutdown").expect("normal shutdown");
 
         assert!(

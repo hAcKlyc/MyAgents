@@ -303,7 +303,7 @@ pub fn run() {
     // The single-instance plugin exits the second process before .setup() is called.
 
     // Create managed sidecar state (now supports multiple instances)
-    let sidecar_state = create_sidecar_state();
+    let sidecar_state = create_sidecar_state(app_dirs::global_sidecar_port_file());
     let agent_network_state = agent_network::registry::NetworkRegistry::new();
 
     // Create IM Bot managed state
