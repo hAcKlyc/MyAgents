@@ -83,7 +83,7 @@ createSdkMcpServer({
 2. 懒加载 instance；
 3. 以当前 env / Session context configure；
 4. 与 external MCP 和 context-injected MCP 合并；
-5. 交给 Query birth，或通过受控 `setMcpServers()` live mutation。
+5. Query 启动时通过 `mcpServersDelivery: 'initialize'` 从标准输入发送外部服务配置，使凭据和长配置避开原生进程命令行。进程内服务仍由 SDK 持有，运行中更新继续走受控的 `setMcpServers()`。
 
 Live mutation 由单一 mutation owner 串行化，有 timeout、fingerprint 和 replacement fallback。不能在 Settings handler 直接修改 active Query 的 MCP map。
 

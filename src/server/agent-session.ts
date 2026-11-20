@@ -11493,6 +11493,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         askUserQuestion: { previewFormat: 'html' as const },
       },
       mcpServers: sdkMcpServersInitial,
+      // Keep server credentials and large configurations off the native command line.
+      mcpServersDelivery: 'initialize' as const,
       // Product visibility boundary. Permission policy remains separately
       // owned by allowedTools/disallowedTools/canUseTool/Hooks below.
       tools: [...SDK_BUILTIN_TOOLS],

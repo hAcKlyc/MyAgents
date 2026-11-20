@@ -1526,7 +1526,8 @@ describe('live Claude reasoning effort', () => {
     agent.setMcpServers(ids.map(id => ({ id, name: id, type: 'http' as const, url: 'http://127.0.0.1:1/mcp', enabled: true, isBuiltin: false })));
     await send('MCP config check');
     await vi.waitFor(() => expect(state.sdkInputs).toHaveLength(1));
-    const servers = state.query.mock.calls[0][0].options.mcpServers;
+    const { mcpServers: servers, mcpServersDelivery } = state.query.mock.calls[0][0].options;
+    expect(mcpServersDelivery).toBe('initialize');
     expect(Object.keys(servers)).toContain('ordinary');
     for (const id of ids.slice(0, -1)) expect(Object.hasOwn(servers, id.replace(/[^a-zA-Z0-9_-]/g, '_'))).toBe(false);
   });
