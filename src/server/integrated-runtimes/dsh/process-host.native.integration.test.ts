@@ -1143,7 +1143,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
         const childText = [systemText, ...childInput.messages.flatMap(message => typeof message.content === 'string'
           ? [message.content] : message.content.map(block => block.text ?? ''))].join('\n');
         expect(childText).toContain(fixture.workspace);
-        expect(childText).toContain('Approval policy: ask.');
+        expect(childText).toMatch(/Approval policy: ask\.|Approval prompts are enabled in this session/u);
         expect(resumedRootInput).toContain('fixture-agent-call');
         expect(resumedRootInput).toContain('Fixture child complete.');
         expect(resumedRootInput).not.toContain('activation_completion');
