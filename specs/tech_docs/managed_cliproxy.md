@@ -118,6 +118,8 @@ Rust 构建与运行时共用 `src-tauri/src/cliproxy_policy.rs` 的门槛选择
 
 实际执行目录为 `<data>/runtimes/cliproxy/<version>/<platform>/<artifact-digest>/`。随包资源先校验并安装到该目录；相同摘要的已有文件直接复用。配置与 key 位于 `<data>/providers/cliproxy/antigravity-sub/run/<instance-generation>/`，凭据保存在独立 `accounts/<opaque-id>/auth`。
 
+原版还可以在 `auth-dir` 内创建 `kv.db`（本地 bbolt KV 缓存），它不是 OAuth 账号 JSON。该文件随原版管理、随账号目录清理，不能把它当成已登录证明，也不能在仍有 writer 时单独删除。无账号的原生合同测试允许此文件，同时检查权限与测试秘密/拒绝请求正文未落盘。
+
 启动先准备本地可信选择，再启动在线检查；之后每 15 分钟检查一次。正常只升级更高组件版本，或采纳同一产物更高 compatibility revision，不因新的 App 安装包带了旧组件就强制降级。更新先下载与校验，等待消费者 drain 后启动新进程，健康后提交 current。失败按既有规则回退；账号文件不兼容或已撤销的旧组件不能作为回退。GC 只处理组件目录，并保留 current/previous/pending 引用的文件。
 
 签名信任根复用 `resource_signature_core.rs` 和 Tauri updater 公钥。网络失败保留本机可信组件；404 记为 `update_unpublished`，传输失败记为 `update_network`。已失败 artifact/App/SDK/revision 的自动安装或启动不会无限重复；这些字段标识失败尝试的环境，不是精确版本准入。正常进程崩溃恢复另有次数上限，不重放任务。
