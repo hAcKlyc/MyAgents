@@ -28,8 +28,7 @@ test('SDK wrapper verification rejects a stale installed package after a version
 
 test('SDK sends long MCP configuration and credentials to the child on stdin', { timeout: 15_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), 'myagents-mcp-delivery-'));
-  // Windows can hold the child's working directory briefly after session.close().
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const cli = join(root, 'capture.cjs');
   // Observe the actual arguments and initialize frame in a child process.
   // This exercises OS spawning on Windows without contacting a model or MCP.
@@ -39,7 +38,7 @@ test('SDK sends long MCP configuration and credentials to the child on stdin', {
     lines.on('line', line => {
       const { request, request_id } = JSON.parse(line);
       if (request?.subtype !== 'initialize') return;
-      writeFileSync('capture.json', JSON.stringify({ args: process.argv, servers: request.mcpServers }));
+      writeFileSync(require('node:path').join(__dirname, 'capture.json'), JSON.stringify({ args: process.argv, servers: request.mcpServers }));
       console.log(JSON.stringify({ type: 'control_response', response: {
         subtype: 'success', request_id, response: { mcp_servers_applied: true }
       } }));
@@ -60,7 +59,8 @@ test('SDK sends long MCP configuration and credentials to the child on stdin', {
   const session = query({
     prompt: 'fixture',
     options: {
-      cwd: root,
+      // Windows holds a process's cwd open; keep it outside the disposable fixture.
+      cwd: tmpdir(),
       pathToClaudeCodeExecutable: process.execPath,
       executableArgs: [cli],
       settingSources: [],
@@ -75,6 +75,6 @@ test('SDK sends long MCP configuration and credentials to the child on stdin', {
     assert.deepEqual(servers, mcpServers);
     assert.doesNotMatch(args.join(' '), /--mcp-config|fixture-stdio-token|fixture-http-token|mcp-padding-/);
   } finally {
-    session.close();
+    await session.return();
   }
 });
