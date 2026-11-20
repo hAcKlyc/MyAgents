@@ -1006,6 +1006,7 @@
       "noProviders": "还没有可用的供应商 —— 请先到「设置 → 模型供应商」添加 API Key 或完成订阅登录。",
       "openProviderSettings": "打开模型供应商设置 →",
       "runtimeChanged": "已切换为 {{label}}，新开 Tab 后生效",
+      "antigravityNotice": "会话使用本机 agy 的登录账号。可在 MyAgents 选择模型、权限模式和会话 MCP。",
       "externalRuntimeNotice": "当前 Agent 工作区的运行环境已设置为 {{runtime}}。无论你在 MyAgents 客户端或通过绑定的聊天机器人与 AI 对话，均将直接调用本机已安装的 {{runtime}} 来执行，效果等同于在终端中使用。因此供应商配置、支持的模型、MCP 工具、权限规则等均由 {{runtime}} 自身管理，如需调整请在其设置中修改。",
       "proxyMyAgents": "MyAgents 代理",
       "proxyMyAgentsHint": "使用 MyAgents 设置里的代理（默认）",

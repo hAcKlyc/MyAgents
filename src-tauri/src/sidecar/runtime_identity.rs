@@ -166,7 +166,7 @@ fn runtime_identity_from_binding(binding: &serde_json::Value) -> Result<RuntimeI
                 .ok_or("runtimeBinding.implementationVersion is missing")?;
             RuntimeIdentity::new(Some("codex"), Some("managed-provider"))
         }
-        ("external", runtime @ ("claude-code" | "codex")) => {
+        ("external", runtime @ ("claude-code" | "codex" | "antigravity")) => {
             RuntimeIdentity::new(Some(runtime), Some("system-cli"))
         }
         _ => return Err(format!("unsupported runtimeBinding {family}/{id}")),
@@ -183,7 +183,7 @@ fn runtime_identity_from_preference(
     match (family, id) {
         ("integrated", "claude-agent-sdk") => Ok(RuntimeIdentity::new(Some("builtin"), None)),
         ("integrated", "dsh") => Ok(RuntimeIdentity::new(Some("dsh"), Some("integrated"))),
-        ("external", runtime @ ("claude-code" | "codex")) => {
+        ("external", runtime @ ("claude-code" | "codex" | "antigravity")) => {
             Ok(RuntimeIdentity::new(Some(runtime), Some("system-cli")))
         }
         _ => Err(format!("unsupported runtimePreference {family}/{id}")),
@@ -214,7 +214,7 @@ fn runtime_identity_from_legacy_agent(
             // not an explicit user-managed Codex preference.
             Ok(RuntimeIdentity::new(Some("builtin"), None))
         }
-        runtime @ ("claude-code" | "codex") => {
+        runtime @ ("claude-code" | "codex" | "antigravity") => {
             Ok(RuntimeIdentity::new(Some(runtime), Some("system-cli")))
         }
         "dsh" if runtime_source.is_none() || runtime_source == Some("integrated") => {
@@ -339,7 +339,7 @@ fn resolve_agent_runtime_identity_by_id_with_policy(
     if let Some(preference) = preference.as_ref().filter(|identity| {
         matches!(
             identity.runtime.as_str(),
-            "claude-code" | "codex"
+            "claude-code" | "codex" | "antigravity"
         )
     }) {
         return Some(admit_runtime_identity_for(preference.clone(), policy));
@@ -531,7 +531,7 @@ fn runtime_identity_from_legacy_session(
             Some("codex"),
             Some("managed-provider"),
         )),
-        (runtime @ ("claude-code" | "codex"), None | Some("system-cli")) => {
+        (runtime @ ("claude-code" | "codex" | "antigravity"), None | Some("system-cli")) => {
             Ok(RuntimeIdentity::new(Some(runtime), Some("system-cli")))
         }
         ("dsh", None | Some("integrated")) => {
@@ -540,7 +540,7 @@ fn runtime_identity_from_legacy_session(
         ("builtin", Some(source)) => Err(format!(
             "legacy builtin Session cannot use runtimeSource {source}"
         )),
-        (runtime @ ("claude-code" | "codex"), Some(source)) => Err(format!(
+        (runtime @ ("claude-code" | "codex" | "antigravity"), Some(source)) => Err(format!(
             "legacy {runtime} Session cannot use runtimeSource {source}"
         )),
         ("dsh", Some(source)) => Err(format!(

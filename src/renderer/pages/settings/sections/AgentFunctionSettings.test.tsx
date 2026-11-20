@@ -10,6 +10,7 @@ describe('Agent function settings', () => {
   beforeEach(() => {
     vi.mocked(invoke).mockResolvedValue({
       builtin: { installed: true }, dsh: { installed: true },
+      antigravity: { installed: true },
       'claude-code': { installed: true }, codex: { installed: true },
     });
   });

@@ -182,6 +182,7 @@ describe('proxy scope remains user configuration', () => {
       if (command === 'cmd_cliproxy_status') return healthyStatus;
       if (command === 'cmd_detect_runtimes') return {
         builtin: { installed: true }, dsh: { installed: true },
+        antigravity: { installed: false },
         'claude-code': { installed: false }, codex: { installed: false },
       };
       return undefined;

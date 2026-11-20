@@ -446,6 +446,8 @@
   "runtime": {
     "header": "运行环境",
     "settings": "设置",
+    "installAgy": "请安装 agy",
+    "upgradeAgy": "请升级 agy",
     "notInstalled": "未安装",
     "comingSoon": "即将支持",
     "integrated": "内置 Agent 运行环境",

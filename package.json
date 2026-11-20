@@ -107,6 +107,7 @@
     "test:native:quit": "node scripts/verify-native-quit.mjs"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "2.8.0",
     "@aiden0z/pptx-renderer": "^1.0.2",
     "@anthropic-ai/claude-agent-sdk": "0.3.329",
     "@codemirror/autocomplete": "^6.20.3",

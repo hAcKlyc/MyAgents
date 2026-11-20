@@ -1,10 +1,10 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { resolveDshWorkspaceSupplement } from './workspace-instructions';
+import { resolveAntigravityWorkspaceInstructions, resolveDshWorkspaceSupplement } from './workspace-instructions';
 
 const roots: string[] = [];
 
@@ -32,4 +32,16 @@ describe('resolveDshWorkspaceSupplement', () => {
     expect(result.indexOf('.claude/rules/a.md')).toBeLessThan(result.indexOf('.claude/rules/z.md'));
     expect(result).not.toContain(root);
   });
+});
+
+it('does not inject linked Claude companion directories into Antigravity', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'agy-project-'));
+  const outside = await mkdtemp(join(tmpdir(), 'agy-outside-'));
+  roots.push(root, outside);
+  await writeFile(join(root, 'CLAUDE.md'), 'local guidance');
+  await writeFile(join(outside, 'CLAUDE.md'), 'external guidance');
+  await symlink(outside, join(root, '.claude'), 'junction');
+  const supplement = resolveAntigravityWorkspaceInstructions(root);
+  expect(supplement).toContain('local guidance');
+  expect(supplement).not.toContain('external guidance');
 });

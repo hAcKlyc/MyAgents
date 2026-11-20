@@ -164,6 +164,7 @@ describe('Ubuntu settings availability', () => {
         providerIds: ['codex-sub', 'vision-provider', 'antigravity-sub'] } } };
     settingsMocks.invoke.mockImplementation(async (command) => command === 'cmd_detect_runtimes' ? {
       builtin: { installed: true }, dsh: { installed: true },
+      antigravity: { installed: false },
       'claude-code': { installed: false }, codex: { installed: false },
     } : undefined);
     settingsMocks.apiPostJson.mockResolvedValue({ success: true, data: { models: [] } });

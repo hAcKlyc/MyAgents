@@ -4,6 +4,7 @@ export type McpEffectiveServerState =
   | 'disabled'
   | 'queued'
   | 'starting'
+  | 'unreported'
   | 'ready'
   | 'stopped'
   | 'needs_auth'

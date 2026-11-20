@@ -105,7 +105,7 @@ function areMessagesEqual(prev: MessageProps, next: MessageProps): boolean {
   // across the shared busy/idle operation gate.
   if (Boolean(prev.onRewind) !== Boolean(next.onRewind)) return false;
   if (Boolean(prev.onFork) !== Boolean(next.onFork)) return false;
-  // onRetry is always present and stable, so its identity remains intentionally ignored.
+  if (Boolean(prev.onRetry) !== Boolean(next.onRetry)) return false;
 
   // Message updates are immutable. Comparing the complete row identity covers
   // attachments and other visible metadata while unchanged history stays cheap.

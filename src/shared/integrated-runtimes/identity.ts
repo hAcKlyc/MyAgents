@@ -9,7 +9,7 @@ export const CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION = packageJson.dependencies[
 export const INTEGRATED_RUNTIME_IDS = ["claude-agent-sdk", "dsh"] as const;
 export type IntegratedRuntimeId = (typeof INTEGRATED_RUNTIME_IDS)[number];
 
-export const EXTERNAL_RUNTIME_IDS = ["claude-code", "codex"] as const;
+export const EXTERNAL_RUNTIME_IDS = ["claude-code", "codex", "antigravity"] as const;
 export type ExternalRuntimeId = (typeof EXTERNAL_RUNTIME_IDS)[number];
 
 export type AgentRuntimePreference =

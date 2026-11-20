@@ -222,6 +222,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // without the three-site scan the prior duplicated ternary required.
   const effectiveMinLines = isLauncherMode ? LAUNCHER_MIN_LINES : 2;
   const isExternalRuntime = usesExternalRuntimeControls;
+  const usesProductMcp = !isExternalRuntime || runtime === 'antigravity';
   const overlayRootRef = useRef<HTMLDivElement>(null);
   const attachmentSessionId = sessionId;
 
@@ -424,7 +425,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       .map(server => configuredServers.get(server.id) ?? { id: server.id, name: server.id });
   }, [isExternalRuntime, mcpEffectiveSnapshot, mcpServers, runtimeMcpServers]);
   const enabledToolEntryCount = useMemo(() => {
-    const enabledMcpEntryCount = isExternalRuntime
+    const enabledMcpEntryCount = !usesProductMcp
       ? externalMcpServers.length
       : new Set(mcpServers
         .filter(server => globalMcpEnabled.includes(server.id) && workspaceMcpEnabled.includes(server.id))
@@ -433,7 +434,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       tool => workspaceOfficialToolEnabled.includes(tool.id),
     ).length;
     return enabledMcpEntryCount + enabledOfficialEntryCount;
-  }, [externalMcpServers.length, globalMcpEnabled, isExternalRuntime, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
+  }, [externalMcpServers.length, globalMcpEnabled, usesProductMcp, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
 
   // #324 — 推理强度 submenu (fixed bottom row of the model menu). Opens on
   // hover/click of the row; share the 120ms close delay with the portaled
@@ -450,7 +451,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     ? `${t('input.reasoningDefault')} (${effortModel.defaultReasoningEffort})`
     : t('input.reasoningDefault');
   const effortChoices = onReasoningEffortChange
-    ? managedEffort
+    ? runtime === 'antigravity'
+      ? runtimeModels?.find(m => m.isDefault)?.supportedReasoningEfforts?.map(o => o.reasoningEffort) ?? null
+      : managedEffort
       ? (effortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [])
       : reasoningEffortChoices(
         runtime === 'dsh' ? 'dsh' : isExternalRuntime ? (runtime ?? 'builtin') : 'builtin',
@@ -551,8 +554,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     [showBuiltinSdkSlashCommands, slashCommands],
   );
   const runtimeVisibleSdkSlashCommands = useMemo(
-    () => showBuiltinSdkSlashCommands ? sdkSlashCommands : [],
-    [showBuiltinSdkSlashCommands, sdkSlashCommands],
+    () => showBuiltinSdkSlashCommands || runtime === 'antigravity' ? sdkSlashCommands : [],
+    [showBuiltinSdkSlashCommands, runtime, sdkSlashCommands],
   );
   const mergedSlashCommands = useMemo(
     () => withClientActionCommands(
@@ -1731,7 +1734,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                     <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
                       {t('input.toolsHeader')}
                     </div>
-                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (!isExternalRuntime && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
+                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (usesProductMcp && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
                       <>
                       {visibleOfficialTools.map((tool) => {
                         const isEnabled = workspaceOfficialToolEnabled.includes(tool.id);
@@ -1781,7 +1784,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                           </div>
                         );
                       })}
-                      {isExternalRuntime && externalMcpServers.map((server) => (
+                      {!usesProductMcp && externalMcpServers.map((server) => (
                         <div
                           key={server.id}
                           className="px-3 py-2"
@@ -1804,7 +1807,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         </div>
                       ))}
                       {mcpServers
-                        .filter(s => !isExternalRuntime && globalMcpEnabled.includes(s.id))
+                        .filter(s => usesProductMcp && globalMcpEnabled.includes(s.id))
                         .map((server) => {
                           const isEnabled = workspaceMcpEnabled.includes(server.id);
                           const effective = mcpServerState(mcpEffectiveSnapshot, server.id);
@@ -1823,7 +1826,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                   </div>
                                 )}
                                 {isEnabled && effective && hasMcpStatusNotice(effective.state) && (
-                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={onMcpRetry} />
+                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={runtime === 'antigravity' ? undefined : onMcpRetry} />
                                 )}
                               </div>
                               {hasUserEditableMcpSettings(server.id) && (
@@ -1873,7 +1876,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         >
                           {t('input.settingsPage')}
                         </button>
-                        {isExternalRuntime
+                        {!usesProductMcp
                           ? t('input.toolsEmptyExternal')
                           : t('input.toolsEmptyBuiltin')}
                       </div>

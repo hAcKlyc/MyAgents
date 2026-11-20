@@ -45,7 +45,7 @@ export type TeamPending = { key: string; kind: TeamAction['kind'] | 'approveGrou
 export type RunTeamAction = (action: TeamAction, done: string) => Promise<TeamActionResult | null>;
 export type ConfirmRequest = { title: string; message: string; confirmText: string; onConfirm: () => void };
 
-const RUNTIMES: RuntimeType[] = ['builtin', 'dsh', 'codex', 'claude-code'];
+const RUNTIMES: RuntimeType[] = ['builtin', 'dsh', 'codex', 'claude-code', 'antigravity'];
 const toolTotal = (config: TeamPeerProfile) =>
   (config.mcpEnabledServers?.length ?? 0) + (config.enabledPluginIds?.length ?? 0) + (config.enabledOfficialToolIds?.length ?? 0);
 

@@ -486,7 +486,7 @@ export interface SessionEngine {
     options?: ForkConversationOptions,
   ): Promise<CapabilityOperationResult>;
   updateProviderEnv(providerEnv: ProviderEnv | undefined): Promise<{ success: boolean; skipped?: string; error?: string }>;
-  updateMcpServers(servers: McpServerDefinition[]): Promise<{ success: boolean; servers?: string[]; skipped?: string; error?: string }>;
+  updateMcpServers(servers: McpServerDefinition[], selectedIds?: readonly string[]): Promise<{ success: boolean; servers?: string[]; skipped?: string; error?: string }>;
   updateAgents(agents: Record<string, unknown>, options?: { forceReload?: boolean }): Promise<{ success: boolean; skipped?: string; error?: string }>;
   updateEnabledPluginIds(ids: string[] | null): Promise<{ success: boolean; enabledIds?: string[] | null; skipped?: string; error?: string }>;
   updateDesktopInteractionScenario(

@@ -4090,7 +4090,7 @@ export default function TabProvider({
               setSessionRuntime(runtime);
               setSessionRuntimeSource(runtimeSource);
               setSessionRuntimeSessionId(newSessionId ?? currentIdForSystemInit);
-              if (runtime !== 'builtin') {
+              if (runtime !== 'builtin' && runtime !== 'antigravity') {
                 setSdkSlashCommands([]);
               }
             }

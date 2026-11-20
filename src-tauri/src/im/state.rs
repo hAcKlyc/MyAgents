@@ -175,7 +175,7 @@ pub(super) fn normalize_runtime_type(runtime: Option<&str>) -> String {
 }
 
 pub(super) fn is_external_runtime_type(runtime: &str) -> bool {
-    matches!(runtime, "claude-code" | "codex")
+    matches!(runtime, "claude-code" | "codex" | "antigravity")
 }
 
 pub(super) fn runtime_source_for_runtime(

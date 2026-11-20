@@ -607,6 +607,7 @@ const MessageList = memo(function MessageList({
   exitPlanModeAnchorIdRef.current = exitPlanModeAnchorId;
   const exitPlanModeSlotRef = useRef(exitPlanModeSlot);
   exitPlanModeSlotRef.current = exitPlanModeSlot;
+  const retryAvailable = !!onRetry;
   const onRetryRef = useRef(onRetry);
   useLayoutEffect(() => { onRetryRef.current = onRetry; }, [onRetry]);
   // Virtual history rows and Message are memoized. Pass a stable forwarding
@@ -759,7 +760,7 @@ const MessageList = memo(function MessageList({
                 citationSources={actionContext.citationSources.get(citationScope(message))}
                 isLoading={isStreamingMsg && isLoadingRef.current}
                 onRewind={canRewind ? actionContext.onRewind : undefined}
-                onRetry={handleRetry}
+                onRetry={retryAvailable ? handleRetry : undefined}
                 onFork={canFork ? actionContext.onFork : undefined}
                 exitPlanModeSlot={
                   message.id === exitPlanModeAnchorIdRef.current
@@ -775,7 +776,7 @@ const MessageList = memo(function MessageList({
           </div>
         );
       },
-    [handleRowLayoutChanged, handleRetry],
+    [handleRowLayoutChanged, handleRetry, retryAvailable],
   );
 
   // ── Stable computeItemKey ──

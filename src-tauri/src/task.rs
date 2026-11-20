@@ -4614,7 +4614,7 @@ fn validate_task_provider_routing(
         );
     }
     if let Some(rt) = runtime.as_deref() {
-        let is_external = matches!(rt, "claude-code" | "codex");
+        let is_external = matches!(rt, "claude-code" | "codex" | "antigravity");
         if is_external && provider_id.is_some() {
             return Err(format!(
                 "外部 runtime '{}' 自管 provider — 不允许同时指定 providerId（请在该 runtime 自身的设置中切换 provider）",
@@ -8021,7 +8021,7 @@ mod tests {
 
         // 4. External runtime + providerId — rejected (codex / cc
         //    self-manage providers).
-        for rt in ["claude-code", "codex"] {
+        for rt in ["claude-code", "codex", "antigravity"] {
             let err = validate_task_provider_routing(
                 &Some("openai-x".into()),
                 &Some("gpt-4o".into()),

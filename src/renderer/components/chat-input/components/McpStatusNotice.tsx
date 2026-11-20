@@ -59,7 +59,7 @@ export function McpStatusNotice({ server, stale, busy, onRetry }: {
       <span className="min-w-0" role="status">
         {retryFailure?.snapshot === server ? retryFailure.message
           : connecting ? t('input.mcpStatus.starting')
-          : stale ? t('input.mcpStatus.stale')
+          : stale || server.state === 'unreported' ? t('input.mcpStatus.stale')
           : stopped ? t('input.mcpStatus.stopped')
           : failed ? reason : t('input.mcpStatus.needsAuth')}
       </span>

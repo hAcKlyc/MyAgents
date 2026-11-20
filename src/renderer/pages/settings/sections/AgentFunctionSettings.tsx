@@ -26,6 +26,7 @@ export default function AgentFunctionSettings({
   const [detections, setDetections] = useState<RuntimeDetections>({
     builtin: { installed: true },
     dsh: { installed: false },
+    antigravity: { installed: false },
     "claude-code": { installed: false },
     codex: { installed: false },
   });

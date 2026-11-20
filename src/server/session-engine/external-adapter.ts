@@ -1055,8 +1055,8 @@ export function createExternalSessionEngine(): SessionEngine {
       return { success: true, skipped: 'external-runtime' };
     },
 
-    async updateMcpServers(servers) {
-      return handleExternalMcpServersChange(servers);
+    async updateMcpServers(servers, selectedIds) {
+      return handleExternalMcpServersChange(servers, selectedIds);
     },
 
     retryMcpServer(serverId) {

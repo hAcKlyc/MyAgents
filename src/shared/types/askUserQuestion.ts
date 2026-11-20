@@ -17,6 +17,8 @@ export interface AskUserQuestion {
   header: string;
   options: AskUserQuestionOption[];
   multiSelect: boolean;
+  /** False for closed native enums. Older question producers accept free text. */
+  allowCustom?: boolean;
   /** Optional fields can be skipped by the user. Omitted means required for legacy callers. */
   required?: boolean;
   /** Render custom text input as password/secret input. */

@@ -171,6 +171,7 @@ describe('WorkspaceConfigPanel i18n', () => {
     await i18n.changeLanguage('en-US');
     mocks.invoke.mockResolvedValue({
       builtin: { installed: true },
+      antigravity: { installed: true },
       'claude-code': { installed: true },
       codex: { installed: true },
     });

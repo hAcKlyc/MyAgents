@@ -3,6 +3,7 @@
 import type { RuntimeSource, RuntimeType } from '../../shared/types/runtime';
 import type { AgentRuntime } from './types';
 import { ClaudeCodeRuntime } from './claude-code';
+import { AntigravityRuntime } from './antigravity';
 import { CodexRuntime } from './codex';
 import { DshRuntime } from '../integrated-runtimes/dsh/runtime';
 
@@ -11,7 +12,7 @@ import { DshRuntime } from '../integrated-runtimes/dsh/runtime';
 const runtimes: Partial<Record<RuntimeType, AgentRuntime>> = {};
 
 // Runtime types that have actual implementations
-const SUPPORTED_AGENT_RUNTIMES = new Set<RuntimeType>(['dsh', 'claude-code', 'codex']);
+const SUPPORTED_AGENT_RUNTIMES = new Set<RuntimeType>(['dsh', 'claude-code', 'codex', 'antigravity']);
 
 function ensureRuntime(type: RuntimeType): AgentRuntime {
   if (!runtimes[type]) {
@@ -21,6 +22,9 @@ function ensureRuntime(type: RuntimeType): AgentRuntime {
         break;
       case 'claude-code':
         runtimes[type] = new ClaudeCodeRuntime();
+        break;
+      case 'antigravity':
+        runtimes[type] = new AntigravityRuntime();
         break;
       case 'codex':
         runtimes[type] = new CodexRuntime();
@@ -56,7 +60,7 @@ export function getExternalRuntime(type: RuntimeType): AgentRuntime {
  * `type === 'builtin'` explicitly.
  */
 export function isExternalRuntime(type: RuntimeType | undefined): boolean {
-  return type === 'claude-code' || type === 'codex';
+  return type === 'claude-code' || type === 'codex' || type === 'antigravity';
 }
 
 export function isDshRuntime(type: RuntimeType | undefined): type is 'dsh' {
@@ -68,7 +72,7 @@ export function isDshRuntime(type: RuntimeType | undefined): type is 'dsh' {
  */
 export function getCurrentRuntimeType(): RuntimeType {
   const env = process.env.MYAGENTS_RUNTIME;
-  if (env === 'dsh' || env === 'claude-code' || env === 'codex') return env;
+  if (env === 'dsh' || env === 'claude-code' || env === 'codex' || env === 'antigravity') return env;
   return 'builtin';
 }
 
@@ -81,7 +85,7 @@ export function getCurrentRuntimeType(): RuntimeType {
 export function getCurrentRuntimeSource(): RuntimeSource | undefined {
   if (getCurrentRuntimeType() === 'dsh') return 'integrated';
   if (!isExternalRuntime(getCurrentRuntimeType())) return undefined;
-  return process.env.MYAGENTS_RUNTIME_SOURCE === 'managed-provider'
+  return getCurrentRuntimeType() === 'codex' && process.env.MYAGENTS_RUNTIME_SOURCE === 'managed-provider'
     ? 'managed-provider'
     : 'system-cli';
 }

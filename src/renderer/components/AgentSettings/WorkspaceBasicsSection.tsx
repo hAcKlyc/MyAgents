@@ -82,6 +82,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
   const [runtimeDetections, setRuntimeDetections] = useState<RuntimeDetections>({
     'builtin': { installed: true },
     'dsh': { installed: false },
+    antigravity: { installed: false },
     'claude-code': { installed: false },
     'codex': { installed: false },
   });
@@ -138,7 +139,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
       // funneling through this single helper.
       await patchAgentConfig(agent.id, { runtime });
       refreshConfig();
-      const label = runtime === 'claude-code' ? 'Claude Code'
+      const label = runtime === 'antigravity' ? 'Antigravity CLI' : runtime === 'claude-code' ? 'Claude Code'
         : runtime === 'dsh' ? 'DSH'
         : runtime === 'codex' ? 'Codex'
         : 'MyAgents';
@@ -418,12 +419,12 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
 
           {/* External CLI runtime notice */}
           {usesExternalCliConfiguration && (() => {
-            const runtimeLabel = currentRuntime === 'claude-code' ? 'Claude Code'
+            const runtimeLabel = currentRuntime === 'antigravity' ? 'Antigravity CLI' : currentRuntime === 'claude-code' ? 'Claude Code'
               : currentRuntime === 'codex' ? 'Codex'
               : currentRuntime;
             return (
               <p className="rounded-lg bg-[var(--accent-warm-subtle)] px-3.5 py-2.5 text-xs leading-relaxed text-[var(--ink-muted)]">
-                {t('agentSettings.basics.externalRuntimeNotice', { runtime: runtimeLabel })}
+                {t(currentRuntime === 'antigravity' ? 'agentSettings.basics.antigravityNotice' : 'agentSettings.basics.externalRuntimeNotice', { runtime: runtimeLabel })}
               </p>
             );
           })()}
@@ -641,8 +642,8 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
       </div>
       )}
 
-      {/* Product MCP selection is shared by Builtin and DSH. */}
-      {usesProductConfiguration && (
+      {/* Antigravity accepts the workspace selection at native Session creation. */}
+      {(usesProductConfiguration || currentRuntime === 'antigravity') && (
       <div className="relative flex items-center gap-3">
         <label className="w-16 shrink-0 text-sm text-[var(--ink-muted)]">{t('agentSettings.basics.tools')}</label>
         <button

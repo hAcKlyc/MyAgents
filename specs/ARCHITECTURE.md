@@ -40,7 +40,7 @@ MyAgents 是基于 Tauri v2 的桌面 AI Agent 客户端。React Renderer 提供
 └──────────────┬──────────────┘  └──────────────────────┘  └──────────────────┘
                │ SessionEngine facade
 ┌──────────────▼───────────────────────────────────────────────────────────────┐
-│ builtin Claude Agent SDK · Integrated DSH · Claude Code · Codex               │
+│ builtin Claude Agent SDK · Integrated DSH · Claude Code · Codex · Antigravity │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 

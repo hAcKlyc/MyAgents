@@ -329,28 +329,29 @@ export function TaskAdvancedConfigEditor(props: Props) {
   // Chat.tsx:721-738. Empty list while the fetch is in flight is fine —
   // the picker just shows "跟随 Agent 当前模型" alone.
   const [codexCatalog, setCodexCatalog] = useState<{
+    runtime: RuntimeType;
     source: RuntimeSource;
     models: RuntimeModelInfo[];
   } | null>(null);
   useEffect(() => {
-    if (effectiveRuntime !== 'codex') return;
+    if (effectiveRuntime !== 'codex' && effectiveRuntime !== 'antigravity') return;
     let cancelled = false;
     const source = effectiveRuntimeSource ?? 'system-cli';
     apiGetJson<{ models?: RuntimeModelInfo[] }>(
-      runtimeModelCatalogPath('codex', source),
+      runtimeModelCatalogPath(effectiveRuntime, source),
     )
       .then((res) => {
-        if (!cancelled) setCodexCatalog({ source, models: res?.models ?? [] });
+        if (!cancelled) setCodexCatalog({ runtime: effectiveRuntime, source, models: res?.models ?? [] });
       })
       .catch(() => {
-        if (!cancelled) setCodexCatalog({ source, models: [] });
+        if (!cancelled) setCodexCatalog({ runtime: effectiveRuntime, source, models: [] });
       });
     return () => { cancelled = true; };
   }, [effectiveRuntime, effectiveRuntimeSource]);
   const externalRuntimeModels: RuntimeModelInfo[] = useMemo(() => {
     if (effectiveRuntime === 'claude-code') return CC_MODELS;
-    if (effectiveRuntime === 'codex') {
-      return codexCatalog && codexCatalog.source === effectiveRuntimeSource
+    if (effectiveRuntime === 'codex' || effectiveRuntime === 'antigravity') {
+      return codexCatalog?.runtime === effectiveRuntime && codexCatalog.source === (effectiveRuntimeSource ?? 'system-cli')
         ? codexCatalog.models
         : [];
     }

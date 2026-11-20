@@ -1,3 +1,4 @@
+import { fingerprintSessionMcp } from '../session-core/mcp-sync-policy';
 import { CHANNEL_MANAGED_CODEX_LIMITS } from '../../shared/channelPrompt';
 import { readChannelPromptOptions } from '../tools/channel-messaging';
 import { captureChannelTurn, effectiveChannelDelivery, channelContextForInput, decorateChannelQuery, channelInputSource } from '../session-core/channel-context';
@@ -92,6 +93,7 @@ import {
   isExternalRuntime,
 } from './factory';
 import {
+  resolveAntigravityWorkspaceInstructions,
   resolveCodexWorkspaceInstructions,
   resolveDshWorkspaceSupplement,
 } from './workspace-instructions';
@@ -674,6 +676,10 @@ let pendingExternalProxyRestart = false;
 let pendingExternalProxyRestartOriginalKey: string | null = null;
 let pendingExternalOfficialToolsRestart = false;
 let pendingExternalCapabilityRestart = false;
+// Store only selection intent. Resolve definitions and credentials from the
+// current Product catalog when creating or replacing the native session.
+let antigravityMcpIds: string[] | null = null;
+let pendingAntigravityMcpRestart = false;
 let externalProcessConfigInvalidationInFlight: Promise<void> | null = null;
 let dshDesiredExtensionSnapshot: ManagedCodexExtensionSnapshot | null = null;
 let dshExtensionStatus: RuntimeExtensionDiagnostics | null = null;
@@ -684,6 +690,7 @@ function clearPendingExternalProcessConfigRestarts(): void {
   pendingExternalProxyRestartOriginalKey = null;
   pendingExternalOfficialToolsRestart = false;
   pendingExternalCapabilityRestart = false;
+  pendingAntigravityMcpRestart = false;
   setManagedCodexExtensionRestartPending(false);
 }
 
@@ -692,6 +699,7 @@ function pendingExternalProcessConfigRestartReasons(): string[] {
     ...(pendingExternalProxyRestart ? ['proxy'] : []),
     ...(pendingExternalOfficialToolsRestart ? ['official-tools'] : []),
     ...(pendingExternalCapabilityRestart ? ['capabilities'] : []),
+    ...(pendingAntigravityMcpRestart ? ['antigravity-mcp'] : []),
     ...(isManagedCodexExtensionRestartPending()
       ? ['managed-codex-extensions']
       : []),
@@ -762,6 +770,7 @@ function applyPendingExternalProcessConfigInvalidation(
       if (reasons.includes('official-tools')) {
         pendingExternalOfficialToolsRestart = true;
       }
+      if (reasons.includes('antigravity-mcp')) pendingAntigravityMcpRestart = true;
       if (reasons.includes('capabilities')) {
         pendingExternalCapabilityRestart = true;
       }
@@ -1588,6 +1597,7 @@ function resetModuleState(): void {
   pendingExternalToolInputTransports.clear();
   activeExternalEnvPolicy = undefined;
   clearPendingExternalProcessConfigRestarts();
+  antigravityMcpIds = null;
   resetManagedCodexExtensionState();
   dshDesiredExtensionSnapshot = null;
   dshExtensionStatus = null;
@@ -3315,7 +3325,7 @@ async function applyRuntimeConfigFieldAtBoundary(
     );
     // Both native RPC and next-turn setters can reject unsupported policy.
     // Never dispatch under the previous (possibly broader) permissions.
-    if (key === 'model' || key === 'permissionMode') {
+    if (key === 'model' || key === 'permissionMode' || active.runtime.type === 'antigravity') {
       return `${key} ${mode} failed: ${message}`;
     }
     warnings.push(`${key} ${mode} failed: ${message}`);
@@ -4122,28 +4132,41 @@ async function reconcileProductExtensionSnapshot(
 
 export async function handleExternalMcpServersChange(
   servers: readonly import('../../shared/config-types').McpServerDefinition[],
+  selectedIds?: readonly string[],
 ): Promise<ProductExtensionUpdateResult & { servers?: string[] }> {
-  if (!isManagedCodexProductRuntime() && !isDshProductRuntime()) {
+  const antigravity = getCurrentRuntimeType() === 'antigravity';
+  if (!antigravity && !isManagedCodexProductRuntime() && !isDshProductRuntime()) {
     const result = notApplicableProductExtensionResult('mcp');
     return { ...result, servers: servers.map((server) => server.id) };
   }
-  const requestedIds = [...new Set(servers.map((server) => server.id))];
+  const requestedIds = [...new Set(antigravity && selectedIds ? selectedIds : servers.map((server) => server.id))];
   await awaitExternalLifecycleStarting();
   const workspacePath = getExternalLifecycleWorkspacePath();
   const sessionId = getExternalLifecycleSessionId();
   if (!workspacePath) {
+    if (antigravity) antigravityMcpIds = requestedIds;
     return {
       ...pendingProductExtensionOwnerResult('mcp'),
       servers: requestedIds,
     };
   }
   try {
-    if (!workspacePath)
-      throw new Error('Managed Codex MCP configuration has no workspace owner');
     const metadata = sessionId ? getExternalSessionMetadata(sessionId) : null;
     const authoritative = resolveWorkspaceConfig(workspacePath, metadata, {
       includeMcp: true,
+      ...(antigravity ? { mcpServerIds: requestedIds } : {}),
     }).mcpServers;
+    if (antigravity) {
+      antigravityMcpIds = requestedIds;
+      const process = getExternalActiveProcess();
+      pendingAntigravityMcpRestart = !!process && !process.exited && process.sessionMcpFingerprint !== fingerprintSessionMcp(authoritative);
+      if (pendingAntigravityMcpRestart) {
+        if (!isExternalTurnBusy()) await applyPendingExternalProcessConfigInvalidation();
+      }
+      return { success: true, servers: requestedIds, extensionStatus: {
+        desiredRevision: '', effectiveRevision: null, state: isExternalTurnBusy() ? 'deferred_until_idle' : 'pending_next_start', components: [],
+      } };
+    }
     const resolvedServers = resolveProductExtensionMcpSelection(
       requestedIds,
       authoritative,
@@ -4157,6 +4180,11 @@ export async function handleExternalMcpServersChange(
     return { ...result, servers: requestedIds };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (antigravity) return {
+      success: false, error: message, servers: requestedIds,
+      extensionStatus: { desiredRevision: '', effectiveRevision: null, state: 'failed',
+        components: [{ component: 'mcp', state: 'failed', code: 'mcp_selection_rejected', message }] },
+    };
     if (isDshProductRuntime()) {
       return {
         ...failedDshExtensionResult('mcp', message),
@@ -4253,7 +4281,7 @@ export function getProductExtensionConfigSnapshot(): {
   }
   if (!isManagedCodexProductRuntime()) {
     return {
-      mcpServerIds: null,
+      mcpServerIds: getCurrentRuntimeType() === 'antigravity' ? antigravityMcpIds : null,
       agentNames: null,
       enabledPluginIds: null,
     };
@@ -4646,6 +4674,12 @@ async function _doStartExternalSession(options: {
   // Generative-UI widget guidance is universal (no MCP equivalent) and is
   // selected for desktop scenarios without a Channel binding.
   const existingMetadataAtStart = getExternalSessionMetadata(options.sessionId);
+  if (runtimeType === 'antigravity' && !options.resumeSessionId && existingMetadataAtStart
+    && (existingMetadataAtStart.runtimeBinding?.id === 'antigravity' || existingMetadataAtStart.runtime === 'antigravity')
+    && ((existingMetadataAtStart.stats?.messageCount ?? 0) > 0 ||
+      (getExternalLifecycleSessionId() === options.sessionId && getExternalSessionMessageCount() > 0))) {
+    throw new Error('Antigravity 原生会话绑定缺失，聊天记录已保留。请新建对话继续。');
+  }
   const enabledOfficialToolIds = getEffectiveOfficialToolIdsForSession(
     options.workspacePath,
     existingMetadataAtStart,
@@ -4677,7 +4711,7 @@ async function _doStartExternalSession(options: {
   const workspaceInstructions =
     runtimeType === 'codex'
       ? resolveCodexWorkspaceInstructions(options.workspacePath)
-      : ''; // Claude Code reads workspace guidance natively
+      : runtimeType === 'antigravity' ? resolveAntigravityWorkspaceInstructions(options.workspacePath) : '';
   if (workspaceInstructions) {
     console.log(
       `[external-session] Injecting workspace instructions for ${runtimeType} (${workspaceInstructions.length} bytes)`,
@@ -4739,13 +4773,16 @@ async function _doStartExternalSession(options: {
       : 'auto'
     : startPermissionMode;
 
-  const managedCodexMcpServers =
-    runtimeType === 'codex' && runtimeSource === 'managed-provider'
+  const acpConfig = runtimeType === 'antigravity'
+    ? resolveWorkspaceConfig(options.workspacePath, existingMetadataAtStart, { includeMcp: true, mcpServerIds: antigravityMcpIds ?? undefined })
+    : undefined;
+  const sessionMcpServers = acpConfig ? acpConfig.mcpServers : runtimeType === 'codex' && runtimeSource === 'managed-provider'
       ? (getProductExtensionSessionMcpServers() ??
         resolveWorkspaceConfig(options.workspacePath, existingMetadataAtStart, {
           includeMcp: true,
         }).mcpServers)
       : undefined;
+  if (acpConfig?.selectedMcpServerIds) antigravityMcpIds = [...acpConfig.selectedMcpServerIds];
   const dshMcpServers =
     runtimeType === 'dsh'
       ? (getProductExtensionSessionMcpServers() ??
@@ -4761,7 +4798,7 @@ async function _doStartExternalSession(options: {
       ? buildCurrentManagedCodexExtensionSnapshot({
           workspacePath: options.workspacePath,
           scenario: options.scenario,
-          mcpServers: managedCodexMcpServers ?? [],
+          mcpServers: sessionMcpServers ?? [],
           skillAdmission: externalSkillAdmission,
         })
       : undefined;
@@ -4795,13 +4832,14 @@ async function _doStartExternalSession(options: {
         })
       : undefined;
   if (dshExtensionSnapshot) dshDesiredExtensionSnapshot = dshExtensionSnapshot;
+  // The process may emit its native identity before the first product message creates metadata.
+  const deferInitialAdmission = !!options.initialMessage && (runtimeType === 'dsh' || runtimeType === 'antigravity'
+    || !!(options.dispatchPromotion && options.requiredSystemSkill));
+  const canMaterializeDeferredBirth = runtimeType === 'dsh' || options.metadataBirthPending
+    || !['im', 'agent-channel', 'registeredAgent'].includes(options.scenario.type);
   if (
     shouldTrackPendingExternalSessionBirth({
-      // DSH deliberately starts protocol/session authority before Product root
-      // admission, so even an initial-message birth must retain the native id.
-      hasInitialMessage: Boolean(
-        options.initialMessage && runtimeType !== 'dsh',
-      ),
+      hasInitialMessage: !!options.initialMessage && !(deferInitialAdmission && canMaterializeDeferredBirth),
       hasResumeSessionId: Boolean(options.resumeSessionId),
       hasMetadata: Boolean(existingMetadataAtStart),
     })
@@ -4818,7 +4856,7 @@ async function _doStartExternalSession(options: {
   }
 
   console.log(
-    `[external-session] Starting ${runtimeType} session for ${options.sessionId}, model=${startModel || '(default)'}, permissionMode=${startPermissionMode || '(default)'}${runtimePermissionMode !== startPermissionMode ? ` -> runtime:${runtimePermissionMode}` : ''}, scenario=${options.scenario.type}, resume=${options.resumeSessionId || 'none'}`,
+    `[external-session] Starting ${runtimeType} session for ${options.sessionId}, model=${startModel || '(default)'}, permissionMode=${startPermissionMode || '(default)'}${runtimePermissionMode !== startPermissionMode ? ` -> runtime:${runtimePermissionMode}` : ''}, scenario=${options.scenario.type}, resume=${Boolean(options.resumeSessionId)}`,
   );
   // Detect pre-warm: prewarmExternalSession calls us with initialMessage=undefined.
   // Stamp this onto the session_init broadcast so the frontend doesn't enter the
@@ -4914,7 +4952,7 @@ async function _doStartExternalSession(options: {
         options.turnBinding.onTerminal,
       );
     }
-    if (!messageOperation.context.asyncQuestionReply) {
+    if (runtimeType !== 'antigravity' && !messageOperation.context.asyncQuestionReply) {
     notifyExternalMessageDispatchAccepted(
       messageOperation,
       options.sessionId,
@@ -5110,7 +5148,7 @@ async function _doStartExternalSession(options: {
         disallowedTools,
         envPolicy: resolvedEnvPolicy,
         runtimeSource,
-        mcpServers: managedCodexMcpServers,
+        mcpServers: sessionMcpServers,
         managedCodexExtensions: managedCodexExtensionSnapshot,
         dshExtensions: dshExtensionSnapshot,
       },
@@ -5121,16 +5159,6 @@ async function _doStartExternalSession(options: {
   let startedProcess: RuntimeProcess | null = null;
   let terminalSettledByStop = false;
   try {
-    const deferRequiredAdmission = Boolean(
-      options.initialMessage &&
-        options.dispatchPromotion &&
-        options.requiredSystemSkill,
-    );
-    const deferDshStartupRecoveryAdmission = Boolean(
-      options.initialMessage && runtimeType === 'dsh',
-    );
-    const deferInitialAdmission =
-      deferRequiredAdmission || deferDshStartupRecoveryAdmission;
     if (options.initialMessage && !deferInitialAdmission) {
       const clientUserMessageId = await admitInitialMessage();
       if (!options.dispatchPromotion) {
@@ -5192,7 +5220,7 @@ async function _doStartExternalSession(options: {
             snapshot: buildCurrentManagedCodexExtensionSnapshot({
               workspacePath: options.workspacePath,
               scenario: options.scenario,
-              mcpServers: managedCodexMcpServers ?? [],
+              mcpServers: sessionMcpServers ?? [],
             }),
             sessionId: options.sessionId,
             workspacePath: options.workspacePath,
@@ -5318,6 +5346,13 @@ async function _doStartExternalSession(options: {
             clientOperationId: options.messageOperation?.dshClientOperationId,
           },
         );
+        if (runtimeType === 'antigravity' && options.messageOperation) {
+          if (options.messageOperation.context.asyncQuestionReply && persistInitialQuestionReply) {
+            await admitExternalAsyncQuestionReply(options.messageOperation, initialOperationGeneration, options.onDispatchAccepted, persistInitialQuestionReply);
+          } else {
+            notifyExternalMessageDispatchAccepted(options.messageOperation, options.sessionId, options.onDispatchAccepted);
+          }
+        }
         deferredInitialDispatched = true;
       }
     }
@@ -5935,6 +5970,12 @@ async function dispatchExternalMessageOperation(
     }
   }
 
+  const acpProcess = getCurrentRuntimeType() === 'antigravity' && getExternalActiveProcess();
+  if (acpProcess && !acpProcess.exited && acpProcess.sessionMcpFingerprint) {
+    const workspacePath = operation.context.workspacePath ?? getExternalLifecycleWorkspacePath();
+    const config = resolveWorkspaceConfig(workspacePath, getExternalSessionMetadata(operation.context.sessionId), { includeMcp: true, mcpServerIds: antigravityMcpIds ?? undefined });
+    pendingAntigravityMcpRestart = fingerprintSessionMcp(config.mcpServers) !== acpProcess.sessionMcpFingerprint;
+  }
   // A previous config change may have reached a terminal boundary while the
   // old process could not be stopped. Never let a later send silently reuse
   // that invalid prompt/env owner: retry invalidation before selecting Case 3.
@@ -5943,7 +5984,7 @@ async function dispatchExternalMessageOperation(
     pendingExternalProcessConfigRestartReasons().length > 0
   ) {
     try {
-      await applyPendingExternalProcessConfigInvalidation();
+      await applyPendingExternalProcessConfigInvalidation(dispatchPromotion);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (dispatchPromotion) finishExternalTurnPromotion(dispatchPromotion);
@@ -6285,7 +6326,7 @@ async function dispatchExternalMessageOperation(
     if (dispatchPromotion) {
       finishExternalTurnPromotion(dispatchPromotion, { status: 'dispatched' });
     }
-    if (!operation.context.asyncQuestionReply) {
+    if (activeRuntime.type !== 'antigravity' && !operation.context.asyncQuestionReply) {
     notifyExternalMessageDispatchAccepted(
       operation,
       getExternalLifecycleSessionId(),
@@ -6336,6 +6377,9 @@ async function dispatchExternalMessageOperation(
         clientOperationId: operation.dshClientOperationId,
       },
     );
+    if (activeRuntime.type === 'antigravity' && !operation.context.asyncQuestionReply) {
+      notifyExternalMessageDispatchAccepted(operation, getExternalLifecycleSessionId(), onDispatchAccepted);
+    }
     if (operation.context.asyncQuestionReply) {
       await admitExternalAsyncQuestionReply(
         operation,
@@ -9488,13 +9532,14 @@ export async function queryRuntimeModels(
 ): Promise<unknown[]> {
   if (runtimeType === 'builtin') return [];
   const runtimeSource =
-    runtimeType === 'codex' ? options.runtimeSource ?? 'system-cli' : undefined;
-  const codex = runtimeType === 'codex';
+    runtimeType === 'antigravity' ? 'system-cli' : runtimeType === 'codex' ? options.runtimeSource ?? 'system-cli' : undefined;
+  const catalogSessionId = getExternalLifecycleSessionId();
+  const sessionCatalog = runtimeType === 'codex' || runtimeType === 'antigravity';
   try {
-    if (codex && getCurrentRuntimeType() === runtimeType && getCurrentRuntimeSource() === runtimeSource) {
+    if (sessionCatalog && getCurrentRuntimeType() === runtimeType && getCurrentRuntimeSource() === runtimeSource) {
       await awaitExternalLifecycleStarting();
     }
-    const runtime = codex ? getExternalActiveRuntime() : null;
+    const runtime = sessionCatalog ? getExternalActiveRuntime() : null;
     const process = runtime?.type === runtimeType && runtimeSource === getCurrentRuntimeSource()
       ? getExternalActiveProcess()
       : null;
@@ -9524,8 +9569,13 @@ export async function queryRuntimeModels(
     const currentProcess = getExternalActiveRuntime()?.type === runtimeType && runtimeSource === getCurrentRuntimeSource()
       ? getExternalActiveProcess()
       : null;
-    if (codex && currentProcess !== process) {
-      throw new Error('Codex Session changed during model discovery');
+    if (sessionCatalog && currentProcess !== process) {
+      if (runtimeType === 'antigravity' && !process && currentProcess && !currentProcess.exited
+        && getExternalLifecycleSessionId() === catalogSessionId) {
+        const active = getExternalActiveRuntime();
+        if (active?.type === runtimeType) return active.queryModels({ process: currentProcess, runtimeSource, signal: options.signal });
+      }
+      throw new Error('Runtime Session changed during model discovery');
     }
     return models;
   } catch (err) {
@@ -11174,6 +11224,16 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       break;
     }
 
+    case 'runtime_title': {
+      const sessionId = getExternalLifecycleSessionId();
+      if (sessionId) void import('../session-title-service').then(({ applyRuntimeTitle }) =>
+        applyRuntimeTitle(sessionId, deriveSessionTitle(event.title, 80))).catch(() => {});
+      break;
+    }
+    case 'runtime_commands': {
+      broadcast('chat:slash-commands', { sessionId: getExternalLifecycleSessionId(), runtime: getCurrentRuntimeType(), commands: event.commands });
+      break;
+    }
     case 'runtime_tool_catalog': {
       const tools = [...event.tools];
       const systemInitPayload = getExternalSystemInitPayloadSnapshot();
@@ -11222,6 +11282,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
     }
 
     case 'mcp_runtime_replacement_required': {
+      if (getCurrentRuntimeType() === 'antigravity') {
+        pendingExternalCapabilityRestart = true;
+        if (!isExternalSessionBusy()) void applyPendingExternalProcessConfigInvalidation().catch(() => {});
+        break;
+      }
       if (!isManagedCodexProductRuntime()) break;
       pendingExternalCapabilityRestart = true;
       console.log(

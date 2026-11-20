@@ -58,6 +58,7 @@ import type {
 import {
   CC_MODELS,
   CC_PERMISSION_MODES,
+  ANTIGRAVITY_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
   DSH_PERMISSION_MODES,
   getDefaultRuntimePermissionMode,
@@ -243,6 +244,7 @@ export default function Launcher({
     {
       builtin: { installed: true },
       dsh: { installed: false },
+      antigravity: { installed: false },
       'claude-code': { installed: false },
       codex: { installed: false },
     },
@@ -344,18 +346,18 @@ export default function Launcher({
   );
 
   // Codex models are dynamic (fetched from the CLI); CC models are static
-  const [codexModels, setCodexModels] = useState<RuntimeModelInfo[]>([]);
+  const [catalog, setCatalog] = useState<{ runtime: RuntimeType; models: RuntimeModelInfo[] }>();
   useEffect(() => {
-    if (launcherRuntime !== 'codex') {
-      setCodexModels([]);
+    if (launcherRuntime !== 'codex' && launcherRuntime !== 'antigravity') {
+      setCatalog(undefined);
       return;
     }
     let cancelled = false;
     apiGetJson<{ models?: RuntimeModelInfo[] }>(
-      runtimeModelCatalogPath('codex', 'system-cli'),
+      runtimeModelCatalogPath(launcherRuntime, 'system-cli'),
     )
       .then((res) => {
-        if (!cancelled && res?.models?.length) setCodexModels(res.models);
+        if (!cancelled) setCatalog({ runtime: launcherRuntime, models: res?.models ?? [] });
       })
       .catch(() => {});
     return () => {
@@ -365,11 +367,11 @@ export default function Launcher({
   const launcherRuntimeModels: RuntimeModelInfo[] | undefined =
     launcherRuntime === 'claude-code'
       ? CC_MODELS
-      : launcherRuntime === 'codex'
-        ? codexModels
+      : (launcherRuntime === 'codex' || launcherRuntime === 'antigravity')
+        ? catalog?.runtime === launcherRuntime ? catalog.models : []
         : undefined;
   const launcherRuntimePermissionModes: RuntimePermissionMode[] | undefined =
-    launcherRuntime === 'dsh'
+    launcherRuntime === 'antigravity' ? ANTIGRAVITY_PERMISSION_MODES : launcherRuntime === 'dsh'
       ? DSH_PERMISSION_MODES
       : launcherRuntime === 'claude-code'
         ? CC_PERMISSION_MODES

@@ -230,6 +230,7 @@ import type { CapabilityInitialSelect } from '../../shared/skillsTypes';
 import {
   CC_MODELS,
   CC_PERMISSION_MODES,
+  ANTIGRAVITY_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
   coerceModelForRuntime,
   DSH_PERMISSION_MODES,
@@ -1739,6 +1740,7 @@ export default function Chat({
     {
       builtin: { installed: true },
       dsh: { installed: false },
+      antigravity: { installed: false },
       'claude-code': { installed: false },
       codex: { installed: false },
     },
@@ -1835,8 +1837,8 @@ export default function Chat({
   const showBuiltinSdkSlashCommands =
     shouldShowBuiltinSdkSlashCommands(currentRuntime);
   const visibleSdkSlashCommands = useMemo(
-    () => (showBuiltinSdkSlashCommands ? sdkSlashCommands : []),
-    [showBuiltinSdkSlashCommands, sdkSlashCommands],
+    () => (showBuiltinSdkSlashCommands || currentRuntime === 'antigravity' ? sdkSlashCommands : []),
+    [showBuiltinSdkSlashCommands, currentRuntime, sdkSlashCommands],
   );
 
   // Detect installed runtimes once on mount
@@ -1921,7 +1923,7 @@ export default function Chat({
 
   // Runtime-specific models and permission modes
   const runtimePermissionModes =
-    currentRuntime === 'dsh'
+    currentRuntime === 'antigravity' ? ANTIGRAVITY_PERMISSION_MODES : currentRuntime === 'dsh'
       ? DSH_PERMISSION_MODES
       : currentRuntime === 'claude-code'
         ? CC_PERMISSION_MODES
@@ -1931,8 +1933,11 @@ export default function Chat({
 
   // Codex models are dynamic (fetched from the CLI); CC models are static
   const [codexModels, setCodexModels] = useState<typeof CC_MODELS>([]);
+  const agyCatalogSession = currentRuntime === 'antigravity' ? sessionRuntimeSessionId : null;
+  const agyCatalogModel = currentRuntime === 'antigravity' ? runtimeModel : null;
+  const [antigravityModels, setAntigravityModels] = useState<typeof CC_MODELS>([]);
   useEffect(() => {
-    if (currentRuntime !== 'codex' || !isConnected) return;
+    if ((currentRuntime !== 'codex' && currentRuntime !== 'antigravity') || !isConnected) return;
     let cancelled = false;
     // AbortController so a tab-close (effect cleanup) silences the
     // proxyFetch "Sidecar gone" warning that would otherwise fire when
@@ -1943,14 +1948,14 @@ export default function Chat({
     const controller = new AbortController();
     apiGet(
       runtimeModelCatalogPath(
-        'codex',
+        currentRuntime,
         managedProviderRuntimeActive ? 'managed-provider' : 'system-cli',
       ),
       { signal: controller.signal },
     )
       .then((res: unknown) => {
         const data = res as { models?: typeof CC_MODELS } | undefined;
-        if (!cancelled && data?.models?.length) setCodexModels(data.models);
+        if (!cancelled) (currentRuntime === 'antigravity' ? setAntigravityModels : setCodexModels)(data?.models ?? []);
       })
       .catch(() => {});
     return () => {
@@ -1964,6 +1969,8 @@ export default function Chat({
     isConnected,
     configPending,
     workspaceRefreshTrigger,
+    agyCatalogSession,
+    agyCatalogModel,
   ]);
   // ─── External runtime pre-warm (v0.1.68) ───
   //
@@ -2069,7 +2076,7 @@ export default function Chat({
   const runtimeModels =
     currentRuntime === 'claude-code'
       ? CC_MODELS
-      : currentRuntime === 'codex'
+      : currentRuntime === 'antigravity' ? antigravityModels : currentRuntime === 'codex'
         ? managedProviderRuntimeActive
           ? []
           : codexModels
@@ -2082,7 +2089,7 @@ export default function Chat({
     ? coerceExternalRuntimeModelForUi(runtimeModel, currentRuntime)
     : undefined;
   const effectiveModel = inputUsesExternalRuntimeControls
-    ? (effectiveRuntimeModel ?? runtimeModels?.find((m) => m.isDefault)?.value)
+    ? (effectiveRuntimeModel ?? (currentRuntime === 'antigravity' ? undefined : runtimeModels?.find((m) => m.isDefault)?.value))
     : selectedModel;
   const runtimeProviderSelectionIncomplete =
     !isProviderModelCompatibleWithRuntime(
@@ -2331,7 +2338,7 @@ export default function Chat({
           await pushSessionConfig(
             'mcp',
             '/api/mcp/set',
-            { servers: effective },
+            { servers: effective, selectedIds: launchMessage.mcpEnabledServers },
             'explicit',
           );
         }
@@ -2993,7 +3000,7 @@ export default function Chat({
         await pushSessionConfig(
           'mcp',
           '/api/mcp/set',
-          { servers: effectiveServers },
+          { servers: effectiveServers, selectedIds: workspaceEnabled },
           'background',
         );
         if (isDebugMode()) {
@@ -3355,7 +3362,7 @@ export default function Chat({
           const response = await pushSessionConfig(
             'mcp',
             '/api/mcp/set',
-            { servers },
+            { servers, selectedIds: patch.mcpEnabledServers },
             'explicit',
           );
           if (response) handleExtensionUpdateResponse(response);
@@ -6538,7 +6545,7 @@ export default function Chat({
                     }
                   }
                 }
-                const canRetry = !!lastUserMsg && !isLoading;
+                const canRetry = currentRuntime !== 'antigravity' && !!lastUserMsg && !isLoading;
                 return (
                   <div className="relative z-10 flex-shrink-0 border-b border-[var(--line)] bg-[var(--paper-inset)] px-4 py-2 text-xs text-[var(--ink)]">
                     <div className="mx-auto flex max-w-3xl items-start gap-2">
@@ -6553,7 +6560,7 @@ export default function Chat({
                         {/* Oversized image hint: detect API 400 about image dimensions and offer rewind.
                       Pattern synced with backend (agent-session.ts shouldResetSessionAfterError).
                       Known API error: "...image dimensions exceed max allowed size: 8000 pixels" */}
-                        {lastUserMsg &&
+                        {currentRuntime !== 'antigravity' && lastUserMsg &&
                           /image.*exceed.*max allowed size/i.test(
                             agentError,
                           ) && (
@@ -6680,7 +6687,7 @@ export default function Chat({
                         : undefined
                       : handleRewind
                   }
-                  onRetry={handleRetry}
+                  onRetry={currentRuntime === 'antigravity' ? undefined : handleRetry}
                   onFork={
                     isExternalRuntime
                       ? runtimeConversationBranchSupported &&

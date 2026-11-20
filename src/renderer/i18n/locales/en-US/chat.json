@@ -446,6 +446,8 @@
   "runtime": {
     "header": "Runtime",
     "settings": "Settings",
+    "installAgy": "Install agy",
+    "upgradeAgy": "Update agy",
     "notInstalled": "Not installed",
     "comingSoon": "Coming soon",
     "integrated": "Built-in Agent runtimes",

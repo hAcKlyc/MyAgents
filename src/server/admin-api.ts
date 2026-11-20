@@ -6974,7 +6974,7 @@ CREATE OPTIONS (myagents cron add ...)
                                   or explicit UTC.
   --workspace <path>              Workspace the task runs in. Defaults to the
                                   current session workspace.
-  --runtime <builtin|dsh|claude-code|codex>
+  --runtime <builtin|dsh|claude-code|codex|antigravity>
   --runtime-config <json-object>  Optional runtime identity/config override.
   --provider-id / --model / --permission-mode
                                   Optional Task execution overrides. Omit all
@@ -8482,7 +8482,7 @@ export async function handleAgentShow(payload: {
   // value for a Codex agent would be actively misleading — the dispatch
   // path never consults that field.
   const usesExternalCliConfiguration =
-    runtime === 'claude-code' ||
+    runtime === 'claude-code' || runtime === 'antigravity' ||
     (runtime === 'codex' && !usesManagedCodex);
   const rcModel = usesExternalCliConfiguration
     ? (runtimeConfig?.model as string | undefined)
@@ -8669,6 +8669,8 @@ function isValidRuntimeType(runtime: unknown): runtime is RuntimeType {
 /** Install guidance keyed by runtime. Shown when a runtime is NOT installed. */
 function hintForMissingRuntime(runtime: RuntimeType): string {
   switch (runtime) {
+    case 'antigravity':
+      return 'Install Antigravity CLI and sign in with agy.';
     case 'claude-code':
       return 'Install the Claude Code CLI — see https://docs.anthropic.com/claude/docs/claude-code';
     case 'codex':
@@ -8805,7 +8807,7 @@ async function validateTaskOverrides(
   if (
     hasProviderOverride &&
     typeof payload.runtime === 'string' &&
-    ['claude-code', 'codex'].includes(payload.runtime)
+    ['claude-code', 'codex', 'antigravity'].includes(payload.runtime)
   ) {
     return {
       success: false,

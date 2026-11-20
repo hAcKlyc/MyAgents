@@ -23,7 +23,7 @@ import {
  * - claude-code: Claude Code CLI (user-installed `claude`)
  * - codex: OpenAI Codex CLI (user-installed `codex`)
  */
-export type RuntimeType = 'builtin' | 'dsh' | 'claude-code' | 'codex';
+export type RuntimeType = 'builtin' | 'dsh' | 'claude-code' | 'codex' | 'antigravity';
 
 /**
  * Distinguishes user-managed CLI runtimes from product-managed runtime-backed
@@ -70,6 +70,7 @@ export const VALID_RUNTIMES = [
   'dsh',
   'claude-code',
   'codex',
+  'antigravity',
 ] as const satisfies readonly RuntimeType[];
 
 /**
@@ -94,6 +95,7 @@ export const RUNTIME_DISPLAY_NAMES: Record<RuntimeType, string> = {
   builtin: 'Built-in (Claude Agent SDK)',
   dsh: 'MyAgents (DeepSeek Harness)',
   'claude-code': 'Claude Code CLI',
+  antigravity: 'Antigravity CLI',
   codex: 'OpenAI Codex CLI',
 };
 
@@ -506,6 +508,13 @@ export const BUILTIN_PERMISSION_MODES: RuntimePermissionMode[] = [
   },
 ];
 
+export const ANTIGRAVITY_PERMISSION_MODES: RuntimePermissionMode[] = [
+  { value: 'default', label: 'Default', icon: '🛡', description: '使用 Antigravity 的常规审批' },
+  { value: 'accept-edits', label: 'Accept Edits', icon: '📝', description: '自动接受文件编辑' },
+  { value: 'auto', label: 'Auto', icon: '⚡', description: '由 Antigravity 自动判定工具权限' },
+  { value: 'plan', label: 'Plan', icon: '📋', description: '规划模式' },
+];
+
 export const DSH_PERMISSION_MODES: RuntimePermissionMode[] = [
   { value: 'approval-required', label: '请求批准', icon: '\u{1F6E1}', description: '工作区内行动，使用工具需审批' },
   { value: 'workspace-autonomous', label: '工作区自主', icon: '\u{1F4C1}', description: '工作区内无限制，无需审批' },
@@ -546,6 +555,7 @@ export function getRuntimePermissionModes(runtime: RuntimeType): RuntimePermissi
   switch (runtime) {
     case 'dsh': return DSH_PERMISSION_MODES;
     case 'claude-code': return CC_PERMISSION_MODES;
+    case 'antigravity': return ANTIGRAVITY_PERMISSION_MODES;
     case 'codex': return CODEX_PERMISSION_MODES;
     case 'builtin': return BUILTIN_PERMISSION_MODES;
     default: return [];
@@ -627,6 +637,7 @@ export function getDefaultRuntimePermissionMode(runtime: RuntimeType): string {
   switch (runtime) {
     case 'dsh': return 'approval-required';
     case 'claude-code': return 'manual';
+    case 'antigravity': return 'default';
     case 'codex': return 'full-auto';
     case 'builtin': return 'auto';
     default: return '';
@@ -656,6 +667,7 @@ export function getMaxPermissionForRuntime(runtime: RuntimeType): string {
     case 'dsh':         return 'full-autonomous';
     case 'builtin':     return 'fullAgency';
     case 'claude-code': return 'bypassPermissions';
+    case 'antigravity': return 'auto';
     case 'codex':       return 'no-restrictions';
     default:            return 'fullAgency';
   }

@@ -422,7 +422,7 @@ class FakeRuntime implements AgentRuntime {
         this.playTurn(options.initialTurn.message);
       }
     };
-    if (this.type === 'dsh') initialize();
+    if (this.type === 'dsh' || this.type === 'antigravity') initialize();
     else this.defer(initialize);
     return process;
   }
@@ -10596,4 +10596,67 @@ describe('external SessionEngine with fake runtime', () => {
       broadcastEvents.some((event) => event.event === 'chat:agent-error'),
     ).toBe(false);
   });
+  it.each(['valid', 'missing'] as const)('reopens an ACP chat with a %s persisted native binding', async binding => {
+    const harness = await createHarness([{ kind: 'success', text: 'first' }, { kind: 'success', text: 'resumed' }], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-deferred-birth';
+    const workspacePath = join(harness.home, 'workspace');
+    const send = (text: string) => harness.engine.sendDesktopMessage({
+      ...desktopRequest(sessionId, workspacePath, text), permissionMode: 'default',
+    });
+    await send('hello');
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    const native = harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId;
+    expect(native).toMatch(/^fake-thread-/);
+    await harness.externalSession.stopExternalSession();
+    if (binding === 'missing') await harness.sessionStore.updateSessionMetadata(sessionId, { runtimeSessionId: '' });
+    await harness.sessionStore.releaseSessionTranscriptForBinding(sessionId);
+    harness.externalSession.__resetExternalSessionForTests();
+    expect(harness.sessionStore.getActiveSessionTranscript(sessionId)).toBeUndefined();
+    await expect(harness.externalSession.restoreExternalSessionState(sessionId, workspacePath, { type: 'desktop' })).resolves.toEqual({ success: true });
+    const next = await send('continue');
+    if (binding === 'missing') {
+      await expect(next.dispatchAcceptance).resolves.toMatchObject({ accepted: false, error: expect.stringContaining('绑定缺失') });
+      expect(harness.runtime.startSessionResumeIds).toEqual([undefined]);
+      expect((await harness.sessionStore.getSessionData(sessionId))?.messages).toHaveLength(2);
+    } else {
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.startSessionResumeIds).toEqual([undefined, native]);
+    }
+  });
+  it('retains raw Antigravity MCP selection across a globally filtered desktop push', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'ready' }], { runtimeType: 'antigravity' });
+    await harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-mcp-raw', join(harness.home, 'workspace'), 'hello'), permissionMode: 'default',
+    });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    expect((await harness.engine.updateMcpServers([], ['temporarily-disabled'])).success).toBe(true);
+    expect(harness.externalSession.getProductExtensionConfigSnapshot().mcpServerIds).toEqual(['temporarily-disabled']);
+    expect((await harness.engine.updateMcpServers([], [])).success).toBe(true);
+    expect(harness.externalSession.getProductExtensionConfigSnapshot().mcpServerIds).toEqual([]);
+  });
+  it.each(['stop', 'force'] as const)('applies the desktop %s queue contract to Antigravity', async action => {
+    const harness = await createHarness([
+      { kind: 'silent' }, { kind: 'success', text: 'C done' }, { kind: 'success', text: 'B done' },
+    ], { runtimeType: 'antigravity', forceInterrupt: true });
+    const send = (text: string) => harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-queue', join(harness.home, 'workspace'), text),
+      permissionMode: 'default',
+    });
+    const first = await send('A');
+    await expect(first.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    const b = await send('B');
+    const c = await send('C');
+    expect(harness.engine.getQueueStatus().map(item => item.messagePreview)).toEqual(['B', 'C']);
+    if (action === 'stop') {
+      expect((await harness.engine.stopTurn()).success).toBe(true);
+      expect(harness.runtime.sentMessages).toEqual(['A']);
+    } else {
+      expect(await harness.engine.forceQueuedMessage(c.queueId!)).toBe(true);
+      await Promise.all([b.dispatchAcceptance, c.dispatchAcceptance]);
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.sentMessages).toEqual(['A', 'C', 'B']);
+    }
+    expect(harness.engine.getQueueStatus()).toEqual([]);
+  });
+
 });

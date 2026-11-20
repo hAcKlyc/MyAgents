@@ -1374,7 +1374,7 @@ fn runtime_from_preference(
     match (preference.family.as_str(), preference.id.as_str()) {
         ("integrated", "claude-agent-sdk") => Ok(("builtin".to_string(), None)),
         ("integrated", "dsh") => Ok(("dsh".to_string(), Some("integrated".to_string()))),
-        ("external", runtime @ ("claude-code" | "codex")) => {
+        ("external", runtime @ ("claude-code" | "codex" | "antigravity")) => {
             Ok((runtime.to_string(), Some("system-cli".to_string())))
         }
         (family, id) => Err(format!("unsupported runtimePreference {family}/{id}")),
