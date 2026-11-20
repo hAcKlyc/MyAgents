@@ -47,6 +47,8 @@ Agent / Channel defaults 保留 Provider choice，不把 managed runtime project
 
 Subscription 是产品/计费类型，不决定执行 Runtime 或 auth owner。官方 `anthropic-sub` 和 `anthropic-api` 只在 Claude Agent SDK 执行；`codex-sub` 由 Managed Codex 执行。其余已声明通用 API family 的 Provider 可由 Claude Agent SDK 或 DSH 执行；Grok OAuth 与 Antigravity CLIProxy 仍由上述唯一 Host owner 管理。新增 subscription 必须显式选择 `sdk-native`、`host-managed-oauth`、`proxy-managed` 或 `runtime-managed`，不能把所有 subscription 当成“空 ProviderEnv”。
 
+模型管理面板可以直接编辑供应商的内置预设。首次编辑只把改动的显示名称、上下文窗口或输入模态保存在该供应商的 `presetCustomModels` 条目的 `presetSettings` 中。未改字段继续使用当前预设与目录的合并值；清空上下文覆盖会恢复继承。协议仍由供应商的逐模型路由规则决定。
+
 ## API Provider env
 
 ### Token Dance 模型协议与账户接入

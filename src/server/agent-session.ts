@@ -770,7 +770,7 @@ function stripUnsupportedModalityBlocks(
     }
   }
   if (!hasImageBlock) return message;
-  if (modelSupportsModality(modelAtYield, 'image')) return message;
+  if (modelSupportsModality(modelAtYield, 'image', getSessionProviderId())) return message;
 
   // Drift detected: filter out image blocks; if nothing usable remains,
   // append a synthetic placeholder so the SDK still receives a non-empty
@@ -9563,7 +9563,10 @@ export async function enqueueUserMessage(
   // provider-env semantics, and `stripUnsupportedModalityBlocks` re-checks
   // at dequeue to catch any drift), otherwise the session's current model.
   const modelForFilter = model ?? configState.currentModel;
-  const imagesAllowed = modelSupportsModality(modelForFilter, 'image');
+  const attachmentProvider = isSessionBusy ? configState.currentProviderEnv : effectiveProviderEnv;
+  const imagesAllowed = !hasImages || modelSupportsModality(
+    modelForFilter, 'image', attachmentProvider ? attachmentProvider.providerId : SUBSCRIPTION_PROVIDER_ID,
+  );
   const filteredImageCount = hasImages && !imagesAllowed ? resolvedImages!.length : 0;
 
   // Mutable text payload — modality fallback (below) appends `@<path>`

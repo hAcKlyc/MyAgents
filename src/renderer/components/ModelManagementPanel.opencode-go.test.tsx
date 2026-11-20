@@ -48,7 +48,51 @@ describe('OpenCode Go model setup', () => {
     expect(save).toBeEnabled();
     fireEvent.click(save);
     await waitFor(() => expect(mocks.config.presetCustomModels?.['opencode-go']?.[0]?.executionProtocol).toBe('openai:responses'));
-    expect(resolveProviderForModel({ ...go, models: mocks.config.presetCustomModels!['opencode-go'] }, 'future-go').upstreamFormat).toBe('responses');
+    expect(resolveProviderForModel(mergePresetCustomModels([go], mocks.config.presetCustomModels)[0], 'future-go').upstreamFormat).toBe('responses');
+  });
+
+  it('edits a bundled model, keeps its official protocol locked and inherits untouched catalog fields', async () => {
+    const model = go.models[0];
+    const view = open([]);
+    fireEvent.click(screen.getByRole('button', { name: `Model parameter settings: ${model.modelName}` }));
+    let editor = await screen.findByRole('dialog', { name: 'Model Parameters' });
+    expect(within(editor).getByText('OpenAI Responses')).toBeInTheDocument();
+    expect(within(editor).queryByRole('button', { name: 'Request protocol' })).not.toBeInTheDocument();
+    fireEvent.change(within(editor).getByLabelText('Context window'), { target: { value: '128k' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocks.config.presetCustomModels?.[go.id]).toEqual([
+      { model: model.model, source: 'preset', presetSettings: { contextLength: 128000 } },
+    ]));
+    view.unmount();
+
+    const upgraded = { ...go, models: [{ ...model, modelName: 'Updated name', inputModalities: ['text', 'image'] }] };
+    const [restored] = mergePresetCustomModels([upgraded], mocks.config.presetCustomModels);
+    expect(restored.models[0]).toMatchObject({ modelName: 'Updated name', inputModalities: ['text', 'image'], contextLength: 128000 });
+    expect(resolveProviderForModel(restored, model.model).upstreamFormat).toBe('responses');
+    open([], restored);
+    fireEvent.click(screen.getByRole('button', { name: 'Model parameter settings: Updated name' }));
+    editor = await screen.findByRole('dialog', { name: 'Model Parameters' });
+    const context = within(editor).getByLabelText('Context window');
+    expect(context).toHaveValue('128000');
+    fireEvent.change(context, { target: { value: '' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocks.config.presetCustomModels?.[go.id] ?? []).toEqual([]));
+  });
+
+  it('keeps discovery metadata separate when changing a bundled display name', async () => {
+    const model = go.models[0];
+    const discovered = { ...model, source: 'discovered' as const, modelName: 'Catalog name', contextLength: 64000 };
+    mocks.config.presetCustomModels = { [go.id]: [discovered] };
+    open([], mergePresetCustomModels([go], mocks.config.presetCustomModels)[0]);
+    fireEvent.click(screen.getByRole('button', { name: `Model parameter settings: ${model.modelName}` }));
+    const editor = await screen.findByRole('dialog', { name: 'Model Parameters' });
+    fireEvent.change(within(editor).getByLabelText('Display name'), { target: { value: 'My model' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocks.config.presetCustomModels?.[go.id]).toEqual([
+      { ...discovered, presetSettings: { modelName: 'My model' } },
+    ]));
+    const [updated] = mergePresetCustomModels([{ ...go, models: [{ ...model, contextLength: 256000 }] }], mocks.config.presetCustomModels);
+    expect(updated.models[0]).toMatchObject({ modelName: 'My model', contextLength: 256000 });
   });
 
   it('lets a known official preset be re-added without a protocol prompt', async () => {
