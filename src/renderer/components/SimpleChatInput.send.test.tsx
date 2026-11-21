@@ -337,9 +337,13 @@ describe('SimpleChatInput send paths', () => {
     expect(within(choices).getByText('high')).toBeVisible();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('group', { name: '推理强度' })).not.toBeInTheDocument();
-    await user.click(screen.getByTitle('切换模型'));
     const nextRow = screen.getByRole('button', { name: /推理强度.*默认/ });
-    nextRow.focus();
+    expect(nextRow).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.getByTitle('切换模型')).toHaveFocus();
+    expect(nextRow).not.toBeInTheDocument();
+    await user.click(screen.getByTitle('切换模型'));
+    screen.getByRole('button', { name: /推理强度.*默认/ }).focus();
     await user.keyboard('{Enter}');
     expect(screen.getByRole('group', { name: '推理强度' })).toBeVisible();
     await user.click(document.body);
@@ -1116,6 +1120,7 @@ describe('SimpleChatInput send paths', () => {
     });
 
     await user.click(screen.getByTitle('切换模型'));
+    await user.click(await screen.findByRole('button', { name: 'Provider B' }));
     await user.click(await screen.findByText('B Pro'));
 
     expect(onBuiltinModelSelect).toHaveBeenCalledWith({

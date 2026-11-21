@@ -26,8 +26,11 @@ import {
   type Padding,
   type FlipOptions,
 } from "@floating-ui/react";
-import { useEffect, useRef } from "react";
+import { createContext, useEffect, useRef } from "react";
 import { popoverPositioning } from "./popoverPositioning";
+
+/** Keyboard actions in portaled menu content return focus to their own trigger. */
+export const PopoverAnchorContext = createContext<React.RefObject<HTMLElement | null> | null>(null);
 
 export type PopoverPlacement = Placement;
 
@@ -180,8 +183,21 @@ export function Popover({
       }
       onClose();
     };
+    // A press on the owning modal's backdrop dismisses the popup first.
+    // Handle that press before the backdrop can discard the modal's draft.
+    const handleBackdrop = (event: MouseEvent) => {
+      const backdrop = anchorRef.current?.closest('[data-overlay-backdrop]');
+      if (backdrop && event.target === backdrop) {
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handleBackdrop, true);
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    return () => {
+      document.removeEventListener("mousedown", handleBackdrop, true);
+      document.removeEventListener("mousedown", handler);
+    };
   }, [open, closeOnOutsideClick, onClose, anchorRef, zIndex]);
 
   if (!open) return null;
@@ -210,7 +226,7 @@ export function Popover({
           unstyled ? className : `${DEFAULT_CHROME} ${className}`.trim()
         }
       >
-        {children}
+        <PopoverAnchorContext.Provider value={isPositioned ? anchorRef : null}>{children}</PopoverAnchorContext.Provider>
       </div>
     </FloatingPortal>
   );

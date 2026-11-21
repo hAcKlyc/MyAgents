@@ -138,6 +138,7 @@ describe('Team AI peer detail', () => {
     await selectPeer();
     await openConfig();
     fireEvent.click(within(row('teamAi.model')).getByRole('button'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Other provider' }));
     expect(await screen.findByText('teamAi.config.laterTag')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Other model'));
     await waitFor(() => expect(mocks.action).toHaveBeenCalledWith('agent', 'bot-a', peer, { kind: 'updateConfig', change: { selection: selectionB } }));

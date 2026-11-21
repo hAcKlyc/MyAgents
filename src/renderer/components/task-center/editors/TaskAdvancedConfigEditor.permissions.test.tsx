@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { i18n } from '@/i18n';
 import { TaskAdvancedConfigEditor } from './TaskAdvancedConfigEditor';
@@ -36,6 +36,18 @@ describe('Task Codex permissions', () => {
     expect(screen.getByRole('button', { name: /^完全自主/ })).toBeInTheDocument();
     fireEvent.click(plan);
     expect(setPermissionMode).toHaveBeenCalledWith('suggest');
+  });
+
+  it('focuses the flat CLI catalogue and returns to its trigger on Escape', async () => {
+    renderSource('system-cli');
+    const trigger = screen.getByRole('button', { name: '跟随 Agent 当前模型' });
+    fireEvent.click(trigger);
+    const follow = screen.getByRole('button', { current: true });
+    await waitFor(() => expect(follow).toHaveFocus());
+    expect(screen.queryByRole('button', { expanded: false, name: /Codex/ })).toBeNull();
+    fireEvent.keyDown(follow, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('offers only native presets for the external CLI', () => {

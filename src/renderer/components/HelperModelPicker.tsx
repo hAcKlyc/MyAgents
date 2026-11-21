@@ -20,7 +20,7 @@ import type { Provider, ProviderVerifyStatus } from '@/config/types';
 import { isProviderAvailable } from '@/config/configService';
 import { isRuntimeBackedProvider } from '../../shared/providerExecution';
 import { Popover, type PopoverPlacement } from '@/components/ui/Popover';
-import { ModalityBadges } from '@/components/ModalityBadges';
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
 
 export interface HelperModelPickerValue {
     providerId: string;
@@ -129,7 +129,7 @@ export function HelperModelPicker({
                 onClose={() => setOpen(false)}
                 anchorRef={btnRef}
                 placement={placement}
-                maxHeight="300px" className="w-[260px] overflow-y-auto rounded-xl py-1 shadow-lg"
+                maxHeight="364px" className="flex w-[292px] max-w-[calc(100vw-16px)] flex-col rounded-xl shadow-lg"
             >
                 {(() => {
                     const availableProviders = providers.filter(p =>
@@ -149,39 +149,14 @@ export function HelperModelPicker({
                             </button>
                         );
                     }
-                    return availableProviders.map((provider, idx) => (
-                        <div key={provider.id}>
-                            {idx > 0 && (
-                                <div className="mx-2 my-1 border-t border-[var(--line)]" />
-                            )}
-                            <div className="px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
-                                {provider.name}
-                            </div>
-                            {provider.models.map(model => {
-                                const isSelected =
-                                    value.providerId === provider.id &&
-                                    value.model === model.model;
-                                return (
-                                    <button
-                                        key={model.model}
-                                        type="button"
-                                        onClick={() => {
-                                            onChange(provider.id, model.model);
-                                            setOpen(false);
-                                        }}
-                                        className={`flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
-                                            isSelected
-                                                ? 'bg-[var(--accent)]/10 font-medium text-[var(--accent)]'
-                                                : 'text-[var(--ink)] hover:bg-[var(--paper-inset)]'
-                                        }`}
-                                    >
-                                        <span className="truncate">{model.modelName}</span>
-                                        <ModalityBadges modalities={model.inputModalities} className="ml-2" />
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    ));
+                    return (
+                        <GroupedModelList onDismiss={() => setOpen(false)}
+                            selectedGroupId={value.providerId} selectedModelId={value.model}
+                            groups={providerModelGroups(availableProviders, (providerId, model) => {
+                                onChange(providerId, model);
+                                setOpen(false);
+                            }, true)} />
+                    );
                 })()}
             </Popover>
         </>

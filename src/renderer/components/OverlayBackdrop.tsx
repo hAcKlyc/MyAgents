@@ -50,6 +50,7 @@ const OverlayBackdrop = forwardRef<HTMLDivElement, OverlayBackdropProps>(functio
   const backdrop = (
     <div
       ref={ref}
+      data-overlay-backdrop=""
       className={`fixed inset-0 flex items-center justify-center ${bg} backdrop-blur-sm ${className}`}
       style={style}
       onMouseDown={onClose ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}

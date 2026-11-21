@@ -23,6 +23,7 @@ import type { RuntimeSource, RuntimeType } from "../../shared/types/runtime";
 
 const mocks = vi.hoisted(() => ({
   config: {} as UseConfigResult,
+  realPicker: false,
   input: null as ComponentProps<typeof SimpleChatInput> | null,
   publishMetadata: null as TabContextValue["setSessionMeta"] | null,
   send: vi.fn<TabContextValue["sendMessage"]>(async () => true),
@@ -107,19 +108,24 @@ vi.mock("@/config/configService", async (original) => ({
   getEnabledMcpServerIds: vi.fn(async () => []),
 }));
 
-vi.mock("@/components/SimpleChatInput", () => ({
-  default: (props: ComponentProps<typeof SimpleChatInput>) => {
-    mocks.input = props;
-    return (
-      <div>
-        <output data-testid="model">{props.selectedModel}</output>
-        <output data-testid="provider">{props.provider?.id}</output>
-        <output data-testid="permission">{props.permissionMode}</output>
-        <button onClick={() => void props.onSend("follow-up")}>Send</button>
-      </div>
-    );
-  },
-}));
+vi.mock("@/config/useConfigData", () => ({ useConfigData: () => mocks.config }));
+vi.mock("@/components/SimpleChatInput", async (importOriginal) => {
+  const { default: Composer } = await importOriginal<typeof import("@/components/SimpleChatInput")>();
+  return {
+    default: (props: ComponentProps<typeof SimpleChatInput>) => {
+      mocks.input = props;
+      if (mocks.realPicker) return <ImagePreviewProvider><Composer {...props} /></ImagePreviewProvider>;
+      return (
+        <div>
+          <output data-testid="model">{props.selectedModel}</output>
+          <output data-testid="provider">{props.provider?.id}</output>
+          <output data-testid="permission">{props.permissionMode}</output>
+          <button onClick={() => void props.onSend("follow-up")}>Send</button>
+        </div>
+      );
+    },
+  };
+});
 vi.mock("@/components/DirectoryPanel", () => ({ default: () => null }));
 vi.mock("@/components/MessageList", () => ({ default: () => null }));
 vi.mock("@/components/SessionHistoryDropdown", () => ({ default: () => null }));
@@ -154,6 +160,7 @@ vi.mock("@/components/scheduled-tasks/CronTaskCard", () => ({
 vi.mock("@/components/CronTaskDetailPanel", () => ({ default: () => null }));
 
 import Chat from "./Chat";
+import { ImagePreviewProvider } from "@/context/ImagePreviewContext";
 import { TabActiveContext, TabContext } from "@/context/TabContext";
 import {
   DEFAULT_CONFIG,
@@ -268,6 +275,7 @@ function launchMessage(): InitialMessage {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.input = null;
+  mocks.realPicker = false;
   mocks.publishMetadata = null;
   mocks.config = {
     config: { ...DEFAULT_CONFIG },
@@ -314,6 +322,22 @@ beforeEach(() => {
 });
 
 describe("Chat execution selection (#685)", () => {
+  it("opens the new-session confirmation only on selection and retains the original conversation on cancel", async () => {
+    mocks.realPicker = true;
+    render(<Harness metadata={ownedMetadata()} />);
+    const trigger = await screen.findByTitle('切换模型');
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('button', { name: 'API' }));
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    fireEvent.click(screen.getByTitle('explicit-api-model'));
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }));
+    expect(trigger).toHaveTextContent(chosenModel);
+    expect(mocks.patchSession).not.toHaveBeenCalled();
+    expect(mocks.patchProject).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent(chosenModel);
+  });
+
   it.each(["mimo-v2.5", "gpt-6.1"])(
     "sends the launch identity before metadata arrives, ignoring workspace model %s",
     async (staleModel) => {

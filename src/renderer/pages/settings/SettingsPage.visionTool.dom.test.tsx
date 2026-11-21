@@ -208,6 +208,24 @@ describe("Settings image-understanding enable flow", () => {
     expect(calls()).toHaveLength(1);
   });
 
+  it("keeps identical vision models distinct and cancels a capability-unconfirmed draft", async () => {
+    const user = userEvent.setup();
+    settingsMocks.apiPostJson.mockResolvedValue({ success: true, data: { models: [
+      { providerId: 'a', providerName: 'First Vision', model: 'shared', modelName: 'Shared', capabilityConfidence: 'declared' },
+      { providerId: 'b', providerName: 'Second Vision', model: 'shared', modelName: 'Shared', capabilityConfidence: 'unknown' },
+    ] } });
+    renderSettings();
+    await user.click(getImageToolSwitch());
+    await user.click(await screen.findByRole('button', { name: 'First Vision / Shared' }));
+    await user.click(screen.getByRole('button', { name: 'Second Vision' }));
+    await user.click(screen.getByRole('button', { name: /Shared.*待确认/ }));
+    expect(screen.getByRole('button', { name: /Second Vision.*Shared.*待确认/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '取消' }));
+    expect(settingsMocks.atomicModifyConfig).not.toHaveBeenCalled();
+    await user.click(getImageToolSwitch());
+    expect(await screen.findByRole('button', { name: 'First Vision / Shared' })).toBeInTheDocument();
+  });
+
   it("keeps the switch off on cancel, then locks dismissal until confirmed save enables it", async () => {
     const user = userEvent.setup();
     let releaseMutation!: () => void;

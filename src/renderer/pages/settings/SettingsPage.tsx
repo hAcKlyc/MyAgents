@@ -50,6 +50,7 @@ import OverlayBackdrop from '@/components/OverlayBackdrop';
 import { apiFetch, apiGetJson, apiPostJson } from '@/api/apiFetch';
 import { useToast } from '@/components/Toast';
 import CustomSelect from '@/components/CustomSelect';
+import { GroupedModelList, groupModelRows } from '@/components/GroupedModelList';
 import { UnifiedLogsPanel } from '@/components/UnifiedLogsPanel';
 import GlobalPluginsPanel from '@/components/GlobalPluginsPanel';
 import CronTaskDebugPanel from '@/components/dev/CronTaskDebugPanel';
@@ -1259,20 +1260,15 @@ export default function Settings({
     void loadVisionModelCandidates();
   }, [loadVisionModelCandidates, providers, apiKeys, providerVerifyStatus]);
 
-  const visionModelOptions = useMemo(
-    () =>
-      visionModelCandidates.map((candidate) => ({
-        value: visionModelOptionValue(candidate.providerId, candidate.model),
-        label: `${candidate.providerName} / ${candidate.modelName || candidate.model}${
-          candidate.capabilityConfidence === 'inferred'
-            ? ` · ${tSettings('toolbox.dialogs.vision.inferredBadge')}`
-            : candidate.capabilityConfidence === 'unknown'
-              ? ` · ${tSettings('toolbox.dialogs.vision.confirmBadge')}`
-              : ''
-        }`,
-      })),
-    [tSettings, visionModelCandidates],
-  );
+  const visionModelOptions = useMemo(() => visionModelCandidates.map(candidate => {
+    const hint = candidate.capabilityConfidence === 'inferred' ? tSettings('toolbox.dialogs.vision.inferredBadge')
+      : candidate.capabilityConfidence === 'unknown' ? tSettings('toolbox.dialogs.vision.confirmBadge') : '';
+    const name = candidate.modelName || candidate.model;
+    return {
+      candidate, name, hint, value: visionModelOptionValue(candidate.providerId, candidate.model),
+      label: `${candidate.providerName} / ${name}${hint ? ` · ${hint}` : ''}`,
+    };
+  }), [tSettings, visionModelCandidates]);
 
   const savedVisionModelValue = useMemo(() => {
     const saved = config.officialToolSettings?.imageUnderstanding;
@@ -6801,6 +6797,23 @@ export default function Settings({
                 <CustomSelect
                   value={visionToolDraftValue}
                   options={visionModelOptions}
+                  renderMenu={(select, dismiss) => (
+                    <GroupedModelList onDismiss={dismiss}
+                      selectedGroupId={selectedVisionModelCandidate?.providerId}
+                      selectedModelId={selectedVisionModelCandidate?.model}
+                      groups={groupModelRows(visionModelOptions, option => ({
+                        groupId: option.candidate.providerId, groupName: option.candidate.providerName,
+                        row: {
+                          id: option.candidate.model, name: option.name,
+                          suffix: option.hint && <span className="shrink-0 text-xs text-[var(--ink-muted)]">{option.hint}</span>,
+                          select: () => select(option.value),
+                        },
+                      }))}>
+                      {visionModelOptions.length === 0 && <p className="px-2 py-1 text-xs text-[var(--ink-muted)]">{tSettings(visionModelsLoading
+                        ? 'toolbox.dialogs.vision.loadingModels' : visionModelsLoadFailed
+                          ? 'toolbox.dialogs.vision.loadModelsFailed' : 'toolbox.dialogs.vision.noImageModels')}</p>}
+                    </GroupedModelList>
+                  )}
                   onChange={setVisionToolDraftValue}
                   placeholder={
                     visionModelOptions.length > 0

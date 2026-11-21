@@ -1,3 +1,4 @@
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
 import type { AgentConfigMutation } from '../../../shared/agentConfigMutation';
 // WorkspaceBasicsSection — workspace name, icon, model, permission, MCP tools
 // AI config (model/provider/permission/mcp) reads from AgentConfig (source of truth).
@@ -520,7 +521,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
           onClose={() => setOpenPopup(null)}
           anchorRef={modelButtonRef}
           placement="bottom-start"
-          className="max-h-[300px] w-[320px] overflow-y-auto overscroll-contain rounded-xl p-2"
+          className="flex w-[320px] max-w-[calc(100vw-16px)] flex-col rounded-xl"
         >
           {availableProviders.length === 0 ? (
             <div className="px-3 py-3">
@@ -536,24 +537,9 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
               </button>
             </div>
           ) : (
-            availableProviders.map(provider => (
-              <div key={provider.id} className="mb-1">
-                <div className="px-2 py-1 text-xs font-medium text-[var(--ink-muted)]">{provider.name}</div>
-                {provider.models?.map(model => (
-                  <button
-                    key={`${provider.id}:${model.model}`}
-                    className={`flex w-full items-center rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
-                      effectiveProviderId === provider.id && effectiveModel === model.model
-                        ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                        : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                    }`}
-                    onClick={() => handleModelSelect(provider.id, model.model)}
-                  >
-                    {model.modelName}
-                  </button>
-                ))}
-              </div>
-            ))
+            <GroupedModelList onDismiss={() => setOpenPopup(null)}
+              groups={providerModelGroups(availableProviders, handleModelSelect)}
+              selectedGroupId={effectiveProviderId ?? undefined} selectedModelId={effectiveModel ?? undefined} />
           )}
         </Popover>
       </div>

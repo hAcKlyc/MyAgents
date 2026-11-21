@@ -24,7 +24,7 @@ import { useTranslation } from 'react-i18next';
 import Tip from '@/components/Tip';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { ModalityBadges } from '@/components/ModalityBadges';
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { useWorkspaceFileService } from '@/hooks/useWorkspaceFileService';
 import { type PermissionMode, PERMISSION_MODES, type Provider, type ProviderVerifyStatus, getModelDisplayName } from '@/config/types';
@@ -474,6 +474,16 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     if (effortCloseTimerRef.current) clearTimeout(effortCloseTimerRef.current);
     effortCloseTimerRef.current = setTimeout(() => setShowEffortSubmenu(false), 120);
   }, []);
+  function dismissModelMenuLayer() {
+    if (showEffortSubmenu) {
+      setShowEffortSubmenu(false);
+      effortRowWrapRef.current?.querySelector('button')?.focus({ preventScroll: true });
+    } else {
+      setShowModelMenu(false);
+      modelBtnRef.current?.focus({ preventScroll: true });
+    }
+  }
+
   // Reset submenu state whenever the model menu closes (incl. outside-click).
   useEffect(() => {
     if (!modelMenuOpen) {
@@ -1979,7 +1989,12 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
             </div>
 
             {/* Right side - model selector + send/stop button */}
-            <div className="ml-auto flex items-center gap-2 shrink-0">
+            <div className="ml-auto flex items-center gap-2 shrink-0" onKeyDown={event => {
+              if (modelMenuOpen && event.key === 'Escape' && !isImeComposingEvent(event)) {
+                event.stopPropagation();
+                dismissModelMenuLayer();
+              }
+            }}>
               {/* PRD 0.2.32 — context 用量指示器（自取数 slot，model 按钮左侧） */}
               {contextIndicator}
               {/* Model Dropdown with Provider Selector */}
@@ -2015,15 +2030,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 onClose={() => setShowModelMenu(false)}
                 anchorRef={modelBtnRef}
                 placement="top-end"
-                className="w-64"
+                className="flex w-[292px] max-w-[calc(100vw-16px)] flex-col"
+                closeOnEscape={!showEffortSubmenu}
               >
-                <div
-                  ref={modelListRef}
-                  data-model-list
-                  className="relative max-h-[260px] overflow-y-auto py-1"
-                >
                 {isExternalRuntime && runtimeModels ? (
-                  <>
+                  <div ref={modelListRef} data-model-list className="relative min-h-0 max-h-[260px] overflow-y-auto py-1">
                     <div className="px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
                       {t('input.runtimeModelHeader', {
                         runtime: runtime === 'claude-code' ? 'CLAUDE CODE' : runtime?.toUpperCase(),
@@ -2052,92 +2063,60 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         </button>
                       );
                     })}
-                  </>
+                    <ModelSelectionScrollSync listRef={modelListRef} selectedRowRef={selectedModelRowRef}
+                      selectionKey={`${runtime ?? 'external'}:${selectedModel ?? 'default'}`} modelSource={runtimeModels} />
+                  </div>
                 ) : (() => {
                   const availableProviders = availableProviderIdSet
                     ? (providers ?? []).filter(p => availableProviderIdSet.has(p.id))
                     : (providers ?? []).filter(p => isProviderAvailable(p, apiKeys, providerVerifyStatus));
                   if (availableProviders.length === 0) {
                     return (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowModelMenu(false);
-                          window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, {
-                            detail: { section: 'providers' }
-                          }));
-                        }}
-                        className="w-full px-3 py-2.5 text-left text-sm text-[var(--accent)] transition-colors hover:bg-[var(--hover-bg)]"
-                      >
-                        {t('input.setupModelProvider')}
-                      </button>
+                      <div data-model-list>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowModelMenu(false);
+                            window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, {
+                              detail: { section: 'providers' }
+                            }));
+                          }}
+                          className="w-full px-3 py-2.5 text-left text-sm text-[var(--accent)] transition-colors hover:bg-[var(--hover-bg)]"
+                        >
+                          {t('input.setupModelProvider')}
+                        </button>
+                      </div>
                     );
                   }
-                  return availableProviders.map((p, idx) => (
-                    <div key={p.id}>
-                      {idx > 0 && <div className="mx-2 my-1 border-t border-[var(--line)]" />}
-                      <div className="group/provider relative flex items-center gap-1 px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
-                        {p.name}
-                        {isProviderWarning(p, apiKeys, providerVerifyStatus) && (
+                  return (
+                    <GroupedModelList onDismiss={dismissModelMenuLayer}
+                      selectedGroupId={provider?.id} selectedModelId={currentModelId}
+                      groups={providerModelGroups(availableProviders, (providerId, model) => {
+                        if (onBuiltinModelSelect) onBuiltinModelSelect({ providerId, model });
+                        else if (provider?.id !== providerId) onProviderChange?.(providerId, model);
+                        else onModelChange?.(model);
+                        setShowModelMenu(false);
+                      }, true, p => ({
+                        badge: isProviderWarning(p, apiKeys, providerVerifyStatus) && (
                           <Tip label={t('input.providerWarning')} position="bottom">
                             <AlertIcon className="h-3 w-3 shrink-0 text-[var(--warning)]" />
                           </Tip>
-                        )}
-                      </div>
-                      {isRuntimeBackedProvider(p) && (p.models.length === 0 || managedCodexModelCatalogStatus === 'error') && (
-                        <div className="px-3 py-2 text-xs text-[var(--ink-muted)]" role="status">
-                          {t(managedCodexModelCatalogStatus === 'loading' ? 'input.modelCatalogLoading'
-                            : managedCodexModelCatalogStatus === 'error' ? 'input.modelCatalogFailed' : 'input.modelCatalogEmpty')}
-                          {onRefreshProviders && managedCodexModelCatalogStatus !== 'loading' && (
-                            <button type="button" className="ml-2 text-[var(--accent)]" onClick={() => onRefreshProviders()}>
-                              {t('input.refreshModelCatalog')}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {p.models.map(model => {
-                        const isSelected = provider?.id === p.id && currentModelId === model.model;
-                        return (
-                          <button
-                            ref={isSelected ? selectedModelRowRef : undefined}
-                            data-selected-model-row={isSelected ? '' : undefined}
-                            key={model.model}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onBuiltinModelSelect) {
-                                onBuiltinModelSelect({ providerId: p.id, model: model.model });
-                              } else if (provider?.id !== p.id) {
-                                onProviderChange?.(p.id, model.model);
-                              } else {
-                                onModelChange?.(model.model);
-                              }
-                              setShowModelMenu(false);
-                            }}
-                            className={`flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
-                              isSelected
-                                ? 'bg-[var(--accent)]/10 font-medium text-[var(--accent)]'
-                                : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                            }`}
-                          >
-                            <span className="truncate">{model.modelName}</span>
-                            <ModalityBadges modalities={model.inputModalities} className="ml-2" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ));
+                        ),
+                        notice: isRuntimeBackedProvider(p) && (p.models.length === 0 || managedCodexModelCatalogStatus === 'error') && (
+                          <div className="px-2 py-2 text-xs text-[var(--ink-muted)]" role="status">
+                            {t(managedCodexModelCatalogStatus === 'loading' ? 'input.modelCatalogLoading'
+                              : managedCodexModelCatalogStatus === 'error' ? 'input.modelCatalogFailed' : 'input.modelCatalogEmpty')}
+                            {onRefreshProviders && managedCodexModelCatalogStatus !== 'loading' && (
+                              <button type="button" className="ml-2 text-[var(--accent)]" onClick={() => onRefreshProviders()}>
+                                {t('input.refreshModelCatalog')}
+                              </button>
+                            )}
+                          </div>
+                        ),
+                      }))} />
+                  );
                 })()}
-                </div>
-                <ModelSelectionScrollSync
-                  listRef={modelListRef}
-                  selectedRowRef={selectedModelRowRef}
-                  selectionKey={isExternalRuntime
-                    ? `${runtime ?? 'external'}:${selectedModel ?? 'default'}`
-                    : `${provider?.id ?? 'none'}:${currentModelId ?? 'none'}`}
-                  modelSource={isExternalRuntime ? runtimeModels : providers}
-                />
 
                 {/* #324 — fixed bottom row: 推理强度. Hidden when the surface has
                     no effort knob (unknown runtime). Hover or click

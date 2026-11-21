@@ -61,6 +61,12 @@ vi.mock('@/analytics', () => ({
   track: analyticsMocks.track,
 }));
 
+const modelProviders = [{
+  id: 'grouped', name: 'Model Provider', type: 'api', config: {},
+  primaryModel: 'example', models: [{ model: 'example', modelName: 'Example Model' }],
+}];
+vi.mock('@/hooks/useAvailableProviders', () => ({ useAvailableProviders: () => modelProviders }));
+vi.mock('@/hooks/useBrowserResourceReady', () => ({ useBrowserResourceReady: () => false }));
 vi.mock('@/hooks/useConfig', () => ({
   useConfig: () => ({
     projects: [
@@ -79,21 +85,13 @@ vi.mock('@/hooks/useConfig', () => ({
         isHidden: false,
       },
     ],
-    providers: [],
+    providers: modelProviders, config: {}, apiKeys: {}, providerVerifyStatus: {},
   }),
 }));
 
 vi.mock('@/hooks/useCloseLayer', () => ({ useCloseLayer: vi.fn() }));
 vi.mock('@/components/Toast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
-}));
-vi.mock('@/components/OverlayBackdrop', () => ({
-  default: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-}));
-vi.mock('./editors/TaskAdvancedConfigEditor', () => ({
-  TaskAdvancedConfigEditor: () => <div>高级配置</div>,
 }));
 vi.mock('@/components/task-center/NotificationConfigEditor', () => ({
   default: () => <div>任务通知配置</div>,
@@ -698,6 +696,24 @@ describe('Task Center UX refinements', () => {
     expect(screen.getByText('触发前检测')).toBeInTheDocument();
   });
 
+  it('clears a fixed task model only when the edited task is saved', async () => {
+    const props = { task: task({ status: 'stopped', executionMode: 'once', providerId: 'grouped', model: 'example' }),
+      onSaved: vi.fn(), onCancel: vi.fn(), onError: vi.fn() };
+    for (const action of ['取消', '保存']) {
+      const view = render(<TaskEditPanel {...props} />);
+      await screen.findByDisplayValue('# Task body');
+      fireEvent.click(screen.getByRole('button', { name: /Model Provider.*Example Model/ }));
+      expect(screen.getByRole('button', { current: true })).toHaveTextContent('Example Model');
+      fireEvent.click(screen.getByRole('button', { name: '跟随 Agent 工作区' }));
+      expect(taskApiMocks.taskUpdate).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: action }));
+      if (action === '取消') expect(taskApiMocks.taskUpdate).not.toHaveBeenCalled();
+      else await waitFor(() => expect(taskApiMocks.taskUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ clearProviderOverride: true })));
+      view.unmount();
+    }
+  });
+
   it('persists workspace reassignment as one pair and normalizes hidden once-only state', async () => {
     const onSaved = vi.fn();
     render(
@@ -820,11 +836,22 @@ describe('Task Center UX refinements', () => {
         target: { value: '# 目标\n整理本周交付。' },
       },
     );
+    fireEvent.click(screen.getByText('高级配置'));
+    fireEvent.click(screen.getByRole('button', { name: '跟随 Agent 工作区' }));
+    const taskName = screen.getByDisplayValue('整理交付清单');
+    fireEvent.mouseDown(taskName.closest('[data-overlay-backdrop]')!);
+    expect(screen.queryByRole('button', { name: 'Example Model' })).toBeNull();
+    expect(taskName).toHaveValue('整理交付清单');
+    fireEvent.click(screen.getByRole('button', { name: '跟随 Agent 工作区' }));
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('跟随 Agent');
+    fireEvent.click(screen.getByRole('button', { name: 'Example Model' }));
+    expect(taskApiMocks.taskCreateDirect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '创建任务' }));
 
     await waitFor(() =>
       expect(taskApiMocks.taskCreateDirect).toHaveBeenCalledWith(
         expect.objectContaining({
+          providerId: 'grouped', model: 'example',
           taskMdContent: '# 目标\n整理本周交付。',
         }),
       ),
