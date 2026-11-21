@@ -403,8 +403,8 @@ export function createExternalSessionEngine(): SessionEngine {
       };
     },
 
-    getLiveSessionOverlay(sessionId: string) {
-      const snapshot = getExternalLiveSessionSnapshot(sessionId);
+    getLiveSessionOverlay(sessionId, page) {
+      const snapshot = page ? getExternalLiveSessionSnapshot(sessionId, { page }) : getExternalLiveSessionSnapshot(sessionId);
       if (!snapshot) {
         return { isActive: false };
       }

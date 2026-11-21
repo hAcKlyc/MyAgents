@@ -2,7 +2,7 @@
 // Unified row design: dashes are always visible in the same position.
 // On hover, text labels slide in from the right — dashes stay anchored.
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { memo, useLayoutEffect, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Message } from '../../types/chat';
 import { parseLeadingSystemReminder } from '../../../shared/systemReminder';
 
@@ -46,30 +46,56 @@ function isNonUserQueryMessage(text: string): boolean {
   );
 }
 
-export default function QueryNavigator({
+function createQuerySelector() {
+  let previous: { id: string; text: string }[] = [];
+  return (messages: readonly Message[]) => {
+    const next = messages.flatMap(message => {
+      if (message.role !== 'user') return [];
+      const text = getVisibleQueryText(getQueryText(message));
+      return text.trim() && !isNonUserQueryMessage(text) ? [{ id: message.id, text }] : [];
+    });
+    if (previous.length !== next.length || next.some((row, i) =>
+      row.id !== previous[i].id || row.text !== previous[i].text)) previous = next;
+    return previous;
+  };
+}
+
+const QueryNavigator = memo(function QueryNavigator({
   messages,
   scrollContainerRef,
   pauseAutoScroll,
   onNavigateToQuery,
 }: QueryNavigatorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeIndexRaw, setActiveIndex] = useState(-1);
-  const listRef = useRef<HTMLDivElement>(null);
-  const activeItemRef = useRef<HTMLButtonElement>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 600, row: 34 });
 
-  // Extract real user queries (filter out system injections)
-  const queries = useMemo(() => {
-    return messages
-      .flatMap((msg) => {
-        if (msg.role !== 'user') return [];
-        const text = getVisibleQueryText(getQueryText(msg));
-        if (text.trim() === '' || isNonUserQueryMessage(text)) return [];
-        return [{ id: msg.id, text }];
-      });
-  }, [messages]);
+  const listRef = useRef<HTMLDivElement>(null);
+
+
+  const selectQueries = useMemo(() => createQuerySelector(), []);
+  const queries = useMemo(() => selectQueries(messages), [messages, selectQueries]);
 
   // Clamp activeIndex to valid range (handles session switch, query list shrink)
-  const activeIndex = activeIndexRaw >= 0 && activeIndexRaw < queries.length ? activeIndexRaw : -1;
+  const queryIndices = useMemo(() => new Map(queries.map((q, i) => [q.id, i])), [queries]);
+  const activeIndex = activeId ? queryIndices.get(activeId) ?? -1 : -1;
+  const focusedIndex = focusedId ? queryIndices.get(focusedId) ?? -1 : -1;
+  const hasRail = queries.length >= MIN_QUERIES;
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!hasRail || !list) return;
+    const measure = () => {
+      const row = list.querySelector('button')?.getBoundingClientRect().height || 34;
+      setViewport({ top: list.scrollTop, height: list.clientHeight || 600, row });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(list);
+    const first = list.querySelector('button');
+    if (first) observer?.observe(first);
+    return () => observer?.disconnect();
+  }, [hasRail, isExpanded]);
 
   // Track active query via IntersectionObserver.
   // With virtualization, elements mount/unmount as the user scrolls. A MutationObserver
@@ -83,8 +109,6 @@ export default function QueryNavigator({
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const idToQueryIndex = new Map<string, number>();
-    queries.forEach((q, i) => idToQueryIndex.set(q.id, i));
 
     const observedElements = new WeakSet<Element>();
     const visibleSet = visibleIndicesRef.current;
@@ -95,7 +119,7 @@ export default function QueryNavigator({
           const el = entry.target as HTMLElement;
           const messageId = el.getAttribute('data-message-id');
           if (!messageId) continue;
-          const qIndex = idToQueryIndex.get(messageId);
+          const qIndex = queryIndices.get(messageId);
           if (qIndex === undefined) continue;
 
           if (entry.isIntersecting) {
@@ -106,7 +130,7 @@ export default function QueryNavigator({
         }
 
         if (visibleSet.size > 0) {
-          setActiveIndex(Math.min(...visibleSet));
+          setActiveId(queries[Math.min(...visibleSet)].id);
         }
       },
       {
@@ -147,17 +171,17 @@ export default function QueryNavigator({
       intersectionObserver.disconnect();
       mutationObserver.disconnect();
     };
-  }, [queries, scrollContainerRef]);
+  }, [queries, queryIndices, scrollContainerRef]);
 
   // Auto-scroll the panel to keep active item visible
   useEffect(() => {
-    if (isExpanded && activeItemRef.current) {
-      activeItemRef.current.scrollIntoView({
-        block: 'nearest',
-        behavior: 'smooth',
-      });
+    const list = listRef.current;
+    if (!isExpanded || activeIndex < 0 || !list) return;
+    const top = activeIndex * viewport.row;
+    if (top < list.scrollTop || top + viewport.row > list.scrollTop + list.clientHeight) {
+      list.scrollTo({ top: Math.max(0, top - (list.clientHeight - viewport.row) / 2), behavior: 'smooth' });
     }
-  }, [isExpanded, activeIndex]);
+  }, [isExpanded, activeIndex, viewport.row]);
 
   // Navigate to a query — prefer virtuoso-aware navigation (handles virtualized messages)
   const handleQueryClick = useCallback(
@@ -185,6 +209,13 @@ export default function QueryNavigator({
 
   if (queries.length < MIN_QUERIES) return null;
 
+  const start = Math.min(queries.length - 1, Math.max(0, Math.floor(viewport.top / viewport.row) - 3));
+  const end = Math.min(queries.length, start + Math.ceil(viewport.height / viewport.row) + 7);
+  const mounted = Array.from({ length: end - start }, (_, offset) => start + offset);
+  if (focusedIndex >= 0 && (focusedIndex < start || focusedIndex >= end)) mounted.push(focusedIndex);
+  if (isExpanded && !mounted.includes(0)) mounted.unshift(0);
+  if (isExpanded && !mounted.includes(queries.length - 1)) mounted.push(queries.length - 1);
+  mounted.sort((a, b) => a - b);
   return (
     <div
       className="absolute right-4 top-0 bottom-0 z-30 hidden md:flex items-center pointer-events-none"
@@ -216,14 +247,35 @@ export default function QueryNavigator({
         {/* Scrollable list — each row: [text (conditional)] + [dash (always)] */}
         <div
           ref={listRef}
+          onScroll={event => {
+            const top = event.currentTarget.scrollTop;
+            setViewport(previous => previous.top === top ? previous : { ...previous, top });
+          }}
           className="overflow-y-auto max-h-[60vh] py-3"
         >
-          {queries.map((q, i) => {
+          <div className="relative" style={{ height: queries.length * viewport.row }}>
+          {mounted.map(i => {
+            const q = queries[i];
             const isActive = i === activeIndex;
             return (
               <button
                 key={q.id}
-                ref={isActive ? activeItemRef : undefined}
+                data-query-index={i}
+                style={{ position: 'absolute', top: i * viewport.row }}
+                onFocus={() => setFocusedId(q.id)}
+                onBlur={() => setFocusedId(null)}
+                onKeyDown={event => {
+                  if (event.key !== 'Tab' || !isExpanded) return;
+                  const next = i + (event.shiftKey ? -1 : 1);
+                  const list = listRef.current;
+                  if (!list || next < 0 || next >= queries.length || list.querySelector(`[data-query-index="${next}"]`)) return;
+                  event.preventDefault();
+                  list.scrollTop = next * viewport.row;
+                  setViewport(previous => ({ ...previous, top: list.scrollTop }));
+                  requestAnimationFrame(() => {
+                    if (list.contains(document.activeElement)) list.querySelector<HTMLButtonElement>(`[data-query-index="${next}"]`)?.focus();
+                  });
+                }}
                 type="button"
                 tabIndex={isExpanded ? 0 : -1}
                 onClick={() => isExpanded && handleQueryClick(q.id)}
@@ -255,6 +307,7 @@ export default function QueryNavigator({
               </button>
             );
           })}
+          </div>
         </div>
 
         {/* Bottom fade mask */}
@@ -267,4 +320,6 @@ export default function QueryNavigator({
       </div>
     </div>
   );
-}
+});
+
+export default QueryNavigator;

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyTranscriptOperation, createTranscriptProjection, transcriptMessages } from '../../shared/sessionTranscript';
 import { withFileLock } from '../utils/file-lock';
 import { TranscriptFile } from './file';
-import type { TranscriptBatch } from './codec';
+import { decodeTranscript, encodeTranscriptBatch, TRANSCRIPT_MAX_LINE_BYTES, type TranscriptBatch } from './codec';
 import { TranscriptWriter } from './writer';
 import { ProductTranscriptContent } from './content';
 
@@ -67,6 +67,26 @@ afterEach(async () => {
 });
 
 describe('V2 real file commit and replacement', () => {
+  it('retains the exact valid prefix at UTF-8, newline and maximum-record boundaries', async () => {
+    const { file, filePath } = await setup();
+    const header = (await readFile(filePath, 'utf8')).split('\n')[0] + '\n';
+    const batch = (content: string) => encodeTranscriptBatch({id:'b',mode:'delta',fromRevision:1,revision:1,
+      operations:[{kind:'message-create',message:{id:'a',role:'assistant',timestamp:'t',content}}]});
+    const empty = batch('');
+    const beforeChar = Buffer.byteLength(header) + empty.indexOf('"content":"') + '"content":"'.length;
+    const multibyte = batch('a'.repeat(65535 - beforeChar) + '😀中文'.repeat(5000));
+    const boundary = batch('a'.repeat(65536 - Buffer.byteLength(header + empty)));
+    expect(Buffer.byteLength(header + boundary)).toBe(65536);
+    const largest = batch('a'.repeat(TRANSCRIPT_MAX_LINE_BYTES - Buffer.byteLength(empty)));
+    for (const suffix of [multibyte,boundary,boundary.slice(0,-1),multibyte + 'bad checksum\n',largest]) {
+      const input = header + suffix;
+      await writeFile(filePath,input);
+      expect(await file.read()).toEqual(decodeTranscript(input,'session-test'));
+    }
+    await writeFile(filePath, header+'x'.repeat(TRANSCRIPT_MAX_LINE_BYTES+1));
+    await expect(file.read()).rejects.toMatchObject({reason:'invalid-history'});
+  });
+
   it('persists coalesced appends and reads them back with the original revision span', async () => {
     const { file, filePath } = await setup();
     const source = await file.read();

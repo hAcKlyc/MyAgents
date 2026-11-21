@@ -1,4 +1,5 @@
 {
+  "retryOlderPage": "重新加载更早的消息",
   "transcriptSave": {
     "warning": "对话记录暂时无法保存，不影响继续使用；未保存内容可能在关闭后丢失。",
     "recovered": "对话记录保存已恢复。"

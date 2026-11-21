@@ -29,7 +29,7 @@ type Recorded = {
   followOutput?: false;
   scrollerRef?: (el: HTMLElement | null) => void;
   totalListHeightChanged?: (height: number) => void;
-  startReached?: () => void;
+  atTopStateChange?: (atTop: boolean) => void;
   skipAnimationFrameInResizeObserver?: boolean;
   itemSize?: SizeFunction;
   itemsRendered?: (items: ListItem<MessageType>[]) => void;
@@ -46,7 +46,7 @@ vi.mock('react-virtuoso', () => ({
     followOutput?: false;
     scrollerRef?: (el: HTMLElement | null) => void;
     totalListHeightChanged?: (height: number) => void;
-    startReached?: () => void;
+    atTopStateChange?: (atTop: boolean) => void;
     skipAnimationFrameInResizeObserver?: boolean;
     itemSize?: SizeFunction;
     itemsRendered?: (items: ListItem<MessageType>[]) => void;
@@ -66,7 +66,7 @@ vi.mock('react-virtuoso', () => ({
       followOutput: props.followOutput,
       scrollerRef: props.scrollerRef,
       totalListHeightChanged: props.totalListHeightChanged,
-      startReached: props.startReached,
+      atTopStateChange: props.atTopStateChange,
       skipAnimationFrameInResizeObserver:
         props.skipAnimationFrameInResizeObserver,
       itemSize: props.itemSize,
@@ -197,6 +197,18 @@ describe('MessageList — freeze data while inactive (Virtuoso cache-poisoning r
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('offers an explicit local retry only while the failed page boundary is visible', () => {
+    const load = vi.fn();
+    renderList({ messages: [msg('latest', 'retained text')], onLoadOlder: load, olderPageFailed: true });
+    act(() => lastData().atTopStateChange?.(true));
+    expect(load).not.toHaveBeenCalled();
+    const retry = screen.getByRole('button', { name: /retry|重试|重新/i });
+    fireEvent.click(retry);
+    expect(load).toHaveBeenCalledOnce();
+    act(() => lastData().atTopStateChange?.(false));
+    expect(retry).not.toBeInTheDocument();
   });
 
   it('publishes committed rows only when presentable, while still allowing recovery to settle', () => {
@@ -619,7 +631,7 @@ describe('MessageList — freeze data while inactive (Virtuoso cache-poisoning r
     expect(handleAtBottomChange).toHaveBeenCalledWith(true);
     expect(followProps.followEnabledRef.current).toBe(true);
     expect(unfocused.followOutput).toBe(false);
-    unfocused.startReached?.();
+    act(() => unfocused.atTopStateChange?.(true));
     expect(onLoadOlder).toHaveBeenCalledTimes(1);
     expect(scrollToBottom).not.toHaveBeenCalled();
 

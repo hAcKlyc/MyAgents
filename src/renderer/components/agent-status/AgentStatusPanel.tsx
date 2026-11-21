@@ -10,7 +10,7 @@ import {
   XCircleIcon,
   StopCircleIcon,
 } from '@/components/icons';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Message } from '@/types/chat';
@@ -46,7 +46,22 @@ const AgentStatusPanel = memo(function AgentStatusPanel({ containerRef, onJumpTo
   // This panel still re-renders per commit via the context subscription; its
   // derived DOM only changes when todos/subagents do (cost absorbed by React).
   const tab = useTabStateOptional();
-  const messages = tab?.messages ?? EMPTY_MESSAGES;
+  const history = tab?.historyMessages ?? EMPTY_MESSAGES;
+  const active = tab?.streamingMessage;
+  // Panel derivation reads tool blocks and persisted background notifications.
+  // Ordinary assistant text has no status contribution, including after tools.
+  const [toolRow, setToolRow] = useState<Message | null>(null);
+  const tools = Array.isArray(active?.content) ? active.content.filter(block => block.type === 'tool_use') : [];
+  if (!active || !tools.length) {
+    if (toolRow) setToolRow(null);
+  } else {
+    const previous = toolRow?.content;
+    if (toolRow?.id !== active.id || !Array.isArray(previous) || previous.length !== tools.length ||
+        tools.some((tool, i) => previous[i] !== tool)) {
+      setToolRow({ ...active, content: tools });
+    }
+  }
+  const messages = useMemo(() => toolRow ? [...history, toolRow] : history, [history, toolRow]);
   const turnIsLive = tab?.sessionState === 'starting'
     || tab?.sessionState === 'running'
     || tab?.sessionState === 'stopping';
@@ -58,7 +73,7 @@ const AgentStatusPanel = memo(function AgentStatusPanel({ containerRef, onJumpTo
     });
     return () => cancelAnimationFrame(raf);
   }, [tab?.isSessionLoading, tab?.sessionId, turnIsLive]);
-  const tail = messages.at(-1);
+  const tail = active ?? history.at(-1);
   const lifecycleMessageId = tab?.streamingMessage?.id
     ?? (!turnIsLive
       && !tab?.isSessionLoading

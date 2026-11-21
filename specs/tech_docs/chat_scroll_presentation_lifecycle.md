@@ -54,6 +54,10 @@ App 的 Tab memo comparator 只让 active Chat 响应 presentation 对象变化�
 - 若用户正在阅读历史，保存该 Session 最近一次可信的 `{messageId, offsetFromViewportTop}`。可信 anchor 在 admitted viewport 的 scroll / atBottom(false) 上持续更新，因此可见失焦期间的 hover-scroll 自然覆盖旧位置。
 - 创建单调 transaction id 并开启 recovery fence。重复 unavailable 信号不覆盖第一次捕获的用户意图。
 
+当阅读线穿过长回复时，快照还会记录当前 block、可验证的 Markdown 源位置，以及一个字符相对视口的偏移。字符节点使用弱引用。重新挂载后按代码行或段内文本核实位置，逐级退到可定位的段落、块、消息。宽度变化、前插历史与恢复都由同一个控制器调整偏移。用户滚轮、主动跳转和工具展开仍优先于待完成的校正。
+
+V2 旧页在用户主动向上滚入顶部一屏时可提前读取。虚拟列表的 overscan 也会提前挂载首行，采用页面因此使用实际触顶通知。TabProvider 只持有一个请求，并持续把其间的事件交给 TranscriptPage。采用时才捕获锚点、补齐事件与工具引用、前插可见行。隐藏、恢复、切换会话、断线与原生传输代次变化均会取消候选。推测读取失败后仍可触顶按需获取，按需失败的重试入口位于列表顶部。
+
 ### admission false → true
 
 - Session identity 已改变：丢弃旧事务，由新 Session 的既有 initial pin owner 接管。

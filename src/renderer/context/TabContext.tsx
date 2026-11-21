@@ -59,6 +59,7 @@ export interface SystemNotice {
 }
 
 export interface LoadOlderMessagesOptions {
+    action?: 'prefetch' | 'cancel';
     beforePrepend?: (visibleFreshCount: number) => void;
 }
 
@@ -82,6 +83,8 @@ export interface TabState {
     // Pagination (session-load-time): initial load pulls the last N messages;
     // older pages load lazily as the user scrolls up.
     firstItemIndex: number;        // Absolute index of the first visible chat row in Virtuoso
+    historyTrace?: string | null;
+    olderPageFailed: boolean;
     hasMoreBefore: boolean;        // True if there are older messages available on disk
     isLoading: boolean;
     /** Live active-query time, excluding unresolved human interaction waits. */
@@ -259,6 +262,7 @@ const defaultContextValue: TabContextValue = {
     historyMessages: [],
     streamingMessage: null,
     firstItemIndex: 0,
+    olderPageFailed: false,
     hasMoreBefore: false,
     isLoading: false,
     getQueryElapsedSeconds: () => 0,

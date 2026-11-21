@@ -1,3 +1,4 @@
+import { perfMark } from '@/utils/perfMark';
 import { newDesktopSession } from '@/api/sessionHandoverClient';
 import { releaseTabSession } from '@/api/tauriClient';
 import { transitionDesktopSession } from './desktopSessionTransition';
@@ -815,6 +816,7 @@ interface TabApiCallOptions {
    * a few more milliseconds.
    */
   signal?: AbortSignal;
+  historyTrace?: string;
 }
 
 function tabCorrelationHeaders(
@@ -869,16 +871,25 @@ function createApiGetJson(
 ) {
   return async <T,>(path: string, opts?: TabApiCallOptions): Promise<T> => {
     const sessionId = sessionIdRef.current;
+    const start = opts?.historyTrace ? performance.now() : 0;
     const response = await sessionSidecarFetch(
       sessionId ?? '',
       { type: 'tab', id: tabId },
       path,
       {
-        headers: tabCorrelationHeaders(tabId, sessionId),
+        headers: {
+          ...tabCorrelationHeaders(tabId, sessionId),
+          ...(opts?.historyTrace && { 'X-MyAgents-Request-Id': opts.historyTrace }),
+        },
         signal: opts?.signal,
       },
     );
-    return handleApiResponse<T>(response);
+    if (!opts?.historyTrace) return handleApiResponse<T>(response);
+    const received = performance.now();
+    const data = await handleApiResponse<T>(response);
+    perfMark('history_response_decoded', { tabId, requestId: opts.historyTrace,
+      transportMs: received - start, decodeMs: performance.now() - received });
+    return data;
   };
 }
 
@@ -1042,7 +1053,6 @@ export default function TabProvider({
   // Publish each event's projection before React batches its rendering. A
   // second SSE event/RAF callback in the same batch must see the first one.
   const transcriptSessionIdRef = useRef<string | null>(null);
-  const transcriptPageRef = useRef<TranscriptPage | null>(null);
   const historyMessagesRef = useRef<Message[]>(historyMessages);
   const setHistoryMessages = useCallback(
     (action: React.SetStateAction<Message[]>) => {
@@ -1189,6 +1199,8 @@ export default function TabProvider({
       ? persistedRestoreLifecycle.error
       : null;
   const sessionRestoreMode = persistedRestoreLifecycle.mode;
+  const historyTrace = persistedRestoreLifecycle.phase === 'ready'
+    ? `${tabId}-${persistedRestoreLifecycle.restoreToken}` : null;
   // Pagination state for large sessions. firstItemIndex is Virtuoso's
   // mechanism for maintaining visible scroll position when items are
   // prepended — on prepend we decrement it by the number of added items.
@@ -1201,7 +1213,25 @@ export default function TabProvider({
   const [hasMoreBefore, setHasMoreBefore] = useState(false);
   const hasMoreBeforeRef = useRef(false);
   hasMoreBeforeRef.current = hasMoreBefore;
-  const loadingOlderRef = useRef(false);
+  const [olderPageFailed, setOlderPageFailed] = useState(false);
+  const olderRequest = useRef<{
+    before: string;
+    sessionId: string;
+    token: number;
+    generation: number;
+    controller: AbortController;
+    adopting: boolean;
+    page: TranscriptPage | null;
+    response: Promise<{ success: boolean; session?: {
+      messages: WireSessionMessage[]; snapshotRevision?: number; hasMoreBefore?: boolean;
+    }}>;
+  } | null>(null);
+  const discardOlderRequest = useCallback(() => {
+    olderRequest.current?.controller.abort();
+    olderRequest.current = null;
+    setOlderPageFailed(false);
+  }, []);
+  useEffect(() => discardOlderRequest, [discardOlderRequest]);
   const [sessionState, setSessionState] = useState<SessionState>('idle');
   const [sessionRuntime, setSessionRuntime] = useState<string | null>(null);
   const [sessionRuntimeSource, setSessionRuntimeSource] =
@@ -1301,6 +1331,12 @@ export default function TabProvider({
   const [lastTerminalReason, setLastTerminalReason] =
     useState<TerminalReason | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const connectedRef = useRef(false);
+  const updateConnection = useCallback((connected: boolean) => {
+    connectedRef.current = connected;
+    if (!connected) discardOlderRequest();
+    setIsConnected(connected);
+  }, [discardOlderRequest]);
   const [pendingPermissions, setPendingPermissions] = useState<
     PermissionRequest[]
   >([]);
@@ -1583,8 +1619,8 @@ export default function TabProvider({
     setFirstItemIndex(PAGINATION_START_INDEX);
     setHasMoreBefore(false);
     hasMoreBeforeRef.current = false;
-    loadingOlderRef.current = false;
-  }, []);
+    discardOlderRequest();
+  }, [discardOlderRequest]);
 
   const clearNewConversationProjection = useCallback(() => {
     abortActiveRestoreRequest();
@@ -1597,7 +1633,6 @@ export default function TabProvider({
 
     // Clear only after the replacement has been admitted and prepared.
     transcriptSessionIdRef.current = null;
-    transcriptPageRef.current = null;
     setPendingDesktopMessages([]);
     setHistoryMessages([]);
     resetPaginationState();
@@ -1984,22 +2019,26 @@ export default function TabProvider({
   // switch replaces the id, so it correctly no-ops without losing in-stream text.
   // Keep the v0.2.14 invariant: do NOT gate on isStreamingRef (idle can race ahead of
   // message-complete and clear it while text is still pending → would silently drop it).
+  const persistedIds = useRef(new WeakMap<readonly Message[], Set<string>>());
   const commitText = useCallback(
     (text: string, expectedId: string | null) => {
       if (!text) return;
       const target = pendingTextTargetRef.current;
       if (target) {
-        updateDisplayedMessages((message) =>
-          message.id === target.messageId
-            ? applyTranscriptDisplayOperation(message, {
-                kind: 'text-append',
-                ...target,
-                field: 'text',
-                offset: 0,
-                text,
-              })
-            : message,
-        );
+        const append = (message: Message) => message.id === target.messageId
+          ? applyTranscriptDisplayOperation(message, { kind: 'text-append', ...target, field: 'text', offset: 0, text })
+          : message;
+        const rows = historyMessagesRef.current;
+        let ids = persistedIds.current.get(rows);
+        if (!ids) {
+          ids = new Set(rows.map(row => row.id));
+          persistedIds.current.set(rows, ids);
+        }
+        if (streamingMessageRef.current?.id === target.messageId && !ids.has(target.messageId)) {
+          setStreamingMessage(previous => previous ? append(previous) : previous);
+        } else {
+          updateDisplayedMessages(append);
+        }
         return;
       }
       setStreamingMessage((prev) => {
@@ -5430,13 +5469,15 @@ export default function TabProvider({
       const eventSessionId = metadata.sessionId;
       const liveRevision = metadata.liveRevision;
       if (eventSessionId && liveRevision !== undefined) {
-        transcriptPageRef.current?.observe({
+        const page = olderRequest.current?.page;
+        page?.observe({
           eventName,
           data,
           sessionId: eventSessionId,
           liveRevision,
           connectionGeneration: metadata.connectionGeneration,
         });
+        if (page?.isOverflowed && !olderRequest.current?.adopting) discardOlderRequest();
       }
       const restore = persistedRestoreLifecycleRef.current;
       if (restore.phase === 'failed') {
@@ -5538,7 +5579,7 @@ export default function TabProvider({
         );
       }
     },
-    [applySseEvent, beginPersistedRestore],
+    [applySseEvent, beginPersistedRestore, discardOlderRequest],
   );
 
   // Connect serializer: each caller's task chains onto the *previous*
@@ -5570,12 +5611,12 @@ export default function TabProvider({
       const oldSse = sseRef.current;
       sseRef.current = null;
       attachedSseSessionIdRef.current = null;
-      setIsConnected(false);
+      updateConnection(false);
       resetTabServerUrlCache(tabId);
       await oldSse.disconnect();
     } else {
       attachedSseSessionIdRef.current = null;
-      setIsConnected(false);
+      updateConnection(false);
       if (sseRef.current) {
         const oldSse = sseRef.current;
         sseRef.current = null;
@@ -5592,7 +5633,7 @@ export default function TabProvider({
         status === 'reconnecting' ||
         status === 'failed'
       ) {
-        setIsConnected(false);
+        updateConnection(false);
         if (status !== 'reconnecting') {
           setIsLoading(false);
         }
@@ -5605,6 +5646,9 @@ export default function TabProvider({
         const targetSessionId = currentSessionIdRef.current;
         const restore = persistedRestoreLifecycleRef.current;
         const connectionGeneration = sse.getConnectionGeneration();
+        if (olderRequest.current && olderRequest.current.generation !== connectionGeneration) {
+          discardOlderRequest();
+        }
         if (
           targetSessionId &&
           restore.phase === 'restoring' &&
@@ -5622,7 +5666,7 @@ export default function TabProvider({
             restore.mode,
           );
         }
-        setIsConnected(true);
+        updateConnection(true);
       }
     });
     sseRef.current = sse;
@@ -5642,12 +5686,12 @@ export default function TabProvider({
       if (sseRef.current === sse) {
         sseRef.current = null;
         attachedSseSessionIdRef.current = null;
-        setIsConnected(false);
+        updateConnection(false);
       }
       console.error(`[TabProvider ${tabId}] SSE connect failed:`, error);
       throw error;
     }
-  }, [tabId, handleSseEvent, beginPersistedRestore]);
+  }, [tabId, handleSseEvent, beginPersistedRestore, updateConnection, discardOlderRequest]);
 
   // Public connectSse — every caller chains its own task onto the
   // previous task's tail, giving true serial execution. Without chaining,
@@ -5726,7 +5770,7 @@ export default function TabProvider({
           `[TabProvider ${tabId}] SessionId changed from ${connectedSessionId ?? 'none'} to ${sessionId}, reconnecting SSE`,
         );
         attachedSseSessionIdRef.current = null;
-        setIsConnected(false);
+        updateConnection(false);
         resetTabServerUrlCache(tabId);
         const oldSse = sseRef.current;
         sseRef.current = null;
@@ -5754,7 +5798,7 @@ export default function TabProvider({
     return () => {
       cancelled = true;
     };
-  }, [agentDir, sessionId, tabId, connectSse, sidecarConfigDisposition]);
+  }, [agentDir, sessionId, tabId, connectSse, sidecarConfigDisposition, updateConnection]);
 
   // Cleanup on unmount - disconnect SSE and clear pending timers
   // NOTE: Sidecar lifecycle is now managed by App.tsx performCloseTab(),
@@ -5793,7 +5837,7 @@ export default function TabProvider({
           // but the live transport does not. Reflect that process epoch
           // boundary until the first envelope from the replacement marks
           // the connection live again; Tab config hydration keys off it.
-          setIsConnected(false);
+          updateConnection(false);
           setMcpEffectiveSnapshot(null);
           resetTabServerUrlCache(tabId);
           const restore = persistedRestoreLifecycleRef.current;
@@ -5815,7 +5859,7 @@ export default function TabProvider({
       ac.signal,
     );
     return () => ac.abort();
-  }, [tabId, beginPersistedRestore]);
+  }, [tabId, beginPersistedRestore, updateConnection]);
 
   // Send message with optional images, permission mode, and model
   // onSubmitted joins the composer handoff to the immediate local projection.
@@ -6276,6 +6320,7 @@ export default function TabProvider({
         }
       }
 
+      discardOlderRequest();
       abortActiveRestoreRequest();
       const controller = new AbortController();
       const restoreRequest = {
@@ -6332,6 +6377,8 @@ export default function TabProvider({
         console.log(
           `[TabProvider ${tabId}] Restoring persisted session: ${targetSessionId}`,
         );
+        const historyTrace = `${tabId}-${restoreToken}`;
+        perfMark('history_page_requested', { tabId, sessionId: targetSessionId, requestId: historyTrace });
         const response = await apiGetJson<{
           success: boolean;
           session?: SessionMetadata & {
@@ -6355,8 +6402,8 @@ export default function TabProvider({
             hasMoreBefore?: boolean;
           };
         }>(
-          `/sessions/${encodeURIComponent(targetSessionId)}?limit=${INITIAL_PAGE_SIZE}${fromQuery}`,
-          { signal: controller.signal },
+          `/sessions/${encodeURIComponent(targetSessionId)}?limit=${INITIAL_PAGE_SIZE}${fromQuery}&historyTrace=${encodeURIComponent(historyTrace)}`,
+          { signal: controller.signal, historyTrace },
         );
 
         if (!ownsCurrentRestore()) return false;
@@ -6420,7 +6467,7 @@ export default function TabProvider({
           const hasMoreBefore = response.session.hasMoreBefore ?? false;
           setHasMoreBefore(hasMoreBefore);
           hasMoreBeforeRef.current = hasMoreBefore;
-          loadingOlderRef.current = false;
+          discardOlderRequest();
         } else if (isLiveRecovery) {
           const reconciled = reconcileLiveRecoveryHistory(
             historyMessagesRef.current,
@@ -6432,7 +6479,7 @@ export default function TabProvider({
             const hasMoreBefore = response.session.hasMoreBefore ?? false;
             setHasMoreBefore(hasMoreBefore);
             hasMoreBeforeRef.current = hasMoreBefore;
-            loadingOlderRef.current = false;
+            discardOlderRequest();
           }
         } else {
           setAgentPlanTodos(null);
@@ -6444,7 +6491,7 @@ export default function TabProvider({
           const hasMoreBefore = response.session.hasMoreBefore ?? false;
           setHasMoreBefore(hasMoreBefore);
           hasMoreBeforeRef.current = hasMoreBefore;
-          loadingOlderRef.current = false;
+          discardOlderRequest();
         }
 
         seenIdsRef.current.clear();
@@ -6598,122 +6645,122 @@ export default function TabProvider({
   );
   // Fetch the page of messages immediately older than the one currently at
   // the top of the history. Called by MessageList when Virtuoso's
-  // startReached fires. Safe to call repeatedly — the loadingOlderRef guard
+  // viewport approaches or reaches the top. Safe to call repeatedly — the current request
   // coalesces concurrent triggers, and hasMoreBefore short-circuits once
   // the earliest message on disk is loaded.
   const loadOlderMessages = useCallback(
     async (options?: LoadOlderMessagesOptions): Promise<void> => {
-      if (loadingOlderRef.current || !hasMoreBeforeRef.current) return;
+      if (options?.action === 'cancel') {
+        discardOlderRequest();
+        return;
+      }
       const sid = currentSessionIdRef.current;
-      if (!sid) return;
       const oldest = historyMessagesRef.current[0];
-      if (!oldest) return;
-
-      loadingOlderRef.current = true;
-      const restoreToken = liveRevisionFenceRef.current.restoreToken;
-      const connectionGeneration =
-        sseRef.current?.getConnectionGeneration() ?? 0;
-      const page =
-        transcriptSessionIdRef.current === sid
-          ? new TranscriptPage(sid, restoreToken, connectionGeneration)
-          : null;
-      transcriptPageRef.current = page;
+      if (!sid || !oldest || !hasMoreBeforeRef.current || liveRevisionFenceRef.current.restoring) return;
+      const speculative = options?.action === 'prefetch';
+      const v2 = transcriptSessionIdRef.current === sid;
+      if ((speculative && !v2) || (v2 && !connectedRef.current)) return;
+      const token = liveRevisionFenceRef.current.restoreToken;
+      const generation = sseRef.current?.getConnectionGeneration() ?? 0;
+      let request = olderRequest.current;
+      if (request && (request.before !== oldest.id || request.sessionId !== sid ||
+          request.token !== token || request.generation !== generation)) {
+        discardOlderRequest();
+        request = null;
+      }
+      if (request && speculative) return;
+      if (!request) {
+        const controller = new AbortController();
+        const page = v2 ? new TranscriptPage(sid, token, generation) : null;
+        request = { before: oldest.id, sessionId: sid, token, generation, controller, page, adopting: false,
+          response: apiGetJson(`/sessions/${encodeURIComponent(sid)}?limit=${OLDER_PAGE_SIZE}&before=${encodeURIComponent(oldest.id)}`,
+            { signal: controller.signal }) };
+        olderRequest.current = request;
+      }
+      const current = () => (!v2 || connectedRef.current) && olderRequest.current === request && currentSessionIdRef.current === sid &&
+        historyMessagesRef.current[0]?.id === oldest.id && liveRevisionFenceRef.current.restoreToken === token &&
+        !liveRevisionFenceRef.current.restoring && (sseRef.current?.getConnectionGeneration() ?? 0) === generation;
+      if (speculative) {
+        try {
+          if (!(await request.response).success && !request.adopting && current()) discardOlderRequest();
+        } catch {
+          if (!request.adopting && current()) discardOlderRequest();
+        }
+        return;
+      }
+      if (request.adopting) return;
+      request.adopting = true;
+      setOlderPageFailed(false);
       try {
-        const resp = await apiGetJson<{
-          success: boolean;
-          session?: {
-            messages: WireSessionMessage[];
-            snapshotRevision?: number;
-            hasMoreBefore?: boolean;
-          };
-        }>(
-          `/sessions/${encodeURIComponent(sid)}?limit=${OLDER_PAGE_SIZE}&before=${encodeURIComponent(oldest.id)}`,
-        );
-
-        // Session may have switched while the request was in flight.
-        if (
-          currentSessionIdRef.current !== sid ||
-          liveRevisionFenceRef.current.restoreToken !== restoreToken ||
-          (sseRef.current?.getConnectionGeneration() ?? 0) !==
-            connectionGeneration
-        )
-          return;
-        if (!resp.success || !resp.session) return;
-
+        const { page } = request;
+        const resp = await request.response;
+        if (!current()) return;
+        if (!resp.success || !resp.session) throw new Error('Older page unavailable');
         const snapshotRows = resp.session.messages.map(
           wireSessionMessageToMessage,
         );
-        const older = page
-          ? await page.complete(
-              snapshotRows,
-              resp.session.snapshotRevision ?? 0,
-              async (ref) => {
-                const baseUrl = await getDataPlaneBaseUrl(tabId, sid);
-                return fetchJsonLargeValueRef(baseUrl, ref);
-              },
-            )
-          : snapshotRows;
-        if (
-          !older ||
-          currentSessionIdRef.current !== sid ||
-          liveRevisionFenceRef.current.restoreToken !== restoreToken ||
-          (sseRef.current?.getConnectionGeneration() ?? 0) !==
-            connectionGeneration
-        )
-          return;
+        const adopt = (older: Message[]) => {
+          if (!current()) return;
+          if (older.length === 0 && resp.session?.hasMoreBefore) {
+            // Every row in the candidate was removed during replay. Its cursor
+            // cannot advance. A user retry obtains the new authoritative page.
+            setOlderPageFailed(true);
+            return;
+          }
 
-        if (older.length === 0) {
-          setHasMoreBefore(false);
-          hasMoreBeforeRef.current = false;
-          return;
-        }
+          const knownBeforeCommit = new Set(
+            historyMessagesRef.current.map((m) => m.id),
+          );
+          const freshBeforeCommit = older.filter(
+            (m) => !knownBeforeCommit.has(m.id),
+          );
+          if (freshBeforeCommit.length === 0) {
+            const nextHasMore = resp.session?.hasMoreBefore ?? false;
+            setHasMoreBefore(nextHasMore);
+            hasMoreBeforeRef.current = nextHasMore;
+            return;
+          }
+          options?.beforePrepend?.(
+            countVisibleChatTimelineRows(freshBeforeCommit),
+          );
 
-        const knownBeforeCommit = new Set(
-          historyMessagesRef.current.map((m) => m.id),
-        );
-        const freshBeforeCommit = older.filter(
-          (m) => !knownBeforeCommit.has(m.id),
-        );
-        if (freshBeforeCommit.length === 0) {
-          const nextHasMore = resp.session.hasMoreBefore ?? false;
+          // Prepend raw history in a single React commit, but decrement
+          // firstItemIndex only by rows that enter Virtuoso. Hidden persisted
+          // task notifications do not occupy the visual index space.
+          setHistoryMessages((prev) => {
+            const known = new Set(prev.map((m) => m.id));
+            const fresh = older.filter((m) => !known.has(m.id));
+            if (fresh.length === 0) return prev;
+            for (const m of fresh) seenIdsRef.current.add(m.id);
+            setFirstItemIndex((idx) =>
+              shiftFirstItemIndexForVisiblePrepend(idx, fresh),
+            );
+            return [...fresh, ...prev];
+          });
+          const nextHasMore = resp.session?.hasMoreBefore ?? false;
           setHasMoreBefore(nextHasMore);
           hasMoreBeforeRef.current = nextHasMore;
-          return;
+        };
+        if (page) {
+          const rows = await page.complete(snapshotRows, resp.session.snapshotRevision ?? 0, async ref => {
+            const baseUrl = await getDataPlaneBaseUrl(tabId, sid);
+            return fetchJsonLargeValueRef(baseUrl, ref);
+          }, adopt);
+          if (!rows && current()) setOlderPageFailed(true);
+        } else {
+          adopt(snapshotRows);
         }
-        options?.beforePrepend?.(
-          countVisibleChatTimelineRows(freshBeforeCommit),
-        );
-
-        // Prepend raw history in a single React commit, but decrement
-        // firstItemIndex only by rows that enter Virtuoso. Hidden persisted
-        // task notifications do not occupy the visual index space.
-        setHistoryMessages((prev) => {
-          const known = new Set(prev.map((m) => m.id));
-          const fresh = older.filter((m) => !known.has(m.id));
-          if (fresh.length === 0) return prev;
-          for (const m of fresh) seenIdsRef.current.add(m.id);
-          setFirstItemIndex((idx) =>
-            shiftFirstItemIndexForVisiblePrepend(idx, fresh),
-          );
-          return [...fresh, ...prev];
-        });
-        const nextHasMore = resp.session.hasMoreBefore ?? false;
-        setHasMoreBefore(nextHasMore);
-        hasMoreBeforeRef.current = nextHasMore;
       } catch (err) {
-        console.warn(`[TabProvider ${tabId}] loadOlderMessages failed:`, err);
+        if (current()) {
+          setOlderPageFailed(true);
+          console.warn(`[TabProvider ${tabId}] loadOlderMessages failed:`, err);
+        }
       } finally {
-        if (transcriptPageRef.current === page)
-          transcriptPageRef.current = null;
-        if (
-          liveRevisionFenceRef.current.restoreToken === restoreToken &&
-          currentSessionIdRef.current === sid
-        )
-        loadingOlderRef.current = false;
+        if (olderRequest.current === request) {
+          olderRequest.current = null;
+        }
       }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apiGetJson is stable
-    [tabId],
+    }, [apiGetJson, discardOlderRequest, setHistoryMessages, tabId],
   );
 
   // Auto-refresh session when a cron task completes and writes data to the session
@@ -7227,6 +7274,8 @@ export default function TabProvider({
       historyMessages: displayedHistoryMessages,
       streamingMessage,
       firstItemIndex,
+      historyTrace,
+      olderPageFailed,
       hasMoreBefore,
       isLoading,
       getQueryElapsedSeconds,
@@ -7289,6 +7338,8 @@ export default function TabProvider({
       displayedHistoryMessages,
       streamingMessage,
       firstItemIndex,
+      historyTrace,
+      olderPageFailed,
       hasMoreBefore,
       isLoading,
       isSessionLoading,

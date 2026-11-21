@@ -89,9 +89,13 @@ interface MessageListProps {
   // prepended items by the absolute index of data[0]. Default 0 = no pagination.
   firstItemIndex?: number;
   heightEstimateSeed?: number[];
+  visibleHistory?: readonly MessageType[];
   layoutByMessageId?: ReadonlyMap<string, RowLayoutContract>;
   /** Fires when Virtuoso reaches the top — time to load an older page. */
   onLoadOlder?: () => void;
+  olderPageFailed?: boolean;
+  onPrefetchOlder?: () => void;
+  onCancelOlder?: () => void;
   virtuosoRef: React.RefObject<VirtuosoHandle | null>;
   onScrollerRef?: (el: HTMLElement | Window | null) => void;
   followEnabledRef: React.MutableRefObject<boolean | 'force'>;
@@ -423,8 +427,12 @@ const MessageList = memo(function MessageList({
   isViewportRecoveryFenced = false,
   firstItemIndex,
   heightEstimateSeed,
+  visibleHistory,
   layoutByMessageId,
   onLoadOlder,
+  olderPageFailed,
+  onPrefetchOlder,
+  onCancelOlder,
   virtuosoRef,
   onScrollerRef,
   followEnabledRef,
@@ -691,10 +699,34 @@ const MessageList = memo(function MessageList({
   // Pagination guard: don't load an older page off stale range math while hidden —
   // Virtuoso can fire startReached from corrupted offsets when our subtree's layout
   // was skipped (content-visibility:hidden), and a prepend in that state compounds the desync.
+  const [atPageStart, setAtPageStart] = useState(false);
   const guardedLoadOlder = useCallback(() => {
     if (!canLayoutVirtualList || isViewportRecoveryFenced) return;
     onLoadOlder?.();
   }, [onLoadOlder, canLayoutVirtualList, isViewportRecoveryFenced]);
+
+  const handleAtPageStart = useCallback((atTop: boolean) => {
+    setAtPageStart(atTop);
+    if (atTop && !olderPageFailed) guardedLoadOlder();
+  }, [olderPageFailed, guardedLoadOlder]);
+
+  useEffect(() => {
+    if (!canLayoutVirtualList || isViewportRecoveryFenced) {
+      onCancelOlder?.();
+      return;
+    }
+    if (!debugScroller || !onPrefetchOlder) return;
+    let previousTop = debugScroller.scrollTop;
+    const onScroll = () => {
+      const top = debugScroller.scrollTop;
+      if (top < previousTop && top > 0 && top <= debugScroller.clientHeight && followEnabledRef.current === false) {
+        onPrefetchOlder();
+      }
+      previousTop = top;
+    };
+    debugScroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => debugScroller.removeEventListener('scroll', onScroll);
+  }, [canLayoutVirtualList, isViewportRecoveryFenced, onCancelOlder, onPrefetchOlder, debugScroller, followEnabledRef]);
 
   const handleScrollerRef = useCallback(
     (el: HTMLElement | Window | null) => {
@@ -706,7 +738,26 @@ const MessageList = memo(function MessageList({
   );
 
   const indexCitations = useMemo(() => createWebSearchCitationIndex(), []);
-  const citationSources = useMemo(() => indexCitations(messages), [indexCitations, messages]);
+  const historyForCitations = visibleHistory ?? messages;
+  const historySources = useMemo(() => indexCitations(historyForCitations), [indexCitations, historyForCitations]);
+  const indexTail = useMemo(() => createWebSearchCitationIndex(), []);
+  const tailSources = useMemo(() => indexTail(visibleHistory && streamingMessage ? [streamingMessage] : []),
+    [indexTail, visibleHistory, streamingMessage]);
+  const citationSources = useMemo(() => {
+    if (!tailSources.size) return historySources;
+    const next = new Map(historySources);
+    for (const [scope, sources] of tailSources) {
+      const history = historySources.get(scope);
+      if (!history) { next.set(scope, sources); continue; }
+      const merged = new Map(history);
+      for (const [id, source] of sources) {
+        const prior = history.get(id);
+        merged.set(id, !history.has(id) || (prior && source && prior.url === source.url && prior.title === source.title) ? source : null);
+      }
+      next.set(scope, merged);
+    }
+    return next;
+  }, [historySources, tailSources]);
 
   const messageActionContext = useMemo<MessageActionContext>(
     () => ({
@@ -920,6 +971,10 @@ const MessageList = memo(function MessageList({
           : undefined
       }
     >
+      {olderPageFailed && atPageStart && <button type="button" onClick={guardedLoadOlder}
+        className="absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md bg-[var(--paper-elevated)] px-3 py-1 text-xs text-[var(--ink)] shadow">
+        {t('retryOlderPage')}
+      </button>}
       {/*
         Virtuoso stays mounted across session switches. Previously `key={sessionId}`
         forced a full remount, which dropped every cached item height, rebuilt
@@ -953,7 +1008,8 @@ const MessageList = memo(function MessageList({
         computeItemKey={computeItemKey}
         firstItemIndex={virtuosoFirstItemIndex}
         heightEstimates={virtuosoHeightEstimateSeed}
-        startReached={onLoadOlder ? guardedLoadOlder : undefined}
+        atTopThreshold={1}
+        atTopStateChange={onLoadOlder ? handleAtPageStart : undefined}
           // The built-in size/viewport paths bypass function-valued followOutput.
           // Literal false leaves all following to the existing chat intent owner.
           followOutput={false}

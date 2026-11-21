@@ -1121,6 +1121,77 @@ describe('TabProvider session activity ownership', () => {
     fetchRef.mockRestore();
   });
 
+  it('keeps the reader in place after page errors and accepts the explicit retry once', async () => {
+    const sessionId = 'page-retry';
+    let tab!: ReturnType<typeof useTabState>;
+    function PagingProbe() {
+      const value = useTabState();
+      useEffect(() => { tab = value; }, [value]);
+      return <Probe />;
+    }
+    let attempts = 0;
+    tauriHarness.proxyFetch.mockImplementation(async (url: string) => {
+      const older = url.includes('&before=');
+      if (older && ++attempts === 1) throw Error('speculative fault');
+      if (older && attempts === 2) return new Response(JSON.stringify({ success: false }));
+      const id = older ? 'older' : 'latest';
+      return new Response(JSON.stringify({ success: true, session: { id: sessionId, transcriptFormat: 2,
+        runtime: 'builtin', title: 'History', agentDir: '/tmp/workspace', snapshotRevision: 10,
+        messages: [{ id, role: 'user', content: id, timestamp: new Date(0).toISOString() }], hasMoreBefore: !older } }));
+    });
+    render(<TabProvider tabId="retry" agentDir="/tmp/workspace" sessionId={sessionId} claimSessionOpeningTransition={allowSessionOpening}><PagingProbe /></TabProvider>);
+    await waitFor(() => expect(tab.hasMoreBefore).toBe(true));
+    const first = tab.firstItemIndex;
+    await act(() => tab.loadOlderMessages({ action: 'prefetch' }));
+    expect(tab.olderPageFailed).toBe(false);
+    await act(() => tab.loadOlderMessages());
+    expect(tab.olderPageFailed).toBe(true);
+    expect(tab.firstItemIndex).toBe(first);
+    expect(tab.historyMessages.map(row => row.id)).toEqual(['latest']);
+    await act(() => tab.loadOlderMessages());
+    expect(tab.olderPageFailed).toBe(false);
+    expect(tab.firstItemIndex).toBe(first - 1);
+    expect(tab.historyMessages.map(row => row.id)).toEqual(['older', 'latest']);
+    await act(() => tab.loadOlderMessages());
+    expect(attempts).toBe(3);
+  });
+
+  it.each(['explicit disconnect', 'native generation change'])('releases a prefetched page on %s with unchanged revision', async path => {
+    const sessionId = 'page-disconnect';
+    let tab!: ReturnType<typeof useTabState>;
+    function PagingProbe() {
+      const value = useTabState();
+      useEffect(() => { tab = value; }, [value]);
+      return <Probe />;
+    }
+    let pageRequests = 0;
+    tauriHarness.proxyFetch.mockImplementation(async (url: string) => {
+      const older = url.includes('&before=');
+      const id = older ? 'old' + (++pageRequests) : 'new';
+      return new Response(JSON.stringify({ success: true, session: { id: sessionId, transcriptFormat: 2,
+        runtime: 'builtin', title: 'History', agentDir: '/tmp/workspace', snapshotRevision: 10,
+        messages: [{ id, role: 'user', content: id, timestamp: new Date(0).toISOString() }], hasMoreBefore: !older } }));
+    });
+    render(<TabProvider tabId="disconnect" agentDir="/tmp/workspace" sessionId={sessionId} claimSessionOpeningTransition={allowSessionOpening}><PagingProbe /></TabProvider>);
+    await waitFor(() => expect(tab.hasMoreBefore).toBe(true));
+    await act(() => tab.loadOlderMessages({ action: 'prefetch' }));
+    const call = tauriHarness.proxyFetch.mock.calls.find(([url]) => String(url).includes('&before='));
+    const signal = call?.[1]?.signal;
+    expect(signal?.aborted).toBe(false);
+    if (path === 'explicit disconnect') {
+      act(() => sseHarness.state.statusHandler?.('disconnected'));
+      await act(() => tab.loadOlderMessages());
+      expect(pageRequests).toBe(1);
+    } else {
+      sseHarness.state.generation++;
+    }
+    act(() => sseHarness.state.statusHandler?.('connected'));
+    expect(signal?.aborted).toBe(true);
+    await act(() => tab.loadOlderMessages());
+    expect(pageRequests).toBe(2);
+    expect(tab.historyMessages.map(row => row.id)).toEqual(['old2', 'new']);
+  });
+
   it('updates a page that arrives after an old tool changed and refreshes the retained prefix on a SSE gap', async () => {
     const sessionId = 'session-v2-paging';
     let tab!: ReturnType<typeof useTabState>;
@@ -1146,15 +1217,18 @@ describe('TabProvider session activity ownership', () => {
     });
     render(<TabProvider tabId="v2-paging" agentDir="/tmp/workspace" sessionId={sessionId} claimSessionOpeningTransition={allowSessionOpening}><PagingProbe /></TabProvider>);
     await waitFor(() => expect(screen.getByTestId('session-loading')).toHaveTextContent('false'));
-    let loading!: Promise<void>;
-    act(() => { loading = tab.loadOlderMessages(); });
+    let fetching!: Promise<void>;
+    act(() => { fetching = tab.loadOlderMessages({ action: 'prefetch' }); });
     await waitFor(() => expect(resolvePage).toBeDefined());
     emit('chat:transcript-operation', { sessionId, operation: { kind: 'block-update', messageId: 'a1', blockId: 'old-block', target: 'tool', details: { isLoading: false } } }, { sessionId, liveRevision: 11 });
     emit('chat:tool-result-complete', { toolUseId: 'old-tool', content: 'late final' }, { sessionId, liveRevision: 12 });
     await act(async () => {
       resolvePage(snapshot([message('u1', 'user', 'first'), oldTool('stale')], 10, false));
-      await loading;
+      await fetching;
     });
+    expect(screen.getByTestId('history-content')).not.toHaveTextContent('late final');
+    await act(() => tab.loadOlderMessages());
+    expect(requests.filter(url => url.includes('&before='))).toHaveLength(1);
     expect(screen.getByTestId('history-content')).toHaveTextContent('late final');
     expect(screen.getByTestId('history-content')).not.toHaveTextContent('stale');
     emit('chat:tool-result-complete', { toolUseId: 'old-tool', content: 'after gap' }, { sessionId, liveRevision: 14 });

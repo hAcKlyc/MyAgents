@@ -23,25 +23,37 @@ type FileCursor = TranscriptCommitTarget & { size: number; dev: number; ino: num
 export async function readTranscriptFile(filePath: string, sessionId: string): Promise<DecodedTranscript> {
   const decoder = new TranscriptDecoder(sessionId);
   const stream = createReadStream(filePath, { encoding: 'utf8', highWaterMark: 64 * 1024 });
-  let pending = '';
+  let fragments: string[] = [];
+  let pendingBytes = 0;
   for await (const chunk of stream) {
-    pending += chunk as string;
+    const text = chunk as string;
     let offset = 0;
     for (;;) {
-      const end = pending.indexOf('\n', offset);
+      const end = text.indexOf('\n', offset);
       if (end < 0) break;
       try {
-        if (!decoder.push(pending.slice(offset, end))) return decoder.finish();
+        let line = text.slice(offset, end);
+        if (fragments.length) {
+          fragments.push(line);
+          line = fragments.join('');
+          fragments = [];
+          pendingBytes = 0;
+        }
+        if (!decoder.push(line)) return decoder.finish();
       } catch (error) {
         throw new TranscriptStorageError('invalid-history', error instanceof Error ? error.message : 'Invalid V2 transcript');
       }
       offset = end + 1;
     }
-    pending = pending.slice(offset);
-    if (Buffer.byteLength(pending) > TRANSCRIPT_MAX_LINE_BYTES) throw new TranscriptStorageError('invalid-history', 'V2 record exceeds size limit');
+    if (offset < text.length) {
+      const suffix = text.slice(offset);
+      fragments.push(suffix);
+      pendingBytes += Buffer.byteLength(suffix);
+    }
+    if (pendingBytes > TRANSCRIPT_MAX_LINE_BYTES) throw new TranscriptStorageError('invalid-history', 'V2 record exceeds size limit');
     await yieldToRuntime();
   }
-  try { return decoder.finish(pending.length > 0); } catch (error) {
+  try { return decoder.finish(pendingBytes > 0); } catch (error) {
     throw new TranscriptStorageError('invalid-history', error instanceof Error ? error.message : 'Invalid V2 transcript');
   }
 }

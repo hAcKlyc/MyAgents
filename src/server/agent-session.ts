@@ -1,3 +1,5 @@
+import { sessionMessageToMessageWire } from './builtin-session/message-codec';
+import { projectMessagePage, type MessagePageRequest } from './session-transcript/message-page';
 import { captureChannelTurn, effectiveChannelDelivery, channelContextForInput, decorateChannelQuery, channelInputSource } from './session-core/channel-context';
 import { readChannelPromptOptions } from './tools/channel-messaging';
 import { desktopContextOf } from '../shared/agentMentions';
@@ -7830,8 +7832,9 @@ export function getMessages(): MessageWire[] {
 
 export function getBuiltinLiveSessionSnapshot(
   targetSessionId: string,
-  options?: { includeHistory?: boolean },
+  options?: { includeHistory?: boolean; page?: MessagePageRequest },
 ): {
+  page?: { totalCount: number; hasMoreBefore: boolean };
   snapshotRevision: number;
   inMemoryMessages: SessionMessage[];
   liveStreamingMessage: SessionMessage | null;
@@ -7843,22 +7846,27 @@ export function getBuiltinLiveSessionSnapshot(
   const streamingAssistantId = getStreamingAssistantId();
   // getBuiltinMessages() projects every V2 row. A stream attachment must
   // select the live row before that projection, not filter a full copy later.
-  const messages = options?.includeHistory === false
+  const product = getBuiltinProductContent();
+  const page = options?.page && product ? projectMessagePage(product.writer.projection, options.page, streamingAssistantId) : null;
+  const asWireRow = (row: SessionMessage) => messageWireToSessionMessage(sessionMessageToMessageWire(row));
+  const messages = page ? page.messages.map(asWireRow) : options?.includeHistory === false
     ? [] : getBuiltinMessages().map(messageWireToSessionMessage);
   let liveStreamingMessage = streamingAssistantId
-    ? messages.find(message => message.id === streamingAssistantId) ?? null
-    : null;
-  if (options?.includeHistory === false && streamingAssistantId) {
-    const product = getBuiltinProductContent();
+    ? messages.find(message => message.id === streamingAssistantId) ?? null : null;
+  if ((options?.includeHistory === false || page) && streamingAssistantId) {
     if (product) {
       const message = product.writer.projection.messages.get(streamingAssistantId);
-      liveStreamingMessage = message ? toStoredTranscriptMessage(message) : null;
+      if (message) {
+        const stored = toStoredTranscriptMessage(message);
+        liveStreamingMessage = page ? asWireRow(stored) : stored;
+      }
     } else {
       const message = getBuiltinMessages().find(message => message.id === streamingAssistantId);
       liveStreamingMessage = message ? messageWireToSessionMessage(message) : null;
     }
   }
   return structuredClone({
+    ...(page && { page: { totalCount: page.totalCount, hasMoreBefore: page.hasMoreBefore } }),
     snapshotRevision: getBuiltinLiveRevision(),
     inMemoryMessages: messages.filter(message => message.id !== streamingAssistantId),
     liveStreamingMessage,

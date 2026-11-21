@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { Message as MessageType } from '@/types/chat';
 import {
@@ -6,10 +6,12 @@ import {
   estimateMessageRowHeight,
   type RowLayoutContract,
 } from '@/utils/chatRowLayout';
-import { projectVisibleChatTimelineRows } from '@/utils/chatTimelineRows';
+import { isVisibleChatTimelineRow, projectVisibleChatTimelineRows } from '@/utils/chatTimelineRows';
 
 export interface ChatScrollModel {
   data: readonly MessageType[];
+  visibleHistory: readonly MessageType[];
+  messageIndices: ReadonlyMap<string, number>;
   firstItemIndex?: number;
   heightEstimateSeed: number[];
   layoutByMessageId: ReadonlyMap<string, RowLayoutContract>;
@@ -34,6 +36,16 @@ function getViewportHeight(): number {
   return window.innerHeight || 800;
 }
 
+// Several immutable message versions can describe the same order or layout.
+// Retain only the last derived value for each selector in this mounted Tab.
+function lastValueForKey<T>() {
+  let previous: { key: string; value: T } | undefined;
+  return (key: string, derive: () => T): T => {
+    if (!previous || previous.key !== key) previous = { key, value: derive() };
+    return previous.value;
+  };
+}
+
 export function useChatScrollModel({
   historyMessages,
   streamingMessage,
@@ -52,79 +64,61 @@ export function useChatScrollModel({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const data = useMemo(
-    () => projectVisibleChatTimelineRows(historyMessages, streamingMessage),
-    [historyMessages, streamingMessage],
-  );
+  const visibleHistory = useMemo(() => projectVisibleChatTimelineRows(historyMessages), [historyMessages]);
+  const tail = streamingMessage && isVisibleChatTimelineRow(streamingMessage) ? streamingMessage : null;
+  const data = useMemo(() => tail ? [...visibleHistory, tail] : visibleHistory, [visibleHistory, tail]);
+  const historyKeys = useMemo(() => JSON.stringify(visibleHistory.map(row => row.id)), [visibleHistory]);
+  const tailId = tail?.id;
+  const orderedIdsKey = useMemo(() => {
+    if (tailId === undefined) return historyKeys;
+    const separator = historyKeys === '[]' ? '' : ',';
+    return historyKeys.slice(0, -1) + separator + JSON.stringify(tailId) + ']';
+  }, [historyKeys, tailId]);
+  const selectIndices = useMemo(() => lastValueForKey<ReadonlyMap<string, number>>(), []);
+  const messageIndices = useMemo(() => selectIndices(orderedIdsKey, () => {
+    const map = new Map<string, number>();
+    visibleHistory.forEach((message, index) => map.set(message.id, index));
+    if (tailId !== undefined) map.set(tailId, visibleHistory.length);
+    return map;
+  }), [selectIndices, orderedIdsKey, visibleHistory, tailId]);
+  const selectHistoryLayouts = useMemo(() => lastValueForKey<Map<string, RowLayoutContract>>(), []);
+  const historyLayouts = useMemo(() => {
+    const key = JSON.stringify([sessionId, ...visibleHistory.map(message => buildMessageLayoutFingerprint(message, viewportHeight))]);
+    return selectHistoryLayouts(key, () => new Map(visibleHistory.map(message =>
+      [message.id, estimateMessageRowHeight(message, viewportHeight)] as const)));
+  }, [selectHistoryLayouts, sessionId, visibleHistory, viewportHeight]);
+  const selectTailLayout = useMemo(() => lastValueForKey<RowLayoutContract>(), []);
+  const tailLayout = tail ? selectTailLayout(buildMessageLayoutFingerprint(tail, viewportHeight),
+    () => estimateMessageRowHeight(tail, viewportHeight)) : null;
+  const layoutByMessageId = useMemo(() => {
+    if (!tailLayout) return historyLayouts;
+    const layouts = new Map(historyLayouts);
+    layouts.set(tailLayout.messageId, tailLayout);
+    return layouts;
+  }, [historyLayouts, tailLayout]);
 
-  const orderedIdsKey = useMemo(
-    () => data.map(message => message.id).join('\u001f'),
-    [data],
-  );
-
-  const layoutFingerprint = useMemo(
-    () => [
-      sessionId ?? '',
-      data.map(message => buildMessageLayoutFingerprint(message, viewportHeight)).join('\u001f'),
-    ].join('\u001e'),
-    [data, sessionId, viewportHeight],
-  );
-
-  const { layoutByMessageId } = useMemo(() => {
-    const nextLayout = new Map<string, RowLayoutContract>();
-
-    for (const message of data) {
-      const contract = estimateMessageRowHeight(message, viewportHeight);
-      nextLayout.set(message.id, contract);
-    }
-
-    return {
-      layoutByMessageId: nextLayout,
-    };
-    // `layoutFingerprint` is the semantic dependency: token-level streaming
-    // changes that stay inside the same line/code/attachment bucket keep the
-    // previous live layout while `data` below remains live for rendering/search.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutFingerprint]);
-
-  const heightEstimateSeedCacheRef = useRef<HeightEstimateSeedCache>({
-    sessionId,
-    orderedIdsKey: '',
-    estimatesById: new Map(),
-    seed: [],
-  });
-
-  const heightEstimateSeedCache = useMemo<HeightEstimateSeedCache>(() => {
-    const previous = heightEstimateSeedCacheRef.current;
-    if (previous.sessionId === sessionId && previous.orderedIdsKey === orderedIdsKey) {
-      return previous;
-    }
-
-    const canReusePrevious = previous.sessionId === sessionId;
-    const nextEstimatesById = new Map<string, number>();
-    const nextSeed = data.map((message) => {
-      const cached = canReusePrevious ? previous.estimatesById.get(message.id) : undefined;
-      const estimate = cached ?? estimateMessageRowHeight(message, viewportHeight).estimatedHeight;
-      nextEstimatesById.set(message.id, estimate);
+  // A seed is the first committed estimate for an ID in this Session.
+  // React discards speculative renders, including their seed, on interruption.
+  const [previousSeed, setSeed] = useState<HeightEstimateSeedCache | null>(null);
+  let heightEstimateSeedCache = previousSeed;
+  if (!previousSeed || previousSeed.sessionId !== sessionId || previousSeed.orderedIdsKey !== orderedIdsKey) {
+    const prior = previousSeed?.sessionId === sessionId ? previousSeed?.estimatesById : undefined;
+    const estimatesById = new Map<string, number>();
+    const seed = data.map(message => {
+      const estimate = prior?.get(message.id) ?? estimateMessageRowHeight(message, viewportHeight).estimatedHeight;
+      estimatesById.set(message.id, estimate);
       return estimate;
     });
-
-    return {
-      sessionId,
-      orderedIdsKey,
-      estimatesById: nextEstimatesById,
-      seed: nextSeed,
-    };
-  }, [data, orderedIdsKey, sessionId, viewportHeight]);
-
-  useLayoutEffect(() => {
-    heightEstimateSeedCacheRef.current = heightEstimateSeedCache;
-  }, [heightEstimateSeedCache]);
+    heightEstimateSeedCache = { sessionId, orderedIdsKey, estimatesById, seed };
+    setSeed(heightEstimateSeedCache);
+  }
 
   return {
     data,
+    visibleHistory,
+    messageIndices,
     firstItemIndex,
-    heightEstimateSeed: heightEstimateSeedCache.seed,
+    heightEstimateSeed: heightEstimateSeedCache!.seed,
     layoutByMessageId,
   };
 }

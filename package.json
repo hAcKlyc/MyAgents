@@ -163,6 +163,7 @@
     "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
+    "refractor": "5.0.0",
     "react-virtuoso": "4.18.3",
     "rehype-katex": "^7.0.1",
     "rehype-raw": "^7.0.0",

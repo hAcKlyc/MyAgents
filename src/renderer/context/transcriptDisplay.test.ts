@@ -57,6 +57,20 @@ describe('V2 displayed rows', () => {
             : { subagentCalls: [{ id: 'child', input }] } }]);
     });
 
+    it('replays corrections arriving while a prefetched tool input resolves before the synchronous prepend', async () => {
+        const page = new TranscriptPage('session', 1, 2);
+        const observe = (liveRevision: number, eventName: string, data: unknown) =>
+            page.observe({ sessionId: 'session', connectionGeneration: 2, liveRevision, eventName, data });
+        observe(11, 'chat:content-block-stop', { toolId: 'tool', inputRef: 'ref' });
+        const adopted: Message[] = [];
+        await page.complete([row()], 10, async () => {
+            await Promise.resolve();
+            observe(12, 'chat:tool-result-complete', { toolUseId: 'tool', content: 'corrected' });
+            return { command: 'latest' };
+        }, rows => adopted.push(...rows));
+        expect(adopted[0].content).toMatchObject([{}, { tool: { input: { command: 'latest' }, result: 'corrected' } }]);
+    });
+
     it('bounds an abandoned page buffer independently of the live conversation', async () => {
         const page = new TranscriptPage('session', 1, 2);
         page.observe({ sessionId: 'session', connectionGeneration: 2, liveRevision: 1, eventName: 'chat:tool-result-delta', data: { toolUseId: 'tool', delta: 'x'.repeat(1024 * 1024) } });

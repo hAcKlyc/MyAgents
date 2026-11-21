@@ -533,7 +533,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
             /* ai-message-content 标记 host prose 上下文；具体 16px/1.7、零字距和
                各语义块节奏由 Markdown 默认变体统一拥有。三个 assistant 分支
                （string/blocks/widget-segment）与文档预览共用这一条路径。 */
-            <div className="ai-message-content text-[var(--ink)] select-text">
+            <div data-chat-block={message.id} className="ai-message-content text-[var(--ink)] select-text">
               {/* Tail-fade only while text is the actively-streaming edge — `streamingTextActive`
                   clears on the text block's content-block-stop, so it doesn't linger during a
                   slow gap before the next block (string-content path). */}
@@ -619,7 +619,7 @@ const Message = memo(function Message({ message, citationSources, isLoading = fa
                       key={index}
                       className="flex justify-start w-full px-1 py-1 select-none"
                     >
-                      <div className="ai-message-content w-full max-w-none text-[var(--ink)] select-text">
+                      <div data-chat-block={item.id} className="ai-message-content w-full max-w-none text-[var(--ink)] select-text">
                         <Markdown citationSources={citationSources} streaming={isLoading && index === groupedBlocks.length - 1 && !!message.streamingTextActive}>{item.text}</Markdown>
                       </div>
                     </div>
