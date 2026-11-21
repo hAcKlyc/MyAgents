@@ -16,6 +16,11 @@ lines.on('line', line => {
   const f = JSON.parse(line);
   const reply = result => send({id:f.id, result});
   if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{sessionCapabilities:{resume:{}}},authMethods:[]});
+  if (f.method === 'session/set_config_option') {
+    const {configId, value} = f.params;
+    if(configId !== 'mode' || !['auto','accept-edits','default','plan'].includes(value)) return send({id:f.id,error:{code:-32602,message:'invalid mode'}});
+    return reply({configOptions:[{id:'mode',name:'Mode',type:'select',currentValue:value,options:[]}]});
+  }
   if (f.method === 'session/new') return reply({sessionId:'native'});
   if (f.method === 'session/resume') return send({id:f.id,error:{code:-32602,message:'unknown session'}});
   if (f.method === 'session/close') return reply({});
@@ -73,6 +78,20 @@ it("gives native model discovery 30 seconds", async () => {
   expect(await runtime.queryModels()).toEqual([{ value: "model-id", displayName: "Native Model" }]);
   expect(timeout).toHaveBeenCalledWith(30_000);
 });
+
+it.each(["accept-edits", "auto", "dangerously-skip-permissions"])(
+  "applies %s via its native interface and reports when a replacement is needed",
+  async mode => {
+    const { options, receive, spawn } = await setup();
+    processHandle = await runtime.startSession({ ...options, permissionMode: mode }, receive);
+    const full = mode === "dangerously-skip-permissions";
+    expect(spawn.mock.calls[0][0].includes("--dangerously-skip-permissions")).toBe(full);
+    expect(processHandle.requiresPermissionModeRestart("dangerously-skip-permissions")).toBe(!full);
+    expect(processHandle.requiresPermissionModeRestart("accept-edits")).toBe(full);
+    await expect(runtime.setPermissionMode(processHandle, full ? "auto" : "dangerously-skip-permissions")).rejects.toThrow(/重新启动/);
+    if (!full) await runtime.setPermissionMode(processHandle, "auto");
+  },
+);
 
 it("answers overlapping approvals by native option and request identity in reverse order", async () => {
   const { options, events, receive } = await setup();

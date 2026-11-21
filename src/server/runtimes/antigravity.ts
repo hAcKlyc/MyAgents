@@ -28,7 +28,9 @@ import type { McpEffectiveServerSnapshot } from "../../shared/mcpEffectiveState"
 import { randomUUID } from "node:crypto";
 import type { McpServerDefinition } from "../../shared/config-types";
 import {
+  ANTIGRAVITY_FULL_ACCESS,
   ANTIGRAVITY_PERMISSION_MODES,
+  getDefaultRuntimePermissionMode,
   type RuntimeEnvPolicy,
   type RuntimeModelInfo,
 } from "../../shared/types/runtime";
@@ -183,6 +185,7 @@ class AntigravitySession implements RuntimeProcess {
     readonly sessionMcpFingerprint: string,
     readonly scenario: SessionStartOptions["scenario"],
     readonly productSessionId: string,
+    readonly skipPermissions: boolean,
   ) {
     const app = new ClientApp();
     app.onNotification("session/update", ({ params }) => {
@@ -582,6 +585,9 @@ class AntigravitySession implements RuntimeProcess {
   modelFamilies() {
     return this.selectOptions("model");
   }
+  requiresPermissionModeRestart(mode: string | undefined) {
+    return this.skipPermissions !== (mode === ANTIGRAVITY_FULL_ACCESS);
+  }
   async setOption(configId: string, value: string) {
     const result = await this.connection.agent
       .request(
@@ -698,7 +704,10 @@ export class AntigravityRuntime implements AgentRuntime {
   }
   async startSession(options: SessionStartOptions, emit: UnifiedEventCallback) {
     const { path, env } = await executable(options.envPolicy);
-    const child = spawn([path, "acp", "--process-per-session"], {
+    const skipPermissions = options.permissionMode === ANTIGRAVITY_FULL_ACCESS;
+    const args = [path, "acp", "--process-per-session"];
+    if (skipPermissions) args.push("--dangerously-skip-permissions");
+    const child = spawn(args, {
       env,
       cwd: options.workspacePath,
       stdin: "pipe",
@@ -712,6 +721,7 @@ export class AntigravityRuntime implements AgentRuntime {
       fingerprintSessionMcp(options.mcpServers ?? []),
       options.scenario,
       options.sessionId,
+      skipPermissions,
     );
     const agent = s.connection.agent;
     let phase = "initialize";
@@ -820,8 +830,7 @@ export class AntigravityRuntime implements AgentRuntime {
       if (options.model) await this.setModel(s, options.model);
       if (options.reasoningEffort)
         await this.setReasoningEffort(s, options.reasoningEffort);
-      if (options.permissionMode)
-        await this.setPermissionMode(s, options.permissionMode);
+      await this.setPermissionMode(s, options.permissionMode);
       emit({
         kind: "session_init",
         sessionId: s.sessionId,
@@ -900,8 +909,10 @@ export class AntigravityRuntime implements AgentRuntime {
       }
     }
   }
-  setPermissionMode(process: RuntimeProcess, mode?: string) {
-    return session(process).setOption("mode", mode || "default");
+  async setPermissionMode(process: RuntimeProcess, mode?: string) {
+    const s = session(process);
+    if (s.requiresPermissionModeRestart(mode)) throw new Error("切换完全访问权限需要重新启动 Antigravity CLI");
+    if (!s.skipPermissions) await s.setOption("mode", mode || getDefaultRuntimePermissionMode("antigravity"));
   }
   sendMessage(
     process: RuntimeProcess,

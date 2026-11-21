@@ -12,6 +12,7 @@ import { MANAGED_BROWSER_MCP_ID } from '../../shared/browserTools';
 import { OFFICIAL_TOOLS } from '../../shared/official-tools';
 import { MANAGED_CODEX_PROVIDER } from '../../shared/config-types';
 import {
+  ANTIGRAVITY_PERMISSION_MODES,
   CC_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
   DSH_PERMISSION_MODES,
@@ -478,6 +479,23 @@ describe('SimpleChatInput send paths', () => {
     expect(screen.getByText('由 Codex 自动审查审批请求，仅潜在不安全操作需确认')).toBeInTheDocument();
     expect(screen.getByText('规划')).toBeInTheDocument();
     expect(screen.getByText('完全自主')).toBeInTheDocument();
+  });
+
+  it('shows only the three Antigravity choices and sends their own permission values', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const user = userEvent.setup();
+    const onPermissionModeChange = vi.fn();
+    renderInput({ runtime: 'antigravity', runtimePermissionModes: ANTIGRAVITY_PERMISSION_MODES,
+      permissionMode: 'plan' as PermissionMode, onPermissionModeChange });
+    expect(screen.getByTitle('切换执行模式')).toHaveTextContent('规划');
+    for (const choice of ANTIGRAVITY_PERMISSION_MODES.filter(mode => !mode.hidden)) {
+      await user.click(screen.getByTitle('切换执行模式'));
+      expect(screen.queryByText('Default')).not.toBeInTheDocument();
+      expect(screen.getAllByText('规划')).toHaveLength(1);
+      expect(screen.getByText(choice.description)).toBeInTheDocument();
+      await user.click(screen.getByText(choice.label));
+      expect(onPermissionModeChange).toHaveBeenLastCalledWith(choice.value);
+    }
   });
 
   it('offers native Codex three choices and keeps the legacy read-only caption truthful', async () => {

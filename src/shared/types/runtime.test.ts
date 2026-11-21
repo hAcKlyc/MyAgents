@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   coerceModelForRuntime,
   coercePermissionModeForRuntime,
+  getDefaultRuntimePermissionMode,
   getMaxPermissionForRuntime,
   isRuntimePermissionMode,
   projectPermissionModeForRuntime,
@@ -237,6 +238,8 @@ describe('getMaxPermissionForRuntime — unattended max-agency mode per runtime'
   // non-bypass mode, /api/memory/update on that runtime would hang to its 60-min
   // timeout instead of completing. (memory-update external-routing fix.)
   test('maps each runtime to its bypass / full-access mode', () => {
+    expect(getMaxPermissionForRuntime('antigravity')).toBe('auto');
+    expect(getDefaultRuntimePermissionMode('antigravity')).toBe('accept-edits');
     expect(getMaxPermissionForRuntime('builtin')).toBe('fullAgency');
     expect(getMaxPermissionForRuntime('claude-code')).toBe('bypassPermissions');
     expect(getMaxPermissionForRuntime('codex')).toBe('no-restrictions');

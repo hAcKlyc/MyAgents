@@ -449,6 +449,10 @@ export function TaskAdvancedConfigEditor(props: Props) {
           effectiveRuntimeSource,
         ))
         .map((m) => {
+          if (effectiveRuntime === 'antigravity') {
+            const key = `chat:input.antigravityPermissionModes.${m.value}`;
+            return { value: m.value, label: `${t(`${key}.label`)} · ${t(`${key}.description`)}` };
+          }
           const label = effectiveRuntimeSource === 'managed-provider'
             ? m.label
             : t(`chat:input.permissionModes.${m.value}.label`, { defaultValue: m.label });

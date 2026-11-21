@@ -202,6 +202,8 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
 
+桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。未显式指定权限的后台任务沿用 `auto`。
+
 | 产品交互 | Antigravity 行为 |
 |---|---|
 | 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，停止由原生 cancel 结束当前轮；普通停止和指定排队项优先发送分别复用现有队列语义。 |

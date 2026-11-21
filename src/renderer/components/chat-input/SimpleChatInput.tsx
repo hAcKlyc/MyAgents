@@ -228,12 +228,13 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   const attachmentSessionId = sessionId;
 
   // Compute display modes and model name based on runtime
+  const permissionTextGroup = runtime === 'antigravity' ? 'antigravityPermissionModes' : 'permissionModes';
   const displayPermissionModes = runtimePermissionModes
     ? runtimePermissionModes.map(m => ({
       value: m.value as PermissionMode,
-      label: t(`input.permissionModes.${m.value}.label`, { defaultValue: m.label }),
+      label: t(`input.${permissionTextGroup}.${m.value}.label`, { defaultValue: m.label }),
       icon: m.icon,
-      description: t(`input.permissionModes.${m.value}.description`, { defaultValue: m.description }),
+      description: t(`input.${permissionTextGroup}.${m.value}.description`, { defaultValue: m.description }),
       sdkValue: m.value,
       hidden: m.hidden,
     }))

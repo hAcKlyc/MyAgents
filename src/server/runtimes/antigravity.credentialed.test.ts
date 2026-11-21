@@ -7,6 +7,37 @@ import { AntigravityRuntime } from "./antigravity";
 import type { RuntimeProcess, UnifiedEvent } from "./types";
 
 it.skipIf(process.env.MYAGENTS_TEST_AGY !== "1")(
+  "runs a workspace file edit with full access and resumes under ordinary approvals",
+  async () => {
+    const runtime = new AntigravityRuntime();
+    const workspacePath = await mkdtemp(join(tmpdir(), "myagents-agy-full-"));
+    let proc: RuntimeProcess | undefined;
+    const options = { workspacePath, sessionId: randomUUID(), scenario: { type: "desktop" as const } };
+    const events: UnifiedEvent[] = [];
+    try {
+      proc = await runtime.startSession({ ...options, permissionMode: "dangerously-skip-permissions" }, e => events.push(e));
+      const init = events.find(e => e.kind === "session_init");
+      if (!init) throw new Error("Missing native session ID");
+      await runtime.sendMessage(proc, "Use your file editing tool to create marker.txt containing exactly kiwi. Then stop.");
+      await expect.poll(() => events.find(e => e.kind === "turn_complete" || e.kind === "permission_request")?.kind,
+        { timeout: 90_000 }).toBe("turn_complete");
+      expect(events.find(e => e.kind === "turn_complete")?.status).toBe("completed");
+      expect((await readFile(join(workspacePath, "marker.txt"), "utf8")).trim()).toBe("kiwi");
+      await runtime.stopSession(proc);
+      proc = undefined;
+      events.length = 0;
+      proc = await runtime.startSession({ ...options, resumeSessionId: init.sessionId, permissionMode: "accept-edits" }, e => events.push(e));
+      expect(events.find(e => e.kind === "session_init")?.sessionId).toBe(init.sessionId);
+      await runtime.setPermissionMode(proc, "auto");
+    } finally {
+      if (proc) await runtime.stopSession(proc);
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  },
+  150_000,
+);
+
+it.skipIf(process.env.MYAGENTS_TEST_AGY !== "1")(
   "approves once, cancels an approval and resumes native history across processes",
   async () => {
     const runtime = new AntigravityRuntime();

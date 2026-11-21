@@ -136,6 +136,28 @@
         "networkPartial": "Network Agent list is incomplete",
       "partial": "Partial results. Refine your search."
     },
+    "antigravityPermissionModes": {
+      "accept-edits": {
+        "label": "Ask for approval",
+        "description": "Automatically approve workspace file edits. Terminal commands follow your permission rules."
+      },
+      "auto": {
+        "label": "Approve for me",
+        "description": "Automatically approve file edits and safe commands. Ask only before irreversible actions."
+      },
+      "dangerously-skip-permissions": {
+        "label": "Full access",
+        "description": "Access files and the network without approval."
+      },
+      "default": {
+        "label": "Default",
+        "description": "Follow Antigravity’s approval settings."
+      },
+      "plan": {
+        "label": "Plan",
+        "description": "Plan before executing a task."
+      }
+    },
     "permissionModes": {
       "approval-required": {
         "label": "Ask for approval",

@@ -134,6 +134,8 @@ export interface SessionStartOptions {
 export interface RuntimeProcess {
   readonly pid: number;
   readonly sessionMcpFingerprint?: string;
+  /** True when the next permission selection requires different subprocess launch flags. */
+  requiresPermissionModeRestart?(mode: string | undefined): boolean;
   /** Optional adapter-owned identity for generation-scoped projections/callbacks. */
   readonly runtimeGeneration?: string;
   /** Runtime admission completed a durable mutation that changed Product transcript state. */

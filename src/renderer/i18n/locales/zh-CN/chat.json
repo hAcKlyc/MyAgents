@@ -136,6 +136,28 @@
         "networkPartial": "网络 Agent 列表尚未完整加载",
       "partial": "仅展示部分结果，请缩小搜索范围"
     },
+    "antigravityPermissionModes": {
+      "accept-edits": {
+        "label": "请求批准",
+        "description": "自动批准工作区内的文件编辑，终端命令仍按权限规则处理"
+      },
+      "auto": {
+        "label": "帮我批准",
+        "description": "自动批准文件编辑和安全命令，仅遇到不可逆操作时询问"
+      },
+      "dangerously-skip-permissions": {
+        "label": "完全访问权限",
+        "description": "无需审批即可访问文件和网络"
+      },
+      "default": {
+        "label": "Default",
+        "description": "按 Antigravity 的权限设置审批"
+      },
+      "plan": {
+        "label": "规划",
+        "description": "先规划再执行"
+      }
+    },
     "permissionModes": {
       "approval-required": {
         "label": "请求批准",

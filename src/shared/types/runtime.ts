@@ -500,11 +500,14 @@ export const BUILTIN_PERMISSION_MODES: RuntimePermissionMode[] = [
   },
 ];
 
+export const ANTIGRAVITY_FULL_ACCESS = 'dangerously-skip-permissions';
 export const ANTIGRAVITY_PERMISSION_MODES: RuntimePermissionMode[] = [
-  { value: 'default', label: 'Default', icon: '🛡', description: '使用 Antigravity 的常规审批' },
-  { value: 'accept-edits', label: 'Accept Edits', icon: '📝', description: '自动接受文件编辑' },
-  { value: 'auto', label: 'Auto', icon: '⚡', description: '由 Antigravity 自动判定工具权限' },
-  { value: 'plan', label: 'Plan', icon: '📋', description: '规划模式' },
+  { value: 'accept-edits', label: '请求批准', icon: '🛡', description: '自动批准工作区内的文件编辑，终端命令仍按权限规则处理' },
+  { value: 'auto', label: '帮我批准', icon: '⚡', description: '自动批准文件编辑和安全命令，仅遇到不可逆操作时询问' },
+  { value: ANTIGRAVITY_FULL_ACCESS, label: '完全访问权限', icon: '🔓', description: '无需审批即可访问文件和网络' },
+  // Existing sessions retain their original native policy until the user changes it.
+  { value: 'default', label: 'Default', icon: '🛡', description: '按 Antigravity 的权限设置审批', hidden: true },
+  { value: 'plan', label: '规划', icon: '📋', description: '先规划再执行', hidden: true },
 ];
 
 export const DSH_PERMISSION_MODES: RuntimePermissionMode[] = [
@@ -629,7 +632,7 @@ export function getDefaultRuntimePermissionMode(runtime: RuntimeType): string {
   switch (runtime) {
     case 'dsh': return 'approval-required';
     case 'claude-code': return 'manual';
-    case 'antigravity': return 'default';
+    case 'antigravity': return 'accept-edits';
     case 'codex': return 'full-auto';
     case 'builtin': return 'auto';
     default: return '';

@@ -93,6 +93,7 @@ type TurnScript =
     };
 
 class FakeRuntimeProcess implements RuntimeProcess {
+  requiresPermissionModeRestart?: RuntimeProcess['requiresPermissionModeRestart'];
   readonly pid = 4242;
   exited = false;
   loadedSkillNames: readonly string[] = [];
@@ -394,6 +395,10 @@ class FakeRuntime implements AgentRuntime {
     }
     this.callback = onEvent;
     const process = new FakeRuntimeProcess();
+    if (this.type === 'antigravity') {
+      const full = options.permissionMode === 'dangerously-skip-permissions';
+      process.requiresPermissionModeRestart = mode => full !== (mode === 'dangerously-skip-permissions');
+    }
     process.loadedSkillNames = (
       options.managedCodexExtensions?.skills ??
       options.dshExtensions?.skills ??
@@ -10608,6 +10613,45 @@ describe('external SessionEngine with fake runtime', () => {
       broadcastEvents.some((event) => event.event === 'chat:agent-error'),
     ).toBe(false);
   });
+  it('resumes the same ACP thread on entry to and exit from full access', async () => {
+    const harness = await createHarness([], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-permission-switch';
+    const send = async (permissionMode: string) => {
+      const result = await harness.engine.sendDesktopMessage({
+        ...desktopRequest(sessionId, join(harness.home, 'workspace'), 'hello'), permissionMode,
+      });
+      await expect(result.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.effectivePermissionMode).toBe(permissionMode);
+    };
+    await send('accept-edits');
+    const native = harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId;
+    expect(native).toMatch(/^fake-thread-/);
+    await send('auto');
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined]);
+    await harness.externalSession.updateExternalRuntimeConfig({ permissionMode: 'dangerously-skip-permissions' }, { source: 'desktop' });
+    await send('dangerously-skip-permissions');
+    // A per-turn selection alone must also revoke the old launch flag.
+    await send('accept-edits');
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined, native, native]);
+  });
+
+  it('finishes an in-flight full-access turn before applying a queued downgrade', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'first', completeDelayMs: 180 }], { runtimeType: 'antigravity' });
+    const request = (text: string) => desktopRequest('agy-busy-access', join(harness.home, 'workspace'), text);
+    const initial = await harness.engine.sendDesktopMessage({ ...request('first'), permissionMode: 'dangerously-skip-permissions' });
+    await expect(initial.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+    const change = await harness.externalSession.updateExternalRuntimeConfig({ permissionMode: 'auto' }, { source: 'desktop' });
+    expect(change.status).toBe('queued');
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(true);
+    const next = await harness.engine.sendDesktopMessage({ ...request('second'), permissionMode: 'auto' });
+    await expect(next.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    expect(harness.runtime.sentMessages).toEqual(['first', 'second']);
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined, 'fake-thread-1']);
+    expect(harness.runtime.effectivePermissionMode).toBe('auto');
+  });
+
   it.each(['valid', 'missing'] as const)('reopens an ACP chat with a %s persisted native binding', async binding => {
     const harness = await createHarness([{ kind: 'success', text: 'first' }, { kind: 'success', text: 'resumed' }], { runtimeType: 'antigravity' });
     const sessionId = 'agy-deferred-birth';
