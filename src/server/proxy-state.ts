@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Agent, Dispatcher, ProxyAgent } from 'undici';
 
+import { EXTERNAL_RUNTIME_IDS, type ExternalRuntimeId } from '../shared/integrated-runtimes/identity';
 import type { ProxySettings } from '../shared/config-types';
 import {
   effectiveProxyScopeKey,
@@ -10,6 +11,8 @@ import {
   PROXY_ENV_KEYS,
   shouldUseMyAgentsProxyForGeneralRequests,
   shouldUseMyAgentsProxyForProvider,
+  selectedProxyRuntimeIds,
+  shouldUseMyAgentsProxyForRuntime,
 } from '../shared/proxyScope';
 import {
   isSocksBridgeRunning,
@@ -30,7 +33,7 @@ let currentProxySettings: ProxySettings | null = readInitialProxySettings();
 let appProxyEnvSnapshot: Record<string, string | undefined> | null = currentProxySettings?.enabled
   ? createAppProxyEnvSnapshot(rawProxyUrl(currentProxySettings))
   : null;
-let providerOwnedConsumersEnabled = true;
+let sessionConsumersEnabled = true;
 let proxyConfigGeneration = 0;
 let proxyConfigTransition: Promise<void> = Promise.resolve();
 let generalRequestDispatcher: { key: string; dispatcher: Dispatcher } | null = null;
@@ -213,8 +216,10 @@ function hasAnyAppProxyConsumer(settings: ProxySettings): boolean {
   if (!settings.enabled) return false;
   const scope = normalizeProxyScope(settings.scope);
   if (scope.mode === 'all') return true;
-  return scope.generalRequests === true
-    || (providerOwnedConsumersEnabled && (scope.providerIds?.length ?? 0) > 0);
+  const runtimeIds = selectedProxyRuntimeIds(scope);
+  return scope.generalRequests === true || (sessionConsumersEnabled && (
+    (scope.providerIds?.length ?? 0) > 0 || EXTERNAL_RUNTIME_IDS.some(id => runtimeIds.includes(id))
+  ));
 }
 
 function proxyForUrlFromEnv(url: string, env: Record<string, string | undefined>): string | undefined {
@@ -282,9 +287,9 @@ export function getProviderProxyScopeKey(providerId: string): string {
   return effectiveProxyScopeKey(currentProxySettings, providerId);
 }
 
-export function getProcessProxyEnvKey(): string {
+export function getProcessProxyEnvKey(env: Readonly<NodeJS.ProcessEnv> = process.env): string {
   return PROXY_ENV_KEYS
-    .map((key) => `${key}=${process.env[key] ?? ''}`)
+    .map((key) => `${key}=${env[key] ?? ''}`)
     .join('\n');
 }
 
@@ -422,10 +427,16 @@ export function getGeneralRequestDispatcher(): Dispatcher {
 
 /** Initialize complete proxy state from disk-derived settings at Sidecar startup. */
 export async function initializeProxyStateFromCurrentSettings(options?: {
-  providerOwnedConsumers?: boolean;
+  sessionConsumers?: boolean;
 }): Promise<void> {
-  providerOwnedConsumersEnabled = options?.providerOwnedConsumers !== false;
+  sessionConsumersEnabled = options?.sessionConsumers !== false;
   await setProcessProxyConfig(currentProxySettings);
+}
+
+export function getRuntimeProxyEnvironment(runtime: ExternalRuntimeId, env: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const useAppProxy = shouldUseMyAgentsProxyForRuntime(currentProxySettings, runtime);
+  copyProxyEnvVars(env, useAppProxy ? (appProxyEnvSnapshot ?? {}) : inheritedProxySnapshot);
+  return env;
 }
 
 export function applyProviderProxyPolicyToEnv(

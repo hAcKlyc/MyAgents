@@ -320,6 +320,22 @@ describe('proxy-state provider scope', () => {
     );
   });
 
+  it('gives only the selected CLI the SOCKS bridge and honors a terminal workspace override', async () => {
+    process.env.HTTPS_PROXY = 'http://parent.proxy:8080';
+    const state = await loadProxyState();
+    await state.setProcessProxyConfig({
+      ...scopedProxySettings, protocol: 'socks5',
+      scope: { mode: 'custom', generalRequests: false, providerIds: [], runtimeIds: ['codex'] },
+    });
+    const { augmentedProcessEnv } = await import('./runtimes/env-utils');
+    expect(augmentedProcessEnv('codex').HTTPS_PROXY).toBe('http://127.0.0.1:41234');
+    expect(augmentedProcessEnv('claude-code').HTTPS_PROXY).toBe('http://parent.proxy:8080');
+    expect(augmentedProcessEnv('antigravity').HTTPS_PROXY).toBe('http://parent.proxy:8080');
+    expect(process.env.HTTPS_PROXY).toBe('http://parent.proxy:8080');
+    expect(state.getProviderRequestProxyPolicy('codex-sub').httpsProxy).toBe('http://parent.proxy:8080');
+    expect(augmentedProcessEnv('codex', { proxy: 'terminal' }).HTTPS_PROXY).toBeUndefined();
+  });
+
   it('does not start a provider-only SOCKS bridge in a general-only process', async () => {
     const proxyState = await loadProxyState();
     proxyState._resetProxyStateForTests({
@@ -334,7 +350,7 @@ describe('proxy-state provider scope', () => {
       },
     });
 
-    await proxyState.initializeProxyStateFromCurrentSettings({ providerOwnedConsumers: false });
+    await proxyState.initializeProxyStateFromCurrentSettings({ sessionConsumers: false });
 
     expect(socksBridgeMocks.startSocksBridge).not.toHaveBeenCalled();
     expect(process.env.HTTP_PROXY).toBeUndefined();

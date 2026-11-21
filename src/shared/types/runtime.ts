@@ -305,16 +305,8 @@ export interface RuntimePermissionMode {
 /**
  * Proxy policy for external-runtime subprocess env (issue #194).
  *
- * - `myagents` (default, legacy) — MyAgents unconditionally injects its own
- *    `proxySettings` into the runtime's env, overriding whatever the parent
- *    shell or system has configured. Best for "MyAgents proxy is THE proxy"
- *    setups.
- * - `terminal` — Drop MyAgents-injected proxy vars; restore whatever proxy
- *    the user's interactive shell would export (HTTP_PROXY / HTTPS_PROXY /
- *    ALL_PROXY / NO_PROXY, lowercase + UPPERCASE). Best for "I run codex /
- *    claude from terminal and want MyAgents to behave the same."
- * - `direct` — Strip all proxy vars. Best when system-level proxy (Clash
- *    TUN, transparent proxy) handles routing.
+ * - `myagents` (default) uses the system CLI's selection in app proxy settings.
+ * - `terminal` uses the proxy variables exported by the user's interactive shell.
  */
 export type RuntimeProxyPolicy = 'myagents' | 'terminal';
 

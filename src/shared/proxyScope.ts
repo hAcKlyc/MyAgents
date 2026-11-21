@@ -1,5 +1,7 @@
 import type { ProxySettings, ProxyScopeSettings } from './config-types';
 
+import { EXTERNAL_RUNTIME_IDS, type ExternalRuntimeId } from './integrated-runtimes/identity';
+
 /** The standard subprocess proxy surface; Provider keys and app-injection markers stay outside it. */
 export const PROXY_ENV_KEYS = [
   'HTTP_PROXY',
@@ -14,7 +16,7 @@ export const PROXY_ENV_KEYS = [
 
 export const DEFAULT_PROXY_SCOPE: ProxyScopeSettings = Object.freeze({ mode: 'all' });
 
-function cleanProviderIds(ids: unknown): string[] {
+function cleanIds(ids: unknown): string[] {
   if (!Array.isArray(ids)) return [];
   const seen = new Set<string>();
   const result: string[] = [];
@@ -40,14 +42,30 @@ export function normalizeProxyScope(raw: unknown): ProxyScopeSettings {
   }
   const hasGeneralRequests = Object.prototype.hasOwnProperty.call(scope, 'generalRequests');
   const generalRequests = hasGeneralRequests ? scope.generalRequests === true : true;
-  const providerIds = cleanProviderIds(scope.providerIds);
+  const providerIds = cleanIds(scope.providerIds);
   // Historical empty custom scopes were treated as invalid and fell back to
   // all. Once the new field is present, an empty provider list is an explicit
   // and valid selection (general-only or no app-proxy owners).
-  if (!hasGeneralRequests && providerIds.length === 0) {
+  if (!hasGeneralRequests && scope.runtimeIds === undefined && providerIds.length === 0) {
     return DEFAULT_PROXY_SCOPE;
   }
-  return { mode: 'custom', generalRequests, providerIds };
+  return {
+    mode: 'custom', generalRequests, providerIds,
+    ...(scope.runtimeIds !== undefined && { runtimeIds: cleanIds(scope.runtimeIds) }),
+  };
+}
+
+/** Old custom scopes used the general network selection for all system CLIs. */
+export function selectedProxyRuntimeIds(scope: ProxyScopeSettings): readonly string[] {
+  if (scope.mode === 'all') return EXTERNAL_RUNTIME_IDS;
+  return scope.runtimeIds ?? (scope.generalRequests === false ? [] : EXTERNAL_RUNTIME_IDS);
+}
+
+export function shouldUseMyAgentsProxyForRuntime(
+  settings: ProxySettings | null | undefined,
+  runtime: ExternalRuntimeId,
+): boolean {
+  return !!settings?.enabled && selectedProxyRuntimeIds(normalizeProxyScope(settings.scope)).includes(runtime);
 }
 
 export function shouldUseMyAgentsProxyForGeneralRequests(
@@ -113,7 +131,7 @@ export function removeProviderFromProxySettingsScope(
   const id = providerId.trim();
   if (!id || proxySettings.scope?.mode !== 'custom') return proxySettings;
 
-  const providerIds = cleanProviderIds(proxySettings.scope.providerIds)
+  const providerIds = cleanIds(proxySettings.scope.providerIds)
     .filter(existingId => existingId !== id);
   const normalizedScope = normalizeProxyScope(proxySettings.scope);
   const generalRequests = normalizedScope.mode === 'all'
@@ -121,6 +139,6 @@ export function removeProviderFromProxySettingsScope(
     : normalizedScope.generalRequests === true;
   return {
     ...proxySettings,
-    scope: { mode: 'custom', generalRequests, providerIds },
+    scope: { ...normalizedScope, mode: 'custom', generalRequests, providerIds },
   };
 }

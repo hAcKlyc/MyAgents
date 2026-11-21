@@ -328,7 +328,7 @@ slash menu 按真实 Runtime capability投影：
 
 | proxy policy | 语义 |
 |---|---|
-| `myagents` | 使用 Sidecar 启动时由 MyAgents 注入的 proxy 环境 |
+| `myagents` | 按 MyAgents 网络代理范围中该系统 CLI 的选择构建 proxy 环境 |
 | `terminal` | 使用 shell warmup 捕获的交互式终端 proxy 变量 |
 
 未知或旧字面量回落到安全默认，不能通过类型断言绕过 resolver。诊断 snapshot 只暴露有效 proxy presence、PATH 前缀、cwd、shell 和结构化 RPC 状态，不记录 secret 或完整环境。

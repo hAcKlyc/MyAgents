@@ -23,6 +23,8 @@ import { getExternalPendingMessageOperations } from './external-session/operatio
 // We only need to: spawn process, relay events, and handle permission delegation.
 
 import { createHash } from 'node:crypto';
+import { CODEX_SUBSCRIPTION_PROVIDER_ID } from '../../shared/config-types';
+import { getProcessProxyEnvKey, getProviderProxyScopeKey, getRuntimeProxyEnvironment, setProcessProxyConfig } from '../proxy-state';
 import { isConcreteProviderRoute } from '../../shared/providerRoute';
 
 import {
@@ -4351,30 +4353,21 @@ export async function requireCurrentExternalSkill(
   }
 }
 
-export async function handleExternalProxyConfigChange(input: {
-  oldManagedProviderKey: string;
-  newManagedProviderKey: string;
-  oldProcessEnvKey: string;
-  newProcessEnvKey: string;
-}): Promise<{ success: boolean; error?: string; skipped?: string }> {
-  const runtimeSource = getCurrentRuntimeSource();
-  const runtimeType = getCurrentRuntimeType();
-  const usesManagedProviderProxy =
-    runtimeType === 'codex' && runtimeSource === 'managed-provider';
-  const usesProcessProxyEnv =
-    // Integrated DSH Shell always consumes the general owner. The terminal
-    // envPolicy belongs only to external CLI runtimes.
-    runtimeType === 'dsh' ||
-    (runtimeSource !== 'managed-provider' &&
-      (activeExternalEnvPolicy?.proxy ?? 'myagents') === 'myagents');
-  const oldKey = usesManagedProviderProxy
-    ? input.oldManagedProviderKey
-    : input.oldProcessEnvKey;
-  const newKey = usesManagedProviderProxy
-    ? input.newManagedProviderKey
-    : input.newProcessEnvKey;
+function currentSessionProxyKey(): string | null {
+  const runtime = getCurrentRuntimeType();
+  if (isManagedCodexProductRuntime()) return getProviderProxyScopeKey(CODEX_SUBSCRIPTION_PROVIDER_ID);
+  if (runtime === 'dsh') return getProcessProxyEnvKey();
+  if (runtime === 'builtin' || activeExternalEnvPolicy?.proxy === 'terminal') return null;
+  return getProcessProxyEnvKey(getRuntimeProxyEnvironment(runtime));
+}
 
-  if (!usesManagedProviderProxy && !usesProcessProxyEnv) {
+export async function handleExternalProxyConfigChange(
+  proxySettings: unknown,
+): Promise<{ success: boolean; error?: string; skipped?: string }> {
+  const oldKey = currentSessionProxyKey();
+  await setProcessProxyConfig(proxySettings);
+  const newKey = currentSessionProxyKey();
+  if (oldKey === null || newKey === null) {
     return { success: true, skipped: 'proxy-not-owned-by-myagents' };
   }
   if (oldKey === newKey) {

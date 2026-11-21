@@ -6,7 +6,9 @@ import OverlayBackdrop from '@/components/OverlayBackdrop';
 import type { Provider } from '@/config/types';
 import type { ProxyScopeSettings } from '../../shared/config-types';
 import { isRuntimeBackedProvider } from '../../shared/providerExecution';
-import { normalizeProxyScope } from '../../shared/proxyScope';
+import { EXTERNAL_RUNTIME_IDS } from '../../shared/integrated-runtimes/identity';
+import { RUNTIME_DISPLAY_NAMES } from '../../shared/types/runtime';
+import { normalizeProxyScope, selectedProxyRuntimeIds } from '../../shared/proxyScope';
 
 interface ProxyScopeDialogProps {
   providers: Provider[];
@@ -34,16 +36,12 @@ export default function ProxyScopeDialog({
   const providerIds = useMemo(() => providers.map(provider => provider.id), [providers]);
   const [scope, setScope] = useState(() => normalizeProxyScope(initialScope));
   const generalRequests = scope.mode === 'all' || scope.generalRequests === true;
-  const selectedIds = useMemo(() => scope.mode === 'all' ? providerIds : (scope.providerIds ?? []), [scope, providerIds]);
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const allSelected = generalRequests && providerIds.every(id => selectedSet.has(id));
-  const selectedCount = providerIds.filter(id => selectedSet.has(id)).length + (generalRequests ? 1 : 0);
-
-  const toggle = (providerId: string) => {
-    setScope({ mode: 'custom', generalRequests, providerIds: selectedSet.has(providerId)
-      ? selectedIds.filter(id => id !== providerId)
-      : [...selectedIds, providerId] });
-  };
+  const selectedIds = scope.mode === 'all' ? providerIds : (scope.providerIds ?? []);
+  const runtimeIds = selectedProxyRuntimeIds(scope);
+  const customScope: ProxyScopeSettings = { mode: 'custom', generalRequests, providerIds: selectedIds, runtimeIds: [...runtimeIds] };
+  const selectedCount = providerIds.filter(id => selectedIds.includes(id)).length
+    + EXTERNAL_RUNTIME_IDS.filter(id => runtimeIds.includes(id)).length + Number(generalRequests);
+  const allSelected = selectedCount === providerIds.length + EXTERNAL_RUNTIME_IDS.length + 1;
 
   return (
     <OverlayBackdrop portal onClose={onClose} className="z-[100] overflow-y-auto px-4 py-8">
@@ -77,9 +75,8 @@ export default function ProxyScopeDialog({
                 // Bulk actions only edit the displayed subset. Hidden IDs
                 // remain selected if the catalog changes during this dialog.
                 setScope({ mode: 'custom', generalRequests: !allSelected,
-                  providerIds: allSelected
-                    ? selectedIds.filter(id => !providerIds.includes(id))
-                    : [...new Set([...selectedIds, ...providerIds])],
+                  runtimeIds: bulkSelection(runtimeIds, EXTERNAL_RUNTIME_IDS, !allSelected),
+                  providerIds: bulkSelection(selectedIds, providerIds, !allSelected),
                 });
               }}
               className="rounded-md border border-[var(--line)] px-3 py-1.5 text-sm text-[var(--ink)] transition-colors hover:bg-[var(--hover-bg)] active:scale-[0.98]"
@@ -94,7 +91,7 @@ export default function ProxyScopeDialog({
             type="button"
             role="checkbox"
             aria-checked={generalRequests}
-            onClick={() => setScope({ mode: 'custom', generalRequests: !generalRequests, providerIds: selectedIds })}
+            onClick={() => setScope({ ...customScope, generalRequests: !generalRequests })}
             className="flex w-full items-center gap-3 border-b border-[var(--line-subtle)] px-5 py-3 text-left transition-colors hover:bg-[var(--hover-bg)]"
           >
             <span
@@ -124,33 +121,19 @@ export default function ProxyScopeDialog({
               {t('proxy.scopeDialogNoProviders')}
             </p>
           )}
-          {providers.map((provider) => {
-            const selected = selectedSet.has(provider.id);
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                role="checkbox"
-                aria-checked={selected}
-                onClick={() => toggle(provider.id)}
-                className="flex w-full items-center gap-3 border-b border-[var(--line-subtle)] px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-[var(--hover-bg)]"
-              >
-                <span
-                  className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--accent)]"
-                  aria-hidden="true"
-                >
-                  {selected ? <CheckIcon size={18} /> : <StopIcon size={18} />}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-[var(--ink)]">{provider.name}</span>
-                  <span className="block truncate text-xs text-[var(--ink-muted)]">{provider.id}</span>
-                </span>
-                <span className="shrink-0 rounded-md bg-[var(--paper-elevated)] px-2 py-1 text-xs text-[var(--ink-muted)]">
-                  {t(providerKindKey(provider))}
-                </span>
-              </button>
-            );
-          })}
+          {providers.map(provider => (
+            <ScopeRow key={provider.id} id={provider.id} name={provider.name} kind={t(providerKindKey(provider))}
+              selected={selectedIds.includes(provider.id)}
+              onClick={() => setScope({ ...customScope, providerIds: toggleId(selectedIds, provider.id) })} />
+          ))}
+          <h4 className="border-b border-[var(--line-subtle)] px-5 py-2 text-xs font-semibold tracking-wider text-[var(--ink-muted)]/60">
+            {t('proxy.scopeDialogRuntimes')}
+          </h4>
+          {EXTERNAL_RUNTIME_IDS.map(id => (
+            <ScopeRow key={id} id={id} name={RUNTIME_DISPLAY_NAMES[id]} kind="CLI"
+              selected={runtimeIds.includes(id)}
+              onClick={() => setScope({ ...customScope, runtimeIds: toggleId(runtimeIds, id) })} />
+          ))}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--line-subtle)] px-5 py-4">
@@ -172,5 +155,45 @@ export default function ProxyScopeDialog({
         </div>
       </div>
     </OverlayBackdrop>
+  );
+}
+
+function toggleId(ids: readonly string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter(selected => selected !== id) : [...ids, id];
+}
+
+function bulkSelection(ids: readonly string[], visible: readonly string[], select: boolean): string[] {
+  return select ? [...new Set([...ids, ...visible])] : ids.filter(id => !visible.includes(id));
+}
+
+function ScopeRow({ id, name, kind, selected, onClick }: {
+  id: string;
+  name: string;
+  kind: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={selected}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 border-b border-[var(--line-subtle)] px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-[var(--hover-bg)]"
+    >
+      <span
+        className="flex h-5 w-5 shrink-0 items-center justify-center text-[var(--accent)]"
+        aria-hidden="true"
+      >
+        {selected ? <CheckIcon size={18} /> : <StopIcon size={18} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-[var(--ink)]">{name}</span>
+        <span className="block truncate text-xs text-[var(--ink-muted)]">{id}</span>
+      </span>
+      <span className="shrink-0 rounded-md bg-[var(--paper-elevated)] px-2 py-1 text-xs text-[var(--ink-muted)]">
+        {kind}
+      </span>
+    </button>
   );
 }

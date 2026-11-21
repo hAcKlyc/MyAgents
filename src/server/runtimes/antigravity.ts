@@ -59,7 +59,7 @@ const rpcDeadline = (ms = 30_000) => ({
 
 async function executable(policy?: RuntimeEnvPolicy) {
   await ensureShellPath();
-  const env = augmentedProcessEnv(policy);
+  const env = augmentedProcessEnv('antigravity', policy);
   return { env, path: resolveCommand("agy", env) };
 }
 

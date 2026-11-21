@@ -3,12 +3,11 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 
+import type { ExternalRuntimeId } from '../../shared/integrated-runtimes/identity';
+import { PROXY_ENV_KEYS } from '../../shared/proxyScope';
+import { getRuntimeProxyEnvironment } from '../proxy-state';
 import type { RuntimeEnvPolicy } from '../../shared/types/runtime';
 import { getShellEnv, getDetectedTerminalProxyEnv } from '../utils/shell';
-
-const PROXY_KEYS_UPPER = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const;
-const PROXY_KEYS_LOWER = ['http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'] as const;
-const PROXY_KEYS_ALL = [...PROXY_KEYS_UPPER, ...PROXY_KEYS_LOWER] as const;
 
 /**
  * Lightweight PATH-based command lookup, used by external-runtime adapters.
@@ -60,13 +59,8 @@ function which(command: string, pathStr: string): string | null {
  * Previously this function had its own hardcoded Unix-only PATH augmentation,
  * which missed Windows paths like %APPDATA%\npm → "Executable not found". See: #70
  *
- * NOTE: The Sidecar process already has NO_PROXY injected by Rust's
- * proxy_config::apply_to_subprocess(). getShellEnv() spreads process.env,
- * so external CLI subprocesses spawned here are also protected.
- *
- * Issue #194 — `policy.proxy` selects how proxy env reaches the runtime:
- *  - `myagents` (default): inherit Sidecar's process.env proxy vars (Rust
- *    injects MyAgents-configured proxy into the Sidecar's env at spawn).
+ * Workspace proxy policy:
+ *  - `myagents` (default): apply this system CLI's proxy scope to its environment.
  *  - `terminal`: replace the inherited proxy vars with whatever the user's
  *    interactive shell exports (detected during shell.ts warmup). If warmup
  *    found nothing, all proxy vars are stripped — that's terminal parity for
@@ -80,30 +74,14 @@ function which(command: string, pathStr: string): string | null {
  * `'direct'` values fall through validation and default to `'myagents'`.
  */
 export function augmentedProcessEnv(
+  runtime: ExternalRuntimeId,
   policy?: RuntimeEnvPolicy,
 ): Record<string, string | undefined> {
   const env = getShellEnv();
 
-  // Defense-in-depth: only act on the explicit allowlist. An unknown value
-  // (forward-compat: a future policy literal not yet implemented here, a
-  // deprecated literal like the removed `'direct'`, or a malformed config
-  // that slipped past upstream validation) MUST behave as `'myagents'` —
-  // i.e. don't strip the user's proxy env on a guess.
-  const rawPolicy = policy?.proxy;
-  const proxyPolicy: 'myagents' | 'terminal' =
-    rawPolicy === 'terminal' ? 'terminal' : 'myagents';
+  if (policy?.proxy !== 'terminal') return getRuntimeProxyEnvironment(runtime, env);
 
-  if (proxyPolicy === 'myagents') {
-    // Legacy / default — leave inherited proxy vars in place. Rust's
-    // `apply_to_subprocess` already populated them in the Sidecar's env.
-    return env;
-  }
-
-  // 'terminal' — strip every inherited proxy var, then restore whatever the
-  // user's interactive shell would set. Drop the MyAgents-injected marker
-  // too so downstream code doesn't mistake a stripped env for a MyAgents-
-  // controlled one.
-  for (const k of PROXY_KEYS_ALL) delete env[k];
+  for (const key of PROXY_ENV_KEYS) delete env[key];
   delete env.MYAGENTS_PROXY_INJECTED;
 
   const detected = getDetectedTerminalProxyEnv();

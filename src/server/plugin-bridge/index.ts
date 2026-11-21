@@ -1363,9 +1363,9 @@ console.log(`[plugin-bridge] HTTP server listening on port ${listenPort}`);
 
 // Establish the process-wide general proxy baseline (including a local HTTP
 // bridge for SOCKS5) before plugin code opens any external connection. Plugin
-// Bridge owns no model-provider traffic, so provider-only scope must not start
+// Bridge owns only general traffic, so provider-only or CLI-only scopes must not start
 // or consume the app proxy in this process.
-initializeProxyStateFromCurrentSettings({ providerOwnedConsumers: false })
+initializeProxyStateFromCurrentSettings({ sessionConsumers: false })
   .then(() => {
     // Community plugins call global fetch directly. Install the package-pinned
     // implementation before evaluating plugin code, then bind it to the same

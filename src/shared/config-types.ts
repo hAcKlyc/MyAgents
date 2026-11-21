@@ -886,11 +886,13 @@ export type ProxyScopeMode = 'all' | 'custom';
 export interface ProxyScopeSettings {
   mode: ProxyScopeMode;
   /**
-   * Whether non-provider-owned network requests use the MyAgents app proxy.
+   * Whether general network requests use the MyAgents app proxy.
    * Missing on legacy custom scopes means `true` for backward compatibility.
    */
   generalRequests?: boolean;
   providerIds?: string[];
+  /** Absent on legacy custom scopes, where system CLIs followed generalRequests. */
+  runtimeIds?: string[];
 }
 
 export interface ProxySettings {

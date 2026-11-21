@@ -15,6 +15,7 @@ import type {
   RuntimePermissionRule,
   RuntimePermissionRulesSnapshot,
 } from '../../shared/types/runtime';
+import { PROXY_ENV_KEYS } from '../../shared/proxyScope';
 import { createDshBinding } from '../../shared/integrated-runtimes/identity';
 import {
   getDefaultRuntimePermissionMode,
@@ -1104,7 +1105,12 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+const initialProxyEnv = { ...process.env };
 function restoreEnv(): void {
+  for (const key of PROXY_ENV_KEYS) {
+    if (initialProxyEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = initialProxyEnv[key];
+  }
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
   if (previousUserProfile === undefined) delete process.env.USERPROFILE;
@@ -4953,10 +4959,7 @@ describe('external SessionEngine with fake runtime', () => {
     });
 
     const update = harness.externalSession.handleExternalProxyConfigChange({
-      oldManagedProviderKey: 'managed-proxy-old',
-      newManagedProviderKey: 'managed-proxy-new',
-      oldProcessEnvKey: 'process-proxy-old',
-      newProcessEnvKey: 'process-proxy-new',
+      enabled: true, host: '127.0.0.1', port: 17865, scope: { mode: 'all' },
     });
     await waitFor(
       () => harness.runtime.isStopAwaitingRelease(),
@@ -10388,6 +10391,24 @@ describe('external SessionEngine with fake runtime', () => {
   });
 
 
+  it('only replaces a system Codex process when its own proxy selection changes', async () => {
+    const harness = await createHarness([], { runtimeType: 'codex', runtimeSource: 'system-cli' });
+    const update = (generalRequests: boolean, runtimeIds: string[]) =>
+      harness.engine.updateProxyConfig({
+        enabled: true, protocol: 'http', host: '127.0.0.1', port: 17866,
+        scope: { mode: 'custom', generalRequests, providerIds: ['codex-sub'], runtimeIds },
+      });
+    await update(false, []);
+    await harness.externalSession.prewarmExternalSession({
+      sessionId: 'system-codex-proxy', workspacePath: join(harness.home, 'workspace'),
+      scenario: { type: 'desktop' },
+    });
+    await expect(update(true, ['antigravity'])).resolves.toMatchObject({ skipped: 'unchanged' });
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(true);
+    await expect(update(true, ['antigravity', 'codex'])).resolves.toEqual({ success: true });
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(false);
+  });
+
   it.each(['codex', 'dsh'] as const)(
     'applies general proxy changes to %s according to its owner with terminal envPolicy saved',
     async (runtimeType) => {
@@ -10439,10 +10460,7 @@ describe('external SessionEngine with fake runtime', () => {
 
       const result =
         await harness.externalSession.handleExternalProxyConfigChange({
-          oldManagedProviderKey: 'provider',
-          newManagedProviderKey: 'provider',
-          oldProcessEnvKey: 'general-old',
-          newProcessEnvKey: 'general-new',
+          enabled: true, host: '127.0.0.1', port: 17868, scope: { mode: 'all' },
         });
       expect(result).toEqual(
         runtimeType === 'dsh'
@@ -10470,6 +10488,7 @@ describe('external SessionEngine with fake runtime', () => {
         ],
         { runtimeType: 'dsh' },
       );
+      await harness.externalSession.handleExternalProxyConfigChange({ enabled: false });
       const sessionId = 'session-dsh-proxy-boundary';
       const workspacePath = join(harness.home, 'workspace');
       const initial = await harness.engine.sendDesktopMessage({
@@ -10488,12 +10507,7 @@ describe('external SessionEngine with fake runtime', () => {
         'active DSH turn',
       );
 
-      const change = {
-        oldManagedProviderKey: 'provider',
-        newManagedProviderKey: 'provider',
-        oldProcessEnvKey: 'A',
-        newProcessEnvKey: 'B',
-      };
+      const change = { enabled: true, host: '127.0.0.1', port: 17867, scope: { mode: 'all' } };
       await expect(
         harness.externalSession.handleExternalProxyConfigChange(change),
       ).resolves.toEqual({ success: true });
@@ -10501,9 +10515,7 @@ describe('external SessionEngine with fake runtime', () => {
       if (revert) {
         await expect(
           harness.externalSession.handleExternalProxyConfigChange({
-            ...change,
-            oldProcessEnvKey: 'B',
-            newProcessEnvKey: 'A',
+            enabled: false,
           }),
         ).resolves.toEqual({ success: true, skipped: 'unchanged-after-defer' });
       }
