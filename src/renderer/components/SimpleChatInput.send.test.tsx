@@ -145,9 +145,9 @@ describe('SimpleChatInput send paths', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'my draft' } });
     fireEvent.click(screen.getByTitle('切换模型'));
     expect(screen.getByRole('status')).toHaveTextContent('模型列表加载失败');
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('textbox')).toHaveValue('my draft');
     expect(screen.getByTitle('切换模型')).toHaveTextContent('saved-model');
   });
@@ -1237,11 +1237,12 @@ describe('SimpleChatInput send paths', () => {
     }
   });
 
-  it.each(['antigravity', 'codex'] as const)('shows progress until the %s model query settles', async runtime => {
+  it.each(['antigravity', 'codex'] as const)('opens the %s catalog without fetching and shows progress only while there are no models', async runtime => {
     await i18n.changeLanguage('zh-CN');
+    const refresh = vi.fn();
     const input = (models: { value: string; displayName: string }[], loading = false) => (
       <ToastProvider><ImagePreviewProvider>
-        <SimpleChatInput runtime={runtime} isLoading={false} onSend={vi.fn()} runtimeModels={models} runtimeModelsLoading={loading} />
+        <SimpleChatInput runtime={runtime} isLoading={false} onSend={vi.fn()} runtimeModels={models} runtimeModelsLoading={loading} onRefreshProviders={refresh} />
       </ImagePreviewProvider></ToastProvider>
     );
     const view = render(input([], true));
@@ -1250,9 +1251,15 @@ describe('SimpleChatInput send paths', () => {
     view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }]));
     expect(screen.queryByText('正在加载模型列表…')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible());
+    fireEvent.click(screen.getByTitle('切换模型'));
+    fireEvent.click(screen.getByTitle('切换模型'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible());
+    expect(refresh).not.toHaveBeenCalled();
     view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }], true));
-    expect(screen.getByRole('status')).toHaveTextContent('正在加载模型列表');
-    expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Native model' })).toBeEnabled();
+    view.rerender(input([{ value: 'new-model', displayName: 'Updated model' }]));
+    expect(screen.getByRole('button', { name: 'Updated model' })).toBeVisible();
     view.rerender(input([]));
     expect(screen.getByText('暂未发现可用模型。')).toBeVisible();
   });

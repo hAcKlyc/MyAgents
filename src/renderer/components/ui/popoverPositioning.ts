@@ -16,7 +16,9 @@ export function popoverPositioning(
     size({
       padding,
       apply({ availableHeight, rects, elements }) {
-        elements.floating.style.maxHeight = `min(${Math.max(0, availableHeight)}px, ${maxHeight})`;
+        const room = `${Math.max(0, availableHeight)}px`;
+        elements.floating.style.setProperty('--popover-available-height', room);
+        elements.floating.style.maxHeight = `min(${room}, ${maxHeight})`;
         if (matchAnchorWidth)
           elements.floating.style.width = `${rects.reference.width}px`;
       },

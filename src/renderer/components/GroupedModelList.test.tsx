@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { GroupedModelList, type ModelListGroup } from './GroupedModelList';
@@ -68,6 +68,28 @@ describe('GroupedModelList', () => {
     render(<GroupedModelList {...props} />);
     expect(screen.getByRole('button', { expanded: true })).toHaveTextContent('Provider 7');
     expect(screen.getByRole('button', { current: true })).toHaveTextContent('Model 4');
+  });
+
+  it('keeps closing rows inert and preserves them when the same provider reopens mid-transition', async () => {
+    const user = userEvent.setup();
+    render(<GroupedModelList groups={catalogue(vi.fn())} selectedGroupId="0" onDismiss={vi.fn()} />);
+    const header = screen.getByRole('button', { expanded: true });
+    const panel = document.getElementById(header.getAttribute('aria-controls')!)!;
+    const row = screen.getByTitle('Model 0');
+    let finish!: () => void;
+    const finished = new Promise<void>(resolve => { finish = resolve; });
+    Object.defineProperty(panel, 'getAnimations', { value: () => [{ finished }] });
+
+    await user.click(header);
+    expect(panel).toHaveAttribute('inert');
+    expect(row).toBeInTheDocument();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: 'Provider 1' })).toHaveFocus();
+
+    await user.click(header);
+    await act(async () => { finish(); });
+    expect(panel).not.toHaveAttribute('inert');
+    expect(screen.getByTitle('Model 0')).toBe(row);
   });
 
   it('recovers focus and forgets a browsed group that disappears on refresh', async () => {

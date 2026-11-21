@@ -2007,15 +2007,10 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 onClick={(e) => {
                   e.stopPropagation();
                   if (showConfigLockedReason()) return;
-                  const willOpen = !modelMenuOpen;
-                  setShowModelMenu(willOpen);
+                  setShowModelMenu(!modelMenuOpen);
                   setShowModeMenu(false);
                   setShowPlusMenu(false);
                   setShowToolMenu(false);
-                  // Refresh providers data when opening menu
-                  if (willOpen && onRefreshProviders) {
-                    onRefreshProviders();
-                  }
                 }}
                 className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)] ${
                   configControlsLocked ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-[var(--ink-muted)]' : ''
@@ -2032,24 +2027,25 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 onClose={() => setShowModelMenu(false)}
                 anchorRef={modelBtnRef}
                 placement="top-end"
-                className="flex w-[292px] max-w-[calc(100vw-16px)] flex-col"
+                maxHeight="448px"
+                className="flex min-h-[min(332px,var(--popover-available-height,100dvh))] w-[292px] max-w-[calc(100vw-16px)] flex-col [&>[data-model-list]]:grow"
                 closeOnEscape={!showEffortSubmenu}
               >
                 {isExternalRuntime && runtimeModels ? (
-                  <div ref={modelListRef} data-model-list className="relative min-h-0 max-h-[260px] overflow-y-auto py-1">
+                  <div ref={modelListRef} data-model-list className="relative min-h-0 overflow-y-auto py-1">
                     <div className="px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
                       {t('input.runtimeModelHeader', {
                         runtime: runtime === 'claude-code' ? 'CLAUDE CODE' : runtime?.toUpperCase(),
                       })}
                     </div>
-                    {runtimeModelsLoading ? (
+                    {runtimeModels.length === 0 && (runtimeModelsLoading ? (
                       <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--ink-muted)]">
                         <LoaderIcon aria-hidden="true" className="h-4 w-4 animate-spin" />
                         {t('input.modelCatalogLoading')}
                       </div>
-                    ) : runtimeModels.length === 0 && (
+                    ) : (
                       <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">{t('input.modelCatalogEmpty')}</div>
-                    )}
+                    ))}
                     {runtimeModels.map(model => {
                       const isSelected = selectedModel === model.value || (!selectedModel && model.isDefault);
                       return (
