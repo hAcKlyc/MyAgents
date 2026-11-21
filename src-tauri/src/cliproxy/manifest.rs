@@ -207,7 +207,23 @@ impl Component {
         }
         Ok(artifact)
     }
-    pub fn credential_compatible(&self, other: &Self) -> bool {
+    pub fn matches_bundled_source(&self) -> bool {
+        let source: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../src/shared/managed-cliproxy-source.json"
+        )).expect("build verifies the bundled CLIProxy source lock");
+        source["version"] == self.version && source["commit"] == self.commit
+    }
+
+    /// The App ships this upgrade for existing accounts as well as new ones.
+    /// A later rollback still needs the signed bidirectional compatibility record.
+    pub fn accepts_accounts_from(&self, current: &Self) -> bool {
+        self.credential_compatible(current)
+            || (self.matches_bundled_source()
+                && matches!((version(&self.version), version(&current.version)),
+                    (Ok(target), Ok(old)) if target > old))
+    }
+
+    fn credential_compatible(&self, other: &Self) -> bool {
         // The newer approval attests both directions. A shipped older
         // manifest cannot know the name of every future compatible release.
         match version(&self.version)
@@ -343,6 +359,19 @@ pub(super) mod tests {
         changed_source.commit = "f".repeat(40);
         assert!(!old.credential_compatible(&changed_source));
     }
+    #[test]
+    fn app_bundled_upgrade_accepts_existing_accounts_without_a_version_list() {
+        let manifest = SignedManifest {
+            json: include_str!("../../../.github/cliproxy/manifest-v1.json").into(),
+            signature: include_str!("../../../.github/cliproxy/manifest-v1.json.sig").into(),
+        }.verify().unwrap();
+        let bundled = manifest.releases.iter().find(|c| c.matches_bundled_source()).unwrap();
+        let old = component("8.0.13");
+        assert!(bundled.accepts_accounts_from(&old));
+        assert!(!old.accepts_accounts_from(bundled));
+        assert!(!component("999.0.0").accepts_accounts_from(&old));
+    }
+
     #[test]
     fn update_admits_higher_versions_and_same_artifact_new_compatibility_only() {
         let old = component("7.2.158");

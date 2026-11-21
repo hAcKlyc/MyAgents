@@ -108,11 +108,7 @@ impl ComponentStore {
     pub fn bundled_installed(&self) -> Result<Installed> {
         let approval = self.bundled_approval()?;
         let mut manifest = approval.verify()?;
-        let source: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../src/shared/managed-cliproxy-source.json"
-        )).map_err(|_| Error::contract())?;
-        // The source lock owns the bundled baseline, not the online update target.
-        manifest.releases.retain(|r| source["version"] == r.version && source["commit"] == r.commit);
+        manifest.releases.retain(Component::matches_bundled_source);
         let release = manifest.select(&self.app_version)?.ok_or_else(Error::contract)?;
         Ok(Installed { min_app_version: release.compatibility.min_app_version.clone(),
             approval, source: "bundled".to_owned() })

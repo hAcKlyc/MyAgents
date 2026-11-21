@@ -100,7 +100,7 @@ MyAgents 不传 `-local-model`，保留原版启动及每三小时更新线上 m
 
 - `minAppVersion` 是开放的最低客户端门槛。选择所有门槛不大于当前 App 的条目中，门槛最高的那条；不依赖数组顺序，不按 CLIProxy 版本大小挑选条目。同一门槛只允许一条记录。
 - `revision` 是该条目的兼容记录修订号。同一组件版本只可复用原始 immutable bytes；修改凭据兼容记录时提高修订号。换到更高组件版本可从 1 开始。
-- `credentialCompatibleVersions` 记录已经验证可双向共用账号文件的旧组件版本。它只在发布新 CLIProxy 时维护，不随 MyAgents 或 SDK 升版改变。已登录账号的升级/回退仍受这一条件约束，不能凭版本号猜测 token 文件兼容。
+- `credentialCompatibleVersions` 记录已经验证可双向共用账号文件的旧组件版本。它只在发布新 CLIProxy 时维护，不随 MyAgents 或 SDK 升版改变。已登录账号随 App 向前升级到随包组件时直接沿用账号目录。独立在线升级和向旧组件回退使用这份双向兼容记录。
 - App、CLIProxy、门槛均按数值 `x.y.z` 比较，不接受预发布后缀。SDK 版本锁定与回归测试仍由客户端开发负责，SDK 版本不参与组件准入。
 
 例：`.17 → 7.2.158` 与 `.20 → 7.3.0` 共存时（这里 `.17` 表示 `0.4.17`），0.4.17–0.4.19 使用前者，0.4.20 及未来客户端使用后者。修改 `.17` 不影响已存在的 `.20`。没有匹配条目表示没有适用更新，保持本地可用组件；不会把其它门槛的资源当成候选。
@@ -120,7 +120,7 @@ Rust 构建与运行时共用 `src-tauri/src/cliproxy_policy.rs` 的门槛选择
 
 原版还可以在 `auth-dir` 内创建 `kv.db`（本地 bbolt KV 缓存），它不是 OAuth 账号 JSON。该文件随原版管理、随账号目录清理，不能把它当成已登录证明，也不能在仍有 writer 时单独删除。无账号的原生合同测试允许此文件，同时检查权限与测试秘密/拒绝请求正文未落盘。
 
-启动先准备本地可信选择，再启动在线检查；之后每 15 分钟检查一次。正常只升级更高组件版本，或采纳同一产物更高 compatibility revision，不因新的 App 安装包带了旧组件就强制降级。更新先下载与校验，等待消费者 drain 后启动新进程，健康后提交 current。失败按既有规则回退；账号文件不兼容或已撤销的旧组件不能作为回退。GC 只处理组件目录，并保留 current/previous/pending 引用的文件。
+启动优先使用可用的较新随包组件，已有账号与新账号遵循相同的随包升级规则。线上先下载了同一随包版本时也按其锁定版本和提交识别。随后启动在线检查；之后每 15 分钟检查一次。正常只升级更高组件版本，或采纳同一产物更高 compatibility revision，不因新的 App 安装包带了旧组件就强制降级。更新先下载与校验，等待消费者 drain 后启动新进程，健康后提交 current。失败按既有规则回退；账号文件不兼容或已撤销的旧组件不能作为回退。GC 只处理组件目录，并保留 current/previous/pending 引用的文件。
 
 签名信任根复用 `resource_signature_core.rs` 和 Tauri updater 公钥。网络失败保留本机可信组件；404 记为 `update_unpublished`，传输失败记为 `update_network`。已失败 artifact/App/SDK/revision 的自动安装或启动不会无限重复；这些字段标识失败尝试的环境，不是精确版本准入。正常进程崩溃恢复另有次数上限，不重放任务。
 
@@ -225,4 +225,4 @@ MYAGENTS_CLIPROXY_DISTRIBUTION_DIR=/path/to/distribution ./build_dev.sh --build-
 - `npm run verify:cliproxy:sdk-local`：真实已安装 SDK + 本地模拟服务，检查 loopback、子 Agent 模型选择，不访问 Google。
 - ignored `native_account_sdk_tool_and_history_contract`：显式浏览器授权与真实 SDK 工具/历史检查；需要单独运行，不进入默认 CI。
 
-发布新上游版本时，真实账号文件兼容与原版接口检查不能被纯版本选择测试代替。改策略选择规则时同步 Node/Rust 边界测试；改安装/切换时重测 current/pending/previous 与运行中的任务。源码仓库不提交二进制缓存、签名私钥或真实账号数据。
+发布新上游版本时检查原版接口。为独立在线升级或回退声明双向凭据兼容时，验证对应版本能共用真实账号文件。改策略选择规则时同步 Node/Rust 边界测试；改安装/切换时重测 current/pending/previous 与运行中的任务。源码仓库不提交二进制缓存、签名私钥或真实账号数据。

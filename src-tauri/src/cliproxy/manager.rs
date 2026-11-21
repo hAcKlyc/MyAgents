@@ -257,111 +257,46 @@ impl<R: tauri::Runtime> CliProxyManager<R> {
 
     async fn selected(&self, manual: bool) -> Result<Installed> {
         let snapshot = self.components.state.lock().await.clone();
-        let live = {
+        let (live, has_accounts) = {
             let state = self.state.lock().await;
-            state
-                .active
-                .iter()
-                .chain(state.candidate.iter())
-                .any(|i| i.alive())
+            (
+                state.active.iter().chain(state.candidate.iter()).any(|i| i.alive()),
+                state.accounts.active.is_some() || state.accounts.candidate.is_some(),
+            )
         };
-        // App upgrades may carry a newer baseline even while the update host
-        // is offline. Prepare it before choosing an older on-disk executable.
-        if !live {
-            if let Ok(bundled) = self.components.bundled_installed() {
-                let current = snapshot
-                    .pending
-                    .as_ref()
-                    .or(snapshot.current.as_ref())
-                    .map(Installed::component)
-                    .transpose()?;
-                if let Ok(component) = self.components.allowed(&bundled).await {
-                    let newer = super::manifest::should_prepare_update(
-                        current.as_ref(),
-                        &component,
-                        super::manifest::platform().ok_or_else(Error::contract)?,
-                        false,
-                    )?;
-                    let compatible = snapshot
-                        .current
-                        .as_ref()
-                        .map(Installed::component)
-                        .transpose()?
-                        .as_ref()
-                        .is_none_or(|current| component.credential_compatible(current));
-                    if newer
-                        && compatible
-                        && (manual || !self.components.failed_attempt(&bundled).await?)
-                    {
-                        if self
-                            .components
-                            .install(&bundled, manual, self.shutdown.subscribe())
-                            .await
-                            .is_ok()
-                        {
-                            return Ok(bundled);
-                        }
-                    }
-                }
-            }
-        }
-        // A live writer stays on its component until activate_pending owns the
-        // drain. Without a writer, prefer the prepared compatible update.
-        let candidates = if live {
-            [snapshot.current.clone(), None, snapshot.previous.clone()]
-        } else {
-            [
-                snapshot.pending.clone(),
-                snapshot.current.clone(),
-                snapshot.previous.clone(),
-            ]
+        let current = snapshot.current.as_ref().map(Installed::component).transpose()?;
+        let accepts_accounts = |component: &super::manifest::Component| {
+            !has_accounts || current.as_ref().is_none_or(|old| component.accepts_accounts_from(old))
         };
-        for candidate in candidates.into_iter().flatten() {
-            if self.components.allowed(&candidate).await.is_err()
-                || (!manual
-                    && self
-                        .components
-                        .failed_attempt(&candidate)
-                        .await
-                        .unwrap_or(true))
+        // A live writer stays on its component until activate_pending drains it.
+        let pending = snapshot.pending.as_ref().filter(|_| !live);
+        for candidate in pending.into_iter().chain(&snapshot.current).chain(&snapshot.previous) {
+            let Ok(component) = self.components.allowed(candidate).await else { continue };
+            if !accepts_accounts(&component)
+                || (!manual && self.components.failed_attempt(candidate).await.unwrap_or(true))
+                || self.components.executable(candidate).is_err()
             {
                 continue;
             }
-            if let Some(current) = &snapshot.current {
-                let has_accounts = {
-                    let state = self.state.lock().await;
-                    state.accounts.active.is_some() || state.accounts.candidate.is_some()
-                };
-                if has_accounts
-                    && !candidate
-                        .component()?
-                        .credential_compatible(&current.component()?)
-                {
-                    continue;
-                }
+            if live {
+                return Ok(candidate.clone());
             }
-            if self.components.executable(&candidate).is_ok() {
-                return Ok(candidate);
+            let Ok(bundled) = self.components.bundled_installed() else { return Ok(candidate.clone()) };
+            let Ok(next) = self.components.allowed(&bundled).await else { return Ok(candidate.clone()) };
+            let platform = super::manifest::platform().ok_or_else(Error::contract)?;
+            if super::manifest::should_prepare_update(Some(&component), &next, platform, false)?
+                && accepts_accounts(&next)
+                && (manual || !self.components.failed_attempt(&bundled).await?)
+                && self.components.install(&bundled, manual, self.shutdown.subscribe()).await.is_ok()
+            {
+                return Ok(bundled);
             }
+            return Ok(candidate.clone());
         }
         let installed = self.components.bundled_installed()?;
         self.components.ingest_controls(&installed.approval, "bundled").await?;
-        self.components.allowed(&installed).await?;
-        if let Some(current) = &snapshot.current {
-            let has_accounts = {
-                let state = self.state.lock().await;
-                state.accounts.active.is_some() || state.accounts.candidate.is_some()
-            };
-            if has_accounts
-                && !installed
-                    .component()?
-                    .credential_compatible(&current.component()?)
-            {
-                return Err(Error::new(
-                    "credential_incompatible",
-                    "本机组件尚未通过账号凭据兼容验证",
-                ));
-            }
+        if !accepts_accounts(&self.components.allowed(&installed).await?) {
+            return Err(Error::new("credential_incompatible", "旧组件无法复用当前账号凭据"));
         }
         self.components
             .install(&installed, manual, self.shutdown.subscribe())
@@ -2013,7 +1948,7 @@ impl<R: tauri::Runtime> CliProxyManager<R> {
         let next_component = self.components.allowed(&pending).await?;
         if let Some(current) = &current {
             if (active.is_some() || candidate.is_some())
-                && !next_component.credential_compatible(&current.component()?)
+                && !next_component.accepts_accounts_from(&current.component()?)
             {
                 return Err(Error::new(
                     "credential_incompatible",
@@ -2131,7 +2066,7 @@ impl<R: tauri::Runtime> CliProxyManager<R> {
             }
             if let Some(old) = &current {
                 if self.components.allowed(old).await.is_ok()
-                    && next_component.credential_compatible(&old.component()?)
+                    && old.component()?.accepts_accounts_from(&next_component)
                 {
                     for account in active.iter().chain(candidate.iter()) {
                         if let Ok(instance) = self
@@ -2750,6 +2685,32 @@ mod tests {
         // No executable is installed in this fixture. Selection may fail only
         // after initialization, with its actual resource error.
         assert_eq!(request.await.err().unwrap().code, "bundled_missing");
+    }
+
+    #[tokio::test]
+    async fn an_existing_account_selects_the_bundled_upgrade_offline() {
+        let fixture = Fixture::new().await;
+        let manager = &fixture.manager;
+        let bundle = &manager.components.bundled;
+        let resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/cliproxy");
+        std::fs::create_dir_all(bundle).unwrap();
+        for name in ["manifest-v1.json", "manifest-v1.json.sig", "artifact.zip"] {
+            std::fs::copy(resources.join(name), bundle.join(name)).unwrap();
+        }
+        let account = AccountRef::candidate();
+        let auth = manager.store.create_account(&account.id).unwrap();
+        let marker = auth.join("upgrade-test-marker");
+        std::fs::write(&marker, b"existing account").unwrap();
+        manager.state.lock().await.accounts.active = Some(account);
+        manager.components.state.lock().await.current = Some(fixture.installed.clone());
+
+        // The second lookup goes through the persisted pending candidate.
+        for _ in 0..2 {
+            let selected = manager.selected(false).await.unwrap();
+            assert!(selected.component().unwrap().matches_bundled_source());
+            assert!(manager.components.executable(&selected).is_ok());
+        }
+        assert_eq!(std::fs::read(&marker).unwrap(), b"existing account");
     }
 
     #[tokio::test]
