@@ -1209,7 +1209,9 @@ export function resolveCodexConversationBranchPoint(
   const index = turns.indexOf(matches[0]);
   if (index === 0) return { kind: 'fresh-thread' };
   const previous = turns[index - 1] as { id?: unknown; status?: unknown } | undefined;
-  if (!previous || typeof previous.id !== 'string' || previous.status !== 'completed') {
+  // A stopped or failed predecessor still owns its tool calls and partial output.
+  if (!previous || typeof previous.id !== 'string' ||
+    (previous.status !== 'completed' && previous.status !== 'interrupted' && previous.status !== 'failed')) {
     throw new RuntimeConversationBranchError('anchor_unavailable', 'The previous Codex turn boundary is unavailable');
   }
   return { kind: 'through-turn', runtimeTurnId: previous.id };

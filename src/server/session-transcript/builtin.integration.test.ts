@@ -1109,16 +1109,25 @@ describe('builtin V2 execution independent of product storage', () => {
     });
   });
 
-it('preserves completed file restoration when later transcript persistence fails', async () => {
+it.each(['original', 'retained', 'removed'])('preserves local file restoration when later transcript persistence fails (fork point=%s)', async forkPoint => {
   const workspace = join(state.home, 'workspace');
   await mkdir(workspace);
-  const metadata = await store.createSession(workspace, { runtime: 'builtin' });
+  const metadata = await store.createSession(workspace, {
+    runtime: 'builtin',
+    ...(forkPoint === 'original' ? {} : { forkOrigin: { sessionId: 'parent', messageId: 'fork-point' } }),
+  });
+  if (forkPoint === 'retained') {
+    const { cursor } = await store.loadSessionTranscript(metadata.id);
+    expect(await store.appendSessionMessages(metadata.id, cursor, [
+      { id: 'fork-point', role: 'assistant', content: 'inherited', timestamp: 't', sdkUuid: 'fork-assistant' },
+    ])).toMatchObject({ ok: true });
+  }
   await agent.initializeAgent(workspace, null, metadata.id, { preWarmDisabled: true });
   await agent.enqueueUserMessage('question', [], undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
   await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
   await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
-  const user = agent.getMessages()[0];
+  const user = agent.getMessages().find(row => row.role === 'user')!;
   state.sdkRead.mockResolvedValue([{ type: 'user', uuid: user.sdkInputUuid,
     message: { role: 'user', content: user.content } }]);
   expect(await store.getActiveSessionTranscript(metadata.id)!.writer.flush()).toBe(true);
@@ -1823,7 +1832,15 @@ it('preserves diagnostics through native fork and cold retry using remapped user
   expect(forkData.messages[1].sdkUuid).toBeUndefined();
   await agent.resetSession();
   await agent.initializeAgent(workspace, null, fork.newSessionId!, { preWarmDisabled: true });
-  expect(await agent.retryBuiltinUserMessage('u2', async () => ({ success: true }))).toMatchObject({ success: true });
+  await agent.enqueueUserMessage('branch-local turn', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(await agent.retryBuiltinUserMessage('u2', async result => {
+    expect(result.fileRewindStatus).toBe('not_attempted');
+    return { success: true };
+  })).toMatchObject({ success: true });
+  expect(state.rewindFiles).not.toHaveBeenCalled();
   expect(agent.getMessages().map(row => row.id)).toEqual(['u1', 'd']);
   expect(store.getSessionMetadata(fork.newSessionId!)?.sdkResumeSessionAt).toBe('fork-native-u1');
 });

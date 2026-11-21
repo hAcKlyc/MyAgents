@@ -462,6 +462,24 @@ describe("Chat execution selection (#685)", () => {
     },
   );
 
+  it.each([undefined, "gemini-3.8-flash-low"])(
+    "uses the Antigravity CLI model %s when the workspace retains a Codex subscription",
+    async (model) => {
+      Object.assign(mocks.config.projects[0], { providerId: "codex-sub", model: chosenModel });
+      const view = render(<Harness runtime="antigravity" source={null} initialMessage={{
+        text: "launch", systemCliRuntime: "antigravity", runtimeModel: model,
+      }} />);
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledOnce());
+      expect(mocks.send.mock.calls[0]?.[3]).toBe(model);
+      expect(mocks.send.mock.calls[0]?.[7]).toBeUndefined();
+      view.rerender(<Harness runtime="antigravity" source="system-cli" />);
+      fireEvent.click(screen.getByText("Send"));
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2));
+      expect(mocks.send.mock.calls[1]?.[3]).toBe(model);
+      expect(mocks.send.mock.calls[1]?.[7]).toBeUndefined();
+    },
+  );
+
   it("uses execution identity over stale duplicate launch fields without requiring catalog membership", async () => {
     const futureModel = "gpt-future-model";
     render(

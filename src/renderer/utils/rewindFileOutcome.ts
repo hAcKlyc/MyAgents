@@ -7,7 +7,7 @@ export type RewindResponse = {
   errorCode?: string;
 };
 
-export type RewindTransportOutcome = 'committed' | 'unchanged' | 'target-unknown' | 'unresolved';
+export type RewindTransportOutcome = 'rejected' | 'committed' | 'unchanged' | 'target-unknown' | 'unresolved';
 
 export type RewindRecoveryProjection = {
   restoreMessageSnapshot: boolean;
@@ -26,8 +26,8 @@ export function projectRewindRecovery(
   outcome: RewindTransportOutcome,
 ): RewindRecoveryProjection {
   return {
-    restoreMessageSnapshot: false,
-    restoreComposerSnapshot: outcome === 'unchanged',
+    restoreMessageSnapshot: outcome === 'rejected',
+    restoreComposerSnapshot: outcome === 'rejected' || outcome === 'unchanged',
   };
 }
 
@@ -51,9 +51,14 @@ export function warnRewindFileOutcome(
 }
 
 /** A validation/capability rejection is known; IO/transport failures remain ambiguous. */
+export function isConversationRejection(error: unknown): error is { status: number; errorCode?: unknown } {
+  if (!error || typeof error !== 'object' || !('status' in error)) return false;
+  return error.status === 400 || error.status === 409 ||
+    (error.status === 502 && 'errorCode' in error && error.errorCode === 'native_fork_failed');
+}
+
 export function getConversationRejectionMessage(error: unknown, translate: Translate): string | null {
-  if (!error || typeof error !== 'object' || !('status' in error)
-    || (error.status !== 400 && error.status !== 409)) return null;
+  if (!isConversationRejection(error)) return null;
   if ('errorCode' in error && typeof error.errorCode === 'string') {
     return translate(`shell.toasts.conversationError.${error.errorCode}`);
   }

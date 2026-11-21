@@ -10592,6 +10592,14 @@ export async function rewindSession(userMessageId: string): Promise<{
     }
     const resumeSessionAt = boundary.kind === 'exact' ? boundary.sdkUuid : undefined;
 
+    // An eager fork remaps the conversation UUIDs and omits file undo history.
+    // Fork publication clears inherited input receipts. Older branch-local rows
+    // can still be identified after the retained product fork point.
+    const forkPoint = sourceMeta?.forkOrigin;
+    const forkIndex = forkPoint ? history.findIndex(row => row.id === forkPoint.messageId) : -1;
+    const localCheckpoint = !forkPoint || (forkIndex >= 0
+      ? targetIndex > forkIndex
+      : Boolean(targetMessage.sdkInputUuid));
     const targetUserUuid = targetMessage.sdkUuid;
     const sourceFailure = await prepareSessionTranscriptMutation(productSessionId);
     if (sourceFailure) throw new Error(`${sourceFailure.reason}: ${sourceFailure.error}`);
@@ -10606,7 +10614,7 @@ export async function rewindSession(userMessageId: string): Promise<{
       abortRequested: lifecycleState.abortRequested,
       // Candidate provenance was checked above; the SDK still owns checkpoint
       // availability and native resume owns the conversation boundary.
-      isCurrentSessionUuid: Boolean(targetUserUuid),
+      isCurrentSessionUuid: localCheckpoint,
     });
     const { skippedLinks, fileRewindStatus } = fileRewind;
     fileOutcome = { skippedLinks, fileRewindStatus };

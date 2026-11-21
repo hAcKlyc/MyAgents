@@ -1075,6 +1075,7 @@ export default function Launcher({
           : {}),
         enabledOfficialToolIds: carriedOfficialTools,
         ...(builtinSelection ? { builtinSelection } : {}),
+        ...(isExternalRuntime ? { systemCliRuntime: launcherRuntime } : {}),
         ...(runtimeModel ? { runtimeModel } : {}),
         ...(runtimeBackedProviderIdentity
           ? { providerExecutionIdentity: runtimeBackedProviderIdentity }

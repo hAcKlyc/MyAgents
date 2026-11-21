@@ -165,7 +165,7 @@ system 菜单只提供上述三项；历史 suggest 仍按只读恢复，并保�
 Codex Rewind/Fork/Retry 由 external owner 在 mutation lease 内编排，依赖现有 native binding 与 Runtime branching 能力：
 
 - root `turn/start` 关联 Product user message id；成功 terminal 后持久化 native turn anchor；
-- Rewind 有目标 turn anchor 时请求 `before-turn`；目标失败而没有 anchor 时，空保留前缀使用 fresh thread，非空前缀必须以紧邻目标的 assistant anchor 请求 `through-turn`。没有精确边界就返回失败，不能因 turn 失败而假设它没有 native 输出或工具副作用；
+- Rewind 有目标 turn anchor 时请求 `before-turn`，保留紧邻目标的原生终态轮次（completed、interrupted 或 failed），包括其中已有的文本和工具记录；目标失败而没有 anchor 时，空保留前缀使用 fresh thread，非空前缀必须以紧邻目标的 assistant anchor 请求 `through-turn`。没有精确边界就返回失败，不能因 turn 失败而假设它没有 native 输出或工具副作用；
 - Rewind 保留 Product Session id，提交产品截断和 replacement native binding；Fork 用 `through-turn` 建立新 Product Session；
 - 创建非空 native branch 后，Runtime adapter 必须确认 source app-server 退出才交出 replacement identity；`thread/unsubscribe` 只解除订阅，不能证明 native writer 已释放。Fork 的源 Session 保留原 native identity，下一轮仍可 resume；
 - fresh-thread 不需要先创建空 native 分支。若产品 Rewind 已提交，随后 source 停止或 Runtime restore 失败，返回已提交并需恢复的结果，不能伪报未执行；source 停止无法确认时由现有 Sidecar restart 路径接管。

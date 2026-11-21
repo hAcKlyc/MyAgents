@@ -34,6 +34,7 @@ export interface InitialMessage {
   enabledPluginIds?: string[];
   enabledOfficialToolIds?: OfficialToolId[];
   builtinSelection?: { providerId: string; model: string };
+  systemCliRuntime?: import('@/../shared/integrated-runtimes/identity').ExternalRuntimeId;
   runtimeModel?: string;
   providerExecutionIdentity?: RuntimeBackedProviderIdentity;
   reasoningEffort?: string;

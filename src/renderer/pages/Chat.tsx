@@ -56,6 +56,7 @@ import { useToast } from '@/components/Toast';
 import {
   classifyRewindTransportOutcome,
   getConversationRejectionMessage,
+  isConversationRejection,
   projectRewindRecovery,
   type RewindResponse,
   warnRewindFileOutcome as showRewindFileOutcomeWarning,
@@ -162,7 +163,7 @@ import { useSessionCronRestore } from '@/hooks/useSessionCronRestore';
 import { isDebugMode } from '@/utils/debug';
 import { getChannelTypeLabel } from '@/utils/taskCenterUtils';
 import { appendCronPromptToDraft } from '@/utils/cronComposerRecovery';
-import { runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
+import { resolveAgentRuntimeModelCatalogIdentity, runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
 import { launchSupportDiagnostics } from '@/utils/supportDiagnostics';
 import { createDefaultSessionGoalDraftConfig } from '@/utils/sessionGoalDraft';
 import { MANAGED_CODEX_COMPACT_SLASH_COMMAND } from '@/utils/slashActions';
@@ -756,19 +757,14 @@ export default function Chat({
   const currentAgent = currentProject?.agentId
     ? getAgentById(config, currentProject.agentId)
     : undefined;
-  const providerUiRuntime: RuntimeType =
-    (sessionRuntime as RuntimeType | null) ??
-    resolveEffectiveRuntime(
-      currentAgent?.runtime,
-      currentAgent?.runtimePreference,
-      currentAgent?.runtimeConfig?.source,
-      currentAgent?.providerId,
-      undefined,
-      config.defaultIntegratedRuntime,
-    );
+  const agentRuntime = resolveEffectiveRuntime(
+    currentAgent?.runtime, currentAgent?.runtimePreference, currentAgent?.runtimeConfig?.source,
+    currentAgent?.providerId, undefined, config.defaultIntegratedRuntime,
+  );
+  const currentRuntime = (sessionRuntime as RuntimeType | null) ?? agentRuntime;
   const providerUiProviders = useMemo(
-    () => projectProvidersForRuntime(providers, providerUiRuntime),
-    [providers, providerUiRuntime],
+    () => projectProvidersForRuntime(providers, currentRuntime),
+    [providers, currentRuntime],
   );
   // Local provider state: snapshot from AgentConfig (priority) or Project at creation.
   // Prevents cross-tab pollution when another tab patches the shared project.
@@ -1441,12 +1437,13 @@ export default function Chat({
       selectedModel,
     ],
   );
-  const currentRuntimeSource =
-    sessionMeta?.runtimeSource ??
-    sessionRuntimeSource ??
-    (currentProviderExecutionIntent?.kind === 'runtime-backed-provider'
-      ? currentProviderExecutionIntent.runtimeSource
-      : undefined);
+  const agentCatalogIdentity = resolveAgentRuntimeModelCatalogIdentity(currentAgent, config.defaultIntegratedRuntime);
+  const currentRuntimeSource = runtimeSourceForRuntimeType(
+    currentRuntime,
+    sessionMeta?.runtimeSource ?? sessionMeta?.providerExecutionIdentity?.runtimeSource ??
+      sessionRuntimeSource ?? (initialMessage?.systemCliRuntime === currentRuntime ? 'system-cli' :
+        currentRuntime === agentCatalogIdentity.runtime ? agentCatalogIdentity.source : undefined),
+  );
   const managedProviderRuntimeActive =
     currentRuntimeSource === 'managed-provider';
   // #324 — 推理强度 setting ('default' | level). ONE state for both runtimes
@@ -1748,40 +1745,12 @@ export default function Chat({
       codex: { installed: false },
     },
   );
-  // Resolve new Sessions through explicit Agent preference or the root default.
-  // Existing Sessions keep their frozen Runtime identity.
-  // Agent's currently-configured runtime — used as the default for NEW sessions.
-  // Managed Codex is a provider default, not the legacy user-managed Codex CLI
-  // runtime, so stale `agent.runtime=codex` must not leak into Chat chrome.
-  const agentRuntime: RuntimeType = resolveEffectiveRuntime(
-    currentAgent?.runtime,
-    currentAgent?.runtimePreference,
-    currentAgent?.runtimeConfig?.source,
-    currentAgent?.providerId,
-    undefined,
-    config.defaultIntegratedRuntime,
-  );
-  // v0.1.69: session is self-contained — its frozen runtime is authoritative for
-  // both display and message routing within this tab. Falls back to agentRuntime
-  // only before the session has loaded (sessionRuntime===null) or for newly-created
-  // sessions before TabProvider syncs metadata. Changing agent.runtime in another
-  // tab does NOT change an existing session's display: the session's Sidecar was
-  // spawned with its frozen runtime and the backend routes by sessionId.
-  const currentRuntime: RuntimeType =
-    (sessionRuntime as RuntimeType | null) ?? agentRuntime;
-  const launchRuntimeSource = runtimeSourceForRuntimeType(
-    agentRuntime,
-    currentAgent?.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID ||
-      currentAgent?.runtimeConfig?.source === 'managed-provider'
-      ? 'managed-provider'
-      : undefined,
-  ) ?? null;
   const menuRuntimeIdentity = sessionId
     ? sessionMenuRuntimeIdentity({
         sessionId,
         metadata: sessionMeta,
-        launchRuntime: agentRuntime,
-        launchRuntimeSource,
+        launchRuntime: agentCatalogIdentity.runtime,
+        launchRuntimeSource: agentCatalogIdentity.source ?? null,
         liveRuntime: sessionRuntime,
         liveRuntimeSource: sessionRuntimeSource,
         liveRuntimeSessionId: sessionRuntimeSessionId,
@@ -2143,10 +2112,7 @@ export default function Chat({
     const base = {
       ...((currentAgent?.runtimeConfig as RuntimeConfig | undefined) ?? {}),
     };
-    if (currentProviderExecutionIntent?.kind === 'runtime-backed-provider') {
-      base.source = currentProviderExecutionIntent.runtimeSource;
-      base.model = currentProviderExecutionIntent.model;
-    }
+    base.source = currentRuntimeSource;
     const persistedModel = coerceExternalRuntimeModelForUi(
       base.model,
       currentRuntime,
@@ -2185,7 +2151,7 @@ export default function Chat({
   }, [
     inputUsesExternalRuntimeControls,
     currentAgent?.runtimeConfig,
-    currentProviderExecutionIntent,
+    currentRuntimeSource,
     runtimeModel,
     effectiveRuntimePermissionMode,
     currentRuntime,
@@ -2237,11 +2203,15 @@ export default function Chat({
   onInitialMessageConsumedRef.current = onInitialMessageConsumed;
   const initialMessageRuntimeReady = useMemo(() => {
     const identity = initialMessage?.providerExecutionIdentity;
+    if (initialMessage?.systemCliRuntime) {
+      return currentRuntime === initialMessage.systemCliRuntime && currentRuntimeSource === 'system-cli';
+    }
     if (!identity) return true;
     if (currentRuntime !== identity.runtime) return false;
     return currentRuntimeSource === identity.runtimeSource;
   }, [
     initialMessage?.providerExecutionIdentity,
+    initialMessage?.systemCliRuntime,
     currentRuntime,
     currentRuntimeSource,
   ]);
@@ -2302,21 +2272,20 @@ export default function Chat({
             defaultPermissionMode: config.defaultPermissionMode,
           })
     ) as PermissionMode;
-    const effectiveModel = launchProviderSelection
+    const launchModel = launchProviderSelection
       ? launchProviderSelection.model
       : inputUsesExternalRuntimeControls
         ? (coerceExternalRuntimeModelForUi(
             launchMessage.runtimeModel,
             currentRuntime,
           ) ??
-          effectiveRuntimeModel ??
-          runtimeModels?.find((m) => m.isDefault)?.value)
+          (launchMessage.systemCliRuntime ? undefined : effectiveModel))
         : selectedModel;
     const provider = launchProviderSelection
       ? (providers.find((p) => p.id === launchProviderSelection.providerId) ??
         (launchMessage.providerExecutionIdentity ? undefined : currentProvider))
       : currentProvider;
-    const providerRoute = buildBuiltinProviderRoute(provider, effectiveModel);
+    const providerRoute = buildBuiltinProviderRoute(provider, launchModel);
     const providerEnv = providerRoute ? undefined : buildProviderEnv(provider);
 
     const autoSend = async () => {
@@ -2403,7 +2372,7 @@ export default function Chat({
           setSelectedModel(launchProviderSelection.model);
           providerInitRef.current = true;
         } else if (inputUsesExternalRuntimeControls) {
-          if (launchMessage.runtimeModel) {
+          if (launchMessage.systemCliRuntime || launchMessage.runtimeModel) {
             setRuntimeModel(
               coerceExternalRuntimeModelForUi(
                 launchMessage.runtimeModel,
@@ -2444,7 +2413,7 @@ export default function Chat({
               !inputUsesExternalRuntimeControls && provider
                 ? provider.id
                 : undefined,
-            model: effectiveModel,
+            model: launchModel,
           });
           const cronPermissionMode = coerceRuntimeBirthPermissionMode(
             effectivePermission,
@@ -2482,7 +2451,7 @@ export default function Chat({
               launchMessage.text,
               launchMessage.images,
               effectivePermission,
-              effectiveModel,
+              launchModel,
               inputUsesExternalRuntimeControls || providerRoute
                 ? undefined
                 : providerEnv,
@@ -2502,7 +2471,7 @@ export default function Chat({
             launchMessage.text,
             launchMessage.images,
             effectivePermission,
-            effectiveModel,
+            launchModel,
             inputUsesExternalRuntimeControls || providerRoute
               ? undefined
               : providerEnv,
@@ -2545,7 +2514,7 @@ export default function Chat({
                 !inputUsesExternalRuntimeControls && provider
                   ? provider.id
                   : undefined,
-              model: effectiveModel,
+              model: launchModel,
             });
             const cronPermissionMode = coerceRuntimeBirthPermissionMode(
               effectivePermission,
@@ -5921,17 +5890,17 @@ export default function Chat({
               : 'transport_error'),
         });
 
-        // A structured HTTP rejection proves the server did not commit. A
-        // transport failure is ambiguous for a native conversation mutation,
+        // Validation and conflict responses reject the operation. A server
+        // or transport failure is ambiguous for a native conversation mutation,
         // so reload SessionStore authority instead of restoring a possibly
         // stale pre-rewind tail.
+        const rejected = isConversationRejection(err);
         const reconciliation =
-          hasRecoverableNativeRewind && typeof structured?.status !== 'number'
+          hasRecoverableNativeRewind && !rejected
             ? await retryCurrentSessionRestore(messageId)
             : null;
         if (sessionIdRef.current !== rewindSessionId) return;
-        const transportOutcome =
-          classifyRewindTransportOutcome(reconciliation);
+        const transportOutcome = rejected ? 'rejected' : classifyRewindTransportOutcome(reconciliation);
         const recovery = projectRewindRecovery(transportOutcome);
         if (recovery.restoreMessageSnapshot) {
           setMessages(snapshot);

@@ -1482,6 +1482,10 @@ describe('Codex app-server protocol helpers', () => {
       kind: 'through-turn',
       runtimeTurnId: 'turn-1',
     });
+    for (const status of ['interrupted', 'failed']) {
+      expect(resolveCodexConversationBranchPoint([{ id: 'stopped', status }, ...turns], 'turn-1'))
+        .toEqual({ kind: 'through-turn', runtimeTurnId: 'stopped' });
+    }
     expect(() => resolveCodexConversationBranchPoint(turns, 'missing')).toThrow(
       /anchor/i,
     );
@@ -1500,7 +1504,7 @@ describe('Codex app-server protocol helpers', () => {
     expect(() =>
       resolveCodexConversationBranchPoint(
         [
-          { id: 'turn-1', status: 'failed' },
+          { id: 'turn-1', status: 'inProgress' },
           { id: 'turn-2', status: 'completed' },
         ],
         'turn-2',
