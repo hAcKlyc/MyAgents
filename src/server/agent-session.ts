@@ -4118,8 +4118,8 @@ async function buildSdkMcpServers(
   // null = MCP not yet configured (e.g. Global sidecar, or Tab pre-warm before /api/mcp/set)
   // [] = explicitly no MCP (user has none enabled)
   // [...]= user's enabled MCP servers
-  // Never fall back to config file — the frontend's /api/mcp/set is the single source of truth.
-  // Global sidecar never receives /api/mcp/set and correctly gets no MCP.
+  // Query launch resolves a materialized Session's selection before building this map.
+  // A pending Tab without an explicit configuration can still have no user MCPs.
   // Filter out SDK reserved names to prevent fatal crash:
   // "Invalid MCP configuration: X is a reserved MCP name." → exit code 1
   const allServers: McpServerDefinition[] = configState.currentMcpServers ?? [];
@@ -11293,6 +11293,13 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       );
     }
 
+    // An Inbox Sidecar can boot before the target Session is materialized.
+    // Resolve at Query launch, when its snapshot exists, unless a Tab or
+    // scheduled turn already supplied an explicit configuration (including []).
+    if (configState.currentMcpServers === null) {
+      const target = getCurrentProductSessionMetadata();
+      if (target) setCurrentMcpServers(resolveWorkspaceConfig(agentDir, target).mcpServers);
+    }
     const mcpStatus = configState.currentMcpServers === null ? 'auto' : configState.currentMcpServers.length === 0 ? 'disabled' : `enabled(${configState.currentMcpServers.length})`;
     const claudeTranscriptCleanupPeriodDays = normalizeClaudeTranscriptCleanupPeriodDays(
       loadAdminConfig().claudeTranscriptCleanupPeriodDays,

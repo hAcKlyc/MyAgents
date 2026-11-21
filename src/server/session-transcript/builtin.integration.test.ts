@@ -318,6 +318,60 @@ afterEach(async () => {
 });
 
 describe('builtin V2 execution independent of product storage', () => {
+  it.each([
+    { birth: 'fresh', selection: ['selected', 'disabled'], expected: ['selected'] },
+    { birth: 'owned', selection: ['selected', 'disabled'], expected: ['selected'] },
+    { birth: 'owned', selection: [], expected: [] },
+    { birth: 'owned', selection: undefined, expected: [] },
+    { birth: 'legacy', selection: undefined, expected: ['workspace-default'] },
+    { birth: 'configured', selection: undefined, expected: [] },
+  ])('mounts target MCPs on cold $birth Inbox dispatch (selection=$selection)', async ({ birth, selection, expected }) => {
+    vi.spyOn(await import('../utils/platform'), 'getHomeDirOrNull').mockReturnValue(state.home);
+    const workspace = join(state.home, 'inbox-workspace');
+    const settings = join(state.home, '.myagents');
+    await mkdir(workspace);
+    await mkdir(settings, { recursive: true });
+    const ids = ['selected', 'workspace-default', 'disabled'];
+    await writeFile(join(settings, 'config.json'), JSON.stringify({
+      mcpServers: ids.map(id => ({ id, name: id, type: 'http', url: 'http://127.0.0.1:1/mcp', isBuiltin: false })),
+      mcpEnabledServers: ['selected', 'workspace-default'],
+    }));
+    await writeFile(join(settings, 'projects.json'), JSON.stringify([
+      { id: 'project', path: workspace, mcpEnabledServers: ['workspace-default'] },
+    ]));
+    state.query.mockImplementation(args => ({
+      ...fakeQuery(args), mcpServerStatus: async () => expected.map(name => ({ name, status: 'connected' })),
+    }));
+    const sessionId = randomUUID();
+    if (birth !== 'fresh') {
+      await store.createSession(workspace, {
+        id: sessionId, runtime: 'builtin', mcpEnabledServers: selection,
+        configSnapshotAt: birth === 'owned' ? 'frozen' : undefined,
+      });
+    }
+    await agent.initializeAgent(workspace, null, sessionId);
+    expect(agent.getMcpServers()).toBeNull();
+    if (birth === 'configured') agent.setMcpServers([]);
+    const engine = (await import('../session-engine/selector')).getSessionEngine();
+    const target = { sessionId, workspacePath: workspace };
+    if (birth === 'fresh') {
+      const { handleFreshSessionStart } = await import('../inbox/start-handler');
+      const result = await handleFreshSessionStart({
+        kind: 'request', messageId: randomUUID(), sourceKind: 'external-cli', fromLabel: 'CLI',
+        toSessionId: sessionId, text: 'use target tools', replyBack: false,
+      }, { ...target, runtime: 'builtin', agent: {
+        id: 'target', name: 'Target', enabled: true, channels: [], permissionMode: 'auto', mcpEnabledServers: selection,
+      } }, (text, options) => engine.enqueueInboxMessage({ ...target, text, ...options }));
+      expect(result).toEqual({ accepted: true });
+    } else {
+      await engine.enqueueInboxMessage({ ...target, text: 'use target tools' });
+    }
+    await vi.waitFor(() => expect(state.sdkInputs).toHaveLength(1));
+    const servers = state.query.mock.calls[0][0].options.mcpServers ?? {};
+    expect(Object.keys(servers)).toEqual(expected);
+    expect(await engine.waitIdle(2_000, 10)).toBe(true);
+  });
+
   it('preserves native Claude commands across bound desktop and IM admissions', async () => {
     const workspace = join(state.home, 'workspace');
     await mkdir(workspace);
