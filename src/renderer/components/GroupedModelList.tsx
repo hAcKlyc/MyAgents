@@ -75,7 +75,8 @@ const check = <CheckIcon aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text
 export function GroupedModelList({
   groups, selectedGroupId, selectedModelId, preferredGroupId, follow, onDismiss, flat, children,
 }: Props) {
-  const [browsed, setBrowsed] = useState<string | null>(null);
+  // undefined follows the opening default; null is an explicit collapse for this visit.
+  const [browsed, setBrowsed] = useState<string | null>();
   const listRef = useRef<HTMLDivElement>(null);
   const anchorOffset = useRef<number | null>(null);
   const interacted = useRef(false);
@@ -83,10 +84,12 @@ export function GroupedModelList({
   const anchor = useContext(PopoverAnchorContext);
   const focusedRow = useRef<HTMLElement | null>(null);
   const preferred = selectedGroupId ?? preferredGroupId;
-  if (browsed !== null && !groups.some(group => group.id === browsed)) {
-    setBrowsed(null);
+  if (typeof browsed === 'string' && !groups.some(group => group.id === browsed)) {
+    setBrowsed(undefined);
   }
-  const expanded = browsed ?? groups.find(group => group.id === preferred)?.id ?? groups[0]?.id;
+  const expanded = flat || browsed === undefined
+    ? groups.find(group => group.id === preferred)?.id ?? groups[0]?.id
+    : browsed;
   const selected = groups.find(group => group.id === selectedGroupId)?.models.find(row => row.id === selectedModelId);
 
   useLayoutEffect(() => {
@@ -159,9 +162,8 @@ export function GroupedModelList({
                   event.stopPropagation();
                   interacted.current = true;
                   event.currentTarget.focus({ preventScroll: true });
-                  if (open) return;
-                  anchorOffset.current = event.currentTarget.offsetTop - (listRef.current?.scrollTop ?? 0);
-                  setBrowsed(group.id);
+                  anchorOffset.current = open ? null : event.currentTarget.offsetTop - (listRef.current?.scrollTop ?? 0);
+                  setBrowsed(open ? null : group.id);
                 }}
                 className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm font-semibold text-[var(--ink)] ${open ? 'bg-[var(--paper-inset)]' : 'hover:bg-[var(--hover-bg)]'}`}>
                 <ChevronRightIcon aria-hidden="true" className={`h-3 w-3 shrink-0 text-[var(--ink-muted)] ${open ? 'rotate-90' : ''}`} />

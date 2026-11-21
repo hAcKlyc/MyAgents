@@ -31,8 +31,7 @@ describe('GroupedModelList', () => {
     expect(current.children[2]).toHaveTextContent('image');
     await user.click(screen.getByRole('button', { name: 'Provider 2' }));
     const header = screen.getByRole('button', { expanded: true });
-    await user.click(header);
-    expect(screen.getByRole('button', { expanded: true })).toBe(header);
+    expect(header).toHaveTextContent('Provider 2');
     expect(screen.getByRole('button', { name: 'Provider 7 Model 4' })).toBeVisible();
     expect(screen.queryByRole('button', { current: true })).toBeNull();
     view.rerender(<GroupedModelList {...props} groups={[...groups]} />);
@@ -40,6 +39,35 @@ describe('GroupedModelList', () => {
     expect(select).not.toHaveBeenCalled();
     await user.click(screen.getByTitle('Model 4'));
     expect(select).toHaveBeenCalledExactlyOnceWith('2', '4');
+  });
+
+  it('collapses to provider headers until another group is opened or the menu is reopened', async () => {
+    const user = userEvent.setup();
+    const select = vi.fn();
+    const groups = catalogue(select);
+    const props = { groups, selectedGroupId: '7', selectedModelId: '4', onDismiss: vi.fn() };
+    const view = render(<GroupedModelList {...props} />);
+    const currentHeader = screen.getByRole('button', { expanded: true });
+    await user.click(currentHeader);
+    expect(currentHeader).toHaveFocus();
+    expect(currentHeader).toHaveAccessibleName('Provider 7 Model 4');
+    view.rerender(<GroupedModelList {...props} groups={[...groups]} />);
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(10);
+    expect(screen.queryByTitle('Model 4')).toBeNull();
+
+    const other = screen.getByRole('button', { name: 'Provider 8' });
+    other.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { expanded: true })).toBe(other);
+    await user.keyboard(' ');
+    expect(screen.queryByRole('button', { expanded: true })).toBeNull();
+    expect(select).not.toHaveBeenCalled();
+    expect(props.onDismiss).not.toHaveBeenCalled();
+
+    view.unmount();
+    render(<GroupedModelList {...props} />);
+    expect(screen.getByRole('button', { expanded: true })).toHaveTextContent('Provider 7');
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent('Model 4');
   });
 
   it('recovers focus and forgets a browsed group that disappears on refresh', async () => {
