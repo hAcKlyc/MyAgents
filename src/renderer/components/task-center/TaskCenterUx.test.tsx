@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionMetadata } from '@/api/sessionClient';
 import type { Task } from '@/../shared/types/task';
 
+import { OverlayOwnerActiveContext } from '@/context/OverlayOwnerActiveContext';
+import { dismissTopmost } from '@/utils/closeLayer';
 import { DispatchTaskDialog } from './DispatchTaskDialog';
 import { TaskEditPanel } from './TaskEditPanel';
 import { TaskDocBlock } from './TaskDocBlock';
@@ -89,7 +91,7 @@ vi.mock('@/hooks/useConfig', () => ({
   }),
 }));
 
-vi.mock('@/hooks/useCloseLayer', () => ({ useCloseLayer: vi.fn() }));
+
 vi.mock('@/components/Toast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn() }),
 }));
@@ -714,6 +716,48 @@ describe('Task Center UX refinements', () => {
     }
   });
 
+  it.each(['follow', 'empty', 'cancel'])('edits a task MCP override with %s as its outcome', async outcome => {
+    const taskToEdit = task({ status: 'stopped', executionMode: 'once', mcpEnabledServers: ['ddg-search'] });
+    const tree = (active: boolean) => (
+      <OverlayOwnerActiveContext.Provider value={active}>
+        <TaskEditPanel task={taskToEdit} onSaved={vi.fn()} onCancel={vi.fn()} onError={vi.fn()} />
+      </OverlayOwnerActiveContext.Provider>
+    );
+    const view = render(tree(true));
+    await screen.findByDisplayValue('# Task body');
+    const trigger = screen.getByRole('button', { name: /^MCP 工具 · DuckDuckGo/ });
+    expect(screen.queryByRole('checkbox', { name: /DuckDuckGo/ })).toBeNull();
+    fireEvent.click(trigger);
+    const follow = screen.getByRole('button', { name: '跟随 Agent 设置', pressed: false });
+    const ddg = screen.getByRole('checkbox', { name: /DuckDuckGo/ });
+    expect(ddg).toBeChecked();
+    fireEvent.click(ddg);
+    expect(follow).toHaveAttribute('aria-pressed', 'false');
+    expect(trigger).toHaveTextContent('0');
+    if (outcome === 'follow') {
+      fireEvent.click(follow);
+      expect(trigger).toHaveTextContent('跟随 Agent 设置');
+    } else {
+      view.rerender(tree(false));
+      fireEvent.keyDown(document, { key: 'Enter', ctrlKey: true });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(taskApiMocks.taskUpdate).not.toHaveBeenCalled();
+      expect(screen.queryByRole('checkbox', { name: /DuckDuckGo/ })).toBeNull();
+      view.rerender(tree(true));
+      const restored = screen.getByRole('checkbox', { name: /DuckDuckGo/ });
+      expect(restored).not.toBeChecked();
+      expect(trigger).toHaveTextContent('0');
+      fireEvent.keyDown(restored, { key: 'Escape' });
+      expect(trigger).toHaveFocus();
+    }
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(taskApiMocks.taskUpdate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: outcome === 'cancel' ? '取消' : '保存' }));
+    if (outcome === 'cancel') expect(taskApiMocks.taskUpdate).not.toHaveBeenCalled();
+    else await waitFor(() => expect(taskApiMocks.taskUpdate).toHaveBeenCalledWith(
+      expect.objectContaining(outcome === 'follow' ? { clearMcpOverride: true } : { mcpEnabledServers: [] })));
+  });
+
   it('persists workspace reassignment as one pair and normalizes hidden once-only state', async () => {
     const onSaved = vi.fn();
     render(
@@ -845,13 +889,22 @@ describe('Task Center UX refinements', () => {
     fireEvent.click(screen.getByRole('button', { name: '跟随 Agent 工作区' }));
     expect(screen.getByRole('button', { current: true })).toHaveTextContent('跟随 Agent');
     fireEvent.click(screen.getByRole('button', { name: 'Example Model' }));
+    const mcp = screen.getByRole('button', { name: 'MCP 工具 · 跟随 Agent 设置' });
+    fireEvent.click(mcp);
+    const follow = screen.getByRole('button', { name: '跟随 Agent 设置', pressed: true });
+    fireEvent.click(screen.getByRole('checkbox', { name: /DuckDuckGo/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Edge TTS/ }));
+    expect(follow).toHaveAttribute('aria-pressed', 'false');
+    act(() => expect(dismissTopmost()).toBe(true));
+    expect(mcp).toHaveFocus();
+    expect(mcp).toHaveTextContent('2');
     expect(taskApiMocks.taskCreateDirect).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '创建任务' }));
 
     await waitFor(() =>
       expect(taskApiMocks.taskCreateDirect).toHaveBeenCalledWith(
         expect.objectContaining({
-          providerId: 'grouped', model: 'example',
+          providerId: 'grouped', model: 'example', mcpEnabledServers: ['ddg-search', 'edge-tts'],
           taskMdContent: '# 目标\n整理本周交付。',
         }),
       ),

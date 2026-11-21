@@ -350,7 +350,7 @@ export default function GlobalAgentsPanel({
 
             {/* Sync conflict dialog */}
             {showSyncConflictDialog && (
-                <OverlayBackdrop className="z-50">
+                <OverlayBackdrop portal className="z-[100]">
                     <div className="w-[420px] rounded-xl border border-[var(--line)] bg-[var(--paper)] p-6 shadow-xl">
                         <h3 className="text-base font-semibold text-[var(--ink)]">{t('agentSettings.globalAgents.conflictTitle')}</h3>
                         <p className="mt-2 text-sm text-[var(--ink-muted)]">

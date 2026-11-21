@@ -219,7 +219,7 @@ export default function ProviderEnableOrderDialog({
     }, [providers, allEnabled, onDisabledProviderDraftChange]);
 
     return (
-        <OverlayBackdrop className="z-50 overflow-y-auto py-8">
+        <OverlayBackdrop portal className="z-[100] overflow-y-auto py-8">
             <div className="mx-4 flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
                 <div className="flex-shrink-0 px-6 pb-4 pt-6">
                     <div className="flex items-center justify-between">

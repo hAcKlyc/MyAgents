@@ -46,6 +46,7 @@ import { homeDir, join } from '@tauri-apps/api/path';
 import { track } from '@/analytics';
 import { useCloseLayer } from '@/hooks/useCloseLayer';
 import { useTtsPreview, type TtsPreviewSettings } from './hooks/useTtsPreview';
+import { OverlayOwnerActiveContext } from '@/context/OverlayOwnerActiveContext';
 import OverlayBackdrop from '@/components/OverlayBackdrop';
 import { apiFetch, apiGetJson, apiPostJson } from '@/api/apiFetch';
 import { useToast } from '@/components/Toast';
@@ -332,7 +333,15 @@ function isSubscriptionLoginActiveStatus(
   return status === 'starting' || status === 'waiting';
 }
 
-export default function Settings({
+export default function Settings(props: SettingsProps) {
+  return (
+    <OverlayOwnerActiveContext.Provider value={props.isActive !== false}>
+      <SettingsPage {...props} />
+    </OverlayOwnerActiveContext.Provider>
+  );
+}
+
+function SettingsPage({
   mode = 'settings',
   onOpenToolMarket,
   initialSection,
@@ -1433,15 +1442,14 @@ export default function Settings({
   const [mcpHeadersExpanded, setMcpHeadersExpanded] = useState(false);
   const [mcpOAuthExpanded, setMcpOAuthExpanded] = useState(false);
 
-  // Cmd+W dismissal for all inline Settings overlays (z-50 / z-[60]).
+  // Cmd+W dismisses the topmost Settings dialog before closing the tab.
   // Checks from highest z-index down; first truthy state gets closed.
   useCloseLayer(() => {
-    // z-[60]: delete confirmation (highest)
+    // Delete confirmation sits above its provider dialog.
     if (deleteConfirmProvider) {
       setDeleteConfirmProvider(null);
       return true;
     }
-    // z-50: all other inline overlays
     if (subscriptionLoginDialogOpen) {
       closeSubscriptionLoginDialog();
       return true;
@@ -1500,7 +1508,7 @@ export default function Settings({
       return true;
     }
     return false;
-  }, 50);
+  }, 100);
 
   // Check which MCP servers need configuration (missing required fields)
   const checkMcpConfigStatus = async (servers: McpServerDefinition[]) => {
@@ -4171,9 +4179,9 @@ export default function Settings({
         : null;
 
     return (
-      <OverlayBackdrop
+      <OverlayBackdrop portal
         onClose={() => setManagedCodexDetailsOpen(false)}
-        className="z-50 overflow-y-auto py-8"
+        className="z-[100] overflow-y-auto py-8"
       >
         <div className="mx-4 flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--line-subtle)] px-6 py-5">
@@ -4331,9 +4339,9 @@ export default function Settings({
           : 'bg-[var(--info-bg)] text-[var(--info)]';
 
     return (
-      <OverlayBackdrop
+      <OverlayBackdrop portal
         onClose={() => setManagedCodexLoginDialogOpen(false)}
-        className="z-50 overflow-y-auto px-4 py-8"
+        className="z-[100] overflow-y-auto px-4 py-8"
       >
         <div className="w-full max-w-xl rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
           <div className="flex items-start justify-between gap-4 border-b border-[var(--line-subtle)] px-6 py-5">
@@ -4494,9 +4502,9 @@ export default function Settings({
           : 'bg-[var(--info-bg)] text-[var(--info)]';
 
     return (
-      <OverlayBackdrop
+      <OverlayBackdrop portal
         onClose={closeSubscriptionLoginDialog}
-        className="z-50 overflow-y-auto px-4 py-8"
+        className="z-[100] overflow-y-auto px-4 py-8"
       >
         <div className="w-full max-w-xl rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
           <div className="flex items-start justify-between gap-4 border-b border-[var(--line-subtle)] px-6 py-5">
@@ -4777,7 +4785,7 @@ export default function Settings({
       {/* Logs Panel */}
       {mode === 'settings' && (
         <UnifiedLogsPanel
-          isVisible={showLogs}
+          isVisible={showLogs && isActive !== false}
           onClose={() => setShowLogs(false)}
         />
       )}
@@ -6758,7 +6766,7 @@ export default function Settings({
 
               {/* Cron Task Debug Panel Modal */}
               <CronTaskDebugPanel
-                isOpen={showCronDebugPanel}
+                isOpen={showCronDebugPanel && isActive !== false}
                 onClose={() => setShowCronDebugPanel(false)}
               />
             </div>
@@ -6768,7 +6776,7 @@ export default function Settings({
 
       {/* Official image understanding tool settings */}
       {visionToolSettingsOpen && (
-        <OverlayBackdrop onClose={closeVisionToolSettings} className="z-50">
+        <OverlayBackdrop portal onClose={closeVisionToolSettings} className="z-[100]">
           <div className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
             <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
               <div className="min-w-0 flex-1">
@@ -6879,7 +6887,7 @@ export default function Settings({
 
       {/* Builtin MCP Settings Modal */}
       {builtinMcpSettings && (
-        <OverlayBackdrop className="z-50">
+        <OverlayBackdrop portal className="z-[100]">
           <div className="mx-4 w-full max-w-lg rounded-2xl bg-[var(--paper-elevated)] shadow-xl max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]">
@@ -7177,7 +7185,7 @@ export default function Settings({
 
       {/* Gemini Image Settings Modal */}
       {geminiImageSettings && (
-        <OverlayBackdrop className="z-50">
+        <OverlayBackdrop portal className="z-[100]">
           <div className="mx-4 w-full max-w-lg rounded-2xl bg-[var(--paper-elevated)] shadow-xl max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]">
@@ -7520,7 +7528,7 @@ export default function Settings({
 
       {/* Playwright Settings Modal */}
       {playwrightSettings && (
-        <OverlayBackdrop className="z-50">
+        <OverlayBackdrop portal className="z-[100]">
           <div className="mx-4 w-full max-w-lg rounded-2xl bg-[var(--paper-elevated)] shadow-xl max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]">
@@ -7867,7 +7875,7 @@ export default function Settings({
 
       {/* Edge TTS Settings Modal */}
       {edgeTtsSettings && (
-        <OverlayBackdrop className="z-50">
+        <OverlayBackdrop portal className="z-[100]">
           <div className="mx-4 w-full max-w-lg rounded-2xl bg-[var(--paper-elevated)] shadow-xl max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]">
@@ -8203,7 +8211,7 @@ export default function Settings({
 
       {/* Add MCP Modal */}
       {showMcpForm && (
-        <OverlayBackdrop className="z-50">
+        <OverlayBackdrop portal className="z-[100]">
           <div className="mx-4 w-full max-w-lg rounded-2xl bg-[var(--paper-elevated)] shadow-xl max-h-[85vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--line)]">
@@ -9215,7 +9223,7 @@ export default function Settings({
 
       {/* Provider Management Modal */}
       {editingProvider && (
-        <OverlayBackdrop className="z-50 overflow-y-auto py-8">
+        <OverlayBackdrop portal className="z-[100] overflow-y-auto py-8">
           <div className="mx-4 w-full max-w-md flex max-h-[90vh] flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
             <div className="flex-shrink-0 px-6 pt-6 pb-4">
               <div className="flex items-center justify-between">
@@ -9771,7 +9779,7 @@ export default function Settings({
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmProvider && (
-        <OverlayBackdrop className="z-[60]">
+        <OverlayBackdrop portal className="z-[110]">
           <div className="mx-4 w-full max-w-sm rounded-2xl bg-[var(--paper-elevated)] p-6 shadow-xl">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--error-bg)]">
@@ -9806,9 +9814,9 @@ export default function Settings({
 
       {/* Runtime not found dialog */}
       {runtimeDialog.show && (
-        <OverlayBackdrop
+        <OverlayBackdrop portal
           onClose={() => setRuntimeDialog({ show: false })}
-          className="z-50"
+          className="z-[100]"
         >
           <div className="mx-4 w-full max-w-sm rounded-2xl bg-[var(--paper-elevated)] p-6 shadow-xl">
             <div className="flex items-center gap-3">

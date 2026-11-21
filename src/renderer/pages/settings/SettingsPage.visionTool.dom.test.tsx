@@ -11,7 +11,7 @@ import { i18n } from "@/i18n";
 import { REACT_LOG_EVENT } from "@/utils/frontendLogger";
 
 import { ToastProvider } from "@/components/Toast";
-import { DEFAULT_CONFIG, type AppConfig, type Provider } from "@/config/types";
+import { DEFAULT_CONFIG, MANAGED_CODEX_PROVIDER, type AppConfig, type Provider } from "@/config/types";
 import { dismissTopmost } from "@/utils/closeLayer";
 import Settings from "./SettingsPage";
 
@@ -180,6 +180,35 @@ describe("Settings image-understanding enable flow", () => {
       }
       return { success: true, data: {} };
     });
+  });
+
+  it("places Codex and tool dialogs above the shell only while their tab is active", async () => {
+    const user = userEvent.setup();
+    stableProviders.push(MANAGED_CODEX_PROVIDER);
+    settingsMocks.config.managedCodexProviderDevGate = true;
+    settingsMocks.config.managedCodexRuntimeInstall = { status: "installed", installedVersion: "0.167.0", usable: true };
+    try {
+      const settings = (active: boolean) => <ToastProvider><Settings mode="settings" initialSection="providers" isActive={active} /></ToastProvider>;
+      const view = render(settings(true));
+      await user.click(await screen.findByTitle("Codex 订阅设置"));
+      const backdrop = () => screen.getByRole("heading", { name: "Codex 订阅设置" }).closest("[data-overlay-backdrop]");
+      expect(backdrop()?.parentElement).toBe(document.body);
+      expect(backdrop()).toHaveClass("z-[100]");
+      view.rerender(settings(false));
+      expect(document.querySelector("[data-overlay-backdrop]")).not.toBeVisible();
+      expect(document.querySelector('.fixed.inset-0[class*="backdrop-blur"]')).toBeNull();
+      act(() => expect(dismissTopmost()).toBe(false));
+      view.rerender(settings(true));
+      expect(backdrop()).toBeVisible();
+      view.unmount();
+    } finally {
+      stableProviders.pop();
+    }
+    renderSettings();
+    await user.click(getImageToolSwitch());
+    const tools = screen.getByRole("heading", { name: "图片理解设置" }).closest("[data-overlay-backdrop]");
+    expect(tools?.parentElement).toBe(document.body);
+    expect(tools).toHaveClass("z-[100]");
   });
 
   it("keeps a real provider model panel stable when Settings receives request logs (#582)", async () => {

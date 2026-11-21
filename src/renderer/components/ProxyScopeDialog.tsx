@@ -46,7 +46,7 @@ export default function ProxyScopeDialog({
   };
 
   return (
-    <OverlayBackdrop onClose={onClose} className="z-50 overflow-y-auto px-4 py-8">
+    <OverlayBackdrop portal onClose={onClose} className="z-[100] overflow-y-auto px-4 py-8">
       <div
         className="mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--paper)] shadow-xl"
         onMouseDown={(event) => event.stopPropagation()}

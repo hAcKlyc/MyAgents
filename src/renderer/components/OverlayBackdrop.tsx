@@ -4,6 +4,7 @@ import {
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 
 /**
  * OverlayBackdrop — Pit-of-success backdrop for all overlay/modal components.
@@ -45,14 +46,16 @@ const OverlayBackdrop = forwardRef<HTMLDivElement, OverlayBackdropProps>(functio
   variant = 'normal',
   portal = false,
 }, ref) {
+  const ownerActive = useOverlayOwnerActive();
+  // Keep the dialog subtree mounted so switching tabs preserves unsaved form fields.
   const bg = variant === 'dark' ? 'bg-black/80' : 'bg-black/30';
 
   const backdrop = (
     <div
       ref={ref}
       data-overlay-backdrop=""
-      className={`fixed inset-0 flex items-center justify-center ${bg} backdrop-blur-sm ${className}`}
-      style={style}
+      className={ownerActive ? `fixed inset-0 flex items-center justify-center ${bg} backdrop-blur-sm ${className}` : 'hidden'}
+      style={ownerActive ? style : { ...style, display: 'none' }}
       onMouseDown={onClose ? (e) => { if (e.target === e.currentTarget) onClose(); } : undefined}
     >
       {children}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { OverlayOwnerActiveContext } from '@/context/OverlayOwnerActiveContext';
 import BugReportOverlay from './BugReportOverlay';
 import SettingsHelperInbox from './SettingsHelperInbox';
 import { ImagePreviewProvider } from '@/context/ImagePreviewContext';
@@ -44,9 +45,20 @@ it.each(['feedback', 'settings'])('retains the draft and sends the chosen provid
             ? <BugReportOverlay {...props} onClose={close} onNavigateToProviders={vi.fn()} />
             : <SettingsHelperInbox {...props} />;
     }
-    render(<ImagePreviewProvider><Helper /></ImagePreviewProvider>);
+    const tree = (active: boolean) => (
+        <OverlayOwnerActiveContext.Provider value={active}><ImagePreviewProvider><Helper /></ImagePreviewProvider></OverlayOwnerActiveContext.Provider>
+    );
+    const view = render(tree(true));
     const input = screen.getByRole('textbox');
     await user.type(input, 'draft');
+    if (surface === 'feedback') {
+        expect(input.closest('[data-overlay-backdrop]')?.parentElement).toBe(document.body);
+        view.rerender(tree(false));
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(close).not.toHaveBeenCalled();
+        view.rerender(tree(true));
+        expect(input).toHaveValue('draft');
+    }
     const trigger = screen.getByRole('button', { name: 'Shared' });
     await user.click(trigger);
     await user.click(screen.getByRole('button', { name: 'Second' }));

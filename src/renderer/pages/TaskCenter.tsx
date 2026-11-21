@@ -3,6 +3,7 @@
 
 import { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { OverlayOwnerActiveContext } from '@/context/OverlayOwnerActiveContext';
 import { ThoughtPanel } from '@/components/task-center/ThoughtPanel';
 import { TaskListPanel } from '@/components/task-center/TaskListPanel';
 import RecordingSourceDialog from '@/components/task-center/RecordingSourceDialog';
@@ -282,14 +283,16 @@ export default function TaskCenter({
 
         {/* Right: Task list */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <TaskListPanel
-            refreshKey={isActive ? '1' : '0'}
-            pendingIntent={pendingIntent ?? null}
-            onSearchIntentConsumed={onSearchIntentConsumed}
-            pendingRoute={pendingRoute ?? null}
-            onRouteConsumed={onRouteConsumed}
-            onCreateTask={handleCreateTask}
-          />
+          <OverlayOwnerActiveContext.Provider value={isActive !== false}>
+            <TaskListPanel
+              refreshKey={isActive ? '1' : '0'}
+              pendingIntent={pendingIntent ?? null}
+              onSearchIntentConsumed={onSearchIntentConsumed}
+              pendingRoute={pendingRoute ?? null}
+              onRouteConsumed={onRouteConsumed}
+              onCreateTask={handleCreateTask}
+            />
+          </OverlayOwnerActiveContext.Provider>
         </div>
       </div>
     </div>

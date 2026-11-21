@@ -17,6 +17,7 @@
 // autocomplete already has its own ↑↓/Enter/Tab handling and shouldn't
 // have focus stolen from the textarea); transitions (kept lean for now).
 
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from "@/utils/imeKeyboard";
 import {
   autoUpdate,
@@ -93,7 +94,7 @@ const DEFAULT_CHROME =
   "overflow-auto rounded-lg border border-[var(--line)] bg-[var(--paper-elevated)] shadow-xl";
 
 export function Popover({
-  open,
+  open: requestedOpen,
   onClose,
   anchorRef,
   placement = "bottom-start",
@@ -114,6 +115,8 @@ export function Popover({
   children,
   onPositioned,
 }: PopoverProps) {
+  const ownerActive = useOverlayOwnerActive();
+  const open = ownerActive && requestedOpen;
   const { refs, floatingStyles, isPositioned } = useFloating({
     placement,
     open,

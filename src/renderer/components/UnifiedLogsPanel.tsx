@@ -4,7 +4,6 @@
 
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { useCloseLayer } from '@/hooks/useCloseLayer';
@@ -104,7 +103,7 @@ function highlightText(text: string, query: string): React.ReactNode {
 export function UnifiedLogsPanel({ tabId, sessionId, isVisible, onClose }: UnifiedLogsPanelProps) {
     const { t } = useTranslation('app');
     const { logs: sseLogs, clear: handleClearAll } = useFrontendLogs(isVisible, { tabId, sessionId });
-    useCloseLayer(() => { if (!isVisible) return false; onClose(); return true; }, 50);
+    useCloseLayer(() => { if (!isVisible) return false; onClose(); return true; }, 100);
     // Only the visible panel subscribes to the window's diagnostic buffer.
     const [filter, setFilter] = useState<LogSource | 'all'>('all');
     const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all');
@@ -276,8 +275,8 @@ export function UnifiedLogsPanel({ tabId, sessionId, isVisible, onClose }: Unifi
     if (!isVisible) return null;
 
     // Use portal to render at document root for true fullscreen overlay
-    return createPortal(
-        <OverlayBackdrop onClose={onClose} className="z-50">
+    return (
+        <OverlayBackdrop portal onClose={onClose} className="z-[100]">
             <div
                 className="flex h-[90vh] w-[95vw] max-w-6xl flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] shadow-2xl"
             >
@@ -491,7 +490,6 @@ export function UnifiedLogsPanel({ tabId, sessionId, isVisible, onClose }: Unifi
                     </div>
                 </div>
             </div>
-        </OverlayBackdrop>,
-        document.body
+        </OverlayBackdrop>
     );
 }

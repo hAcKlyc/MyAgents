@@ -1,3 +1,4 @@
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -43,6 +44,7 @@ export default function ConfirmDialog({
     onConfirm,
     onCancel
 }: ConfirmDialogProps) {
+    const ownerActive = useOverlayOwnerActive();
     const { t } = useTranslation('common');
     // Cmd+W dismissal: z-[300] matches the component's CSS z-index
     useCloseLayer(() => { onCancel(); return true; }, 300);
@@ -66,9 +68,10 @@ export default function ConfirmDialog({
     }, [loading, disableEnterShortcut, onConfirm, onCancel]);
 
     useEffect(() => {
+        if (!ownerActive) return;
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [handleKeyDown]);
+    }, [handleKeyDown, ownerActive]);
 
     // Portal to body so z-[300] competes at the root stacking context. Without
     // this, any caller whose ancestor creates a stacking context renders this

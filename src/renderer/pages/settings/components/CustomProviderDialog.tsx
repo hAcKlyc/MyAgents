@@ -19,7 +19,7 @@ export default function CustomProviderDialog({ form, onChange, onSubmit, onCance
   const [managingModels, setManagingModels] = useState(false);
   const provider = useMemo(() => buildCustomProvider(form, 'custom-provider-draft'), [form]);
   return <>
-        <OverlayBackdrop className="z-50 overflow-y-auto py-8">
+        <OverlayBackdrop portal className="z-[100] overflow-y-auto py-8">
           <div role="dialog" aria-modal="true" aria-hidden={managingModels || undefined} inert={managingModels} aria-labelledby={titleId} className="mx-4 w-full max-w-md flex max-h-[90vh] flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
             <div className="flex-shrink-0 px-6 pt-6 pb-4">
               <div className="flex items-center justify-between">

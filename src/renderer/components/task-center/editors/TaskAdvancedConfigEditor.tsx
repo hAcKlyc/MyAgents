@@ -18,7 +18,9 @@ import { Popover } from '@/components/ui/Popover';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDownIcon, SlidersIcon } from '@/components/icons';
+import { useCloseLayer } from '@/hooks/useCloseLayer';
+import { isImeComposingEvent } from '@/utils/imeKeyboard';
+import { CheckIcon, ChevronDownIcon, SlidersIcon } from '@/components/icons';
 import CustomSelect from '@/components/CustomSelect';
 import { useConfig } from '@/hooks/useConfig';
 import { useAvailableProviders } from '@/hooks/useAvailableProviders';
@@ -64,6 +66,7 @@ import { projectProvidersForRuntime } from '@/utils/runtimeProviderProjection';
 // than a different sentinel keeps the option compatible with the existing
 // `<CustomSelect value={…}>` contract (which doesn't tolerate `undefined`).
 const FOLLOW_VALUE = '';
+const taskPickerTriggerClass = 'flex w-full items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-left text-sm text-[var(--ink)] transition-colors hover:border-[var(--ink-subtle)]';
 
 interface Props {
   /** Workspace path the task is bound to — used to resolve the workspace's
@@ -460,28 +463,15 @@ export function TaskAdvancedConfigEditor(props: Props) {
     [effectiveRuntime, effectiveRuntimeSource, t],
   );
 
-  // Toggle a single MCP server in the override list.
-  // `undefined` follows Agent; `[]` is an explicit no-MCP override. The
-  // "恢复跟随 Agent" button is the only path that clears back to undefined.
   const toggleMcp = (id: string) => {
-    const enabled = mcpEnabledServers === undefined || !mcpEnabledServers.includes(id);
+    const current = mcpEnabledServers ?? [];
+    const enabled = !current.includes(id);
     if (id === MANAGED_BROWSER_MCP_ID && enabled && !managedBrowserReady) {
       toast.warning(tSettings('toolbox.browserResource.installFirst'));
       return;
     }
-    if (mcpEnabledServers === undefined) {
-      setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle([], id, true, managedBrowserReady));
-      return;
-    }
-    setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle(
-      mcpEnabledServers,
-      id,
-      enabled,
-      managedBrowserReady,
-    ));
+    setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle(current, id, enabled, managedBrowserReady));
   };
-
-  const resetMcpToFollow = () => setMcpEnabledServers(undefined);
 
   return (
     <div className="rounded-[var(--radius-md)] border border-[var(--line)]">
@@ -603,63 +593,10 @@ export function TaskAdvancedConfigEditor(props: Props) {
           </FieldRow>
 
 
-          {/* MCP enable list — Product-configured runtimes only. Hint + reset action share a
-              single bottom row: status text on the left, "恢复跟随 Agent"
-              on the right (only when there's actually an override to revert
-              — pristine state hides the button rather than disabling it,
-              since a disabled button reads as "I should be able to click
-              this but can't" while no button reads as "nothing to do here"). */}
           {usesProductConfiguration && (
             <FieldRow label={t('advanced.mcpTools')}>
-              {mcpCatalogue.length === 0 ? (
-                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--line)] px-3 py-3 text-xs text-[var(--ink-muted)]">
-                  {t('advanced.noMcp')}
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    {mcpCatalogue.map((s) => {
-                      const checked = mcpEnabledServers
-                        ? mcpEnabledServers.includes(s.id)
-                        : false; // pristine = visually unchecked, label says "跟随"
-                      return (
-                        <label
-                          key={s.id}
-                          className={`flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] border border-transparent px-2 py-1 text-xs text-[var(--ink-secondary)] hover:bg-[var(--hover-bg)] ${
-                            checked
-                              ? 'border-[var(--accent-warm)]/30 bg-[var(--accent-warm-subtle)] text-[var(--ink)]'
-                              : ''
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleMcp(s.id)}
-                            className="h-3.5 w-3.5 accent-[var(--accent-warm)]"
-                          />
-                          <span className="truncate">{s.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-3 text-xs leading-snug text-[var(--ink-muted)]">
-                    <span>
-                      {mcpEnabledServers === undefined
-                        ? t('advanced.mcpFollowing')
-                        : t('advanced.mcpEnabled', { count: mcpEnabledServers.length })}
-                    </span>
-                    {mcpEnabledServers !== undefined && (
-                      <button
-                        type="button"
-                        onClick={resetMcpToFollow}
-                        className="shrink-0 text-[var(--ink-muted)] transition-colors hover:text-[var(--accent-warm)]"
-                      >
-                        {t('advanced.restoreFollowAgent')}
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
+              <TaskMcpPicker catalogue={mcpCatalogue} selected={mcpEnabledServers}
+                onToggle={toggleMcp} onFollow={() => setMcpEnabledServers(undefined)} />
             </FieldRow>
           )}
         </div>
@@ -690,6 +627,67 @@ function FieldRow({
           {hint}
         </p>
       )}
+    </div>
+  );
+}
+
+function TaskMcpPicker({ catalogue, selected, onToggle, onFollow }: {
+  catalogue: McpServerDefinition[];
+  selected?: string[];
+  onToggle: (id: string) => void;
+  onFollow: () => void;
+}) {
+  const { t } = useTranslation('task');
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const followRow = useRef<HTMLButtonElement>(null);
+  const follow = t('advanced.mcpFollowAgent');
+  const summary = selected === undefined ? follow
+    : selected.length === 1 ? catalogue.find(server => server.id === selected[0])?.name ?? selected[0]
+    : t('advanced.mcpEnabled', { count: selected.length });
+
+  function closeToTrigger() {
+    setOpen(false);
+    trigger.current?.focus({ preventScroll: true });
+  }
+
+  useCloseLayer(() => {
+    if (!open) return false;
+    closeToTrigger();
+    return true;
+  }, open ? 260 : 0);
+
+  return (
+    <div onKeyDown={event => {
+      if (open && event.key === 'Escape' && !isImeComposingEvent(event)) {
+        event.stopPropagation();
+        closeToTrigger();
+      }
+    }}>
+      <button ref={trigger} type="button" aria-expanded={open} aria-label={`${t('advanced.mcpTools')} · ${summary}`}
+        className={taskPickerTriggerClass} onClick={() => setOpen(!open)}>
+        <span className="min-w-0 flex-1 truncate">{summary}</span>
+        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--ink-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <Popover open={open} anchorRef={trigger} matchAnchorWidth maxHeight="320px" onClose={() => setOpen(false)}
+        onPositioned={() => followRow.current?.focus({ preventScroll: true })} className="p-1.5">
+        <button ref={followRow} type="button" aria-pressed={selected === undefined}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--hover-bg)] aria-pressed:text-[var(--accent)]"
+          onClick={() => { onFollow(); closeToTrigger(); }}>
+          {follow}
+          {selected === undefined && <CheckIcon aria-hidden="true" className="h-3.5 w-3.5" />}
+        </button>
+        <div className="mt-1 border-t border-[var(--line-subtle)] pt-1">
+          {catalogue.map(server => (
+            <label key={server.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--hover-bg)]">
+              <input type="checkbox" checked={selected?.includes(server.id) ?? false} onChange={() => onToggle(server.id)}
+                className="h-3.5 w-3.5 shrink-0 accent-[var(--accent)]" />
+              <span className="truncate" title={server.name}>{server.name}</span>
+            </label>
+          ))}
+          {!catalogue.length && <p className="px-2 py-1.5 text-xs text-[var(--ink-muted)]">{t('advanced.noMcp')}</p>}
+        </div>
+      </Popover>
     </div>
   );
 }
@@ -825,7 +823,7 @@ function ModelPicker(props: {
         // group: `rounded-lg`, `bg-[var(--paper)]`, `px-3 py-2.5 text-sm`,
         // `border-[var(--line)]`, hover deepens the border. Down-arrow chevron
         // (mirroring CustomSelect's affordance) is animated on open.
-        className="flex w-full items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-left text-sm text-[var(--ink)] transition-colors hover:border-[var(--ink-subtle)]"
+        className={taskPickerTriggerClass}
         onClick={() => setOpen(isOpen ? null : variant)}
       >
         <span className="min-w-0 flex-1 truncate">{closedLabel}</span>
