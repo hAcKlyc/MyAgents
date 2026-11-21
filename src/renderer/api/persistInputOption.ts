@@ -22,12 +22,8 @@ import type { AgentConfigMutation } from '../../shared/agentConfigMutation';
 //    out keeps this function pure across both Chat (with a session) and
 //    Launcher (without).
 
-import { CODEX_SUBSCRIPTION_PROVIDER_ID, type PermissionMode, type Project, type McpServerDefinition } from '@/config/types';
+import { type PermissionMode, type Project, type McpServerDefinition } from '@/config/types';
 import { type RuntimeConfig } from '@/../shared/types/runtime';
-import {
-  runtimeTypeForAgentRuntimePreference,
-  type AgentRuntimePreference,
-} from '@/../shared/integrated-runtimes/identity';
 import { createConcreteProviderRoute, type ProviderRoute } from '@/../shared/providerRoute';
 import {
   runtimeBackedProviderPermissionMode,
@@ -94,15 +90,6 @@ export interface PersistInputOptionParams {
   /** Integrated runtimes such as DSH use the shared process adapter while
    * Product Agent/Project fields continue to own Provider/model/permission. */
   usesProductConfiguration?: boolean;
-  /** Existing runtimeConfig to merge into when writing
-   *  `runtimeConfig.permissionMode` / `.model`. Avoids stomping unrelated keys. */
-  currentRuntimeConfig?: RuntimeConfig;
-  /** Base Integrated Runtime preference to restore after leaving a managed
-   * Provider Runtime. Managed Codex must not silently reset DSH to Claude. */
-  currentRuntimePreference?: AgentRuntimePreference;
-  /** Current Agent/Project provider. Used only to clean old managed-provider runtime projection. */
-  currentProviderId?: string | null;
-
   fields: InputOptionFields;
 
   /** Disk writers — injected so the helper has zero direct module imports
@@ -468,21 +455,11 @@ function buildAgentPatch(params: PersistInputOptionParams): AgentConfigMutation 
   } else if (fields.providerId !== undefined) {
     patch.providerId = fields.providerId ?? undefined;
   }
-  const writesOrdinaryProviderDefault = fields.runtimeBackedProviderSelection === undefined
-    && (fields.builtinSelection !== undefined || fields.providerId !== undefined || fields.builtinModel !== undefined);
-  const leavingManagedProvider = writesOrdinaryProviderDefault
-    && (params.currentProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID || params.currentRuntimeConfig?.source === 'managed-provider');
-  if (leavingManagedProvider && params.currentRuntimePreference?.family === 'integrated'
-    && runtimeTypeForAgentRuntimePreference(params.currentRuntimePreference) === 'dsh') {
-    // The writer resolves this intent against its locked current record, preserving
-    // the base Integrated Runtime rather than silently rebirthing Claude.
-    patch.runtime = 'dsh';
-    patch.runtimePreference = params.currentRuntimePreference;
-  }
   if (fields.mcpEnabledServers !== undefined) patch.mcpEnabledServers = fields.mcpEnabledServers;
   if (fields.enabledPluginIds !== undefined) patch.enabledPluginIds = fields.enabledPluginIds;
   if (fields.enabledOfficialToolIds !== undefined) patch.enabledOfficialToolIds = fields.enabledOfficialToolIds;
 
+  const writesOrdinaryProviderDefault = fields.builtinSelection !== undefined || fields.providerId !== undefined || fields.builtinModel !== undefined;
   if (fields.runtimeBackedProviderSelection !== undefined) {
     // The locked config writer resolves selection and strips stale managed fields.
   } else if (fields.runtimeBackedProviderContext) {

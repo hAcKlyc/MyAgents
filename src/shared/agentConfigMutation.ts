@@ -1,8 +1,9 @@
 import { resolveAgentRuntimePreference, runtimeTypeForAgentRuntimePreference } from './integrated-runtimes/identity';
 import type { AgentConfig } from './types/agent';
 import { buildRuntimeChangePatch, getDefaultRuntimePermissionMode, projectPermissionModeForRuntime, type RuntimeConfig } from './types/runtime';
+import { providerRequiresClaudeSdk } from './integrated-runtimes/provider-constraints';
 import { CODEX_SUBSCRIPTION_PROVIDER_ID } from './config-types';
-import { agentDefaultsForRuntimeBackedProvider, createRuntimeBackedProviderIdentity, type RuntimeBackedProviderIdentity } from './providerExecution';
+import { agentDefaultsForRuntimeBackedProvider, createRuntimeBackedProviderIdentity, agentUsesManagedCodexProvider, runtimeConfigForRuntimeBackedProviderDefault, type RuntimeBackedProviderIdentity } from './providerExecution';
 
 /** Field intent, resolved only by the config writer against its locked latest record. */
 export type AgentConfigMutation = Partial<Omit<AgentConfig, 'id'>> & {
@@ -17,12 +18,32 @@ export function resolveAgentConfigMutation(current: AgentConfig, mutation: Agent
       permissionMode: mutation.permissionMode,
       reasoningEffort: mutation.reasoningEffort,
     }));
+    // A legacy Agent may have only runtime=dsh. Preserve that base before storing the managed carrier.
+    const preference = resolveAgentRuntimePreference({ ...current, runtimeSource: current.runtimeConfig?.source });
+    if (!current.runtime && !current.runtimePreference) {
+      patch.runtime = undefined; // Keep following the configured Integrated default.
+    } else {
+      patch.runtimePreference = preference?.family === 'integrated' ? preference : undefined;
+    }
     delete patch.reasoningEffort;
   } else if (patch.runtime !== undefined && !Object.hasOwn(patch, 'runtimeConfig')) {
+    const switchingBase = (patch.runtime === 'builtin' || patch.runtime === 'dsh')
+      && (patch.providerId ?? current.providerId) === CODEX_SUBSCRIPTION_PROVIDER_ID;
     Object.assign(patch, buildRuntimeChangePatch(current.runtimeConfig, patch.runtime));
+    if (switchingBase) {
+      patch.runtime = 'builtin';
+      if (agentUsesManagedCodexProvider(current)) {
+        patch.runtimeConfig = runtimeConfigForRuntimeBackedProviderDefault(current.runtimeConfig);
+      }
+    }
   } else if (patch.providerId !== undefined && patch.providerId !== CODEX_SUBSCRIPTION_PROVIDER_ID
     && (current.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID || current.runtimeConfig?.source === 'managed-provider')) {
-    Object.assign(patch, buildRuntimeChangePatch(current.runtimeConfig, 'builtin'));
+    const preference = resolveAgentRuntimePreference({ ...current, runtimeSource: current.runtimeConfig?.source });
+    if (preference?.family === 'integrated') {
+      const restored = buildRuntimeChangePatch(current.runtimeConfig, runtimeTypeForAgentRuntimePreference(preference));
+      if (current.runtime || current.runtimePreference) Object.assign(patch, restored);
+      else if (current.runtimeConfig) patch.runtimeConfig = restored.runtimeConfig;
+    }
   }
   if (runtimeConfigPatch) {
     patch.runtimeConfig = { ...(Object.hasOwn(patch, 'runtimeConfig') ? patch.runtimeConfig : current.runtimeConfig), ...runtimeConfigPatch };
@@ -31,8 +52,9 @@ export function resolveAgentConfigMutation(current: AgentConfig, mutation: Agent
   // runtimeConfig. A runtime switch must update both in the same config write.
   if ((patch.runtime === 'builtin' || patch.runtime === 'dsh')
       && !Object.hasOwn(patch, 'permissionMode')) {
-    const permissionMode = projectPermissionModeForRuntime(current.permissionMode, patch.runtime)
-      ?? getDefaultRuntimePermissionMode(patch.runtime);
+    const permissionRuntime = providerRequiresClaudeSdk(patch.providerId ?? current.providerId) ? 'builtin' : patch.runtime;
+    const permissionMode = projectPermissionModeForRuntime(current.permissionMode, permissionRuntime)
+      ?? getDefaultRuntimePermissionMode(permissionRuntime);
     if (permissionMode !== current.permissionMode) patch.permissionMode = permissionMode;
   }
   return patch;
@@ -58,6 +80,5 @@ export function mutationForAgentModelSelection(current: AgentConfig, selection: 
   }
   return { providerId: selection.providerId, model: selection.model, providerEnvJson: undefined,
     ...(effort !== undefined ? { reasoningEffort: effort } : {}),
-    ...((current.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID || current.runtimeConfig?.source === 'managed-provider')
-      && current.runtimePreference?.family === 'integrated' && current.runtimePreference.id === 'dsh' ? { runtime: 'dsh' } : {}) };
+  };
 }

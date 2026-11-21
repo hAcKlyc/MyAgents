@@ -32,6 +32,8 @@ Renderer / IM / Task / Goal / Inbox
 
 Provider constraint 优先于通用默认：官方 Anthropic subscription/API 使用 Claude Agent SDK，`codex-sub` 使用 Managed Codex；其他 Provider 按声明的 API family 与模型能力解析。不能为了选择 DSH 把固定 Provider 伪装为普通 API。
 
+启动页和工作区设置的 Runtime 选择器展示 Agent 偏好。选用 Codex 订阅时，模型和执行权限由托管 Codex 管理；调整内置 Runtime 仅改变基础偏好，换回普通 API 模型后按该偏好执行。这两步的先后顺序不影响结果。
+
 出生时将 effective identity 固化为 Session `runtimeBinding`。已有 Session 使用自己的 binding 与配置快照；默认值或 Agent 设置变化不替换它。未知 binding 保留历史读取，不能静默改成 SDK。DSH 的 integrated engine kind 也不能进入 SDK 专属配置或 enqueue 分支。
 
 桌面首轮的具体 `providerRoute` 经 SessionEngine 保留在原 message operation 的配置快照，并在原生启动时交给 DSH；此时 Product metadata 尚未准入，不能重新从 Agent 模板猜测已选 Provider。原生准入后的 Product 出生使用同一 operation 快照固化 Provider/model/权限/推理配置。已有 Session 的 Provider 读取与配置 adopt 复用 `resolveWorkspaceConfig` 的 owned snapshot / legacy 解析，缺失或无法唯一解析时明确失败，不借用 Agent 最新默认。外部 CLI Runtime 仍管理自己的 Provider，不消费这项 DSH 配置。

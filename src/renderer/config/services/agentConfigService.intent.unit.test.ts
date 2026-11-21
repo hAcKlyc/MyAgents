@@ -118,8 +118,7 @@ describe('Agent/Project configuration intent ownership', () => {
     state.config.agents![0].runtimeConfig = { ...stale };
     await patchAgentConfig('agent-1', { runtimeConfigPatch: { model: 'model-b' } });
     await persistInputOptionChange({
-      workspaceId: 'project-1', agentId: 'agent-1', isExternalRuntime: true,
-      currentRuntimeConfig: stale, fields: { reasoningEffort: 'high' },
+      workspaceId: 'project-1', agentId: 'agent-1', isExternalRuntime: true, fields: { reasoningEffort: 'high' },
       patchAgentConfig, patchAgentProjectConfig, patchProject: async () => {},
     });
     expect(state.config.agents![0].runtimeConfig).toEqual({ model: 'model-b', permissionMode: 'full-auto', reasoningEffort: 'high' });

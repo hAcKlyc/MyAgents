@@ -1,3 +1,4 @@
+import { resolveAgentRuntimePreference } from './integrated-runtimes/identity';
 import type { PermissionMode, Provider, ProviderExecution } from './config-types';
 import { CODEX_SUBSCRIPTION_PROVIDER_ID, SUBSCRIPTION_PROVIDER_ID } from './config-types';
 import {
@@ -65,6 +66,7 @@ const MANAGED_CODEX_RUNTIME_PERMISSION_TO_PROVIDER: Record<string, PermissionMod
 type ManagedCodexAgentIdentity = {
   providerId?: string | null;
   runtime?: string | null;
+  runtimePreference?: unknown;
   runtimeConfig?: { source?: string | null } | null;
 };
 
@@ -77,9 +79,12 @@ export function agentUsesManagedCodexProvider(
   agent: ManagedCodexAgentIdentity | null | undefined,
 ): boolean {
   if (agent?.providerId !== CODEX_SUBSCRIPTION_PROVIDER_ID) return false;
-  const runtime = agent.runtime ?? 'builtin';
-  return runtime === 'builtin'
-    || (runtime === 'codex' && agent.runtimeConfig?.source === 'managed-provider');
+  return resolveAgentRuntimePreference({
+    runtimePreference: agent.runtimePreference,
+    runtime: agent.runtime,
+    runtimeSource: agent.runtimeConfig?.source,
+    providerId: agent.providerId,
+  })?.family === 'integrated';
 }
 
 export function isRuntimeBackedProvider(

@@ -26,7 +26,7 @@ import RuntimeSelector from '../RuntimeSelector';
 import { PermissionModeIcon, PermissionModeMenuContent, type PermissionModeMenuItem } from '../PermissionModeMenu';
 import { Popover } from '../ui/Popover';
 import type { RuntimeType, RuntimeDetections, RuntimeConfig } from '../../../shared/types/runtime';
-import { getRuntimePermissionModes, isAgentRuntimeSelectorAvailable, resolveEffectiveRuntime } from '../../../shared/types/runtime';
+import { getRuntimePermissionModes, isAgentRuntimeSelectorAvailable, resolveAgentRuntimeSelection, resolveEffectiveRuntime } from '../../../shared/types/runtime';
 import { agentUsesManagedCodexProvider, toProviderExecutionIntent } from '../../../shared/providerExecution';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '@/components/Toast';
@@ -89,22 +89,16 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
   });
   // Unset Agents follow the root default; explicit choices remain authoritative.
   const agentRuntimeConfig = agent?.runtimeConfig as RuntimeConfig | undefined;
-  const currentRuntime: RuntimeType = resolveEffectiveRuntime(
-    agent?.runtime,
-    agent?.runtimePreference,
-    agent?.runtimeConfig?.source,
-    agent?.providerId,
-    undefined,
-    config.defaultIntegratedRuntime,
-  );
+  const selectedRuntime = resolveAgentRuntimeSelection(agent, config.defaultIntegratedRuntime);
+  const usesManagedCodexProvider = agentUsesManagedCodexProvider(agent);
+  const effectiveProviderId = agent?.providerId ?? project?.providerId;
+  const currentRuntime = resolveEffectiveRuntime(selectedRuntime, undefined, undefined, effectiveProviderId);
   const runtimeSelectorAvailable = isAgentRuntimeSelectorAvailable();
-  const usesManagedCodexProvider = currentRuntime === 'builtin'
-    && agentUsesManagedCodexProvider(agent);
-  const usesExternalCliConfiguration = currentRuntime !== 'builtin' && currentRuntime !== 'dsh';
+  const usesExternalCliConfiguration = selectedRuntime !== 'builtin' && selectedRuntime !== 'dsh';
   const usesProductConfiguration = !usesExternalCliConfiguration;
   const availableProviders = useMemo(
-    () => projectProvidersForRuntime(credentialedProviders, currentRuntime),
-    [credentialedProviders, currentRuntime],
+    () => projectProvidersForRuntime(credentialedProviders, selectedRuntime, effectiveProviderId),
+    [credentialedProviders, selectedRuntime, effectiveProviderId],
   );
 
   // Sync name when canonical name changes externally
@@ -292,7 +286,6 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
   // "⚠ 暂不可用" hint when the saved provider fails `isProviderAvailable`.
   // This is cheaper than an automatic rewrite and keeps persistence as
   // the single source of truth for what was actually saved.
-  const effectiveProviderId = agent?.providerId ?? project?.providerId;
   const effectiveModel = agent?.model ?? project?.model;
   const selectedProvider = providers.find(p => p.id === effectiveProviderId);
   const isSelectedProviderAvailable = selectedProvider
@@ -410,7 +403,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
             <label className="w-16 shrink-0 text-sm text-[var(--ink-muted)]">{t('agentSettings.basics.runtime')}</label>
             <div className="min-w-0 flex-1">
               <RuntimeSelector
-                value={currentRuntime}
+                value={selectedRuntime}
                 detections={runtimeDetections}
                 onChange={handleRuntimeChange}
                 variant="panel"

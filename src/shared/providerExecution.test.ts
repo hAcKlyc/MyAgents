@@ -120,6 +120,9 @@ describe('provider execution identity', () => {
 
   it('does not let a dormant managed provider id override an explicit system runtime', () => {
     expect(agentUsesManagedCodexProvider({
+      providerId: CODEX_SUBSCRIPTION_PROVIDER_ID, runtime: 'builtin', runtimePreference: { family: 'external', id: 'codex' },
+    })).toBe(false);
+    expect(agentUsesManagedCodexProvider({
       providerId: CODEX_SUBSCRIPTION_PROVIDER_ID,
       runtime: 'builtin',
     })).toBe(true);

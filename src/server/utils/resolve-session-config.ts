@@ -78,6 +78,7 @@ export function resolveSessionConfig(
     const eff = channel ? resolveEffectiveConfig(agent, channel) : { ...agent, permissionMode: getMaxPermissionForRuntime(agent.runtime ?? 'builtin') };
     const effectiveRuntime = eff.runtime ?? 'builtin';
     const managedCodexSelected = agentUsesManagedCodexProvider({
+      runtimePreference: agent.runtimePreference,
       providerId: eff.providerId,
       runtime: agent.runtime,
       runtimeConfig: agent.runtimeConfig,

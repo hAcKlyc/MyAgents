@@ -13,6 +13,7 @@ import {
   resolveCronPermissionMode,
   resolveScheduledTurnPermissionMode,
   resolveEffectiveRuntime,
+  resolveAgentRuntimeSelection,
   runtimeSourceForRuntimeType,
   runtimeSupportsPrewarm,
   VALID_RUNTIMES,
@@ -105,6 +106,18 @@ describe('resolveEffectiveRuntime', () => {
       undefined,
       'codex-sub',
     )).toBe('codex');
+  });
+
+  test('selects the Agent base independently of the provider that owns a new Session', () => {
+    const dsh = { runtime: 'dsh', runtimePreference: { family: 'integrated', id: 'dsh' } };
+    for (const providerId of ['codex-sub', 'anthropic-sub', 'anthropic-api']) {
+      expect(resolveAgentRuntimeSelection({ ...dsh, providerId })).toBe('dsh');
+      expect(resolveEffectiveRuntime(dsh.runtime, dsh.runtimePreference, undefined, providerId)).toBe('builtin');
+    }
+    expect(resolveEffectiveRuntime(dsh.runtime, dsh.runtimePreference, undefined, 'xai-sub')).toBe('dsh');
+    expect(resolveAgentRuntimeSelection({ providerId: 'codex-sub' }, 'dsh')).toBe('dsh');
+    expect(resolveAgentRuntimeSelection({ runtime: 'codex', providerId: 'codex-sub', runtimeConfig: { source: 'managed-provider' } })).toBe('builtin');
+    expect(resolveAgentRuntimeSelection({ runtime: 'codex', providerId: 'codex-sub' })).toBe('codex');
   });
 
   test('with no/unknown agent runtime is builtin', () => {

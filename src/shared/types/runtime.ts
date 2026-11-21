@@ -1,3 +1,4 @@
+import { providerRequiresClaudeSdk } from '../integrated-runtimes/provider-constraints';
 export type { PermissionReview, PermissionOperation } from '../../../contracts/myagents-dsh/public-contract.generated';
 // Multi-Agent Runtime types (v0.1.59)
 // Defines runtime types and metadata for external CLI agent integration
@@ -155,6 +156,22 @@ export function coerceModelForRuntime(
   return modelLooksLikeRuntime(trimmed, runtime) ? trimmed : undefined;
 }
 
+type AgentRuntimeSelectionFacts = {
+  runtime?: string | null;
+  runtimePreference?: unknown;
+  runtimeConfig?: { source?: RuntimeSource | null } | null;
+  providerId?: unknown;
+};
+
+/** The Runtime pickers edit the Agent preference, including when a model has its own execution owner. */
+export function resolveAgentRuntimeSelection(
+  agent: AgentRuntimeSelectionFacts | null | undefined,
+  configuredDefaultIntegratedRuntime?: unknown,
+  policy: AgentRuntimeDistributionPolicy = AGENT_RUNTIME_DISTRIBUTION_POLICY,
+): RuntimeType {
+  return projectAgentRuntime(agent, configuredDefaultIntegratedRuntime, policy);
+}
+
 /**
  * Resolve the **agent-config** effective runtime through the build distribution
  * and its selector policy. Agents without an explicit choice use the configured
@@ -189,6 +206,20 @@ export function resolveEffectiveRuntime(
   policy: AgentRuntimeDistributionPolicy = AGENT_RUNTIME_DISTRIBUTION_POLICY,
   configuredDefaultIntegratedRuntime?: unknown,
 ): RuntimeType {
+  return projectAgentRuntime(
+    { runtime: agentRuntime, runtimePreference, runtimeConfig: { source: runtimeSource }, providerId },
+    configuredDefaultIntegratedRuntime,
+    policy,
+    providerId,
+  );
+}
+
+function projectAgentRuntime(
+  agent: AgentRuntimeSelectionFacts | null | undefined,
+  configuredDefaultIntegratedRuntime: unknown,
+  policy: AgentRuntimeDistributionPolicy,
+  executionProviderId?: unknown,
+): RuntimeType {
   const defaultIntegratedRuntime = resolveDefaultIntegratedRuntime(
     policy,
     configuredDefaultIntegratedRuntime,
@@ -197,15 +228,12 @@ export function resolveEffectiveRuntime(
     policy,
     configuredDefaultIntegratedRuntime,
   );
-  const selectorAvailable = isRuntimeSelectorAvailable(
-    policy,
-  );
-  const preference = selectorAvailable
+  const preference = isRuntimeSelectorAvailable(policy)
     ? resolveAgentRuntimePreference({
-        runtimePreference,
-        runtime: agentRuntime,
-        runtimeSource,
-        providerId,
+        runtimePreference: agent?.runtimePreference,
+        runtime: agent?.runtime,
+        runtimeSource: agent?.runtimeConfig?.source,
+        providerId: agent?.providerId,
         defaultIntegratedRuntime,
       })
     : { family: 'integrated' as const, id: defaultIntegratedRuntime };
@@ -220,17 +248,17 @@ export function resolveEffectiveRuntime(
   // Product subscription Providers have fixed execution owners and constrain
   // either Integrated preference before Session birth. Managed Codex keeps its
   // historical builtin carrier in renderer-facing configuration.
-  if (providerId === 'codex-sub') {
+  if (executionProviderId === 'codex-sub') {
     return isRuntimeAllowedByDistribution(policy, 'codex', 'managed-provider')
       ? 'builtin'
       : distributionDefault;
   }
-  if (providerId === 'anthropic-sub' || providerId === 'xai-sub') {
+  if (providerRequiresClaudeSdk(executionProviderId)) {
     return isRuntimeAllowedByDistribution(policy, 'builtin')
       ? 'builtin'
       : distributionDefault;
   }
-  return isRuntimeAllowedByDistribution(policy, preferredRuntime, runtimeSource)
+  return isRuntimeAllowedByDistribution(policy, preferredRuntime, agent?.runtimeConfig?.source)
     ? preferredRuntime
     : distributionDefault;
 }

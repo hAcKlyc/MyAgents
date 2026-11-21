@@ -25,6 +25,11 @@ function provider(id: string, primaryModel: string, models: string[]): Provider 
 }
 
 describe('runtime Provider projection', () => {
+  it('keeps a saved official Claude provider selectable on a DSH base', () => {
+    const official = provider('anthropic-sub', 'claude-example', ['claude-example']);
+    expect(projectProvidersForRuntime([official], 'dsh', official.id)).toEqual([official]);
+    expect(projectProvidersForRuntime([official], 'dsh', 'deepseek')).toEqual([]);
+  });
   it('shows API transports in DSH while keeping both official Claude choices on the SDK', () => {
     const ids = ['anthropic-sub', 'anthropic-api', 'xai-sub', 'antigravity-sub', 'deepseek'];
     const presets = PRESET_PROVIDERS.filter(candidate => ids.includes(candidate.id));

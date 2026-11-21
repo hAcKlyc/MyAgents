@@ -150,7 +150,6 @@ import {
   isRuntimePermissionMode,
   projectPermissionModeForRuntime,
   resolveEffectiveRuntime,
-  buildRuntimeChangePatch,
   runtimeSourceForRuntimeType,
   type RuntimeType,
   type RecoveryHint,
@@ -2224,13 +2223,7 @@ export async function handleAgentSet(payload: {
     }, 'set');
   }
 
-  // `runtime` field has a cross-runtime scrub policy (see
-  // buildRuntimeChangePatch doc in shared/types/runtime.ts). A blind spread
-  // here would leak the previous runtime's model/permissionMode/additionalArgs
-  // into the new runtime — Codex CLI then rejects e.g. a Claude model with
-  // "model is not supported when using ChatGPT account". Route through the
-  // helper so the CLI `myagents agent set <id> runtime codex` path stays in
-  // lockstep with the Chat / Settings / Launcher in-app paths.
+  // Use the same locked Agent mutation as the desktop Runtime pickers.
   if (key === 'runtime') {
     if (typeof value !== 'string') {
       return { success: false, error: 'runtime must be a string' };
@@ -2244,23 +2237,12 @@ export async function handleAgentSet(payload: {
     return modifyAgentConfigIntent(
       id,
       (agent) => {
-        const patch = buildRuntimeChangePatch(
-          agent.runtimeConfig as RuntimeConfig | undefined,
-          value as RuntimeType,
-        );
+        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { runtime: value as RuntimeType });
         return {
           ok: true,
-          agent: {
-            ...agent,
-            runtime: patch.runtime,
-            runtimeConfig: patch.runtimeConfig,
-            runtimePreference: patch.runtimePreference,
-          },
-          livePatch: {
-            runtime: patch.runtime,
-            runtimeConfig: patch.runtimeConfig ?? null,
-            runtimePreference: patch.runtimePreference,
-          },
+          agent: { ...agent, ...patch } as AgentConfigSlim,
+          projectPatch: patch.permissionMode ? { permissionMode: patch.permissionMode } : undefined,
+          livePatch: { ...patch, runtimeConfig: patch.runtimeConfig ?? null },
         };
       },
       'set',
@@ -2296,6 +2278,7 @@ export async function handleAgentSet(payload: {
         }
         const runtimeConfig = value as RuntimeConfig;
         const targetManagedCodex = agentUsesManagedCodexProvider({
+          runtimePreference: agent.runtimePreference,
           providerId: agent.providerId,
           runtime:
             typeof agent.runtime === 'string' ? agent.runtime : undefined,
@@ -2359,6 +2342,7 @@ export async function handleAgentSet(payload: {
         const requestedMode = (value as string).trim();
         if (
           agentUsesManagedCodexProvider({
+            runtimePreference: agent.runtimePreference,
             providerId: agent.providerId,
             runtime:
               typeof agent.runtime === 'string' ? agent.runtime : undefined,
@@ -2478,36 +2462,27 @@ export async function handleAgentSet(payload: {
         }
       }
 
-      const syncExecutionDefault =
-        key === 'providerId' || key === 'model' || key === 'permissionMode';
-      const providerEnvJson =
-        key === 'providerId'
-          ? (() => {
-              const resolved = resolveProviderEnv(
-                String(normalizedValue),
-                currentConfig,
-              );
-              return resolved ? JSON.stringify(resolved) : undefined;
-            })()
-          : undefined;
+      if (key === 'providerId') {
+        const providerId = String(normalizedValue);
+        const env = resolveProviderEnv(providerId, currentConfig);
+        const providerEnvJson = env ? JSON.stringify(env) : undefined;
+        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { providerId, providerEnvJson });
+        return {
+          ok: true,
+          agent: { ...agent, ...patch } as AgentConfigSlim,
+          projectPatch: { providerId, ...(patch.permissionMode ? { permissionMode: patch.permissionMode } : {}) },
+          livePatch: {
+            ...patch, providerEnvJson: providerEnvJson ?? null,
+            ...(Object.hasOwn(patch, 'runtimeConfig') ? { runtimeConfig: patch.runtimeConfig ?? null } : {}),
+          },
+        };
+      }
+      const syncExecutionDefault = key === 'model' || key === 'permissionMode';
+      const update = { [key]: normalizedValue };
       return {
-        ok: true,
-        agent: {
-          ...agent,
-          [key]: normalizedValue,
-          ...(key === 'providerId' ? { providerEnvJson } : {}),
-        },
-        projectPatch: syncExecutionDefault
-          ? { [key]: normalizedValue }
-          : undefined,
-        livePatch: syncExecutionDefault
-          ? {
-              [key]: normalizedValue,
-              ...(key === 'providerId'
-                ? { providerEnvJson: providerEnvJson ?? null }
-                : {}),
-            }
-          : undefined,
+        ok: true, agent: { ...agent, ...update },
+        projectPatch: syncExecutionDefault ? update : undefined,
+        livePatch: syncExecutionDefault ? update : undefined,
       };
     },
     'set',
@@ -8447,8 +8422,9 @@ export async function handleAgentShow(payload: {
   // AgentConfigSlim is intentionally permissive (`[key: string]: unknown`) —
   // runtime / permissionMode / runtimeConfig exist on the full AgentConfig
   // but not on the slim shape. Extract defensively.
-  const storedRuntime = (agent.runtime as RuntimeType | undefined) ?? 'builtin';
+  const storedRuntime = agent.runtime as RuntimeType | undefined;
   const rawUsesManagedCodex = agentUsesManagedCodexProvider({
+    runtimePreference: agent.runtimePreference,
     providerId: agent.providerId,
     runtime: storedRuntime,
     runtimeConfig: agent.runtimeConfig as { source?: string } | undefined,
@@ -9142,7 +9118,7 @@ function resolveAgentRuntimeIdentityFromWorkspace(payload: {
 
   const raw = agent.runtime as unknown;
   const legacyRuntime =
-    typeof raw === 'string' && isValidRuntimeType(raw) ? raw : 'builtin';
+    typeof raw === 'string' && isValidRuntimeType(raw) ? raw : undefined;
   const preferredRuntime = resolveEffectiveRuntime(
     legacyRuntime,
     agent.runtimePreference,
@@ -9154,6 +9130,7 @@ function resolveAgentRuntimeIdentityFromWorkspace(payload: {
   if (
     preferredRuntime === 'builtin' &&
     agentUsesManagedCodexProvider({
+      runtimePreference: agent.runtimePreference,
       providerId: agent.providerId,
       runtime: legacyRuntime,
       runtimeConfig: agent.runtimeConfig as { source?: string } | undefined,
