@@ -34,6 +34,10 @@ type ProviderConstraintShape = Pick<
   "id" | "type" | "execution" | "subscriptionAuth" | "apiProtocol" | "upstreamFormat"
 >;
 
+export function providerRequiresClaudeSdk(id: unknown): id is typeof SUBSCRIPTION_PROVIDER_ID | 'anthropic-api' {
+  return id === SUBSCRIPTION_PROVIDER_ID || id === 'anthropic-api';
+}
+
 /**
  * Resolve the product execution requirement from explicit Provider fields.
  *
@@ -50,7 +54,7 @@ export function getProviderExecutionConstraint(
       providerId: CODEX_SUBSCRIPTION_PROVIDER_ID,
     };
   }
-  if (provider.id === SUBSCRIPTION_PROVIDER_ID || provider.id === "anthropic-api") {
+  if (providerRequiresClaudeSdk(provider.id)) {
     return {
       kind: "requires-integrated-runtime",
       runtimeId: "claude-agent-sdk",

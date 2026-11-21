@@ -276,7 +276,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   async detect(): Promise<RuntimeDetection> {
     try {
       await ensureShellPath();
-      const env = augmentedProcessEnv();
+      const env = augmentedProcessEnv('claude-code');
       const command = resolveCommand('claude', env);
       const proc = spawn([command, '--version'], {
         stdout: 'pipe',
@@ -473,7 +473,7 @@ export class ClaudeCodeRuntime implements AgentRuntime {
     // Issue #194 — pass envPolicy and pin PWD to workspacePath for terminal
     // parity (same fix applied to Codex runtime).
     await ensureShellPath();
-    const ccEnv = augmentedProcessEnv(options.envPolicy);
+    const ccEnv = augmentedProcessEnv('claude-code', options.envPolicy);
     ccEnv.PWD = options.workspacePath;
     ccEnv.MYAGENTS_SESSION_ID = options.sessionId;
     const proc = spawn([resolveCommand('claude', ccEnv), ...args], {

@@ -423,12 +423,13 @@ myagents plugin remove <pluginId>                       # 卸载
 ### Claude 插件（cc-plugin） — PRD 0.2.17
 
 ```bash
-myagents cc-plugin list                                 # 已装 Claude 插件 + 启停状态
+myagents cc-plugin list                                 # 已安装插件的完整 ID、全局可用性与安装状态
 myagents cc-plugin install <source>                     # 来源：owner/repo / GitHub URL / 直链 zip / file:///abs
 myagents cc-plugin uninstall <name> [--purgeData]       # 卸载（数据目录默认保留）
-myagents cc-plugin enable <name>                        # 启用；按 Runtime 支持的扩展边界应用
-myagents cc-plugin disable <name>                       # 禁用
+myagents cc-plugin enable <name>                        # 打开全局开关
+myagents cc-plugin disable <name>                       # 关闭全局开关
 myagents cc-plugin show <id|name>                       # 详情（含 manifest + 组件清单）
+myagents agent set <agentId> enabledPluginIds '["my-plugin@local"]'
 ```
 
 **与上面 `plugin` 的区别：** `cc-plugin` 是 Claude Plugin 协议（skills/agents/MCP/hooks），落在 `~/.myagents/plugins/<name>/`；SDK 加载支持的组件，DSH/Managed Codex 按各自 admission 支持部分扩展，不保证 SDK hooks 等价。`plugin`（无前缀）是 OpenClaw IM 渠道插件。
@@ -436,9 +437,10 @@ myagents cc-plugin show <id|name>                       # 详情（含 manifest 
 **何时用：**
 - "粘个 GitHub URL 装个插件" → `cc-plugin install owner/repo`
 - "装本地正在调的插件" → `cc-plugin install file:///path/to/plugin`
-- "禁掉 X 插件" → `cc-plugin disable X`
+- "让某个 Agent 的新会话使用 X 插件" → 查 `cc-plugin list` 和 `agent show <agentId>`，再用 `agent set` 提交包含 X 的完整插件 ID 数组
+- "全局禁用 X 插件" → `cc-plugin disable X`
 
-启停 / 安装 / 卸载后会触发 SDK 柔性重启（500ms 防抖），下一次发消息时 plugin 内组件才生效。外部 Runtime（Claude Code CLI / Codex）下不读取这里——它们各自管自己的 plugin 体系。
+安装会打开插件的全局开关。Agent 选择决定未来会话的默认名单，传 `[]` 可清空。需要修改当前会话时，在聊天输入框的插件菜单里选择。Runtime 只加载全局可用且会话选中的插件组件。系统 Claude Code CLI 和系统 Codex CLI 使用各自的扩展配置。
 
 ### 通用配置 + 状态（config / status / version / reload）
 

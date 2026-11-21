@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QueryNavigator from './QueryNavigator';
 import type { Message } from '../../types/chat';
@@ -32,6 +32,22 @@ describe('QueryNavigator', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('bounds the number of mounted controls while scrolling through 5000 questions', () => {
+    const navigate = vi.fn();
+    const { container } = render(<QueryNavigator
+      messages={Array.from({ length: 5000 }, (_, index) => userMessage(String(index), 'Question ' + index))}
+      scrollContainerRef={{ current: document.createElement('div') }}
+      pauseAutoScroll={vi.fn()} onNavigateToQuery={navigate} />);
+    expect(container.querySelectorAll('button').length).toBeLessThan(40);
+    const list = container.querySelector<HTMLElement>('.overflow-y-auto')!;
+    fireEvent.mouseEnter(list.parentElement!);
+    fireEvent.scroll(list, { target: { scrollTop: 34000 } });
+    expect(container.querySelectorAll('button').length).toBeLessThan(40);
+    const target = Array.from(container.querySelectorAll('button')).find(row => row.textContent === 'Question 1000');
+    fireEvent.click(target!);
+    expect(navigate).toHaveBeenCalledWith('1000');
   });
 
   it('keeps the rail clear of the native message scrollbar gutter', () => {

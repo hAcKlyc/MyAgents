@@ -212,7 +212,7 @@ function PetdexImportDialog({
         if (importing) return true;
         onClose();
         return true;
-    }, 50);
+    }, 100);
 
     useEffect(() => {
         if (!open) return;
@@ -226,7 +226,7 @@ function PetdexImportDialog({
     if (!open) return null;
 
     return (
-        <OverlayBackdrop onClose={importing ? undefined : onClose} className="z-50 px-4">
+        <OverlayBackdrop portal onClose={importing ? undefined : onClose} className="z-[100] px-4">
             <form
                 className="w-full max-w-lg rounded-xl border border-[var(--line)] bg-[var(--paper-elevated)] p-5 shadow-2xl"
                 onSubmit={(event) => {

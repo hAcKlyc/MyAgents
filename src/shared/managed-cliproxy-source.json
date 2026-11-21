@@ -1,23 +1,23 @@
 {
-  "version": "8.0.13",
-  "tag": "v8.0.13",
-  "commit": "d7914afdedca7af95ee974a42453dc49fc1388ce",
+  "version": "8.0.79",
+  "tag": "v8.0.79",
+  "commit": "6faa8d20b2673404cff70a2f2d9537ae0d0e684d",
   "license": "MIT",
   "platforms": {
     "darwin-arm64": {
-      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.13/CLIProxyAPI_8.0.13_darwin_aarch64.tar.gz",
-      "size": 21157700,
-      "sha256": "652a192e3e38520253e330c4a094fa8916728370c3f213f127dbc56e35be7938"
+      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.79/CLIProxyAPI_8.0.79_darwin_aarch64.tar.gz",
+      "size": 24399310,
+      "sha256": "3f807ccc49ea0c3fce7240fb5890904e6953fbe42d20cb16d0e326b1387085c8"
     },
     "darwin-x64": {
-      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.13/CLIProxyAPI_8.0.13_darwin_amd64.tar.gz",
-      "size": 22907031,
-      "sha256": "8c47459190b997828be246973d18fbb681799540cebb867c3b7368d189559785"
+      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.79/CLIProxyAPI_8.0.79_darwin_amd64.tar.gz",
+      "size": 26456517,
+      "sha256": "cc7fb3568ccb899afe09e7e32b2ab49c62b1fb21ef6c16f6aa2041db80b3dbcf"
     },
     "win32-x64": {
-      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.13/CLIProxyAPI_8.0.13_windows_amd64.zip",
-      "size": 23228601,
-      "sha256": "7064ec8150511d0ece145a492968b476aa5abae3e1c7ef385852631918086bdd"
+      "url": "https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.79/CLIProxyAPI_8.0.79_windows_amd64.zip",
+      "size": 26780861,
+      "sha256": "a0d39a942c295ae907ca0aee4f3274260ea4a1b986c10d9e4c649320eceddff7"
     }
   }
 }

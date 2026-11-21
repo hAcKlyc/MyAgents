@@ -2,6 +2,7 @@
  * WorkspaceConfigPanel - Full-screen configuration overlay for workspace
  * Two tabs: 「系统提示词」(CLAUDE.md + rules) and 「技能 Skills」(skills + commands + agents)
  */
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { CloseIcon, SlidersIcon, ChevronLeftIcon } from '@/components/icons';
 import { useCallback, useEffect, useState, useRef } from 'react';
@@ -81,6 +82,7 @@ const TAB_ITEMS: { key: Tab; labelKey: string }[] = [
 ];
 
 export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: externalRefreshKey = 0, initialTab, initialSelect, onRequestInit, initialAddChannelPlatform, onInitialAddChannelPlatformConsumed }: WorkspaceConfigPanelProps) {
+    const ownerActive = useOverlayOwnerActive();
     const { t } = useTranslation('settings');
     const toast = useToast();
     // Stabilize toast reference to avoid unnecessary effect re-runs
@@ -151,6 +153,7 @@ export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: ex
 
     // Close on Escape key
     useEffect(() => {
+        if (!ownerActive) return;
         const handleKeyDown = (e: KeyboardEvent) => {
             if (isImeComposingEvent(e)) return;
             if (e.key === 'Escape') {
@@ -164,15 +167,16 @@ export default function WorkspaceConfigPanel({ agentDir, onClose, refreshKey: ex
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [handleClose, handleBackFromDetail, detailView]);
+    }, [handleClose, handleBackFromDetail, detailView, ownerActive]);
 
     // Prevent background scroll
     useEffect(() => {
+        if (!ownerActive) return;
         document.body.style.overflow = 'hidden';
         return () => {
             document.body.style.overflow = '';
         };
-    }, []);
+    }, [ownerActive]);
 
     // Keep this panel on the same persisted capability generation as Chat.
     useEffect(() => {

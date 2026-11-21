@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   coerceModelForRuntime,
   coercePermissionModeForRuntime,
+  getDefaultRuntimePermissionMode,
   getMaxPermissionForRuntime,
   isRuntimePermissionMode,
   projectPermissionModeForRuntime,
@@ -12,6 +13,7 @@ import {
   resolveCronPermissionMode,
   resolveScheduledTurnPermissionMode,
   resolveEffectiveRuntime,
+  resolveAgentRuntimeSelection,
   runtimeSourceForRuntimeType,
   runtimeSupportsPrewarm,
   VALID_RUNTIMES,
@@ -104,6 +106,18 @@ describe('resolveEffectiveRuntime', () => {
       undefined,
       'codex-sub',
     )).toBe('codex');
+  });
+
+  test('selects the Agent base independently of the provider that owns a new Session', () => {
+    const dsh = { runtime: 'dsh', runtimePreference: { family: 'integrated', id: 'dsh' } };
+    for (const providerId of ['codex-sub', 'anthropic-sub', 'anthropic-api']) {
+      expect(resolveAgentRuntimeSelection({ ...dsh, providerId })).toBe('dsh');
+      expect(resolveEffectiveRuntime(dsh.runtime, dsh.runtimePreference, undefined, providerId)).toBe('builtin');
+    }
+    expect(resolveEffectiveRuntime(dsh.runtime, dsh.runtimePreference, undefined, 'xai-sub')).toBe('dsh');
+    expect(resolveAgentRuntimeSelection({ providerId: 'codex-sub' }, 'dsh')).toBe('dsh');
+    expect(resolveAgentRuntimeSelection({ runtime: 'codex', providerId: 'codex-sub', runtimeConfig: { source: 'managed-provider' } })).toBe('builtin');
+    expect(resolveAgentRuntimeSelection({ runtime: 'codex', providerId: 'codex-sub' })).toBe('codex');
   });
 
   test('with no/unknown agent runtime is builtin', () => {
@@ -237,6 +251,8 @@ describe('getMaxPermissionForRuntime — unattended max-agency mode per runtime'
   // non-bypass mode, /api/memory/update on that runtime would hang to its 60-min
   // timeout instead of completing. (memory-update external-routing fix.)
   test('maps each runtime to its bypass / full-access mode', () => {
+    expect(getMaxPermissionForRuntime('antigravity')).toBe('auto');
+    expect(getDefaultRuntimePermissionMode('antigravity')).toBe('accept-edits');
     expect(getMaxPermissionForRuntime('builtin')).toBe('fullAgency');
     expect(getMaxPermissionForRuntime('claude-code')).toBe('bypassPermissions');
     expect(getMaxPermissionForRuntime('codex')).toBe('no-restrictions');

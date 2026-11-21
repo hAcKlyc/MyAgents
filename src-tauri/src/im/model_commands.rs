@@ -748,7 +748,7 @@ pub(super) async fn model_help_line(
         if let Ok(port) = global_port(manager) {
             if let Ok(value) = call(client, port, &format!("/sessions/{id}?limit=1"), None).await {
                 let snapshot = &value["session"];
-                if matches!(snapshot["runtime"].as_str(), Some("codex" | "claude-code"))
+                if matches!(snapshot["runtime"].as_str(), Some("codex" | "claude-code" | "antigravity"))
                     && snapshot["runtimeSource"].as_str() != Some("managed-provider")
                 {
                     return "查看当前 CLI 可用模型";

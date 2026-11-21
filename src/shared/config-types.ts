@@ -116,6 +116,13 @@ export interface ModelEntity extends Pick<RuntimeModelInfo, 'supportedReasoningE
   source?: 'preset' | 'discovered' | 'manual';
 }
 
+/** A bundled model needs only its ID and the fields the user actually edited.
+ * Existing manually added and discovered entries retain their catalog metadata. */
+export type PresetModelSettings = Partial<Pick<ModelEntity, 'modelName' | 'contextLength' | 'inputModalities'>>;
+export type PresetModelEntry = Omit<ModelEntity, 'modelName' | 'modelSeries'>
+  & Partial<Pick<ModelEntity, 'modelName' | 'modelSeries'>>
+  & { presetSettings?: PresetModelSettings };
+
 /**
  * Merge a persisted preset-provider custom entry into a bundled preset model.
  *
@@ -130,7 +137,7 @@ export interface ModelEntity extends Pick<RuntimeModelInfo, 'supportedReasoningE
  */
 export function mergePresetModelWithCustomEntry(
   preset: ModelEntity,
-  custom: ModelEntity | undefined,
+  custom: PresetModelEntry | undefined,
 ): ModelEntity {
   if (!custom) return preset;
 
@@ -144,6 +151,7 @@ export function mergePresetModelWithCustomEntry(
       supportedProtocols: custom.supportedProtocols ?? preset.supportedProtocols,
       executionProtocol: custom.executionProtocol ?? preset.executionProtocol,
       conversationUpdates: preset.conversationUpdates ?? custom.conversationUpdates,
+      ...custom.presetSettings,
     };
   }
 
@@ -158,6 +166,7 @@ export function mergePresetModelWithCustomEntry(
     supportedProtocols: custom.supportedProtocols ?? preset.supportedProtocols,
     executionProtocol: custom.executionProtocol ?? preset.executionProtocol,
     conversationUpdates: custom.conversationUpdates ?? preset.conversationUpdates,
+    ...custom.presetSettings,
   };
 }
 
@@ -877,11 +886,13 @@ export type ProxyScopeMode = 'all' | 'custom';
 export interface ProxyScopeSettings {
   mode: ProxyScopeMode;
   /**
-   * Whether non-provider-owned network requests use the MyAgents app proxy.
+   * Whether general network requests use the MyAgents app proxy.
    * Missing on legacy custom scopes means `true` for backward compatibility.
    */
   generalRequests?: boolean;
   providerIds?: string[];
+  /** Absent on legacy custom scopes, where system CLIs followed generalRequests. */
+  runtimeIds?: string[];
 }
 
 export interface ProxySettings {
@@ -1062,7 +1073,7 @@ export interface AppConfig {
   // User-added custom models for preset providers (key = provider ID)
   // These are merged with preset models at runtime, allowing users to add models
   // while keeping preset definitions unchanged (updated with app releases)
-  presetCustomModels?: Record<string, ModelEntity[]>;
+  presetCustomModels?: Record<string, PresetModelEntry[]>;
   // Preset models explicitly removed by user (key = provider ID, value = model IDs)
   // App upgrades won't re-add these; new models NOT in this list appear automatically
   presetRemovedModels?: Record<string, string[]>;
@@ -1570,7 +1581,7 @@ export function withManagedCodexProviderCatalog(
  */
 export function mergePresetCustomModels(
   providers: Provider[],
-  presetCustomModels: Record<string, ModelEntity[]> | undefined,
+  presetCustomModels: Record<string, PresetModelEntry[]> | undefined,
   presetRemovedModels?: Record<string, string[]>,
 ): Provider[] {
   const hasCustom =
@@ -1595,8 +1606,17 @@ export function mergePresetCustomModels(
           customModels?.find((candidate) => candidate.model === preset.model),
         ),
       );
-    const newModels =
-      customModels?.filter((model) => !presetIds.has(model.model)) ?? [];
+    const newModels = (customModels ?? []).flatMap(entry => {
+      // A settings-only row follows its bundled model out of the catalog.
+      if (presetIds.has(entry.model) || (entry.source === 'preset' && entry.modelName === undefined)) return [];
+      const { presetSettings, ...model } = entry;
+      return [{
+        ...model,
+        modelName: model.modelName ?? model.model,
+        modelSeries: model.modelSeries ?? provider.vendor.toLowerCase(),
+        ...presetSettings,
+      }];
+    });
     return { ...provider, models: [...enrichedPresets, ...newModels] };
   });
 }

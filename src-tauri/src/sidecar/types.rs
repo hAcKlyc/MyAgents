@@ -157,7 +157,6 @@ impl SidecarRetirement {
         let Self { sessions, globals } = self;
         drop(sessions);
         drop(globals);
-        remove_global_port_file();
     }
 }
 
@@ -327,7 +326,7 @@ fn resolve_runtime_for_owner(
 }
 
 #[cfg(test)]
-mod lifecycle_contract_tests {
+pub(super) mod lifecycle_contract_tests {
     use super::*;
     use crate::sidecar::manager::GlobalMonitorSnapshot;
     use std::collections::HashSet;
@@ -336,7 +335,7 @@ mod lifecycle_contract_tests {
         values.into_iter().collect()
     }
 
-    fn test_global_instance(port: u16, generation: u64, healthy: bool) -> SidecarInstance {
+    pub(in crate::sidecar) fn test_global_instance(port: u16, generation: u64, healthy: bool) -> SidecarInstance {
         SidecarInstance {
             process: Some(spawn_test_child()),
             generation,

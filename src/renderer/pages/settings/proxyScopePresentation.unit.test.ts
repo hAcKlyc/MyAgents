@@ -8,49 +8,29 @@ describe('describeProxyScopeSummary', () => {
       enabled: false,
       scope: { mode: 'all' },
       selectedProviderNames: ['Anthropic'],
-    }).key).toBe('proxy.scopeDisabledHint');
+    })[0].key).toBe('proxy.scopeDisabledHint');
     expect(describeProxyScopeSummary({
       enabled: true,
       scope: { mode: 'all' },
       selectedProviderNames: ['Anthropic'],
-    }).key).toBe('proxy.scopeAllSummary');
+    })[0].key).toBe('proxy.scopeAllSummary');
   });
 
-  it('covers explicit zero and general-only custom scopes', () => {
-    expect(describeProxyScopeSummary({
-      enabled: true,
-      scope: { mode: 'custom', generalRequests: false, providerIds: [] },
-      selectedProviderNames: [],
-    }).key).toBe('proxy.scopeCustomEmptySummary');
-    expect(describeProxyScopeSummary({
-      enabled: true,
-      scope: { mode: 'custom', generalRequests: true, providerIds: [] },
-      selectedProviderNames: [],
-    }).key).toBe('proxy.scopeCustomGeneralOnlySummary');
-  });
-
-  it('distinguishes general on and off with selected providers', () => {
-    expect(describeProxyScopeSummary({
-      enabled: true,
-      scope: { mode: 'custom', generalRequests: true, providerIds: ['anthropic-sub'] },
-      selectedProviderNames: ['Anthropic'],
-    })).toEqual({
-      key: 'proxy.scopeCustomGeneralOnSummary',
-      values: {
-        providerSummaryKey: 'proxy.scopeProviderNames',
-        names: 'Anthropic',
-      },
-    });
-    expect(describeProxyScopeSummary({
-      enabled: true,
-      scope: { mode: 'custom', generalRequests: false, providerIds: ['a', 'b', 'c', 'd'] },
-      selectedProviderNames: ['A', 'B', 'C', 'D'],
-    })).toEqual({
-      key: 'proxy.scopeCustomGeneralOffSummary',
-      values: {
-        providerSummaryKey: 'proxy.scopeProviderCount',
-        count: 4,
-      },
-    });
+  it('summarizes each selected group, including runtime-only selections', () => {
+    const summary = (generalRequests: boolean, providerIds: string[], runtimeIds: string[]) =>
+      describeProxyScopeSummary({
+        enabled: true, scope: { mode: 'custom', generalRequests, providerIds, runtimeIds },
+        selectedProviderNames: providerIds,
+      });
+    expect(summary(false, [], [])).toEqual([{ key: 'proxy.scopeCustomEmptySummary' }]);
+    expect(summary(false, [], ['codex'])).toEqual([{ key: 'proxy.scopeRuntimeCount', values: { count: 1 } }]);
+    expect(summary(true, ['A'], ['codex', 'antigravity'])).toEqual([
+      { key: 'proxy.scopeDialogGeneralRequests' },
+      { key: 'proxy.scopeProviderNames', values: { names: 'A' } },
+      { key: 'proxy.scopeRuntimeCount', values: { count: 2 } },
+    ]);
+    expect(summary(false, ['A', 'B', 'C', 'D'], [])).toEqual([
+      { key: 'proxy.scopeProviderCount', values: { count: 4 } },
+    ]);
   });
 });

@@ -318,6 +318,8 @@ export interface ChatSearchController {
   hasQuery: boolean;
 }
 
+let paintedBy: symbol | null = null;
+
 export function useChatSearch({
   scrollerRef,
   messages,
@@ -336,36 +338,27 @@ export function useChatSearch({
   // value is pure — same value React will commit — so StrictMode double-
   // invocation is a no-op. Mirrors `query` so navigation callbacks can read
   // the latest value without depending on it (and thus re-creating).
-  // eslint-disable-next-line react-hooks/refs
   queryRef.current = query;
   const messagesRef = useRef(messages);
   // Same justification as queryRef above.
-  // eslint-disable-next-line react-hooks/refs
   messagesRef.current = messages;
   const scrollToMessageRef = useRef(scrollToMessage);
-  // eslint-disable-next-line react-hooks/refs
   scrollToMessageRef.current = scrollToMessage;
   const pauseAutoScrollRef = useRef(pauseAutoScroll);
-  // eslint-disable-next-line react-hooks/refs
   pauseAutoScrollRef.current = pauseAutoScroll;
   const summariesRef = useRef<MessageMatchSummary[]>([]);
   const focusRequestIdRef = useRef(0);
-  // Timestamp of the user's most recent next/prev click. `reconcile()` runs on
-  // a debounce (DEBOUNCE_MS) after `messages` changes (streaming, append, …);
-  // if the user clicked next/prev during the debounce window, the unconditional
-  // index rewrite at the end of `reconcile()` would clobber their new position
-  // with one re-anchored from the *pre-click* index (the one we captured at
-  // entry to `reconcile()`). Guard it with a grace window > DEBOUNCE_MS so that
-  // user navigation always wins over the message-array-churn recompute.
-  const userNavigatedAtRef = useRef<number>(0);
-
   const supported = useMemo(() => {
     const ok = isHighlightApiSupported();
     if (ok) ensureHighlightStyles();
     return ok;
   }, []);
 
+  const owner = useRef(Symbol('chat-search'));
+  const occurrences = useRef({ query: '', counts: new WeakMap<Message, number>() });
   const clearHighlights = useCallback(() => {
+    if (paintedBy !== owner.current) return;
+    paintedBy = null;
     const css = getCssHighlights();
     if (!css?.highlights) return;
     css.highlights.delete(HIGHLIGHT_ALL);
@@ -386,6 +379,7 @@ export function useChatSearch({
       if (!css?.highlights || !HighlightImpl) return;
       const scroller = scrollerRef.current;
       const q = queryRef.current;
+      paintedBy = owner.current;
       css.highlights.delete(HIGHLIGHT_ALL);
       css.highlights.delete(HIGHLIGHT_CURRENT);
       if (!scroller || !q) return;
@@ -436,13 +430,20 @@ export function useChatSearch({
       summariesRef.current = [];
       return 0;
     }
+    if (occurrences.current.query !== q) {
+      occurrences.current = { query: q, counts: new WeakMap() };
+    }
+    const { counts } = occurrences.current;
     const msgs = messagesRef.current;
     const summaries: MessageMatchSummary[] = [];
     let total = 0;
     for (let i = 0; i < msgs.length; i += 1) {
       const m = msgs[i];
-      const text = extractMessageSearchText(m);
-      const count = countOccurrences(text, q);
+      let count = counts.get(m);
+      if (count === undefined) {
+        count = countOccurrences(extractMessageSearchText(m), q);
+        counts.set(m, count);
+      }
       if (count > 0) {
         summaries.push({ messageIndex: i, messageId: m.id, count });
         total += count;
@@ -491,18 +492,6 @@ export function useChatSearch({
           nextFlat = offset + occ;
         }
       }
-      // If the user clicked next/prev during this debounce window, their
-      // position is more authoritative than the re-anchored one. Keep
-      // `currentIndexRef.current` but clamp it into the new total so we don't
-      // index past the end after a shrink.
-      const recentNavigationGraceMs = DEBOUNCE_MS + 100;
-      const userInteractedDuringDebounce =
-        !resetFocus &&
-        userNavigatedAtRef.current > 0 &&
-        Date.now() - userNavigatedAtRef.current < recentNavigationGraceMs;
-      if (userInteractedDuringDebounce && total > 0) {
-        nextFlat = priorFlat < 0 ? 0 : Math.min(priorFlat, total - 1);
-      }
       currentIndexRef.current = nextFlat;
       setMatchCount(total);
       setCurrentIndex(nextFlat);
@@ -523,7 +512,10 @@ export function useChatSearch({
 
   const scheduleRecompute = useCallback(
     (resetFocus: boolean) => {
-      if (recomputeTimerRef.current) clearTimeout(recomputeTimerRef.current);
+      if (recomputeTimerRef.current !== null) {
+        if (!resetFocus) return;
+        clearTimeout(recomputeTimerRef.current);
+      }
       recomputeTimerRef.current = setTimeout(() => {
         recomputeTimerRef.current = null;
         reconcile({ resetFocus });
@@ -533,7 +525,7 @@ export function useChatSearch({
   );
 
   const scheduleRepaint = useCallback(() => {
-    if (repaintTimerRef.current) clearTimeout(repaintTimerRef.current);
+    if (repaintTimerRef.current !== null) return;
     repaintTimerRef.current = setTimeout(() => {
       repaintTimerRef.current = null;
       if (!active || !supported) return;
@@ -580,6 +572,7 @@ export function useChatSearch({
   // Clear highlights on deactivation / unmount.
   useEffect(() => {
     if (!active) {
+      occurrences.current = { query: '', counts: new WeakMap() };
       focusRequestIdRef.current += 1;
       clearHighlights();
     }
@@ -645,6 +638,8 @@ export function useChatSearch({
     const startedAt = Date.now();
     const retry = () => {
       if (focusRequestIdRef.current !== focusRequestId || !isCurrentNavigation?.()) return;
+      const selected = resolveFlatIndex(summariesRef.current, currentIndexRef.current);
+      if (selected?.messageId !== pos.messageId || selected.occInMessage !== pos.occInMessage) return;
       if (tryPaintAndScroll()) return;
       if (Date.now() - startedAt >= PAINT_RETRY_TIMEOUT_MS) {
         // Give up the precise paint; the pulse + scroll already landed the
@@ -662,7 +657,6 @@ export function useChatSearch({
     const total = summariesRef.current.reduce((acc, s) => acc + s.count, 0);
     if (total === 0) return;
     const nextIdx = (currentIndexRef.current + 1) % total;
-    userNavigatedAtRef.current = Date.now();
     currentIndexRef.current = nextIdx;
     setCurrentIndex(nextIdx);
     focusCurrent();
@@ -673,16 +667,21 @@ export function useChatSearch({
     if (total === 0) return;
     const cur = currentIndexRef.current;
     const nextIdx = cur - 1 < 0 ? total - 1 : cur - 1;
-    userNavigatedAtRef.current = Date.now();
     currentIndexRef.current = nextIdx;
     setCurrentIndex(nextIdx);
     focusCurrent();
   }, [focusCurrent]);
 
   const setQuery = useCallback((value: string) => {
+    if (queryRef.current === value) return;
     focusRequestIdRef.current += 1;
+    summariesRef.current = [];
+    currentIndexRef.current = -1;
+    setMatchCount(0);
+    setCurrentIndex(-1);
+    clearHighlights();
     setQueryState(value);
-  }, []);
+  }, [clearHighlights]);
 
   return {
     query,

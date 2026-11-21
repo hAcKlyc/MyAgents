@@ -1,3 +1,4 @@
+import { GroupedModelList, groupModelRows } from '@/components/GroupedModelList';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionMetadata } from '@/api/sessionClient';
@@ -45,7 +46,7 @@ export type TeamPending = { key: string; kind: TeamAction['kind'] | 'approveGrou
 export type RunTeamAction = (action: TeamAction, done: string) => Promise<TeamActionResult | null>;
 export type ConfirmRequest = { title: string; message: string; confirmText: string; onConfirm: () => void };
 
-const RUNTIMES: RuntimeType[] = ['builtin', 'dsh', 'codex', 'claude-code'];
+const RUNTIMES: RuntimeType[] = ['builtin', 'dsh', 'codex', 'claude-code', 'antigravity'];
 const toolTotal = (config: TeamPeerProfile) =>
   (config.mcpEnabledServers?.length ?? 0) + (config.enabledPluginIds?.length ?? 0) + (config.enabledOfficialToolIds?.length ?? 0);
 
@@ -227,26 +228,30 @@ function ConfigSection({ agentId, row, editable, note, run, confirm }: {
                 )}
               </PropRow>
               <PropRow
+                menuClassName="flex flex-col"
                 label={t('teamAi.model')}
                 disabled={!editable || view.models.length === 0}
                 value={<>{model?.name ?? config.model ?? t('teamAi.defaultModel')}{model && <span className="truncate text-xs text-[var(--ink-subtle)]">{model.group}</span>}</>}
               >
-                {close => view.models.map((option, index) => (
-                  <div key={`${option.group}:${option.name}:${index}`}>
-                    {(index === 0 || option.group !== view.models[index - 1].group) && (
-                      <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-[var(--ink-subtle)]">{option.group}</div>
-                    )}
-                    <button className={menuOption} onClick={() => {
-                      close();
-                      if (!option.isCurrent) void edit({ kind: 'updateConfig', change: { selection: option.selection } }, t('teamAi.done.updated', { what: t('teamAi.model') }));
-                    }}>
-                      <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                      {option.isCurrent
-                        ? <CheckIcon className="h-4 w-4 text-[var(--accent)]" />
-                        : current && !option.appliesNow && <span className={`${tag} ml-auto bg-[var(--paper-inset)] text-[var(--ink-muted)]`}>{t('teamAi.config.laterTag')}</span>}
-                    </button>
-                  </div>
-                ))}
+                {close => (
+                  <GroupedModelList onDismiss={close}
+                    flat={view.models[0]?.selection.kind === 'external-cli'}
+                    selectedGroupId={model && modelGroupId(model.selection)} selectedModelId={model?.selection.model}
+                    groups={groupModelRows(view.models, option => ({
+                      groupId: modelGroupId(option.selection),
+                      groupName: option.group,
+                      row: {
+                        id: option.selection.model, name: option.name,
+                        suffix: !option.isCurrent && current && !option.appliesNow && (
+                          <span className={`${tag} ml-auto bg-[var(--paper-inset)] text-[var(--ink-muted)]`}>{t('teamAi.config.laterTag')}</span>
+                        ),
+                        select: () => {
+                          close();
+                          if (!option.isCurrent) void edit({ kind: 'updateConfig', change: { selection: option.selection } }, t('teamAi.done.updated', { what: t('teamAi.model') }));
+                        },
+                      },
+                    }))} />
+                )}
               </PropRow>
               {!!view.effortChoices?.length && (
                 <PropRow label={t('teamAi.effort')} disabled={!editable} value={effortLabel}>
@@ -300,8 +305,12 @@ function ConfigSection({ agentId, row, editable, note, run, confirm }: {
   );
 }
 
+function modelGroupId(selection: TeamPeerConfig['models'][number]['selection']) {
+  return selection.kind === 'product-provider' ? selection.providerId : selection.runtime;
+}
+
 /** One label/value row whose value opens a popover editor. */
-function PropRow({ label, value, disabled, children }: { label: string; value: ReactNode; disabled?: boolean; children: (close: () => void) => ReactNode }) {
+function PropRow({ label, value, disabled, children, menuClassName = '' }: { menuClassName?: string; label: string; value: ReactNode; disabled?: boolean; children: (close: () => void) => ReactNode }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   return (
@@ -319,7 +328,7 @@ function PropRow({ label, value, disabled, children }: { label: string; value: R
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">{value}</span>
         {!disabled && <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-[var(--ink-subtle)] opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-aria-expanded:opacity-100" />}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} placement="bottom-start" className="max-h-[360px] min-w-[240px] overflow-y-auto p-1">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={anchor} placement="bottom-start" maxHeight="360px" className={`min-w-[240px] max-w-[calc(100vw-16px)] overflow-y-auto p-1 ${menuClassName}`}>
         {open && children(() => setOpen(false))}
       </Popover>
     </div>

@@ -1,3 +1,4 @@
+import { providerRequiresClaudeSdk } from '../integrated-runtimes/provider-constraints';
 export type { PermissionReview, PermissionOperation } from '../../../contracts/myagents-dsh/public-contract.generated';
 // Multi-Agent Runtime types (v0.1.59)
 // Defines runtime types and metadata for external CLI agent integration
@@ -23,7 +24,7 @@ import {
  * - claude-code: Claude Code CLI (user-installed `claude`)
  * - codex: OpenAI Codex CLI (user-installed `codex`)
  */
-export type RuntimeType = 'builtin' | 'dsh' | 'claude-code' | 'codex';
+export type RuntimeType = 'builtin' | 'dsh' | 'claude-code' | 'codex' | 'antigravity';
 
 /**
  * Distinguishes user-managed CLI runtimes from product-managed runtime-backed
@@ -70,6 +71,7 @@ export const VALID_RUNTIMES = [
   'dsh',
   'claude-code',
   'codex',
+  'antigravity',
 ] as const satisfies readonly RuntimeType[];
 
 /**
@@ -94,6 +96,7 @@ export const RUNTIME_DISPLAY_NAMES: Record<RuntimeType, string> = {
   builtin: 'Built-in (Claude Agent SDK)',
   dsh: 'MyAgents (DeepSeek Harness)',
   'claude-code': 'Claude Code CLI',
+  antigravity: 'Antigravity CLI',
   codex: 'OpenAI Codex CLI',
 };
 
@@ -153,6 +156,22 @@ export function coerceModelForRuntime(
   return modelLooksLikeRuntime(trimmed, runtime) ? trimmed : undefined;
 }
 
+type AgentRuntimeSelectionFacts = {
+  runtime?: string | null;
+  runtimePreference?: unknown;
+  runtimeConfig?: { source?: RuntimeSource | null } | null;
+  providerId?: unknown;
+};
+
+/** The Runtime pickers edit the Agent preference, including when a model has its own execution owner. */
+export function resolveAgentRuntimeSelection(
+  agent: AgentRuntimeSelectionFacts | null | undefined,
+  configuredDefaultIntegratedRuntime?: unknown,
+  policy: AgentRuntimeDistributionPolicy = AGENT_RUNTIME_DISTRIBUTION_POLICY,
+): RuntimeType {
+  return projectAgentRuntime(agent, configuredDefaultIntegratedRuntime, policy);
+}
+
 /**
  * Resolve the **agent-config** effective runtime through the build distribution
  * and its selector policy. Agents without an explicit choice use the configured
@@ -187,6 +206,20 @@ export function resolveEffectiveRuntime(
   policy: AgentRuntimeDistributionPolicy = AGENT_RUNTIME_DISTRIBUTION_POLICY,
   configuredDefaultIntegratedRuntime?: unknown,
 ): RuntimeType {
+  return projectAgentRuntime(
+    { runtime: agentRuntime, runtimePreference, runtimeConfig: { source: runtimeSource }, providerId },
+    configuredDefaultIntegratedRuntime,
+    policy,
+    providerId,
+  );
+}
+
+function projectAgentRuntime(
+  agent: AgentRuntimeSelectionFacts | null | undefined,
+  configuredDefaultIntegratedRuntime: unknown,
+  policy: AgentRuntimeDistributionPolicy,
+  executionProviderId?: unknown,
+): RuntimeType {
   const defaultIntegratedRuntime = resolveDefaultIntegratedRuntime(
     policy,
     configuredDefaultIntegratedRuntime,
@@ -195,15 +228,12 @@ export function resolveEffectiveRuntime(
     policy,
     configuredDefaultIntegratedRuntime,
   );
-  const selectorAvailable = isRuntimeSelectorAvailable(
-    policy,
-  );
-  const preference = selectorAvailable
+  const preference = isRuntimeSelectorAvailable(policy)
     ? resolveAgentRuntimePreference({
-        runtimePreference,
-        runtime: agentRuntime,
-        runtimeSource,
-        providerId,
+        runtimePreference: agent?.runtimePreference,
+        runtime: agent?.runtime,
+        runtimeSource: agent?.runtimeConfig?.source,
+        providerId: agent?.providerId,
         defaultIntegratedRuntime,
       })
     : { family: 'integrated' as const, id: defaultIntegratedRuntime };
@@ -218,17 +248,17 @@ export function resolveEffectiveRuntime(
   // Product subscription Providers have fixed execution owners and constrain
   // either Integrated preference before Session birth. Managed Codex keeps its
   // historical builtin carrier in renderer-facing configuration.
-  if (providerId === 'codex-sub') {
+  if (executionProviderId === 'codex-sub') {
     return isRuntimeAllowedByDistribution(policy, 'codex', 'managed-provider')
       ? 'builtin'
       : distributionDefault;
   }
-  if (providerId === 'anthropic-sub' || providerId === 'xai-sub') {
+  if (providerRequiresClaudeSdk(executionProviderId)) {
     return isRuntimeAllowedByDistribution(policy, 'builtin')
       ? 'builtin'
       : distributionDefault;
   }
-  return isRuntimeAllowedByDistribution(policy, preferredRuntime, runtimeSource)
+  return isRuntimeAllowedByDistribution(policy, preferredRuntime, agent?.runtimeConfig?.source)
     ? preferredRuntime
     : distributionDefault;
 }
@@ -303,16 +333,8 @@ export interface RuntimePermissionMode {
 /**
  * Proxy policy for external-runtime subprocess env (issue #194).
  *
- * - `myagents` (default, legacy) — MyAgents unconditionally injects its own
- *    `proxySettings` into the runtime's env, overriding whatever the parent
- *    shell or system has configured. Best for "MyAgents proxy is THE proxy"
- *    setups.
- * - `terminal` — Drop MyAgents-injected proxy vars; restore whatever proxy
- *    the user's interactive shell would export (HTTP_PROXY / HTTPS_PROXY /
- *    ALL_PROXY / NO_PROXY, lowercase + UPPERCASE). Best for "I run codex /
- *    claude from terminal and want MyAgents to behave the same."
- * - `direct` — Strip all proxy vars. Best when system-level proxy (Clash
- *    TUN, transparent proxy) handles routing.
+ * - `myagents` (default) uses the system CLI's selection in app proxy settings.
+ * - `terminal` uses the proxy variables exported by the user's interactive shell.
  */
 export type RuntimeProxyPolicy = 'myagents' | 'terminal';
 
@@ -506,6 +528,16 @@ export const BUILTIN_PERMISSION_MODES: RuntimePermissionMode[] = [
   },
 ];
 
+export const ANTIGRAVITY_FULL_ACCESS = 'dangerously-skip-permissions';
+export const ANTIGRAVITY_PERMISSION_MODES: RuntimePermissionMode[] = [
+  { value: 'accept-edits', label: '请求批准', icon: '🛡', description: '自动批准工作区内的文件编辑，终端命令仍按权限规则处理' },
+  { value: 'auto', label: '帮我批准', icon: '⚡', description: '自动批准文件编辑和安全命令，仅遇到不可逆操作时询问' },
+  { value: ANTIGRAVITY_FULL_ACCESS, label: '完全访问权限', icon: '🔓', description: '无需审批即可访问文件和网络' },
+  // Existing sessions retain their original native policy until the user changes it.
+  { value: 'default', label: 'Default', icon: '🛡', description: '按 Antigravity 的权限设置审批', hidden: true },
+  { value: 'plan', label: '规划', icon: '📋', description: '先规划再执行', hidden: true },
+];
+
 export const DSH_PERMISSION_MODES: RuntimePermissionMode[] = [
   { value: 'approval-required', label: '请求批准', icon: '\u{1F6E1}', description: '工作区内行动，使用工具需审批' },
   { value: 'workspace-autonomous', label: '工作区自主', icon: '\u{1F4C1}', description: '工作区内无限制，无需审批' },
@@ -546,6 +578,7 @@ export function getRuntimePermissionModes(runtime: RuntimeType): RuntimePermissi
   switch (runtime) {
     case 'dsh': return DSH_PERMISSION_MODES;
     case 'claude-code': return CC_PERMISSION_MODES;
+    case 'antigravity': return ANTIGRAVITY_PERMISSION_MODES;
     case 'codex': return CODEX_PERMISSION_MODES;
     case 'builtin': return BUILTIN_PERMISSION_MODES;
     default: return [];
@@ -627,6 +660,7 @@ export function getDefaultRuntimePermissionMode(runtime: RuntimeType): string {
   switch (runtime) {
     case 'dsh': return 'approval-required';
     case 'claude-code': return 'manual';
+    case 'antigravity': return 'accept-edits';
     case 'codex': return 'full-auto';
     case 'builtin': return 'auto';
     default: return '';
@@ -656,6 +690,7 @@ export function getMaxPermissionForRuntime(runtime: RuntimeType): string {
     case 'dsh':         return 'full-autonomous';
     case 'builtin':     return 'fullAgency';
     case 'claude-code': return 'bypassPermissions';
+    case 'antigravity': return 'auto';
     case 'codex':       return 'no-restrictions';
     default:            return 'fullAgency';
   }

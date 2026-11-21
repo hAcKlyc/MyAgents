@@ -23,7 +23,7 @@ import {
 } from '../../shared/integrated-runtimes/distribution-policy';
 
 // Runtime types that have backend implementations (not just type definitions)
-const IMPLEMENTED_RUNTIMES = new Set<RuntimeType>(['builtin', 'dsh', 'claude-code', 'codex']);
+const IMPLEMENTED_RUNTIMES = new Set<RuntimeType>(['builtin', 'dsh', 'claude-code', 'codex', 'antigravity']);
 
 // ─── Runtime display metadata ───
 
@@ -35,6 +35,7 @@ const RUNTIME_OPTIONS: {
     { type: 'builtin', name: RUNTIME_PRESENTATION.builtin.name, group: 'integrated' },
     { type: 'dsh', name: RUNTIME_PRESENTATION.dsh.name, group: 'integrated' },
     { type: 'claude-code', name: RUNTIME_PRESENTATION['claude-code'].name, group: 'external' },
+    { type: 'antigravity', name: RUNTIME_PRESENTATION.antigravity.name, group: 'external' },
     { type: 'codex', name: RUNTIME_PRESENTATION.codex.name, group: 'external' },
   ];
 
@@ -171,7 +172,7 @@ export default memo(function RuntimeSelector({
         </div>
         {availableOptions.map((opt, index) => {
           const detection = detections[opt.type];
-          const installed = opt.type === 'builtin' || (detection?.installed && IMPLEMENTED_RUNTIMES.has(opt.type));
+          const installed = opt.type === 'builtin' || (detection?.installed && detection.reason !== 'protocol-mismatch' && IMPLEMENTED_RUNTIMES.has(opt.type));
           const selected = opt.type === value;
           const groupStart = index === 0 || availableOptions[index - 1].group !== opt.group;
           return (
@@ -209,7 +210,7 @@ export default memo(function RuntimeSelector({
                   <CheckIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--accent)] ${selected ? '' : 'invisible'}`} aria-hidden="true" />
                 ) : (
                   <span className="shrink-0 text-xs text-[var(--ink-subtle)]">
-                    {detection?.installed && !IMPLEMENTED_RUNTIMES.has(opt.type)
+                    {opt.type === 'antigravity' ? t(detection?.installed ? 'runtime.upgradeAgy' : 'runtime.installAgy') : detection?.installed && !IMPLEMENTED_RUNTIMES.has(opt.type)
                       ? t('runtime.comingSoon')
                       : t('runtime.notInstalled')}
                   </span>

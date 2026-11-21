@@ -24,7 +24,7 @@ import { useTranslation } from 'react-i18next';
 import Tip from '@/components/Tip';
 import { useToast } from '@/components/Toast';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { ModalityBadges } from '@/components/ModalityBadges';
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
 import { useImagePreview } from '@/context/ImagePreviewContext';
 import { useWorkspaceFileService } from '@/hooks/useWorkspaceFileService';
 import { type PermissionMode, PERMISSION_MODES, type Provider, type ProviderVerifyStatus, getModelDisplayName } from '@/config/types';
@@ -204,6 +204,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   runtime = 'builtin',
   usesExternalRuntimeControls = runtime !== 'builtin' && runtime !== 'dsh',
   runtimeModels,
+  runtimeModelsLoading = false,
   managedReasoningModel,
   runtimePermissionModes,
   queuedMessages = [],
@@ -222,16 +223,18 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // without the three-site scan the prior duplicated ternary required.
   const effectiveMinLines = isLauncherMode ? LAUNCHER_MIN_LINES : 2;
   const isExternalRuntime = usesExternalRuntimeControls;
+  const usesProductMcp = !isExternalRuntime || runtime === 'antigravity';
   const overlayRootRef = useRef<HTMLDivElement>(null);
   const attachmentSessionId = sessionId;
 
   // Compute display modes and model name based on runtime
+  const permissionTextGroup = runtime === 'antigravity' ? 'antigravityPermissionModes' : 'permissionModes';
   const displayPermissionModes = runtimePermissionModes
     ? runtimePermissionModes.map(m => ({
       value: m.value as PermissionMode,
-      label: t(`input.permissionModes.${m.value}.label`, { defaultValue: m.label }),
+      label: t(`input.${permissionTextGroup}.${m.value}.label`, { defaultValue: m.label }),
       icon: m.icon,
-      description: t(`input.permissionModes.${m.value}.description`, { defaultValue: m.description }),
+      description: t(`input.${permissionTextGroup}.${m.value}.description`, { defaultValue: m.description }),
       sdkValue: m.value,
       hidden: m.hidden,
     }))
@@ -424,7 +427,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       .map(server => configuredServers.get(server.id) ?? { id: server.id, name: server.id });
   }, [isExternalRuntime, mcpEffectiveSnapshot, mcpServers, runtimeMcpServers]);
   const enabledToolEntryCount = useMemo(() => {
-    const enabledMcpEntryCount = isExternalRuntime
+    const enabledMcpEntryCount = !usesProductMcp
       ? externalMcpServers.length
       : new Set(mcpServers
         .filter(server => globalMcpEnabled.includes(server.id) && workspaceMcpEnabled.includes(server.id))
@@ -433,7 +436,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       tool => workspaceOfficialToolEnabled.includes(tool.id),
     ).length;
     return enabledMcpEntryCount + enabledOfficialEntryCount;
-  }, [externalMcpServers.length, globalMcpEnabled, isExternalRuntime, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
+  }, [externalMcpServers.length, globalMcpEnabled, usesProductMcp, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
 
   // #324 — 推理强度 submenu (fixed bottom row of the model menu). Opens on
   // hover/click of the row; share the 120ms close delay with the portaled
@@ -450,7 +453,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     ? `${t('input.reasoningDefault')} (${effortModel.defaultReasoningEffort})`
     : t('input.reasoningDefault');
   const effortChoices = onReasoningEffortChange
-    ? managedEffort
+    ? runtime === 'antigravity'
+      ? runtimeModels?.find(m => m.isDefault)?.supportedReasoningEfforts?.map(o => o.reasoningEffort) ?? null
+      : managedEffort
       ? (effortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [])
       : reasoningEffortChoices(
         runtime === 'dsh' ? 'dsh' : isExternalRuntime ? (runtime ?? 'builtin') : 'builtin',
@@ -471,6 +476,16 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     if (effortCloseTimerRef.current) clearTimeout(effortCloseTimerRef.current);
     effortCloseTimerRef.current = setTimeout(() => setShowEffortSubmenu(false), 120);
   }, []);
+  function dismissModelMenuLayer() {
+    if (showEffortSubmenu) {
+      setShowEffortSubmenu(false);
+      effortRowWrapRef.current?.querySelector('button')?.focus({ preventScroll: true });
+    } else {
+      setShowModelMenu(false);
+      modelBtnRef.current?.focus({ preventScroll: true });
+    }
+  }
+
   // Reset submenu state whenever the model menu closes (incl. outside-click).
   useEffect(() => {
     if (!modelMenuOpen) {
@@ -551,8 +566,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     [showBuiltinSdkSlashCommands, slashCommands],
   );
   const runtimeVisibleSdkSlashCommands = useMemo(
-    () => showBuiltinSdkSlashCommands ? sdkSlashCommands : [],
-    [showBuiltinSdkSlashCommands, sdkSlashCommands],
+    () => showBuiltinSdkSlashCommands || runtime === 'antigravity' ? sdkSlashCommands : [],
+    [showBuiltinSdkSlashCommands, runtime, sdkSlashCommands],
   );
   const mergedSlashCommands = useMemo(
     () => withClientActionCommands(
@@ -1731,7 +1746,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                     <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
                       {t('input.toolsHeader')}
                     </div>
-                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (!isExternalRuntime && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
+                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (usesProductMcp && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
                       <>
                       {visibleOfficialTools.map((tool) => {
                         const isEnabled = workspaceOfficialToolEnabled.includes(tool.id);
@@ -1781,7 +1796,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                           </div>
                         );
                       })}
-                      {isExternalRuntime && externalMcpServers.map((server) => (
+                      {!usesProductMcp && externalMcpServers.map((server) => (
                         <div
                           key={server.id}
                           className="px-3 py-2"
@@ -1804,7 +1819,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         </div>
                       ))}
                       {mcpServers
-                        .filter(s => !isExternalRuntime && globalMcpEnabled.includes(s.id))
+                        .filter(s => usesProductMcp && globalMcpEnabled.includes(s.id))
                         .map((server) => {
                           const isEnabled = workspaceMcpEnabled.includes(server.id);
                           const effective = mcpServerState(mcpEffectiveSnapshot, server.id);
@@ -1823,7 +1838,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                   </div>
                                 )}
                                 {isEnabled && effective && hasMcpStatusNotice(effective.state) && (
-                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={onMcpRetry} />
+                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={runtime === 'antigravity' ? undefined : onMcpRetry} />
                                 )}
                               </div>
                               {hasUserEditableMcpSettings(server.id) && (
@@ -1873,7 +1888,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         >
                           {t('input.settingsPage')}
                         </button>
-                        {isExternalRuntime
+                        {!usesProductMcp
                           ? t('input.toolsEmptyExternal')
                           : t('input.toolsEmptyBuiltin')}
                       </div>
@@ -1976,7 +1991,12 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
             </div>
 
             {/* Right side - model selector + send/stop button */}
-            <div className="ml-auto flex items-center gap-2 shrink-0">
+            <div className="ml-auto flex items-center gap-2 shrink-0" onKeyDown={event => {
+              if (modelMenuOpen && event.key === 'Escape' && !isImeComposingEvent(event)) {
+                event.stopPropagation();
+                dismissModelMenuLayer();
+              }
+            }}>
               {/* PRD 0.2.32 — context 用量指示器（自取数 slot，model 按钮左侧） */}
               {contextIndicator}
               {/* Model Dropdown with Provider Selector */}
@@ -1987,15 +2007,10 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 onClick={(e) => {
                   e.stopPropagation();
                   if (showConfigLockedReason()) return;
-                  const willOpen = !modelMenuOpen;
-                  setShowModelMenu(willOpen);
+                  setShowModelMenu(!modelMenuOpen);
                   setShowModeMenu(false);
                   setShowPlusMenu(false);
                   setShowToolMenu(false);
-                  // Refresh providers data when opening menu
-                  if (willOpen && onRefreshProviders) {
-                    onRefreshProviders();
-                  }
                 }}
                 className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-medium text-[var(--ink-muted)] transition-colors hover:bg-[var(--hover-bg)] hover:text-[var(--ink)] ${
                   configControlsLocked ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-[var(--ink-muted)]' : ''
@@ -2012,20 +2027,25 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 onClose={() => setShowModelMenu(false)}
                 anchorRef={modelBtnRef}
                 placement="top-end"
-                className="w-64"
+                maxHeight="448px"
+                className="flex min-h-[min(332px,var(--popover-available-height,100dvh))] w-[292px] max-w-[calc(100vw-16px)] flex-col [&>[data-model-list]]:grow"
+                closeOnEscape={!showEffortSubmenu}
               >
-                <div
-                  ref={modelListRef}
-                  data-model-list
-                  className="relative max-h-[260px] overflow-y-auto py-1"
-                >
                 {isExternalRuntime && runtimeModels ? (
-                  <>
+                  <div ref={modelListRef} data-model-list className="relative min-h-0 overflow-y-auto py-1">
                     <div className="px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
                       {t('input.runtimeModelHeader', {
                         runtime: runtime === 'claude-code' ? 'CLAUDE CODE' : runtime?.toUpperCase(),
                       })}
                     </div>
+                    {runtimeModels.length === 0 && (runtimeModelsLoading ? (
+                      <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--ink-muted)]">
+                        <LoaderIcon aria-hidden="true" className="h-4 w-4 animate-spin" />
+                        {t('input.modelCatalogLoading')}
+                      </div>
+                    ) : (
+                      <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">{t('input.modelCatalogEmpty')}</div>
+                    ))}
                     {runtimeModels.map(model => {
                       const isSelected = selectedModel === model.value || (!selectedModel && model.isDefault);
                       return (
@@ -2049,92 +2069,60 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         </button>
                       );
                     })}
-                  </>
+                    <ModelSelectionScrollSync listRef={modelListRef} selectedRowRef={selectedModelRowRef}
+                      selectionKey={`${runtime ?? 'external'}:${selectedModel ?? 'default'}`} modelSource={runtimeModels} />
+                  </div>
                 ) : (() => {
                   const availableProviders = availableProviderIdSet
                     ? (providers ?? []).filter(p => availableProviderIdSet.has(p.id))
                     : (providers ?? []).filter(p => isProviderAvailable(p, apiKeys, providerVerifyStatus));
                   if (availableProviders.length === 0) {
                     return (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setShowModelMenu(false);
-                          window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, {
-                            detail: { section: 'providers' }
-                          }));
-                        }}
-                        className="w-full px-3 py-2.5 text-left text-sm text-[var(--accent)] transition-colors hover:bg-[var(--hover-bg)]"
-                      >
-                        {t('input.setupModelProvider')}
-                      </button>
+                      <div data-model-list>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowModelMenu(false);
+                            window.dispatchEvent(new CustomEvent(CUSTOM_EVENTS.OPEN_SETTINGS, {
+                              detail: { section: 'providers' }
+                            }));
+                          }}
+                          className="w-full px-3 py-2.5 text-left text-sm text-[var(--accent)] transition-colors hover:bg-[var(--hover-bg)]"
+                        >
+                          {t('input.setupModelProvider')}
+                        </button>
+                      </div>
                     );
                   }
-                  return availableProviders.map((p, idx) => (
-                    <div key={p.id}>
-                      {idx > 0 && <div className="mx-2 my-1 border-t border-[var(--line)]" />}
-                      <div className="group/provider relative flex items-center gap-1 px-3 pb-0.5 pt-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60">
-                        {p.name}
-                        {isProviderWarning(p, apiKeys, providerVerifyStatus) && (
+                  return (
+                    <GroupedModelList onDismiss={dismissModelMenuLayer}
+                      selectedGroupId={provider?.id} selectedModelId={currentModelId}
+                      groups={providerModelGroups(availableProviders, (providerId, model) => {
+                        if (onBuiltinModelSelect) onBuiltinModelSelect({ providerId, model });
+                        else if (provider?.id !== providerId) onProviderChange?.(providerId, model);
+                        else onModelChange?.(model);
+                        setShowModelMenu(false);
+                      }, true, p => ({
+                        badge: isProviderWarning(p, apiKeys, providerVerifyStatus) && (
                           <Tip label={t('input.providerWarning')} position="bottom">
                             <AlertIcon className="h-3 w-3 shrink-0 text-[var(--warning)]" />
                           </Tip>
-                        )}
-                      </div>
-                      {isRuntimeBackedProvider(p) && (p.models.length === 0 || managedCodexModelCatalogStatus === 'error') && (
-                        <div className="px-3 py-2 text-xs text-[var(--ink-muted)]" role="status">
-                          {t(managedCodexModelCatalogStatus === 'loading' ? 'input.modelCatalogLoading'
-                            : managedCodexModelCatalogStatus === 'error' ? 'input.modelCatalogFailed' : 'input.modelCatalogEmpty')}
-                          {onRefreshProviders && managedCodexModelCatalogStatus !== 'loading' && (
-                            <button type="button" className="ml-2 text-[var(--accent)]" onClick={() => onRefreshProviders()}>
-                              {t('input.refreshModelCatalog')}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {p.models.map(model => {
-                        const isSelected = provider?.id === p.id && currentModelId === model.model;
-                        return (
-                          <button
-                            ref={isSelected ? selectedModelRowRef : undefined}
-                            data-selected-model-row={isSelected ? '' : undefined}
-                            key={model.model}
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (onBuiltinModelSelect) {
-                                onBuiltinModelSelect({ providerId: p.id, model: model.model });
-                              } else if (provider?.id !== p.id) {
-                                onProviderChange?.(p.id, model.model);
-                              } else {
-                                onModelChange?.(model.model);
-                              }
-                              setShowModelMenu(false);
-                            }}
-                            className={`flex w-full items-center rounded-md px-3 py-1.5 text-left text-sm transition-colors ${
-                              isSelected
-                                ? 'bg-[var(--accent)]/10 font-medium text-[var(--accent)]'
-                                : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                            }`}
-                          >
-                            <span className="truncate">{model.modelName}</span>
-                            <ModalityBadges modalities={model.inputModalities} className="ml-2" />
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ));
+                        ),
+                        notice: isRuntimeBackedProvider(p) && (p.models.length === 0 || managedCodexModelCatalogStatus === 'error') && (
+                          <div className="px-2 py-2 text-xs text-[var(--ink-muted)]" role="status">
+                            {t(managedCodexModelCatalogStatus === 'loading' ? 'input.modelCatalogLoading'
+                              : managedCodexModelCatalogStatus === 'error' ? 'input.modelCatalogFailed' : 'input.modelCatalogEmpty')}
+                            {onRefreshProviders && managedCodexModelCatalogStatus !== 'loading' && (
+                              <button type="button" className="ml-2 text-[var(--accent)]" onClick={() => onRefreshProviders()}>
+                                {t('input.refreshModelCatalog')}
+                              </button>
+                            )}
+                          </div>
+                        ),
+                      }))} />
+                  );
                 })()}
-                </div>
-                <ModelSelectionScrollSync
-                  listRef={modelListRef}
-                  selectedRowRef={selectedModelRowRef}
-                  selectionKey={isExternalRuntime
-                    ? `${runtime ?? 'external'}:${selectedModel ?? 'default'}`
-                    : `${provider?.id ?? 'none'}:${currentModelId ?? 'none'}`}
-                  modelSource={isExternalRuntime ? runtimeModels : providers}
-                />
 
                 {/* #324 — fixed bottom row: 推理强度. Hidden when the surface has
                     no effort knob (unknown runtime). Hover or click

@@ -1,5 +1,5 @@
 import { computePosition, type Platform } from "@floating-ui/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { popoverPositioning } from "./popoverPositioning";
 
 function geometry(
@@ -10,7 +10,7 @@ function geometry(
   { viewportWidth = 900, anchorLeft = 100, anchorWidth = 540, popupWidth = 540 } = {},
 ) {
   const reference = {};
-  const floating = { style: { maxHeight: "", width: "" } };
+  const floating = { style: { maxHeight: "", width: "", setProperty: vi.fn() } };
   const measuredHeight = () => {
     const limit = /min\(([\d.]+)px, ([\d.]+)(px|vh)\)/.exec(
       floating.style.maxHeight,
@@ -61,6 +61,9 @@ describe("anchored popover available space", () => {
           ),
         },
       );
+      const [property, room] = fixture.floating.style.setProperty.mock.lastCall!;
+      expect(property).toBe("--popover-available-height");
+      expect(fixture.floating.style.maxHeight).toBe(`min(${room}, 512px)`);
       expect(result.y).toBeGreaterThanOrEqual(52);
       expect(result.y + fixture.measuredHeight()).toBeLessThanOrEqual(
         height - 8,

@@ -26,6 +26,7 @@ export interface SelectOption {
 interface CustomSelectProps {
   value: string;
   options: SelectOption[];
+  renderMenu?: (select: (value: string) => void, dismiss: () => void) => ReactNode;
   onChange: (value: string) => void;
   placeholder?: string;
   triggerIcon?: ReactNode;
@@ -60,6 +61,7 @@ interface CustomSelectProps {
 export default function CustomSelect({
   value,
   options,
+  renderMenu,
   onChange,
   placeholder,
   triggerIcon,
@@ -153,7 +155,7 @@ export default function CustomSelect({
         anchorRef={triggerRef}
         placement="bottom-start"
         matchAnchorWidth
-        className="shadow-md"
+        className={renderMenu ? "flex flex-col shadow-md" : "shadow-md"}
         style={
           popoverMinWidth ? { minWidth: `${popoverMinWidth}px` } : undefined
         }
@@ -169,70 +171,72 @@ export default function CustomSelect({
                     long option lists (e.g. 24-hour picker showed only
                     ~8 items, couldn't scroll). A nested div sidesteps the
                     conflict: outer clips, inner scrolls. */}
-        <div className="max-h-60 overflow-y-auto py-1">
-          {options.map((option) =>
-            option.isSeparator ? (
-              <div
-                key={option.value}
-                className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60"
-              >
-                {option.label}
-              </div>
-            ) : (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => handleSelect(option.value)}
-                // Item font size mirrors the trigger's: `size='md'`
-                // → `text-sm` (14px) so options read at parity with
-                // what the closed trigger shows. Default `size='sm'`
-                // keeps the legacy `text-xs` (12px) for dense forms.
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
-                  size === 'md' || size === 'toolbar' ? 'text-sm' : 'text-xs'
-                } ${
-                  option.value === value
-                    ? 'text-[var(--accent-warm)]'
-                    : 'text-[var(--ink)] hover:bg-[var(--paper-inset)]'
-                }`}
-              >
-                {option.icon && <span className="shrink-0">{option.icon}</span>}
-                <span className="min-w-0">
-                  {option.content ?? (
-                    <span className="block truncate">{option.label}</span>
+        {renderMenu ? renderMenu(handleSelect, () => setIsOpen(false)) : (
+          <div className="max-h-60 overflow-y-auto py-1">
+            {options.map((option) =>
+              option.isSeparator ? (
+                <div
+                  key={option.value}
+                  className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]/60"
+                >
+                  {option.label}
+                </div>
+              ) : (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleSelect(option.value)}
+                  // Item font size mirrors the trigger's: `size='md'`
+                  // → `text-sm` (14px) so options read at parity with
+                  // what the closed trigger shows. Default `size='sm'`
+                  // keeps the legacy `text-xs` (12px) for dense forms.
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors ${
+                    size === 'md' || size === 'toolbar' ? 'text-sm' : 'text-xs'
+                  } ${
+                    option.value === value
+                      ? 'text-[var(--accent-warm)]'
+                      : 'text-[var(--ink)] hover:bg-[var(--paper-inset)]'
+                  }`}
+                >
+                  {option.icon && <span className="shrink-0">{option.icon}</span>}
+                  <span className="min-w-0">
+                    {option.content ?? (
+                      <span className="block truncate">{option.label}</span>
+                    )}
+                  </span>
+                  {option.value === value && (
+                    <CheckIcon data-selected-indicator className="h-3 w-3 shrink-0" />
                   )}
-                </span>
-                {option.value === value && (
-                  <CheckIcon data-selected-indicator className="h-3 w-3 shrink-0" />
-                )}
-                <span className="min-w-0 flex-1" />
-                {option.suffix && (
-                  <span className="shrink-0">{option.suffix}</span>
-                )}
-              </button>
-            ),
-          )}
+                  <span className="min-w-0 flex-1" />
+                  {option.suffix && (
+                    <span className="shrink-0">{option.suffix}</span>
+                  )}
+                </button>
+              ),
+            )}
 
-          {footerAction && (
-            <>
-              <div className="my-1 border-t border-[var(--line)]" />
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  footerAction.onClick();
-                }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] ${
-                  size === 'md' || size === 'toolbar' ? 'text-sm' : 'text-xs'
-                }`}
-              >
-                {footerAction.icon && (
-                  <span className="shrink-0">{footerAction.icon}</span>
-                )}
-                <span>{footerAction.label}</span>
-              </button>
-            </>
-          )}
-        </div>
+            {footerAction && (
+              <>
+                <div className="my-1 border-t border-[var(--line)]" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsOpen(false);
+                    footerAction.onClick();
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[var(--ink-muted)] transition-colors hover:bg-[var(--paper-inset)] hover:text-[var(--ink)] ${
+                    size === 'md' || size === 'toolbar' ? 'text-sm' : 'text-xs'
+                  }`}
+                >
+                  {footerAction.icon && (
+                    <span className="shrink-0">{footerAction.icon}</span>
+                  )}
+                  <span>{footerAction.label}</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </Popover>
     </div>
   );

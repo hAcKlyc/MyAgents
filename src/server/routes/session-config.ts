@@ -96,9 +96,14 @@ export async function handleSessionConfigRoute(
 
   if (pathname === '/api/mcp/set' && request.method === 'POST') {
     try {
-      const payload = await request.json() as { servers?: McpServerDefinition[] };
+      const payload = await request.json() as { servers?: McpServerDefinition[]; selectedIds?: unknown };
       const servers = payload?.servers ?? [];
-      const result = await getSessionEngine().updateMcpServers(servers);
+      const selectedIds = payload?.selectedIds;
+      if (selectedIds !== undefined && (!Array.isArray(selectedIds) || !selectedIds.every(id => typeof id === 'string'))) {
+        return jsonResponse({ success: false, error: 'selectedIds must be a list of MCP IDs' }, 400);
+      }
+      const engine = getSessionEngine();
+      const result = selectedIds === undefined ? await engine.updateMcpServers(servers) : await engine.updateMcpServers(servers, selectedIds);
       return jsonResponse(result, result.success ? 200 : 500);
     } catch (error) {
       console.error('[api/mcp/set] Error:', error);

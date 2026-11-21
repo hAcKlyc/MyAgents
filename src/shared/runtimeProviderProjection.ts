@@ -3,6 +3,7 @@ import {
   getProviderExecutionConstraint,
   isDshModelSelectable,
   isDshProviderEligible,
+  providerRequiresClaudeSdk,
 } from './integrated-runtimes/provider-constraints';
 import { isRuntimeBackedProvider, isRuntimeBackedProviderId } from './providerExecution';
 import type { RuntimeType, RuntimeSource } from './types/runtime';
@@ -18,16 +19,14 @@ export function platformHiddenProviderIds(platform: string): readonly string[] {
 export function projectProvidersForRuntime(
   providers: readonly Provider[],
   runtime: RuntimeType,
+  selectedProviderId?: string | null,
 ): Provider[] {
   if (runtime !== 'dsh') return [...providers];
-  return providers.flatMap((provider) => {
-    // Managed Provider Runtimes remain first-class choices in the Product
-    // picker. Selecting one crosses a Session boundary and never asks DSH to
-    // execute the provider/model pair itself.
-    if (isRuntimeBackedProvider(provider)) {
-      return [provider];
-    }
-    return isDshProviderEligible(provider) ? [provider] : [];
+  return providers.filter((provider) => {
+    // Keep a selected fixed-owner model across a base change. It runs with its own executor.
+    return isRuntimeBackedProvider(provider)
+      || (provider.id === selectedProviderId && providerRequiresClaudeSdk(provider.id))
+      || isDshProviderEligible(provider);
   });
 }
 

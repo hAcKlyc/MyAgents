@@ -910,9 +910,10 @@ export const KNOWN_CODEX_SERVER_REQUEST_METHODS = Object.freeze([
   'item/tool/call',
   'account/chatgptAuthTokens/refresh',
   'attestation/generate',
-  'currentTime/read',
   'applyPatchApproval',
   'execCommandApproval',
+  // Older installed and system CLIs still request the host clock.
+  'currentTime/read',
 ] as const);
 
 type KnownCodexServerRequestMethod = (typeof KNOWN_CODEX_SERVER_REQUEST_METHODS)[number];
@@ -1208,7 +1209,9 @@ export function resolveCodexConversationBranchPoint(
   const index = turns.indexOf(matches[0]);
   if (index === 0) return { kind: 'fresh-thread' };
   const previous = turns[index - 1] as { id?: unknown; status?: unknown } | undefined;
-  if (!previous || typeof previous.id !== 'string' || previous.status !== 'completed') {
+  // A stopped or failed predecessor still owns its tool calls and partial output.
+  if (!previous || typeof previous.id !== 'string' ||
+    (previous.status !== 'completed' && previous.status !== 'interrupted' && previous.status !== 'failed')) {
     throw new RuntimeConversationBranchError('anchor_unavailable', 'The previous Codex turn boundary is unavailable');
   }
   return { kind: 'through-turn', runtimeTurnId: previous.id };

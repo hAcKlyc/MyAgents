@@ -1,6 +1,6 @@
 # Multi-Agent Runtime 架构
 
-> 本文定义 builtin、DSH、Claude Code 与 Codex 如何接入同一 Product Session。Runtime 的安装版本、完整 RPC schema 和字段枚举以锁文件、生成类型与实现为准，不在本文维护副本。
+> 本文定义 builtin、DSH、Claude Code、Codex 与 Antigravity 如何接入同一 Product Session。Runtime 的安装版本、完整 RPC schema 和字段枚举以锁文件、生成类型与实现为准，不在本文维护副本。
 
 ## 1. 总体边界
 
@@ -11,7 +11,8 @@ routes
       -> integrated-adapter.ts -> DSH RuntimeProcessHost -> native DSH
       -> external-adapter.ts -> external-session.ts    -> AgentRuntime
                                                          |- Claude Code CLI
-                                                         `- Codex app-server
+                                                         |- Codex app-server
+                                                         `- Antigravity CLI (ACP)
 ```
 
 `SessionEngine` 是 route 面向当前 Session Runtime 的唯一 facade。Route 只做请求校验和响应映射，不自行判断 builtin/integrated/external，也不直接 import Runtime owner。
@@ -164,7 +165,7 @@ system 菜单只提供上述三项；历史 suggest 仍按只读恢复，并保�
 Codex Rewind/Fork/Retry 由 external owner 在 mutation lease 内编排，依赖现有 native binding 与 Runtime branching 能力：
 
 - root `turn/start` 关联 Product user message id；成功 terminal 后持久化 native turn anchor；
-- Rewind 有目标 turn anchor 时请求 `before-turn`；目标失败而没有 anchor 时，空保留前缀使用 fresh thread，非空前缀必须以紧邻目标的 assistant anchor 请求 `through-turn`。没有精确边界就返回失败，不能因 turn 失败而假设它没有 native 输出或工具副作用；
+- Rewind 有目标 turn anchor 时请求 `before-turn`，保留紧邻目标的原生终态轮次（completed、interrupted 或 failed），包括其中已有的文本和工具记录；目标失败而没有 anchor 时，空保留前缀使用 fresh thread，非空前缀必须以紧邻目标的 assistant anchor 请求 `through-turn`。没有精确边界就返回失败，不能因 turn 失败而假设它没有 native 输出或工具副作用；
 - Rewind 保留 Product Session id，提交产品截断和 replacement native binding；Fork 用 `through-turn` 建立新 Product Session；
 - 创建非空 native branch 后，Runtime adapter 必须确认 source app-server 退出才交出 replacement identity；`thread/unsubscribe` 只解除订阅，不能证明 native writer 已释放。Fork 的源 Session 保留原 native identity，下一轮仍可 resume；
 - fresh-thread 不需要先创建空 native 分支。若产品 Rewind 已提交，随后 source 停止或 Runtime restore 失败，返回已提交并需恢复的结果，不能伪报未执行；source 停止无法确认时由现有 Sidecar restart 路径接管。
@@ -194,6 +195,24 @@ Fork/rewind/delete/retry/compact 走 SessionEngine 的 adapter operation；丢�
 DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission 时冻结的模式，不因设置变化中断。下一条 query 启动前，adapter 在原生 `config/apply` 边界同时落实 Product 权限、DSH sandbox 与 approval policy，确认有效后才发送 `turn/start`；应用失败则阻止这条 query，不能沿用旧权限执行。
 
 详细协议、制品边界与恢复规则见 [DSH 集成指南](./myagents_dsh_integrated_runtime.md)。
+
+### 5.5 Antigravity CLI
+
+选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。模型菜单读取 `agy models`；聊天中的模型及推理档位以本 Session worker 回报为准。已验证的本机版本为 1.5.13。
+
+每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
+
+桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。未显式指定权限的后台任务沿用 `auto`。
+
+| 产品交互 | Antigravity 行为 |
+|---|---|
+| 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，停止由原生 cancel 结束当前轮；普通停止和指定排队项优先发送分别复用现有队列语义。 |
+| 审批与问答 | 通过原请求所提供的 option ID 回复；仅展示原生支持的长期许可。支持可无损往返的标量表单。后台无交互入口时结束请求。 |
+| 工具与附件 | 文字、思考、调用、变更、图片和结果投影到已有消息块；原生拒绝与取消保留各自的终态。 |
+| 会话级 MCP | 按现有产品选择投影 stdio 和协商支持的远程传输；由 CLI 拥有的全局工具遵循其配置。选择或凭据变化在空闲边界重启并恢复同一 native session。ACP 未报告当前工具目录时显示状态待确认。 |
+| 历史与命令 | 产品拥有 transcript，CLI 拥有执行上下文。原生命令、标题和计划投影至现有界面。精确 Fork、Rewind、历史 Retry、同轮 steer 和手动压缩依照能力门控。 |
+
+普通测试使用替代 ACP 子进程和临时工作区。带账号验证用 `MYAGENTS_TEST_AGY=1 npm run test:credentialed -- src/server/runtimes/antigravity.credentialed.test.ts`，覆盖真实写入审批、取消后磁盘无副作用、换进程恢复和会话级 MCP 撤销。
 
 ## 6. External Session owner
 
@@ -311,7 +330,7 @@ slash menu 按真实 Runtime capability投影：
 
 | proxy policy | 语义 |
 |---|---|
-| `myagents` | 使用 Sidecar 启动时由 MyAgents 注入的 proxy 环境 |
+| `myagents` | 按 MyAgents 网络代理范围中该系统 CLI 的选择构建 proxy 环境 |
 | `terminal` | 使用 shell warmup 捕获的交互式终端 proxy 变量 |
 
 未知或旧字面量回落到安全默认，不能通过类型断言绕过 resolver。诊断 snapshot 只暴露有效 proxy presence、PATH 前缀、cwd、shell 和结构化 RPC 状态，不记录 secret 或完整环境。

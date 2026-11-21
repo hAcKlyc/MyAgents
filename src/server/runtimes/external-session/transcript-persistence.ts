@@ -133,8 +133,10 @@ function isContentBlockJson(content: string): boolean {
 export function getLastExternalAssistantTextFromTranscript(): string {
   const product = getExternalProductContent();
   if (product) {
-    const messages = [...product.writer.projection.messages.values()].filter(message => message.role === 'assistant');
-    const turnId = product.currentTurn?.id ?? messages.at(-1)?.turnId;
+    const timeline = [...product.writer.projection.messages.values()];
+    const turnId = product.currentTurn?.id ?? timeline.at(-1)?.turnId;
+    if (!turnId && timeline.at(-1)?.role === 'user') return '';
+    const messages = timeline.filter(message => message.role === 'assistant');
     return messages.filter(message => turnId ? message.turnId === turnId : message.id === messages.at(-1)?.id)
       .map(message => typeof message.content === 'string' ? message.content : message.content
         .filter(block => block.type === 'text').map(block => typeof block.text === 'string' ? block.text : '').join(''))
@@ -142,6 +144,7 @@ export function getLastExternalAssistantTextFromTranscript(): string {
   }
   for (let i = allSessionMessages.length - 1; i >= 0; i--) {
     const msg = allSessionMessages[i];
+    if (msg.role === 'user') return '';
     if (msg.role !== 'assistant') continue;
     const content = msg.content ?? '';
     if (isContentBlockJson(content)) {

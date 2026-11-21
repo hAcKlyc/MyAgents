@@ -38,7 +38,7 @@ describe('ProxyScopeDialog', () => {
     await i18n.changeLanguage('en-US');
   });
 
-  it('renders general requests before providers and saves both dimensions', async () => {
+  it('renders general requests, providers, then three independent system CLIs', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     render(
@@ -51,20 +51,26 @@ describe('ProxyScopeDialog', () => {
     );
 
     const choices = screen.getAllByRole('checkbox');
-    expect(choices).toHaveLength(3);
+    expect(choices).toHaveLength(6);
     expect(choices[0]).toHaveAccessibleName(/General network requests/);
     expect(choices[0]).toHaveAttribute('aria-checked', 'true');
     expect(choices[1]).toHaveAccessibleName(/Anthropic/);
     expect(choices[2]).toHaveAccessibleName(/DeepSeek/);
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    expect(choices.slice(3).map(row => row.getAttribute('aria-checked'))).toEqual(['true', 'true', 'true']);
+    expect(choices[3]).toHaveAccessibleName(/Claude Code CLI/);
+    expect(choices[4]).toHaveAccessibleName(/Codex CLI/);
+    expect(choices[5]).toHaveAccessibleName(/Antigravity CLI/);
+    expect(screen.getByText('5 selected')).toBeInTheDocument();
 
     await user.click(choices[0]);
     await user.click(choices[2]);
+    await user.click(choices[3]);
+    await user.click(choices[5]);
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(onSave).toHaveBeenCalledWith({
       mode: 'custom', generalRequests: false,
-      providerIds: ['anthropic-sub', 'deepseek'],
+      providerIds: ['anthropic-sub', 'deepseek'], runtimeIds: ['codex'],
     }, ['anthropic-sub', 'deepseek']);
   });
 
@@ -89,7 +95,7 @@ describe('ProxyScopeDialog', () => {
     expect(screen.getByText('0 selected')).toBeInTheDocument();
     await user.click(save);
 
-    expect(onSave).toHaveBeenCalledWith({ mode: 'custom', generalRequests: false, providerIds: [] }, ['anthropic-sub', 'deepseek']);
+    expect(onSave).toHaveBeenCalledWith({ mode: 'custom', generalRequests: false, runtimeIds: [], providerIds: [] }, ['anthropic-sub', 'deepseek']);
   });
 
   it('retains selections outside the displayed catalog when saving and toggling all visible items', () => {
@@ -106,7 +112,7 @@ describe('ProxyScopeDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }));
     expect(screen.getByText('0 selected')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSave).toHaveBeenLastCalledWith({ mode: 'custom', generalRequests: false, providerIds: ['antigravity-sub'] }, ['anthropic-sub', 'deepseek']);
+    expect(onSave).toHaveBeenLastCalledWith({ mode: 'custom', generalRequests: false, runtimeIds: [], providerIds: ['antigravity-sub'] }, ['anthropic-sub', 'deepseek']);
   });
 
   it('keeps its displayed catalog stable while background configuration shrinks and expands', () => {
@@ -122,7 +128,7 @@ describe('ProxyScopeDialog', () => {
     expect(screen.getByRole('checkbox', { name: /DeepSeek/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('checkbox', { name: /Anthropic/ })).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSave).toHaveBeenCalledWith({ mode: 'custom', generalRequests: true, providerIds: ['deepseek'] }, ['anthropic-sub', 'deepseek']);
+    expect(onSave).toHaveBeenCalledWith({ mode: 'custom', generalRequests: true, runtimeIds: ['claude-code', 'codex', 'antigravity'], providerIds: ['deepseek'] }, ['anthropic-sub', 'deepseek']);
   });
   it('keeps All implicit and picks up new catalog entries on the next open', () => {
     const onSave = vi.fn();
@@ -139,7 +145,7 @@ describe('ProxyScopeDialog', () => {
     expect(screen.getByRole('checkbox', { name: /DeepSeek/ })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('checkbox', { name: /DeepSeek/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSave).toHaveBeenLastCalledWith({ mode: 'custom', generalRequests: true,
+    expect(onSave).toHaveBeenLastCalledWith({ mode: 'custom', generalRequests: true, runtimeIds: ['claude-code', 'codex', 'antigravity'],
       providerIds: ['anthropic-sub'] }, ['anthropic-sub', 'deepseek']);
   });
 
@@ -157,7 +163,7 @@ describe('ProxyScopeDialog', () => {
     view.rerender(<ProxyScopeDialog providers={providers.slice(0, 1)} initialScope={disk.proxySettings!.scope!}
       onClose={vi.fn()} onSave={onSave} />);
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(disk.proxySettings?.scope).toEqual({ mode: 'custom', generalRequests: false, providerIds: [] });
+    expect(disk.proxySettings?.scope).toEqual({ mode: 'custom', generalRequests: false, runtimeIds: [], providerIds: [] });
   });
 
   it.each([false, true])('retains an All member when its background catalog shrinks (custom provider: %s)', custom => {

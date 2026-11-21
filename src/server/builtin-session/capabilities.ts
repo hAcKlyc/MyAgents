@@ -1,3 +1,4 @@
+import type { SlashCommand as SdkSlashCommand } from '@anthropic-ai/claude-agent-sdk';
 import type {
   EffectiveProjectCapabilitySnapshot,
   ProjectCapabilityCandidate,
@@ -91,6 +92,15 @@ export function findDisabledCapabilityForSlashInput(
   return snapshot.candidates.find(item => (
     item.kind === 'command' && !item.enabled && item.canonicalName === name
   )) ?? null;
+}
+
+export function isSdkBuiltinCommand(name: string, commands: readonly SdkSlashCommand[]): boolean {
+  // Canonical names take precedence over aliases. If several rows share a
+  // canonical name, Claude dispatches the builtin row when one exists.
+  const named = commands.filter(command => command.name === name);
+  if (named.length) return named.some(command => command.builtin === true);
+  const aliases = commands.filter(command => command.aliases?.includes(name));
+  return aliases.length > 0 && aliases.every(command => command.builtin === true);
 }
 
 export function filterSlashCommandsForCapabilities(

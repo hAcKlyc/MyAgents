@@ -1,3 +1,4 @@
+import { providerRequiresClaudeSdk } from '../integrated-runtimes/provider-constraints';
 // Agent architecture types (v0.1.41)
 // Agent = upgraded workspace with pluggable I/O channels
 
@@ -20,8 +21,6 @@ import {
 } from '../integrated-runtimes/identity';
 import {
   CODEX_SUBSCRIPTION_PROVIDER_ID,
-  SUBSCRIPTION_PROVIDER_ID,
-  XAI_SUBSCRIPTION_PROVIDER_ID,
 } from '../config-types';
 import type { OfficialToolId } from '../official-tools';
 import type { ProjectCapabilitySelectionV1 } from '../projectCapabilities';
@@ -237,7 +236,7 @@ export function resolveAgentChannelRuntime(agent: AgentConfig, channel: ChannelC
   if (preference.family === 'external') return preferredRuntime;
   const providerId = resolveAgentChannelProviderId(agent, channel);
   if (providerId === CODEX_SUBSCRIPTION_PROVIDER_ID) return 'codex';
-  if (providerId === SUBSCRIPTION_PROVIDER_ID || providerId === XAI_SUBSCRIPTION_PROVIDER_ID) {
+  if (providerRequiresClaudeSdk(providerId)) {
     return 'builtin';
   }
   return preferredRuntime;

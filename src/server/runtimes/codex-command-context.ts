@@ -10,7 +10,7 @@ import {
 import type { RuntimeEnvPolicy, RuntimeSource } from '../../shared/types/runtime';
 import { INTERNAL_CLI_TOKEN_ENV } from '../../shared/externalCliCapabilities';
 import { ensureDirSync } from '../utils/fs-utils';
-import { ensureShellPath } from '../utils/shell';
+import { ensureShellPath, getShellEnv } from '../utils/shell';
 import { applyProviderProxyPolicyToEnv } from '../proxy-state';
 import { augmentedProcessEnv, resolveCommand } from './env-utils';
 
@@ -310,10 +310,8 @@ function looksLikeAuthEnvName(name: string): boolean {
     || /(KEY|TOKEN|SECRET|PASSWORD)$/.test(upper);
 }
 
-function buildManagedCodexEnv(
-  policy?: RuntimeEnvPolicy,
-): Record<string, string | undefined> {
-  const base = augmentedProcessEnv(policy);
+function buildManagedCodexEnv(): Record<string, string | undefined> {
+  const base = getShellEnv();
   const env: Record<string, string | undefined> = {};
 
   for (const key of MANAGED_SAFE_ENV_KEYS) {
@@ -361,14 +359,14 @@ export async function resolveCodexCommandContext(args: {
     return {
       source,
       commandPath: installation.commandPath,
-      env: buildManagedCodexEnv(args.envPolicy),
+      env: buildManagedCodexEnv(),
       codexHome: getManagedCodexHome(),
       version: installation.version,
       platform: platform ?? undefined,
     };
   }
 
-  const env = augmentedProcessEnv(args.envPolicy);
+  const env = augmentedProcessEnv('codex', args.envPolicy);
   return {
     source: 'system-cli',
     commandPath: resolveCommand('codex', env),

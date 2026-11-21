@@ -7,7 +7,7 @@ import type { AddProjectOptions } from '@/config/ConfigProvider';
 import type {
     AppConfig,
     ModelAliases,
-    ModelEntity,
+    PresetModelEntry,
     Project,
     Provider,
     ProviderVerifyStatus,
@@ -38,7 +38,7 @@ export interface UseConfigResult {
     refreshProviders: () => Promise<void>;
 
     // Preset provider custom models (user-added models for preset providers)
-    savePresetCustomModels: (providerId: string, models: ModelEntity[]) => Promise<void>;
+    savePresetCustomModels: (providerId: string, models: PresetModelEntry[]) => Promise<void>;
     removePresetCustomModel: (providerId: string, modelId: string) => Promise<void>;
     // Provider primary model override
     savePrimaryModel: (providerId: string, modelId: string) => Promise<void>;

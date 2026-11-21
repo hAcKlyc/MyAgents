@@ -20,7 +20,7 @@ export interface ContextUsage {
   /** `min(100, contextTokens / contextWindow * 100)`。 */
   usedPercent: number;
   /** 产出该快照的 runtime。 */
-  source: 'builtin' | 'dsh' | 'codex' | 'claude-code';
+  source: 'builtin' | 'dsh' | 'codex' | 'claude-code' | 'antigravity';
   /** 窗口来源：runtime 自报 / registry 查到 / 200K 兜底。用于卡片底部弱灰说明。 */
   windowSource: 'runtime' | 'registry' | 'default';
   /** 当前模型 id（已 strip `[1m]` 之前的原值，仅展示用）。 */

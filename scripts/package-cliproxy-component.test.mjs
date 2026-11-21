@@ -100,7 +100,9 @@ test('component upgrade keeps the published minimum App version without a new cl
     assert.equal(selectBundledRelease(manifest.releases, app, source).version, source.version);
   }
   assert.equal(selectRelease(manifest.releases, '0.4.16'), undefined);
-  assert.ok(current.compatibility.credentialCompatibleVersions.includes('7.2.158'));
+  // v8.0.79 has only had account-free local acceptance. Do not inherit the
+  // previous release's real-account attestation transitively.
+  assert.deepEqual(current.compatibility.credentialCompatibleVersions, []);
 });
 test('publication retains existing thresholds and immutable version bytes', () => {
   const old = validateApproval(approval(), [record('darwin-arm64')]);

@@ -1,3 +1,5 @@
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
+import { Popover } from '@/components/ui/Popover';
 // TaskAdvancedConfigEditor — collapsible "高级配置" block shared by the
 // task dispatch dialog and the task edit panel.
 //
@@ -16,7 +18,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDownIcon, SlidersIcon } from '@/components/icons';
+import { useCloseLayer } from '@/hooks/useCloseLayer';
+import { isImeComposingEvent } from '@/utils/imeKeyboard';
+import { CheckIcon, ChevronDownIcon, SlidersIcon } from '@/components/icons';
 import CustomSelect from '@/components/CustomSelect';
 import { useConfig } from '@/hooks/useConfig';
 import { useAvailableProviders } from '@/hooks/useAvailableProviders';
@@ -62,6 +66,7 @@ import { projectProvidersForRuntime } from '@/utils/runtimeProviderProjection';
 // than a different sentinel keeps the option compatible with the existing
 // `<CustomSelect value={…}>` contract (which doesn't tolerate `undefined`).
 const FOLLOW_VALUE = '';
+const taskPickerTriggerClass = 'flex w-full items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-left text-sm text-[var(--ink)] transition-colors hover:border-[var(--ink-subtle)]';
 
 interface Props {
   /** Workspace path the task is bound to — used to resolve the workspace's
@@ -126,12 +131,7 @@ export function TaskAdvancedConfigEditor(props: Props) {
     || (permissionMode && permissionMode.length > 0)
     || mcpEnabledServers !== undefined;
   const [open, setOpen] = useState<boolean>(hasAnyOverride);
-  // PRD 0.2.9 — Grouped builtin model picker popup state. We render a
-  // popup-style grouped list (provider name → models) instead of a flat
-  // <CustomSelect> so the UX matches Chat / Agent settings exactly. The
-  // ref is used to outside-click-close the popup.
   const [modelPickerOpen, setModelPickerOpen] = useState<'builtin' | 'external' | null>(null);
-  const modelPickerRef = useRef<HTMLDivElement | null>(null);
 
   const { config, projects, providers, apiKeys, providerVerifyStatus } = useConfig();
   // PRD 0.2.9 — All credentialed providers (cross-provider list, mirrors
@@ -329,28 +329,29 @@ export function TaskAdvancedConfigEditor(props: Props) {
   // Chat.tsx:721-738. Empty list while the fetch is in flight is fine —
   // the picker just shows "跟随 Agent 当前模型" alone.
   const [codexCatalog, setCodexCatalog] = useState<{
+    runtime: RuntimeType;
     source: RuntimeSource;
     models: RuntimeModelInfo[];
   } | null>(null);
   useEffect(() => {
-    if (effectiveRuntime !== 'codex') return;
+    if (effectiveRuntime !== 'codex' && effectiveRuntime !== 'antigravity') return;
     let cancelled = false;
     const source = effectiveRuntimeSource ?? 'system-cli';
     apiGetJson<{ models?: RuntimeModelInfo[] }>(
-      runtimeModelCatalogPath('codex', source),
+      runtimeModelCatalogPath(effectiveRuntime, source),
     )
       .then((res) => {
-        if (!cancelled) setCodexCatalog({ source, models: res?.models ?? [] });
+        if (!cancelled) setCodexCatalog({ runtime: effectiveRuntime, source, models: res?.models ?? [] });
       })
       .catch(() => {
-        if (!cancelled) setCodexCatalog({ source, models: [] });
+        if (!cancelled) setCodexCatalog({ runtime: effectiveRuntime, source, models: [] });
       });
     return () => { cancelled = true; };
   }, [effectiveRuntime, effectiveRuntimeSource]);
   const externalRuntimeModels: RuntimeModelInfo[] = useMemo(() => {
     if (effectiveRuntime === 'claude-code') return CC_MODELS;
-    if (effectiveRuntime === 'codex') {
-      return codexCatalog && codexCatalog.source === effectiveRuntimeSource
+    if (effectiveRuntime === 'codex' || effectiveRuntime === 'antigravity') {
+      return codexCatalog?.runtime === effectiveRuntime && codexCatalog.source === (effectiveRuntimeSource ?? 'system-cli')
         ? codexCatalog.models
         : [];
     }
@@ -448,6 +449,10 @@ export function TaskAdvancedConfigEditor(props: Props) {
           effectiveRuntimeSource,
         ))
         .map((m) => {
+          if (effectiveRuntime === 'antigravity') {
+            const key = `chat:input.antigravityPermissionModes.${m.value}`;
+            return { value: m.value, label: `${t(`${key}.label`)} · ${t(`${key}.description`)}` };
+          }
           const label = effectiveRuntimeSource === 'managed-provider'
             ? m.label
             : t(`chat:input.permissionModes.${m.value}.label`, { defaultValue: m.label });
@@ -462,28 +467,15 @@ export function TaskAdvancedConfigEditor(props: Props) {
     [effectiveRuntime, effectiveRuntimeSource, t],
   );
 
-  // Toggle a single MCP server in the override list.
-  // `undefined` follows Agent; `[]` is an explicit no-MCP override. The
-  // "恢复跟随 Agent" button is the only path that clears back to undefined.
   const toggleMcp = (id: string) => {
-    const enabled = mcpEnabledServers === undefined || !mcpEnabledServers.includes(id);
+    const current = mcpEnabledServers ?? [];
+    const enabled = !current.includes(id);
     if (id === MANAGED_BROWSER_MCP_ID && enabled && !managedBrowserReady) {
       toast.warning(tSettings('toolbox.browserResource.installFirst'));
       return;
     }
-    if (mcpEnabledServers === undefined) {
-      setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle([], id, true, managedBrowserReady));
-      return;
-    }
-    setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle(
-      mcpEnabledServers,
-      id,
-      enabled,
-      managedBrowserReady,
-    ));
+    setMcpEnabledServers(applyBuiltinBrowserExecutionToolToggle(current, id, enabled, managedBrowserReady));
   };
-
-  const resetMcpToFollow = () => setMcpEnabledServers(undefined);
 
   return (
     <div className="rounded-[var(--radius-md)] border border-[var(--line)]">
@@ -582,7 +574,7 @@ export function TaskAdvancedConfigEditor(props: Props) {
               isBuiltin={usesProductConfiguration}
               open={modelPickerOpen}
               setOpen={setModelPickerOpen}
-              modelPickerRef={modelPickerRef}
+              inheritedProviderId={workspaceProvider?.id}
               // Builtin
               availableProviders={availableProviders}
               providers={providers}
@@ -605,63 +597,10 @@ export function TaskAdvancedConfigEditor(props: Props) {
           </FieldRow>
 
 
-          {/* MCP enable list — Product-configured runtimes only. Hint + reset action share a
-              single bottom row: status text on the left, "恢复跟随 Agent"
-              on the right (only when there's actually an override to revert
-              — pristine state hides the button rather than disabling it,
-              since a disabled button reads as "I should be able to click
-              this but can't" while no button reads as "nothing to do here"). */}
           {usesProductConfiguration && (
             <FieldRow label={t('advanced.mcpTools')}>
-              {mcpCatalogue.length === 0 ? (
-                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--line)] px-3 py-3 text-xs text-[var(--ink-muted)]">
-                  {t('advanced.noMcp')}
-                </div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    {mcpCatalogue.map((s) => {
-                      const checked = mcpEnabledServers
-                        ? mcpEnabledServers.includes(s.id)
-                        : false; // pristine = visually unchecked, label says "跟随"
-                      return (
-                        <label
-                          key={s.id}
-                          className={`flex cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] border border-transparent px-2 py-1 text-xs text-[var(--ink-secondary)] hover:bg-[var(--hover-bg)] ${
-                            checked
-                              ? 'border-[var(--accent-warm)]/30 bg-[var(--accent-warm-subtle)] text-[var(--ink)]'
-                              : ''
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleMcp(s.id)}
-                            className="h-3.5 w-3.5 accent-[var(--accent-warm)]"
-                          />
-                          <span className="truncate">{s.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-3 text-xs leading-snug text-[var(--ink-muted)]">
-                    <span>
-                      {mcpEnabledServers === undefined
-                        ? t('advanced.mcpFollowing')
-                        : t('advanced.mcpEnabled', { count: mcpEnabledServers.length })}
-                    </span>
-                    {mcpEnabledServers !== undefined && (
-                      <button
-                        type="button"
-                        onClick={resetMcpToFollow}
-                        className="shrink-0 text-[var(--ink-muted)] transition-colors hover:text-[var(--accent-warm)]"
-                      >
-                        {t('advanced.restoreFollowAgent')}
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
+              <TaskMcpPicker catalogue={mcpCatalogue} selected={mcpEnabledServers}
+                onToggle={toggleMcp} onFollow={() => setMcpEnabledServers(undefined)} />
             </FieldRow>
           )}
         </div>
@@ -696,6 +635,67 @@ function FieldRow({
   );
 }
 
+function TaskMcpPicker({ catalogue, selected, onToggle, onFollow }: {
+  catalogue: McpServerDefinition[];
+  selected?: string[];
+  onToggle: (id: string) => void;
+  onFollow: () => void;
+}) {
+  const { t } = useTranslation('task');
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const followRow = useRef<HTMLButtonElement>(null);
+  const follow = t('advanced.mcpFollowAgent');
+  const summary = selected === undefined ? follow
+    : selected.length === 1 ? catalogue.find(server => server.id === selected[0])?.name ?? selected[0]
+    : t('advanced.mcpEnabled', { count: selected.length });
+
+  function closeToTrigger() {
+    setOpen(false);
+    trigger.current?.focus({ preventScroll: true });
+  }
+
+  useCloseLayer(() => {
+    if (!open) return false;
+    closeToTrigger();
+    return true;
+  }, open ? 260 : 0);
+
+  return (
+    <div onKeyDown={event => {
+      if (open && event.key === 'Escape' && !isImeComposingEvent(event)) {
+        event.stopPropagation();
+        closeToTrigger();
+      }
+    }}>
+      <button ref={trigger} type="button" aria-expanded={open} aria-label={`${t('advanced.mcpTools')} · ${summary}`}
+        className={taskPickerTriggerClass} onClick={() => setOpen(!open)}>
+        <span className="min-w-0 flex-1 truncate">{summary}</span>
+        <ChevronDownIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--ink-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <Popover open={open} anchorRef={trigger} matchAnchorWidth maxHeight="320px" onClose={() => setOpen(false)}
+        onPositioned={() => followRow.current?.focus({ preventScroll: true })} className="p-1.5">
+        <button ref={followRow} type="button" aria-pressed={selected === undefined}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--hover-bg)] aria-pressed:text-[var(--accent)]"
+          onClick={() => { onFollow(); closeToTrigger(); }}>
+          {follow}
+          {selected === undefined && <CheckIcon aria-hidden="true" className="h-3.5 w-3.5" />}
+        </button>
+        <div className="mt-1 border-t border-[var(--line-subtle)] pt-1">
+          {catalogue.map(server => (
+            <label key={server.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--hover-bg)]">
+              <input type="checkbox" checked={selected?.includes(server.id) ?? false} onChange={() => onToggle(server.id)}
+                className="h-3.5 w-3.5 shrink-0 accent-[var(--accent)]" />
+              <span className="truncate" title={server.name}>{server.name}</span>
+            </label>
+          ))}
+          {!catalogue.length && <p className="px-2 py-1.5 text-xs text-[var(--ink-muted)]">{t('advanced.noMcp')}</p>}
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
 /**
  * PRD 0.2.9 — Two-mode grouped model picker. Displays as a button that
  * opens a popup; the popup renders either a provider-grouped list (builtin
@@ -711,7 +711,7 @@ function ModelPicker(props: {
   isBuiltin: boolean;
   open: 'builtin' | 'external' | null;
   setOpen: (next: 'builtin' | 'external' | null) => void;
-  modelPickerRef: React.MutableRefObject<HTMLDivElement | null>;
+  inheritedProviderId?: string;
   // Builtin
   availableProviders: ReturnType<typeof useAvailableProviders>;
   providers: ReturnType<typeof useConfig>['providers'];
@@ -736,7 +736,7 @@ function ModelPicker(props: {
     isBuiltin,
     open,
     setOpen,
-    modelPickerRef,
+    inheritedProviderId,
     availableProviders,
     providers,
     providerId,
@@ -756,6 +756,7 @@ function ModelPicker(props: {
 
   const variant: 'builtin' | 'external' = isBuiltin ? 'builtin' : 'external';
   const isOpen = open === variant;
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Closed-button label. PRD 0.2.9 — "跟随 Agent" is a real selected state
   // (not a placeholder), so render it in `text-[var(--ink)]` to match the
@@ -809,16 +810,24 @@ function ModelPicker(props: {
   }
 
   return (
-    <div className="relative" ref={modelPickerRef}>
+    <div className="relative" onKeyDown={event => {
+      if (isOpen && event.key === 'Escape') {
+        event.stopPropagation();
+        setOpen(null);
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    }}>
       <button
         type="button"
+        ref={triggerRef}
+        aria-expanded={isOpen}
         // Match the CustomSelect `size="md"` shape used by the IM Bot
         // delivery picker below (NotificationConfigEditor.tsx) so the three
         // 高级配置 fields (Runtime / 权限模式 / 模型) read as one visual
         // group: `rounded-lg`, `bg-[var(--paper)]`, `px-3 py-2.5 text-sm`,
         // `border-[var(--line)]`, hover deepens the border. Down-arrow chevron
         // (mirroring CustomSelect's affordance) is animated on open.
-        className="flex w-full items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--paper)] px-3 py-2.5 text-left text-sm text-[var(--ink)] transition-colors hover:border-[var(--ink-subtle)]"
+        className={taskPickerTriggerClass}
         onClick={() => setOpen(isOpen ? null : variant)}
       >
         <span className="min-w-0 flex-1 truncate">{closedLabel}</span>
@@ -829,129 +838,69 @@ function ModelPicker(props: {
         />
       </button>
 
-      {isOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40"
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setOpen(null);
-            }}
-          />
-          <div className="absolute left-0 top-full z-50 mt-1 max-h-[320px] w-full overflow-y-auto overscroll-contain rounded-[var(--radius-md)] border border-[var(--line)] bg-[var(--paper-elevated)] p-2 shadow-lg">
-            {variant === 'builtin' ? (
-              <>
-                <button
-                  type="button"
-                  className={`flex w-full items-center rounded-[var(--radius-sm)] px-3 py-1.5 text-left text-sm transition-colors ${
-                    !providerId
-                      ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                      : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                  }`}
-                  onClick={onSelectBuiltinFollow}
-                >
-                  {workspaceDefaultModelLabel
-                    ? t('advanced.followAgentCurrent', { value: workspaceDefaultModelLabel })
-                    : t('advanced.followAgentWorkspace')}
-                </button>
-                {availableProviders.length === 0 ? (
-                  <div className="px-3 py-3 text-xs leading-relaxed text-[var(--ink-muted)]">
-                    {t('advanced.noProviders')}
-                  </div>
-                ) : (
-                  availableProviders.map((p) => (
-                    <div key={p.id} className="mt-1">
-                      <div className="px-2 py-1 text-xs font-medium text-[var(--ink-muted)]">
-                        {p.name}
-                      </div>
-                      {p.models?.map((m) => (
-                        <button
-                          type="button"
-                          key={`${p.id}:${m.model}`}
-                          className={`flex w-full items-center rounded-[var(--radius-sm)] px-3 py-1.5 text-left text-sm transition-colors ${
-                            providerId === p.id && model === m.model
-                              ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                              : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                          }`}
-                          onClick={() => onSelectBuiltinModel(p.id, m.model)}
-                        >
-                          {m.modelName || m.model}
-                        </button>
-                      ))}
-                    </div>
-                  ))
-                )}
-                {/* PRD 0.2.9 R8 — Stale-provider rescue. If the saved provider
-                    is uncredentialed (or fully removed from config), surface
-                    the row inside the picker too so the user can spot it
-                    and pick a fresh one. Skipped when the saved provider
-                    is in the available list (then it's already shown). */}
-                {providerId
-                  && !availableProviders.some((p) => p.id === providerId)
-                  && (() => {
-                    const p = providers.find((q) => q.id === providerId);
-                    const providerLabel = p?.name ?? providerId;
-                    const modelLabel = (p?.models?.find((mm) => mm.model === model)?.modelName)
-                      || model
-                      || '';
-                    return (
-                      <div className="mt-2 rounded-[var(--radius-sm)] border border-dashed border-[var(--warning)]/50 bg-[var(--warning-subtle)]/40 px-3 py-2 text-xs leading-relaxed text-[var(--ink-muted)]">
-                        <div className="font-medium text-[var(--ink)]">
-                          {t('advanced.selectedProvider', {
-                            provider: providerLabel,
-                            model: modelLabel
-                              ? t('advanced.providerModelSeparator', { model: modelLabel })
-                              : '',
-                          })}
-                        </div>
-                        <div className="mt-1">
-                          {p
-                            ? t('advanced.providerMissingKey')
-                            : t('advanced.providerDeleted')}
-                        </div>
-                      </div>
-                    );
-                  })()}
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className={`flex w-full items-center rounded-[var(--radius-sm)] px-3 py-1.5 text-left text-sm transition-colors ${
-                    !externalSelectedModel
-                      ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                      : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                  }`}
-                  onClick={onSelectExternalFollow}
-                >
-                  {t('advanced.followAgentCurrentModel')}
-                </button>
-                {externalRuntimeModels.length === 0 ? (
-                  <div className="px-3 py-3 text-xs leading-relaxed text-[var(--ink-muted)]">
-                    {effectiveRuntime === 'codex'
-                      ? t('advanced.queryingModels')
-                      : t('advanced.noRuntimeModels')}
-                  </div>
-                ) : (
-                  externalRuntimeModels.map((m) => (
-                    <button
-                      type="button"
-                      key={m.value}
-                      className={`flex w-full items-center rounded-[var(--radius-sm)] px-3 py-1.5 text-left text-sm transition-colors ${
-                        externalSelectedModel === m.value
-                          ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                          : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                      }`}
-                      onClick={() => onSelectExternalModel(m.value)}
-                    >
-                      {m.displayName || m.value}
-                    </button>
-                  ))
-                )}
-              </>
+      <Popover open={isOpen} onClose={() => setOpen(null)} anchorRef={triggerRef} matchAnchorWidth
+        placement="bottom-start" className="flex flex-col" maxHeight="364px">
+        {variant === 'builtin' ? (
+          <GroupedModelList onDismiss={() => setOpen(null)}
+            groups={providerModelGroups(availableProviders, onSelectBuiltinModel)}
+            selectedGroupId={providerId} selectedModelId={model} preferredGroupId={inheritedProviderId}
+            follow={{
+              name: workspaceDefaultModelLabel
+                ? t('advanced.followAgentCurrent', { value: workspaceDefaultModelLabel })
+                : t('advanced.followAgentWorkspace'),
+              selected: !providerId,
+              select: onSelectBuiltinFollow,
+            }}>
+            {availableProviders.length === 0 && (
+              <div className="px-3 py-3 text-xs text-[var(--ink-muted)]">{t('advanced.noProviders')}</div>
             )}
-          </div>
-        </>
-      )}
+            {/* PRD 0.2.9 R8 — Stale-provider rescue. If the saved provider
+                is uncredentialed (or fully removed from config), surface
+                the row inside the picker too so the user can spot it
+                and pick a fresh one. Skipped when the saved provider
+                is in the available list (then it's already shown). */}
+            {providerId
+              && !availableProviders.some((p) => p.id === providerId)
+              && (() => {
+                const p = providers.find((q) => q.id === providerId);
+                const providerLabel = p?.name ?? providerId;
+                const modelLabel = (p?.models?.find((mm) => mm.model === model)?.modelName)
+                  || model
+                  || '';
+                return (
+                  <div className="mt-2 rounded-[var(--radius-sm)] border border-dashed border-[var(--warning)]/50 bg-[var(--warning-subtle)]/40 px-3 py-2 text-xs leading-relaxed text-[var(--ink-muted)]">
+                    <div className="font-medium text-[var(--ink)]">
+                      {t('advanced.selectedProvider', {
+                        provider: providerLabel,
+                        model: modelLabel
+                          ? t('advanced.providerModelSeparator', { model: modelLabel })
+                          : '',
+                      })}
+                    </div>
+                    <div className="mt-1">
+                      {p
+                        ? t('advanced.providerMissingKey')
+                        : t('advanced.providerDeleted')}
+                    </div>
+                  </div>
+                );
+              })()}
+          </GroupedModelList>
+        ) : (
+          <GroupedModelList flat onDismiss={() => setOpen(null)}
+            selectedGroupId={effectiveRuntime} selectedModelId={externalSelectedModel}
+            groups={[{ id: effectiveRuntime, name: '', models: externalRuntimeModels.map(option => ({
+              id: option.value, name: option.displayName || option.value, select: () => onSelectExternalModel(option.value),
+            })) }]}
+            follow={{ name: t('advanced.followAgentCurrentModel'), selected: !externalSelectedModel, select: onSelectExternalFollow }}>
+            {externalRuntimeModels.length === 0 && (
+              <div className="px-3 py-3 text-xs leading-relaxed text-[var(--ink-muted)]">
+                {t(effectiveRuntime === 'codex' ? 'advanced.queryingModels' : 'advanced.noRuntimeModels')}
+              </div>
+            )}
+          </GroupedModelList>
+        )}
+      </Popover>
     </div>
   );
 }

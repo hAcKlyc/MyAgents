@@ -182,6 +182,7 @@ describe('proxy scope remains user configuration', () => {
       if (command === 'cmd_cliproxy_status') return healthyStatus;
       if (command === 'cmd_detect_runtimes') return {
         builtin: { installed: true }, dsh: { installed: true },
+        antigravity: { installed: false },
         'claude-code': { installed: false }, codex: { installed: false },
       };
       return undefined;
@@ -222,13 +223,13 @@ describe('proxy scope remains user configuration', () => {
       providerIds: ['antigravity-sub', 'codex-sub', 'temporarily-unloaded'] };
     render(<ToastProvider><Settings mode="settings" initialSection="proxy" isActive /></ToastProvider>);
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
-    expect(screen.getByRole('checkbox', { name: /Antigravity/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('checkbox', { name: /antigravity-sub/ })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('checkbox', { name: /Vision Provider/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /General network requests/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(settingsMocks.patchProxySettings).toHaveBeenCalledWith({ scope: {
       mode: 'custom', generalRequests: true,
-      providerIds: ['antigravity-sub', 'codex-sub', 'temporarily-unloaded', 'vision-provider'],
+      providerIds: ['antigravity-sub', 'codex-sub', 'temporarily-unloaded', 'vision-provider'], runtimeIds: [],
     } }, ['vision-provider', 'codex-sub', 'antigravity-sub']));
   });
   it('keeps an unchanged All scope and honors explicit provider deselection', async () => {
@@ -240,10 +241,10 @@ describe('proxy scope remains user configuration', () => {
     expect(settingsMocks.patchProxySettings).toHaveBeenCalledWith({ scope: { mode: 'all' } },
       ['vision-provider', 'codex-sub', 'antigravity-sub']);
     fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: /Antigravity/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /antigravity-sub/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(settingsMocks.patchProxySettings).toHaveBeenCalledWith({ scope: {
-      mode: 'custom', generalRequests: true, providerIds: ['vision-provider', 'codex-sub'],
+      mode: 'custom', generalRequests: true, providerIds: ['vision-provider', 'codex-sub'], runtimeIds: ['claude-code', 'codex', 'antigravity'],
     } }, ['vision-provider', 'codex-sub', 'antigravity-sub']);
   });
 

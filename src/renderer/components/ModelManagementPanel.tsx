@@ -34,7 +34,7 @@ import {
   resolveModalitiesToSave,
   type EditableModality,
 } from '@/utils/modelSettingsForm';
-import { PRESET_PROVIDERS, splitProviderModelInput, type Provider, type ModelEntity, type AppConfig } from '@/config/types';
+import { PRESET_PROVIDERS, mergePresetModelWithCustomEntry, splitProviderModelInput, type Provider, type ModelEntity, type AppConfig, type PresetModelEntry, type PresetModelSettings } from '@/config/types';
 import {
   fetchProviderModels,
   enrichExistingModelsFromDiscovery,
@@ -56,12 +56,48 @@ interface ModelManagementPanelProps {
   apiKey: string | undefined;
   config: AppConfig;
   onClose: () => void;
-  onSaveCustomModels: (providerId: string, models: ModelEntity[]) => Promise<void>;
+  onSaveCustomModels: (providerId: string, models: PresetModelEntry[]) => Promise<void>;
   onUpdateCustomProvider?: (provider: Provider, discoveredModels?: DiscoveredModel[]) => Promise<void>;
   onSetPrimaryModel: (providerId: string, modelId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
   discoveryAction?: () => Promise<DiscoveredModel[]>;
   discoveryUnavailableMessage?: string;
+}
+
+type ModelSettingsPatch = PresetModelSettings & Pick<ModelEntity, 'executionProtocol'>;
+
+function applyModelSettingsPatch<T extends ModelSettingsPatch>(base: T, patch: ModelSettingsPatch): T {
+  const result = { ...base, ...patch };
+  for (const key of Object.keys(patch) as (keyof ModelSettingsPatch)[]) {
+    if (patch[key] === undefined) delete result[key];
+  }
+  return result;
+}
+
+function editPresetModelEntry(
+  preset: ModelEntity | undefined,
+  existing: PresetModelEntry | undefined,
+  patch: ModelSettingsPatch,
+): PresetModelEntry | undefined {
+  if (!preset || (existing?.modelName !== undefined && existing.source !== 'discovered')) {
+    if (!existing) return undefined;
+    const { presetSettings, ...model } = existing;
+    return applyModelSettingsPatch({ ...model, ...presetSettings }, patch);
+  }
+
+  // Preserve catalog metadata independently, even if discovery refreshes it during editing.
+  const { presetSettings, ...record } = existing ?? { model: preset.model, source: 'preset' };
+  const baseline = mergePresetModelWithCustomEntry(preset, record);
+  const { executionProtocol, ...changes } = patch;
+  for (const field of Object.keys(changes) as (keyof PresetModelSettings)[]) {
+    // A field restored to its catalog value should follow future updates.
+    if (JSON.stringify(changes[field]) === JSON.stringify(baseline[field])) changes[field] = undefined;
+  }
+  const settings = applyModelSettingsPatch(presetSettings ?? {}, changes);
+  if (executionProtocol) record.executionProtocol = executionProtocol;
+  if (Object.keys(settings).length > 0) return { ...record, presetSettings: settings };
+  if (record.source === 'preset' && Object.keys(record).length === 2) return undefined;
+  return record;
 }
 
 // Both the panel and its portaled editor own their keyboard focus. Popover
@@ -146,9 +182,7 @@ export default function ModelManagementPanel({
     [provider.isBuiltin, provider.id],
   );
 
-  // Hand-curated bundled model ids for this builtin provider — shared by the
-  // editability gate below and the re-add write plan in
-  // handleAddDiscoveredModel (both must agree on what "bundled" means).
+  // Discovery re-adds a removed bundled ID without copying the preset.
   const bundledModelIds = useMemo(
     () => new Set(bundledModelsById.keys()),
     [bundledModelsById],
@@ -264,12 +298,6 @@ export default function ModelManagementPanel({
     await onRefresh();
   }, [provider, config.presetCustomModels, primaryModel, bundledModelIds, onSaveCustomModels, onUpdateCustomProvider, onSetPrimaryModel, onRefresh]);
 
-  // #325 — which rows get the ⚙ settings button. On a custom provider every
-  // model lives in the provider file → all editable. On a builtin (preset)
-  // provider, user-added models are editable. A bundled preset also becomes
-  // editable when it has a manual presetCustomModels override, because that is
-  // now user-authored data rather than automatic discovery metadata.
-  //
   const createManualModelEntity = useCallback((id: string): ModelEntity => ({
     ...bundledModelsById.get(id),
     model: id,
@@ -296,14 +324,11 @@ export default function ModelManagementPanel({
     setPendingCustomModel(null);
   }, []);
 
-  const handleSavePendingCustomModelSettings = useCallback(async (modelId: string, patch: Partial<ModelEntity>) => {
+  const handleSavePendingCustomModelSettings = useCallback(async (modelId: string, patch: ModelSettingsPatch) => {
     const base = pendingCustomModel && pendingCustomModel.model === modelId
       ? pendingCustomModel
       : createManualModelEntity(modelId);
-    const entity: ModelEntity = { ...base, ...patch };
-    for (const key of Object.keys(patch) as Array<keyof ModelEntity>) {
-      if (patch[key] === undefined) delete entity[key];
-    }
+    const entity = applyModelSettingsPatch(base, patch);
     if (provider.id === TOKENDANCE_PROVIDER_ID) {
       const catalog = discoveredModels.length ? discoveredModels : await fetchProviderModels(provider, apiKey);
       const matched = catalog.find(m => m.id === modelId);
@@ -362,16 +387,6 @@ export default function ModelManagementPanel({
     setCustomInput(remainingInputIds.join(', '));
   }, [pendingCustomModel, createManualModelEntity, customInputModelIds, activeModelIds, provider, onUpdateCustomProvider, onRefresh, discoveredModels, apiKey, t]);
 
-  const editableModelIds = useMemo(() => {
-    if (!provider.isBuiltin) return activeModelIds;
-    const customModels = config.presetCustomModels?.[provider.id] ?? [];
-    return new Set(
-      customModels
-        .filter(m => !bundledModelIds.has(m.model) || m.source !== 'discovered' || Boolean(m.executionProtocol))
-        .map(m => m.model)
-    );
-  }, [provider.isBuiltin, provider.id, activeModelIds, config.presetCustomModels, bundledModelIds]);
-
   const handleToggleEdit = useCallback((modelId: string) => {
     setPendingCustomModel(null);
     setEditingModelId(prev => (prev === modelId ? null : modelId));
@@ -382,36 +397,34 @@ export default function ModelManagementPanel({
   // #325 — persist edited model-level params through the SAME write paths the
   // add/delete actions use, so the sidecar capability registry picks the change
   // up via its existing mtime invalidation (providers dir / config.json).
-  const handleSaveModelSettings = useCallback(async (modelId: string, patch: Partial<ModelEntity>) => {
-    const applyPatch = (m: ModelEntity): ModelEntity => {
-      if (m.model !== modelId) return m;
-      const next = { ...m, ...patch };
-      // `undefined` patch values mean "clear" — drop the keys so the stored
-      // JSON stays minimal and the registry falls back per its source chain.
-      for (const key of Object.keys(patch) as Array<keyof ModelEntity>) {
-        if (patch[key] === undefined) delete next[key];
-      }
-      return next;
-    };
+  const handleSaveModelSettings = useCallback(async (modelId: string, patch: ModelSettingsPatch) => {
+    if (Object.keys(patch).length === 0) {
+      setEditingModelId(null);
+      return;
+    }
     if (provider.isBuiltin) {
       await atomicModifyConfig(c => {
-        const customModels = c.presetCustomModels?.[provider.id] ?? [];
-        const nextCustomModels = customModels.map(applyPatch);
-        const nextPresetCustomModels = { ...c.presetCustomModels };
-        if (nextCustomModels.length > 0) {
-          nextPresetCustomModels[provider.id] = nextCustomModels;
+        if (c.presetRemovedModels?.[provider.id]?.includes(modelId)) return c;
+        const entries = [...(c.presetCustomModels?.[provider.id] ?? [])];
+        const index = entries.findIndex(entry => entry.model === modelId);
+        const updated = editPresetModelEntry(bundledModelsById.get(modelId), entries[index], patch);
+        if (index < 0) {
+          if (!updated) return c;
+          entries.push(updated);
+        } else if (updated) {
+          entries[index] = updated;
         } else {
-          delete nextPresetCustomModels[provider.id];
+          entries.splice(index, 1);
         }
-        return { ...c, presetCustomModels: nextPresetCustomModels };
+        return { ...c, presetCustomModels: { ...c.presetCustomModels, [provider.id]: entries } };
       });
       await rebuildAndPersistAvailableProviders();
     } else if (onUpdateCustomProvider) {
-      await onUpdateCustomProvider({ ...provider, models: provider.models.map(applyPatch) });
+      await onUpdateCustomProvider({ ...provider, models: provider.models.map(m => m.model === modelId ? applyModelSettingsPatch(m, patch) : m) });
     }
     setEditingModelId(null);
     await onRefresh();
-  }, [provider, onUpdateCustomProvider, onRefresh]);
+  }, [provider, bundledModelsById, onUpdateCustomProvider, onRefresh]);
 
   const handleAddDiscoveredModel = useCallback(async (model: DiscoveredModel) => {
     if (activeModelIds.has(model.id)) return;
@@ -575,7 +588,6 @@ export default function ModelManagementPanel({
                     <ActiveModelRow
                       model={model}
                       isPrimary={model.model === primaryModel}
-                      editable={editableModelIds.has(model.model)}
                       isEditing={editingModelId === model.model}
                       onSetPrimary={handleSetPrimary}
                       onDelete={handleDeleteModel}
@@ -588,6 +600,7 @@ export default function ModelManagementPanel({
                         anchorRef={editingAnchorRef}
                         fallbackFocusRef={panelRef}
                         onCancel={handleCancelEdit}
+                        editingExisting
                         onSave={handleSaveModelSettings}
                       />
                     )}
@@ -750,7 +763,6 @@ export default function ModelManagementPanel({
 const ActiveModelRow = React.memo(function ActiveModelRow({
   model,
   isPrimary,
-  editable,
   isEditing,
   onSetPrimary,
   onDelete,
@@ -758,7 +770,6 @@ const ActiveModelRow = React.memo(function ActiveModelRow({
 }: {
   model: ModelEntity;
   isPrimary: boolean;
-  editable: boolean;
   isEditing: boolean;
   onSetPrimary: (id: string) => void;
   onDelete: (id: string) => void;
@@ -794,24 +805,20 @@ const ActiveModelRow = React.memo(function ActiveModelRow({
         </span>
       ) : null}
 
-      {/* #325 — per-model settings (user-added / custom-provider models only;
-          bundled preset models are app-curated and read-only) */}
-      {editable && (
-        <button
-          type="button"
-          onClick={handleToggleEdit}
-          title={t('providers.models.settingsTitle')}
-          aria-label={`${t('providers.models.settingsTitle')}: ${model.modelName ?? model.model}`}
-          data-model-gear
-          className={`flex-shrink-0 rounded p-1 transition-all hover:text-[var(--accent)] ${
-            isEditing
-              ? 'text-[var(--accent)] opacity-100'
-              : 'text-[var(--ink-subtle)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-          }`}
-        >
-          <SlidersIcon className="h-3 w-3" />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={handleToggleEdit}
+        title={t('providers.models.settingsTitle')}
+        aria-label={`${t('providers.models.settingsTitle')}: ${model.modelName ?? model.model}`}
+        data-model-gear
+        className={`flex-shrink-0 rounded p-1 transition-all hover:text-[var(--accent)] ${
+          isEditing
+            ? 'text-[var(--accent)] opacity-100'
+            : 'text-[var(--ink-subtle)] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+        }`}
+      >
+        <SlidersIcon className="h-3 w-3" />
+      </button>
 
       {/* Primary badge or hover action */}
       {isPrimary ? (
@@ -858,6 +865,7 @@ const ModelSettingsEditor = function ModelSettingsEditor({
   provider,
   anchorRef,
   fallbackFocusRef,
+  editingExisting = false,
   onCancel,
   onSave,
 }: {
@@ -865,10 +873,12 @@ const ModelSettingsEditor = function ModelSettingsEditor({
   provider: Provider;
   anchorRef: React.RefObject<HTMLDivElement | null>;
   fallbackFocusRef: React.RefObject<HTMLDivElement | null>;
+  editingExisting?: boolean;
   onCancel: () => void;
-  onSave: (modelId: string, patch: Partial<ModelEntity>) => Promise<void>;
+  onSave: (modelId: string, patch: ModelSettingsPatch) => Promise<void>;
 }) {
   const { t } = useTranslation('settings');
+  const [initialModel] = useState(model);
   const [nameDraft, setNameDraft] = useState(model.modelName ?? model.model);
   const [contextDraft, setContextDraft] = useState(
     model.contextLength ? String(model.contextLength) : '',
@@ -882,10 +892,9 @@ const ModelSettingsEditor = function ModelSettingsEditor({
   const protocolLabel = (value: ModelProtocol) => t(`providers.models.protocols.${value.replace(':', '_')}`);
   const showProtocol = isPerModelProtocolProvider(provider) && provider.id !== TOKENDANCE_PROVIDER_ID;
   const protocolLocked = Boolean(officialProtocol && !model.executionProtocol);
-  const [protocolDraft, setProtocolDraft] = useState<ModelProtocol | ''>(
-    model.executionProtocol ?? officialProtocol ??
-    (model.supportedProtocols?.length === 1 ? model.supportedProtocols[0] : ''),
-  );
+  const initialProtocol = initialModel.executionProtocol ?? officialProtocol ??
+    (initialModel.supportedProtocols?.length === 1 ? initialModel.supportedProtocols[0] : '');
+  const [protocolDraft, setProtocolDraft] = useState<ModelProtocol | ''>(initialProtocol);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const mountedRef = useRef(true);
@@ -934,12 +943,18 @@ const ModelSettingsEditor = function ModelSettingsEditor({
     try {
       // `canSave` guard above already excluded 'invalid' (TS narrows via the
       // aliased condition), so parsedContext is number | null here.
-      await onSave(model.model, {
-        modelName: nameDraft.trim() || model.model,
-        contextLength: parsedContext ?? undefined,
-        inputModalities: resolveModalitiesToSave(modalitiesTouched, model.inputModalities, modalities),
-        ...(showProtocol && !protocolLocked ? { executionProtocol: protocolDraft || undefined } : {}),
-      });
+      const name = nameDraft.trim() || model.model;
+      const contextLength = parsedContext ?? undefined;
+      const patch: ModelSettingsPatch = {};
+      if (!editingExisting || name !== initialModel.modelName) patch.modelName = name;
+      if (!editingExisting || contextLength !== initialModel.contextLength) patch.contextLength = contextLength;
+      if (!editingExisting || modalitiesTouched) {
+        patch.inputModalities = resolveModalitiesToSave(modalitiesTouched, initialModel.inputModalities, modalities);
+      }
+      if (showProtocol && !protocolLocked && (!editingExisting || protocolDraft !== initialProtocol)) {
+        patch.executionProtocol = protocolDraft || undefined;
+      }
+      await onSave(model.model, patch);
     } catch (error) {
       if (mountedRef.current) {
         setSaveError(error instanceof Error ? error.message : String(error));
@@ -1125,7 +1140,7 @@ const DiscoveredModelRow = React.memo(function DiscoveredModelRow({
   provider: Provider;
   fallbackFocusRef: React.RefObject<HTMLDivElement | null>;
   onCancelPending: () => void;
-  onSavePending: (modelId: string, patch: Partial<ModelEntity>) => Promise<void>;
+  onSavePending: (modelId: string, patch: ModelSettingsPatch) => Promise<void>;
 }) {
   const { t } = useTranslation('settings');
   const rowRef = useRef<HTMLDivElement | null>(null);

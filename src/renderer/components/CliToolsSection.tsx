@@ -350,14 +350,14 @@ function CliToolDetailModal({
     onClose, onSaveEnv, onRequestDelete,
 }: CliToolDetailModalProps) {
     const { t } = useTranslation('settings');
-    useCloseLayer(() => { onClose(); return true; }, 50);
+    useCloseLayer(() => { onClose(); return true; }, 100);
 
     // env 区显示的 key 集合：manifest 声明的 ∪ 已配置的（防御已配置但未声明的残留）
     const envKeysToShow = Array.from(new Set([...(tool.envKeys ?? []), ...Object.keys(envConfigured)]));
     const registeredDate = formatCalendarDate(new Date(tool.registeredAt)) || tool.registeredAt.slice(0, 10);
 
     return (
-        <OverlayBackdrop className="z-50" onClose={onClose}>
+        <OverlayBackdrop portal className="z-[100]" onClose={onClose}>
             <div className="mx-4 flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-[var(--paper-elevated)] shadow-xl">
                 <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
                     <div className="min-w-0">

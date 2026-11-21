@@ -91,6 +91,12 @@ Chat Tab 与桌宠复用 `transcriptDisplay`、`transcriptToolDisplay`、`liveRe
 
 Rust Search watcher 同时观察 sessions 与 sessions-v2。V2 索引按 Session/message ID 更新；最多 4 会话、128 MiB 源日志的派生游标缓存绑定 generation 和有效末批边界，替换/修复不只比较长度。启动时重扫 V2 覆盖离线变化；搜索只能重建自身索引，不能修复权威记录。Memory 读端使用相同格式决策。
 
+## 桌面历史分页
+
+文件读端按 UTF-8 流分块，在新到的块中寻找换行并累计未完成记录的字节数，再将整行交给现有解码器校验。V2 详情接口在有范围时先选 ID，再转换要返回的消息。活动 Runtime 在原 SessionEngine 快照入口冲刷事件、处理 pending 用户消息和单列活动行。SessionStore 在同一同步读取边界取 writer 元数据和行，避免在两者之间接纳一次新的写入。V1、完整历史调用和日志校验沿用原契约。
+
+检查桌面冷打开时，可由同一 Tab 的 `history_page_requested`、Rust HTTP 转发、`history_page_encoded`、`history_response_decoded` 和 `history_rows_visible` 关联首个尾页。Sidecar 就绪按 Session 和 Tab owner 关联。普通打开的目标为实际与视口相交的最后一行；隐藏窗口、空会话和恢复到历史中段应结合实际阅读位置判读。
+
 ## 验证入口
 
 `session-transcript/*.unit.test.ts`、`*.integration.test.ts` 覆盖 codec、writer、原始文件、binding、fork、fake SDK 与真实进程强杀；external adapter、SessionEngine、Renderer restore/toast 与 Rust reader/indexer 的原测试共同验证接线。

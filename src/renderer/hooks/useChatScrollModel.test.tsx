@@ -76,6 +76,19 @@ describe('useChatScrollModel', () => {
     expect(result.current.layoutByMessageId).toBe(firstLayout);
   });
 
+  it('retains index and height seeds when the same visible tail enters history', () => {
+    const first = message('id-1', 'question');
+    const last = message('id-2', 'answer');
+    const { result, rerender } = renderHook(({ historyMessages, streamingMessage }: {
+      historyMessages: Message[]; streamingMessage: Message | null;
+    }) => useChatScrollModel({ historyMessages, streamingMessage, sessionId: 's' }),
+    { initialProps: { historyMessages: [first], streamingMessage: last as Message | null } });
+    const { messageIndices, heightEstimateSeed } = result.current;
+    rerender({ historyMessages: [first,last], streamingMessage: null });
+    expect(result.current.messageIndices).toBe(messageIndices);
+    expect(result.current.heightEstimateSeed).toBe(heightEstimateSeed);
+  });
+
   it('keeps estimate seed stable while the same streaming message crosses layout buckets', () => {
     const history = [message('m1', 'short reply')];
     const { result, rerender } = renderHook(

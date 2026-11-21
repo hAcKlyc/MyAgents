@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CHANNEL_DELIVERY } from '../session-core/channel-delivery';
+import { parseLeadingSystemReminder } from '../../shared/systemReminder';
 import type { TurnTerminalOutcome } from '../session-core/turn-queue';
 import type { Options } from '@anthropic-ai/claude-agent-sdk';
 
@@ -241,6 +242,7 @@ function fakeQuery(args: { prompt: AsyncIterable<unknown>; options: { sessionId?
     },
     [Symbol.asyncIterator]() { return this; },
     initializationResult: async () => ({ commands: state.sdkCommands }),
+    supportedCommands: async () => state.sdkCommands,
     interrupt: async () => { if (state.interruptCloses) close(); },
     close,
     rewindFiles: state.rewindFiles,
@@ -316,6 +318,153 @@ afterEach(async () => {
 });
 
 describe('builtin V2 execution independent of product storage', () => {
+  it.each([
+    { birth: 'fresh', selection: ['selected', 'disabled'], expected: ['selected'] },
+    { birth: 'owned', selection: ['selected', 'disabled'], expected: ['selected'] },
+    { birth: 'owned', selection: [], expected: [] },
+    { birth: 'owned', selection: undefined, expected: [] },
+    { birth: 'legacy', selection: undefined, expected: ['workspace-default'] },
+    { birth: 'configured', selection: undefined, expected: [] },
+  ])('mounts target MCPs on cold $birth Inbox dispatch (selection=$selection)', async ({ birth, selection, expected }) => {
+    vi.spyOn(await import('../utils/platform'), 'getHomeDirOrNull').mockReturnValue(state.home);
+    const workspace = join(state.home, 'inbox-workspace');
+    const settings = join(state.home, '.myagents');
+    await mkdir(workspace);
+    await mkdir(settings, { recursive: true });
+    const ids = ['selected', 'workspace-default', 'disabled'];
+    await writeFile(join(settings, 'config.json'), JSON.stringify({
+      mcpServers: ids.map(id => ({ id, name: id, type: 'http', url: 'http://127.0.0.1:1/mcp', isBuiltin: false })),
+      mcpEnabledServers: ['selected', 'workspace-default'],
+    }));
+    await writeFile(join(settings, 'projects.json'), JSON.stringify([
+      { id: 'project', path: workspace, mcpEnabledServers: ['workspace-default'] },
+    ]));
+    state.query.mockImplementation(args => ({
+      ...fakeQuery(args), mcpServerStatus: async () => expected.map(name => ({ name, status: 'connected' })),
+    }));
+    const sessionId = randomUUID();
+    if (birth !== 'fresh') {
+      await store.createSession(workspace, {
+        id: sessionId, runtime: 'builtin', mcpEnabledServers: selection,
+        configSnapshotAt: birth === 'owned' ? 'frozen' : undefined,
+      });
+    }
+    await agent.initializeAgent(workspace, null, sessionId);
+    expect(agent.getMcpServers()).toBeNull();
+    if (birth === 'configured') agent.setMcpServers([]);
+    const engine = (await import('../session-engine/selector')).getSessionEngine();
+    const target = { sessionId, workspacePath: workspace };
+    if (birth === 'fresh') {
+      const { handleFreshSessionStart } = await import('../inbox/start-handler');
+      const result = await handleFreshSessionStart({
+        kind: 'request', messageId: randomUUID(), sourceKind: 'external-cli', fromLabel: 'CLI',
+        toSessionId: sessionId, text: 'use target tools', replyBack: false,
+      }, { ...target, runtime: 'builtin', agent: {
+        id: 'target', name: 'Target', enabled: true, channels: [], permissionMode: 'auto', mcpEnabledServers: selection,
+      } }, (text, options) => engine.enqueueInboxMessage({ ...target, text, ...options }));
+      expect(result).toEqual({ accepted: true });
+    } else {
+      await engine.enqueueInboxMessage({ ...target, text: 'use target tools' });
+    }
+    await vi.waitFor(() => expect(state.sdkInputs).toHaveLength(1));
+    const servers = state.query.mock.calls[0][0].options.mcpServers ?? {};
+    expect(Object.keys(servers)).toEqual(expected);
+    expect(await engine.waitIdle(2_000, 10)).toBe(true);
+  });
+
+  it('preserves native Claude commands across bound desktop and IM admissions', async () => {
+    const workspace = join(state.home, 'workspace');
+    await mkdir(workspace);
+    const sessionId = (await store.createSession(workspace, { runtime: 'builtin' })).id;
+    const channelMessaging = await import('../tools/channel-messaging');
+    const channelScope = {
+      channels: [{ channelId: 'c', platform: 'feishu', name: null, mode: 'tool_only', groupActivation: null, targetTypes: [], mediaTypes: [] }],
+      defaultTarget: { channelId: 'c', type: 'chat', id: 'chat', idType: 'chat_id' },
+      sourceType: 'private',
+    };
+    const readScope = vi.spyOn(channelMessaging, 'readChannelScope').mockResolvedValue(channelScope);
+    vi.spyOn(await import('../utils/admin-config'), 'loadConfig').mockReturnValue({ chatQueueResponseMode: 'turn' });
+    const builtinCommands = [
+      { name: 'compact', builtin: true },
+      { name: 'context', builtin: true },
+      { name: 'usage', aliases: ['cost', 'stats'], builtin: true },
+      { name: 'init' }, { name: 'init', builtin: true },
+      { name: 'security-review', aliases: ['inspect-changes'], builtin: true },
+    ];
+    state.sdkCommands = builtinCommands;
+    await agent.initializeAgent(workspace, null, sessionId, { preWarmDisabled: true });
+    const engine = (await import('../session-engine/selector')).getSessionEngine();
+    const desktop = (text: string) => engine.sendDesktopMessage({
+      text, images: [], sessionId, workspacePath: workspace, scenario: { type: 'desktop' },
+    });
+    const waitIdle = () => expect(engine.waitIdle(2_000, 10)).resolves.toBe(true);
+    const { imRequestRegistry } = await import('../utils/im-request-registry');
+    const { normalizeImInbound } = await import('../session-core/channel-context');
+    const im = async (requestId: string, sourceType: 'private' | 'group', parts: string[] = []) => {
+      const request = imRequestRegistry.register(requestId, sessionId);
+      request.channelInbound = normalizeImInbound({
+        botId: 'c', requestId, receivedAt: '2026-11-14T02:00:00Z',
+        sourceMetadata: { parts: parts.map(eventId => ({
+          eventId, platformMessageId: null, senderId: 'user', senderName: null,
+          senderUsername: null, senderIsBot: false, sentAt: null,
+        })) },
+      });
+      const result = await engine.enqueueImMessage({ message: '/context', requestId, sessionId, workspacePath: workspace,
+        scenario: { type: 'agent-channel', platform: 'feishu', sourceType } });
+      return { request, result };
+    };
+    const firstResult = Promise.withResolvers<void>();
+    releaseWrite = () => firstResult.resolve();
+    state.beforeResult.mockImplementationOnce(() => firstResult.promise);
+    const compact = '/compact\t保留决策\n和后续计划';
+    await desktop(compact);
+    await vi.waitFor(() => expect(state.beforeResult).toHaveBeenCalled());
+    const privateCommand = await im('private-context', 'private');
+    expect(privateCommand.result).toMatchObject({ success: true, queued: true });
+    firstResult.resolve();
+    await waitIdle();
+    expect(privateCommand.request.channelDeliveryMode).toBe('tool_only');
+
+    const commands = [compact, '/context', '/usage', '/cost', '/stats', '/init', '/security-review staged', '/inspect-changes'];
+    for (const text of commands.slice(2)) {
+      await desktop(text);
+      await waitIdle();
+    }
+    state.sdkCommands = [...builtinCommands.filter(command => command.name !== 'context'),
+      { name: 'context' }, { name: 'stats' }, { name: 'workspace-review', aliases: ['inspect-changes'] }];
+    const decorated = ['/context', '/stats', '/inspect-changes', '/workspace-review', '/compact-extra', '/COMPACT', '解释 /compact'];
+    for (const text of decorated) {
+      await desktop(text);
+      await waitIdle();
+    }
+    state.sdkCommands = builtinCommands;
+    expect(await engine.runInjectedTurn({
+      prompt: '<system-reminder>\n<HEARTBEAT>scheduled check</HEARTBEAT>\n</system-reminder>\n/compact',
+      sessionId, workspacePath: workspace,
+      scenario: { type: 'cron', taskId: 'heartbeat', intervalMinutes: 15, aiCanExit: false },
+      assistantChannelDelivery: 'caller-owned', timeoutMs: 2_000, pollMs: 10,
+    })).toMatchObject({ success: true });
+    await im('combined-context', 'private', ['part-1', 'part-2']);
+    await waitIdle();
+    readScope.mockResolvedValue({ ...channelScope, sourceType: 'group' });
+    await im('group-context', 'group');
+    await waitIdle();
+    const sdkTexts = state.sdkInputs.map(input => (input as { message: { content: { text: string }[] } }).message.content.at(-1)?.text);
+    expect(sdkTexts.slice(0, commands.length)).toEqual(commands);
+    for (const input of state.sdkInputs.slice(0, commands.length)) {
+      const blocks = (input as { message: { content: { text: string }[] } }).message.content;
+      expect(blocks).toHaveLength(2);
+      expect(parseLeadingSystemReminder(blocks[0]!.text)).toMatchObject({ kind: 'CHANNEL_CONTEXT', visibleText: '' });
+    }
+    expect(sdkTexts.slice(commands.length).map(text => parseLeadingSystemReminder(text ?? ''))).toEqual(
+      [
+        ...decorated.map(text => expect.objectContaining({ kind: 'CHANNEL_CONTEXT', visibleText: text })),
+        expect.objectContaining({ kind: 'HEARTBEAT', visibleText: '/compact', body: expect.stringContaining('<CHANNEL_CONTEXT ') }),
+        ...['combined-context', 'group-context'].map(eventId => expect.objectContaining({ kind: 'CHANNEL_CONTEXT', visibleText: '/context', body: expect.stringContaining(eventId) })),
+      ],
+    );
+  });
+
   it('persists a notification status once without a model turn, including a failed flush retry', async () => {
     const workspace = join(state.home,'workspace'); await mkdir(workspace);
     const metadata = await store.createSession(workspace,{runtime:'builtin'});
@@ -960,16 +1109,25 @@ describe('builtin V2 execution independent of product storage', () => {
     });
   });
 
-it('preserves completed file restoration when later transcript persistence fails', async () => {
+it.each(['original', 'retained', 'removed'])('preserves local file restoration when later transcript persistence fails (fork point=%s)', async forkPoint => {
   const workspace = join(state.home, 'workspace');
   await mkdir(workspace);
-  const metadata = await store.createSession(workspace, { runtime: 'builtin' });
+  const metadata = await store.createSession(workspace, {
+    runtime: 'builtin',
+    ...(forkPoint === 'original' ? {} : { forkOrigin: { sessionId: 'parent', messageId: 'fork-point' } }),
+  });
+  if (forkPoint === 'retained') {
+    const { cursor } = await store.loadSessionTranscript(metadata.id);
+    expect(await store.appendSessionMessages(metadata.id, cursor, [
+      { id: 'fork-point', role: 'assistant', content: 'inherited', timestamp: 't', sdkUuid: 'fork-assistant' },
+    ])).toMatchObject({ ok: true });
+  }
   await agent.initializeAgent(workspace, null, metadata.id, { preWarmDisabled: true });
   await agent.enqueueUserMessage('question', [], undefined, undefined, undefined, undefined,
     undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
   await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
   await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
-  const user = agent.getMessages()[0];
+  const user = agent.getMessages().find(row => row.role === 'user')!;
   state.sdkRead.mockResolvedValue([{ type: 'user', uuid: user.sdkInputUuid,
     message: { role: 'user', content: user.content } }]);
   expect(await store.getActiveSessionTranscript(metadata.id)!.writer.flush()).toBe(true);
@@ -1439,7 +1597,8 @@ describe('live Claude reasoning effort', () => {
     agent.setMcpServers(ids.map(id => ({ id, name: id, type: 'http' as const, url: 'http://127.0.0.1:1/mcp', enabled: true, isBuiltin: false })));
     await send('MCP config check');
     await vi.waitFor(() => expect(state.sdkInputs).toHaveLength(1));
-    const servers = state.query.mock.calls[0][0].options.mcpServers;
+    const { mcpServers: servers, mcpServersDelivery } = state.query.mock.calls[0][0].options;
+    expect(mcpServersDelivery).toBe('initialize');
     expect(Object.keys(servers)).toContain('ordinary');
     for (const id of ids.slice(0, -1)) expect(Object.hasOwn(servers, id.replace(/[^a-zA-Z0-9_-]/g, '_'))).toBe(false);
   });
@@ -1673,7 +1832,15 @@ it('preserves diagnostics through native fork and cold retry using remapped user
   expect(forkData.messages[1].sdkUuid).toBeUndefined();
   await agent.resetSession();
   await agent.initializeAgent(workspace, null, fork.newSessionId!, { preWarmDisabled: true });
-  expect(await agent.retryBuiltinUserMessage('u2', async () => ({ success: true }))).toMatchObject({ success: true });
+  await agent.enqueueUserMessage('branch-local turn', [], undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, undefined, undefined, { channelDelivery: NO_CHANNEL_DELIVERY });
+  await vi.waitFor(() => expect(agent.getLastBuiltinAssistantText()).toBe('answer 1 full-only tail'));
+  await vi.waitFor(() => expect(agent.isSessionBusy()).toBe(false));
+  expect(await agent.retryBuiltinUserMessage('u2', async result => {
+    expect(result.fileRewindStatus).toBe('not_attempted');
+    return { success: true };
+  })).toMatchObject({ success: true });
+  expect(state.rewindFiles).not.toHaveBeenCalled();
   expect(agent.getMessages().map(row => row.id)).toEqual(['u1', 'd']);
   expect(store.getSessionMetadata(fork.newSessionId!)?.sdkResumeSessionAt).toBe('fork-native-u1');
 });

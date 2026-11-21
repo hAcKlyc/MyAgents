@@ -535,9 +535,12 @@ describe('Codex app-server protocol helpers', () => {
     });
   });
 
-  it('keeps the known Codex server request allowlist in sync with app-server schema', () => {
+  it('accepts the pinned server requests and the legacy clock request', () => {
     expect(managedCodexProtocol.version).toBe(managedCodexRuntimeLock.version);
-    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual(managedCodexProtocol.serverRequestMethods);
+    expect(KNOWN_CODEX_SERVER_REQUEST_METHODS).toEqual([
+      ...managedCodexProtocol.serverRequestMethods,
+      'currentTime/read',
+    ]);
   });
 
   it.each([false, true])('negotiates only supported capabilities without opting into human checkpoints (experimental=%s)', experimental => {
@@ -1479,6 +1482,10 @@ describe('Codex app-server protocol helpers', () => {
       kind: 'through-turn',
       runtimeTurnId: 'turn-1',
     });
+    for (const status of ['interrupted', 'failed']) {
+      expect(resolveCodexConversationBranchPoint([{ id: 'stopped', status }, ...turns], 'turn-1'))
+        .toEqual({ kind: 'through-turn', runtimeTurnId: 'stopped' });
+    }
     expect(() => resolveCodexConversationBranchPoint(turns, 'missing')).toThrow(
       /anchor/i,
     );
@@ -1497,7 +1504,7 @@ describe('Codex app-server protocol helpers', () => {
     expect(() =>
       resolveCodexConversationBranchPoint(
         [
-          { id: 'turn-1', status: 'failed' },
+          { id: 'turn-1', status: 'inProgress' },
           { id: 'turn-2', status: 'completed' },
         ],
         'turn-2',

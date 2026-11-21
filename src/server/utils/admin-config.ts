@@ -1735,6 +1735,8 @@ export function decodeProviderEnvSnapshot(
 
 /** Result of self-resolution for a workspace */
 export interface WorkspaceResolvedConfig {
+  /** Session/Agent selection before the global enable filter. */
+  selectedMcpServerIds?: readonly string[];
   mcpServers: McpServerDefinition[];
   enabledOfficialToolIds: OfficialToolId[];
   providerEnv: ResolvedProviderEnv | undefined;
@@ -1780,7 +1782,7 @@ function asBuiltinPermissionMode(value: unknown): string | undefined {
 export function resolveWorkspaceConfig(
   agentDir: string,
   sessionMeta?: SessionMetadata | null,
-  options?: { includeMcp?: boolean },
+  options?: { includeMcp?: boolean; mcpServerIds?: readonly string[] },
 ): WorkspaceResolvedConfig {
   const config = loadConfig();
   // MCP resolution is the expensive part here (walks all agents, intersects
@@ -1805,18 +1807,16 @@ export function resolveWorkspaceConfig(
   let mcpServers: McpServerDefinition[] = [];
   const snapshotOwnsConfig = Boolean(sessionMeta?.configSnapshotAt);
 
-  if (includeMcp) {
-    if (sessionMeta?.mcpEnabledServers) {
+  const selectedMcpServerIds = includeMcp
+    ? options?.mcpServerIds ?? sessionMeta?.mcpEnabledServers ?? (snapshotOwnsConfig ? [] : resolveDefaultMcpSelection(agent, project))
+    : undefined;
+  if (selectedMcpServerIds) {
       const allServers = getAllMcpServers(config);
       const globalEnabled = new Set(getEnabledMcpServerIds(config));
-      const sessionEnabled = new Set(sessionMeta.mcpEnabledServers);
+      const sessionEnabled = new Set(selectedMcpServerIds);
       mcpServers = allServers.filter(
         (s) => globalEnabled.has(s.id) && sessionEnabled.has(s.id),
       );
-    } else if (!snapshotOwnsConfig) {
-      // Legacy metadata has no snapshot owner yet; resolve Agent defaults (or Project compatibility).
-      mcpServers = getEffectiveMcpServers(agentDir);
-    }
   }
   console.log(
     includeMcp
@@ -1842,6 +1842,7 @@ export function resolveWorkspaceConfig(
 
   const agentProviderId = agent?.providerId as string | undefined;
   const agentUsesRuntimeBackedProvider = agentUsesManagedCodexProvider({
+    runtimePreference: agent?.runtimePreference,
     providerId: agentProviderId,
     runtime: typeof agent?.runtime === 'string' ? agent.runtime : undefined,
     runtimeConfig: agent?.runtimeConfig as { source?: string } | undefined,
@@ -2089,6 +2090,7 @@ export function resolveWorkspaceConfig(
 
   return {
     mcpServers,
+    ...(selectedMcpServerIds ? { selectedMcpServerIds } : {}),
     enabledOfficialToolIds,
     providerEnv,
     providerRoute,

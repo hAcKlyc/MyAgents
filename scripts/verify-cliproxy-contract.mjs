@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, lstat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -24,6 +24,19 @@ await new Promise(resolve => reserved.close(resolve));
 const modelKey = randomBytes(32).toString('hex');
 const managementKey = randomBytes(32).toString('hex');
 const auth = join(root, 'auth');
+// v8.0.79 enables its local bbolt KV store under auth-dir by default.
+// Keep the native default: this cache shares the account directory lifecycle.
+const assertNoCredentials = async () => {
+  assert.deepEqual(await readdir(auth), ['kv.db']);
+  const database = join(auth, 'kv.db');
+  const metadata = await lstat(database);
+  assert(metadata.isFile(), 'native KV must be a regular file');
+  if (process.platform !== 'win32') assert.equal(metadata.mode & 0o777, 0o600);
+  const bytes = await readFile(database);
+  for (const value of [modelKey, managementKey, 'synthetic-late-code', 'synthetic-body-must-not-be-logged']) {
+    assert(!bytes.includes(Buffer.from(value)), 'native KV must not retain smoke secrets or the rejected request body');
+  }
+};
 await mkdir(auth, { mode: 0o700 });
 const config = {
   host: '127.0.0.1', port, 'auth-dir': auth, 'api-keys': [modelKey],
@@ -101,11 +114,12 @@ try {
     assert.deepEqual((await (await request('/v0/management/auth-files', managementKey)).json()).files, []);
     checks.push('callback-accepted-before-native-failure', 'native-oauth-error-category');
   } finally { await new Promise(resolve => callback.close(resolve)); }
-  await request('/v1/messages', modelKey, 'POST', { model: 'synthetic-unavailable', max_tokens: 1,
+  const rejected = await request('/v1/messages', modelKey, 'POST', { model: 'synthetic-unavailable', max_tokens: 1,
     messages: [{ role: 'user', content: 'synthetic-body-must-not-be-logged' }] });
+  assert(rejected.status >= 400, 'an account-free request for the synthetic model must fail');
   await delay(250);
   assert.deepEqual(await readdir(root), ['auth', 'config.yaml']);
-  assert.deepEqual(await readdir(auth), []);
+  await assertNoCredentials();
   checks.push('no-error-body-or-credential-residue');
   console.log(JSON.stringify({ success: true, checks }, null, 2));
 } finally {

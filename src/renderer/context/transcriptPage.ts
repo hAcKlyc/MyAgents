@@ -14,6 +14,8 @@ export class TranscriptPage {
 
     constructor(readonly sessionId: string, readonly restoreToken: number, readonly connectionGeneration: number) {}
 
+    get isOverflowed(): boolean { return this.overflow; }
+
     observe(event: BufferedLiveRevisionEvent): void {
         if (this.overflow || event.sessionId !== this.sessionId || event.connectionGeneration !== this.connectionGeneration) return;
         if (event.eventName !== 'chat:transcript-operation' && !TRANSCRIPT_TOOL_DISPLAY_EVENTS.has(event.eventName)) return;
@@ -26,6 +28,7 @@ export class TranscriptPage {
 
     async complete(messages: Message[], snapshotRevision: number,
         resolveInput: (ref: unknown) => Promise<Record<string, unknown>>,
+        adopt?: (rows: Message[]) => void,
     ): Promise<Message[] | null> {
         if (this.overflow) return null;
         let rows = messages;
@@ -52,6 +55,7 @@ export class TranscriptPage {
                 rows = rows.map(row => applyTranscriptToolDisplayEvent(row, event.eventName, payload));
             }
         }
+        adopt?.(rows);
         return rows;
     }
 }

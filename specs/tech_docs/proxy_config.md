@@ -15,17 +15,18 @@ MyAgents 的代理不是一个 process-global 开关，而是按网络请求 own
   "scope": {
     "mode": "custom",
     "generalRequests": true,
-    "providerIds": ["anthropic-sub"]
+    "providerIds": ["anthropic-sub"],
+    "runtimeIds": ["codex"]
   }
 }
 ```
 
 - `protocol` 只接受 `http`、`https`、`socks5`；
-- `mode: all` 表示 general 与所有 Provider owner 使用应用代理；
-- `mode: custom` 分别选择 `generalRequests` 和 `providerIds`；
+- `mode: all` 表示 通用请求、全部 Provider 和全部系统 CLI Runtime 使用应用代理；
+- `mode: custom` 分别选择 `generalRequests`、`providerIds` 和 `runtimeIds`；
 - 未开启、未选中的 owner 使用 inherited system / parent-process network baseline，不等于强制直连。TUN、VPN 和系统代理仍自然生效。
 
-读取旧 custom scope 时，如果缺少 `generalRequests`，默认视为 `true`；缺字段且 Provider 列表也为空的旧空 scope 归一化为 `all`。这是仍在生效的磁盘兼容规则，新写入必须使用完整 current shape。
+读取旧 custom scope 时，如果缺少 `generalRequests`，默认视为 `true`；同时缺少两个选择字段（`generalRequests`、`runtimeIds`）且 Provider 列表为空的旧 scope 归一化为 `all`。旧配置缺少 `runtimeIds` 时，三个 CLI 延续原有通用请求的选择。编辑范围后独立保存 CLI 列表，空数组表示全部取消。
 
 `providerIds` 是用户的持久选择，不是当前可用或可见 Provider 的缓存。`normalizeProxyScope` 只整理字段、空值和重复项，不接受展示目录作为允许集合。Settings / Capabilities 的挂载、CLIProxy 状态轮询、组件替换或平台/功能隐藏都不能裁剪或自动写回 scope；真正删除自定义 Provider 时由既有删除入口移除其 ID。
 
@@ -39,6 +40,9 @@ config.json proxySettings
        +-- general owner
        |     updater, resource/runtime downloads, model metadata,
        |     generic MyAgents HTTP, Plugin Bridge
+       |
+       +-- system CLI owner(runtimeId)
+       |     Claude Code CLI, Codex CLI, Antigravity CLI discovery and sessions
        |
        +-- provider owner(providerId)
              Builtin SDK, OpenAI Bridge upstream, provider probe,
@@ -109,19 +113,19 @@ CLIProxy 的 Google 请求由 Rust `apply_to_subprocess_for_provider(..., "antig
 多数 SDK/子进程只稳定支持 HTTP proxy。应用配置为 SOCKS5 时，Sidecar 建立稳定的本地 HTTP-to-SOCKS5 bridge：
 
 - bridge 从完整 current settings 初始化，不从 general env 反推；
-- general 与 Provider owner 分别决定是否使用该 bridge；
-- `generalRequests=false` 但有 Provider 被选中时，bridge 仍存在但不会写入 general env；
+- 通用请求、模型供应商及系统 CLI 各自决定是否使用该 bridge；
+- `generalRequests=false` 但有 Provider 或系统 CLI 被选中时，bridge 仍存在但不会写入 general env；
 - endpoint 变化后新连接使用新目标，既有 tunnel 自然排空；
 - 没有任何 app-proxy consumer 时停止接收新连接，不强制切断活跃 tunnel；
 - generation fence 丢弃旧配置的 callback。
 
 ## External Runtime envPolicy
 
-Claude Code / Codex 等 external Runtime 还可在 Agent 配置选择：
+Claude Code CLI、Codex CLI 和 Antigravity CLI 还可在 Agent 配置选择：
 
 | 值 | 语义 |
 | --- | --- |
-| `myagents` | 使用 Sidecar 当前 general baseline |
+| `myagents` | 按该 CLI 的 `runtimeIds` 选择使用应用代理或 inherited baseline |
 | `terminal` | 移除 Sidecar proxy vars，再恢复 interactive shell warmup 检测到的 proxy env |
 
 `src/server/runtimes/env-utils.ts::resolveAgentEnvPolicy()` 是磁盘读取与字面量校验入口。未知值 fail-safe 到 `myagents` 并记录 warning；调用方不得裸 cast。`terminal` 没检测到 shell proxy 时形成无显式 proxy env，但仍可能通过 TUN/VPN 路由。
@@ -134,6 +138,7 @@ Integrated DSH 不使用 external CLI 的 `envPolicy`；Agent 从外部 Runtime 
 
 - Settings 在 Rust 配置写锁内更新 `config.json`；
 - 活跃 Sidecar 接收 hot proxy state propagation，`/api/proxy/set` 在 `sidecar-composition.ts` 中属于 common，Global 和 Session 都必须能接收；后续 generic 请求和新 Provider subprocess 使用新 policy；
+- 系统 CLI 的有效代理环境变化后，空闲时释放旧进程，进行中的对话轮次结束后再应用。其他 CLI 或通用请求的独立选择不会重启该会话。托管 Codex 始终按 `codex-sub` 的 Provider 选择执行。
 - DSH Shell 的代理快照属于进程 generation；general baseline 变化复用 external Session lifecycle 的 config invalidation，在 idle 边界释放旧进程，下次启动读取新快照。当前轮不被中断，轮内 A → B → A 撤销不必要的重启；
 - Plugin Bridge 与 IM Channel 通过各自 keyed lifecycle lock 在安全空闲边界 replacement，不能并发启动第二实例；
 - 连续设置变化由 generation / reconciliation 收敛到最新磁盘配置；

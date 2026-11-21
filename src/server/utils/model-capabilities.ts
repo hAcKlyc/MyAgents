@@ -70,7 +70,7 @@ import { stripModelSuffix } from '../../shared/contextUsage';
 // — that the source file might pull React / renderer-only deps into
 // the Sidecar bundle — is moot now that the file lives in shared/
 // where it has zero transitive deps by construction.
-import { PRESET_PROVIDERS } from '../../shared/config-types';
+import { PRESET_PROVIDERS, mergePresetModelWithCustomEntry, type PresetModelEntry } from '../../shared/config-types';
 
 export type ModelCapabilitySource = 'preset' | 'custom' | 'discovered' | 'litellm';
 
@@ -354,7 +354,23 @@ function loadPresetCustomModels(home: string): Record<string, unknown> | null {
     }
     const raw = readFileSync(configPath, 'utf-8');
     const cfg = JSON.parse(stripBom(raw)) as { presetCustomModels?: Record<string, unknown> };
-    return cfg.presetCustomModels ?? null;
+    const models = cfg.presetCustomModels;
+    if (!models) return null;
+    for (const [id, entries] of Object.entries(models)) {
+      if (!Array.isArray(entries)) continue;
+      const presetProvider = PRESET_PROVIDERS.find(provider => provider.id === id);
+      models[id] = entries.flatMap((entry: PresetModelEntry) => {
+        if (!entry?.presetSettings) return [entry];
+        const preset = presetProvider?.models.find(model => model.model === entry.model);
+        if (!preset && entry.source === 'preset' && entry.modelName === undefined) return [];
+        // A settings-only entry contributes just its overrides to the flat registry.
+        // A catalog record also needs the same discovery precedence as the picker.
+        return [preset && entry.source === 'discovered'
+          ? mergePresetModelWithCustomEntry(preset, entry)
+          : { ...entry, ...entry.presetSettings }];
+      });
+    }
+    return models;
   } catch (err) {
     console.warn('[model-caps] failed to read ~/.myagents/config.json:', (err as Error)?.message ?? err);
     return null;
@@ -650,19 +666,27 @@ export function snapshotProviderModelContextLengths(
   modelIds: Iterable<string | undefined | null>,
   providerId: string | undefined | null,
 ): ModelContextLengthSnapshot {
+  const capabilities = snapshotProviderModelCapabilities(modelIds, providerId);
+  return new Map(Array.from(capabilities, ([model, capability]) => [model, capability?.contextLength]));
+}
+
+function snapshotProviderModelCapabilities(
+  modelIds: Iterable<string | undefined | null>,
+  providerId: string | undefined | null,
+): Map<string, ModelCapability | undefined> {
   const bareModelIds = new Set<string>();
   for (const modelId of modelIds) {
     const bare = stripModelSuffix(modelId);
     if (bare) bareModelIds.add(bare);
   }
-  const snapshot = new Map<string, number | undefined>();
+  const snapshot = new Map<string, ModelCapability | undefined>();
   if (bareModelIds.size === 0) return snapshot;
 
   const home = getHomeDirOrNull();
   if (!providerId || !home) {
     const flatRegistry = buildRegistry();
     for (const bare of bareModelIds) {
-      snapshot.set(bare, flatRegistry.get(bare)?.contextLength);
+      snapshot.set(bare, flatRegistry.get(bare));
     }
     return snapshot;
   }
@@ -690,9 +714,7 @@ export function snapshotProviderModelContextLengths(
     const providerOwnsModel = providerListContainsModel(providerCandidates, bare);
     snapshot.set(
       bare,
-      providerOwnsModel
-        ? providerMap.get(bare)?.contextLength
-        : flatRegistry.get(bare)?.contextLength,
+      providerOwnsModel ? providerMap.get(bare) : flatRegistry.get(bare),
     );
   }
   return snapshot;
@@ -726,9 +748,13 @@ export interface ModelModalitySupport {
 export function lookupModelModalitySupport(
   modelId: string | undefined | null,
   kind: ModalityKind,
+  providerId?: string | null,
 ): ModelModalitySupport {
   if (kind === 'text') return { status: 'supported' };
-  const cap = lookupModelCapability(modelId);
+  const bare = stripModelSuffix(modelId);
+  const cap = providerId && bare
+    ? snapshotProviderModelCapabilities([bare], providerId).get(bare)
+    : lookupModelCapability(modelId);
   const evidence = cap?.inputModalitySupport?.[kind];
   if (evidence) {
     return {
@@ -880,8 +906,9 @@ export function applyProviderContextWindowSuffix(
 export function modelSupportsModality(
   modelId: string | undefined | null,
   kind: ModalityKind,
+  providerId?: string | null,
 ): boolean {
-  const evidence = lookupModelModalitySupport(modelId, kind);
+  const evidence = lookupModelModalitySupport(modelId, kind, providerId);
   // LiteLLM is a provider-unknown fallback. A negative row must not veto the
   // active provider's same-named offering; only provider-owned declarations
   // are authoritative enough to reject an attachment.

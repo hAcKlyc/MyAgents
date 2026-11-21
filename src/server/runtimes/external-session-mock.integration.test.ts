@@ -15,6 +15,7 @@ import type {
   RuntimePermissionRule,
   RuntimePermissionRulesSnapshot,
 } from '../../shared/types/runtime';
+import { PROXY_ENV_KEYS } from '../../shared/proxyScope';
 import { createDshBinding } from '../../shared/integrated-runtimes/identity';
 import {
   getDefaultRuntimePermissionMode,
@@ -92,6 +93,7 @@ type TurnScript =
     };
 
 class FakeRuntimeProcess implements RuntimeProcess {
+  requiresPermissionModeRestart?: RuntimeProcess['requiresPermissionModeRestart'];
   readonly pid = 4242;
   exited = false;
   loadedSkillNames: readonly string[] = [];
@@ -393,6 +395,10 @@ class FakeRuntime implements AgentRuntime {
     }
     this.callback = onEvent;
     const process = new FakeRuntimeProcess();
+    if (this.type === 'antigravity') {
+      const full = options.permissionMode === 'dangerously-skip-permissions';
+      process.requiresPermissionModeRestart = mode => full !== (mode === 'dangerously-skip-permissions');
+    }
     process.loadedSkillNames = (
       options.managedCodexExtensions?.skills ??
       options.dshExtensions?.skills ??
@@ -422,7 +428,7 @@ class FakeRuntime implements AgentRuntime {
         this.playTurn(options.initialTurn.message);
       }
     };
-    if (this.type === 'dsh') initialize();
+    if (this.type === 'dsh' || this.type === 'antigravity') initialize();
     else this.defer(initialize);
     return process;
   }
@@ -1104,7 +1110,12 @@ async function waitFor(
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+const initialProxyEnv = { ...process.env };
 function restoreEnv(): void {
+  for (const key of PROXY_ENV_KEYS) {
+    if (initialProxyEnv[key] === undefined) delete process.env[key];
+    else process.env[key] = initialProxyEnv[key];
+  }
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
   if (previousUserProfile === undefined) delete process.env.USERPROFILE;
@@ -4953,10 +4964,7 @@ describe('external SessionEngine with fake runtime', () => {
     });
 
     const update = harness.externalSession.handleExternalProxyConfigChange({
-      oldManagedProviderKey: 'managed-proxy-old',
-      newManagedProviderKey: 'managed-proxy-new',
-      oldProcessEnvKey: 'process-proxy-old',
-      newProcessEnvKey: 'process-proxy-new',
+      enabled: true, host: '127.0.0.1', port: 17865, scope: { mode: 'all' },
     });
     await waitFor(
       () => harness.runtime.isStopAwaitingRelease(),
@@ -10388,6 +10396,24 @@ describe('external SessionEngine with fake runtime', () => {
   });
 
 
+  it('only replaces a system Codex process when its own proxy selection changes', async () => {
+    const harness = await createHarness([], { runtimeType: 'codex', runtimeSource: 'system-cli' });
+    const update = (generalRequests: boolean, runtimeIds: string[]) =>
+      harness.engine.updateProxyConfig({
+        enabled: true, protocol: 'http', host: '127.0.0.1', port: 17866,
+        scope: { mode: 'custom', generalRequests, providerIds: ['codex-sub'], runtimeIds },
+      });
+    await update(false, []);
+    await harness.externalSession.prewarmExternalSession({
+      sessionId: 'system-codex-proxy', workspacePath: join(harness.home, 'workspace'),
+      scenario: { type: 'desktop' },
+    });
+    await expect(update(true, ['antigravity'])).resolves.toMatchObject({ skipped: 'unchanged' });
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(true);
+    await expect(update(true, ['antigravity', 'codex'])).resolves.toEqual({ success: true });
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(false);
+  });
+
   it.each(['codex', 'dsh'] as const)(
     'applies general proxy changes to %s according to its owner with terminal envPolicy saved',
     async (runtimeType) => {
@@ -10439,10 +10465,7 @@ describe('external SessionEngine with fake runtime', () => {
 
       const result =
         await harness.externalSession.handleExternalProxyConfigChange({
-          oldManagedProviderKey: 'provider',
-          newManagedProviderKey: 'provider',
-          oldProcessEnvKey: 'general-old',
-          newProcessEnvKey: 'general-new',
+          enabled: true, host: '127.0.0.1', port: 17868, scope: { mode: 'all' },
         });
       expect(result).toEqual(
         runtimeType === 'dsh'
@@ -10470,6 +10493,7 @@ describe('external SessionEngine with fake runtime', () => {
         ],
         { runtimeType: 'dsh' },
       );
+      await harness.externalSession.handleExternalProxyConfigChange({ enabled: false });
       const sessionId = 'session-dsh-proxy-boundary';
       const workspacePath = join(harness.home, 'workspace');
       const initial = await harness.engine.sendDesktopMessage({
@@ -10488,12 +10512,7 @@ describe('external SessionEngine with fake runtime', () => {
         'active DSH turn',
       );
 
-      const change = {
-        oldManagedProviderKey: 'provider',
-        newManagedProviderKey: 'provider',
-        oldProcessEnvKey: 'A',
-        newProcessEnvKey: 'B',
-      };
+      const change = { enabled: true, host: '127.0.0.1', port: 17867, scope: { mode: 'all' } };
       await expect(
         harness.externalSession.handleExternalProxyConfigChange(change),
       ).resolves.toEqual({ success: true });
@@ -10501,9 +10520,7 @@ describe('external SessionEngine with fake runtime', () => {
       if (revert) {
         await expect(
           harness.externalSession.handleExternalProxyConfigChange({
-            ...change,
-            oldProcessEnvKey: 'B',
-            newProcessEnvKey: 'A',
+            enabled: false,
           }),
         ).resolves.toEqual({ success: true, skipped: 'unchanged-after-defer' });
       }
@@ -10596,4 +10613,106 @@ describe('external SessionEngine with fake runtime', () => {
       broadcastEvents.some((event) => event.event === 'chat:agent-error'),
     ).toBe(false);
   });
+  it('resumes the same ACP thread on entry to and exit from full access', async () => {
+    const harness = await createHarness([], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-permission-switch';
+    const send = async (permissionMode: string) => {
+      const result = await harness.engine.sendDesktopMessage({
+        ...desktopRequest(sessionId, join(harness.home, 'workspace'), 'hello'), permissionMode,
+      });
+      await expect(result.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.effectivePermissionMode).toBe(permissionMode);
+    };
+    await send('accept-edits');
+    const native = harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId;
+    expect(native).toMatch(/^fake-thread-/);
+    await send('auto');
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined]);
+    await harness.externalSession.updateExternalRuntimeConfig({ permissionMode: 'dangerously-skip-permissions' }, { source: 'desktop' });
+    await send('dangerously-skip-permissions');
+    // A per-turn selection alone must also revoke the old launch flag.
+    await send('accept-edits');
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined, native, native]);
+  });
+
+  it('finishes an in-flight full-access turn before applying a queued downgrade', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'first', completeDelayMs: 180 }], { runtimeType: 'antigravity' });
+    const request = (text: string) => desktopRequest('agy-busy-access', join(harness.home, 'workspace'), text);
+    const initial = await harness.engine.sendDesktopMessage({ ...request('first'), permissionMode: 'dangerously-skip-permissions' });
+    await expect(initial.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+    const change = await harness.externalSession.updateExternalRuntimeConfig({ permissionMode: 'auto' }, { source: 'desktop' });
+    expect(change.status).toBe('queued');
+    expect(harness.externalSession.hasExternalRuntimeProcess()).toBe(true);
+    const next = await harness.engine.sendDesktopMessage({ ...request('second'), permissionMode: 'auto' });
+    await expect(next.dispatchAcceptance).resolves.toMatchObject({ accepted: true });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    expect(harness.runtime.sentMessages).toEqual(['first', 'second']);
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined, 'fake-thread-1']);
+    expect(harness.runtime.effectivePermissionMode).toBe('auto');
+  });
+
+  it.each(['valid', 'missing'] as const)('reopens an ACP chat with a %s persisted native binding', async binding => {
+    const harness = await createHarness([{ kind: 'success', text: 'first' }, { kind: 'success', text: 'resumed' }], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-deferred-birth';
+    const workspacePath = join(harness.home, 'workspace');
+    const send = (text: string) => harness.engine.sendDesktopMessage({
+      ...desktopRequest(sessionId, workspacePath, text), permissionMode: 'default',
+    });
+    await send('hello');
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    const native = harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId;
+    expect(native).toMatch(/^fake-thread-/);
+    await harness.externalSession.stopExternalSession();
+    if (binding === 'missing') await harness.sessionStore.updateSessionMetadata(sessionId, { runtimeSessionId: '' });
+    await harness.sessionStore.releaseSessionTranscriptForBinding(sessionId);
+    harness.externalSession.__resetExternalSessionForTests();
+    expect(harness.sessionStore.getActiveSessionTranscript(sessionId)).toBeUndefined();
+    await expect(harness.externalSession.restoreExternalSessionState(sessionId, workspacePath, { type: 'desktop' })).resolves.toEqual({ success: true });
+    const next = await send('continue');
+    if (binding === 'missing') {
+      await expect(next.dispatchAcceptance).resolves.toMatchObject({ accepted: false, error: expect.stringContaining('绑定缺失') });
+      expect(harness.runtime.startSessionResumeIds).toEqual([undefined]);
+      expect((await harness.sessionStore.getSessionData(sessionId))?.messages).toHaveLength(2);
+    } else {
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.startSessionResumeIds).toEqual([undefined, native]);
+    }
+  });
+  it('retains raw Antigravity MCP selection across a globally filtered desktop push', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'ready' }], { runtimeType: 'antigravity' });
+    await harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-mcp-raw', join(harness.home, 'workspace'), 'hello'), permissionMode: 'default',
+    });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    expect((await harness.engine.updateMcpServers([], ['temporarily-disabled'])).success).toBe(true);
+    expect(harness.externalSession.getProductExtensionConfigSnapshot().mcpServerIds).toEqual(['temporarily-disabled']);
+    expect((await harness.engine.updateMcpServers([], [])).success).toBe(true);
+    expect(harness.externalSession.getProductExtensionConfigSnapshot().mcpServerIds).toEqual([]);
+  });
+  it.each(['stop', 'force'] as const)('applies the desktop %s queue contract to Antigravity', async action => {
+    const harness = await createHarness([
+      { kind: 'silent' }, { kind: 'success', text: 'C done' }, { kind: 'success', text: 'B done' },
+    ], { runtimeType: 'antigravity', forceInterrupt: true });
+    const send = (text: string) => harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-queue', join(harness.home, 'workspace'), text),
+      permissionMode: 'default',
+    });
+    const first = await send('A');
+    await expect(first.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    const b = await send('B');
+    const c = await send('C');
+    expect(harness.engine.getQueueStatus().map(item => item.messagePreview)).toEqual(['B', 'C']);
+    if (action === 'stop') {
+      expect((await harness.engine.stopTurn()).success).toBe(true);
+      expect(harness.runtime.sentMessages).toEqual(['A']);
+    } else {
+      expect(await harness.engine.forceQueuedMessage(c.queueId!)).toBe(true);
+      await Promise.all([b.dispatchAcceptance, c.dispatchAcceptance]);
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+      expect(harness.runtime.sentMessages).toEqual(['A', 'C', 'B']);
+    }
+    expect(harness.engine.getQueueStatus()).toEqual([]);
+  });
+
 });

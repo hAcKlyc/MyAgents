@@ -1773,28 +1773,47 @@ export async function migratePendingSessionIdentity(
  */
 export async function getSessionData(sessionId: string): Promise<SessionData | null> {
     const metadata = getSessionMetadata(sessionId);
-    if (!metadata) {
-        return null;
-    }
-
-    return getSessionDataFromMetadata(metadata);
+    return metadata ? getSessionDataFromMetadata(metadata) : null;
 }
 
-/**
- * Get full session data when the caller already owns the authoritative
- * metadata row. Bulk readers must use this path instead of looking the same
- * row up in sessions.json again for every session.
- */
-export async function getSessionDataFromMetadata(metadata: SessionMetadata): Promise<SessionData> {
-    const sessionId = metadata.id;
+type SessionReadSource = {
+    metadata: Omit<SessionData, 'messages'>;
+    rows: { projection: TranscriptProjection; validBytes?: number } | { messages: SessionMessage[] };
+};
 
-    const active = activeTranscripts.get(sessionId);
-    if (active) return {
-        ...active.metadata, messages: transcriptMessages(active.writer.projection),
-        transcriptTurns: [...active.writer.projection.turns.values()],
-        transcriptSaveStatus: active.writer.status,
-        ...(active.writer.status.reason === 'invalid-history' ? { transcriptRecovery: 'unavailable' as const } : {}),
+function snapshotActiveReadSource(active: SessionTranscript): SessionReadSource {
+    const { projection, status } = active.writer;
+    return {
+        metadata: { ...active.metadata, transcriptTurns: [...projection.turns.values()],
+            transcriptSaveStatus: status,
+            ...(status.reason === 'invalid-history' ? { transcriptRecovery: 'unavailable' } : {}) },
+        rows: { projection },
     };
+}
+
+/** Finish conversion synchronously while rows, turns and writer status share one revision. */
+export async function getSessionDataFromMetadata(metadata: SessionMetadata): Promise<SessionData> {
+    const active = getActiveSessionTranscript(metadata.id);
+    const source = active ? snapshotActiveReadSource(active) : await readStoredSessionSource(metadata);
+    const messages = 'projection' in source.rows ? transcriptMessages(source.rows.projection) : source.rows.messages;
+    return { ...source.metadata, messages };
+}
+
+/** Flush the runtime overlay in the caller, then read its writer in the same synchronous turn. */
+export async function withSessionReadSource<T>(sessionId: string,
+    read: (format: number | undefined, snapshot: () => SessionReadSource | null) => T,
+): Promise<T> {
+    const metadata = getSessionMetadata(sessionId);
+    if (!metadata) return read(undefined, () => null);
+    const active = getActiveSessionTranscript(sessionId);
+    if (active) return read(2, () => snapshotActiveReadSource(active));
+    const stored = await readStoredSessionSource(metadata);
+    const attached = getActiveSessionTranscript(sessionId);
+    return attached ? read(2, () => snapshotActiveReadSource(attached)) : read(stored.metadata.transcriptFormat, () => stored);
+}
+
+async function readStoredSessionSource(metadata: SessionMetadata): Promise<SessionReadSource> {
+    const sessionId = metadata.id;
     let format: Awaited<ReturnType<typeof sessionTranscriptFormat>>;
     try {
         format = await sessionTranscriptFormat(metadata, sessionId);
@@ -1803,19 +1822,20 @@ export async function getSessionDataFromMetadata(metadata: SessionMetadata): Pro
         // native binding. Expose an unavailable history without falling back
         // to a legacy file or making the REST shell disable conversation.
         console.warn(`[SessionStore] History format unavailable for ${sessionId}:`, error);
-        return { ...metadata, messages: [], transcriptRecovery: 'unavailable' };
+        return { metadata: { ...metadata, transcriptRecovery: 'unavailable' }, rows: { messages: [] } };
     }
     if (format === 'v2') {
         try {
             const decoded = await readTranscriptFile(getV2SessionFilePath(sessionId), sessionId);
             // A file reader cannot infer whether another Sidecar still owns execution.
-            const messages = transcriptMessages(decoded.projection);
-            return { ...metadata, messages, transcriptTurns: [...decoded.projection.turns.values()],
-                ...(decoded.tail === 'invalid' ? { transcriptRecovery: 'incomplete' as const } : {}),
+            return {
+                metadata: { ...metadata, transcriptTurns: [...decoded.projection.turns.values()],
+                    ...(decoded.tail === 'invalid' ? { transcriptRecovery: 'incomplete' } : {}) },
+                rows: { projection: decoded.projection, validBytes: decoded.validBytes },
             };
         } catch (error) {
             console.warn(`[SessionStore] V2 history unavailable for ${sessionId}:`, error);
-            return { ...metadata, messages: [], transcriptRecovery: 'unavailable' };
+            return { metadata: { ...metadata, transcriptRecovery: 'unavailable' }, rows: { messages: [] } };
         }
     }
 
@@ -1833,10 +1853,7 @@ export async function getSessionDataFromMetadata(metadata: SessionMetadata): Pro
         messages = migrateToJsonl(sessionId);
     }
 
-    return {
-        ...metadata,
-        messages,
-    };
+    return { metadata, rows: { messages } };
 }
 
 /**

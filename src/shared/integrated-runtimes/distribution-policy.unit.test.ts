@@ -12,7 +12,7 @@ describe("Agent Runtime distribution policy", () => {
     expect(AGENT_RUNTIME_DISTRIBUTION_POLICY).toEqual({
       schemaVersion: 1,
       allowedIntegratedRuntimes: ["claude-agent-sdk", "dsh"],
-      allowedExternalRuntimes: ["claude-code", "codex"],
+      allowedExternalRuntimes: ["claude-code", "codex", "antigravity"],
       defaultIntegratedRuntime: "claude-agent-sdk",
       selectorAvailability: "always",
     });

@@ -1,3 +1,4 @@
+import { GroupedModelList, providerModelGroups } from '@/components/GroupedModelList';
 import type { AgentConfigMutation } from '../../../shared/agentConfigMutation';
 // WorkspaceBasicsSection — workspace name, icon, model, permission, MCP tools
 // AI config (model/provider/permission/mcp) reads from AgentConfig (source of truth).
@@ -25,7 +26,7 @@ import RuntimeSelector from '../RuntimeSelector';
 import { PermissionModeIcon, PermissionModeMenuContent, type PermissionModeMenuItem } from '../PermissionModeMenu';
 import { Popover } from '../ui/Popover';
 import type { RuntimeType, RuntimeDetections, RuntimeConfig } from '../../../shared/types/runtime';
-import { getRuntimePermissionModes, isAgentRuntimeSelectorAvailable, resolveEffectiveRuntime } from '../../../shared/types/runtime';
+import { getRuntimePermissionModes, isAgentRuntimeSelectorAvailable, resolveAgentRuntimeSelection, resolveEffectiveRuntime } from '../../../shared/types/runtime';
 import { agentUsesManagedCodexProvider, toProviderExecutionIntent } from '../../../shared/providerExecution';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '@/components/Toast';
@@ -82,27 +83,22 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
   const [runtimeDetections, setRuntimeDetections] = useState<RuntimeDetections>({
     'builtin': { installed: true },
     'dsh': { installed: false },
+    antigravity: { installed: false },
     'claude-code': { installed: false },
     'codex': { installed: false },
   });
   // Unset Agents follow the root default; explicit choices remain authoritative.
   const agentRuntimeConfig = agent?.runtimeConfig as RuntimeConfig | undefined;
-  const currentRuntime: RuntimeType = resolveEffectiveRuntime(
-    agent?.runtime,
-    agent?.runtimePreference,
-    agent?.runtimeConfig?.source,
-    agent?.providerId,
-    undefined,
-    config.defaultIntegratedRuntime,
-  );
+  const selectedRuntime = resolveAgentRuntimeSelection(agent, config.defaultIntegratedRuntime);
+  const usesManagedCodexProvider = agentUsesManagedCodexProvider(agent);
+  const effectiveProviderId = agent?.providerId ?? project?.providerId;
+  const currentRuntime = resolveEffectiveRuntime(selectedRuntime, undefined, undefined, effectiveProviderId);
   const runtimeSelectorAvailable = isAgentRuntimeSelectorAvailable();
-  const usesManagedCodexProvider = currentRuntime === 'builtin'
-    && agentUsesManagedCodexProvider(agent);
-  const usesExternalCliConfiguration = currentRuntime !== 'builtin' && currentRuntime !== 'dsh';
+  const usesExternalCliConfiguration = selectedRuntime !== 'builtin' && selectedRuntime !== 'dsh';
   const usesProductConfiguration = !usesExternalCliConfiguration;
   const availableProviders = useMemo(
-    () => projectProvidersForRuntime(credentialedProviders, currentRuntime),
-    [credentialedProviders, currentRuntime],
+    () => projectProvidersForRuntime(credentialedProviders, selectedRuntime, effectiveProviderId),
+    [credentialedProviders, selectedRuntime, effectiveProviderId],
   );
 
   // Sync name when canonical name changes externally
@@ -138,7 +134,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
       // funneling through this single helper.
       await patchAgentConfig(agent.id, { runtime });
       refreshConfig();
-      const label = runtime === 'claude-code' ? 'Claude Code'
+      const label = runtime === 'antigravity' ? 'Antigravity CLI' : runtime === 'claude-code' ? 'Claude Code'
         : runtime === 'dsh' ? 'DSH'
         : runtime === 'codex' ? 'Codex'
         : 'MyAgents';
@@ -290,7 +286,6 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
   // "⚠ 暂不可用" hint when the saved provider fails `isProviderAvailable`.
   // This is cheaper than an automatic rewrite and keeps persistence as
   // the single source of truth for what was actually saved.
-  const effectiveProviderId = agent?.providerId ?? project?.providerId;
   const effectiveModel = agent?.model ?? project?.model;
   const selectedProvider = providers.find(p => p.id === effectiveProviderId);
   const isSelectedProviderAvailable = selectedProvider
@@ -408,7 +403,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
             <label className="w-16 shrink-0 text-sm text-[var(--ink-muted)]">{t('agentSettings.basics.runtime')}</label>
             <div className="min-w-0 flex-1">
               <RuntimeSelector
-                value={currentRuntime}
+                value={selectedRuntime}
                 detections={runtimeDetections}
                 onChange={handleRuntimeChange}
                 variant="panel"
@@ -418,12 +413,12 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
 
           {/* External CLI runtime notice */}
           {usesExternalCliConfiguration && (() => {
-            const runtimeLabel = currentRuntime === 'claude-code' ? 'Claude Code'
+            const runtimeLabel = currentRuntime === 'antigravity' ? 'Antigravity CLI' : currentRuntime === 'claude-code' ? 'Claude Code'
               : currentRuntime === 'codex' ? 'Codex'
               : currentRuntime;
             return (
               <p className="rounded-lg bg-[var(--accent-warm-subtle)] px-3.5 py-2.5 text-xs leading-relaxed text-[var(--ink-muted)]">
-                {t('agentSettings.basics.externalRuntimeNotice', { runtime: runtimeLabel })}
+                {t(currentRuntime === 'antigravity' ? 'agentSettings.basics.antigravityNotice' : 'agentSettings.basics.externalRuntimeNotice', { runtime: runtimeLabel })}
               </p>
             );
           })()}
@@ -519,7 +514,7 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
           onClose={() => setOpenPopup(null)}
           anchorRef={modelButtonRef}
           placement="bottom-start"
-          className="max-h-[300px] w-[320px] overflow-y-auto overscroll-contain rounded-xl p-2"
+          className="flex w-[320px] max-w-[calc(100vw-16px)] flex-col rounded-xl"
         >
           {availableProviders.length === 0 ? (
             <div className="px-3 py-3">
@@ -535,24 +530,9 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
               </button>
             </div>
           ) : (
-            availableProviders.map(provider => (
-              <div key={provider.id} className="mb-1">
-                <div className="px-2 py-1 text-xs font-medium text-[var(--ink-muted)]">{provider.name}</div>
-                {provider.models?.map(model => (
-                  <button
-                    key={`${provider.id}:${model.model}`}
-                    className={`flex w-full items-center rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
-                      effectiveProviderId === provider.id && effectiveModel === model.model
-                        ? 'bg-[var(--accent-warm-muted)] text-[var(--accent-warm)]'
-                        : 'text-[var(--ink)] hover:bg-[var(--hover-bg)]'
-                    }`}
-                    onClick={() => handleModelSelect(provider.id, model.model)}
-                  >
-                    {model.modelName}
-                  </button>
-                ))}
-              </div>
-            ))
+            <GroupedModelList onDismiss={() => setOpenPopup(null)}
+              groups={providerModelGroups(availableProviders, handleModelSelect)}
+              selectedGroupId={effectiveProviderId ?? undefined} selectedModelId={effectiveModel ?? undefined} />
           )}
         </Popover>
       </div>
@@ -641,8 +621,8 @@ export default function WorkspaceBasicsSection({ project, agent, agentDir }: Wor
       </div>
       )}
 
-      {/* Product MCP selection is shared by Builtin and DSH. */}
-      {usesProductConfiguration && (
+      {/* Antigravity accepts the workspace selection at native Session creation. */}
+      {(usesProductConfiguration || currentRuntime === 'antigravity') && (
       <div className="relative flex items-center gap-3">
         <label className="w-16 shrink-0 text-sm text-[var(--ink-muted)]">{t('agentSettings.basics.tools')}</label>
         <button

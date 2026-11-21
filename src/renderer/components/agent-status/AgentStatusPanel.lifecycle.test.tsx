@@ -18,6 +18,7 @@ const panelHarness = vi.hoisted(() => ({
 vi.mock('@/context/TabContext', () => ({
   useTabStateOptional: () => ({
     messages: panelHarness.messages,
+    historyMessages: panelHarness.streamingMessage ? panelHarness.messages.filter(row => row !== panelHarness.streamingMessage) : panelHarness.messages,
     streamingMessage: panelHarness.streamingMessage,
     sessionState: panelHarness.sessionState,
     agentPlanTodos: panelHarness.agentPlanTodos,

@@ -24,7 +24,7 @@ Session 不是单一对象，而是同一产品会话在不同生命周期阶段
 每个 Product Session 有稳定的 `SessionMetadata.id`。它拥有历史、Tab/Sidecar scope、workspace、配置快照和产品级状态。Runtime 还可以拥有独立执行身份：
 
 - builtin 使用 `sdkSessionId` 作为 Claude Agent SDK 的 create/resume candidate；
-- DSH、Codex、Claude Code 使用 `runtimeSessionId`；
+- DSH、Codex、Claude Code 和 Antigravity 使用 `runtimeSessionId`；
 - Rewind、Fork 或 provider history 边界可以替换执行身份，但不得偷偷替换 Product Session identity。
 
 普通新会话中两个身份可能相同，这只是初始化结果，不是可依赖的不变量。读取和写入 metadata 时使用 `src/server/types/session.ts` 的当前类型，不在文档中复制完整字段表。
@@ -176,7 +176,7 @@ Builtin 用户消息的 `sdkInputUuid` 只持有提交关联，不是恢复锚�
 | Fork | 创建新 identity | 先建立精确 native 分支，再发布完整产品历史与独立附件 |
 | Retry | 保持原 identity | 同一 mutation 内先 Rewind，再通过普通 desktop admission 接纳原输入；接纳成功不等于 turn 成功 |
 
-Builtin Rewind 以保留前缀末条 native 内容的精确 chain UUID 为边界，包括 user。只可越过明确标记的独立产品诊断（assistant、`messageKind: diagnostic`、无 native UUID/anchor），产品记录仍保留；第一条真实或未分类内容缺锚点时在文件副作用前失败，不能再向前找 UUID。诊断标记与 user 或 native anchor 冲突时拒绝。native 前缀为空（产品前缀为空或全为明确诊断）才分配新的 SDK execution identity。UUID 出现在 Product transcript、原始 SDK JSONL 或 SDK `getSessionMessages()` 的单链投影中，都不能证明它位于 native runtime 当前可恢复分支；同样，缺席该投影也不能证明它无效，因为投影按物理记录选择 leaf，而 CLI resume 使用 durable selected head。Query 启动是 native resumability 的唯一裁决；拒绝时保留显式边界并报告失败，不能清除锚点、恢复更长历史或自动重放。拒绝 `No message found with message.uuid` 且不能恢复推导锚点时展示恢复提示和 toast，保持用户消息及 Product 历史。边界通过既有 mutation intent 与 `sdkResumeSessionAt` metadata 一起提交；新一轮成功后先正常结束该 Query，让 native runtime 发布新的 selected head，再解除边界并发布 Product terminal，配置重启只能发生在此后。已有坏锚点通过从更早、仍可由 native runtime 接受的消息重新 Rewind / Retry 覆盖恢复。文件恢复仍使用现有 Query 的 `rewindFiles`；standalone SDK fork 不携带 undo 历史，不能用它替换 builtin Rewind。旧记录的 `reloadAnchor` 只在加载时推导，优先级低于显式回溯边界；它不是另一份持久化状态或 Session identity。若 SDK 在零模型轮次明确拒绝本次推导的 UUID，清掉这个临时锚点并以 bare resume 重试，保留 Product 历史和当前输入；旧版未持久化的回溯边界在这种失败后可能恢复较长的 native 历史，这是宽松兼容策略，不适用于显式 `sdkResumeSessionAt` 或 fork 边界。
+Builtin Rewind 以保留前缀末条 native 内容的精确 chain UUID 为边界，包括 user。只可越过明确标记的独立产品诊断（assistant、`messageKind: diagnostic`、无 native UUID/anchor），产品记录仍保留；第一条真实或未分类内容缺锚点时在文件副作用前失败，不能再向前找 UUID。诊断标记与 user 或 native anchor 冲突时拒绝。native 前缀为空（产品前缀为空或全为明确诊断）才分配新的 SDK execution identity。UUID 出现在 Product transcript、原始 SDK JSONL 或 SDK `getSessionMessages()` 的单链投影中，都不能证明它位于 native runtime 当前可恢复分支；同样，缺席该投影也不能证明它无效，因为投影按物理记录选择 leaf，而 CLI resume 使用 durable selected head。Query 启动是 native resumability 的唯一裁决；拒绝时保留显式边界并报告失败，不能清除锚点、恢复更长历史或自动重放。拒绝 `No message found with message.uuid` 且不能恢复推导锚点时展示恢复提示和 toast，保持用户消息及 Product 历史。边界通过既有 mutation intent 与 `sdkResumeSessionAt` metadata 一起提交；新一轮成功后先正常结束该 Query，让 native runtime 发布新的 selected head，再解除边界并发布 Product terminal，配置重启只能发生在此后。已有坏锚点通过从更早、仍可由 native runtime 接受的消息重新 Rewind / Retry 覆盖恢复。文件恢复仍使用现有 Query 的 `rewindFiles`；standalone SDK fork 只重映射对话 UUID，继承的用户消息没有文件检查点，分支内新提交的用户消息仍可使用本分支检查点。分支不携带源会话的 undo 历史，不能用它替换 builtin Rewind。旧记录的 `reloadAnchor` 只在加载时推导，优先级低于显式回溯边界；它不是另一份持久化状态或 Session identity。若 SDK 在零模型轮次明确拒绝本次推导的 UUID，清掉这个临时锚点并以 bare resume 重试，保留 Product 历史和当前输入；旧版未持久化的回溯边界在这种失败后可能恢复较长的 native 历史，这是宽松兼容策略，不适用于显式 `sdkResumeSessionAt` 或 fork 边界。
 
 新 Fork 统一先实体化 native history，builtin 同时映射 SDK UUID；完整执行配置复用 `snapshotForForkedSession`，不手工挑字段。Fork 不继承 source 的 Agent origin、Goal、置顶或 Tag。旧 lazy fork 通过记录的 binding/source 解析真实 native 来源，允许尚未启动的旧分支继续 fork；新请求不再生成 lazy fork 或通过设置切回旧路径。prepared 发布、附件复制和清理见 [V2 transcript](session_transcript_v2.md#生命周期与显式操作)。
 
@@ -225,6 +225,8 @@ Goal 的详细产品行为和 Task/Goal provider routing 见 [`task_center.md`](
 backend-created target 只有在 Runtime dispatch claim 成功后才发布 prepared Session；ACK 不明时保留 identity，不能自动重试导致重复执行。`session start/send` 的每一层外部 timeout 都大于内层 owner/ACK timeout；transport error、成功状态但不可解析的 ACK 和外层超时统一是 `admission_unconfirmed`，只有明确拒绝才是 definitive failure。
 
 本地与跨设备 fresh Inbox 共用上述出生入口。目标 Sidecar 启动时 metadata 尚不存在；出生完成后，DSH/外部 adapter 必须在 Inbox admission 从已写入的 owned Session snapshot 捕获权限、模型与推理配置，不能沿用 bootstrap 的空 desired state。已有 owned Session 的缺失字段仍按产品默认解析，不重新继承 Agent 当前设置。DSH 原生 Plan 状态只更新 Runtime 的 Plan owner，不投影为权限变化或写回 Session permission snapshot。
+
+Builtin SDK 创建 Query 时，若尚未收到显式 MCP 配置，则按目标 Session 的 metadata 解析名单并应用当前全局开关。这样后台 Inbox 首轮也能使用会话选择的工具。显式空名单保持为空，缺少快照标记的旧会话沿用原有配置解析规则。
 
 Session Inbox 与用户手动 query 的投递时机独立：通用 `chatQueueResponseMode` 只控制手动 query；builtin / DSH / Codex 的 Inbox 固定 realtime。原 Runtime queue 负责接纳与派发，native receipt 决定消费与上屏；排队 HTTP 回执不代表模型已感知。A 运行、手动 B 等下一轮时，Inbox C 可在 A 的安全消费点进入 A，B 仍等待 A terminal。已消费的多个请求由原 turn owner 保存关联，在 terminal 前同步取走快照，分别返回同轮结果；未消费输入不能借用 A 的结果，reply / watch notification 也不触发自动回复。
 

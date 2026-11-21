@@ -436,7 +436,7 @@ Commands:
   session   Discover, start, message, and observe Agent execution contexts
   widget    Generative UI widget design guidelines (readme)
   plugin    Manage OpenClaw channel plugins (IM npm-packaged adapters)
-  cc-plugin Manage Claude plugins (PRD 0.2.17 — Anthropic plugin protocol)
+  cc-plugin Manage Claude plugin installation and global availability
   config    Read/write application config
   status    Show app running state
   version   Show app version
@@ -548,6 +548,7 @@ Examples:
   myagents cc-plugin install anthropics/example-plugin
   myagents cc-plugin install file:///path/to/dev-plugin
   myagents cc-plugin enable my-plugin
+  myagents agent set <agentId> enabledPluginIds '["my-plugin@local"]'
   myagents version
   myagents reload
 
@@ -2520,21 +2521,20 @@ function printCcPluginList(plugins: Array<Record<string, unknown>>): void {
     console.log('No Claude plugins installed.');
     return;
   }
+  const idWidth = plugins.reduce((width, plugin) => Math.max(width, String(plugin.id ?? '?').length + 2), 24);
   const pad = (s: string, n: number) => s.padEnd(n);
-  console.log(pad('STATUS', 10) + pad('NAME', 24) + pad('VERSION', 12) + pad('SOURCE', 24) + 'DESCRIPTION');
+  console.log(pad('ID', idWidth) + pad('GLOBAL', 10) + pad('INSTALL', 10) + pad('VERSION', 12) + pad('SOURCE', 24) + 'DESCRIPTION');
   for (const p of plugins) {
-    const enabled = p.enabled === true;
-    const status = p.status as string;
-    const statusLabel = status === 'ok'
-      ? (enabled ? '✓ enabled' : '· disabled')
-      : `! ${status}`;
-    const name = String(p.name ?? '?').slice(0, 22);
+    const id = String(p.id ?? '?');
+    const globalAvailability = p.enabled === true ? 'enabled' : 'disabled';
+    const status = String(p.status ?? 'unknown');
     const version = String(p.version ?? '?').slice(0, 10);
     const source = String(p.sourceUrl ?? '').slice(0, 22);
     const desc = String(p.description ?? '');
-    console.log(pad(statusLabel, 10) + pad(name, 24) + pad(version, 12) + pad(source, 24) + desc);
+    console.log(pad(id, idWidth) + pad(globalAvailability, 10) + pad(status, 10) + pad(version, 12) + pad(source, 24) + desc);
   }
   console.log(`\n${plugins.length} plugin(s) installed`);
+  console.log('Agent selection for future Sessions: myagents agent show <agentId>');
 }
 
 function printPluginList(plugins: Array<Record<string, unknown>>): void {

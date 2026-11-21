@@ -1374,7 +1374,7 @@ fn runtime_from_preference(
     match (preference.family.as_str(), preference.id.as_str()) {
         ("integrated", "claude-agent-sdk") => Ok(("builtin".to_string(), None)),
         ("integrated", "dsh") => Ok(("dsh".to_string(), Some("integrated".to_string()))),
-        ("external", runtime @ ("claude-code" | "codex")) => {
+        ("external", runtime @ ("claude-code" | "codex" | "antigravity")) => {
             Ok((runtime.to_string(), Some("system-cli".to_string())))
         }
         (family, id) => Err(format!("unsupported runtimePreference {family}/{id}")),
@@ -1481,6 +1481,7 @@ pub(crate) fn max_permission_for_runtime(runtime: Option<&str>) -> &'static str 
     match runtime {
         Some("dsh") => "full-autonomous",
         Some("claude-code") => "bypassPermissions",
+        Some("antigravity") => "auto",
         Some("codex") => "no-restrictions",
         _ => "fullAgency",
     }
@@ -2158,6 +2159,8 @@ mod tests {
             channel.to_im_config(&agent).permission_mode,
             "bypassPermissions"
         );
+        agent.runtime = Some("antigravity".to_string());
+        assert_eq!(channel.to_im_config(&agent).permission_mode, "auto");
     }
 
     #[test]

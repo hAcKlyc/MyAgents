@@ -93,6 +93,16 @@ describe('Workspace basics menus', () => {
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('writes the chosen workspace model through the Agent settings owner', async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceBasicsSection project={project} agent={agent} agentDir={project.path} />);
+    await user.click(screen.getByRole('button', { name: 'Test Provider / Test Model' }));
+    expect(mocks.patch).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole('button', { name: 'Test Model' }));
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('test-agent',
+      { providerId: 'test-provider', model: 'test-model' }, 'test-project', expect.anything()));
+  });
+
   it('switches between rows and keeps tools open for multiple selections until an outside click', async () => {
     const user = userEvent.setup();
     render(<WorkspaceBasicsSection project={project} agent={agent} agentDir={project.path} />);

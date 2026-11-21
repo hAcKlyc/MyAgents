@@ -55,6 +55,10 @@ interface CollectBudget {
 // ─── File reading helpers ───
 
 /** Read a single regular file if it exists, non-symlink, and within size cap. */
+function isInstructionDirectory(path: string): boolean {
+  try { return lstatSync(path).isDirectory(); } catch { return false; }
+}
+
 function readIfExists(filePath: string): WorkspaceInstruction | null {
   try {
     if (!existsSync(filePath)) return null;
@@ -105,6 +109,7 @@ function collectRuleFiles(
 
   let entries: Dirent[];
   try {
+    if (!isInstructionDirectory(dir)) return;
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
     return; // ENOENT / EACCES — silently skip
@@ -171,6 +176,7 @@ function collectRuleFiles(
  */
 function readClaudeRulesOnly(workspacePath: string): WorkspaceInstruction[] {
   const rules: WorkspaceInstruction[] = [];
+  if (!isInstructionDirectory(join(workspacePath, '.claude'))) return rules;
   const budget: CollectBudget = { totalBytes: 0, truncated: false };
   collectRuleFiles(join(workspacePath, '.claude', 'rules'), rules, budget);
   return rules;
@@ -209,6 +215,14 @@ function formatInstructions(instructions: WorkspaceInstruction[]): string {
  * CLAUDE.md itself is handled by Codex's native file discovery via
  * `-c 'project_doc_fallback_filenames=["CLAUDE.md"]'` CLI arg.
  */
+export function resolveAntigravityWorkspaceInstructions(workspacePath: string): string {
+  const names = isInstructionDirectory(join(workspacePath, '.claude')) ? ['CLAUDE.md', '.claude/CLAUDE.md'] : ['CLAUDE.md'];
+  const instructions = names
+    .map(name => readIfExists(join(workspacePath, name)))
+    .filter((entry): entry is WorkspaceInstruction => entry !== null);
+  return formatInstructions([...instructions, ...readClaudeRulesOnly(workspacePath)]);
+}
+
 export function resolveCodexWorkspaceInstructions(workspacePath: string): string {
   const rules = readClaudeRulesOnly(workspacePath);
   return formatInstructions(rules);
@@ -222,6 +236,7 @@ export function resolveDshWorkspaceSupplement(workspacePath: string): string {
   const maxBytes = 512 * 1024;
   const instructions: WorkspaceInstruction[] = [];
   const budget: CollectBudget = { totalBytes: 0, truncated: false };
+  if (!isInstructionDirectory(join(workspacePath, '.claude'))) return '';
   const companion = readIfExists(join(workspacePath, '.claude', 'CLAUDE.md'));
   if (companion) {
     const bytes = Buffer.byteLength(companion.content, 'utf8');

@@ -46,11 +46,25 @@ mod tests {
             scope: Some(proxy_config::ProxyScopeSettings::Custom {
                 general_requests: None,
                 provider_ids: vec!["anthropic-sub".into()],
+                runtime_ids: None,
             }),
         }));
 
         assert_eq!(payload["scope"]["generalRequests"], true);
         assert_eq!(payload["scope"]["providerIds"][0], "anthropic-sub");
+    }
+
+    #[test]
+    fn proxy_payload_preserves_runtime_only_selection() {
+        let settings = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "scope": { "mode": "custom", "generalRequests": false, "runtimeIds": ["codex"] }
+        }))
+        .unwrap();
+        let payload = proxy_payload_from_settings(Some(settings));
+        assert_eq!(payload["scope"]["runtimeIds"], serde_json::json!(["codex"]));
+        assert_eq!(payload["scope"]["generalRequests"], false);
+        assert_eq!(payload["scope"]["providerIds"], serde_json::json!([]));
     }
 
     #[test]
@@ -63,6 +77,7 @@ mod tests {
             scope: Some(proxy_config::ProxyScopeSettings::Custom {
                 general_requests: Some(false),
                 provider_ids: vec![],
+                runtime_ids: None,
             }),
         }));
 

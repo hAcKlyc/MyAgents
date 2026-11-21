@@ -99,6 +99,9 @@ pub enum ProxyScopeSettings {
         general_requests: Option<bool>,
         #[serde(default, rename = "providerIds")]
         provider_ids: Vec<String>,
+        // The Sidecar resolves absent legacy selections against generalRequests.
+        #[serde(default, rename = "runtimeIds", skip_serializing_if = "Option::is_none")]
+        runtime_ids: Option<Vec<String>>,
     },
 }
 
@@ -200,6 +203,7 @@ pub fn normalized_proxy_scope(settings: &ProxySettings) -> ProxyScopeSettings {
         Some(ProxyScopeSettings::Custom {
             general_requests,
             provider_ids,
+            runtime_ids,
         }) => {
             let mut seen = std::collections::HashSet::new();
             let mut cleaned = Vec::new();
@@ -210,7 +214,7 @@ pub fn normalized_proxy_scope(settings: &ProxySettings) -> ProxyScopeSettings {
                 }
                 cleaned.push(id.to_string());
             }
-            if cleaned.is_empty() && general_requests.is_none() {
+            if cleaned.is_empty() && general_requests.is_none() && runtime_ids.is_none() {
                 ulog_warn!(
                     "[proxy_config] Empty custom proxy scope found; falling back to all providers"
                 );
@@ -219,6 +223,7 @@ pub fn normalized_proxy_scope(settings: &ProxySettings) -> ProxyScopeSettings {
                 ProxyScopeSettings::Custom {
                     general_requests: Some(general_requests.unwrap_or(true)),
                     provider_ids: cleaned,
+                    runtime_ids: runtime_ids.clone(),
                 }
             }
         }
@@ -622,6 +627,7 @@ mod tests {
             scope: Some(ProxyScopeSettings::Custom {
                 general_requests: None,
                 provider_ids: vec!["codex-sub".to_string(), "deepseek".to_string()],
+                runtime_ids: None,
             }),
         };
 
@@ -655,6 +661,7 @@ mod tests {
             scope: Some(ProxyScopeSettings::Custom {
                 general_requests: None,
                 provider_ids: vec![],
+                runtime_ids: None,
             }),
         };
 
@@ -715,6 +722,7 @@ mod tests {
                 ProxyScopeSettings::Custom {
                     general_requests: Some(general_requests),
                     provider_ids: vec![],
+                    runtime_ids: None,
                 }
             );
             assert_eq!(

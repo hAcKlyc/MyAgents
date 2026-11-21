@@ -473,7 +473,7 @@ async function syncFloatingSidecarConfig(
         const mcpResp = await floatingProxyFetch(sessionId, '/api/mcp/set', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ servers: effectiveServers }),
+            body: JSON.stringify({ servers: effectiveServers, selectedIds: workspaceEnabled }),
         });
         if (!mcpResp.ok) throw new Error(`MCP sync failed: HTTP ${mcpResp.status}`);
 

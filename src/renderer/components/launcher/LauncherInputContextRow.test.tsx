@@ -51,6 +51,7 @@ describe('LauncherInputContextRow', () => {
         runtimeDetections={{
           builtin: { installed: true },
           dsh: { installed: false },
+          antigravity: { installed: false },
           'claude-code': { installed: false },
           codex: { installed: false },
         }}

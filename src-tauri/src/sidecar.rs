@@ -69,7 +69,7 @@ pub use legacy::{
     check_process_alive, ensure_sidecar_running, get_sidecar_status, restart_sidecar,
     start_sidecar, stop_sidecar,
 };
-#[allow(unused_imports)]
+#[cfg(test)]
 pub use manager::create_sidecar_manager;
 pub use manager::{
     create_sidecar_state, LegacySidecarConfig, ManagedSidecar, ManagedSidecarManager,
@@ -438,10 +438,6 @@ mod sidecar_process_role_tests {
             .any(|(key, _)| key == SESSION_DELETE_AUTHORITY_ENV));
     }
 }
-
-// Port file for CLI discovery — written when Global Sidecar starts,
-// read by `cli.rs` to know which port to connect to.
-const PORT_FILE_NAME: &str = "sidecar.port";
 
 // ===== Crashed Node Tracking =====
 // When a bundled Node.js crashes with STATUS_ACCESS_VIOLATION (0xC0000005) on Windows —

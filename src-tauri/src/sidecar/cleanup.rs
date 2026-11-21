@@ -1,24 +1,19 @@
 use super::*;
+use std::path::Path;
 
 // ===== Port File for CLI Discovery =====
 
-/// Write the Global Sidecar port to ~/.myagents/sidecar.port so the CLI can discover it.
-pub(super) fn write_global_port_file(port: u16) {
-    if let Some(home) = dirs::home_dir() {
-        let port_file = home.join(".myagents").join(PORT_FILE_NAME);
-        if let Err(e) = std::fs::write(&port_file, port.to_string()) {
-            ulog_warn!("[sidecar] Failed to write port file {:?}: {}", port_file, e);
-        } else {
-            ulog_info!("[sidecar] Wrote CLI port file: {:?} = {}", port_file, port);
-        }
+pub(super) fn write_global_port_file(port_file: &Path, port: u16) {
+    if let Err(e) = std::fs::write(port_file, port.to_string()) {
+        ulog_warn!("[sidecar] Failed to write port file {:?}: {}", port_file, e);
+    } else {
+        ulog_info!("[sidecar] Wrote CLI port file: {:?} = {}", port_file, port);
     }
 }
 
-/// Remove the port file (called on app exit / sidecar shutdown).
-pub(super) fn remove_global_port_file() {
-    if let Some(home) = dirs::home_dir() {
-        let port_file = home.join(".myagents").join(PORT_FILE_NAME);
-        let _ = std::fs::remove_file(&port_file);
+pub(super) fn remove_global_port_file(port_file: Option<&Path>) {
+    if let Some(path) = port_file {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -148,7 +143,7 @@ pub fn wait_for_startup_cleanup(timeout: Duration) -> Result<(), String> {
 /// heavy cleanup pass is spawned into a blocking worker. Removes the stale
 /// port file so a lingering CLI read doesn't see a dead port.
 pub fn cleanup_stale_sidecars_preamble() {
-    remove_global_port_file();
+    remove_global_port_file(crate::app_dirs::global_sidecar_port_file().as_deref());
 }
 
 /// Heavy cleanup pass — enumerate and kill stale sidecar/SDK/MCP

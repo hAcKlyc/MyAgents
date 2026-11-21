@@ -62,6 +62,24 @@ describe('SessionStore V2 ownership and compatibility', () => {
     expect((await store.getSessionData(metadata.id))?.messages[0].content).toBe('admitted');
   });
 
+  it('captures full history synchronously and reads paged metadata after flushing the live overlay', async () => {
+    const { metadata, active } = await create();
+    const add = (id: string) => active.writer.observe({ kind: 'message-create',
+      message: { id, role: 'user', content: id, timestamp: 't' } });
+    add('first');
+    const revision = active.writer.status.liveRevision;
+    const full = store.getSessionDataFromMetadata(metadata);
+    add('second');
+    expect(await full).toMatchObject({ messages: [{ id: 'first' }], transcriptSaveStatus: { liveRevision: revision } });
+    const page = await store.withSessionReadSource(metadata.id, (_, snapshot) => {
+      add('overlay');
+      const source = snapshot()!;
+      if (!('projection' in source.rows)) throw Error('Expected V2 projection');
+      return { last: [...source.rows.projection.messages.keys()].at(-1), revision: source.metadata.transcriptSaveStatus?.liveRevision };
+    });
+    expect(page).toEqual({ last: 'overlay', revision: active.writer.status.liveRevision });
+  });
+
   async function preparedBinding() {
     const binding = await import('../session-engine/product-session-binding');
     const source = await create({ id: 'pending-retiring' });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { McpServerDefinition } from '../../shared/config-types';
 
 export type McpAuthority = 'tab' | 'self-resolve';
@@ -59,4 +60,8 @@ export function shouldDeferLiveMcpMutation(params: {
     || params.turnInFlight
     || params.sdkCommandInFlight
     || params.backgroundTasksActive === true;
+}
+
+export function fingerprintSessionMcp(servers: readonly McpServerDefinition[]): string {
+  return createHash('sha256').update(mcpConfigFingerprint(servers)).digest('hex');
 }

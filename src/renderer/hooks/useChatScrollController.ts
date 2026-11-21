@@ -5,7 +5,10 @@ import type { RowLayoutChangeReason } from '@/context/ChatRowLayoutContext';
 import type { Message as MessageType } from '@/types/chat';
 import type { MainWindowPresentation } from '@/utils/mainWindowPresentation';
 
+import { captureReadingAnchor, readingAnchorDelta, type ChatReadingAnchor } from '@/utils/chatReadingAnchor';
+
 export interface ScrollAnchorSnapshot {
+  reading?: ChatReadingAnchor;
   messageId: string;
   offsetFromViewportTop: number;
   label: string;
@@ -41,6 +44,7 @@ export interface ChatScrollController {
 
 export interface UseChatScrollControllerOptions {
   messages: readonly MessageType[];
+  messageIndices?: ReadonlyMap<string, number>;
   isActive: boolean;
   windowPresentation?: MainWindowPresentation;
   sessionId?: string | null;
@@ -66,6 +70,7 @@ interface PendingAnchorRestore {
 }
 
 interface TrustedViewportAnchor {
+  correctedTop?: number;
   sessionId: string | null;
   anchor: ScrollAnchorSnapshot;
 }
@@ -125,6 +130,7 @@ function getToolHostMessageId(messages: readonly MessageType[], toolId: string):
 
 export function useChatScrollController({
   messages,
+  messageIndices,
   isActive,
   windowPresentation = DEFAULT_WINDOW_PRESENTATION,
   sessionId,
@@ -172,6 +178,8 @@ export function useChatScrollController({
   // navigation intent. New viewport input invalidates both parts.
   const navigationVersionRef = useRef(0);
   const continuitySnapshotRef = useRef<ViewportContinuitySnapshot | null>(null);
+  const sizeObserver = useRef<ResizeObserver | null>(null);
+  const observedRow = useRef<HTMLElement | null>(null);
   const lastTrustedAnchorRef = useRef<TrustedViewportAnchor | null>(null);
   const [recoveryFenceId, setRecoveryFenceId] = useState<number | null>(null);
   const isCurrentViewportAdmitted = useCallback(() => (
@@ -186,7 +194,8 @@ export function useChatScrollController({
       : null;
     const continuityId = continuity?.id ?? pending?.id ?? null;
     continuitySnapshotRef.current = null;
-    if (pending) pendingAnchorRef.current = null;
+    pendingAnchorRef.current = null;
+    lastTrustedAnchorRef.current = null;
     if (continuityId !== null) {
       setRecoveryFenceId(current => current === continuityId ? null : current);
     }
@@ -204,10 +213,11 @@ export function useChatScrollController({
   }, [cancelViewportNavigation, performPauseAutoScroll]);
 
   const messageIndexById = useMemo(() => {
+    if (messageIndices) return messageIndices;
     const map = new Map<string, number>();
     messages.forEach((message, index) => map.set(message.id, index));
     return map;
-  }, [messages]);
+  }, [messages, messageIndices]);
   const messageIndexByIdRef = useRef(messageIndexById);
   // eslint-disable-next-line react-hooks/refs
   messageIndexByIdRef.current = messageIndexById;
@@ -217,12 +227,18 @@ export function useChatScrollController({
     if (!scroller) return null;
     const scopes = getVisibleMessageScopes(scroller);
     if (scopes.length === 0) return null;
-    const scrollerTop = getScrollerRect(scroller).top;
-    const anchorEl = scopes.find(el => el.getBoundingClientRect().top >= scrollerTop - 1) ?? scopes[0];
+    const viewport = getScrollerRect(scroller);
+    const scrollerTop = viewport.top;
+    const crossing = scopes[0];
+    const crossingRect = crossing.getBoundingClientRect();
+    const reading = crossingRect.top < scrollerTop && crossingRect.height > viewport.height
+      ? captureReadingAnchor(crossing, viewport) : undefined;
+    const anchorEl = reading ? crossing : scopes.find(el => el.getBoundingClientRect().top >= scrollerTop - 1) ?? scopes[0];
     const messageId = anchorEl.getAttribute('data-message-id');
     if (!messageId) return null;
     return {
       messageId,
+      ...(reading && { reading }),
       offsetFromViewportTop: anchorEl.getBoundingClientRect().top - scrollerTop,
       label,
     };
@@ -235,13 +251,23 @@ export function useChatScrollController({
 
   const rememberTrustedAnchor = useCallback((label: string) => {
     if (!isCurrentViewportAdmitted() || followEnabledRef.current !== false) return;
+    const trusted = lastTrustedAnchorRef.current;
+    if (trusted?.anchor.reading && trusted.correctedTop === scrollerRef.current?.scrollTop &&
+        trusted.sessionId === sessionIdRef.current) return;
     const anchor = readAnchor(label);
     if (!anchor) return;
+    const scroller = scrollerRef.current;
+    const row = anchor.reading && scroller ? findMessageScope(scroller, anchor.messageId) : null;
+    if (row !== observedRow.current) {
+      if (observedRow.current) sizeObserver.current?.unobserve(observedRow.current);
+      if (row) sizeObserver.current?.observe(row);
+      observedRow.current = row;
+    }
     lastTrustedAnchorRef.current = {
       sessionId: sessionIdRef.current,
       anchor,
     };
-  }, [followEnabledRef, isCurrentViewportAdmitted, readAnchor]);
+  }, [followEnabledRef, isCurrentViewportAdmitted, readAnchor, scrollerRef]);
 
   const completePendingAnchor = useCallback((restoreIntent: PendingAnchorRestore) => {
     if (pendingAnchorRef.current === restoreIntent) {
@@ -290,11 +316,12 @@ export function useChatScrollController({
       if (!scope) return false;
       const scrollerTop = getScrollerRect(scroller).top;
       const nextOffset = scope.getBoundingClientRect().top - scrollerTop;
-      const delta = nextOffset - anchor.offsetFromViewportTop;
+      const internal = anchor.reading ? readingAnchorDelta(scope, anchor.reading, scrollerTop) : null;
+      const delta = internal ?? nextOffset - anchor.offsetFromViewportTop;
       // Even a zero offset completes the index-mounting transaction. Otherwise
       // a late size/smooth callback can replay its coarse start alignment.
       if (restoreIntent.mountRequested || Math.abs(delta) >= 1) {
-        virtuosoRef.current?.scrollBy({ top: delta, behavior: options?.behavior ?? 'auto' });
+        virtuosoRef.current?.scrollBy({ top: internal == null ? delta : Math.round(delta), behavior: options?.behavior ?? 'auto' });
       }
       return true;
     };
@@ -302,7 +329,7 @@ export function useChatScrollController({
     const mountedScope = findMessageScope(scroller, anchor.messageId);
     if (mountedScope) {
       if (adjustOffset()) {
-        lastTrustedAnchorRef.current = { sessionId: restoreSessionId, anchor };
+        lastTrustedAnchorRef.current = { sessionId: restoreSessionId, anchor, correctedTop: scroller.scrollTop };
         completePendingAnchor(restoreIntent);
       }
       return;
@@ -532,7 +559,9 @@ export function useChatScrollController({
     // The controller only compensates a reading anchor here.
     if (followEnabledRef.current) return;
     if (!messageIndexByIdRef.current.has(messageId)) return;
-    const anchor = captureAnchor(reason);
+    const trusted = lastTrustedAnchorRef.current;
+    const anchor = trusted?.sessionId === sessionIdRef.current && trusted.anchor.reading
+      ? trusted.anchor : captureAnchor(reason);
     if (!anchor) return;
     restoreAnchorAfterNextCommit(anchor, { behavior: 'auto' });
   }, [captureAnchor, followEnabledRef, isCurrentViewportAdmitted, pauseAutoScroll, restoreAnchorAfterNextCommit]);
@@ -550,15 +579,35 @@ export function useChatScrollController({
   const attachedScrollerRef = useRef<HTMLElement | null>(null);
   const attachScroller = useCallback((el: HTMLElement | Window | null) => {
     attachedScrollerRef.current?.removeEventListener('scroll', onViewportScroll);
+    sizeObserver.current?.disconnect();
+    observedRow.current = null;
     attachVirtuosoScroller(el);
     const next = el instanceof HTMLElement ? el : null;
     attachedScrollerRef.current = next;
     next?.addEventListener('scroll', onViewportScroll, { passive: true });
-  }, [attachVirtuosoScroller, onViewportScroll]);
+    if (next && typeof ResizeObserver !== 'undefined') {
+      let width = next.clientWidth;
+      const compensate = () => {
+        const trusted = lastTrustedAnchorRef.current;
+        if (trusted?.sessionId === sessionIdRef.current && trusted.anchor.reading && !followEnabledRef.current) {
+          const row = observedRow.current;
+          const delta = row && readingAnchorDelta(row, trusted.anchor.reading, next.getBoundingClientRect().top);
+          if (delta != null && Math.abs(delta) >= 1) restoreAnchorAfterNextCommit(trusted.anchor);
+        }
+      };
+      sizeObserver.current = new ResizeObserver(entries => {
+        if (next.clientWidth === width && !entries.some(entry => entry.target === observedRow.current)) return;
+        width = next.clientWidth;
+        compensate();
+      });
+      sizeObserver.current.observe(next);
+    }
+  }, [attachVirtuosoScroller, followEnabledRef, onViewportScroll, restoreAnchorAfterNextCommit]);
 
   useLayoutEffect(() => () => {
     navigationVersionRef.current += 1;
     attachedScrollerRef.current?.removeEventListener('scroll', onViewportScroll);
+    sizeObserver.current?.disconnect();
   }, [onViewportScroll]);
 
   return {

@@ -281,6 +281,21 @@ describe('capability-suffix tolerance + per-field merge (#338)', () => {
     expect(lookupModelContextLength('glm-5-turbo')).toBe(202_752); // filled from preset, not shadowed
   });
 
+  it('uses bundled model settings in both the provider-scoped and flat capability registry', () => {
+    writeFileSync(join(tmpHome, '.myagents', 'config.json'), JSON.stringify({
+      presetCustomModels: { zhipu: [{
+        model: 'glm-5-turbo', source: 'preset', presetSettings: { contextLength: 128000, inputModalities: ['text', 'image'] },
+      }] },
+    }));
+    expect(lookupProviderModelContextLength('glm-5-turbo', 'zhipu')).toBe(128000);
+    expect(lookupProviderModelContextLength('glm-5-turbo', 'zhipu-ai')).toBe(202752);
+    expect(modelSupportsModality('glm-5-turbo', 'image', 'zhipu')).toBe(true);
+    expect(modelSupportsModality('glm-5-turbo', 'image', 'zhipu-ai')).toBe(false);
+    expect(lookupModelCapability('glm-5-turbo')).toMatchObject({
+      contextLength: 128000, inputModalities: ['text', 'image'],
+    });
+  });
+
   // A reseller reusing the bundled id claude-sonnet-4-6 at a 1M window, stored
   // with the suffix baked into the model id. Bare AND suffixed lookups must see
   // 1M (winning over the 200K bundled preset), and applyContextWindowSuffix

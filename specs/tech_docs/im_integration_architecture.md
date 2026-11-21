@@ -293,7 +293,7 @@ PendingQuestions 在发送平台请求前登记，避免快速回调丢失；卡
 
 ### 7.2 Prompt context
 
-Rust 拥有 group activation、pending history 和 group metadata；原生 Adapter 的 `inbound_metadata` 与 Bridge 的 `channel-context` 提取各自可证明的来源事实，经 ImMessage/sourceMetadata 和 request registry 传递。Sidecar 在实际 turn admission 生成 `CHANNEL_CONTEXT version="1"`，私聊和群聊每条均注入，不再依赖首轮/周期提醒。sender/message 随该次输入，配置模式冻结在该执行轮；非 IM 唤起没有当前 sender/message。引用、历史、提及、附件和插件装饰进入有来源的数据字段，用户配置指令单独标记；未知时间不以接收时间冒充。模板、escape、预算、单 envelope 和可见正文规则见 [System Reminder](system_reminder_protocol.md#channel-context)。
+Rust 拥有 group activation、pending history 和 group metadata；原生 Adapter 的 `inbound_metadata` 与 Bridge 的 `channel-context` 提取各自可证明的来源事实，经 ImMessage/sourceMetadata 和 request registry 传递。Sidecar 在实际 turn admission 生成 `CHANNEL_CONTEXT version="1"`，私聊和群聊逐条投影。内置 Claude SDK 私聊单条输入中的SDK 原生命令及别名按 [System Reminder](system_reminder_protocol.md#channel-context) 保留原始命令文本。sender/message 随该次输入，配置模式冻结在该执行轮；非 IM 唤起没有当前 sender/message。引用、历史、提及、附件和插件装饰进入有来源的数据字段，用户配置指令单独标记；未知时间不以接收时间冒充。模板、escape、预算、单 envelope 和可见正文规则见 [System Reminder](system_reminder_protocol.md#channel-context)。
 
 群名称按“用户配置 → platform/plugin hint → chat id”解析。`groupToolsDeny`只是额外可选禁用层，不替代权限模式、MCP选择或工具自己的安全检查。
 

@@ -6,7 +6,7 @@ const POLICY_JSON: &str =
     include_str!("../../src/shared/integrated-runtimes/distribution-policy.json");
 
 const INTEGRATED_RUNTIME_IDS: &[&str] = &["claude-agent-sdk", "dsh"];
-const EXTERNAL_RUNTIME_IDS: &[&str] = &["claude-code", "codex"];
+const EXTERNAL_RUNTIME_IDS: &[&str] = &["claude-code", "codex", "antigravity"];
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -96,7 +96,7 @@ impl RuntimeDistributionPolicy {
             // carried by the Claude-SDK-capable distribution; a DSH-only
             // edition must leave incompatible Provider routes unavailable.
             ("codex", Some("managed-provider")) => self.allows_integrated("claude-agent-sdk"),
-            (runtime @ ("claude-code" | "codex"), _) => self.allows_external(runtime),
+            (runtime @ ("claude-code" | "codex" | "antigravity"), _) => self.allows_external(runtime),
             _ => false,
         }
     }

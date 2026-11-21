@@ -376,7 +376,7 @@ function AskUserQuestionForm({ request, onSubmit, onCancel }: AskUserQuestionPro
                     })}
 
                     {/* Custom input option */}
-                    <div
+                    {currentQuestion.allowCustom !== false && <div
                         className={`w-full text-left px-4 py-3 rounded-lg border transition-all
                             ${isCustomSelected
                                 ? 'border-[var(--accent)] bg-[var(--accent)]/8 ring-1 ring-[var(--accent)]/25'
@@ -414,7 +414,7 @@ function AskUserQuestionForm({ request, onSubmit, onCancel }: AskUserQuestionPro
                                     disabled:opacity-50`}
                             />
                         </div>
-                    </div>
+                    </div>}
                 </div>
 
                 {/* Progress indicators (for multi-question) */}

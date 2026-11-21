@@ -23,6 +23,7 @@ import type { RuntimeSource, RuntimeType } from "../../shared/types/runtime";
 
 const mocks = vi.hoisted(() => ({
   config: {} as UseConfigResult,
+  realPicker: false,
   input: null as ComponentProps<typeof SimpleChatInput> | null,
   publishMetadata: null as TabContextValue["setSessionMeta"] | null,
   send: vi.fn<TabContextValue["sendMessage"]>(async () => true),
@@ -62,6 +63,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     builtin: { installed: true },
     dsh: { installed: true, readiness: "ready" },
     codex: { installed: true },
+    antigravity: { installed: true },
     "claude-code": { installed: true },
   })),
 }));
@@ -106,19 +108,24 @@ vi.mock("@/config/configService", async (original) => ({
   getEnabledMcpServerIds: vi.fn(async () => []),
 }));
 
-vi.mock("@/components/SimpleChatInput", () => ({
-  default: (props: ComponentProps<typeof SimpleChatInput>) => {
-    mocks.input = props;
-    return (
-      <div>
-        <output data-testid="model">{props.selectedModel}</output>
-        <output data-testid="provider">{props.provider?.id}</output>
-        <output data-testid="permission">{props.permissionMode}</output>
-        <button onClick={() => void props.onSend("follow-up")}>Send</button>
-      </div>
-    );
-  },
-}));
+vi.mock("@/config/useConfigData", () => ({ useConfigData: () => mocks.config }));
+vi.mock("@/components/SimpleChatInput", async (importOriginal) => {
+  const { default: Composer } = await importOriginal<typeof import("@/components/SimpleChatInput")>();
+  return {
+    default: (props: ComponentProps<typeof SimpleChatInput>) => {
+      mocks.input = props;
+      if (mocks.realPicker) return <ImagePreviewProvider><Composer {...props} /></ImagePreviewProvider>;
+      return (
+        <div>
+          <output data-testid="model">{props.selectedModel}</output>
+          <output data-testid="provider">{props.provider?.id}</output>
+          <output data-testid="permission">{props.permissionMode}</output>
+          <button onClick={() => void props.onSend("follow-up")}>Send</button>
+        </div>
+      );
+    },
+  };
+});
 vi.mock("@/components/DirectoryPanel", () => ({ default: () => null }));
 vi.mock("@/components/MessageList", () => ({ default: () => null }));
 vi.mock("@/components/SessionHistoryDropdown", () => ({ default: () => null }));
@@ -153,6 +160,7 @@ vi.mock("@/components/scheduled-tasks/CronTaskCard", () => ({
 vi.mock("@/components/CronTaskDetailPanel", () => ({ default: () => null }));
 
 import Chat from "./Chat";
+import { ImagePreviewProvider } from "@/context/ImagePreviewContext";
 import { TabActiveContext, TabContext } from "@/context/TabContext";
 import {
   DEFAULT_CONFIG,
@@ -267,6 +275,7 @@ function launchMessage(): InitialMessage {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.input = null;
+  mocks.realPicker = false;
   mocks.publishMetadata = null;
   mocks.config = {
     config: { ...DEFAULT_CONFIG },
@@ -313,6 +322,22 @@ beforeEach(() => {
 });
 
 describe("Chat execution selection (#685)", () => {
+  it("opens the new-session confirmation only on selection and retains the original conversation on cancel", async () => {
+    mocks.realPicker = true;
+    render(<Harness metadata={ownedMetadata()} />);
+    const trigger = await screen.findByTitle('切换模型');
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('button', { name: 'API' }));
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull();
+    fireEvent.click(screen.getByTitle('explicit-api-model'));
+    fireEvent.click(await screen.findByRole('button', { name: '取消' }));
+    expect(trigger).toHaveTextContent(chosenModel);
+    expect(mocks.patchSession).not.toHaveBeenCalled();
+    expect(mocks.patchProject).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('button', { current: true })).toHaveTextContent(chosenModel);
+  });
+
   it.each(["mimo-v2.5", "gpt-6.1"])(
     "sends the launch identity before metadata arrives, ignoring workspace model %s",
     async (staleModel) => {
@@ -434,6 +459,44 @@ describe("Chat execution selection (#685)", () => {
       await waitFor(() => expect(mocks.send).toHaveBeenCalledOnce());
       expect(mocks.send.mock.calls[0]?.[2]).toBe(runtimePermission);
       expect(mocks.send.mock.calls[0]?.[3]).toBe(chosenModel);
+    },
+  );
+
+  it("shows catalog loading again on reconnect while keeping available CLI models", async () => {
+    const get = mocks.get.getMockImplementation()!;
+    const models = [{ value: "cli-model", displayName: "CLI model" }];
+    let finishRefresh!: (value: unknown) => void;
+    const refresh = new Promise(resolve => { finishRefresh = resolve; });
+    const catalog = vi.fn().mockResolvedValueOnce({ models }).mockReturnValue(refresh);
+    mocks.get.mockImplementation(path => path.startsWith("/api/runtime/models?type=antigravity")
+      ? catalog() : get(path));
+    const harness = (connected: boolean) => <Harness runtime="antigravity" source="system-cli" connected={connected} />;
+    const view = render(harness(true));
+    await waitFor(() => expect(mocks.input?.runtimeModels).toEqual(models));
+    view.rerender(harness(false));
+    view.rerender(harness(true));
+    await waitFor(() => expect(mocks.input?.runtimeModelsLoading).toBe(true));
+    expect(mocks.input?.runtimeModels).toEqual(models);
+    await act(async () => { finishRefresh({ models: [] }); });
+    await waitFor(() => expect(mocks.input?.runtimeModelsLoading).toBe(false));
+    expect(mocks.input?.runtimeModels).toEqual([]);
+  });
+
+  it.each([undefined, "gemini-3.8-flash-low"])(
+    "uses the Antigravity CLI model %s when the workspace retains a Codex subscription",
+    async (model) => {
+      Object.assign(mocks.config.projects[0], { providerId: "codex-sub", model: chosenModel });
+      const view = render(<Harness runtime="antigravity" source={null} initialMessage={{
+        text: "launch", systemCliRuntime: "antigravity", runtimeModel: model,
+      }} />);
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledOnce());
+      expect(mocks.send.mock.calls[0]?.[3]).toBe(model);
+      expect(mocks.send.mock.calls[0]?.[7]).toBeUndefined();
+      view.rerender(<Harness runtime="antigravity" source="system-cli" />);
+      fireEvent.click(screen.getByText("Send"));
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledTimes(2));
+      expect(mocks.send.mock.calls[1]?.[3]).toBe(model);
+      expect(mocks.send.mock.calls[1]?.[7]).toBeUndefined();
     },
   );
 

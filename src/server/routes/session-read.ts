@@ -1,6 +1,9 @@
+import { emitPerfTrace, nowMs, elapsedMs } from '../utils/perf-trace';
+import { messagePageRequest, projectMessagePage, selectMessagePage } from '../session-transcript/message-page';
+import type { SessionEngineLiveOverlay } from '../session-engine/types';
 import { deriveSessionLabel } from '../inbox/derive-label';
 import { getSessionEngine } from '../session-engine';
-import { getSessionData, getSessionMetadata, isHistoryVisibleSession } from '../SessionStore';
+import { withSessionReadSource, getSessionMetadata, isHistoryVisibleSession } from '../SessionStore';
 import { pendingSessionWatchCount, registerPendingSessionWatch, removeNetworkSessionWatch, manageLocalSessionWatches } from '../inbox/watch-registry';
 import { parseNetworkReturnReference } from '../../shared/agentNetworkReturn';
 import { hasValidInternalCliCredential } from '../external-cli-admission';
@@ -38,39 +41,8 @@ function paginateMessages(
   url: URL,
   transcriptFormat?: number,
 ): { messages: SessionMessage[]; totalCount: number; hasMoreBefore: boolean } {
-  const rawLimit = parseInt(url.searchParams.get('limit') ?? '0', 10);
-  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 0;
-  const before = url.searchParams.get('before');
-
-  const totalCount = messages.length;
-  const from = transcriptFormat === 2 ? url.searchParams.get('from') : null;
-  if (from) {
-    const index = messages.findIndex(message => message.id === from);
-    if (index >= 0) return { messages: messages.slice(index), totalCount, hasMoreBefore: index > 0 };
-    // A mutation removed the retained anchor; return a fresh tail instead of
-    // preserving rows whose source is no longer present in the transcript.
-  }
-  let paginatedMessages = messages;
-  let hasMoreBefore = false;
-
-  if (limit > 0) {
-    if (before) {
-      const beforeIdx = messages.findIndex(message => message.id === before);
-      if (beforeIdx < 0) {
-        paginatedMessages = [];
-      } else {
-        const start = Math.max(0, beforeIdx - limit);
-        paginatedMessages = messages.slice(start, beforeIdx);
-        hasMoreBefore = start > 0;
-      }
-    } else {
-      const start = Math.max(0, totalCount - limit);
-      paginatedMessages = messages.slice(start);
-      hasMoreBefore = start > 0;
-    }
-  }
-
-  return { messages: paginatedMessages, totalCount, hasMoreBefore };
+  const request = messagePageRequest(url);
+  return selectMessagePage(messages, { ...request, from: transcriptFormat === 2 ? request.from : null }, row => row.id);
 }
 
 async function handleSessionWatchRegister(request: Request): Promise<Response> {
@@ -142,63 +114,85 @@ async function handleSessionWatchRegister(request: Request): Promise<Response> {
 
 async function handleSessionDetails(sessionId: string, url: URL): Promise<Response> {
   const engine = getSessionEngine();
-  const session = (await getSessionData(sessionId));
-  const overlay = engine.getLiveSessionOverlay(sessionId);
+  const start = nowMs();
+  const trace = url.searchParams.get('historyTrace');
+  const request = messagePageRequest(url);
+  const ranged = Boolean(request.limit || request.from);
+  // Keep the decoded projection until the live owner has flushed its events.
+  // Only the selected authority converts its page to wire rows.
+  return withSessionReadSource(sessionId, (format, snapshot) => {
+    const readMs = elapsedMs(start);
+    const overlay: SessionEngineLiveOverlay = format === 2 && ranged
+      ? engine.getLiveSessionOverlay(sessionId, request)
+      : engine.getLiveSessionOverlay(sessionId);
+    const source = snapshot();
+    const session = source?.metadata;
 
-  if (!session) {
-    if (overlay.isActive) {
-      const { messages, totalCount, hasMoreBefore } = paginateMessages(
-        overlay.inMemoryMessages ?? [],
-        url,
-      );
-      return jsonResponse({
-        success: true,
-        session: {
-          id: sessionId,
-          runtime: overlay.runtime ?? engine.getRuntimeIdentity().runtime,
-          messages: shrinkSessionMessagesForClient(messages),
-          snapshotRevision: overlay.snapshotRevision ?? 0,
-          liveStreamingMessage: overlay.liveStreamingMessage
-            ? shrinkSessionMessageForClient(overlay.liveStreamingMessage)
-            : null,
-          liveSessionState: overlay.liveSessionState,
-          pendingInteractiveRequests: overlay.pendingInteractiveRequests ?? [],
-    queuedMessages: overlay.queuedMessages ?? [],
-          totalCount,
-          hasMoreBefore,
-        },
-      });
+    if (!source || !session) {
+      if (overlay.isActive) {
+        const { messages, totalCount, hasMoreBefore } = paginateMessages(
+          overlay.inMemoryMessages ?? [],
+          url,
+        );
+        return jsonResponse({
+          success: true,
+          session: {
+            id: sessionId,
+            runtime: overlay.runtime ?? engine.getRuntimeIdentity().runtime,
+            messages: shrinkSessionMessagesForClient(messages),
+            snapshotRevision: overlay.snapshotRevision ?? 0,
+            liveStreamingMessage: overlay.liveStreamingMessage
+              ? shrinkSessionMessageForClient(overlay.liveStreamingMessage)
+              : null,
+            liveSessionState: overlay.liveSessionState,
+            pendingInteractiveRequests: overlay.pendingInteractiveRequests ?? [],
+            queuedMessages: overlay.queuedMessages ?? [],
+            totalCount,
+            hasMoreBefore,
+          },
+        });
+      }
+      return jsonResponse({ success: false, error: 'Session not found.' }, 404);
     }
-    return jsonResponse({ success: false, error: 'Session not found.' }, 404);
-  }
-  const isActivePreparedSession =
-    overlay.isActive && session.materializationState === 'prepared';
-  if (!isHistoryVisibleSession(session) && !isActivePreparedSession) {
-    return jsonResponse({ success: false, error: 'Session not found.' }, 404);
-  }
+    const isActivePreparedSession =
+      overlay.isActive && session.materializationState === 'prepared';
+    if (!isHistoryVisibleSession(session) && !isActivePreparedSession) {
+      return jsonResponse({ success: false, error: 'Session not found.' }, 404);
+    }
 
-  const mergedMessages = session.transcriptFormat === 2
-    ? (overlay.isActive ? overlay.inMemoryMessages ?? [] : session.messages)
-      .filter(message => message.id !== overlay.liveStreamingMessage?.id)
-    : mergeActiveOverlayMessages(session.messages, overlay.inMemoryMessages);
-  const { messages, totalCount, hasMoreBefore } = paginateMessages(mergedMessages, url, session.transcriptFormat);
-  const liveStreamingMessage = overlay.liveStreamingMessage
-    ? shrinkSessionMessageForClient(overlay.liveStreamingMessage)
-    : null;
+    const storedRows = source.rows;
+    let page;
+    if (session.transcriptFormat === 2 && overlay.isActive) {
+      const rows = overlay.inMemoryMessages ?? [];
+      page = overlay.page ? { ...overlay.page, messages: rows } :
+        paginateMessages(rows.filter(row => row.id !== overlay.liveStreamingMessage?.id), url, 2);
+    } else if ('projection' in storedRows) {
+      page = projectMessagePage(storedRows.projection, request);
+    } else {
+      page = paginateMessages(mergeActiveOverlayMessages(storedRows.messages, overlay.inMemoryMessages), url, session.transcriptFormat);
+    }
+    const { messages, totalCount, hasMoreBefore } = page;
+    const liveStreamingMessage = overlay.liveStreamingMessage
+      ? shrinkSessionMessageForClient(overlay.liveStreamingMessage)
+      : null;
 
-  const sessionWithPreview = {
-    ...toClientSessionMetadata(session as SessionMetadata),
-    liveStreamingMessage,
-    snapshotRevision: overlay.snapshotRevision ?? 0,
-    liveSessionState: overlay.liveSessionState,
-    pendingInteractiveRequests: overlay.pendingInteractiveRequests ?? [],
-          queuedMessages: overlay.queuedMessages ?? [],
-    messages: shrinkSessionMessagesForClient(messages),
-    totalCount,
-    hasMoreBefore,
-  };
+    const sessionWithPreview = {
+      ...toClientSessionMetadata(session as SessionMetadata),
+      liveStreamingMessage,
+      snapshotRevision: overlay.snapshotRevision ?? 0,
+      liveSessionState: overlay.liveSessionState,
+      pendingInteractiveRequests: overlay.pendingInteractiveRequests ?? [],
+      queuedMessages: overlay.queuedMessages ?? [],
+      messages: shrinkSessionMessagesForClient(messages),
+      totalCount,
+      hasMoreBefore,
+    };
 
-  return jsonResponse({ success: true, session: sessionWithPreview });
+    const response = jsonResponse({ success: true, session: sessionWithPreview });
+    if (trace) emitPerfTrace({ trace: 'storage_io', phase: 'history_page_encoded', requestId: trace, sessionId,
+      durationMs: elapsedMs(start), count: messages.length, detail: { readMs, totalCount, validatedBytes: 'projection' in storedRows ? storedRows.validBytes : undefined } });
+    return response;
+  });
 }
 
 export async function handleSessionReadRoute(

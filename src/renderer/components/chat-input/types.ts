@@ -147,6 +147,7 @@ export interface SimpleChatInputProps {
   /** True only for user-managed CLI controls; Integrated DSH keeps Product provider/tool controls. */
   usesExternalRuntimeControls?: boolean;
   runtimeModels?: RuntimeModelInfo[];
+  runtimeModelsLoading?: boolean;
   /** Session-scoped capability; null means still unknown (do not use Global catalog). */
   managedReasoningModel?: Pick<RuntimeModelInfo, 'supportedReasoningEfforts' | 'defaultReasoningEffort'> | null;
   runtimePermissionModes?: RuntimePermissionMode[];

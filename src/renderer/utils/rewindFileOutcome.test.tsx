@@ -71,6 +71,7 @@ describe('conversation transport reconciliation', () => {
   });
 
   it.each([
+    ['rejected', true, true],
     ['committed', false, false],
     ['unchanged', false, true],
     ['target-unknown', false, false],
@@ -91,6 +92,11 @@ describe('explicit conversation rejections', () => {
   it.each(['unsupported_runtime', 'codex_update_required', 'anchor_unavailable'])('preserves %s instead of claiming an unknown outcome', errorCode => {
     const error = Object.assign(new Error('known rejection'), { status: 400, errorCode });
     expect(getConversationRejectionMessage(error, translate)).toBe(`shell.toasts.conversationError.${errorCode}`);
+  });
+  it('recognizes an explicit native branch refusal before product rewind commit', () => {
+    expect(getConversationRejectionMessage({ status: 502, errorCode: 'native_fork_failed' }, translate))
+      .toBe('shell.toasts.conversationError.native_fork_failed');
+    expect(getConversationRejectionMessage({ status: 502 }, translate)).toBeNull();
   });
   it('retains a concrete validation message and keeps transport/server failure ambiguous', () => {
     expect(getConversationRejectionMessage(Object.assign(new Error('Invalid target'), { status: 400 }), translate)).toBe('Invalid target');

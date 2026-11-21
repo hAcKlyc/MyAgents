@@ -1978,7 +1978,8 @@ export default function App({ rendererAttachment = COLD_RENDERER_ATTACHMENT }: {
           ? getProjectAgent(configForLaunchBirth, configProjects, project.path)
           : undefined;
         const initialMessageHasExecutionSelection = Boolean(
-          initialMessage?.providerExecutionIdentity ||
+          initialMessage?.systemCliRuntime ||
+            initialMessage?.providerExecutionIdentity ||
             initialMessage?.builtinSelection ||
             initialMessage?.runtimeModel ||
             sessionBirthHint?.providerExecutionIdentity ||

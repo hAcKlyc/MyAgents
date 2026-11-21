@@ -1,4 +1,5 @@
 {
+  "retryOlderPage": "Retry loading older messages",
   "transcriptSave": {
     "warning": "Chat history cannot be saved right now. You can keep chatting; unsaved content may be lost when you close the app.",
     "recovered": "Chat history saving has resumed."
@@ -134,6 +135,28 @@
       "unavailable": "Unavailable in this context",
         "networkPartial": "Network Agent list is incomplete",
       "partial": "Partial results. Refine your search."
+    },
+    "antigravityPermissionModes": {
+      "accept-edits": {
+        "label": "Ask for approval",
+        "description": "Automatically approve workspace file edits. Terminal commands follow your permission rules."
+      },
+      "auto": {
+        "label": "Approve for me",
+        "description": "Automatically approve file edits and safe commands. Ask only before irreversible actions."
+      },
+      "dangerously-skip-permissions": {
+        "label": "Full access",
+        "description": "Access files and the network without approval."
+      },
+      "default": {
+        "label": "Default",
+        "description": "Follow Antigravity’s approval settings."
+      },
+      "plan": {
+        "label": "Plan",
+        "description": "Plan before executing a task."
+      }
     },
     "permissionModes": {
       "approval-required": {
@@ -446,6 +469,8 @@
   "runtime": {
     "header": "Runtime",
     "settings": "Settings",
+    "installAgy": "Install agy",
+    "upgradeAgy": "Update agy",
     "notInstalled": "Not installed",
     "comingSoon": "Coming soon",
     "integrated": "Built-in Agent runtimes",

@@ -1,3 +1,4 @@
+import { perfMark } from '@/utils/perfMark';
 import { useChatWorkspaceLayout } from '@/hooks/useChatWorkspaceLayout';
 import { resolveDefaultMcpSelection } from '../../shared/mcpSelection';
 import { useChatDraftScope } from "@/hooks/useChatDraftScope";
@@ -55,6 +56,7 @@ import { useToast } from '@/components/Toast';
 import {
   classifyRewindTransportOutcome,
   getConversationRejectionMessage,
+  isConversationRejection,
   projectRewindRecovery,
   type RewindResponse,
   warnRewindFileOutcome as showRewindFileOutcomeWarning,
@@ -161,7 +163,7 @@ import { useSessionCronRestore } from '@/hooks/useSessionCronRestore';
 import { isDebugMode } from '@/utils/debug';
 import { getChannelTypeLabel } from '@/utils/taskCenterUtils';
 import { appendCronPromptToDraft } from '@/utils/cronComposerRecovery';
-import { runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
+import { resolveAgentRuntimeModelCatalogIdentity, runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
 import { launchSupportDiagnostics } from '@/utils/supportDiagnostics';
 import { createDefaultSessionGoalDraftConfig } from '@/utils/sessionGoalDraft';
 import { MANAGED_CODEX_COMPACT_SLASH_COMMAND } from '@/utils/slashActions';
@@ -230,6 +232,7 @@ import type { CapabilityInitialSelect } from '../../shared/skillsTypes';
 import {
   CC_MODELS,
   CC_PERMISSION_MODES,
+  ANTIGRAVITY_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
   coerceModelForRuntime,
   DSH_PERMISSION_MODES,
@@ -658,7 +661,9 @@ export default function Chat({
     historyMessages,
     streamingMessage,
     firstItemIndex,
-    hasMoreBefore: _hasMoreBefore,
+    hasMoreBefore,
+    olderPageFailed,
+    historyTrace,
     loadOlderMessages,
     isLoading,
     getQueryElapsedSeconds,
@@ -752,19 +757,14 @@ export default function Chat({
   const currentAgent = currentProject?.agentId
     ? getAgentById(config, currentProject.agentId)
     : undefined;
-  const providerUiRuntime: RuntimeType =
-    (sessionRuntime as RuntimeType | null) ??
-    resolveEffectiveRuntime(
-      currentAgent?.runtime,
-      currentAgent?.runtimePreference,
-      currentAgent?.runtimeConfig?.source,
-      currentAgent?.providerId,
-      undefined,
-      config.defaultIntegratedRuntime,
-    );
+  const agentRuntime = resolveEffectiveRuntime(
+    currentAgent?.runtime, currentAgent?.runtimePreference, currentAgent?.runtimeConfig?.source,
+    currentAgent?.providerId, undefined, config.defaultIntegratedRuntime,
+  );
+  const currentRuntime = (sessionRuntime as RuntimeType | null) ?? agentRuntime;
   const providerUiProviders = useMemo(
-    () => projectProvidersForRuntime(providers, providerUiRuntime),
-    [providers, providerUiRuntime],
+    () => projectProvidersForRuntime(providers, currentRuntime),
+    [providers, currentRuntime],
   );
   // Local provider state: snapshot from AgentConfig (priority) or Project at creation.
   // Prevents cross-tab pollution when another tab patches the shared project.
@@ -1437,12 +1437,13 @@ export default function Chat({
       selectedModel,
     ],
   );
-  const currentRuntimeSource =
-    sessionMeta?.runtimeSource ??
-    sessionRuntimeSource ??
-    (currentProviderExecutionIntent?.kind === 'runtime-backed-provider'
-      ? currentProviderExecutionIntent.runtimeSource
-      : undefined);
+  const agentCatalogIdentity = resolveAgentRuntimeModelCatalogIdentity(currentAgent, config.defaultIntegratedRuntime);
+  const currentRuntimeSource = runtimeSourceForRuntimeType(
+    currentRuntime,
+    sessionMeta?.runtimeSource ?? sessionMeta?.providerExecutionIdentity?.runtimeSource ??
+      sessionRuntimeSource ?? (initialMessage?.systemCliRuntime === currentRuntime ? 'system-cli' :
+        currentRuntime === agentCatalogIdentity.runtime ? agentCatalogIdentity.source : undefined),
+  );
   const managedProviderRuntimeActive =
     currentRuntimeSource === 'managed-provider';
   // #324 — 推理强度 setting ('default' | level). ONE state for both runtimes
@@ -1739,44 +1740,17 @@ export default function Chat({
     {
       builtin: { installed: true },
       dsh: { installed: false },
+      antigravity: { installed: false },
       'claude-code': { installed: false },
       codex: { installed: false },
     },
   );
-  // Resolve new Sessions through explicit Agent preference or the root default.
-  // Existing Sessions keep their frozen Runtime identity.
-  // Agent's currently-configured runtime — used as the default for NEW sessions.
-  // Managed Codex is a provider default, not the legacy user-managed Codex CLI
-  // runtime, so stale `agent.runtime=codex` must not leak into Chat chrome.
-  const agentRuntime: RuntimeType = resolveEffectiveRuntime(
-    currentAgent?.runtime,
-    currentAgent?.runtimePreference,
-    currentAgent?.runtimeConfig?.source,
-    currentAgent?.providerId,
-    undefined,
-    config.defaultIntegratedRuntime,
-  );
-  // v0.1.69: session is self-contained — its frozen runtime is authoritative for
-  // both display and message routing within this tab. Falls back to agentRuntime
-  // only before the session has loaded (sessionRuntime===null) or for newly-created
-  // sessions before TabProvider syncs metadata. Changing agent.runtime in another
-  // tab does NOT change an existing session's display: the session's Sidecar was
-  // spawned with its frozen runtime and the backend routes by sessionId.
-  const currentRuntime: RuntimeType =
-    (sessionRuntime as RuntimeType | null) ?? agentRuntime;
-  const launchRuntimeSource = runtimeSourceForRuntimeType(
-    agentRuntime,
-    currentAgent?.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID ||
-      currentAgent?.runtimeConfig?.source === 'managed-provider'
-      ? 'managed-provider'
-      : undefined,
-  ) ?? null;
   const menuRuntimeIdentity = sessionId
     ? sessionMenuRuntimeIdentity({
         sessionId,
         metadata: sessionMeta,
-        launchRuntime: agentRuntime,
-        launchRuntimeSource,
+        launchRuntime: agentCatalogIdentity.runtime,
+        launchRuntimeSource: agentCatalogIdentity.source ?? null,
         liveRuntime: sessionRuntime,
         liveRuntimeSource: sessionRuntimeSource,
         liveRuntimeSessionId: sessionRuntimeSessionId,
@@ -1835,8 +1809,8 @@ export default function Chat({
   const showBuiltinSdkSlashCommands =
     shouldShowBuiltinSdkSlashCommands(currentRuntime);
   const visibleSdkSlashCommands = useMemo(
-    () => (showBuiltinSdkSlashCommands ? sdkSlashCommands : []),
-    [showBuiltinSdkSlashCommands, sdkSlashCommands],
+    () => (showBuiltinSdkSlashCommands || currentRuntime === 'antigravity' ? sdkSlashCommands : []),
+    [showBuiltinSdkSlashCommands, currentRuntime, sdkSlashCommands],
   );
 
   // Detect installed runtimes once on mount
@@ -1921,7 +1895,7 @@ export default function Chat({
 
   // Runtime-specific models and permission modes
   const runtimePermissionModes =
-    currentRuntime === 'dsh'
+    currentRuntime === 'antigravity' ? ANTIGRAVITY_PERMISSION_MODES : currentRuntime === 'dsh'
       ? DSH_PERMISSION_MODES
       : currentRuntime === 'claude-code'
         ? CC_PERMISSION_MODES
@@ -1931,9 +1905,14 @@ export default function Chat({
 
   // Codex models are dynamic (fetched from the CLI); CC models are static
   const [codexModels, setCodexModels] = useState<typeof CC_MODELS>([]);
+  const agyCatalogSession = currentRuntime === 'antigravity' ? sessionRuntimeSessionId : null;
+  const agyCatalogModel = currentRuntime === 'antigravity' ? runtimeModel : null;
+  const [runtimeModelsLoading, setRuntimeModelsLoading] = useState(false);
+  const [antigravityModels, setAntigravityModels] = useState<typeof CC_MODELS>([]);
   useEffect(() => {
-    if (currentRuntime !== 'codex' || !isConnected) return;
-    let cancelled = false;
+    if ((currentRuntime !== 'codex' && currentRuntime !== 'antigravity') || !isConnected) return;
+    setRuntimeModelsLoading(true);
+    const setModels = currentRuntime === 'antigravity' ? setAntigravityModels : setCodexModels;
     // AbortController so a tab-close (effect cleanup) silences the
     // proxyFetch "Sidecar gone" warning that would otherwise fire when
     // this in-flight request lands on a sidecar port that just got
@@ -1943,20 +1922,20 @@ export default function Chat({
     const controller = new AbortController();
     apiGet(
       runtimeModelCatalogPath(
-        'codex',
+        currentRuntime,
         managedProviderRuntimeActive ? 'managed-provider' : 'system-cli',
       ),
       { signal: controller.signal },
     )
       .then((res: unknown) => {
         const data = res as { models?: typeof CC_MODELS } | undefined;
-        if (!cancelled && data?.models?.length) setCodexModels(data.models);
+        if (!controller.signal.aborted) setModels(data?.models ?? []);
       })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
+      .catch(() => {})
+      .finally(() => {
+        if (!controller.signal.aborted) setRuntimeModelsLoading(false);
+      });
+    return () => controller.abort();
   }, [
     managedProviderRuntimeActive,
     currentRuntime,
@@ -1964,6 +1943,8 @@ export default function Chat({
     isConnected,
     configPending,
     workspaceRefreshTrigger,
+    agyCatalogSession,
+    agyCatalogModel,
   ]);
   // ─── External runtime pre-warm (v0.1.68) ───
   //
@@ -2069,7 +2050,7 @@ export default function Chat({
   const runtimeModels =
     currentRuntime === 'claude-code'
       ? CC_MODELS
-      : currentRuntime === 'codex'
+      : currentRuntime === 'antigravity' ? antigravityModels : currentRuntime === 'codex'
         ? managedProviderRuntimeActive
           ? []
           : codexModels
@@ -2082,7 +2063,7 @@ export default function Chat({
     ? coerceExternalRuntimeModelForUi(runtimeModel, currentRuntime)
     : undefined;
   const effectiveModel = inputUsesExternalRuntimeControls
-    ? (effectiveRuntimeModel ?? runtimeModels?.find((m) => m.isDefault)?.value)
+    ? (effectiveRuntimeModel ?? (currentRuntime === 'antigravity' ? undefined : runtimeModels?.find((m) => m.isDefault)?.value))
     : selectedModel;
   const runtimeProviderSelectionIncomplete =
     !isProviderModelCompatibleWithRuntime(
@@ -2133,10 +2114,7 @@ export default function Chat({
     const base = {
       ...((currentAgent?.runtimeConfig as RuntimeConfig | undefined) ?? {}),
     };
-    if (currentProviderExecutionIntent?.kind === 'runtime-backed-provider') {
-      base.source = currentProviderExecutionIntent.runtimeSource;
-      base.model = currentProviderExecutionIntent.model;
-    }
+    base.source = currentRuntimeSource;
     const persistedModel = coerceExternalRuntimeModelForUi(
       base.model,
       currentRuntime,
@@ -2175,7 +2153,7 @@ export default function Chat({
   }, [
     inputUsesExternalRuntimeControls,
     currentAgent?.runtimeConfig,
-    currentProviderExecutionIntent,
+    currentRuntimeSource,
     runtimeModel,
     effectiveRuntimePermissionMode,
     currentRuntime,
@@ -2227,11 +2205,15 @@ export default function Chat({
   onInitialMessageConsumedRef.current = onInitialMessageConsumed;
   const initialMessageRuntimeReady = useMemo(() => {
     const identity = initialMessage?.providerExecutionIdentity;
+    if (initialMessage?.systemCliRuntime) {
+      return currentRuntime === initialMessage.systemCliRuntime && currentRuntimeSource === 'system-cli';
+    }
     if (!identity) return true;
     if (currentRuntime !== identity.runtime) return false;
     return currentRuntimeSource === identity.runtimeSource;
   }, [
     initialMessage?.providerExecutionIdentity,
+    initialMessage?.systemCliRuntime,
     currentRuntime,
     currentRuntimeSource,
   ]);
@@ -2292,21 +2274,20 @@ export default function Chat({
             defaultPermissionMode: config.defaultPermissionMode,
           })
     ) as PermissionMode;
-    const effectiveModel = launchProviderSelection
+    const launchModel = launchProviderSelection
       ? launchProviderSelection.model
       : inputUsesExternalRuntimeControls
         ? (coerceExternalRuntimeModelForUi(
             launchMessage.runtimeModel,
             currentRuntime,
           ) ??
-          effectiveRuntimeModel ??
-          runtimeModels?.find((m) => m.isDefault)?.value)
+          (launchMessage.systemCliRuntime ? undefined : effectiveModel))
         : selectedModel;
     const provider = launchProviderSelection
       ? (providers.find((p) => p.id === launchProviderSelection.providerId) ??
         (launchMessage.providerExecutionIdentity ? undefined : currentProvider))
       : currentProvider;
-    const providerRoute = buildBuiltinProviderRoute(provider, effectiveModel);
+    const providerRoute = buildBuiltinProviderRoute(provider, launchModel);
     const providerEnv = providerRoute ? undefined : buildProviderEnv(provider);
 
     const autoSend = async () => {
@@ -2331,7 +2312,7 @@ export default function Chat({
           await pushSessionConfig(
             'mcp',
             '/api/mcp/set',
-            { servers: effective },
+            { servers: effective, selectedIds: launchMessage.mcpEnabledServers },
             'explicit',
           );
         }
@@ -2393,7 +2374,7 @@ export default function Chat({
           setSelectedModel(launchProviderSelection.model);
           providerInitRef.current = true;
         } else if (inputUsesExternalRuntimeControls) {
-          if (launchMessage.runtimeModel) {
+          if (launchMessage.systemCliRuntime || launchMessage.runtimeModel) {
             setRuntimeModel(
               coerceExternalRuntimeModelForUi(
                 launchMessage.runtimeModel,
@@ -2434,7 +2415,7 @@ export default function Chat({
               !inputUsesExternalRuntimeControls && provider
                 ? provider.id
                 : undefined,
-            model: effectiveModel,
+            model: launchModel,
           });
           const cronPermissionMode = coerceRuntimeBirthPermissionMode(
             effectivePermission,
@@ -2472,7 +2453,7 @@ export default function Chat({
               launchMessage.text,
               launchMessage.images,
               effectivePermission,
-              effectiveModel,
+              launchModel,
               inputUsesExternalRuntimeControls || providerRoute
                 ? undefined
                 : providerEnv,
@@ -2492,7 +2473,7 @@ export default function Chat({
             launchMessage.text,
             launchMessage.images,
             effectivePermission,
-            effectiveModel,
+            launchModel,
             inputUsesExternalRuntimeControls || providerRoute
               ? undefined
               : providerEnv,
@@ -2535,7 +2516,7 @@ export default function Chat({
                 !inputUsesExternalRuntimeControls && provider
                   ? provider.id
                   : undefined,
-              model: effectiveModel,
+              model: launchModel,
             });
             const cronPermissionMode = coerceRuntimeBirthPermissionMode(
               effectivePermission,
@@ -2993,7 +2974,7 @@ export default function Chat({
         await pushSessionConfig(
           'mcp',
           '/api/mcp/set',
-          { servers: effectiveServers },
+          { servers: effectiveServers, selectedIds: workspaceEnabled },
           'background',
         );
         if (isDebugMode()) {
@@ -3314,10 +3295,6 @@ export default function Chat({
         agentId: currentProject.agentId ?? null,
         isExternalRuntime,
         usesProductConfiguration: currentRuntime === 'dsh',
-        currentRuntimeConfig: currentAgent?.runtimeConfig,
-        currentRuntimePreference: currentAgent?.runtimePreference,
-        currentProviderId:
-          currentAgent?.providerId ?? currentProject.providerId,
         fields: {
           builtinSelection: patch.builtinSelection,
           builtinProviderEnvPolicy: patch.builtinProviderEnvPolicy,
@@ -3355,7 +3332,7 @@ export default function Chat({
           const response = await pushSessionConfig(
             'mcp',
             '/api/mcp/set',
-            { servers },
+            { servers, selectedIds: patch.mcpEnabledServers },
             'explicit',
           );
           if (response) handleExtensionUpdateResponse(response);
@@ -3814,10 +3791,6 @@ export default function Chat({
         workspaceId: currentProject.id,
         agentId: currentProject.agentId ?? null,
         isExternalRuntime: false,
-        currentRuntimeConfig: currentAgent?.runtimeConfig,
-        currentRuntimePreference: currentAgent?.runtimePreference,
-        currentProviderId:
-          currentAgent?.providerId ?? currentProject.providerId,
         fields: { builtinModel: fallback },
         snapshotWriteMode: 'disabled',
         // Team AI defaults change only from Agent settings.
@@ -4123,6 +4096,7 @@ export default function Chat({
     return ids;
   }, [historyMessages]);
   const chatScrollController = useChatScrollController({
+    messageIndices: chatScrollModel.messageIndices,
     messages: chatScrollModel.data,
     isActive,
     windowPresentation,
@@ -4162,7 +4136,7 @@ export default function Chat({
     messages: chatScrollModel.data,
     scrollToMessage,
     pauseAutoScroll,
-    active: chatSearchOpen,
+    active: chatSearchOpen && isActive,
   });
 
   const handleLoadOlderMessages = useCallback(() => {
@@ -4175,6 +4149,8 @@ export default function Chat({
       },
     });
   }, [captureAnchor, loadOlderMessages, restoreAnchorAfterNextCommit]);
+  const prefetchOlder = useCallback(() => { void loadOlderMessages({ action: 'prefetch' }); }, [loadOlderMessages]);
+  const cancelOlder = useCallback(() => { void loadOlderMessages({ action: 'cancel' }); }, [loadOlderMessages]);
   const chatSearchSetQueryRef = useRef(chatSearch.setQuery);
   chatSearchSetQueryRef.current = chatSearch.setQuery;
   const closeChatSearch = useCallback(() => {
@@ -4920,7 +4896,7 @@ export default function Chat({
   handleSendMessageRef.current = handleSendMessage;
 
   const questionActions = useMemo<AsyncQuestionActions>(() => ({
-    answered: acceptedAsyncQuestionReplies([...historyMessages, ...messages]),
+    answered: acceptedAsyncQuestionReplies(historyMessages),
     queued: queuedMessages.flatMap(message => message.asyncQuestionReply ? [message.asyncQuestionReply] : []),
     disabled: isSessionLoading || !isConnected || sessionState === 'stopping',
     onReply: async (reply, text) => (await handleSendMessageRef.current(text, undefined, undefined, undefined, undefined, reply)) === true,
@@ -4928,7 +4904,7 @@ export default function Chat({
       setQuestionDraft({ sessionId, reply, title });
       inputRef.current?.focus();
     },
-  }), [historyMessages, messages, queuedMessages, isSessionLoading, isConnected, sessionState, sessionId, setQuestionDraft]);
+  }), [historyMessages, queuedMessages, isSessionLoading, isConnected, sessionState, sessionId, setQuestionDraft]);
 
   // Triggered from the SystemPromptsPanel empty state ("智能生成" card). Closes the
   // workspace settings overlay and dispatches `/init` to the current Tab so the user
@@ -4945,13 +4921,9 @@ export default function Chat({
       // Snapshot the queued message info before it's removed (for image restore)
       const queuedMsg = queuedMessages.find((q) => q.queueId === queueId);
       const cancelledSessionId = sessionId;
-      const sourceContents = [
-        ...historyMessages,
-        ...messages,
-        ...(streamingMessage ? [streamingMessage] : []),
-      ]
-        .filter((message) => message.role === 'assistant')
-        .map((message) => message.content);
+      const sourceContents = queuedMsg?.asyncQuestionReply
+        ? messagesRef.current.filter(message => message.role === 'assistant').map(message => message.content)
+        : [];
       const cancelledText = await cancelQueuedMessage(queueId);
       if (cancelledText && sessionIdRef.current === cancelledSessionId) {
         const restored = queuedMsg?.asyncQuestionReply
@@ -4998,9 +4970,6 @@ export default function Chat({
       queuedMessages,
       setQuestionDraft,
       sessionId,
-      historyMessages,
-      messages,
-      streamingMessage,
     ],
   );
 
@@ -5212,12 +5181,6 @@ export default function Chat({
           workspaceId: currentProject.id,
           agentId: currentProject.agentId,
           isExternalRuntime: false,
-          currentRuntimeConfig: currentAgent?.runtimeConfig as
-            | RuntimeConfig
-            | undefined,
-          currentRuntimePreference: currentAgent?.runtimePreference,
-          currentProviderId:
-            currentAgent?.providerId ?? currentProject.providerId,
           fields: {
             ...(targetIntent.kind === 'runtime-backed-provider'
               ? {
@@ -5698,10 +5661,22 @@ export default function Chat({
     [config.plugins, config.enabledPlugins],
   );
 
+  const historyTargetId = chatScrollModel.data.at(-1)?.id;
+  const reportedHistoryTrace = useRef<string | null>(null);
   const handleStartupItemsRendered = useCallback((rows: readonly MessageType[]) => {
     onItemsRendered();
     onStartupItemsRendered(rows);
-  }, [onItemsRendered, onStartupItemsRendered]);
+    const scroller = scrollerRef.current;
+    if (!historyTrace || !isActive || isViewportRecoveryFenced || reportedHistoryTrace.current === historyTrace || !scroller) return;
+    const viewport = scroller.getBoundingClientRect();
+    if (viewport.height <= 0) return;
+    if (!historyTargetId || !rows.some(row => row.id === historyTargetId)) return;
+    const rect = scroller.querySelector(`[data-chat-search-scope][data-message-id="${CSS.escape(historyTargetId)}"]`)?.getBoundingClientRect();
+    if (rect && rect.height > 0 && rect.top < viewport.bottom && rect.bottom > viewport.top) {
+      reportedHistoryTrace.current = historyTrace;
+      perfMark('history_rows_visible', { tabId, requestId: historyTrace, mountedRows: rows.length });
+    }
+  }, [onItemsRendered, onStartupItemsRendered, historyTargetId, historyTrace, isActive, isViewportRecoveryFenced, scrollerRef, tabId]);
 
   // Stable callbacks for MessageList (extracted from inline arrows to enable memo)
   const handlePermissionDecision = useCallback(
@@ -5903,17 +5878,17 @@ export default function Chat({
               : 'transport_error'),
         });
 
-        // A structured HTTP rejection proves the server did not commit. A
-        // transport failure is ambiguous for a native conversation mutation,
+        // Validation and conflict responses reject the operation. A server
+        // or transport failure is ambiguous for a native conversation mutation,
         // so reload SessionStore authority instead of restoring a possibly
         // stale pre-rewind tail.
+        const rejected = isConversationRejection(err);
         const reconciliation =
-          hasRecoverableNativeRewind && typeof structured?.status !== 'number'
+          hasRecoverableNativeRewind && !rejected
             ? await retryCurrentSessionRestore(messageId)
             : null;
         if (sessionIdRef.current !== rewindSessionId) return;
-        const transportOutcome =
-          classifyRewindTransportOutcome(reconciliation);
+        const transportOutcome = rejected ? 'rejected' : classifyRewindTransportOutcome(reconciliation);
         const recovery = projectRewindRecovery(transportOutcome);
         if (recovery.restoreMessageSnapshot) {
           setMessages(snapshot);
@@ -6538,7 +6513,7 @@ export default function Chat({
                     }
                   }
                 }
-                const canRetry = !!lastUserMsg && !isLoading;
+                const canRetry = currentRuntime !== 'antigravity' && !!lastUserMsg && !isLoading;
                 return (
                   <div className="relative z-10 flex-shrink-0 border-b border-[var(--line)] bg-[var(--paper-inset)] px-4 py-2 text-xs text-[var(--ink)]">
                     <div className="mx-auto flex max-w-3xl items-start gap-2">
@@ -6553,7 +6528,7 @@ export default function Chat({
                         {/* Oversized image hint: detect API 400 about image dimensions and offer rewind.
                       Pattern synced with backend (agent-session.ts shouldResetSessionAfterError).
                       Known API error: "...image dimensions exceed max allowed size: 8000 pixels" */}
-                        {lastUserMsg &&
+                        {currentRuntime !== 'antigravity' && lastUserMsg &&
                           /image.*exceed.*max allowed size/i.test(
                             agentError,
                           ) && (
@@ -6621,7 +6596,7 @@ export default function Chat({
 
             {/* Query Navigator — floating right-side panel for quick session navigation */}
             <QueryNavigator
-              messages={chatScrollModel.data}
+              messages={chatScrollModel.visibleHistory}
               scrollContainerRef={
                 scrollerRef as React.RefObject<HTMLDivElement | null>
               }
@@ -6634,9 +6609,13 @@ export default function Chat({
                   messages={chatScrollModel.data}
                   streamingMessage={streamingMessage}
                   firstItemIndex={chatScrollModel.firstItemIndex}
+                  visibleHistory={chatScrollModel.visibleHistory}
                   heightEstimateSeed={chatScrollModel.heightEstimateSeed}
                   layoutByMessageId={chatScrollModel.layoutByMessageId}
-                  onLoadOlder={handleLoadOlderMessages}
+                  onLoadOlder={hasMoreBefore ? handleLoadOlderMessages : undefined}
+                  olderPageFailed={olderPageFailed}
+                  onPrefetchOlder={hasMoreBefore && !olderPageFailed ? prefetchOlder : undefined}
+                  onCancelOlder={cancelOlder}
                   isLoading={isLoading}
                   getQueryElapsedSeconds={getQueryElapsedSeconds}
                   sessionId={sessionId}
@@ -6680,7 +6659,7 @@ export default function Chat({
                         : undefined
                       : handleRewind
                   }
-                  onRetry={handleRetry}
+                  onRetry={currentRuntime === 'antigravity' ? undefined : handleRetry}
                   onFork={
                     isExternalRuntime
                       ? runtimeConversationBranchSupported &&
@@ -6882,6 +6861,7 @@ export default function Chat({
                         ? runtimeModels
                         : undefined
               }
+              runtimeModelsLoading={isConnected && runtimeModelsLoading && (currentRuntime === 'codex' || currentRuntime === 'antigravity')}
               runtimePermissionModes={
                 currentRuntime === 'dsh' || inputUsesExternalRuntimeControls
                   ? runtimePermissionModes

@@ -26,6 +26,8 @@ const PERMISSION_MODE_ICONS: Partial<Record<string, AppIconComponent>> = {
   manual: ShieldQuestionIcon,
   dontAsk: BanIcon,
   acceptEdits: FileEditIcon,
+  'accept-edits': ShieldQuestionIcon,
+  'dangerously-skip-permissions': LockOpenIcon,
   bypassPermissions: LockOpenIcon,
   suggest: ShieldQuestionIcon,
   'auto-edit': FileEditIcon,

@@ -113,6 +113,7 @@ export function reasoningEffortChoices(
     }
     case 'claude-code':
       return SDK_EFFORT_LEVELS;
+    case 'antigravity': return null; // The active ACP session owns the available choices.
     case 'codex':
       return CODEX_EFFORT_LEVELS;
     case 'dsh': {
@@ -138,7 +139,7 @@ export function coerceReasoningEffortForRuntime(
   if (!normalized) return undefined;
   // Persist intent before a process/catalog exists. Codex owns model-specific
   // validation at execution; a closed vocabulary here destroys future values.
-  if (runtime === 'codex') return normalized;
+  if (runtime === 'codex' || runtime === 'antigravity') return normalized;
   const choices = reasoningEffortChoices(runtime, apiProtocol);
   if (!choices) return undefined;
   return choices.includes(normalized) ? normalized : undefined;
@@ -158,7 +159,7 @@ export function coerceReasoningEffortSettingForRuntime(
   const trimmed = value?.trim();
   if (!trimmed) return undefined;
   if (trimmed === REASONING_EFFORT_DEFAULT) return REASONING_EFFORT_DEFAULT;
-  if (runtime === 'codex') return trimmed;
+  if (runtime === 'codex' || runtime === 'antigravity') return trimmed;
   const choices = reasoningEffortChoices(runtime, apiProtocol);
   if (!choices) return undefined;
   return choices.includes(trimmed) ? trimmed : undefined;

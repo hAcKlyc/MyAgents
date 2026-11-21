@@ -133,6 +133,9 @@ export interface SessionStartOptions {
  */
 export interface RuntimeProcess {
   readonly pid: number;
+  readonly sessionMcpFingerprint?: string;
+  /** True when the next permission selection requires different subprocess launch flags. */
+  requiresPermissionModeRestart?(mode: string | undefined): boolean;
   /** Optional adapter-owned identity for generation-scoped projections/callbacks. */
   readonly runtimeGeneration?: string;
   /** Runtime admission completed a durable mutation that changed Product transcript state. */
@@ -430,6 +433,8 @@ export type UnifiedEvent = (
   // Mutable tool discovery is separate from session_init so startup remains a
   // one-time lifecycle event. External session state replays the latest catalog
   // through its system-init snapshot on reconnect.
+  | { kind: 'runtime_title'; title: string }
+  | { kind: 'runtime_commands'; commands: import('../../shared/slashCommands').SlashCommand[] }
   | { kind: 'runtime_tool_catalog'; tools: string[] }
   | {
     kind: 'mcp_effective_update';

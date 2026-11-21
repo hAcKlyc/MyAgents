@@ -49,11 +49,11 @@ export async function modelContext(agentId: string, sessionId?: string, base?: P
   const currentEnv = metadata ? resolveWorkspaceConfig(workspacePath, metadata, { includeMcp: false }).providerEnv
     : resolveProviderEnv(current.providerId ?? agent.providerId ?? 'anthropic-sub', config);
   const runtime = current.runtime ?? 'builtin';
-  const nativeCli = (runtime === 'codex' || runtime === 'claude-code') && current.runtimeSource !== 'managed-provider';
+  const nativeCli = (runtime === 'codex' || runtime === 'claude-code' || runtime === 'antigravity') && current.runtimeSource !== 'managed-provider';
   const options: ImModelOption[] = [];
   if (nativeCli) {
     const models = await queryRuntimeModels(runtime, { runtimeSource: current.runtimeSource ?? 'system-cli' });
-    for (const model of models as import('../../shared/types/runtime').RuntimeModelInfo[]) options.push({ selection: { kind: 'external-cli', runtime, runtimeSource: current.runtimeSource ?? 'system-cli', model: model.value }, group: runtime === 'codex' ? 'Codex CLI' : 'Claude Code', name: model.displayName, isCurrent: current.model === model.value, requiresNewSession: false, capabilities: model });
+    for (const model of models as import('../../shared/types/runtime').RuntimeModelInfo[]) options.push({ selection: { kind: 'external-cli', runtime, runtimeSource: current.runtimeSource ?? 'system-cli', model: model.value }, group: runtime === 'antigravity' ? 'Antigravity CLI' : runtime === 'codex' ? 'Codex CLI' : 'Claude Code', name: model.displayName, isCurrent: current.model === model.value || (runtime === 'antigravity' && !!model.isDefault), requiresNewSession: false, capabilities: model });
   } else {
     const managedModels = isManagedCodexProviderReady(config)
       ? await queryRuntimeModels('codex', { runtimeSource: 'managed-provider' }) : undefined;
@@ -94,7 +94,7 @@ export function imSnapshotObservation(metadata: SessionMetadata): string {
 export function sessionEffortChoices(context: Awaited<ReturnType<typeof modelContext>>): readonly string[] | null {
   const current = context.current;
   const capabilities = context.options.find(option => option.isCurrent)?.capabilities;
-  if (current.runtimeSource === 'managed-provider') return capabilities?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [];
+  if (current.runtimeSource === 'managed-provider' || current.runtime === 'antigravity') return capabilities?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [];
   return reasoningEffortChoices(current.runtime ?? 'builtin', context.currentEnv?.apiProtocol, current.providerId, current.model, context.currentEnv?.baseUrl);
 }
 

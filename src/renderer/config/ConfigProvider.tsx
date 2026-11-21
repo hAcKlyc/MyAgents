@@ -5,7 +5,7 @@ import React, { createContext, useCallback, useEffect, useMemo, useRef, useState
 import {
     type AppConfig,
     DEFAULT_CONFIG,
-    type ModelEntity,
+    type PresetModelEntry,
     type Project,
     type WorkspaceTemplateAgentDefaults,
     type WorkspaceTemplateSource,
@@ -257,7 +257,7 @@ export interface ConfigActionsValue {
     deleteCustomProvider: (providerId: string) => Promise<void>;
     refreshProviders: () => Promise<void>;
     // Preset custom models
-    savePresetCustomModels: (providerId: string, models: ModelEntity[]) => Promise<void>;
+    savePresetCustomModels: (providerId: string, models: PresetModelEntry[]) => Promise<void>;
     removePresetCustomModel: (providerId: string, modelId: string) => Promise<void>;
     // Provider primary model override
     savePrimaryModel: (providerId: string, modelId: string) => Promise<void>;
@@ -1190,7 +1190,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
 
     // --- Preset Custom Models ---
 
-    const savePresetCustomModels = useCallback(async (providerId: string, models: ModelEntity[]) => {
+    const savePresetCustomModels = useCallback(async (providerId: string, models: PresetModelEntry[]) => {
         const newConfig = await atomicModifyConfig(c => {
             const newPresetCustomModels = {
                 ...c.presetCustomModels,

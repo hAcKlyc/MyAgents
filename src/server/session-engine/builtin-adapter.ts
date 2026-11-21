@@ -374,8 +374,8 @@ export function createBuiltinSessionEngine(): SessionEngine {
       };
     },
 
-    getLiveSessionOverlay(sessionId: string) {
-      const snapshot = getBuiltinLiveSessionSnapshot(sessionId);
+    getLiveSessionOverlay(sessionId, page) {
+      const snapshot = page ? getBuiltinLiveSessionSnapshot(sessionId, { page }) : getBuiltinLiveSessionSnapshot(sessionId);
       if (!snapshot) {
         return { isActive: false };
       }

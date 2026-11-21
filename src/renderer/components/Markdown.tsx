@@ -12,7 +12,7 @@
 import 'katex/dist/katex.min.css';
 import './Markdown.css';
 
-import { Fragment, lazy, Suspense, memo, useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { createContext, useContext, Fragment, lazy, Suspense, memo, useEffect, useMemo, useState, type ComponentProps } from 'react';
 import type { Components } from 'react-markdown';
 import type { Element } from 'hast';
 import ReactMarkdown from 'react-markdown';
@@ -74,6 +74,9 @@ function rehypeStreamTail() {
     };
     const found = walk(tree);
     if (!found) return;
+    if (found.parent.tagName === 'code') {
+      found.parent.properties = { ...found.parent.properties, dataStreamingCode: true };
+    }
     const chars = Array.from(found.value); // code-point aware
     const n = Math.min(STREAM_TAIL_LEN, chars.length);
     if (n <= 0) return;
@@ -105,6 +108,8 @@ const MarkdownLink = memo(function MarkdownLink({ href, children, basePath = '',
 
 // Custom code component - handles both inline and block code
 const CodeComponent: Components['code'] = ({ className, children, node: _node, ...props }) => {
+  const chunkStart = useContext(ChunkStart);
+  const fenceOffset = _node?.position?.start.offset;
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : '';
 
@@ -136,7 +141,7 @@ const CodeComponent: Components['code'] = ({ className, children, node: _node, .
     }
 
     return (
-      <CodeBlock language={language} className={className}>
+      <CodeBlock sourceOffset={fenceOffset === undefined ? undefined : chunkStart + fenceOffset} language={language} className={className} streaming={_node?.properties?.dataStreamingCode === true}>
         {codeString}
       </CodeBlock>
     );
@@ -251,9 +256,12 @@ const LiComponent: Components['li'] = ({ children, className, node: _node, ...pr
 
 // Paragraph rhythm is owned by the Markdown root stylesheet. Keeping a semantic
 // class here lets default and compact density change as one coherent system.
-const ParagraphComponent: Components['p'] = ({ children }) => (
-  <p className="markdown-paragraph">{children}</p>
-);
+const ChunkStart = createContext(0);
+const ParagraphComponent: Components['p'] = ({ children, node }) => {
+  const start = useContext(ChunkStart);
+  const offset = node?.position?.start.offset;
+  return <p data-chat-source={offset === undefined ? undefined : start + offset} className="markdown-paragraph">{children}</p>;
+};
 
 const StrongComponent: Components['strong'] = ({ children }) => (
   <strong className="markdown-strong">{children}</strong>
@@ -477,6 +485,15 @@ const Markdown = memo(function Markdown({ children, compact = false, preserveNew
   // identical and their memoized renderers bail out (#634).
   const chunks = useMemo(() => splitMarkdownRenderChunks(processedContent), [processedContent]);
 
+  const chunkStarts = useMemo(() => {
+    let offset = 0;
+    const starts: number[] = [];
+    for (const chunk of chunks) {
+      starts.push(offset);
+      offset += chunk.length;
+    }
+    return starts;
+  }, [chunks]);
   const remarkPlugins = useMemo(() => {
     const base = preserveNewlines ? MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : MARKDOWN_REMARK_PLUGINS_DEFAULT;
     const plugins: NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']> = base.map(plugin =>
@@ -514,12 +531,14 @@ const Markdown = memo(function Markdown({ children, compact = false, preserveNew
             keep it at chunk boundaries so the DOM (and plain-text copy) is
             identical to a whole-document render. */}
         {index > 0 && '\n'}
+        <ChunkStart.Provider value={chunkStarts[index]}>
         <MarkdownChunk
           source={chunk}
           remarkPlugins={remarkPlugins}
           rehypePlugins={streaming && !raw && index === chunks.length - 1 ? REHYPE_PLUGINS_STREAMING : MARKDOWN_REHYPE_PLUGINS}
           components={components}
         />
+        </ChunkStart.Provider>
         </Fragment>
       ))}
     </div>

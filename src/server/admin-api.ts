@@ -2,6 +2,7 @@ import { readChannelIdentities, projectConfiguredChannel, projectScopedChannels 
 import { nextAgentNetworkExposureRevision } from "../shared/config-types";
 import { MODEL_ADD_OPTIONS_HELP } from '../shared/modelAddOptions';
 import { resolveAgentConfigMutation, mutationForAgentModelSelection, type AgentModelSelection } from '../shared/agentConfigMutation';
+import { resolveAgentWorkspaceProjections } from '../shared/agentWorkspaceIdentity';
 import { APP_BUILD_IDENTITY, SIDECAR_BUILD_IDENTITY, SIDECAR_STARTED_AT } from './build-identity';
 import { CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } from '../shared/integrated-runtimes/identity';
 /**
@@ -17,6 +18,7 @@ import { CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } from '../shared/integrated-ru
  */
 
 import { channelExecutionConfigChangeError } from '../shared/types/agent';
+import type { PluginEntry } from '../shared/types/plugin';
 import { execFile } from 'node:child_process';
 import { lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { cp as fsCp } from 'node:fs/promises';
@@ -148,7 +150,6 @@ import {
   isRuntimePermissionMode,
   projectPermissionModeForRuntime,
   resolveEffectiveRuntime,
-  buildRuntimeChangePatch,
   runtimeSourceForRuntimeType,
   type RuntimeType,
   type RecoveryHint,
@@ -2144,6 +2145,7 @@ const AGENT_SET_FIELDS = [
   'model',
   'permissionMode',
   'mcpEnabledServers',
+  'enabledPluginIds',
 ] as const;
 
 export async function handleAgentSet(payload: {
@@ -2197,13 +2199,31 @@ export async function handleAgentSet(payload: {
     }, 'set');
   }
 
-  // `runtime` field has a cross-runtime scrub policy (see
-  // buildRuntimeChangePatch doc in shared/types/runtime.ts). A blind spread
-  // here would leak the previous runtime's model/permissionMode/additionalArgs
-  // into the new runtime — Codex CLI then rejects e.g. a Claude model with
-  // "model is not supported when using ChatGPT account". Route through the
-  // helper so the CLI `myagents agent set <id> runtime codex` path stays in
-  // lockstep with the Chat / Settings / Launcher in-app paths.
+  if (key === 'enabledPluginIds') {
+    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
+      return { success: false, error: 'enabledPluginIds must be a JSON array of plugin IDs' };
+    }
+    const ids = [...new Set(value)];
+    return modifyAgentConfigIntent(id, (agent, config) => {
+      const { diagnostics } = resolveAgentWorkspaceProjections(loadProjects(), config.agents ?? []);
+      const conflict = diagnostics.find(item => item.agentIds.includes(id));
+      if (conflict) {
+        return { ok: false, response: { success: false, error: conflict.message, code: conflict.code } };
+      }
+      const plugins = Array.isArray(config.plugins) ? config.plugins as PluginEntry[] : [];
+      const unknown = ids.filter(pluginId => !plugins.some(plugin => plugin?.id === pluginId));
+      if (unknown.length) {
+        return { ok: false, response: { success: false, error: `Unknown Claude plugin IDs: ${unknown.join(', ')}` } };
+      }
+      return {
+        ok: true,
+        agent: { ...agent, enabledPluginIds: ids },
+        projectPatch: { enabledPluginIds: ids },
+      };
+    }, 'set');
+  }
+
+  // Use the same locked Agent mutation as the desktop Runtime pickers.
   if (key === 'runtime') {
     if (typeof value !== 'string') {
       return { success: false, error: 'runtime must be a string' };
@@ -2217,23 +2237,12 @@ export async function handleAgentSet(payload: {
     return modifyAgentConfigIntent(
       id,
       (agent) => {
-        const patch = buildRuntimeChangePatch(
-          agent.runtimeConfig as RuntimeConfig | undefined,
-          value as RuntimeType,
-        );
+        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { runtime: value as RuntimeType });
         return {
           ok: true,
-          agent: {
-            ...agent,
-            runtime: patch.runtime,
-            runtimeConfig: patch.runtimeConfig,
-            runtimePreference: patch.runtimePreference,
-          },
-          livePatch: {
-            runtime: patch.runtime,
-            runtimeConfig: patch.runtimeConfig ?? null,
-            runtimePreference: patch.runtimePreference,
-          },
+          agent: { ...agent, ...patch } as AgentConfigSlim,
+          projectPatch: patch.permissionMode ? { permissionMode: patch.permissionMode } : undefined,
+          livePatch: { ...patch, runtimeConfig: patch.runtimeConfig ?? null },
         };
       },
       'set',
@@ -2269,6 +2278,7 @@ export async function handleAgentSet(payload: {
         }
         const runtimeConfig = value as RuntimeConfig;
         const targetManagedCodex = agentUsesManagedCodexProvider({
+          runtimePreference: agent.runtimePreference,
           providerId: agent.providerId,
           runtime:
             typeof agent.runtime === 'string' ? agent.runtime : undefined,
@@ -2332,6 +2342,7 @@ export async function handleAgentSet(payload: {
         const requestedMode = (value as string).trim();
         if (
           agentUsesManagedCodexProvider({
+            runtimePreference: agent.runtimePreference,
             providerId: agent.providerId,
             runtime:
               typeof agent.runtime === 'string' ? agent.runtime : undefined,
@@ -2451,36 +2462,27 @@ export async function handleAgentSet(payload: {
         }
       }
 
-      const syncExecutionDefault =
-        key === 'providerId' || key === 'model' || key === 'permissionMode';
-      const providerEnvJson =
-        key === 'providerId'
-          ? (() => {
-              const resolved = resolveProviderEnv(
-                String(normalizedValue),
-                currentConfig,
-              );
-              return resolved ? JSON.stringify(resolved) : undefined;
-            })()
-          : undefined;
+      if (key === 'providerId') {
+        const providerId = String(normalizedValue);
+        const env = resolveProviderEnv(providerId, currentConfig);
+        const providerEnvJson = env ? JSON.stringify(env) : undefined;
+        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { providerId, providerEnvJson });
+        return {
+          ok: true,
+          agent: { ...agent, ...patch } as AgentConfigSlim,
+          projectPatch: { providerId, ...(patch.permissionMode ? { permissionMode: patch.permissionMode } : {}) },
+          livePatch: {
+            ...patch, providerEnvJson: providerEnvJson ?? null,
+            ...(Object.hasOwn(patch, 'runtimeConfig') ? { runtimeConfig: patch.runtimeConfig ?? null } : {}),
+          },
+        };
+      }
+      const syncExecutionDefault = key === 'model' || key === 'permissionMode';
+      const update = { [key]: normalizedValue };
       return {
-        ok: true,
-        agent: {
-          ...agent,
-          [key]: normalizedValue,
-          ...(key === 'providerId' ? { providerEnvJson } : {}),
-        },
-        projectPatch: syncExecutionDefault
-          ? { [key]: normalizedValue }
-          : undefined,
-        livePatch: syncExecutionDefault
-          ? {
-              [key]: normalizedValue,
-              ...(key === 'providerId'
-                ? { providerEnvJson: providerEnvJson ?? null }
-                : {}),
-            }
-          : undefined,
+        ok: true, agent: { ...agent, ...update },
+        projectPatch: syncExecutionDefault ? update : undefined,
+        livePatch: syncExecutionDefault ? update : undefined,
       };
     },
     'set',
@@ -3481,12 +3483,12 @@ Note: for Claude plugins (Anthropic plugin protocol — skills + agents + MCP
   'cc-plugin': `myagents cc-plugin — Manage Claude plugins (PRD 0.2.17)
 
 Commands:
-  list                                       List installed plugins + enabled state
+  list                                       List installed plugin IDs and global availability
   install <source>                           Install from owner/repo, github URL,
                                              .zip URL, or file:///abs/path
   uninstall <name|--id ID> [--purgeData]     Remove plugin; data dir kept unless --purgeData
-  enable <name|--id ID>                      Enable an installed plugin
-  disable <name|--id ID>                     Disable without uninstalling
+  enable <name|--id ID>                      Make an installed plugin globally available
+  disable <name|--id ID>                     Block a plugin globally without uninstalling
   show <name|--id ID>                        Show manifest + component inventory
 
 Examples:
@@ -3497,9 +3499,12 @@ Examples:
   myagents cc-plugin show my-plugin
   myagents cc-plugin uninstall my-plugin --purgeData
 
-Plugins land in ~/.myagents/plugins/<name>/ and are activated on next session
-pre-warm (~1s). Different concept from OpenClaw channel plugins above —
-unrelated storage, unrelated semantics.`,
+Installation makes a plugin globally available. To select plugins for an Agent's
+future Sessions, find the Agent ID with myagents agent list and read its current
+selection with myagents agent show <agentId>. Set the complete list of plugin IDs:
+  Bash/Zsh: myagents agent set AGENT_ID enabledPluginIds '["my-plugin@local"]'
+  cmd.exe:  myagents agent set AGENT_ID enabledPluginIds "[\\"my-plugin@local\\"]"
+Use an empty JSON array to clear the Agent's selection.`,
 
   runtime: `myagents runtime — Inspect Agent Runtimes (v0.1.69+)
 
@@ -4778,9 +4783,9 @@ Management:
   disable <id>                    Disable an agent
   archive <id>                    Archive an Agent workspace and pause proactive channels
   unarchive <id>                  Restore an archived Agent workspace
-  set <id> <key> <value>          Set enabled/runtime/runtimeConfig or one of
-                                  providerId/model/permissionMode; the latter
-                                  sync the Project mirror and live channels
+  set <id> <key> <value>          Set enabled, runtime, runtimeConfig,
+                                  providerId/model/permissionMode, mcpEnabledServers,
+                                  or enabledPluginIds. See myagents agent set --help.
   runtime-status                  Runtime drift status across agents
   channel list <agent-id>         List channels
   channel add <agent-id>          Add a channel
@@ -4840,14 +4845,15 @@ Restores its workspace visibility through the lifecycle owner. --json returns
 the result. Inspect agent show for the resulting configuration.`,
   'agent/set': `myagents agent set <agentId> <key> <value> — Change local Agent configuration
 
-Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode, mcpEnabledServers.
+Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode, mcpEnabledServers, enabledPluginIds.
 Values are parsed as JSON when valid; quote strings/JSON for your shell.
 Use runtime list/describe before selecting runtime-specific values.
 Configuration intent is validated by the Agent owner; providerId/model/permissionMode
 also update the Project mirror and live channels. mcpEnabledServers accepts a JSON
-array of catalogue IDs and changes future defaults; globally disabled servers remain
-unavailable. Existing Session configuration
-has its own lifecycle; Agent defaults do not prove its effective permissions.
+array of catalogue IDs for future Sessions. enabledPluginIds replaces the Agent's
+selection for future Sessions. Pass a JSON array of IDs from myagents cc-plugin list
+or '[]' to clear it. Global availability still applies to both selections.
+Existing Session configuration has its own lifecycle.
 --json returns the result. Read agent show first; network references and unknown
 keys are not supported. There is no --dry-run.`,
 
@@ -6943,7 +6949,7 @@ CREATE OPTIONS (myagents cron add ...)
                                   or explicit UTC.
   --workspace <path>              Workspace the task runs in. Defaults to the
                                   current session workspace.
-  --runtime <builtin|dsh|claude-code|codex>
+  --runtime <builtin|dsh|claude-code|codex|antigravity>
   --runtime-config <json-object>  Optional runtime identity/config override.
   --provider-id / --model / --permission-mode
                                   Optional Task execution overrides. Omit all
@@ -7450,7 +7456,7 @@ export async function handleCcPluginInstall(payload: {
     return {
       success: true,
       data: json.entry,
-      hint: 'Plugin installed. Active after the next session pre-warm.',
+      hint: 'Plugin installed and globally available. Set Agent plugin defaults with myagents agent set and enabledPluginIds. See myagents cc-plugin --help.',
     };
   }
   return {
@@ -7511,7 +7517,9 @@ export async function handleCcPluginToggle(payload: {
     return {
       success: true,
       data: json.entry,
-      hint: payload.enabled ? 'Plugin enabled.' : 'Plugin disabled.',
+      hint: payload.enabled
+        ? 'Plugin is globally available. Select it in the Agent defaults or the Chat plugin menu to use it.'
+        : 'Plugin is globally disabled.',
     };
   }
   return {
@@ -8408,12 +8416,15 @@ export async function handleAgentShow(payload: {
     };
   }
   const { agent, project, workspacePath } = identity;
+  const projectPluginIds = identity.association === 'project-linked' ? project?.enabledPluginIds : undefined;
+  const enabledPluginIds = agent.enabledPluginIds ?? projectPluginIds;
 
   // AgentConfigSlim is intentionally permissive (`[key: string]: unknown`) —
   // runtime / permissionMode / runtimeConfig exist on the full AgentConfig
   // but not on the slim shape. Extract defensively.
-  const storedRuntime = (agent.runtime as RuntimeType | undefined) ?? 'builtin';
+  const storedRuntime = agent.runtime as RuntimeType | undefined;
   const rawUsesManagedCodex = agentUsesManagedCodexProvider({
+    runtimePreference: agent.runtimePreference,
     providerId: agent.providerId,
     runtime: storedRuntime,
     runtimeConfig: agent.runtimeConfig as { source?: string } | undefined,
@@ -8447,7 +8458,7 @@ export async function handleAgentShow(payload: {
   // value for a Codex agent would be actively misleading — the dispatch
   // path never consults that field.
   const usesExternalCliConfiguration =
-    runtime === 'claude-code' ||
+    runtime === 'claude-code' || runtime === 'antigravity' ||
     (runtime === 'codex' && !usesManagedCodex);
   const rcModel = usesExternalCliConfiguration
     ? (runtimeConfig?.model as string | undefined)
@@ -8501,8 +8512,8 @@ export async function handleAgentShow(payload: {
         mcpEnabledServers: Array.isArray(agent.mcpEnabledServers)
           ? agent.mcpEnabledServers
           : [],
-        enabledPluginIds: Array.isArray(agent.enabledPluginIds)
-          ? agent.enabledPluginIds
+        enabledPluginIds: Array.isArray(enabledPluginIds)
+          ? enabledPluginIds
           : [],
         enabledOfficialToolIds: Array.isArray(agent.enabledOfficialToolIds)
           ? agent.enabledOfficialToolIds
@@ -8634,6 +8645,8 @@ function isValidRuntimeType(runtime: unknown): runtime is RuntimeType {
 /** Install guidance keyed by runtime. Shown when a runtime is NOT installed. */
 function hintForMissingRuntime(runtime: RuntimeType): string {
   switch (runtime) {
+    case 'antigravity':
+      return 'Install Antigravity CLI and sign in with agy.';
     case 'claude-code':
       return 'Install the Claude Code CLI — see https://docs.anthropic.com/claude/docs/claude-code';
     case 'codex':
@@ -8770,7 +8783,7 @@ async function validateTaskOverrides(
   if (
     hasProviderOverride &&
     typeof payload.runtime === 'string' &&
-    ['claude-code', 'codex'].includes(payload.runtime)
+    ['claude-code', 'codex', 'antigravity'].includes(payload.runtime)
   ) {
     return {
       success: false,
@@ -9105,7 +9118,7 @@ function resolveAgentRuntimeIdentityFromWorkspace(payload: {
 
   const raw = agent.runtime as unknown;
   const legacyRuntime =
-    typeof raw === 'string' && isValidRuntimeType(raw) ? raw : 'builtin';
+    typeof raw === 'string' && isValidRuntimeType(raw) ? raw : undefined;
   const preferredRuntime = resolveEffectiveRuntime(
     legacyRuntime,
     agent.runtimePreference,
@@ -9117,6 +9130,7 @@ function resolveAgentRuntimeIdentityFromWorkspace(payload: {
   if (
     preferredRuntime === 'builtin' &&
     agentUsesManagedCodexProvider({
+      runtimePreference: agent.runtimePreference,
       providerId: agent.providerId,
       runtime: legacyRuntime,
       runtimeConfig: agent.runtimeConfig as { source?: string } | undefined,

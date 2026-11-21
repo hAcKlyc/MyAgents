@@ -1,5 +1,5 @@
 /** Version shared with Rust's SYSTEM_SKILLS_VERSION contract. */
-export const SYSTEM_SKILLS_VERSION = '63';
+export const SYSTEM_SKILLS_VERSION = '64';
 
 /**
  * Canonical Skill names that are part of MyAgents' always-available runtime

@@ -221,6 +221,8 @@ pub struct SidecarManager {
     /// Standing lifecycle demand for the canonical Global Sidecar. Candidate
     /// insertion/removal must not mutate this authority.
     global_sidecar_intent: GlobalSidecarIntent,
+    /// CLI discovery path supplied by the desktop App. Standalone managers default to none.
+    pub(super) global_port_file: Option<PathBuf>,
     /// Port counter for allocation (starts from BASE_PORT)
     pub(super) port_counter: Arc<AtomicU16>,
     /// Session ID -> generation counter. The generation is the unique instance
@@ -278,6 +280,10 @@ pub struct SidecarManager {
 
 impl SidecarManager {
     pub fn new() -> Self {
+        Self::with_global_port_file(None)
+    }
+
+    pub(super) fn with_global_port_file(global_port_file: Option<PathBuf>) -> Self {
         // Drop the initial receiver immediately — subscribers grab their own via
         // `subscribe_stop_events()`. broadcast::Sender keeps working even with
         // zero receivers (send returns Err which we discard at call sites).
@@ -288,6 +294,7 @@ impl SidecarManager {
             recovering_sidecars: HashMap::new(),
             instances: HashMap::new(),
             global_sidecar_intent: GlobalSidecarIntent::Stopped,
+            global_port_file,
             port_counter: Arc::new(AtomicU16::new(BASE_PORT)),
             sidecar_generations: HashMap::new(),
             // Start at 1 so callers using `0` as an "unknown / not present"
@@ -2296,8 +2303,9 @@ impl Drop for SidecarManager {
 pub type ManagedSidecarManager = Arc<Mutex<SidecarManager>>;
 
 /// Create a new managed sidecar manager
+#[cfg(test)]
 pub fn create_sidecar_manager() -> ManagedSidecarManager {
-    Arc::new(Mutex::new(SidecarManager::new()))
+    create_sidecar_state(None)
 }
 
 // ============= Legacy compatibility types =============
@@ -2324,9 +2332,10 @@ pub struct SidecarStatus {
 /// Legacy managed sidecar type alias
 pub type ManagedSidecar = ManagedSidecarManager;
 
-/// Legacy function: create_sidecar_state -> create_sidecar_manager
-pub fn create_sidecar_state() -> ManagedSidecar {
-    create_sidecar_manager()
+pub fn create_sidecar_state(global_port_file: Option<PathBuf>) -> ManagedSidecar {
+    Arc::new(Mutex::new(SidecarManager::with_global_port_file(
+        global_port_file,
+    )))
 }
 
 #[cfg(test)]

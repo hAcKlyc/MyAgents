@@ -12,13 +12,16 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { registerCloseLayer } from '@/utils/closeLayer';
 
 export function useCloseLayer(handler: () => boolean, zIndex: number): void {
+    const ownerActive = useOverlayOwnerActive();
     const handlerRef = useRef(handler);
     useEffect(() => { handlerRef.current = handler; });
 
     useEffect(() => {
+        if (!ownerActive) return;
         return registerCloseLayer(() => handlerRef.current(), zIndex);
-    }, [zIndex]);
+    }, [ownerActive, zIndex]);
 }

@@ -23,6 +23,7 @@ function readiness(
       dsh: dshState,
     },
     external: {
+      antigravity: { state: "ready", implementationVersion: "1.5.13" },
       "claude-code": { state: "ready", implementationVersion: "1.0.0" },
       codex: { state: "ready", implementationVersion: "2.0.0" },
     },

@@ -59,6 +59,9 @@ export async function generateAndApplyTitle(
   providerEnv: ProviderEnv | undefined,
   agentDir: string,
 ): Promise<string | null> {
+  // ACP supplies the title of the actual conversation. Never start a second
+  // tool-capable conversation to title the first one.
+  if (runtime === 'antigravity') return getSessionMetadata(sessionId)?.title ?? null;
   const { generateTitle, generateTitleExternal } = await import('./title-generator');
   let title: string | null;
   if (runtime === 'builtin') {
@@ -73,6 +76,11 @@ export async function generateAndApplyTitle(
     title = await generateTitleExternal(rounds, runtime, model || '', agentDir, runtimeSource);
   }
   if (!title) return null;
+  return applyRuntimeTitle(sessionId, title);
+}
+
+export async function applyRuntimeTitle(sessionId: string, title: string): Promise<string | null> {
+  if (!title.trim()) return null;
 
   // TOCTOU close (review #3): a user rename may have landed during the
   // (multi-second) LLM call. A plain read-then-write still races — the rename
@@ -112,7 +120,7 @@ export async function maybeGenerateTitleAfterTurn(
   model: string | undefined,
   providerEnv?: ProviderEnv,
 ): Promise<void> {
-  if (!sessionId || inFlight.has(sessionId)) return;
+  if (runtime === 'antigravity' || !sessionId || inFlight.has(sessionId)) return;
   inFlight.add(sessionId);
   try {
     const meta = getSessionMetadata(sessionId);

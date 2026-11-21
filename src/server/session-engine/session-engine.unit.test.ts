@@ -413,6 +413,7 @@ vi.mock('../agent-session', async () => ({
 }));
 
 vi.mock('../runtimes/external-session', () => ({
+  handleExternalProxyConfigChange: vi.fn(),
   recordExternalNotificationEvent: vi.fn(),
   getExternalChannelSnapshot: vi.fn(() => null),
   inspectExternalRuntime: vi.fn(async () => null),

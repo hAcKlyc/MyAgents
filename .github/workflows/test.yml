@@ -126,6 +126,8 @@ jobs:
           npm ci --ignore-scripts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node scripts/prepare-cliproxy.mjs win32-x64
+      - name: Verify Claude SDK launch with a long MCP configuration on Windows
+        run: node --test scripts/verify-claude-sdk-wrapper.test.mjs
       - name: Verify Windows bootstrap download retry and publication
         run: node --test scripts/node-runtime.test.mjs
       - name: Verify selective Sherpa source extraction on Windows

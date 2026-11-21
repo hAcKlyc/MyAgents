@@ -83,6 +83,27 @@ describe('useChatSearch', () => {
     });
   });
 
+  it('makes matches available during continuous output and preserves the selected message on prepend', () => {
+    const base: Message = { id: 'first', role: 'assistant', timestamp: new Date(0), content: 'needle' };
+    const scrollerRef = { current: document.createElement('div') };
+    const { result, rerender } = renderHook(({ messages }: { messages: Message[] }) =>
+      useChatSearch({ active: true, messages, scrollerRef, scrollToMessage: vi.fn(), pauseAutoScroll: vi.fn() }),
+      { initialProps: { messages: [base] } });
+    act(() => result.current.setQuery('needle'));
+    const tail = { ...base, id: 'tail' };
+    for (let i = 0; i < 5; i++) {
+      act(() => vi.advanceTimersByTime(33));
+      rerender({ messages: [base, { ...tail, content: 'needle'.slice(0, i + 2) }] });
+    }
+    expect(result.current.matchCount).toBe(1);
+    act(() => vi.advanceTimersByTime(150));
+    expect(result.current.matchCount).toBe(2);
+    act(() => result.current.next());
+    rerender({ messages: [{ ...base, id: 'older' }, base, tail] });
+    act(() => vi.advanceTimersByTime(151));
+    expect(result.current.currentIndex).toBe(2);
+  });
+
   it('pauses following before scrolling an already-mounted match', () => {
     const pauseAutoScroll = vi.fn();
     const scrollToMessage = vi.fn(() => () => true);

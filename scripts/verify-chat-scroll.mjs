@@ -15,6 +15,7 @@ const repo = resolve(import.meta.dirname, '..');
 patchReactVirtuoso(resolve(repo, 'node_modules/react-virtuoso'), true);
 const output = await mkdtemp(resolve(tmpdir(), 'myagents-scroll-verification-'));
 const engine = process.argv[2] ?? 'webkit';
+const readingOnly = process.argv.includes('--reading-only');
 const ownershipOnly = process.argv.includes('--ownership-only');
 const followOnly = process.argv.includes('--follow-only');
 assert.ok(['webkit', 'chrome', 'chromium'].includes(engine), 'Choose webkit, chrome or chromium');
@@ -29,6 +30,7 @@ import {ImagePreviewProvider} from './context/ImagePreviewContext';
 import {useChatScrollModel} from './hooks/useChatScrollModel';
 import {useChatScrollController} from './hooks/useChatScrollController';
 import {useChatSearch} from './hooks/useChatSearch';
+import {readingAnchorDelta} from './utils/chatReadingAnchor';
 await i18n.changeLanguage('zh-CN');
 const mk=(id,content,role='assistant')=>({id,content,role,timestamp:new Date(),streamingTextActive:true});
 const seedMode=new URLSearchParams(location.search).get('seed');
@@ -53,7 +55,7 @@ function Fixture(){
  const model=useChatScrollModel({historyMessages:loaded?history:[],streamingMessage:loaded?sm:null,sessionId:session});
  const ctrl=useChatScrollController({messages:model.data,isActive:active,sessionId:session,rootRef});
  const search=useChatSearch({active:searchOpen,messages:model.data,scrollerRef:ctrl.scrollerRef,scrollToMessage:ctrl.scrollToMessage,pauseAutoScroll:ctrl.pauseAutoScroll});
- useLayoutEffect(()=>{window.audit={ctrl,search,setActive,setSession,setLoaded,load:()=>setLoaded(true),seed:model.heightEstimateSeed,
+ useLayoutEffect(()=>{window.audit={ctrl,search,readingAnchorDelta,setActive,setSession,setLoaded,load:()=>setLoaded(true),seed:model.heightEstimateSeed,
  readState:()=>new Promise(resolve=>ctrl.virtuosoRef.current.getState(resolve)),setSearchOpen,setLoading,setHeight,setSpacer,setPermission,
  showDisclosure:()=>setSm(prev=>({...prev,content:[{type:'thinking',thinking:'Expanded thinking content with many lines. '.repeat(100),isComplete:true},{type:'text',text:'Disclosure tail.'}]})),
  growDisclosure:()=>setSm(prev=>({...prev,content:prev.content.map(block=>block.type==='text'?{...block,text:block.text+' Later output below the open content. '.repeat(20)}:block)})),append:text=>setSm(prev=>({...prev,content:prev.content+text})),replace:text=>setSm(prev=>({...prev,content:text})),snapshot:()=>{
@@ -109,8 +111,79 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const address = server.httpServer.address();
   const fixtureUrl = `http://127.0.0.1:${address.port}/__scroll_audit`;
-  await verifyScrollOwnership(page, fixtureUrl, output);
-  if (!ownershipOnly) {
+  if (readingOnly) {
+    await page.goto(fixtureUrl);
+    await page.waitForFunction(() => window.audit?.ctrl.scrollerRef.current);
+    await page.evaluate(() => {
+      const lines = Array.from({length:140}, (_, i) => 'Paragraph ' + i + '. ' + ('Reading this section in the same position. ').repeat(5));
+      window.audit.replace(lines.join('\n\n'));
+      window.audit.ctrl.scrollToBottom('auto');
+    });
+    await page.waitForFunction(() => document.querySelectorAll('[data-message-id="stream"] p').length > 100);
+    await page.waitForTimeout(400);
+    await page.mouse.move(360,280);
+    await page.mouse.wheel(0,-1800);
+    await page.waitForTimeout(350);
+    const origin = await page.evaluate(() => {
+      const anchor = window.audit.ctrl.captureAnchor('test');
+      if (!anchor?.reading) throw Error('No internal text position at the reading line');
+      window.reading = anchor.reading;
+      return {source:anchor.reading.source, top:anchor.reading.top};
+    });
+    const offsets = [];
+    for (const width of [525, 740, 580, 760]) {
+      await page.evaluate(width => { document.querySelector('[data-viewport-phase]').parentElement.style.width = width + 'px'; }, width);
+      await page.waitForTimeout(250);
+      offsets.push(await page.evaluate(() => {
+        const anchor = window.reading;
+        const node = anchor.node.deref();
+        const range = document.createRange();
+        range.setStart(node, anchor.offset);
+        range.setEnd(node, anchor.offset+1);
+        return range.getBoundingClientRect().top-window.audit.ctrl.scrollerRef.current.getBoundingClientRect().top-anchor.top;
+      }));
+    }
+    // Emulate an image decoding above the reading line while the same row remains mounted.
+    await page.evaluate(() => {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.style.cssText = 'display:block;width:30px;height:93px';
+      document.querySelector('[data-message-id="stream"] p').prepend(img);
+    });
+    await page.waitForTimeout(250);
+    const afterImage = await page.evaluate(() => window.audit.readingAnchorDelta(
+      document.querySelector('[data-message-id="stream"]'),window.reading,
+      window.audit.ctrl.scrollerRef.current.getBoundingClientRect().top));
+    assert.ok(afterImage != null && Math.abs(afterImage) <= 1, 'Late image moved the reading point '+afterImage);
+    await page.evaluate(() => {
+      const fence = String.fromCharCode(96).repeat(3);
+      const longCode = Array.from({length:250}, (_,i) => '  const variable'+i+' = "a long, readable string value for this row";');
+      window.audit.replace([fence+'typescript',...longCode,fence].join('\n'));
+      window.audit.ctrl.scrollToBottom('auto');
+    });
+    await page.waitForFunction(() => document.querySelectorAll('[data-message-id="stream"] .react-syntax-highlighter-line-number').length >= 250);
+    await page.waitForTimeout(250);
+    await page.mouse.wheel(0,-1600);
+    await page.waitForTimeout(300);
+    const remounted = await page.evaluate(() => {
+      const anchor = window.audit.ctrl.captureAnchor('code-remount')?.reading;
+      if (!anchor?.codeLine || !anchor.source) throw Error('Expected an internal numbered code line');
+      const row = document.querySelector('[data-message-id="stream"]');
+      const clone = row.cloneNode(true);
+      const rect = row.getBoundingClientRect();
+      clone.style.cssText = 'position:fixed;left:'+rect.left+'px;top:'+rect.top+'px;width:'+rect.width+'px;visibility:hidden';
+      document.body.appendChild(clone);
+      try {
+        const diff = window.audit.readingAnchorDelta(clone,anchor,window.audit.ctrl.scrollerRef.current.getBoundingClientRect().top);
+        return {line:anchor.codeLine.number,diff};
+      } finally {clone.remove();}
+    });
+    assert.ok(remounted.diff != null && Math.abs(remounted.diff)<=1,'Remounted code line moved '+JSON.stringify(remounted));
+    console.log(JSON.stringify({engine,origin,offsets,afterImage,remounted}));
+    await writeFile(resolve(output,'reading.json'),JSON.stringify({origin,offsets,afterImage,remounted}));
+    assert.ok(offsets.every(d => Math.abs(d) <= 1), 'Reading position moved after reflow: '+offsets);
+  } else await verifyScrollOwnership(page, fixtureUrl, output);
+  if (!ownershipOnly && !readingOnly) {
   const seedEvidence = {};
   for (const mode of followOnly ? [] : ['immediate', 'deferred']) {
     await page.goto(`${fixtureUrl}?seed=${mode}`);

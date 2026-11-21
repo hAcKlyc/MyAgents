@@ -1,3 +1,4 @@
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloseIcon, SendIcon, ImagePlusIcon } from '@/components/icons';
@@ -36,6 +37,7 @@ export default function BugReportOverlay({
     onClose, onNavigateToProviders, appVersion, providers, apiKeys, providerVerifyStatus,
     initialProviderId, initialModel, onModelChange, assistantEntry,
 }: BugReportOverlayProps) {
+    const ownerActive = useOverlayOwnerActive();
     const { t } = useTranslation('settings');
     // Cmd+W dismissal: z-[250] matches the component's CSS z-index
     useCloseLayer(() => { onClose(); return true; }, 250);
@@ -84,6 +86,7 @@ export default function BugReportOverlay({
     useEffect(() => { onCloseRef.current = onClose; });
 
     useEffect(() => {
+        if (!ownerActive) return;
         const handleKey = (e: KeyboardEvent) => {
             if (isImeComposingEvent(e)) return;
             if (e.key === 'Escape' && !menuOpenRef.current) {
@@ -92,7 +95,7 @@ export default function BugReportOverlay({
         };
         document.addEventListener('keydown', handleKey);
         return () => document.removeEventListener('keydown', handleKey);
-    }, []);
+    }, [ownerActive]);
 
     const handleSubmit = useCallback(() => {
         if (!canSubmit) return;
@@ -122,7 +125,7 @@ export default function BugReportOverlay({
     };
 
     return (
-        <OverlayBackdrop onClose={onClose} className="z-[250] px-4">
+        <OverlayBackdrop portal onClose={onClose} className="z-[250] px-4">
             <div className="glass-panel w-full max-w-md">
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4">

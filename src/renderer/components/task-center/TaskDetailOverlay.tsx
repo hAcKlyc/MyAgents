@@ -1,6 +1,7 @@
 // TaskDetailOverlay — modal covering Task Center with full details of one Task.
 // PRD §7.3. Uses the shared OverlayBackdrop + closeLayer Cmd+W integration.
 
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -182,7 +183,8 @@ export function TaskDetailOverlay({
   // Esc closes the overlay in preview mode. In edit mode, TaskEditPanel
   // owns Esc so it can run its dirty-guard before unwinding to preview;
   // we deactivate the overlay-level Esc to keep them from competing.
-  useOverlayEsc(!editing, onClose);
+  const ownerActive = useOverlayOwnerActive();
+  useOverlayEsc(ownerActive && !editing, onClose);
 
   // Load run stats alongside the fresh task — re-fired on reloadToken so
   // external transitions (scheduler tick) re-aggregate executionCount.

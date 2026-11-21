@@ -8,6 +8,7 @@ import {
   removeProviderFromProxySettingsScope,
   shouldUseMyAgentsProxyForGeneralRequests,
   shouldUseMyAgentsProxyForProvider,
+  shouldUseMyAgentsProxyForRuntime,
 } from './proxyScope';
 
 function proxy(scope?: ProxySettings['scope'], enabled = true): ProxySettings {
@@ -118,5 +119,20 @@ describe('provider-owned proxy decision', () => {
     const providerOnGeneralOff = proxy({ mode: 'custom', generalRequests: false, providerIds: ['deepseek'] });
     expect(effectiveProxyScopeKey(providerOn, 'deepseek'))
       .toBe(effectiveProxyScopeKey(providerOnGeneralOff, 'deepseek'));
+  });
+});
+
+describe('system CLI proxy scope', () => {
+  it('inherits the legacy selection and honors explicit selections independently', () => {
+    const use = (scope: ProxySettings['scope'], enabled = true) =>
+      shouldUseMyAgentsProxyForRuntime(proxy(scope, enabled), 'codex');
+    expect(use({ mode: 'all' })).toBe(true);
+    expect(use({ mode: 'all' }, false)).toBe(false);
+    expect(use({ mode: 'custom', providerIds: ['a'] })).toBe(true);
+    expect(use({ mode: 'custom', generalRequests: false, providerIds: ['codex-sub'] })).toBe(false);
+    expect(use({ mode: 'custom', generalRequests: true, runtimeIds: [] })).toBe(false);
+    expect(use({ mode: 'custom', generalRequests: false, runtimeIds: ['codex'] })).toBe(true);
+    expect(removeProviderFromProxySettingsScope(proxy({ mode: 'custom', runtimeIds: ['codex'], providerIds: ['a'] }), 'a')?.scope?.runtimeIds)
+      .toEqual(['codex']);
   });
 });

@@ -12,6 +12,7 @@ import { MANAGED_BROWSER_MCP_ID } from '../../shared/browserTools';
 import { OFFICIAL_TOOLS } from '../../shared/official-tools';
 import { MANAGED_CODEX_PROVIDER } from '../../shared/config-types';
 import {
+  ANTIGRAVITY_PERMISSION_MODES,
   CC_PERMISSION_MODES,
   CODEX_PERMISSION_MODES,
   DSH_PERMISSION_MODES,
@@ -144,9 +145,9 @@ describe('SimpleChatInput send paths', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'my draft' } });
     fireEvent.click(screen.getByTitle('切换模型'));
     expect(screen.getByRole('status')).toHaveTextContent('模型列表加载失败');
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('textbox')).toHaveValue('my draft');
     expect(screen.getByTitle('切换模型')).toHaveTextContent('saved-model');
   });
@@ -337,9 +338,13 @@ describe('SimpleChatInput send paths', () => {
     expect(within(choices).getByText('high')).toBeVisible();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('group', { name: '推理强度' })).not.toBeInTheDocument();
-    await user.click(screen.getByTitle('切换模型'));
     const nextRow = screen.getByRole('button', { name: /推理强度.*默认/ });
-    nextRow.focus();
+    expect(nextRow).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(screen.getByTitle('切换模型')).toHaveFocus();
+    expect(nextRow).not.toBeInTheDocument();
+    await user.click(screen.getByTitle('切换模型'));
+    screen.getByRole('button', { name: /推理强度.*默认/ }).focus();
     await user.keyboard('{Enter}');
     expect(screen.getByRole('group', { name: '推理强度' })).toBeVisible();
     await user.click(document.body);
@@ -474,6 +479,23 @@ describe('SimpleChatInput send paths', () => {
     expect(screen.getByText('由 Codex 自动审查审批请求，仅潜在不安全操作需确认')).toBeInTheDocument();
     expect(screen.getByText('规划')).toBeInTheDocument();
     expect(screen.getByText('完全自主')).toBeInTheDocument();
+  });
+
+  it('shows only the three Antigravity choices and sends their own permission values', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const user = userEvent.setup();
+    const onPermissionModeChange = vi.fn();
+    renderInput({ runtime: 'antigravity', runtimePermissionModes: ANTIGRAVITY_PERMISSION_MODES,
+      permissionMode: 'plan' as PermissionMode, onPermissionModeChange });
+    expect(screen.getByTitle('切换执行模式')).toHaveTextContent('规划');
+    for (const choice of ANTIGRAVITY_PERMISSION_MODES.filter(mode => !mode.hidden)) {
+      await user.click(screen.getByTitle('切换执行模式'));
+      expect(screen.queryByText('Default')).not.toBeInTheDocument();
+      expect(screen.getAllByText('规划')).toHaveLength(1);
+      expect(screen.getByText(choice.description)).toBeInTheDocument();
+      await user.click(screen.getByText(choice.label));
+      expect(onPermissionModeChange).toHaveBeenLastCalledWith(choice.value);
+    }
   });
 
   it('offers native Codex three choices and keeps the legacy read-only caption truthful', async () => {
@@ -1116,6 +1138,7 @@ describe('SimpleChatInput send paths', () => {
     });
 
     await user.click(screen.getByTitle('切换模型'));
+    await user.click(await screen.findByRole('button', { name: 'Provider B' }));
     await user.click(await screen.findByText('B Pro'));
 
     expect(onBuiltinModelSelect).toHaveBeenCalledWith({
@@ -1212,6 +1235,33 @@ describe('SimpleChatInput send paths', () => {
     } finally {
       window.removeEventListener(CUSTOM_EVENTS.OPEN_SETTINGS, openSettings);
     }
+  });
+
+  it.each(['antigravity', 'codex'] as const)('opens the %s catalog without fetching and shows progress only while there are no models', async runtime => {
+    await i18n.changeLanguage('zh-CN');
+    const refresh = vi.fn();
+    const input = (models: { value: string; displayName: string }[], loading = false) => (
+      <ToastProvider><ImagePreviewProvider>
+        <SimpleChatInput runtime={runtime} isLoading={false} onSend={vi.fn()} runtimeModels={models} runtimeModelsLoading={loading} onRefreshProviders={refresh} />
+      </ImagePreviewProvider></ToastProvider>
+    );
+    const view = render(input([], true));
+    fireEvent.click(screen.getByTitle('切换模型'));
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载模型列表');
+    view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }]));
+    expect(screen.queryByText('正在加载模型列表…')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible());
+    fireEvent.click(screen.getByTitle('切换模型'));
+    fireEvent.click(screen.getByTitle('切换模型'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible());
+    expect(refresh).not.toHaveBeenCalled();
+    view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }], true));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Native model' })).toBeEnabled();
+    view.rerender(input([{ value: 'new-model', displayName: 'Updated model' }]));
+    expect(screen.getByRole('button', { name: 'Updated model' })).toBeVisible();
+    view.rerender(input([]));
+    expect(screen.getByText('暂未发现可用模型。')).toBeVisible();
   });
 
   it('does not show the custom model service row for user-managed CLI runtimes', async () => {

@@ -1,3 +1,4 @@
+import type { MessagePageRequest } from '../session-transcript/message-page';
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
 import type { RuntimeAgentWorkControl, RuntimeAgentWorkTree } from '../../shared/types/subagent-lifecycle';
 import type { AsyncQuestionReply } from '../../shared/asyncUserQuestions';
@@ -345,6 +346,7 @@ export type SessionEngineMaterializePendingResult = {
 };
 
 export type SessionEngineLiveOverlay = {
+  page?: { totalCount: number; hasMoreBefore: boolean };
   isActive: boolean;
   runtime?: RuntimeType;
   snapshotRevision?: number;
@@ -418,7 +420,7 @@ export interface SessionEngine {
   getSessionCompletionTerminal(): SessionCompletionTerminal | null;
   hasQueuedTurnOwnedBy(owner: TurnOwner): boolean;
   getHeldImConfigSnapshot(): SessionEngineHeldImConfigSnapshot;
-  getLiveSessionOverlay(sessionId: string): SessionEngineLiveOverlay;
+  getLiveSessionOverlay(sessionId: string, page?: MessagePageRequest): SessionEngineLiveOverlay;
   sendDesktopMessage(request: DesktopMessageRequest): Promise<DesktopAdmissionResult>;
   /** Run a runtime-native context compaction without adding a transcript turn. */
   compactContext(): Promise<CapabilityOperationResult>;
@@ -486,7 +488,7 @@ export interface SessionEngine {
     options?: ForkConversationOptions,
   ): Promise<CapabilityOperationResult>;
   updateProviderEnv(providerEnv: ProviderEnv | undefined): Promise<{ success: boolean; skipped?: string; error?: string }>;
-  updateMcpServers(servers: McpServerDefinition[]): Promise<{ success: boolean; servers?: string[]; skipped?: string; error?: string }>;
+  updateMcpServers(servers: McpServerDefinition[], selectedIds?: readonly string[]): Promise<{ success: boolean; servers?: string[]; skipped?: string; error?: string }>;
   updateAgents(agents: Record<string, unknown>, options?: { forceReload?: boolean }): Promise<{ success: boolean; skipped?: string; error?: string }>;
   updateEnabledPluginIds(ids: string[] | null): Promise<{ success: boolean; enabledIds?: string[] | null; skipped?: string; error?: string }>;
   updateDesktopInteractionScenario(

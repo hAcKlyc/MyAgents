@@ -1,3 +1,5 @@
+import { sessionMessageToMessageWire } from './builtin-session/message-codec';
+import { projectMessagePage, type MessagePageRequest } from './session-transcript/message-page';
 import { captureChannelTurn, effectiveChannelDelivery, channelContextForInput, decorateChannelQuery, channelInputSource } from './session-core/channel-context';
 import { readChannelPromptOptions } from './tools/channel-messaging';
 import { desktopContextOf } from '../shared/agentMentions';
@@ -189,6 +191,7 @@ import {
   buildBuiltinSkillAllowlist,
   filterSlashCommandsForCapabilities,
   findDisabledCapabilityForSlashInput,
+  isSdkBuiltinCommand,
   sanitizeSdkSkillAllowlist,
 } from './builtin-session/capabilities';
 import { initLogger, appendLog, getLogLines as getLogLinesFromLogger } from './AgentLogger';
@@ -768,7 +771,7 @@ function stripUnsupportedModalityBlocks(
     }
   }
   if (!hasImageBlock) return message;
-  if (modelSupportsModality(modelAtYield, 'image')) return message;
+  if (modelSupportsModality(modelAtYield, 'image', getSessionProviderId())) return message;
 
   // Drift detected: filter out image blocks; if nothing usable remains,
   // append a synthetic placeholder so the SDK still receives a non-empty
@@ -4114,8 +4117,8 @@ async function buildSdkMcpServers(
   // null = MCP not yet configured (e.g. Global sidecar, or Tab pre-warm before /api/mcp/set)
   // [] = explicitly no MCP (user has none enabled)
   // [...]= user's enabled MCP servers
-  // Never fall back to config file — the frontend's /api/mcp/set is the single source of truth.
-  // Global sidecar never receives /api/mcp/set and correctly gets no MCP.
+  // Query launch resolves a materialized Session's selection before building this map.
+  // A pending Tab without an explicit configuration can still have no user MCPs.
   // Filter out SDK reserved names to prevent fatal crash:
   // "Invalid MCP configuration: X is a reserved MCP name." → exit code 1
   const allServers: McpServerDefinition[] = configState.currentMcpServers ?? [];
@@ -7828,8 +7831,9 @@ export function getMessages(): MessageWire[] {
 
 export function getBuiltinLiveSessionSnapshot(
   targetSessionId: string,
-  options?: { includeHistory?: boolean },
+  options?: { includeHistory?: boolean; page?: MessagePageRequest },
 ): {
+  page?: { totalCount: number; hasMoreBefore: boolean };
   snapshotRevision: number;
   inMemoryMessages: SessionMessage[];
   liveStreamingMessage: SessionMessage | null;
@@ -7841,22 +7845,27 @@ export function getBuiltinLiveSessionSnapshot(
   const streamingAssistantId = getStreamingAssistantId();
   // getBuiltinMessages() projects every V2 row. A stream attachment must
   // select the live row before that projection, not filter a full copy later.
-  const messages = options?.includeHistory === false
+  const product = getBuiltinProductContent();
+  const page = options?.page && product ? projectMessagePage(product.writer.projection, options.page, streamingAssistantId) : null;
+  const asWireRow = (row: SessionMessage) => messageWireToSessionMessage(sessionMessageToMessageWire(row));
+  const messages = page ? page.messages.map(asWireRow) : options?.includeHistory === false
     ? [] : getBuiltinMessages().map(messageWireToSessionMessage);
   let liveStreamingMessage = streamingAssistantId
-    ? messages.find(message => message.id === streamingAssistantId) ?? null
-    : null;
-  if (options?.includeHistory === false && streamingAssistantId) {
-    const product = getBuiltinProductContent();
+    ? messages.find(message => message.id === streamingAssistantId) ?? null : null;
+  if ((options?.includeHistory === false || page) && streamingAssistantId) {
     if (product) {
       const message = product.writer.projection.messages.get(streamingAssistantId);
-      liveStreamingMessage = message ? toStoredTranscriptMessage(message) : null;
+      if (message) {
+        const stored = toStoredTranscriptMessage(message);
+        liveStreamingMessage = page ? asWireRow(stored) : stored;
+      }
     } else {
       const message = getBuiltinMessages().find(message => message.id === streamingAssistantId);
       liveStreamingMessage = message ? messageWireToSessionMessage(message) : null;
     }
   }
   return structuredClone({
+    ...(page && { page: { totalCount: page.totalCount, hasMoreBefore: page.hasMoreBefore } }),
     snapshotRevision: getBuiltinLiveRevision(),
     inMemoryMessages: messages.filter(message => message.id !== streamingAssistantId),
     liveStreamingMessage,
@@ -9561,7 +9570,10 @@ export async function enqueueUserMessage(
   // provider-env semantics, and `stripUnsupportedModalityBlocks` re-checks
   // at dequeue to catch any drift), otherwise the session's current model.
   const modelForFilter = model ?? configState.currentModel;
-  const imagesAllowed = modelSupportsModality(modelForFilter, 'image');
+  const attachmentProvider = isSessionBusy ? configState.currentProviderEnv : effectiveProviderEnv;
+  const imagesAllowed = !hasImages || modelSupportsModality(
+    modelForFilter, 'image', attachmentProvider ? attachmentProvider.providerId : SUBSCRIPTION_PROVIDER_ID,
+  );
   const filteredImageCount = hasImages && !imagesAllowed ? resolvedImages!.length : 0;
 
   // Mutable text payload — modality fallback (below) appends `@<path>`
@@ -10580,6 +10592,14 @@ export async function rewindSession(userMessageId: string): Promise<{
     }
     const resumeSessionAt = boundary.kind === 'exact' ? boundary.sdkUuid : undefined;
 
+    // An eager fork remaps the conversation UUIDs and omits file undo history.
+    // Fork publication clears inherited input receipts. Older branch-local rows
+    // can still be identified after the retained product fork point.
+    const forkPoint = sourceMeta?.forkOrigin;
+    const forkIndex = forkPoint ? history.findIndex(row => row.id === forkPoint.messageId) : -1;
+    const localCheckpoint = !forkPoint || (forkIndex >= 0
+      ? targetIndex > forkIndex
+      : Boolean(targetMessage.sdkInputUuid));
     const targetUserUuid = targetMessage.sdkUuid;
     const sourceFailure = await prepareSessionTranscriptMutation(productSessionId);
     if (sourceFailure) throw new Error(`${sourceFailure.reason}: ${sourceFailure.error}`);
@@ -10594,7 +10614,7 @@ export async function rewindSession(userMessageId: string): Promise<{
       abortRequested: lifecycleState.abortRequested,
       // Candidate provenance was checked above; the SDK still owns checkpoint
       // availability and native resume owns the conversation boundary.
-      isCurrentSessionUuid: Boolean(targetUserUuid),
+      isCurrentSessionUuid: localCheckpoint,
     });
     const { skippedLinks, fileRewindStatus } = fileRewind;
     fileOutcome = { skippedLinks, fileRewindStatus };
@@ -11280,6 +11300,13 @@ async function startStreamingSession(preWarm = false): Promise<void> {
       );
     }
 
+    // An Inbox Sidecar can boot before the target Session is materialized.
+    // Resolve at Query launch, when its snapshot exists, unless a Tab or
+    // scheduled turn already supplied an explicit configuration (including []).
+    if (configState.currentMcpServers === null) {
+      const target = getCurrentProductSessionMetadata();
+      if (target) setCurrentMcpServers(resolveWorkspaceConfig(agentDir, target).mcpServers);
+    }
     const mcpStatus = configState.currentMcpServers === null ? 'auto' : configState.currentMcpServers.length === 0 ? 'disabled' : `enabled(${configState.currentMcpServers.length})`;
     const claudeTranscriptCleanupPeriodDays = normalizeClaudeTranscriptCleanupPeriodDays(
       loadAdminConfig().claudeTranscriptCleanupPeriodDays,
@@ -11491,6 +11518,8 @@ async function startStreamingSession(preWarm = false): Promise<void> {
         askUserQuestion: { previewFormat: 'html' as const },
       },
       mcpServers: sdkMcpServersInitial,
+      // Keep server credentials and large configurations off the native command line.
+      mcpServersDelivery: 'initialize' as const,
       // Product visibility boundary. Permission policy remains separately
       // owned by allowedTools/disallowedTools/canUseTool/Hooks below.
       tools: [...SDK_BUILTIN_TOOLS],
@@ -14366,19 +14395,63 @@ async function* messageGenerator(
           const inbound = item.requestId ? imRequestRegistry.get(item.requestId)?.channelInbound : undefined;
           const context = channelContextForInput(item.channelSnapshot, item.channelDelivery, source, inbound);
           const ownedEnvelope = !!(item.desktopQuery?.primaryContext || item.desktopQuery?.agentMentions?.length) || !!item.channelPrimaryReminder || item.inputSource === 'inbox';
-          item.messageText = decorateChannelQuery(item.messageText, context, ownedEnvelope);
-          if (Array.isArray(item.message.content)) {
-            const textBlock = item.message.content.findLast(block => block.type === 'text');
-            if (textBlock?.type === 'text') textBlock.text = decorateChannelQuery(textBlock.text, context, ownedEnvelope);
-            else item.message.content.push({ type: 'text', text: decorateChannelQuery('', context, false) });
+          const content = item.message.content;
+          const textBlock = Array.isArray(content) ? content.findLast(block => block.type === 'text') : undefined;
+          // An IM group or combined media message is not a direct session command.
+          const directInput = source === 'desktop' || (source === 'im'
+            && item.channelSnapshot.scope.sourceType === 'private'
+            && (inbound?.data?.parts.length ?? 0) <= 1 && !inbound?.data?.reply
+            && !inbound?.data?.attachments.length);
+          const commandName = directInput && !ownedEnvelope && Array.isArray(content) && content.length === 1
+            && !item.attachments?.length && textBlock?.type === 'text'
+            && textBlock.text === item.messageText
+            ? /^\/([^\s]+)/u.exec(textBlock.text)?.[1]
+            : undefined;
+          let preserveCommand = false;
+          if (promotedQuery && commandName) {
+            // This reads the SDK's initialized catalog and latest commands_changed push.
+            const commands = await Promise.race([
+              promotedQuery.supportedCommands().catch(() => []),
+              ...(promotionCancellation ? [promotionCancellation.then(() => [])] : []),
+            ]);
+            if (isPromotedItemCanceled(item.id) || lifecycleState.abortRequested) {
+              await rejectPromotedMessageBeforeDispatch(item, {
+                accepted: false,
+                code: 'dispatch_canceled',
+                error: 'Queue item was cancelled before Claude command dispatch',
+                rollbackBeforeReject: Promise.resolve(item.beforeDispatch?.cancel?.()),
+              });
+              continue;
+            }
+            if (lifecycleState.query !== promotedQuery) {
+              item.channelSnapshot = undefined;
+              requeuePromotedItemBeforeSdkDispatch(item);
+              traceBuiltinInputProgress('input-retired', inputTrace);
+              return;
+            }
+            preserveCommand = isSdkBuiltinCommand(commandName, commands);
+          }
+          if (preserveCommand && Array.isArray(content)) {
+            // Claude parses the final text block as the command. Earlier blocks
+            // accompany its expansion without becoming command arguments.
+            const reminder = decorateChannelQuery('', context, false);
+            if (reminder) content.unshift({ type: 'text', text: reminder });
+          } else {
+            item.messageText = decorateChannelQuery(item.messageText, context, ownedEnvelope);
+            if (Array.isArray(content)) {
+              if (textBlock?.type === 'text') textBlock.text = decorateChannelQuery(textBlock.text, context, ownedEnvelope);
+              else content.push({ type: 'text', text: decorateChannelQuery('', context, false) });
+            }
           }
           const inFlight = getInFlightMetadata();
           if (getInFlightQueueId() === item.id && inFlight) {
             inFlight.messageText = item.messageText;
             inFlight.channelDelivery = item.channelDelivery;
           }
-          if (item.deferredUserSurface) item.deferredUserSurface.message.content = item.messageText;
-          if (item.surfacedUserMessageId) confirmBuiltinUserContent(item.surfacedUserMessageId, item.messageText);
+          if (!preserveCommand) {
+            if (item.deferredUserSurface) item.deferredUserSurface.message.content = item.messageText;
+            if (item.surfacedUserMessageId) confirmBuiltinUserContent(item.surfacedUserMessageId, item.messageText);
+          }
         }
       }
     } catch (error) {

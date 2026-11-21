@@ -101,11 +101,6 @@ import {
 import { getLatestAssistantResultFromMessages, NO_TEXT_RESPONSE } from '../inbox/latest-result';
 import { CODEX_SUBSCRIPTION_PROVIDER_ID } from '../../shared/config-types';
 import {
-  getProcessProxyEnvKey,
-  getProviderProxyScopeKey,
-  setProcessProxyConfig,
-} from '../proxy-state';
-import {
   isPermissionModeForRuntimeIdentity,
   type RuntimeBackedProviderIdentity,
 } from '../../shared/providerExecution';
@@ -403,8 +398,8 @@ export function createExternalSessionEngine(): SessionEngine {
       };
     },
 
-    getLiveSessionOverlay(sessionId: string) {
-      const snapshot = getExternalLiveSessionSnapshot(sessionId);
+    getLiveSessionOverlay(sessionId, page) {
+      const snapshot = page ? getExternalLiveSessionSnapshot(sessionId, { page }) : getExternalLiveSessionSnapshot(sessionId);
       if (!snapshot) {
         return { isActive: false };
       }
@@ -929,19 +924,7 @@ export function createExternalSessionEngine(): SessionEngine {
       return handleExternalOfficialToolIdsChange(ids);
     },
 
-    async updateProxyConfig(proxySettings) {
-      const oldManagedProviderKey = getProviderProxyScopeKey(CODEX_SUBSCRIPTION_PROVIDER_ID);
-      const oldProcessEnvKey = getProcessProxyEnvKey();
-      await setProcessProxyConfig(proxySettings);
-      const newManagedProviderKey = getProviderProxyScopeKey(CODEX_SUBSCRIPTION_PROVIDER_ID);
-      const newProcessEnvKey = getProcessProxyEnvKey();
-      return handleExternalProxyConfigChange({
-        oldManagedProviderKey,
-        newManagedProviderKey,
-        oldProcessEnvKey,
-        newProcessEnvKey,
-      });
-    },
+    updateProxyConfig: handleExternalProxyConfigChange,
 
     async materializePendingDesktopSession(request) {
       const phase = request.phase ?? 'commit';
@@ -1055,8 +1038,8 @@ export function createExternalSessionEngine(): SessionEngine {
       return { success: true, skipped: 'external-runtime' };
     },
 
-    async updateMcpServers(servers) {
-      return handleExternalMcpServersChange(servers);
+    async updateMcpServers(servers, selectedIds) {
+      return handleExternalMcpServersChange(servers, selectedIds);
     },
 
     retryMcpServer(serverId) {

@@ -20,7 +20,12 @@ vi.mock('../session-engine', () => ({
 }));
 
 vi.mock('../SessionStore', () => ({
-  getSessionData: mocks.getSessionData,
+  withSessionReadSource: async (id: string, read: (format: number | undefined, snapshot: () => unknown) => unknown) => {
+    const data = await mocks.getSessionData(id);
+    if (!data) return read(undefined, () => null);
+    const { messages, ...metadata } = data;
+    return read(metadata.transcriptFormat, () => ({ metadata, rows: { messages } }));
+  },
   getSessionMetadata: vi.fn(() => ({ id: 'sid', title: 'Target' })),
   isHistoryVisibleSession: mocks.isHistoryVisibleSession,
 }));

@@ -1071,7 +1071,7 @@ fn sync_admin_agent_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<boo
 // matching exclusion list in src/server/index.ts::seedBundledSkills
 // MUST be kept in sync (comment there points back here).
 
-const SYSTEM_SKILLS_VERSION: &str = "63";
+const SYSTEM_SKILLS_VERSION: &str = "64";
 
 /// One process-wide transaction owner for the versioned system-skill
 /// snapshot. Startup automation and ConfigProvider may request convergence at
@@ -1603,7 +1603,7 @@ mod system_skills_tests {
 
     #[test]
     fn system_skill_version_keeps_cuse_and_product_skills_aligned() {
-        assert_eq!(SYSTEM_SKILLS_VERSION, "63");
+        assert_eq!(SYSTEM_SKILLS_VERSION, "64");
         assert!(SYSTEM_SKILLS.contains(&"cuse"));
         assert!(!REQUIRED_SYSTEM_SKILLS.contains(&"cuse"));
         assert!(SYSTEM_SKILLS.contains(&"myagents-task-alignment"));
@@ -3435,6 +3435,7 @@ fn run_runtime_detection_with_policy(
 
     for (runtime, binary) in [
         ("claude-code", "claude"),
+        ("antigravity", "agy"),
         ("codex", "codex"),
     ] {
         results.insert(
@@ -3531,13 +3532,15 @@ fn detect_runtimes_blocking(
 fn detect_cli(binary_name: &str) -> RuntimeDetectionResult {
     match crate::system_binary::find(binary_name) {
         Some(path) => {
-            let version = detect_cli_version(&path);
+            let version = detect_cli_output(&path, &["--version"]);
+            let compatible = binary_name != "agy" || detect_cli_output(&path, &["acp", "--help"])
+                .is_some_and(|help| help.contains("--process-per-session"));
             RuntimeDetectionResult {
                 installed: true,
                 version,
                 path: Some(path.to_string_lossy().to_string()),
-                readiness: Some("ready".to_string()),
-                reason: None,
+                readiness: Some(if compatible { "ready" } else { "unavailable" }.to_string()),
+                reason: (!compatible).then(|| "protocol-mismatch".to_string()),
             }
         }
         None => RuntimeDetectionResult {
@@ -3664,15 +3667,15 @@ fn detect_dsh_runtime_with_lock(
     }
 }
 
-fn detect_cli_version(path: &Path) -> Option<String> {
+fn detect_cli_output(path: &Path, args: &[&str]) -> Option<String> {
     // MUST use process_cmd::new() to prevent Windows console flash.
     let mut cmd = crate::process_cmd::new(path);
-    cmd.arg("--version")
+    cmd.args(args)
         // npm shims use /usr/bin/env node; resolve Node in the same environment
         // that selected the CLI, rather than the GUI application's minimal PATH.
         .env("PATH", crate::system_binary::augmented_path())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdin(Stdio::null());
     crate::proxy_config::apply_to_subprocess(&mut cmd);
 
@@ -3683,7 +3686,7 @@ fn detect_cli_version(path: &Path) -> Option<String> {
             Ok(Some(status)) => {
                 let output = child.wait_with_output().ok()?;
                 if status.success() {
-                    return String::from_utf8(output.stdout)
+                    return String::from_utf8(if output.stdout.is_empty() { output.stderr } else { output.stdout })
                         .ok()
                         .map(|s| s.trim().to_string());
                 }

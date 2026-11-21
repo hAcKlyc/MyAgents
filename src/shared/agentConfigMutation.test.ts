@@ -1,10 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import { resolveAgentConfigMutation, mutationForAgentModelSelection } from './agentConfigMutation';
+import { agentUsesManagedCodexProvider, createRuntimeBackedProviderIdentity } from './providerExecution';
+import { resolveAgentRuntimeSelection } from './types/runtime';
 import type { AgentConfig } from './types/agent';
 
 const agent: AgentConfig = { id: 'a', name: 'test', enabled: false, permissionMode: 'auto', runtime: 'codex', channels: [], runtimeConfig: { model: 'model-b', permissionMode: 'full-auto', envPolicy: { proxy: 'terminal' } } };
 
 describe('Agent execution edits at the config writer', () => {
+  it.each([['runtime', 'model'], ['model', 'runtime']] as const)(
+    'preserves the DSH preference and managed model when choosing %s then %s', (first, second) => {
+      const model = createRuntimeBackedProviderIdentity({ providerId: 'codex-sub', model: 'gpt-example' });
+      const changes = { runtime: { runtime: 'dsh' as const }, model: { runtimeBackedProviderSelection: model } };
+      let current: AgentConfig = { ...agent, runtime: 'builtin', runtimeConfig: undefined };
+      for (const action of [first, second]) {
+        current = { ...current, ...resolveAgentConfigMutation(current, changes[action]) };
+      }
+      expect(resolveAgentRuntimeSelection(current)).toBe('dsh');
+      expect(agentUsesManagedCodexProvider(current)).toBe(true);
+      expect(current.model).toBe(model.model);
+      current = { ...current, ...resolveAgentConfigMutation(current, { providerId: 'deepseek', model: 'deepseek-example' }) };
+      expect(resolveAgentRuntimeSelection(current)).toBe('dsh');
+      expect(agentUsesManagedCodexProvider(current)).toBe(false);
+    },
+  );
+  it('preserves Claude plan permissions when changing the base under a fixed Claude model', () => {
+    const current: AgentConfig = { ...agent, runtime: 'builtin', providerId: 'anthropic-sub', permissionMode: 'plan' };
+    const next = { ...current, ...resolveAgentConfigMutation(current, { runtime: 'dsh' }) };
+    expect(resolveAgentRuntimeSelection(next)).toBe('dsh');
+    expect(next.permissionMode).toBe('plan');
+  });
+  it('keeps following the global default across a managed model round trip', () => {
+    let current: AgentConfig = { ...agent, runtime: undefined, runtimeConfig: undefined, providerId: 'deepseek' };
+    for (const intent of [
+      { runtimeBackedProviderSelection: createRuntimeBackedProviderIdentity({ providerId: 'codex-sub', model: 'gpt-example' }) },
+      { providerId: 'deepseek', model: 'deepseek-example' },
+    ]) {
+      current = { ...current, ...resolveAgentConfigMutation(current, intent) };
+      expect(resolveAgentRuntimeSelection(current, 'dsh')).toBe('dsh');
+      expect(resolveAgentRuntimeSelection(current, 'claude-agent-sdk')).toBe('builtin');
+    }
+  });
+  it('reads an already saved DSH + Codex subscription workspace and keeps its managed settings on a base switch', () => {
+    const current: AgentConfig = {
+      ...agent, providerId: 'codex-sub', runtime: 'dsh', runtimePreference: { family: 'integrated', id: 'dsh' },
+      permissionMode: 'plan', runtimeConfig: { reasoningEffort: 'high', envPolicy: { proxy: 'terminal' } },
+    };
+    expect(resolveAgentRuntimeSelection(current)).toBe('dsh');
+    expect(agentUsesManagedCodexProvider(current)).toBe(true);
+    const next = { ...current, ...resolveAgentConfigMutation(current, { runtime: 'builtin' }) };
+    expect(resolveAgentRuntimeSelection(next)).toBe('builtin');
+    expect(next.runtimeConfig).toEqual(current.runtimeConfig);
+    expect(next.permissionMode).toBe('plan');
+  });
   it('changes only the requested field against latest state', () => {
     const patch = resolveAgentConfigMutation(agent, { runtimeConfigPatch: { reasoningEffort: 'high' } });
     expect(patch).toEqual({ runtimeConfig: { ...agent.runtimeConfig, reasoningEffort: 'high' } });

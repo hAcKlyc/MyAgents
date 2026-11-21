@@ -38,6 +38,7 @@ export type InteractionScenario =
 function getRuntimeDisplayName(runtime: RuntimeType | undefined): string {
   switch (runtime) {
     case 'dsh':         return 'MyAgents integrated DeepSeek Harness';
+    case 'antigravity': return 'Google Antigravity CLI';
     case 'claude-code': return 'Anthropic Claude Code CLI';
     case 'codex':       return 'OpenAI Codex CLI';
     case 'builtin':

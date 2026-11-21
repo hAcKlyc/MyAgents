@@ -12,6 +12,7 @@
 // Spacing constants are exported so callers compose with `${SECTION_GAP}`
 // instead of pasting `space-y-7` and slowly drifting apart again.
 
+import { useOverlayOwnerActive } from '@/context/OverlayOwnerActiveContext';
 import { isImeComposingEvent } from '@/utils/imeKeyboard';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -207,7 +208,9 @@ export function usePanelKeys(opts: {
   disabled?: boolean;
 }): void {
   const { onClose, onSubmit, disabled } = opts;
+  const ownerActive = useOverlayOwnerActive();
   useEffect(() => {
+    if (!ownerActive) return;
     const handler = (e: KeyboardEvent) => {
       if (isImeComposingEvent(e)) return;
       if (e.key === 'Escape' && onClose) {
@@ -226,7 +229,7 @@ export function usePanelKeys(opts: {
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose, onSubmit, disabled]);
+  }, [onClose, onSubmit, disabled, ownerActive]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

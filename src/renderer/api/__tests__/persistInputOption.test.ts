@@ -255,12 +255,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: true,
-      currentRuntimeConfig: {
-        envPolicy: { proxy: 'terminal' },
-        source: 'system-cli',
-        model: 'stale-system-cli-model',
-        additionalArgs: ['--legacy'],
-      },
       fields: {
         runtimeBackedProviderSelection: identity,
         permissionMode: 'fullAgency',
@@ -308,7 +302,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: false,
-      currentRuntimeConfig: { envPolicy: { proxy: 'myagents' } },
       fields: {
         runtimeBackedProviderSelection: identity,
         permissionMode: 'plan',
@@ -335,13 +328,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: false,
-      currentProviderId: 'codex-sub',
-      currentRuntimeConfig: {
-        source: 'managed-provider',
-        model: 'gpt-5.5-codex',
-        additionalArgs: ['--legacy'],
-        envPolicy: { proxy: 'terminal' },
-      },
       fields: {
         builtinSelection: { providerId: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
       },
@@ -364,13 +350,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: true,
-      currentProviderId: 'codex-sub',
-      currentRuntimePreference: { family: 'integrated', id: 'dsh' },
-      currentRuntimeConfig: {
-        source: 'managed-provider',
-        model: 'gpt-5.5-codex',
-        envPolicy: { proxy: 'terminal' },
-      },
       fields: {
         builtinSelection: { providerId: 'zhipu', model: 'glm-5.3' },
       },
@@ -384,13 +363,12 @@ describe('persistInputOptionChange — disk write fanout', () => {
     expect(intent).toEqual({
       providerId: 'zhipu',
       model: 'glm-5.3',
-      runtime: 'dsh',
-      runtimePreference: { family: 'integrated', id: 'dsh' },
     });
     const resolved = resolveAgentConfigMutation({
-      id: 'agent-1', providerId: 'codex-sub', runtime: 'builtin',
+      id: 'agent-1', providerId: 'codex-sub', runtime: 'builtin', runtimePreference: { family: 'integrated', id: 'dsh' },
       runtimeConfig: { source: 'managed-provider', model: 'gpt-5.5-codex', envPolicy: { proxy: 'terminal' } },
     } as AgentConfig, intent);
+    expect(resolved.runtime).toBe('dsh');
     expect(resolved.runtimeConfig).toEqual({ envPolicy: { proxy: 'terminal' } });
   });
 
@@ -401,12 +379,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: true,
-      currentProviderId: 'codex-sub',
-      currentRuntimeConfig: {
-        source: 'managed-provider',
-        model: 'gpt-5.5-codex',
-        additionalArgs: ['--legacy'],
-      },
       fields: {
         builtinSelection: { providerId: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
         permissionMode: 'full-auto',
@@ -466,7 +438,6 @@ describe('persistInputOptionChange — disk write fanout', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: true,
-      currentRuntimeConfig: { customSetting: 'preserve' } as never,
       fields: { permissionMode: 'plan' },
       patchProject: m.patchProject,
       patchAgentConfig: m.patchAgentConfig,
@@ -807,7 +778,6 @@ describe('persistInputOptionChange — reasoning effort routing (#324)', () => {
       workspaceId: 'ws-1',
       agentId: 'agent-1',
       isExternalRuntime: true,
-      currentRuntimeConfig: { model: 'gpt-5.2-codex', permissionMode: 'full-auto' },
       fields: { reasoningEffort: effort },
       patchProject: m.patchProject,
       patchAgentConfig: m.patchAgentConfig,
