@@ -388,6 +388,8 @@ describe('builtin V2 execution independent of product storage', () => {
       { name: 'compact', builtin: true },
       { name: 'context', builtin: true },
       { name: 'usage', aliases: ['cost', 'stats'], builtin: true },
+      { name: 'init' }, { name: 'init', builtin: true },
+      { name: 'security-review', aliases: ['inspect-changes'], builtin: true },
     ];
     state.sdkCommands = builtinCommands;
     await agent.initializeAgent(workspace, null, sessionId, { preWarmDisabled: true });
@@ -423,13 +425,14 @@ describe('builtin V2 execution independent of product storage', () => {
     await waitIdle();
     expect(privateCommand.request.channelDeliveryMode).toBe('tool_only');
 
-    for (const text of ['/usage', '/cost', '/stats']) {
+    const commands = [compact, '/context', '/usage', '/cost', '/stats', '/init', '/security-review staged', '/inspect-changes'];
+    for (const text of commands.slice(2)) {
       await desktop(text);
       await waitIdle();
     }
     state.sdkCommands = [...builtinCommands.filter(command => command.name !== 'context'),
-      { name: 'context' }, { name: 'stats' }];
-    const decorated = ['/context', '/stats', '/compact-extra', '/COMPACT', '解释 /compact'];
+      { name: 'context' }, { name: 'stats' }, { name: 'workspace-review', aliases: ['inspect-changes'] }];
+    const decorated = ['/context', '/stats', '/inspect-changes', '/workspace-review', '/compact-extra', '/COMPACT', '解释 /compact'];
     for (const text of decorated) {
       await desktop(text);
       await waitIdle();
@@ -447,8 +450,13 @@ describe('builtin V2 execution independent of product storage', () => {
     await im('group-context', 'group');
     await waitIdle();
     const sdkTexts = state.sdkInputs.map(input => (input as { message: { content: { text: string }[] } }).message.content.at(-1)?.text);
-    expect(sdkTexts.slice(0, 5)).toEqual([compact, '/context', '/usage', '/cost', '/stats']);
-    expect(sdkTexts.slice(5).map(text => parseLeadingSystemReminder(text ?? ''))).toEqual(
+    expect(sdkTexts.slice(0, commands.length)).toEqual(commands);
+    for (const input of state.sdkInputs.slice(0, commands.length)) {
+      const blocks = (input as { message: { content: { text: string }[] } }).message.content;
+      expect(blocks).toHaveLength(2);
+      expect(parseLeadingSystemReminder(blocks[0]!.text)).toMatchObject({ kind: 'CHANNEL_CONTEXT', visibleText: '' });
+    }
+    expect(sdkTexts.slice(commands.length).map(text => parseLeadingSystemReminder(text ?? ''))).toEqual(
       [
         ...decorated.map(text => expect.objectContaining({ kind: 'CHANNEL_CONTEXT', visibleText: text })),
         expect.objectContaining({ kind: 'HEARTBEAT', visibleText: '/compact', body: expect.stringContaining('<CHANNEL_CONTEXT ') }),

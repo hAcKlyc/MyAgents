@@ -189,10 +189,9 @@ import {
 import { listPluginQualifiedSkillNames } from './plugins/manifest';
 import {
   buildBuiltinSkillAllowlist,
-  channelContextFreeCommandName,
   filterSlashCommandsForCapabilities,
   findDisabledCapabilityForSlashInput,
-  isChannelContextFreeBuiltinCommand,
+  isSdkBuiltinCommand,
   sanitizeSdkSkillAllowlist,
 } from './builtin-session/capabilities';
 import { initLogger, appendLog, getLogLines as getLogLinesFromLogger } from './AgentLogger';
@@ -14398,7 +14397,7 @@ async function* messageGenerator(
           const commandName = directInput && !ownedEnvelope && Array.isArray(content) && content.length === 1
             && !item.attachments?.length && textBlock?.type === 'text'
             && textBlock.text === item.messageText
-            ? channelContextFreeCommandName(textBlock.text)
+            ? /^\/([^\s]+)/u.exec(textBlock.text)?.[1]
             : undefined;
           let preserveCommand = false;
           if (promotedQuery && commandName) {
@@ -14422,9 +14421,14 @@ async function* messageGenerator(
               traceBuiltinInputProgress('input-retired', inputTrace);
               return;
             }
-            preserveCommand = isChannelContextFreeBuiltinCommand(commandName, commands);
+            preserveCommand = isSdkBuiltinCommand(commandName, commands);
           }
-          if (!preserveCommand) {
+          if (preserveCommand && Array.isArray(content)) {
+            // Claude parses the final text block as the command. Earlier blocks
+            // accompany its expansion without becoming command arguments.
+            const reminder = decorateChannelQuery('', context, false);
+            if (reminder) content.unshift({ type: 'text', text: reminder });
+          } else {
             item.messageText = decorateChannelQuery(item.messageText, context, ownedEnvelope);
             if (Array.isArray(content)) {
               if (textBlock?.type === 'text') textBlock.text = decorateChannelQuery(textBlock.text, context, ownedEnvelope);

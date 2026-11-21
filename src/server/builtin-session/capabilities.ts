@@ -94,15 +94,13 @@ export function findDisabledCapabilityForSlashInput(
   )) ?? null;
 }
 
-export function channelContextFreeCommandName(text: string): string | undefined {
-  return /^\/(compact|context|usage|cost|stats)(?=\s|$)/.exec(text)?.[1];
-}
-
-export function isChannelContextFreeBuiltinCommand(name: string, commands: readonly SdkSlashCommand[]): boolean {
-  // A workspace command can take a builtin name or shadow a usage alias.
+export function isSdkBuiltinCommand(name: string, commands: readonly SdkSlashCommand[]): boolean {
+  // Canonical names take precedence over aliases. If several rows share a
+  // canonical name, Claude dispatches the builtin row when one exists.
   const named = commands.filter(command => command.name === name);
   if (named.length) return named.some(command => command.builtin === true);
-  return commands.some(command => command.builtin === true && command.name === 'usage' && command.aliases?.includes(name));
+  const aliases = commands.filter(command => command.aliases?.includes(name));
+  return aliases.length > 0 && aliases.every(command => command.builtin === true);
 }
 
 export function filterSlashCommandsForCapabilities(

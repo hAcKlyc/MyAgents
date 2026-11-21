@@ -224,7 +224,7 @@ Space 的内部 trust boundary 不改变通用 reminder wire protocol：Cloud �
 
 渠道提示词只属于 Rust 确认当前实际绑定的 Session：固定 system 段与逐轮 `CHANNEL_CONTEXT` 都按精确绑定准入，不能用 Agent 的渠道能力列表或入口 scenario 代替绑定。桌面打开已绑定 Session 保留渠道语义；未绑定桌面即使所属 Agent 有渠道也不注入。mode 切换不修改固定 system 前缀，实际执行轮快照与下一轮生效策略不变。
 
-内置 Claude SDK 的桌面直接输入和 IM 私聊单条纯文本可在实际 admission 省略本轮 `CHANNEL_CONTEXT`。仅当入队文本的首个完整词是 `/compact`、`/context`、`/usage`、`/cost` 或 `/stats`，且当前 SDK 命令清单确认它解析为相应原生命令时生效。入队后的命令及参数原样提交给 SDK。同名工作区命令、已有产品 envelope、群聊、合并入站、引用回复和附件仍按常规规则投影。渠道快照、绑定校验和投递策略仍在同一执行边界确定。
+内置 Claude SDK 收到桌面直接输入或 IM 单条私聊纯文本时，按当前 Query 的命令清单识别 SDK 原生命令及别名。原生命令和参数原样保留在最后一个 text block，逐轮 `CHANNEL_CONTEXT` 独立放在前一个 block，供需要推理的命令展开时使用。命令正名优先于别名，同名条目按 SDK 的 builtin 标记裁决。工作区自定义命令、已有产品 envelope、群聊入站、合并入站、引用回复和附件仍按常规规则投影。
 
 内部 schema 保留完整状态与 null 进行校验；模型 facts 仅投影 connection/self/conversation/sender/message，递归省略未知字段、空对象及空数组。facts/context-data 的 JSON 位于 XML 元素文本内，只转义 `&`、`<`、`>`，不膨胀普通 JSON 引号；预算仍按实际 escaped UTF-8 计算。connection 存在时只补 source 和 time（本轮开始时刻与时区）两个执行信息；execution/delivery/projection 整组不进入模型。发送状态由一句自然语言 instruction 表达，参数与连接能力按需从 CLI 查询。
 
