@@ -3,7 +3,7 @@
 ## 文档职责
 
 本文记录 MyAgents 对话 Session 的系统上下文如何组成、由谁拥有、何时固化，以及
-Builtin Claude Agent SDK、Claude Code、Codex、Integrated DSH 四条 Runtime 路径如何接收同一套
+各内置与外部 Runtime 如何接收同一套
 产品指令。
 
 本文拥有以下内容：
@@ -45,7 +45,7 @@ Workspace 指令（CLAUDE.md / rules / AGENTS.md）
 
 | 来源                   | Owner / 权威实现                                                             | 生命周期                                              | 典型内容                                                    |
 | ---------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------- |
-| Runtime 原生 Prompt    | Claude SDK / Claude Code / Codex / DSH 自身及对应 adapter                 | Runtime 进程或 thread 创建时                          | 工具协议、安全规则、Runtime 自身行为约定                    |
+| Runtime 原生 Prompt    | 各 Runtime 及其 adapter                                                    | Runtime 进程或 thread 创建时                          | 工具协议、安全规则、Runtime 自身行为约定                    |
 | MyAgents 产品级 append | `src/server/system-prompt.ts`、`system-prompt-cli-tools.ts`                  | Session Query / external thread 创建或 replacement 时 | MyAgents 身份、入口场景、产品能力发现提示                   |
 | Workspace 指令         | Workspace 文件；加载兼容层为 `src/server/runtimes/workspace-instructions.ts` | Runtime 启动时读取，或由 Runtime 原生发现             | `CLAUDE.md`、`.claude/rules/*.md`、`AGENTS.md` |
 | 动态 Reminder          | 对应业务 owner + `src/shared/systemReminder.ts`                              | 每个需要补充上下文的 Turn                             | Goal、Task、浮球、群聊、Space、Heartbeat 等动态事实         |
@@ -62,7 +62,7 @@ Workspace 指令可能由 Runtime 原生加载，Codex 的 MyAgents append 则�
 `src/server/system-prompt.ts` 是产品级 Prompt 的唯一中央 assembler。它先用
 `buildProductSessionPrompt()` 生成共同的场景/能力内容，再由两个公开出口投送：
 
-- `buildSystemPromptAppend()` 为 Builtin/Claude Code/Codex 保留原有整串 append；
+- `buildSystemPromptAppend()` 为内置 Claude Agent SDK 和外部 CLI 生成整段 append；
 - `buildDshSystemContext()` 为 Integrated DSH 输出有名字、顺序和 scope 的
   `SystemContextSnapshot`，避免把产品变化重新硬编码进 Runtime。
 
@@ -169,6 +169,7 @@ Prompt 中出现一个能力名称，不等于真实 Tool 已被注册或授权�
 | ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Builtin Claude Agent SDK | Claude Code preset + `systemPrompt.append`                  | `settingSources: ['project']` 原生读取项目配置；全局启用 Skill 先投影到项目目录                               |
 | Claude Code CLI          | 临时文件 + `--append-system-prompt-file`                    | Claude Code 原生发现 `CLAUDE.md` / rules                                                                      |
+| Antigravity CLI          | ACP 建立或恢复会话时传入 `_meta.antigravity.systemPrompt.append` | Host 将根目录的 `CLAUDE.md`、`.claude/CLAUDE.md` 和 `.claude/rules/` 下的规则与产品指令合并 |
 | Codex                    | `thread/start` / `thread/resume` 的 `developerInstructions` | Codex 原生发现 `AGENTS.md`，并将 `CLAUDE.md` 配为 fallback；MyAgents 另外把 `.claude/rules/*.md` 格式化后追加 |
 | Integrated DSH           | 当前生成契约中的 `systemContext.sections/contexts`        | DSH 每目录互斥加载 `CLAUDE.md` → `AGENTS.override.md` → `AGENTS.md`；Host 仅冻结 `.claude/CLAUDE.md` 与 rules companion supplement |
 
@@ -207,6 +208,7 @@ SDK 默认会记录并跨 resume 复用 system prompt；Builtin 显式关闭该�
 - Claude Code：写入有界生命周期的临时文件并使用
   `--append-system-prompt-file`；保留 Claude Code 默认 preset 和 OAuth/Keychain 行为。
 - Codex：使用 `developerInstructions`，新建与 resume thread 都走同一字段。
+- Antigravity 在建立或恢复会话前检查 ACP 的场景指令追加能力。需要投送指令而 CLI 不支持时，启动会返回错误。
 
 ### Integrated DSH
 

@@ -11,7 +11,7 @@
 
 ## Runtime 接入与侧栏边界
 
-内置 Claude SDK、托管 Codex 和 Integrated DSH 在各自 adapter 中将 `myagents-browser` 的 `__browser_host__` 产品标记解析为 Rust 颁发的 HTTP capability。DSH 首启、恢复和 live extension replacement 共用 `projectDshManagedBrowser`：先以 canonical Product Session ID adoption，再 acquire；不能使用 DSH native Session ID。既有 Session 的产品 MCP 选择无需迁移。
+内置 Claude SDK、托管 Codex、Integrated DSH 和 Antigravity CLI 在各自 adapter 中将 `myagents-browser` 的 `__browser_host__` 产品标记解析为 Rust 颁发的 HTTP capability。Antigravity 在建立或恢复会话时接入，依赖 CLI 的 ACP HTTP MCP 能力。DSH 首启、恢复和 live extension replacement 共用 `projectDshManagedBrowser`：先以 canonical Product Session ID adoption，再 acquire；不能使用 DSH native Session ID。既有 Session 的产品 MCP 选择无需迁移。
 
 DSH 现有扩展 owner 将原始 source 与其 compiled plane 存入同一 generation 记录，按 desired/effective plane 读取配对来源；候选被拒绝并释放后自动回到 effective 的配对来源。下一次 Root turn admission 内沿同一个串行 replacement 边界重新取得 capability。该刷新只重新投影浏览器组件与凭据，其余组件、Skill 内容资源和授权根沿用已准入快照；不能因刷新浏览器而重新读取磁盘中的 Skill 或触发完整能力发现。Host generation、endpoint 或 token 变化使公开的 opaque credential revision 改变；真实 Authorization 仅留在 generation-scoped reverse credential binding，不进入公开 snapshot、argv 或配置文件。旧 effective plane 的凭据与 dispatcher 按既有 native background-work 生命周期保留到进程退出；同一 source 刷新不得 dispose 仍被有效 plane 引用的 dispatcher。Host 获取失败成为单组件诊断，基础 Runtime 可用；下一个边界可重新接入。这不承诺当前进行中的浏览器操作跨 Host 重启续跑。
 

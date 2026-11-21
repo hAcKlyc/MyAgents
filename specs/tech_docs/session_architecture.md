@@ -24,7 +24,7 @@ Session 不是单一对象，而是同一产品会话在不同生命周期阶段
 每个 Product Session 有稳定的 `SessionMetadata.id`。它拥有历史、Tab/Sidecar scope、workspace、配置快照和产品级状态。Runtime 还可以拥有独立执行身份：
 
 - builtin 使用 `sdkSessionId` 作为 Claude Agent SDK 的 create/resume candidate；
-- DSH、Codex、Claude Code 使用 `runtimeSessionId`；
+- DSH、Codex、Claude Code 和 Antigravity 使用 `runtimeSessionId`；
 - Rewind、Fork 或 provider history 边界可以替换执行身份，但不得偷偷替换 Product Session identity。
 
 普通新会话中两个身份可能相同，这只是初始化结果，不是可依赖的不变量。读取和写入 metadata 时使用 `src/server/types/session.ts` 的当前类型，不在文档中复制完整字段表。
