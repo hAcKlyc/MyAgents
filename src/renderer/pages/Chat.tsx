@@ -1907,10 +1907,12 @@ export default function Chat({
   const [codexModels, setCodexModels] = useState<typeof CC_MODELS>([]);
   const agyCatalogSession = currentRuntime === 'antigravity' ? sessionRuntimeSessionId : null;
   const agyCatalogModel = currentRuntime === 'antigravity' ? runtimeModel : null;
+  const [runtimeModelsLoading, setRuntimeModelsLoading] = useState(false);
   const [antigravityModels, setAntigravityModels] = useState<typeof CC_MODELS>([]);
   useEffect(() => {
     if ((currentRuntime !== 'codex' && currentRuntime !== 'antigravity') || !isConnected) return;
-    let cancelled = false;
+    setRuntimeModelsLoading(true);
+    const setModels = currentRuntime === 'antigravity' ? setAntigravityModels : setCodexModels;
     // AbortController so a tab-close (effect cleanup) silences the
     // proxyFetch "Sidecar gone" warning that would otherwise fire when
     // this in-flight request lands on a sidecar port that just got
@@ -1927,13 +1929,13 @@ export default function Chat({
     )
       .then((res: unknown) => {
         const data = res as { models?: typeof CC_MODELS } | undefined;
-        if (!cancelled) (currentRuntime === 'antigravity' ? setAntigravityModels : setCodexModels)(data?.models ?? []);
+        if (!controller.signal.aborted) setModels(data?.models ?? []);
       })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
+      .catch(() => {})
+      .finally(() => {
+        if (!controller.signal.aborted) setRuntimeModelsLoading(false);
+      });
+    return () => controller.abort();
   }, [
     managedProviderRuntimeActive,
     currentRuntime,
@@ -6873,6 +6875,7 @@ export default function Chat({
                         ? runtimeModels
                         : undefined
               }
+              runtimeModelsLoading={isConnected && runtimeModelsLoading && (currentRuntime === 'codex' || currentRuntime === 'antigravity')}
               runtimePermissionModes={
                 currentRuntime === 'dsh' || inputUsesExternalRuntimeControls
                   ? runtimePermissionModes

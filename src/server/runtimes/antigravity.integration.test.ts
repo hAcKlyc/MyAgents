@@ -66,6 +66,14 @@ afterEach(async () => {
   if (directory) await rm(directory, { recursive: true, force: true });
 });
 
+it("gives native model discovery 30 seconds", async () => {
+  const timeout = vi.spyOn(AbortSignal, "timeout");
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", "console.log('model-id\\tNative Model')"], options));
+  expect(await runtime.queryModels()).toEqual([{ value: "model-id", displayName: "Native Model" }]);
+  expect(timeout).toHaveBeenCalledWith(30_000);
+});
+
 it("answers overlapping approvals by native option and request identity in reverse order", async () => {
   const { options, events, receive } = await setup();
   processHandle = await runtime.startSession(options, receive);

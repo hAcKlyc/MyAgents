@@ -462,6 +462,26 @@ describe("Chat execution selection (#685)", () => {
     },
   );
 
+  it("shows catalog loading again on reconnect while keeping available CLI models", async () => {
+    const get = mocks.get.getMockImplementation()!;
+    const models = [{ value: "cli-model", displayName: "CLI model" }];
+    let finishRefresh!: (value: unknown) => void;
+    const refresh = new Promise(resolve => { finishRefresh = resolve; });
+    const catalog = vi.fn().mockResolvedValueOnce({ models }).mockReturnValue(refresh);
+    mocks.get.mockImplementation(path => path.startsWith("/api/runtime/models?type=antigravity")
+      ? catalog() : get(path));
+    const harness = (connected: boolean) => <Harness runtime="antigravity" source="system-cli" connected={connected} />;
+    const view = render(harness(true));
+    await waitFor(() => expect(mocks.input?.runtimeModels).toEqual(models));
+    view.rerender(harness(false));
+    view.rerender(harness(true));
+    await waitFor(() => expect(mocks.input?.runtimeModelsLoading).toBe(true));
+    expect(mocks.input?.runtimeModels).toEqual(models);
+    await act(async () => { finishRefresh({ models: [] }); });
+    await waitFor(() => expect(mocks.input?.runtimeModelsLoading).toBe(false));
+    expect(mocks.input?.runtimeModels).toEqual([]);
+  });
+
   it.each([undefined, "gemini-3.8-flash-low"])(
     "uses the Antigravity CLI model %s when the workspace retains a Codex subscription",
     async (model) => {

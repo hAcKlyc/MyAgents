@@ -1219,6 +1219,26 @@ describe('SimpleChatInput send paths', () => {
     }
   });
 
+  it.each(['antigravity', 'codex'] as const)('shows progress until the %s model query settles', async runtime => {
+    await i18n.changeLanguage('zh-CN');
+    const input = (models: { value: string; displayName: string }[], loading = false) => (
+      <ToastProvider><ImagePreviewProvider>
+        <SimpleChatInput runtime={runtime} isLoading={false} onSend={vi.fn()} runtimeModels={models} runtimeModelsLoading={loading} />
+      </ImagePreviewProvider></ToastProvider>
+    );
+    const view = render(input([], true));
+    fireEvent.click(screen.getByTitle('切换模型'));
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载模型列表');
+    view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }]));
+    expect(screen.queryByText('正在加载模型列表…')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible());
+    view.rerender(input([{ value: 'cli-native', displayName: 'Native model' }], true));
+    expect(screen.getByRole('status')).toHaveTextContent('正在加载模型列表');
+    expect(screen.getByRole('button', { name: 'Native model' })).toBeVisible();
+    view.rerender(input([]));
+    expect(screen.getByText('暂未发现可用模型。')).toBeVisible();
+  });
+
   it('does not show the custom model service row for user-managed CLI runtimes', async () => {
     const user = userEvent.setup();
     renderInput({

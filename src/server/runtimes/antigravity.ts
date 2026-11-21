@@ -70,7 +70,7 @@ async function queryCli(
 ) {
   const { path, env } = await executable(policy);
   const abort = AbortSignal.any([
-    AbortSignal.timeout(15_000),
+    AbortSignal.timeout(arg === "models" ? 30_000 : 15_000),
     ...(signal ? [signal] : []),
   ]);
   abort.throwIfAborted();

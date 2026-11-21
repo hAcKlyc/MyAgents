@@ -204,6 +204,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   runtime = 'builtin',
   usesExternalRuntimeControls = runtime !== 'builtin' && runtime !== 'dsh',
   runtimeModels,
+  runtimeModelsLoading = false,
   managedReasoningModel,
   runtimePermissionModes,
   queuedMessages = [],
@@ -2040,6 +2041,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         runtime: runtime === 'claude-code' ? 'CLAUDE CODE' : runtime?.toUpperCase(),
                       })}
                     </div>
+                    {runtimeModelsLoading ? (
+                      <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--ink-muted)]">
+                        <LoaderIcon aria-hidden="true" className="h-4 w-4 animate-spin" />
+                        {t('input.modelCatalogLoading')}
+                      </div>
+                    ) : runtimeModels.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">{t('input.modelCatalogEmpty')}</div>
+                    )}
                     {runtimeModels.map(model => {
                       const isSelected = selectedModel === model.value || (!selectedModel && model.isDefault);
                       return (
