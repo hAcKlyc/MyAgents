@@ -97,12 +97,13 @@ export function MonoText({
 
 const FILE_PATH_BOX_CLASS = 'rounded border border-[var(--line-subtle)] bg-[var(--paper-inset)]/50 px-1.5 py-0.5';
 
-function useResolvedFileAction(path?: string | null) {
+function useResolvedFileAction(path?: string | null, lineNumber?: number) {
   const fileAction = useFileAction();
   const displayPath = path?.trim() || null;
-  const actionTarget = displayPath && fileAction
+  const target = displayPath && fileAction
     ? resolveFileActionTarget(displayPath, fileAction.workspacePath)
     : null;
+  const actionTarget = target && lineNumber ? { ...target, initialLineNumber: lineNumber } : target;
   const pathInfo = useFileTargetInfo(actionTarget);
 
   if (!displayPath || !fileAction || !actionTarget || !pathInfo?.exists) return null;
@@ -129,9 +130,9 @@ function useResolvedFileAction(path?: string | null) {
  * plain monospace chips; the dashed underline is reserved for a current
  * `exists:true` capability.
  */
-export function FilePath({ path }: { path?: string | null }) {
+export function FilePath({ path, lineNumber }: { path?: string | null; lineNumber?: number }) {
   const { t } = useTranslation('chat');
-  const resolvedAction = useResolvedFileAction(path);
+  const resolvedAction = useResolvedFileAction(path, lineNumber);
   // A file tool can arrive with NO path: a partial/streaming tool input where
   // `file_path` hasn't parsed yet, or a restored/old persisted tool block whose
   // input lacks it (parsedInput comes from parsePartialJson and is optional).

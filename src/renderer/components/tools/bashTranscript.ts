@@ -2,9 +2,11 @@ import type { ToolUseSimple } from '@/types/chat';
 
 export type BashTranscriptStatus =
   | 'initializing'
+  | 'pending'
   | 'running'
   | 'completed'
   | 'failed'
+  | 'declined'
   | 'stopped'
   | 'interrupted'
   | 'timeout'
@@ -78,7 +80,7 @@ const BACKGROUND_STATUS_PATTERN = /background/;
 const TIMEOUT_STATUS_PATTERN = /^(?:timeout|timed[_ -]?out)$/;
 const STOPPED_STATUS_PATTERN = /^(?:stop|stopped|cancelled|canceled)$/;
 const INTERRUPTED_STATUS_PATTERN = /^(?:interrupt|interrupted|aborted)$/;
-const FAILED_STATUS_PATTERN = /^(?:fail|failed|error|errored|declined|denied)$/;
+const FAILED_STATUS_PATTERN = /^(?:fail|failed|error|errored)$/;
 // Detection/parsing is presentation work on the renderer thread. Above this
 // bound, retain the untouched text and let BashTool's window project a prefix;
 // never scan/parse an arbitrarily large result before the render cap applies.
@@ -150,7 +152,8 @@ export function resolveBashTranscriptModel(tool: ToolUseSimple): BashTranscriptM
   );
 
   return {
-    shell: tool.name === 'pwsh' ? 'PowerShell' : tool.name === 'bash' ? 'Bash' : detectShellWrapper(rawCommand),
+    shell: tool.name === 'PowerShell' || tool.name === 'pwsh' ? 'PowerShell'
+      : tool.name === 'bash' ? 'Bash' : detectShellWrapper(rawCommand),
     commandLanguage: tool.name === 'PowerShell' || tool.name === 'pwsh' ? 'powershell' : 'bash',
     command: commandText
       ? {
@@ -584,6 +587,7 @@ function resolveBashStatus(
   if (tool.isStopped || STOPPED_STATUS_PATTERN.test(rawStatus)) return 'stopped';
   if (parsedResult?.interrupted || INTERRUPTED_STATUS_PATTERN.test(rawStatus)) return 'interrupted';
   if (TIMEOUT_STATUS_PATTERN.test(rawStatus)) return 'timeout';
+  if (rawStatus === 'declined' || rawStatus === 'denied') return 'declined';
   if (
     tool.isFailed
     || tool.isError
@@ -591,6 +595,7 @@ function resolveBashStatus(
     || FAILED_STATUS_PATTERN.test(rawStatus)
   ) return 'failed';
   if (parsedResult?.background || input.run_in_background === true || BACKGROUND_STATUS_PATTERN.test(rawStatus)) return 'background';
+  if (rawStatus === 'pending') return 'pending';
   if (tool.isLoading || RUNNING_STATUS_PATTERN.test(rawStatus)) return tool.input && !hasCommand ? 'initializing' : 'running';
   if (tool.result !== undefined || COMPLETE_STATUS_PATTERN.test(rawStatus)) return 'completed';
   return hasCommand ? 'running' : 'initializing';

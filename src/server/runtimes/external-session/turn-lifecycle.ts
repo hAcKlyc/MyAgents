@@ -1,7 +1,7 @@
 import { TurnFinalizationGate } from '../external-turn-finalization';
 import { decideSessionCompleteErrorAction } from '../external-abort-policy';
 import type { ExternalTurnUsage } from './types';
-import type { UnifiedEvent } from '../types';
+import type { AgentPlanTodo, UnifiedEvent } from '../types';
 import type { ContextUsage } from '../../../shared/types/context-usage';
 import type { RuntimeTurnAnchor } from '../../types/session';
 import type {
@@ -27,6 +27,7 @@ let lastTurnSucceeded = false;
 let currentTurnStartTime = 0;
 let currentTurnUsage: ExternalTurnUsage | null = null;
 let currentTurnContextUsage: ContextUsage | null = null;
+let currentTurnPlan: readonly AgentPlanTodo[] = [];
 let currentRuntimeTurnAnchor: RuntimeTurnAnchor | null = null;
 let currentTurnEstimatedInputTokens = 0;
 let turnSequence = 0;
@@ -290,6 +291,7 @@ export function resetExternalTurnLifecycleState(): void {
   turnCompleted = false;
   lastTurnSucceeded = false;
   currentTurnStartTime = 0;
+  currentTurnPlan = [];
   currentTurnUsage = null;
   currentTurnContextUsage = null;
   currentRuntimeTurnAnchor = null;
@@ -446,6 +448,7 @@ export function isExternalTurnPromotionInFlight(): boolean {
 }
 
 export function resetExternalTurnAccumulators(): void {
+  currentTurnPlan = [];
   currentTurnUsage = null;
   currentTurnContextUsage = null;
   currentRuntimeTurnAnchor = null;
@@ -454,6 +457,14 @@ export function resetExternalTurnAccumulators(): void {
     assistantDisposition: 'none',
     pendingAssistantDeliveries: [],
   };
+}
+
+export function getExternalCurrentTurnPlan(): readonly AgentPlanTodo[] {
+  return currentTurnPlan;
+}
+
+export function setExternalCurrentTurnPlan(plan: readonly AgentPlanTodo[]): void {
+  currentTurnPlan = plan;
 }
 
 export function setExternalRuntimeTurnAnchor(anchor: RuntimeTurnAnchor): void {

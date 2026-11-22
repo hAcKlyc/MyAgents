@@ -923,7 +923,8 @@ export function createBuiltinSessionEngine(): SessionEngine {
       });
     },
 
-    async respondPermission(requestId, decision) {
+    async respondPermission(requestId, decision, _reason, optionId) {
+      if (optionId !== undefined) return false;
       return handlePermissionResponse(requestId, decision);
     },
 

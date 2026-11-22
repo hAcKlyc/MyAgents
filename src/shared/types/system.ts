@@ -5,6 +5,7 @@ export type SystemInitInfo = {
   cwd?: string;
   session_id?: string;
   tools?: string[];
+  supportsImageInput?: boolean;
   mcp_servers?: string[];
   model?: string;
   permissionMode?: string;

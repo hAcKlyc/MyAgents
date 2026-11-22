@@ -333,9 +333,10 @@ failure and stop terminals; they contain no raw error text and do not supply
 usage accounting for turns without a successful result.
 
 `tool_use.tool_origin` distinguishes `runtime` tool calls from `provider`
-server tools. The `tool` value preserves the Runtime's native tool name; UI
-presentation aliases must not rewrite the wire identity. Permission events are
-emitted after the response is accepted. Companion events use
+server tools. The `tool` value preserves the Runtime's native tool name.
+For Antigravity, tool usage and permission events record a fixed tool category.
+Native presentation titles, command arguments, and user MCP server/tool identifiers
+stay in session content. Permission events are emitted after the response is accepted. Companion events use
 `source='floating_ball'` and `surface='floating_ball'`, with the Companion's
 frozen Session binding rather than the main window's active Tab.
 

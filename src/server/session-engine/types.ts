@@ -288,6 +288,7 @@ export type SessionEngineStreamReplaySnapshot = {
   liveStreamingMessage?: SessionEngineReplayMessage | null;
   systemInitPayload?: unknown;
   mcpEffectiveSnapshot?: import('../../shared/mcpEffectiveState').McpEffectiveSnapshot | null;
+  agentPlan?: readonly import('../runtimes/types').AgentPlanTodo[];
   pendingInteractiveRequests: SessionEnginePendingInteractiveRequest[];
 };
 
@@ -478,6 +479,7 @@ export interface SessionEngine {
     requestId: string,
     decision: 'deny' | 'allow_once' | 'always_allow',
     reason?: string,
+    optionId?: string,
   ): Promise<boolean>;
   respondAskUserQuestion(requestId: string, answers: AskUserQuestionAnswers | null): Promise<boolean>;
   respondPlanApproval(requestId: string, approved: boolean, feedback?: string): Promise<boolean>;

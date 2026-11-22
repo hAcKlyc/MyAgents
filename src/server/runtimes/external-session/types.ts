@@ -1,4 +1,5 @@
 import type { AsyncQuestionSet, AsyncQuestionReply } from '../../../shared/asyncUserQuestions';
+import type { ToolPermissionOption } from '../../../shared/types/toolPermission';
 import type { InteractionScenario } from '../../system-prompt';
 import type { ImagePayload } from '../types';
 import type { ToolAttachment } from '../../../shared/types/tool-attachment';
@@ -80,6 +81,8 @@ export type ExternalPendingInteractiveRequest =
       toolName: string;
       toolUseId: string;
       input: string;
+      inputRef?: LargeValueRef;
+      permissionOptions?: readonly ToolPermissionOption[];
     };
   }
   | {

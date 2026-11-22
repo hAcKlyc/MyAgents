@@ -1005,7 +1005,7 @@
       "noProviders": "No available providers yet. Add an API key or complete subscription login in Settings → Model Providers first.",
       "openProviderSettings": "Open Model Provider settings →",
       "runtimeChanged": "Switched to {{label}}. New tabs will use it.",
-      "antigravityNotice": "Sessions use the account signed in to agy on this computer. Choose models, permissions and session MCP servers in MyAgents.",
+      "antigravityNotice": "Sessions use the account signed in to agy on this computer. Set model and permission defaults for new sessions here. Use the chat composer to change the current session’s model, permissions and MCP servers.",
       "externalRuntimeNotice": "This Agent workspace now uses {{runtime}}. Conversations from MyAgents or bound Channels will call the locally installed {{runtime}} directly, just like using it in a terminal. Provider settings, supported models, MCP tools, and permission rules are managed by {{runtime}} itself. Change them in that runtime's own settings.",
       "proxyMyAgents": "MyAgents proxy",
       "proxyMyAgentsHint": "Follow the MyAgents proxy settings for this runtime (default)",

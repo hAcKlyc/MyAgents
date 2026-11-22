@@ -309,7 +309,9 @@ function TerminalEmptyState({ status, t }: { status: BashTranscriptStatus; t: Ch
       {waiting && (
         <LoaderIcon className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
       )}
-      <span>{t(waiting ? 'shell.toolChrome.bash.waitingForOutput' : 'shell.toolChrome.bash.noOutput')}</span>
+      <span>{t(waiting ? 'shell.toolChrome.bash.waitingForOutput'
+        : status === 'pending' ? 'shell.toolChrome.bash.status.pending'
+        : 'shell.toolChrome.bash.noOutput')}</span>
     </div>
   );
 }
@@ -319,8 +321,8 @@ function statusIcon(status: BashTranscriptStatus): ReactNode {
     return <LoaderIcon className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />;
   }
   if (status === 'completed') return <SuccessIcon className="size-3.5" aria-hidden="true" />;
-  if (status === 'timeout') return <ClockIcon className="size-3.5" aria-hidden="true" />;
-  if (status === 'stopped' || status === 'interrupted') {
+  if (status === 'timeout' || status === 'pending') return <ClockIcon className="size-3.5" aria-hidden="true" />;
+  if (status === 'stopped' || status === 'interrupted' || status === 'declined') {
     return <StopCircleIcon className="size-3.5" aria-hidden="true" />;
   }
   if (status === 'failed') return <WarningIcon className="size-3.5" aria-hidden="true" />;
@@ -330,7 +332,7 @@ function statusIcon(status: BashTranscriptStatus): ReactNode {
 function statusTone(status: BashTranscriptStatus): string {
   if (status === 'completed') return 'bg-[var(--success-bg)] text-[var(--success)]';
   if (status === 'failed') return 'bg-[var(--error-bg)] text-[var(--error)]';
-  if (status === 'timeout' || status === 'stopped' || status === 'interrupted') {
+  if (status === 'timeout' || status === 'stopped' || status === 'interrupted' || status === 'declined') {
     return 'bg-[var(--warning-bg)] text-[var(--warning)]';
   }
   if (status === 'running' || status === 'initializing') {

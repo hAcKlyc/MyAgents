@@ -3353,6 +3353,7 @@ async function main() {
             {
               runtimeSource,
               signal: request.signal,
+              throwOnError: type === 'antigravity',
             },
           );
           return jsonResponse({ models });
@@ -5964,12 +5965,15 @@ async function main() {
           const payload = (await request.json()) as {
             requestId: string;
             decision: 'deny' | 'allow_once' | 'always_allow';
+            optionId?: string;
           };
-
-          const success = await getPermissionResponseEngine().respondPermission(
-            payload.requestId,
-            payload.decision,
-          );
+          if (payload.optionId !== undefined && typeof payload.optionId !== 'string') {
+            return jsonResponse({ success: false, error: 'Invalid permission optionId' }, 400);
+          }
+          const engine = getPermissionResponseEngine();
+          const success = payload.optionId === undefined
+            ? await engine.respondPermission(payload.requestId, payload.decision)
+            : await engine.respondPermission(payload.requestId, payload.decision, undefined, payload.optionId);
 
           return jsonResponse({ success });
         } catch (error) {

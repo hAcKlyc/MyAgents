@@ -23,9 +23,10 @@ const response = (body: unknown) => new Response(JSON.stringify(body));
 const permission = (requestId: string) => ({
   requestId, sessionId: 'companion-test', toolName: 'Bash', input: '{}',
   defaultToNo: true, suppressAlwaysAllowRule: true,
+  permissionOptions: [{ optionId: 'exact-command', name: 'Allow this command', kind: 'allow_once' as const }],
 });
 
-describe('Companion SDK permission hints', () => {
+describe('Companion permission request projection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     harness.handler = null;
@@ -33,6 +34,7 @@ describe('Companion SDK permission hints', () => {
   });
   it.each(['live', 'restore'] as const)('preserves both constraints through %s delivery', async delivery => {
     harness.fetch.mockImplementation(async (_sid, _owner, path) => {
+      if (path === '/api/permission/respond') return response({ success: true });
       if (path.startsWith('/sessions/')) return response({ success: true, session: {
         id: 'companion-test', messages: [], transcriptFormat: 2, snapshotRevision: 0,
         pendingInteractiveRequests: delivery === 'restore'
@@ -44,5 +46,9 @@ describe('Companion SDK permission hints', () => {
     await waitFor(() => expect(result.current.ready).toBe(true));
     if (delivery === 'live') act(() => harness.handler!('permission:request', permission('p1'), { sessionId: 'companion-test', connectionGeneration: 1 }));
     await waitFor(() => expect(result.current.permReq).toMatchObject(permission('p1')));
+    await act(async () => { await result.current.respondPermission('allow_once', 'p1', 'exact-command'); });
+    const posted = harness.fetch.mock.calls.find((args) => args[2] === '/api/permission/respond');
+    expect(JSON.parse(posted?.[3]?.body)).toEqual({ requestId: 'p1', decision: 'allow_once', optionId: 'exact-command' });
+    expect(result.current.permReq).toBeNull();
   });
 });

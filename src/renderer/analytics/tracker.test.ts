@@ -75,6 +75,19 @@ describe('analytics tracker active context', () => {
     }));
   });
 
+  it.each([
+    ['tool_use', 'printf SYNTHETIC_PRIVATE_MARKER', 'Tool'],
+    ['permission_grant', 'File /private/SYNTHETIC_PRIVATE_MARKER', 'Tool'],
+    ['permission_deny', 'mcp__private_server__private_tool', 'MCP'],
+    ['tool_use', 'Bash', 'Bash'],
+  ])('transmits only the Antigravity tool category for %s', (event, tool, expected) => {
+    track(event, { runtime: 'antigravity', tool });
+    expect(mocks.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      event,
+      params: { runtime: 'antigravity', tool: expected },
+    }));
+  });
+
   it('preserves the explicit target session id on history_open', () => {
     setAnalyticsContext({ sessionId: 'session-active', tabId: 'tab-active' });
 

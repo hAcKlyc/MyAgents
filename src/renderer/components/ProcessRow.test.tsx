@@ -76,6 +76,26 @@ describe('ProcessRow thinking block expand behaviour', () => {
 });
 
 describe('ProcessRow Codex CollabAgent activity', () => {
+  it('keeps the native delegation name after reopening a canonical tool block', () => {
+    const block: ContentBlock = {
+      type: 'tool_use',
+      tool: {
+        id: 'delegation', name: 'CollabAgent', streamIndex: 0, input: {},
+        inputJson: '{"tool":"spawnAgent","description":"File Researcher"}',
+        isLoading: false,
+        subagentLifecycle: {
+          status: 'completed', startedAt: 1000, finishedAt: 3000,
+          description: 'File Researcher', agentType: 'research',
+        },
+      },
+    };
+    render(<ProcessRow block={block} index={0} totalBlocks={1} />);
+    const card = screen.getByRole('button', { expanded: false });
+    expect(card).toHaveTextContent('File Researcher');
+    expect(card).toHaveTextContent('2s');
+    expect(card).not.toHaveTextContent('CollabAgent');
+  });
+
   it('keeps a completed parent row active while a nested sub-agent call is still streaming', () => {
     const block = {
       type: 'tool_use',
@@ -151,6 +171,78 @@ describe('ProcessRow tool body layout ownership', () => {
     fireEvent.click(screen.getByRole('button', { expanded: false }));
 
     expect(container.querySelector('[data-process-body-layout="indented"]')).toHaveClass('ml-7');
+  });
+});
+
+describe('ProcessRow tool input and output', () => {
+  it.each(['Read', 'Write', 'Edit'])('shows the same compact %s title after V2 replay', (name) => {
+    const input = { file_path: 'C:\\fixture\\12345678901234567890.txt' };
+    const tool = {
+      id: 'replayed-file-tool', name, streamIndex: 0, input: {},
+      inputJson: JSON.stringify(input), result: '',
+    };
+    const { rerender } = render(<ProcessRow
+      block={{ type: 'tool_use', tool }} index={0} totalBlocks={1}
+    />);
+    const expected = new RegExp(`^${name}\\s*12345678901234567\\.\\.\\.$`);
+    expect(screen.getByRole('button', { name: expected, expanded: false })).toBeInTheDocument();
+
+    rerender(<ProcessRow
+      block={{ type: 'tool_use', tool: { ...tool, parsedInput: input } }} index={0} totalBlocks={1}
+    />);
+    expect(screen.getByRole('button', { name: expected, expanded: false })).toBeInTheDocument();
+  });
+
+  it('shows a generic tool result and its confirmed input with a single click', () => {
+    const block: ContentBlock = {
+      type: 'tool_use',
+      tool: {
+        id: 'unknown-tool', name: 'Tool', streamIndex: 0, input: {},
+        parsedInput: { title: 'Inspect a file', path: '/workspace/example' } as NonNullable<ContentBlock['tool']>['parsedInput'],
+        result: 'Unable to read the requested file', isError: true,
+      },
+    };
+    render(<ProcessRow block={block} index={0} totalBlocks={1} />);
+    const header = screen.getByRole('button', { expanded: false });
+    expect(header).toHaveTextContent('Inspect a file');
+    expect(header).toHaveTextContent('失败');
+    fireEvent.click(header);
+    expect(screen.getByText(/\/workspace\/example/)).toBeInTheDocument();
+    expect(screen.getByText('Unable to read the requested file')).toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('uses the native command summary in a truncated row even while a later tool runs', () => {
+    const block: ContentBlock = {
+      type: 'tool_use',
+      tool: {
+        id: 'terminal', name: 'Bash', streamIndex: 0, input: {},
+        parsedInput: { command: `printf '${'long-command-'.repeat(80)}'`, description: 'Print fixture output' },
+        isLoading: true,
+      },
+    };
+    const { container } = render(<ProcessRow block={block} index={0} totalBlocks={2} isStreaming />);
+    const header = screen.getByRole('button', { expanded: false });
+    expect(header).toHaveTextContent('运行命令');
+    expect(header).not.toHaveTextContent('long-command-');
+    expect(screen.getByText('Print fixture output')).toHaveClass('truncate');
+    expect(container.querySelector('.animate-spin')).not.toBeNull();
+  });
+
+  it('distinguishes a pending tool and a declined command from a running tool', () => {
+    const tool = { id: 'terminal', name: 'Bash', streamIndex: 0, input: { command: 'pwd' } };
+    const { container, rerender } = render(<ProcessRow
+      block={{ type: 'tool_use', tool: { ...tool, isLoading: true, resultMeta: { status: 'pending' } } }}
+      index={0} totalBlocks={1} isStreaming
+    />);
+    expect(screen.getByText('等待执行')).toBeInTheDocument();
+    expect(container.querySelector('.animate-spin')).toBeNull();
+
+    rerender(<ProcessRow
+      block={{ type: 'tool_use', tool: { ...tool, isLoading: false, isError: true, resultMeta: { status: 'declined' } } }}
+      index={0} totalBlocks={1}
+    />);
+    expect(screen.getByText('已拒绝')).toBeInTheDocument();
   });
 });
 

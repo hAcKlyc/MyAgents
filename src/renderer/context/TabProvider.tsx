@@ -1,3 +1,4 @@
+import { antigravityToolTelemetryName } from '../../shared/antigravityToolTelemetry';
 import { perfMark } from '@/utils/perfMark';
 import { newDesktopSession } from '@/api/sessionHandoverClient';
 import { releaseTabSession } from '@/api/tauriClient';
@@ -4727,6 +4728,8 @@ export default function TabProvider({
                 sessionId: payload.sessionId,
                 toolName: payload.toolName,
                 input: payload.input || '',
+                inputRef: payload.inputRef,
+                permissionOptions: payload.permissionOptions,
                 toolUseId: payload.toolUseId,
                 rootToolUseId: payload.rootToolUseId,
                 review: payload.review,
@@ -7122,6 +7125,7 @@ export default function TabProvider({
     async (
       decision: 'deny' | 'allow_once' | 'always_allow',
       requestIdOverride?: string,
+      optionId?: string,
     ) => {
       if (isRestoreActionBlocked(persistedRestoreLifecycleRef.current.phase)) {
         throw new Error(
@@ -7138,9 +7142,10 @@ export default function TabProvider({
 
       const requestId = permission.requestId;
       const toolName = permission.toolName;
-      console.log(
-        `[TabProvider] Permission response: ${decision} for ${toolName}`,
-      );
+      const loggedTool = analyticsMetaRef.current.runtime === 'antigravity'
+        ? antigravityToolTelemetryName(toolName)
+        : toolName;
+      console.log(`[TabProvider] Permission response: ${decision} for ${loggedTool}`);
 
       const permissionAnalytics = {
         session_id: currentSessionIdRef.current ?? null,
@@ -7153,7 +7158,7 @@ export default function TabProvider({
       try {
         const response = await postJson<{ success?: boolean; error?: string }>(
           '/api/permission/respond',
-          { requestId, decision },
+          { requestId, decision, ...(optionId === undefined ? {} : { optionId }) },
         );
         if (response.success !== true) {
           throw new Error(

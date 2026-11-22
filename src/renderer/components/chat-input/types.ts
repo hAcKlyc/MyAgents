@@ -148,6 +148,9 @@ export interface SimpleChatInputProps {
   usesExternalRuntimeControls?: boolean;
   runtimeModels?: RuntimeModelInfo[];
   runtimeModelsLoading?: boolean;
+  runtimeModelsError?: boolean;
+  onRuntimeModelsRetry?: () => void;
+  runtimeSupportsImageInput?: boolean;
   /** Session-scoped capability; null means still unknown (do not use Global catalog). */
   managedReasoningModel?: Pick<RuntimeModelInfo, 'supportedReasoningEfforts' | 'defaultReasoningEffort'> | null;
   runtimePermissionModes?: RuntimePermissionMode[];

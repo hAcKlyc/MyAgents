@@ -231,7 +231,10 @@ function getTodoWriteLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): strin
 function getFilePatchLabel(tool: ToolUseSimple): string | null {
   const display = resolveFilePatchRenderModel(tool);
   const filePath = display ? getFilePatchPrimaryPath(display) : null;
-  if (!filePath) return null;
+  return filePath ? formatCompactFilePath(filePath) : null;
+}
+
+function formatCompactFilePath(filePath: string): string {
   const fileName = filePath.split(/[/\\]/).pop() || filePath;
   return fileName.length > 20 ? `${fileName.substring(0, 17)}...` : fileName;
 }
@@ -615,8 +618,11 @@ function getCollabActionLabel(action: string, t?: ToolChromeTranslator): string 
 }
 
 function getCollabAgentLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): string {
-  const action = getStringProp(tool.parsedInput, 'tool');
-  const model = getStringProp(tool.parsedInput, 'model');
+  const input = tool.parsedInput ?? tool.input;
+  const action = getStringProp(input, 'tool');
+  const description = tool.subagentLifecycle?.description ?? getStringProp(input, 'description');
+  if (description) return description;
+  const model = tool.subagentLifecycle?.model ?? getStringProp(input, 'model');
   const base = action ? getCollabActionLabel(action, t) : tc(t, 'labels.subAgent');
   return model ? `${base} · ${model}` : base;
 }
@@ -624,6 +630,8 @@ function getCollabAgentLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): str
 export function getToolMainLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): string {
   const displayNameOverride = getStringProp(tool.parsedInput, '_displayName');
   if (displayNameOverride) return displayNameOverride;
+  if (tool.name === 'Bash' || tool.name === 'PowerShell') return tc(t, 'labels.runCommand');
+  if (tool.name === 'Tool') return tc(t, 'labels.tool');
   if (tool.name === 'CollabAgent') return tc(t, 'labels.subAgent');
   if (tool.name === 'Task' || tool.name === 'Agent') {
     const subagentType = getStringProp(tool.parsedInput, 'subagent_type');
@@ -654,13 +662,14 @@ export function getToolLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): str
     if (label) return label;
   }
 
-  if (!tool.parsedInput) {
+  if (!tool.parsedInput && tool.name !== 'CollabAgent') {
     // Try to parse from inputJson if available
     if (tool.inputJson) {
       try {
         const parsed = JSON.parse(tool.inputJson);
         if (tool.name === 'Read' || tool.name === 'Write' || tool.name === 'Edit') {
-          return parsed.file_path ? `${tool.name} ${parsed.file_path.split(/[/\\]/).pop()}` : tool.name;
+          const filePath = getStringProp(parsed, 'file_path');
+          return filePath ? formatCompactFilePath(filePath) : tool.name;
         }
         if (['Bash', 'PowerShell', 'bash', 'pwsh'].includes(tool.name)) {
           return parsed.description || parsed.command ?
@@ -710,14 +719,11 @@ export function getToolLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): str
         if (label) return label;
       }
       const filePath = getStringProp(tool.parsedInput, 'file_path');
-      if (filePath) {
-        const fileName = filePath.split(/[/\\]/).pop() || filePath;
-        return fileName.length > 20 ? `${fileName.substring(0, 17)}...` : fileName;
-      }
-      return tool.name;
+      return filePath ? formatCompactFilePath(filePath) : tool.name;
     }
     case 'bash':
     case 'pwsh':
+    case 'PowerShell':
     case 'Bash': {
       const description = getStringProp(tool.parsedInput, 'description');
       if (description) return description;
@@ -728,6 +734,10 @@ export function getToolLabel(tool: ToolUseSimple, t?: ToolChromeTranslator): str
       }
       return tc(t, 'labels.runCommand');
     }
+    case 'Tool':
+      return getStringProp(tool.parsedInput, 'title')
+        || getStringProp(tool.parsedInput, 'native_name')
+        || tc(t, 'labels.tool');
     case 'BashOutput': {
       return tc(t, 'labels.bashOutput');
     }

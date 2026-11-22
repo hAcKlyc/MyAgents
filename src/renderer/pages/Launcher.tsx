@@ -51,9 +51,7 @@ import { persistInputOptionChange } from '@/api/persistInputOption';
 import { createCronTask, startCronTask } from '@/api/cronTaskClient';
 import type {
   RuntimeType,
-  RuntimeModelInfo,
   RuntimePermissionMode,
-  RuntimeDetections,
 } from '../../shared/types/runtime';
 import {
   CC_MODELS,
@@ -78,8 +76,8 @@ import {
   normalizeOfficialToolIds,
   type OfficialToolId,
 } from '../../shared/official-tools';
-import { apiGetJson } from '@/api/apiFetch';
-import { runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
+import { useRuntimeModelCatalog } from '@/hooks/useRuntimeModelCatalog';
+import { useRuntimeDetections } from '@/hooks/useRuntimeDetections';
 import { resolveBuiltinPermissionMode, resolveLauncherProvider } from '@/utils/optionResolve';
 import {
   isProviderModelCompatibleWithRuntime,
@@ -239,34 +237,8 @@ export default function Launcher({
   // Runtime state — adapts model/permission selectors when workspace uses external runtime
   const runtimeSelectorAvailable = isAgentRuntimeSelectorAvailable();
 
-  // PRD 0.2.7 D6 / Phase F: Launcher exposes Runtime selector in the row
-  // below the input. We detect once on mount, mirroring Chat.tsx's pattern.
-  const [runtimeDetections, setRuntimeDetections] = useState<RuntimeDetections>(
-    {
-      builtin: { installed: true },
-      dsh: { installed: false },
-      antigravity: { installed: false },
-      'claude-code': { installed: false },
-      codex: { installed: false },
-    },
-  );
-  useEffect(() => {
-    let cancelled = false;
-    import('@tauri-apps/api/core').then(({ invoke }) => {
-      invoke<
-        Record<string, { installed: boolean; version?: string; path?: string }>
-      >('cmd_detect_runtimes')
-        .then((d) => {
-          if (!cancelled) setRuntimeDetections(d as RuntimeDetections);
-        })
-        .catch(() => {
-          /* non-fatal */
-        });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const runtimeDetection = useRuntimeDetections();
+  const runtimeDetections = runtimeDetection.detections;
 
   // MCP state
   const [launcherMcpServers, setLauncherMcpServers] = useState<
@@ -324,37 +296,10 @@ export default function Launcher({
     launcherRuntime === 'dsh' &&
     runtimeDetections.dsh.readiness !== 'ready' &&
     runtimeDetections.dsh.readiness !== 'unverified-dev-runtime';
-  // Codex models are dynamic (fetched from the CLI); CC models are static
-  const [catalog, setCatalog] = useState<{ runtime: RuntimeType; models: RuntimeModelInfo[] }>();
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  useEffect(() => {
-    if (launcherRuntime !== 'codex' && launcherRuntime !== 'antigravity') {
-      setCatalog(undefined);
-      setCatalogLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setCatalogLoading(true);
-    apiGetJson<{ models?: RuntimeModelInfo[] }>(
-      runtimeModelCatalogPath(launcherRuntime, 'system-cli'),
-    )
-      .then((res) => {
-        if (!cancelled) setCatalog({ runtime: launcherRuntime, models: res?.models ?? [] });
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setCatalogLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [launcherRuntime]);
-  const launcherRuntimeModels: RuntimeModelInfo[] | undefined =
-    launcherRuntime === 'claude-code'
-      ? CC_MODELS
-      : (launcherRuntime === 'codex' || launcherRuntime === 'antigravity')
-        ? catalog?.runtime === launcherRuntime ? catalog.models : []
-        : undefined;
+  const runtimeModelCatalog = useRuntimeModelCatalog(
+    launcherRuntime === 'codex' || launcherRuntime === 'antigravity' ? launcherRuntime : undefined,
+  );
+  const launcherRuntimeModels = launcherRuntime === 'claude-code' ? CC_MODELS : runtimeModelCatalog.models;
   const launcherRuntimePermissionModes: RuntimePermissionMode[] | undefined =
     launcherRuntime === 'antigravity' ? ANTIGRAVITY_PERMISSION_MODES : launcherRuntime === 'dsh'
       ? DSH_PERMISSION_MODES
@@ -691,7 +636,9 @@ export default function Launcher({
   const handleLauncherModelChange = useCallback(
     (model: string | undefined) => {
       setLauncherSelectedModel(model);
-      const nextEffort = usesManagedCodexProvider
+      const nextEffort = launcherRuntime === 'antigravity'
+        ? 'default'
+        : usesManagedCodexProvider
         ? reasoningEffortAfterModelChange(launcherReasoningEffort, launcherProvider?.models?.find(item => item.model === model))
         : launcherReasoningEffort;
       setLauncherReasoningEffort(nextEffort);
@@ -706,7 +653,7 @@ export default function Launcher({
           agentId: selectedWorkspace.agentId ?? null,
           isExternalRuntime,
           fields: isExternalRuntime
-            ? { runtimeModel: model ?? null }
+            ? { runtimeModel: model ?? null, ...(launcherRuntime === 'antigravity' ? { reasoningEffort: nextEffort } : {}) }
             : providerExecutionIntent?.kind === 'runtime-backed-provider'
               ? { runtimeBackedProviderSelection: providerExecutionIntent, reasoningEffort: nextEffort }
               : { builtinModel: model ?? null },
@@ -722,6 +669,7 @@ export default function Launcher({
       isExternalRuntime,
       launcherProvider,
       launcherReasoningEffort,
+      launcherRuntime,
       usesManagedCodexProvider,
       t,
     ],
@@ -1232,7 +1180,9 @@ export default function Launcher({
           runtimeModels={
             isExternalRuntime ? launcherRuntimeModels : undefined
           }
-          runtimeModelsLoading={catalogLoading}
+          runtimeModelsLoading={runtimeModelCatalog.loading}
+          runtimeModelsError={runtimeModelCatalog.error}
+          onRuntimeModelsRetry={runtimeModelCatalog.retry}
           runtimePermissionModes={
             launcherRuntime !== 'builtin'
               ? launcherRuntimePermissionModes
@@ -1241,6 +1191,9 @@ export default function Launcher({
           /* Runtime selector lives below the input (LauncherInputContextRow). */
           runtimeSelectorAvailable={runtimeSelectorAvailable}
           runtimeDetections={runtimeDetections}
+          runtimeDetecting={runtimeDetection.detecting}
+          runtimeDetectionFailed={runtimeDetection.detectionFailed}
+          onRuntimeDetectAgain={runtimeDetection.retry}
           onRuntimeChange={handleLauncherRuntimeChange}
           activeRuntime={selectedRuntime}
           isActive={isActive}

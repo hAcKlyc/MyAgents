@@ -71,7 +71,14 @@ export async function handleSessionEngineRuntimeRoute(
     const reason = body.reason as string | undefined;
     if (!requestId) return jsonResponse({ error: 'Missing requestId' }, 400);
     try {
-      const success = await getPermissionResponseEngine().respondPermission(requestId, decision, reason);
+      const engine = getPermissionResponseEngine();
+      const optionId = body.optionId;
+      if (optionId !== undefined && typeof optionId !== 'string') {
+        return jsonResponse({ error: 'Invalid permission optionId' }, 400);
+      }
+      const success = optionId === undefined
+        ? await engine.respondPermission(requestId, decision, reason)
+        : await engine.respondPermission(requestId, decision, reason, optionId);
       return jsonResponse({ success });
     } catch (error) {
       return jsonResponse({ error: error instanceof Error ? error.message : 'Unknown error' }, 500);

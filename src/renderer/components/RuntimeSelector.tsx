@@ -15,6 +15,7 @@ import Tip from '@/components/Tip';
 import { RUNTIME_PRESENTATION } from '@/components/runtimePresentation';
 import RuntimeIcon from '@/components/RuntimeIcon';
 import { useCloseLayer } from '@/hooks/useCloseLayer';
+import { openExternal } from '@/utils/openExternal';
 import type { RuntimeType, RuntimeDetections } from '../../shared/types/runtime';
 import {
   AGENT_RUNTIME_DISTRIBUTION_POLICY,
@@ -65,6 +66,9 @@ function RuntimeGroupHeading({ group }: { group: 'integrated' | 'external' }) {
 interface RuntimeSelectorProps {
   value: RuntimeType;
   detections: RuntimeDetections;
+  detecting?: boolean;
+  detectionFailed?: boolean;
+  onDetectAgain?: () => void;
   onChange: (runtime: RuntimeType) => void;
   variant?: 'launcher' | 'panel';
   onOpenSettings?: () => void;
@@ -78,6 +82,9 @@ interface RuntimeSelectorProps {
 export default memo(function RuntimeSelector({
   value,
   detections,
+  detecting = false,
+  detectionFailed = false,
+  onDetectAgain,
   onChange,
   variant = 'launcher',
   onOpenSettings,
@@ -155,7 +162,8 @@ export default memo(function RuntimeSelector({
         onClose={() => setOpen(false)}
         anchorRef={triggerRef}
         placement="top-start"
-        className="w-88 max-w-[calc(100vw-1rem)] rounded-xl py-2"
+        maxHeight="min(540px, 75dvh)"
+        className="w-88 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-xl py-2"
       >
         <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-1">
           <span className="text-xs font-semibold text-[var(--ink-muted)]">{t('runtime.header')}</span>
@@ -174,6 +182,7 @@ export default memo(function RuntimeSelector({
           const detection = detections[opt.type];
           const installed = opt.type === 'builtin' || (detection?.installed && detection.reason !== 'protocol-mismatch' && IMPLEMENTED_RUNTIMES.has(opt.type));
           const selected = opt.type === value;
+          const help = opt.type === 'antigravity' && !installed && !detecting && !detectionFailed;
           const groupStart = index === 0 || availableOptions[index - 1].group !== opt.group;
           return (
             <div key={opt.type}>
@@ -210,15 +219,31 @@ export default memo(function RuntimeSelector({
                   <CheckIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--accent)] ${selected ? '' : 'invisible'}`} aria-hidden="true" />
                 ) : (
                   <span className="shrink-0 text-xs text-[var(--ink-subtle)]">
-                    {opt.type === 'antigravity' ? t(detection?.installed ? 'runtime.upgradeAgy' : 'runtime.installAgy') : detection?.installed && !IMPLEMENTED_RUNTIMES.has(opt.type)
+                    {detecting ? t('runtime.detecting') : detectionFailed ? t('runtime.detectFailed') : opt.type === 'antigravity' ? t(detection?.installed ? 'runtime.upgradeAgy' : 'runtime.installAgy') : detection?.installed && !IMPLEMENTED_RUNTIMES.has(opt.type)
                       ? t('runtime.comingSoon')
                       : t('runtime.notInstalled')}
                   </span>
                 )}
               </button>
+              {help && (
+                <button
+                  type="button"
+                  className="ml-[60px] mb-1 rounded px-1.5 py-0.5 text-xs text-[var(--accent)] hover:underline"
+                  onClick={() => { void openExternal('https://antigravity.google/docs/cli/tutorial'); }}
+                >
+                  {t('runtime.agyInstallGuide')}
+                </button>
+              )}
             </div>
           );
         })}
+        {onDetectAgain && !integratedOnly && (
+          <div className="mx-3 mt-1 border-t border-[var(--line-subtle)] pt-1">
+            <button type="button" className="rounded px-1.5 py-1 text-xs font-medium text-[var(--ink-muted)] hover:bg-[var(--hover-bg)] disabled:opacity-50" onClick={onDetectAgain} disabled={detecting}>
+              {t('runtime.detectAgain')}
+            </button>
+          </div>
+        )}
       </Popover>
     </>
   );

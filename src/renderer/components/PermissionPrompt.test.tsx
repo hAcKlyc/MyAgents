@@ -151,3 +151,60 @@ describe('structured permission review', () => {
     expect(screen.getByText('old content')).toBeInTheDocument();
   });
 });
+
+
+describe('native Antigravity approval choices', () => {
+  const choices = [
+    { optionId: 'project-rule', name: 'Always allow for this project', kind: 'allow_always' as const },
+    { optionId: 'command-rule', name: 'Always allow this command', kind: 'allow_always' as const },
+    { optionId: 'block-command', name: 'Always deny this command', kind: 'reject_always' as const },
+  ];
+
+  it('renders only native-scoped actions and forwards the selected ID', async () => {
+    const command = `printf '%s' '${'example'.repeat(200)}'`;
+    const onDecision = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(<PermissionPrompt request={{
+      requestId: 'native-1', toolName: 'Bash',
+      input: JSON.stringify({ command, cwd: '/workspace/current' }),
+      permissionOptions: choices,
+    }} onDecision={onDecision} />);
+    expect(screen.getByText('shell.permissionPrompt.terminalCommandTitle')).toBeInTheDocument();
+    expect(container.querySelector('[data-permission-command]')?.textContent).toBe(command);
+    expect(container.querySelector('[data-permission-cwd]')?.textContent).toBe('/workspace/current');
+    expect(screen.queryByRole('button', { name: 'shell.permissionPrompt.allowOnce' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'shell.permissionPrompt.deny' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Always allow this command' }));
+    expect(onDecision).toHaveBeenCalledExactlyOnceWith('native-1', 'always_allow', 'command-rule');
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  it('shows each proposed file change in the shared diff view', () => {
+    const changes = [
+      { path: '/work/first.txt', kind: 'update', diff: '@@ -1 +1 @@\n-old\n+new\n' },
+      { path: '/work/second.txt', kind: 'add', diff: '@@ -0,0 +1 @@\n+another\n' },
+    ];
+    const { container } = render(<PermissionPrompt request={{
+      requestId: 'native-diff', toolName: 'Edit', input: JSON.stringify({ changes }), permissionOptions: choices,
+    }} onDecision={vi.fn()} />);
+    expect(container.querySelector('[data-file-patch-path="/work/first.txt"]')).toHaveTextContent('new');
+    expect(container.querySelector('[data-file-patch-path="/work/second.txt"]')).toHaveTextContent('another');
+  });
+
+  it('loads exact referenced input before enabling native approval', async () => {
+    const ref = { kind: 'ref' as const, id: 'large-native-input', mimetype: 'application/json', sizeBytes: 90000, preview: '', expiresAt: 9_000_000_000_000 };
+    const command = 'printf ' + 'value'.repeat(16000);
+    vi.mocked(fetchJsonLargeValueRef).mockResolvedValueOnce({ command, cwd: '/workspace' });
+    const onDecision = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(<PermissionPrompt request={{
+      requestId: 'native-2', sessionId: 'session-ref', toolName: 'Bash', input: '', inputRef: ref,
+      permissionOptions: choices,
+    }} onDecision={onDecision} />);
+    expect(screen.getByRole('button', { name: 'Always allow for this project' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Always deny this command' })).toBeEnabled();
+    await screen.findByText('shell.permissionPrompt.terminalCommandTitle');
+    expect(container.querySelector('[data-permission-command]')?.textContent).toBe(command);
+    fireEvent.click(screen.getByRole('button', { name: 'Always deny this command' }));
+    expect(onDecision).toHaveBeenCalledExactlyOnceWith('native-2', 'deny', 'block-command');
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+});

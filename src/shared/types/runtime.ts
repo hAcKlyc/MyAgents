@@ -313,9 +313,11 @@ export interface RuntimeModelInfo {
   displayName: string;  // UI display name (e.g., "Sonnet 4.6")
   description?: string; // Optional description
   isDefault?: boolean;  // Mark as default selection
+  isCurrent?: boolean;  // Effective selection reported by an active session
   /** Runtime-owned model capabilities. Values are intentionally open-ended. */
   supportedReasoningEfforts?: { reasoningEffort: string; description?: string }[];
   defaultReasoningEffort?: string;
+  currentReasoningEffort?: string;
 }
 
 /**
