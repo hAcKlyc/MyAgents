@@ -1432,7 +1432,7 @@ export default function CompanionWindow() {
                             <PermissionPrompt
                                 key={session.permReq.requestId}
                                 request={session.permReq}
-                                onDecision={(requestId, decision) => session.respondPermission(decision, requestId)}
+                                onDecision={(requestId, decision, optionId) => session.respondPermission(decision, requestId, optionId)}
                             />
                         )}
                         {session.askReq && (

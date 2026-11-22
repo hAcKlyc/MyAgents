@@ -52,6 +52,10 @@ export async function handleChatStreamRoute(
     client.send('chat:mcp-effective-snapshot', snapshot.mcpEffectiveSnapshot);
   }
 
+  if (snapshot.agentPlan) {
+    client.send('chat:agent-plan-update', { sessionId: snapshot.sessionId, todos: snapshot.agentPlan });
+  }
+
   for (const pending of snapshot.pendingInteractiveRequests) {
     client.send(pending.type, pending.data);
   }

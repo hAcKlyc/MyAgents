@@ -37,6 +37,9 @@ interface LauncherInputContextRowProps {
   showRuntime: boolean;
   runtime?: RuntimeType;
   runtimeDetections?: RuntimeDetections;
+  runtimeDetecting?: boolean;
+  runtimeDetectionFailed?: boolean;
+  onRuntimeDetectAgain?: () => void;
   onRuntimeChange?: (runtime: RuntimeType) => void;
 }
 
@@ -63,6 +66,9 @@ export default memo(function LauncherInputContextRow({
   showRuntime,
   runtime,
   runtimeDetections,
+  runtimeDetecting,
+  runtimeDetectionFailed,
+  onRuntimeDetectAgain,
   onRuntimeChange,
 }: LauncherInputContextRowProps) {
   return (
@@ -82,6 +88,9 @@ export default memo(function LauncherInputContextRow({
           <RuntimeSelector
             value={runtime}
             detections={runtimeDetections}
+            detecting={runtimeDetecting}
+            detectionFailed={runtimeDetectionFailed}
+            onDetectAgain={onRuntimeDetectAgain}
             onChange={onRuntimeChange}
             variant="launcher"
           />

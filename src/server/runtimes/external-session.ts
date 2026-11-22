@@ -1,3 +1,4 @@
+import { antigravityToolTelemetryName } from '../../shared/antigravityToolTelemetry';
 import { projectMessagePage, type MessagePageRequest } from '../session-transcript/message-page';
 import { fingerprintSessionMcp } from '../session-core/mcp-sync-policy';
 import { CHANNEL_MANAGED_CODEX_LIMITS } from '../../shared/channelPrompt';
@@ -418,6 +419,7 @@ import {
   bindExternalTurn,
   getExternalTurnTerminalGeneration,
   getExternalCurrentTurnContextUsage,
+  getExternalCurrentTurnPlan,
   getExternalCurrentTurnEstimatedInputTokens,
   getExternalCurrentTurnUsage,
   getExternalTurnStartTime,
@@ -439,6 +441,7 @@ import {
   resetExternalTurnAccumulators,
   resetExternalTurnLifecycleState,
   setExternalCurrentTurnContextUsage,
+  setExternalCurrentTurnPlan,
   setExternalCurrentTurnEstimatedInputTokens,
   setExternalCurrentTurnUsage,
   setExternalLastTurnSucceeded,
@@ -467,10 +470,12 @@ import {
   appendExternalPendingText,
   appendExternalPendingThinkingText,
   appendExternalToolResultDeltaToContent,
+  replaceExternalToolResultPreview,
   appendExternalToolInputDelta,
   applyExternalProviderToolResult,
   applyExternalReplayedToolResultToContent,
   applyExternalSubagentLifecycle,
+  getExternalSubagentLifecycleDetails,
   mergeSubagentLifecycle,
   applyExternalSubagentAttachmentUpdate,
   applyExternalSubagentToolResult as applyExternalSubagentToolResultToContent,
@@ -656,6 +661,7 @@ function getPendingDshRootOperation() {
 }
 
 let pendingDshProductEvents = 0;
+let pendingAntigravityProductEvents = 0;
 function hasPendingDshNativeWork(): boolean {
   if (getCurrentRuntimeType() !== 'dsh') return false;
   const active = getExternalActivePair();
@@ -666,6 +672,10 @@ function hasPendingDshNativeWork(): boolean {
     (getBoundDshMetadata()?.pendingDshInputs?.length ?? 0) > 0 ||
     Boolean(active?.runtime.getActiveRootOperation?.(active.process))
   );
+}
+function hasPendingAntigravityWork(): boolean {
+  if (getCurrentRuntimeType() !== 'antigravity') return false;
+  return pendingAntigravityProductEvents > 0 || getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true;
 }
 let currentTurnTraceRequestId: string | undefined;
 let currentTurnTraceRuntime = '';
@@ -721,6 +731,8 @@ function applyPendingExternalProcessConfigInvalidation(
   if (externalProcessConfigInvalidationInFlight) {
     return externalProcessConfigInvalidationInFlight;
   }
+
+  if (getExternalActiveProcess()?.hasPendingBackgroundWork?.()) return Promise.resolve();
 
   const reasons = pendingExternalProcessConfigRestartReasons();
   if (restartForPermissionMode) reasons.push('permission-mode');
@@ -2806,8 +2818,9 @@ function emitExternalToolStartTrace(
 ): void {
   if (!currentTurnTraceId) return;
   activeToolTraceStarts.set(toolUseId, nowMs());
+  const name = currentTurnTraceRuntime === 'antigravity' ? antigravityToolTelemetryName(toolName) : toolName;
   emitExternalTurnTrace('tool_start', {
-    detail: { toolUseId, toolName, subAgent: isSubAgent },
+    detail: { toolUseId, toolName: name, subAgent: isSubAgent },
   });
 }
 
@@ -3432,7 +3445,8 @@ export async function updateExternalRuntimeConfig(
       isExternalTurnFinalizationInFlight(),
     ) ||
     externalSessionMutationInFlight ||
-    hasPendingDshNativeWork();
+    hasPendingDshNativeWork() ||
+    hasPendingAntigravityWork();
   const noop = isExternalRuntimeConfigPatchNoopAgainstDesired(normalized, {
     allowLiveReportedModel: !shouldDefer,
   });
@@ -3726,6 +3740,7 @@ export function getExternalLiveSessionSnapshot(
   liveSessionState: ExternalSessionState;
   queuedMessages: ReturnType<typeof getExternalQueueStatus>;
   pendingInteractiveRequests: ExternalPendingInteractiveRequest[];
+  agentPlan: ReturnType<typeof getExternalCurrentTurnPlan>;
 } | null {
   if (targetSessionId !== getCurrentExternalBoundSessionId()) return null;
   flushPendingLiveEvents();
@@ -3755,6 +3770,7 @@ export function getExternalLiveSessionSnapshot(
     liveSessionState: getExternalLifecycleState(),
     queuedMessages: getExternalQueueStatus(),
     pendingInteractiveRequests: getExternalInteractiveRequestsSnapshot(),
+    agentPlan: getExternalLifecycleState() === 'running' ? getExternalCurrentTurnPlan() : [],
   });
 }
 
@@ -4175,13 +4191,25 @@ export async function handleExternalMcpServersChange(
     if (antigravity) {
       antigravityMcpIds = requestedIds;
       const process = getExternalActiveProcess();
-      pendingAntigravityMcpRestart = !!process && !process.exited && process.sessionMcpFingerprint !== fingerprintSessionMcp(authoritative);
-      if (pendingAntigravityMcpRestart) {
-        if (!isExternalTurnBusy()) await applyPendingExternalProcessConfigInvalidation();
+      const desiredRevision = fingerprintSessionMcp(authoritative);
+      const effectiveRevision = process && !process.exited ? process.sessionMcpFingerprint ?? null : null;
+      const busy = isExternalSessionBusy();
+      pendingAntigravityMcpRestart = effectiveRevision !== null && effectiveRevision !== desiredRevision;
+      if (pendingAntigravityMcpRestart && !busy) {
+        await applyPendingExternalProcessConfigInvalidation();
       }
-      return { success: true, servers: requestedIds, extensionStatus: {
-        desiredRevision: '', effectiveRevision: null, state: isExternalTurnBusy() ? 'deferred_until_idle' : 'pending_next_start', components: [],
-      } };
+      return {
+        success: true,
+        servers: requestedIds,
+        extensionStatus: {
+          desiredRevision,
+          effectiveRevision: hasExternalRuntimeProcess() ? effectiveRevision : null,
+          state: effectiveRevision === desiredRevision
+            ? 'unchanged'
+            : busy ? 'deferred_until_idle' : 'pending_next_start',
+          components: [],
+        },
+      };
     }
     const resolvedServers = resolveProductExtensionMcpSelection(
       requestedIds,
@@ -5027,62 +5055,62 @@ async function _doStartExternalSession(options: {
   );
 
   let runtimeInitialTurn: RuntimeInitialTurn | undefined;
-  let dshProductTail = Promise.resolve();
-  let dshProductProjectionFailed = false;
-  let dshProductQueuedCount = 0;
-  let dshProductQueuedBytes = 0;
-  const failDshProductProjection = (error: unknown): void => {
-    if (dshProductProjectionFailed) return;
-    dshProductProjectionFailed = true;
+  let runtimeProductTail = Promise.resolve();
+  let runtimeProductProjectionFailed = false;
+  let runtimeProductQueuedCount = 0;
+  let runtimeProductQueuedBytes = 0;
+  const failRuntimeProductProjection = (error: unknown): void => {
+    if (runtimeProductProjectionFailed) return;
+    runtimeProductProjectionFailed = true;
     console.error(
-      '[external-session] DSH Product event projection failed:',
+      `[external-session] ${runtimeType} Product event projection failed:`,
       error,
     );
     startedProcess?.kill();
     setExternalSessionState('error');
     broadcast('chat:agent-error', {
-      message: 'Failed to restore DSH collaboration state',
+      message: `Failed to project ${runtimeType} collaboration work`,
     });
   };
   const receiveRuntimeEvent = (event: UnifiedEvent): void => {
-    if (runtimeType !== 'dsh') {
+    const continuing = event.kind === 'root_turn_admitted' && event.origin === 'collaboration';
+    if (runtimeType !== 'dsh' &&
+      !(runtimeType === 'antigravity' && (continuing || runtimeProductQueuedCount > 0))) {
       handleUnifiedEvent(event);
       return;
     }
-    if (dshProductProjectionFailed) return;
+    if (runtimeProductProjectionFailed) return;
     const eventBytes = Buffer.byteLength(JSON.stringify(event), 'utf8');
     if (
-      dshProductQueuedCount >= 2_048 ||
-      dshProductQueuedBytes + eventBytes > 8 * 1024 * 1024
+      runtimeProductQueuedCount >= 2_048 ||
+      runtimeProductQueuedBytes + eventBytes > 8 * 1024 * 1024
     ) {
-      failDshProductProjection(
-        new Error('DSH Product event projection exceeded its bounded queue'),
+      failRuntimeProductProjection(
+        new Error(`${runtimeType} Product event projection exceeded its bounded queue`),
       );
       return;
     }
-    dshProductQueuedCount++;
-    dshProductQueuedBytes += eventBytes;
-    pendingDshProductEvents++;
-    dshProductTail = dshProductTail
+    runtimeProductQueuedCount++;
+    runtimeProductQueuedBytes += eventBytes;
+    if (runtimeType === 'dsh') pendingDshProductEvents++;
+    else pendingAntigravityProductEvents++;
+    runtimeProductTail = runtimeProductTail
       .then(async () => {
         if (
-          dshProductProjectionFailed ||
+          runtimeProductProjectionFailed ||
           getExternalLifecycleSessionId() !== options.sessionId ||
           (startedProcess &&
             getExternalActivePair()?.process &&
             getExternalActivePair()?.process !== startedProcess)
         )
           return;
-        if (
-          event.kind === 'root_turn_admitted' &&
-          event.origin === 'collaboration'
-        ) {
+        if (continuing) {
           if (!(await waitExternalTurnFinalization(30_000)))
             throw new Error(
-              'DSH collaboration is waiting for the previous Product turn persistence',
+              `${runtimeType} collaboration could not settle the previous Product turn`,
             );
         }
-        if (event.kind === 'user_message_cancelled') {
+        if (runtimeType === 'dsh' && event.kind === 'user_message_cancelled') {
           const pending = getSessionMetadata(
             options.sessionId,
           )?.pendingDshInputs?.find(
@@ -5100,11 +5128,12 @@ async function _doStartExternalSession(options: {
         }
         handleUnifiedEvent(event);
       })
-      .catch(failDshProductProjection)
+      .catch(failRuntimeProductProjection)
       .finally(() => {
-        pendingDshProductEvents--;
-        dshProductQueuedCount--;
-        dshProductQueuedBytes -= eventBytes;
+        if (runtimeType === 'dsh') pendingDshProductEvents--;
+        else pendingAntigravityProductEvents--;
+        runtimeProductQueuedCount--;
+        runtimeProductQueuedBytes -= eventBytes;
       });
   };
   let currentEventReceiver: ((event: UnifiedEvent) => void) | undefined;
@@ -5268,7 +5297,7 @@ async function _doStartExternalSession(options: {
       );
     }
     startedProcess = process;
-    if (dshProductProjectionFailed) {
+    if (runtimeProductProjectionFailed) {
       process.kill();
       throw new Error('DSH Product event projection failed during startup');
     }
@@ -5309,7 +5338,7 @@ async function _doStartExternalSession(options: {
         scenario: options.scenario,
         channelDelivery: NO_CHANNEL_DELIVERY,
       });
-      await dshProductTail;
+      await runtimeProductTail;
     }
     let deferredInitialDispatched = false;
     if (deferInitialAdmission) {
@@ -6966,6 +6995,7 @@ function enqueueExternalInput(
     externalSessionMutationInFlight ||
     hasPendingDshMutation() ||
     pendingDshRootBlocksAdmission ||
+    hasPendingAntigravityWork() ||
     (context.asyncQuestionReply && lifecycleState === 'idle') ||
     (lifecycleState === 'idle' && hasExternalSendInFlight()) ||
     shouldQueueExternalOperation(lifecycleState, {
@@ -7204,6 +7234,7 @@ function drainExternalQueueAfterTurn(): void {
   if (
     externalSessionMutationInFlight || hasPendingDshMutation() ||
     (hasPendingDshNativeWork() && getExternalActiveSteerPair() === null) ||
+    hasPendingAntigravityWork() ||
     !canDrainExternalOperations(getExternalLifecycleState(), getExternalActiveSteerPair() !== null)
   )
     return;
@@ -7214,6 +7245,7 @@ async function drainExternalOperationsAfterTurn(): Promise<void> {
   if (
     externalSessionMutationInFlight || hasPendingDshMutation() ||
     (hasPendingDshNativeWork() && getExternalActiveSteerPair() === null) ||
+    hasPendingAntigravityWork() ||
     !canDrainExternalOperations(getExternalLifecycleState(), getExternalActiveSteerPair() !== null)
   )
     return;
@@ -7371,6 +7403,9 @@ export async function forceExecuteExternalQueueItem(
 ): Promise<boolean> {
   if (!moveExternalQueuedMessageToFront(queueId)) return false;
   const active = getExternalActivePair();
+  if (active?.runtime.type === 'antigravity' && active.process.hasPendingBackgroundWork?.()) {
+    return stopExternalSession({ preserveQueue: true });
+  }
   if (
     getExternalLifecycleState() === 'running' &&
     active &&
@@ -7587,6 +7622,7 @@ export async function respondExternalPermission(
   requestId: string,
   decision: 'deny' | 'allow_once' | 'always_allow',
   reason?: string,
+  optionId?: string,
 ): Promise<boolean> {
   const active = getExternalActivePair();
   if (!active) {
@@ -7608,13 +7644,12 @@ export async function respondExternalPermission(
   console.log(
     `[external-session] Permission response: ${decision} for requestId=${requestId}${suggestions?.length ? `, with ${suggestions.length} suggestion(s)` : ''}`,
   );
-  await active.runtime.respondPermission(
-    active.process,
-    requestId,
-    decision,
-    reason,
-    suggestions,
-  );
+  if (optionId === undefined) {
+    await active.runtime.respondPermission(active.process, requestId, decision, reason, suggestions);
+  } else {
+    if (!active.runtime.respondPermissionOption) return false;
+    await active.runtime.respondPermissionOption(active.process, requestId, optionId);
+  }
   // Integrated runtimes may synchronously emit interactive_request_resolved while
   // the response call is awaiting its authoritative effect. Do not settle twice.
   if (!getExternalInteractiveRequest(requestId)) return true;
@@ -8177,6 +8212,7 @@ export function isExternalSessionBusy(): boolean {
   return (
     externalSessionMutationInFlight ||
     hasPendingDshNativeWork() ||
+    hasPendingAntigravityWork() ||
     isExternalTurnBusy() ||
     hasExternalSendInFlight() ||
     hasExternalQueuedOperations() ||
@@ -8188,7 +8224,8 @@ export function isExternalSessionBusy(): boolean {
 export async function retryExternalMcpServer(
   serverId: string,
 ): Promise<McpRetryResult> {
-  if (!isManagedCodexProductRuntime()) {
+  const antigravity = getCurrentRuntimeType() === 'antigravity';
+  if (!antigravity && !isManagedCodexProductRuntime()) {
     return { success: false, status: 400, errorCode: 'unsupported_runtime' };
   }
   if (
@@ -8202,17 +8239,22 @@ export async function retryExternalMcpServer(
   const failed = previousSnapshot?.servers.find(
     (server) => server.id === serverId,
   );
-  const desired = getManagedCodexDesiredSnapshot();
-  if (
-    !failed?.desired ||
-    (failed.state !== 'failed' && failed.state !== 'stopped') ||
-    !desired?.mcpServers.some((server) => server.id === serverId)
-  ) {
-    return { success: false, status: 409, errorCode: 'server_not_failed' };
-  }
   const sessionId = getExternalLifecycleSessionId();
   const workspacePath = getExternalLifecycleWorkspacePath();
   const scenario = getExternalLifecycleScenario();
+  const getDesiredServers = () => antigravity
+    ? resolveWorkspaceConfig(workspacePath, getExternalSessionMetadata(sessionId), {
+        includeMcp: true,
+        mcpServerIds: antigravityMcpIds ?? undefined,
+      }).mcpServers
+    : getManagedCodexDesiredSnapshot()?.mcpServers ?? [];
+  if (
+    !failed?.desired ||
+    (failed.state !== 'failed' && failed.state !== 'stopped') ||
+    !getDesiredServers().some((server) => server.id === serverId)
+  ) {
+    return { success: false, status: 409, errorCode: 'server_not_failed' };
+  }
   const lease = tryAcquireExternalSessionMutationLease();
   if (!lease) return { success: false, status: 409, errorCode: 'session_busy' };
   const retryFailed = (): McpRetryResult => {
@@ -8222,22 +8264,24 @@ export async function retryExternalMcpServer(
     if (!hasExternalRuntimeProcess() && !isExternalLifecycleStarting()
       && !current?.servers.length && previousSnapshot
       && getExternalLifecycleSessionId() === sessionId) {
-      const currentDesired = getManagedCodexDesiredSnapshot();
+      const servers = getDesiredServers();
       const now = Date.now();
       const snapshot = setExternalMcpEffectiveSnapshot({
         configGeneration: previousSnapshot.configGeneration,
-        configFingerprint: currentDesired?.revision ?? previousSnapshot.configFingerprint,
+        configFingerprint: antigravity
+          ? fingerprintSessionMcp(servers)
+          : getManagedCodexDesiredSnapshot()?.revision ?? previousSnapshot.configFingerprint,
         catalogGeneration: (current?.catalogGeneration ?? 0) + 1,
         observedAt: now,
         observationStale: false,
         dispatch: { state: 'released', releaseReason: 'terminal_status' },
-        servers: (currentDesired?.mcpServers ?? []).map(server => ({
+        servers: servers.map(server => ({
           id: server.id, desired: true, state: 'failed', errorCode: 'MCP_STARTUP_FAILED', toolCount: 0,
           attemptGeneration: (previousSnapshot.servers.find(previous => previous.id === server.id)?.attemptGeneration ?? 0) + 1,
           updatedAt: now,
         })),
         tools: [],
-      }, 'codex', 'managed-provider');
+      }, getCurrentRuntimeType(), getCurrentRuntimeSource());
       broadcast('chat:mcp-effective-snapshot', snapshot);
     }
     return { success: false, status: 502, errorCode: 'retry_failed' };
@@ -8245,6 +8289,18 @@ export async function retryExternalMcpServer(
   try {
     pendingExternalCapabilityRestart = true;
     await applyPendingExternalProcessConfigInvalidation();
+    if (antigravity) {
+      await startExternalSession({
+        sessionId,
+        workspacePath,
+        scenario,
+        model: getExternalRuntimeDesiredModel() || undefined,
+        permissionMode: getExternalRuntimeDesiredPermissionMode() || undefined,
+        reasoningEffort: getExternalRuntimeDesiredReasoningEffort() || undefined,
+        resumeSessionId: getExternalRuntimeSessionId() || undefined,
+      });
+      return hasExternalRuntimeProcess() ? { success: true } : retryFailed();
+    }
     const result = await prewarmExternalSession({
       sessionId,
       workspacePath,
@@ -9537,7 +9593,7 @@ export async function queryRuntimeModels(
   if (runtimeType === 'builtin') return [];
   const runtimeSource =
     runtimeType === 'antigravity' ? 'system-cli' : runtimeType === 'codex' ? options.runtimeSource ?? 'system-cli' : undefined;
-  const catalogSessionId = getExternalLifecycleSessionId();
+  const catalogSessionId = getCurrentBoundSessionId();
   const sessionCatalog = runtimeType === 'codex' || runtimeType === 'antigravity';
   try {
     if (sessionCatalog && getCurrentRuntimeType() === runtimeType && getCurrentRuntimeSource() === runtimeSource) {
@@ -9547,46 +9603,54 @@ export async function queryRuntimeModels(
     const process = runtime?.type === runtimeType && runtimeSource === getCurrentRuntimeSource()
       ? getExternalActiveProcess()
       : null;
-    const models =
-      runtime?.type === runtimeType &&
-      runtimeSource === getCurrentRuntimeSource() &&
-      process &&
-      !process.exited
-        ? await runtime.queryModels({
-            runtimeSource,
-            process,
-            signal: options.signal,
-          })
+    const readAntigravitySessionCatalog = async () => {
+      if (runtimeType !== 'antigravity' || getCurrentRuntimeType() !== runtimeType) return null;
+      await awaitExternalLifecycleStarting();
+      options.signal?.throwIfAborted();
+      const current = getExternalActivePair();
+      const currentSessionId = getCurrentBoundSessionId();
+      if (current?.runtime.type !== runtimeType || current.process.exited) return null;
+      if (catalogSessionId && !isPendingSessionId(catalogSessionId) && catalogSessionId !== currentSessionId) {
+        throw new Error('Runtime Session changed during model discovery');
+      }
+      return current.runtime.queryModels({ process: current.process, runtimeSource, signal: options.signal });
+    };
+    let models: unknown[];
+    try {
+      models = runtime && process && !process.exited
+        ? await runtime.queryModels({ runtimeSource, process, signal: options.signal })
         : await queryRuntimeModelsSingleFlight(
             runtimeType,
-            async (ownerSignal) => {
-              return await getExternalRuntime(runtimeType).queryModels({
-                runtimeSource,
-                signal: ownerSignal,
-              });
-            },
+            (signal) => getExternalRuntime(runtimeType).queryModels({ runtimeSource, signal }),
             runtimeSource,
             options.signal,
           );
-    // The lifecycle owner arbitrates late discovery, including a temporary
-    // query begun just before prewarm published the Session's actual process.
+    } catch (error) {
+      const sessionModels = await readAntigravitySessionCatalog();
+      if (sessionModels) return sessionModels;
+      throw error;
+    }
+
+    // A temporary Antigravity catalog can race a pending Tab's first prompt
+    // or a configuration restart. Use the ready process's native catalog.
+    if (runtimeType === 'antigravity' && !process && isExternalLifecycleStarting()) {
+      const sessionModels = await readAntigravitySessionCatalog();
+      if (sessionModels) return sessionModels;
+    }
     const currentProcess = getExternalActiveRuntime()?.type === runtimeType && runtimeSource === getCurrentRuntimeSource()
       ? getExternalActiveProcess()
       : null;
     if (sessionCatalog && currentProcess !== process) {
-      if (runtimeType === 'antigravity' && !process && currentProcess && !currentProcess.exited
-        && getExternalLifecycleSessionId() === catalogSessionId) {
-        const active = getExternalActiveRuntime();
-        if (active?.type === runtimeType) return active.queryModels({ process: currentProcess, runtimeSource, signal: options.signal });
-      }
+      const sessionModels = await readAntigravitySessionCatalog();
+      if (sessionModels) return sessionModels;
       throw new Error('Runtime Session changed during model discovery');
     }
     return models;
   } catch (err) {
-    console.error(
-      `[external-session] Failed to query models for ${runtimeType}:`,
-      err,
-    );
+    if (!options.signal?.aborted) {
+      console.error(`[external-session] Failed to query models for ${runtimeType}:`,
+        runtimeType === 'antigravity' ? summarizeExternalRuntimeMessageForLog(err) : err);
+    }
     if (options.throwOnError) throw err;
     return [];
   }
@@ -10017,9 +10081,9 @@ async function persistTurnResult(
     });
     clearExternalTurnActivityFacts(turnActivityFacts);
 
-    // Always reach idle, even if the body above threw. The
-    // session_complete handler counts on us to drain the deferred idle.
-    setExternalSessionState('idle');
+    // The prompt and detached child work have different terminal boundaries.
+    // Preserve the existing running/Stop surface while AGY still owns work.
+    setExternalSessionState(getExternalActiveProcess()?.hasPendingBackgroundWork?.() ? 'running' : 'idle');
     if (finalizedTurnSucceeded) {
       fireExternalImCallback(
         'complete',
@@ -10383,6 +10447,7 @@ function handleUnifiedEvent(event: UnifiedEvent): void {
         'tool_input_delta',
         'tool_use_stop',
         'tool_result_delta',
+        'tool_result_update',
         'tool_result',
         'provider_tool_use_start',
         'provider_tool_result',
@@ -10570,7 +10635,8 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       getExternalProductContent()?.adoptRuntimeTurn(event.runtimeTurnId, event.clientUserMessageId);
       if (
         getCurrentRuntimeType() === 'codex' ||
-        getCurrentRuntimeType() === 'dsh'
+        getCurrentRuntimeType() === 'dsh' ||
+        getCurrentRuntimeType() === 'antigravity'
       ) {
         if (event.origin === 'collaboration') {
           clearExternalPrewarmingSession();
@@ -10581,7 +10647,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
           resetWatchdog();
           markExternalTurnStarted();
           beginExternalTurnTrace(
-            'dsh_collaboration_turn_started',
+            getCurrentRuntimeType() === 'dsh' ? 'dsh_collaboration_turn_started' : 'antigravity_continuation_started',
             getExternalLifecycleSessionId(),
           );
           setExternalSessionState('running');
@@ -10597,6 +10663,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
           });
         }
       }
+      break;
+
+    case 'background_work_settled':
+      if (isExternalTurnCompleted()) setExternalSessionState('idle');
+      scheduleExternalQueueDrainAfterTurnBoundary();
       break;
 
     case 'turn_started':
@@ -10791,6 +10862,34 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       break;
     }
 
+    case 'tool_result_update': {
+      const product = getExternalProductContent();
+      const target = product?.tool(event.toolUseId);
+      const metadata = event.status ? { status: event.status } : undefined;
+      if (product && target) {
+        product.confirmText(target, 'result', event.content);
+        product.updateTool(target, { isLoading: true, ...(metadata ? { resultMeta: metadata } : {}) });
+      } else if (!product) {
+        replaceExternalToolResultPreview(event.toolUseId, event.content, metadata);
+      }
+      const parentToolUseId = product
+        ? target?.subagentToolId
+          ? (product.readBlock(target)?.tool as TranscriptObject | undefined)?.id
+          : undefined
+        : getExternalChildToolParent(event.toolUseId);
+      // The canonical transcript above owns the full live output. A preview
+      // must not schedule a delayed spill that can arrive after the terminal.
+      publishExternalUiEvent(parentToolUseId
+        ? 'chat:subagent-tool-result-start'
+        : 'chat:tool-result-start', {
+        toolUseId: event.toolUseId,
+        ...(parentToolUseId ? { parentToolUseId } : {}),
+        content: event.content.slice(0, 8 * 1024),
+        metadata,
+      });
+      break;
+    }
+
     case 'tool_result_delta': {
       const product = presentation?.content;
       const target = product?.tool(event.toolUseId);
@@ -10931,6 +11030,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
               : undefined,
             event.status,
             event.observedAt,
+            getExternalSubagentLifecycleDetails(event),
           )
         : applyExternalSubagentLifecycle(event);
       broadcastExternalSubagentLifecycle(event.parentToolUseId, lifecycle);
@@ -11107,11 +11207,15 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
         toolName: event.toolName,
         toolUseId: event.toolUseId,
         input:
-          event.review || event.reviewRef
+          event.review || event.reviewRef || event.inputRef
             ? ''
-            : typeof event.input === 'object'
-              ? JSON.stringify(event.input).slice(0, 500)
-              : String(event.input ?? '').slice(0, 500),
+            : event.permissionOptions
+              ? JSON.stringify(event.input)
+              : typeof event.input === 'object'
+                ? JSON.stringify(event.input).slice(0, 500)
+                : String(event.input ?? '').slice(0, 500),
+        ...(event.inputRef === undefined ? {} : { inputRef: event.inputRef }),
+        ...(event.permissionOptions === undefined ? {} : { permissionOptions: event.permissionOptions }),
         ...(event.review === undefined ? {} : { review: event.review }),
         ...(event.reviewRef === undefined
           ? {}
@@ -11209,6 +11313,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
         session_id: event.sessionId,
         model: event.model,
         tools: event.tools,
+        ...(event.supportsImageInput === undefined ? {} : { supportsImageInput: event.supportsImageInput }),
       };
       if (event.model) {
         setExternalRuntimeLiveReportedModel(event.model);
@@ -11346,6 +11451,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
     }
 
     case 'agent_plan_update': {
+      setExternalCurrentTurnPlan(event.todos);
       broadcast('chat:agent-plan-update', {
         sessionId: getExternalLifecycleSessionId() || null,
         todos: event.todos,
@@ -11394,9 +11500,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       // remain available for turn-boundary demotion without transcript writes.
       if (getCurrentRuntimeType() !== 'dsh')
         surfaceAcknowledgedPendingRealtimeSteeredUserMessages();
-      finalizeExternalSubagentLifecycleProjection(
-        getExternalUserRequestedStop() ? 'interrupted' : 'failed',
-      );
+      if (getCurrentRuntimeType() !== 'antigravity') {
+        finalizeExternalSubagentLifecycleProjection(
+          getExternalUserRequestedStop() ? 'interrupted' : 'failed',
+        );
+      }
       const terminalGenerationBefore = getExternalTurnTerminalGeneration();
       const forceTransferInProgress = externalForceTransferQueueId !== null;
       const turnPlan = markExternalTurnComplete(event, {

@@ -4226,6 +4226,43 @@ describe('external SessionEngine with fake runtime', () => {
   });
 
 
+  it('replaces ACP tool previews in the live V2 row and saves the exact terminal result', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const sessionId = 'session-acp-tool-preview';
+    const workspacePath = join(harness.home, 'workspace');
+    const admission = await harness.engine.sendDesktopMessage({
+      ...desktopRequest(sessionId, workspacePath, 'show progress'),
+      model: 'agy-test-model', permissionMode: 'accept-edits',
+    });
+    await expect(admission.dispatchAcceptance).resolves.toEqual({ accepted: true });
+
+    const toolUseId = 'tool-preview';
+    harness.runtime.emitForTest({ kind: 'tool_use_start', toolUseId, toolName: 'Bash', input: { command: 'printf test' } });
+    const largeOutput = 'x'.repeat(300 * 1024);
+    harness.runtime.emitForTest({ kind: 'tool_result_update', toolUseId, content: largeOutput, status: 'in_progress' });
+    expect(broadcastEvents.find(({ event }) => event === 'chat:tool-result-start')?.data).toMatchObject({
+      toolUseId, content: largeOutput.slice(0, 8 * 1024), metadata: { status: 'in_progress' },
+    });
+    harness.runtime.emitForTest({ kind: 'tool_result_update', toolUseId, content: 'revised', status: 'pending' });
+    const live = harness.engine.getStreamReplaySnapshot().liveStreamingMessage?.content;
+    expect(typeof live === 'string' ? JSON.parse(live) : live).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tool: expect.objectContaining({
+        id: toolUseId, result: 'revised', isLoading: true, resultMeta: { status: 'pending' },
+      }) }),
+    ]));
+
+    harness.runtime.emitForTest({ kind: 'tool_use_stop', toolUseId });
+    harness.runtime.emitForTest({ kind: 'tool_result', toolUseId, content: 'done', metadata: { status: 'completed', exitCode: 0 } });
+    harness.runtime.emitForTest({ kind: 'turn_complete', status: 'completed' });
+    await expect(harness.engine.waitIdle(2_000, 10)).resolves.toBe(true);
+    const message = (await harness.sessionStore.getSessionData(sessionId))?.messages.at(-1);
+    expect(JSON.parse(String(message?.content))).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tool: expect.objectContaining({
+        id: toolUseId, result: 'done', isLoading: false, resultMeta: { status: 'completed', exitCode: 0 },
+      }) }),
+    ]));
+  });
+
   it('persists one terminal CollabAgent lifecycle and closes residual nested trace on success', async () => {
     const harness = await createHarness([
       { kind: 'success', text: 'root reply', completeDelayMs: 50 },
@@ -10613,6 +10650,138 @@ describe('external SessionEngine with fake runtime', () => {
       broadcastEvents.some((event) => event.event === 'chat:agent-error'),
     ).toBe(false);
   });
+  it('returns the current Antigravity catalog when a temporary query races the first prompt', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'ready' }], { runtimeType: 'antigravity' });
+    let resolveInstalled!: (models: RuntimeModelInfo[]) => void;
+    const discovery = vi.spyOn(harness.runtime, 'queryModels')
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveInstalled = resolve; }))
+      .mockResolvedValueOnce([{ value: 'effective', displayName: 'Effective', isCurrent: true }]);
+    const request = harness.externalSession.queryRuntimeModels('antigravity', { throwOnError: true });
+    await waitFor(() => discovery.mock.calls.length === 1, 'installed Antigravity catalog');
+    await harness.engine.sendDesktopMessage({
+      ...desktopRequest('pending-agy-catalog', join(harness.home, 'workspace'), 'hello'), permissionMode: 'default',
+    });
+    await expect(harness.engine.waitIdle(2000, 10)).resolves.toBe(true);
+    resolveInstalled([{ value: 'stale', displayName: 'Stale' }]);
+    await expect(request).resolves.toEqual([{ value: 'effective', displayName: 'Effective', isCurrent: true }]);
+    expect(discovery).toHaveBeenLastCalledWith(expect.objectContaining({ process: expect.any(FakeRuntimeProcess) }));
+  });
+
+  it('logs Antigravity tool categories while delivering the full tool card', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const sent = await harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-tool-telemetry', join(harness.home, 'workspace'), 'hello'), permissionMode: 'default',
+    });
+    await expect(sent.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      harness.runtime.emitForTest({
+        kind: 'tool_use_start',
+        toolUseId: 'test-call',
+        toolName: 'mcp__synthetic_private_server__synthetic_tool',
+        input: { title: 'synthetic-private-path', command: 'synthetic-private-command' },
+      });
+      const trace = log.mock.calls.flat().find((entry) => typeof entry === 'string' && entry.includes('phase=tool_start'));
+      expect(trace).toContain('detail.toolName=MCP');
+      expect(trace).not.toContain('synthetic');
+      expect(broadcastEvents).toContainEqual({
+        event: 'chat:tool-use-start',
+        data: { id: 'test-call', name: 'mcp__synthetic_private_server__synthetic_tool', input: {
+          title: 'synthetic-private-path', command: 'synthetic-private-command',
+        } },
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('replays the Antigravity plan only while its turn is running', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const sent = await harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-plan-reconnect', join(harness.home, 'workspace'), 'hello'), permissionMode: 'default',
+    });
+    await expect(sent.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    const todos = [{ key: 'phase-1', content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }] as const;
+    harness.runtime.emitForTest({ kind: 'agent_plan_update', todos: [...todos] });
+    expect(harness.engine.getStreamReplaySnapshot({ includeHistory: false }).agentPlan).toEqual(todos);
+    await harness.engine.stopTurn();
+    expect(harness.engine.getStreamReplaySnapshot({ includeHistory: false }).agentPlan).toEqual([]);
+  });
+
+  it('retries an unavailable Antigravity MCP server by resuming the same native session', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'ready' }], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-mcp-retry';
+    const workspacePath = join(harness.home, 'workspace');
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(harness.home, '.myagents', 'config.json'), JSON.stringify({
+      mcpEnabledServers: ['playwright'],
+      agents: [{ id: 'agy-mcp-agent', path: workspacePath, mcpEnabledServers: ['playwright'] }],
+    }));
+    writeFileSync(join(harness.home, '.myagents', 'projects.json'), JSON.stringify([
+      { id: 'agy-mcp-project', path: workspacePath, agentId: 'agy-mcp-agent', mcpEnabledServers: ['playwright'] },
+    ]));
+    await harness.engine.sendDesktopMessage({
+      ...desktopRequest(sessionId, workspacePath, 'hello'), permissionMode: 'default',
+    });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    const native = harness.sessionStore.getSessionMetadata(sessionId)?.runtimeSessionId;
+    expect(native).toMatch(/^fake-thread-/);
+    harness.runtime.emitForTest({
+      kind: 'mcp_effective_update',
+      configGeneration: 1,
+      configFingerprint: 'unchanged',
+      catalogGeneration: 1,
+      dispatch: { state: 'released' },
+      tools: [],
+      servers: [{ id: 'playwright', desired: true, state: 'failed', errorCode: 'MCP_CONNECTION_TIMEOUT', toolCount: 0, attemptGeneration: 1, updatedAt: 1 }],
+    });
+    expect(await harness.engine.retryMcpServer('playwright')).toEqual({ success: true });
+    expect(harness.runtime.startSessionResumeIds).toEqual([undefined, native]);
+    expect(harness.runtime.sentMessages).toEqual(['hello']);
+  });
+
+  it('persists detached ACP parent replies and the original child card in one Product Session', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-detached-parent';
+    const workspacePath = join(harness.home, 'workspace');
+    const admission = await harness.engine.sendDesktopMessage({
+      ...desktopRequest(sessionId, workspacePath, 'delegate'), permissionMode: 'accept-edits',
+    });
+    await expect(admission.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    const emit = (event: UnifiedEvent) => harness.runtime.emitForTest(event);
+    const parentToolUseId = 'native-launch';
+    emit({ kind: 'tool_use_start', toolUseId: parentToolUseId, toolName: 'CollabAgent', input: { description: 'Research' } });
+    emit({ kind: 'tool_use_stop', toolUseId: parentToolUseId });
+    emit({ kind: 'tool_result', toolUseId: parentToolUseId, content: '' });
+    emit({ kind: 'subagent_lifecycle', parentToolUseId, status: 'running', agentId: 'native-child',
+      observedAt: 10, affectsRootActivity: false });
+    emit({ kind: 'text_delta', text: 'Waiting for research.' });
+    emit({ kind: 'turn_complete', status: 'completed' });
+    emit({ kind: 'subagent_lifecycle', parentToolUseId, status: 'completed', agentId: 'native-child',
+      observedAt: 20, result: 'Native child report', affectsRootActivity: false });
+    for (const [i, text] of ['Progress from research.', 'Requested final summary.'].entries()) {
+      const id = 'native-continuation-' + i;
+      emit({ kind: 'root_turn_admitted', origin: 'collaboration', runtimeTurnId: id, clientOperationId: id });
+      emit({ kind: 'text_delta', text });
+      emit({ kind: 'text_stop' });
+      emit({ kind: 'turn_complete', status: 'completed' });
+    }
+    await vi.waitFor(async () => {
+      const messages = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+      expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'assistant', 'assistant']);
+      expect(JSON.stringify(messages[1]?.content)).toContain('Native child report');
+      expect(JSON.stringify(messages[2]?.content)).toContain('Progress from research.');
+      expect(JSON.stringify(messages[3]?.content)).toContain('Requested final summary.');
+    });
+    expect(harness.runtime.sentMessages).toEqual(['delegate']);
+    await expect(harness.engine.waitIdle(2000, 10)).resolves.toBe(true);
+    await harness.sessionStore.releaseSessionTranscriptForBinding(sessionId);
+    expect(harness.sessionStore.getActiveSessionTranscript(sessionId)).toBeUndefined();
+    const durable = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+    expect(durable).toHaveLength(4);
+    expect(JSON.stringify(durable[3]?.content)).toContain('Requested final summary.');
+  });
+
   it('resumes the same ACP thread on entry to and exit from full access', async () => {
     const harness = await createHarness([], { runtimeType: 'antigravity' });
     const sessionId = 'agy-permission-switch';

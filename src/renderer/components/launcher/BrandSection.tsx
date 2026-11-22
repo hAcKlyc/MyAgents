@@ -139,12 +139,17 @@ interface BrandSectionProps {
   usesExternalRuntimeControls?: boolean;
   runtimeModels?: RuntimeModelInfo[];
   runtimeModelsLoading?: boolean;
+  runtimeModelsError?: boolean;
+  onRuntimeModelsRetry?: () => void;
   runtimePermissionModes?: RuntimePermissionMode[];
   // PRD 0.2.7 Phase F: runtime selector lives in the row below the input
   // when permitted by the build distribution. Caller provides the
   // detection map + onChange just like in chat-tab.
   runtimeSelectorAvailable?: boolean;
   runtimeDetections?: RuntimeDetections;
+  runtimeDetecting?: boolean;
+  runtimeDetectionFailed?: boolean;
+  onRuntimeDetectAgain?: () => void;
   onRuntimeChange?: (runtime: RuntimeType) => void;
   /** All runtimes (builtin + external) so the row's chip shows the full picture.
    *  Distinct from `runtime` which is the *external* runtime when in external mode. */
@@ -197,9 +202,14 @@ export default memo(function BrandSection({
   usesExternalRuntimeControls,
   runtimeModels,
   runtimeModelsLoading,
+  runtimeModelsError,
+  onRuntimeModelsRetry,
   runtimePermissionModes,
   runtimeSelectorAvailable,
   runtimeDetections,
+  runtimeDetecting,
+  runtimeDetectionFailed,
+  onRuntimeDetectAgain,
   onRuntimeChange,
   activeRuntime,
   isActive,
@@ -732,6 +742,8 @@ export default memo(function BrandSection({
                 usesExternalRuntimeControls={usesExternalRuntimeControls}
                 runtimeModels={runtimeModels}
                 runtimeModelsLoading={runtimeModelsLoading}
+                runtimeModelsError={runtimeModelsError}
+                onRuntimeModelsRetry={onRuntimeModelsRetry}
                 runtimePermissionModes={runtimePermissionModes}
                 /* PRD 0.2.7 Phase F: workspace + runtime selectors moved out of
                  * the toolbar to the row below — toolbarPrefix dropped here. */
@@ -785,6 +797,9 @@ export default memo(function BrandSection({
                   showRuntime={!!runtimeSelectorAvailable}
                   runtime={activeRuntime}
                   runtimeDetections={runtimeDetections}
+                  runtimeDetecting={runtimeDetecting}
+                  runtimeDetectionFailed={runtimeDetectionFailed}
+                  onRuntimeDetectAgain={onRuntimeDetectAgain}
                   onRuntimeChange={onRuntimeChange}
                 />
               </div>

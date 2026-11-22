@@ -231,7 +231,7 @@ export function attachExternalPendingSubagentLifecycle(
   pendingSubagentLifecyclesByParent.delete(parentToolUseId);
 }
 
-export function applyExternalSubagentLifecycle(input: {
+type ExternalSubagentLifecycleUpdate = {
   handleRevision?: number;
   agentId?: string;
   taskId?: string;
@@ -251,8 +251,10 @@ export function applyExternalSubagentLifecycle(input: {
   result?: string;
   resultTruncated?: boolean;
   usage?: SubagentLifecycle['usage'];
-}): SubagentLifecycle {
-  const details = {
+};
+
+export function getExternalSubagentLifecycleDetails(input: ExternalSubagentLifecycleUpdate) {
+  return {
     ...(input.handleRevision === undefined ? {} : { handleRevision: input.handleRevision }),
     ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
     ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
@@ -270,6 +272,10 @@ export function applyExternalSubagentLifecycle(input: {
     ...(input.resultTruncated === undefined ? {} : { resultTruncated: input.resultTruncated }),
     ...(input.usage === undefined ? {} : { usage: input.usage }),
   };
+}
+
+export function applyExternalSubagentLifecycle(input: ExternalSubagentLifecycleUpdate): SubagentLifecycle {
+  const details = getExternalSubagentLifecycleDetails(input);
   const parent = findExternalToolBlockById(input.parentToolUseId);
   if (parent?.tool) {
     attachExternalPendingSubagentLifecycle(input.parentToolUseId, parent.tool);
@@ -648,6 +654,21 @@ export function appendExternalToolResultDeltaToContent(toolUseId: string, delta:
   if (!block?.tool) return false;
   block.tool.result = `${block.tool.result ?? ''}${delta}`;
   return true;
+}
+
+export function replaceExternalToolResultPreview(
+  toolUseId: string,
+  result: string,
+  metadata?: NonNullable<PersistContentBlock['tool']>['resultMeta'],
+): void {
+  const parentToolUseId = childToolToParent.get(toolUseId);
+  const tool = parentToolUseId
+    ? findExternalSubagentCall(parentToolUseId, toolUseId)
+    : findExternalToolBlockById(toolUseId)?.tool;
+  if (!tool) return;
+  tool.result = result;
+  tool.isLoading = true;
+  if (metadata) tool.resultMeta = metadata;
 }
 
 export function getExternalSubagentAttachmentParent(toolUseId: string): string | undefined {

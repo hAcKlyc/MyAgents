@@ -52,6 +52,7 @@ import { hasUserEditableMcpSettings } from '../../../shared/browserTools';
 import { CUSTOM_EVENTS } from '../../../shared/constants';
 import { IMAGE_UNDERSTANDING_TOOL_ID } from '../../../shared/official-tools';
 import { reasoningEffortChoices, REASONING_EFFORT_DESCRIPTIONS, REASONING_EFFORT_DEFAULT } from '../../../shared/reasoningEffort';
+import { ANTIGRAVITY_FULL_ACCESS } from '../../../shared/types/runtime';
 import { retainFocusOnMouseDown } from '@/utils/focusRetention';
 import { detectExcessiveRepetition } from '@/utils/excessiveRepetition';
 import { isProviderAvailable } from '@/config/configService';
@@ -198,13 +199,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   mode = 'chat',
   toolbarPrefix,
   contextIndicator,
-  // Whether this input belongs to the currently active tab. Used to gate document-level
-  // listeners (Shift+Tab permission-mode cycle below) so background tabs don't also fire.
   active = true,
   runtime = 'builtin',
   usesExternalRuntimeControls = runtime !== 'builtin' && runtime !== 'dsh',
   runtimeModels,
   runtimeModelsLoading = false,
+  runtimeModelsError = false,
+  onRuntimeModelsRetry,
+  runtimeSupportsImageInput,
   managedReasoningModel,
   runtimePermissionModes,
   queuedMessages = [],
@@ -426,6 +428,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       .filter(server => server.desired)
       .map(server => configuredServers.get(server.id) ?? { id: server.id, name: server.id });
   }, [isExternalRuntime, mcpEffectiveSnapshot, mcpServers, runtimeMcpServers]);
+  const antigravityNativeMcpServers = runtime === 'antigravity'
+    ? runtimeMcpServers.filter(server => !mcpServers.some(configured => configured.id === server.id))
+    : [];
   const enabledToolEntryCount = useMemo(() => {
     const enabledMcpEntryCount = !usesProductMcp
       ? externalMcpServers.length
@@ -435,8 +440,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     const enabledOfficialEntryCount = visibleOfficialTools.filter(
       tool => workspaceOfficialToolEnabled.includes(tool.id),
     ).length;
-    return enabledMcpEntryCount + enabledOfficialEntryCount;
-  }, [externalMcpServers.length, globalMcpEnabled, usesProductMcp, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
+    return enabledMcpEntryCount + enabledOfficialEntryCount + antigravityNativeMcpServers.length;
+  }, [antigravityNativeMcpServers.length, externalMcpServers.length, globalMcpEnabled, usesProductMcp, mcpServers, visibleOfficialTools, workspaceMcpEnabled, workspaceOfficialToolEnabled]);
 
   // #324 — 推理强度 submenu (fixed bottom row of the model menu). Opens on
   // hover/click of the row; share the 120ms close delay with the portaled
@@ -446,15 +451,23 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   const effortCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // null = this surface has no reasoning-effort knob (unknown) → row hidden.
   const managedEffort = isRuntimeBackedProvider(provider);
+  const antigravityEffortModel = runtime === 'antigravity'
+    ? (runtimeModels?.find(model => model.value === selectedModel) ?? runtimeModels?.find(model => model.isCurrent))
+    : undefined;
   const effortModel = managedReasoningModel !== undefined
     ? managedReasoningModel
-    : provider?.models?.find(model => model.model === (selectedModel ?? provider.primaryModel));
-  const defaultEffortLabel = managedEffort && effortModel?.defaultReasoningEffort
-    ? `${t('input.reasoningDefault')} (${effortModel.defaultReasoningEffort})`
+    : antigravityEffortModel ?? provider?.models?.find(model => model.model === (selectedModel ?? provider.primaryModel));
+  const reportedDefaultEffort = runtime === 'antigravity'
+    ? (reasoningEffort === REASONING_EFFORT_DEFAULT
+        ? antigravityEffortModel?.currentReasoningEffort
+        : antigravityEffortModel?.defaultReasoningEffort)
+    : managedEffort ? effortModel?.defaultReasoningEffort : undefined;
+  const defaultEffortLabel = reportedDefaultEffort
+    ? `${t('input.reasoningDefault')} (${reportedDefaultEffort})`
     : t('input.reasoningDefault');
   const effortChoices = onReasoningEffortChange
     ? runtime === 'antigravity'
-      ? runtimeModels?.find(m => m.isDefault)?.supportedReasoningEfforts?.map(o => o.reasoningEffort) ?? null
+      ? antigravityEffortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? null
       : managedEffort
       ? (effortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [])
       : reasoningEffortChoices(
@@ -503,6 +516,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // Get display name for current model (runtime-aware)
   const currentModelName = isExternalRuntime
     ? (runtimeModels?.find(m => m.value === selectedModel)?.displayName
+      ?? (runtime === 'antigravity' ? selectedModel || runtimeModels?.find(m => m.isCurrent)?.displayName : undefined)
       ?? runtimeModels?.find(m => m.isDefault)?.displayName
       ?? t('input.modelDefault'))
     : (currentModelId
@@ -571,11 +585,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   );
   const mergedSlashCommands = useMemo(
     () => withClientActionCommands(
-      mergeSdkSlashCommands(runtimeVisibleSlashCommands, runtimeVisibleSdkSlashCommands),
+      mergeSdkSlashCommands(runtime === 'antigravity' ? [] : runtimeVisibleSlashCommands, runtimeVisibleSdkSlashCommands),
       clientActionsEnabled,
       clientActionSlashCommands ?? [],
     ),
-    [runtimeVisibleSlashCommands, runtimeVisibleSdkSlashCommands, clientActionsEnabled, clientActionSlashCommands],
+    [runtime, runtimeVisibleSlashCommands, runtimeVisibleSdkSlashCommands, clientActionsEnabled, clientActionSlashCommands],
   );
 
   // Compute filtered slash commands once per render (used in both handleKeyDown and JSX)
@@ -961,45 +975,28 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     setInputValue(newValue);
   }, [inputValue, showFileSearch, atPosition, showSlashMenu, slashPosition]);
 
+  const selectPermissionMode = useCallback((value: string) => {
+    if (value === permissionMode || showConfigLockedReason()) return;
+    if (value === ANTIGRAVITY_FULL_ACCESS) {
+      toastRef.current.warning(t('input.antigravityAutonomyWarning'), 5000);
+    } else if (value === 'fullAgency' || value === 'bypassPermissions' || value === 'no-restrictions' || value === 'full-autonomous') {
+      toastRef.current.warning(t(runtime === 'dsh' ? 'input.dshAutonomyWarning' : 'input.autonomyWarning'), 5000);
+    }
+    onPermissionModeChange?.(value as PermissionMode);
+  }, [permissionMode, onPermissionModeChange, runtime, showConfigLockedReason, t]);
+
   // Cycle permission mode — runtime-aware:
   // Builtin: auto → plan → fullAgency → auto
   // External: cycle through runtimePermissionModes (CC or Codex specific modes)
   const cyclePermissionMode = useCallback(() => {
-    if (showConfigLockedReason()) return;
     const modeOrder: string[] = runtimePermissionModes?.length
       ? runtimePermissionModes.filter(m => !m.hidden).map(m => m.value)
       : ['auto', 'plan', 'fullAgency'];
     const currentIndex = modeOrder.indexOf(permissionMode);
     // If current mode not in list (e.g., mode from a different runtime), start from first
     const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % modeOrder.length;
-    const nextMode = modeOrder[nextIndex] as PermissionMode;
-
-    // Show warning toast for dangerous modes (runtime-agnostic string check)
-    const dangerousModes = new Set(['fullAgency', 'bypassPermissions', 'no-restrictions', 'full-autonomous']);
-    if (dangerousModes.has(nextMode)) {
-      toastRef.current.warning(t(runtime === 'dsh' ? 'input.dshAutonomyWarning' : 'input.autonomyWarning'), 5000);
-    }
-    onPermissionModeChange?.(nextMode);
-  }, [permissionMode, onPermissionModeChange, runtime, runtimePermissionModes, showConfigLockedReason, t]);
-
-  // Global Shift+Tab handler with capture phase to prevent default Tab behavior.
-  // Gated by `active` so pressing Shift+Tab doesn't cycle permission-mode on every
-  // mounted tab simultaneously (document-level listener otherwise fans out to all
-  // N tabs, each calling its own cyclePermissionMode).
-  useEffect(() => {
-    if (!active) return;
-    const handleShiftTab = (e: KeyboardEvent) => {
-      if (isComposingRef.current || isImeComposingEvent(e)) return;
-      if (e.key === 'Tab' && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        cyclePermissionMode();
-      }
-    };
-    // Use capture phase to intercept before default Tab behavior
-    document.addEventListener('keydown', handleShiftTab, { capture: true });
-    return () => document.removeEventListener('keydown', handleShiftTab, { capture: true });
-  }, [active, cyclePermissionMode]);
+    selectPermissionMode(modeOrder[nextIndex]);
+  }, [permissionMode, runtimePermissionModes, selectPermissionMode]);
 
   // Send message - defined before handleKeyDown to avoid circular dependency
   // Note: isLoading guard removed to allow queuing messages while AI is responding
@@ -1012,6 +1009,10 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
 
     const text = inputValue.trim();
     if (!text && images.length === 0) return;
+    if (images.length > 0 && runtimeSupportsImageInput === false) {
+      toastRef.current.warning(t('input.runtimeImageUnsupported'));
+      return;
+    }
     if (onSlashAction && images.length === 0 && text.startsWith('/')) {
       const actionName = resolveClientActionName(text, enabledClientActionCommands);
       if (actionName) {
@@ -1089,7 +1090,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     } finally {
       sendingRef.current = false;
     }
-  }, [onSend, images, inputValue, agentMentions, primaryContext, requiredSystemSkill, provider, currentModelId, isExternalRuntime, setImages, onSlashAction, enabledClientActionCommands, showConfigLockedReason, notifyUnsupportedImageFallback]);
+  }, [onSend, images, inputValue, agentMentions, primaryContext, requiredSystemSkill, provider, currentModelId, isExternalRuntime, setImages, onSlashAction, enabledClientActionCommands, showConfigLockedReason, notifyUnsupportedImageFallback, runtimeSupportsImageInput, t]);
 
   // Handle keyboard navigation in file search and slash menu
   // Handler for selecting a slash command — shared by the click path
@@ -1130,10 +1131,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     // Candidate confirmation/navigation belongs to IME before slash/@ menus,
     // permission shortcuts, or message sending can interpret the same key.
     if (isComposingRef.current || isImeComposingEvent(event)) return;
-    // Shift+Tab to cycle permission mode
+    // Keep permission cycling within the textarea, outside its open pickers.
     if (event.key === 'Tab' && event.shiftKey) {
-      event.preventDefault();
-      cyclePermissionMode();
+      if (active && onPermissionModeChange && event.currentTarget === textareaRef.current
+        && !showSlashMenu && !showFileSearch && !configControlsLocked) {
+        event.preventDefault();
+        event.stopPropagation();
+        cyclePermissionMode();
+      }
       return;
     }
 
@@ -1257,7 +1262,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
       // 'newline' → fall through, the browser inserts the newline.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- textareaRef is stable
-  }, [cyclePermissionMode, undoStack, fileService, showSlashMenu, filteredSlashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, mentionPicker, chooseMention, inputValue, atPosition, fileSearchQuery, images.length, handleSend, handleSkillSelect, handleSlashSelect]);
+  }, [active, configControlsLocked, onPermissionModeChange, cyclePermissionMode, undoStack, fileService, showSlashMenu, filteredSlashCommands, slashSearchQuery, selectedSlashIndex, slashPosition, showFileSearch, mentionPicker, chooseMention, inputValue, atPosition, fileSearchQuery, images.length, handleSend, handleSkillSelect, handleSlashSelect]);
 
   const visibleGoal = !isLauncherMode ? sessionGoal : null;
   const goalDraftFromCronConfig = cronModeEnabled
@@ -1318,6 +1323,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
           {queuedMessages.length > 0 && (
             <QueuedMessagesPanel
               messages={queuedMessages}
+              stopsCurrentTurn={runtime === 'antigravity'}
               onCancel={(queueId) => onCancelQueued?.(queueId)}
               onForceExecute={(queueId) => onForceExecuteQueued?.(queueId)}
             />
@@ -1502,6 +1508,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
             >
               <SlashCommandMenu
                 commands={filteredSlashCommands}
+                sdkSourceLabel={runtime === 'antigravity' ? 'Antigravity CLI' : undefined}
                 selectedIndex={selectedSlashIndex}
                 isEmpty={slashSearchQuery.length > 0 && filteredSlashCommands.length === 0}
                 onSelect={handleSlashSelect}
@@ -1683,6 +1690,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                 placement="top-start"
                 className="composer-toolbar-menu-enter w-72 py-1"
               >
+                {runtime === 'antigravity' && isLoading && (
+                  <p className="mx-3 border-b border-[var(--line-subtle)] py-2 text-xs text-[var(--ink-muted)]">
+                    {t('input.runtimeConfigAfterCurrentTurn')}
+                  </p>
+                )}
                 <PermissionModeMenuContent
                   items={displayPermissionModes.filter(m => !m.hidden)}
                   selectedValue={permissionMode}
@@ -1695,10 +1707,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                     },
                   } : undefined}
                   onSelect={(value) => {
-                    if (value === 'fullAgency' || value === 'bypassPermissions' || value === 'full-autonomous') {
-                      toastRef.current.warning(t(runtime === 'dsh' ? 'input.dshAutonomyWarning' : 'input.autonomyWarning'), 5000);
-                    }
-                    onPermissionModeChange?.(value as PermissionMode);
+                    selectPermissionMode(value);
                     setShowModeMenu(false);
                   }}
                 />
@@ -1746,7 +1755,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                     <div className="px-3 py-2 text-xs font-medium text-[var(--ink-muted)] border-b border-[var(--line)]">
                       {t('input.toolsHeader')}
                     </div>
-                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || (usesProductMcp && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
+                    {visibleOfficialTools.length > 0 || externalMcpServers.length > 0 || antigravityNativeMcpServers.length > 0 || (usesProductMcp && mcpServers.some(s => globalMcpEnabled.includes(s.id))) ? (
                       <>
                       {visibleOfficialTools.map((tool) => {
                         const isEnabled = workspaceOfficialToolEnabled.includes(tool.id);
@@ -1785,7 +1794,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                 e.stopPropagation();
                                 onWorkspaceOfficialToolToggle?.(tool.id, !isEnabled);
                               }}
-                              className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus:outline-none ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
+                              className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
                                 }`}
                             >
                               <span
@@ -1818,6 +1827,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                           })()}
                         </div>
                       ))}
+                      {antigravityNativeMcpServers.length > 0 && (
+                        <div className="border-t border-[var(--line-subtle)] px-3 py-2">
+                          <div className="text-xs font-medium text-[var(--ink-muted)]">{t('input.antigravityManagedTools')}</div>
+                          {antigravityNativeMcpServers.map(server => (
+                            <div key={server.id} className="truncate pt-1 text-sm text-[var(--ink)]">{server.name}</div>
+                          ))}
+                        </div>
+                      )}
                       {mcpServers
                         .filter(s => usesProductMcp && globalMcpEnabled.includes(s.id))
                         .map((server) => {
@@ -1838,7 +1855,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                   </div>
                                 )}
                                 {isEnabled && effective && hasMcpStatusNotice(effective.state) && (
-                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={runtime === 'antigravity' ? undefined : onMcpRetry} />
+                                  <McpStatusNotice server={effective} stale={mcpEffectiveSnapshot?.observationStale} busy={isLoading} onRetry={onMcpRetry} />
                                 )}
                               </div>
                               {hasUserEditableMcpSettings(server.id) && (
@@ -1857,11 +1874,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                               )}
                               <button
                                 type="button"
+                                aria-label={server.name}
+                                role="switch"
+                                aria-checked={isEnabled}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   onWorkspaceMcpToggle?.(server.id, !isEnabled);
                                 }}
-                                className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus:outline-none ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
+                                className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
                                   }`}
                               >
                                 <span
@@ -1955,7 +1975,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                                 e.stopPropagation();
                                 onWorkspacePluginToggle?.(plugin.id, !isEnabled);
                               }}
-                              className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus:outline-none ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
+                              className={`relative ml-2 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${isEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--line-strong)]'
                                 }`}
                             >
                               <span
@@ -2038,7 +2058,14 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                         runtime: runtime === 'claude-code' ? 'CLAUDE CODE' : runtime?.toUpperCase(),
                       })}
                     </div>
-                    {runtimeModels.length === 0 && (runtimeModelsLoading ? (
+                    {runtimeModelsError ? (
+                      <div className="flex items-start justify-between gap-2 px-3 py-2 text-sm text-[var(--ink-muted)]">
+                        <span role="status">{t(selectedModel ? 'input.modelCatalogFailed' : 'input.runtimeModelCatalogFailed')}</span>
+                        {onRuntimeModelsRetry && <button type="button" className="shrink-0 text-[var(--accent)] hover:underline" onClick={onRuntimeModelsRetry}>
+                          {t('input.refreshModelCatalog')}
+                        </button>}
+                      </div>
+                    ) : runtimeModels.length === 0 && (runtimeModelsLoading ? (
                       <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--ink-muted)]">
                         <LoaderIcon aria-hidden="true" className="h-4 w-4 animate-spin" />
                         {t('input.modelCatalogLoading')}
@@ -2047,7 +2074,8 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                       <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">{t('input.modelCatalogEmpty')}</div>
                     ))}
                     {runtimeModels.map(model => {
-                      const isSelected = selectedModel === model.value || (!selectedModel && model.isDefault);
+                      const isSelected = selectedModel === model.value
+                        || (!selectedModel && (runtime === 'antigravity' ? model.isCurrent ?? model.isDefault : model.isDefault));
                       return (
                         <button
                           ref={isSelected ? selectedModelRowRef : undefined}
@@ -2178,7 +2206,7 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                       >
                         {[REASONING_EFFORT_DEFAULT, ...effortChoices].map(level => {
                           const isSelected = reasoningEffort === level;
-                          const description = managedEffort
+                          const description = managedEffort || runtime === 'antigravity'
                             ? effortModel?.supportedReasoningEfforts?.find(option => option.reasoningEffort === level)?.description ?? ''
                             : REASONING_EFFORT_DESCRIPTIONS[level] ?? '';
                           return (

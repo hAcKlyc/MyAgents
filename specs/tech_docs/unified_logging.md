@@ -339,6 +339,8 @@ Builtin / external runtime 在 turn/content 完成边界输出 `[assistant-outpu
 
 SDK user message 摘要通过 `contentKind`、`textLength`、`isEmptyContent` 区分字符串、内容块、空值与缺失，并保留 `isReplay`。`contentBlockCount=0` 只表示没有数组内容块，不表示字符串消息为空；仅图片的非空数组也不算空消息。generator yield 沿既有 `queueId` / `requestId` 关联这份摘要，不记录原始正文或改变投递队列。
 
+Antigravity 的工具启动 trace 与审批响应日志只记录稳定工具类别。命令、路径、ACP 展示标题和 MCP 服务/工具名保留在会话数据里。
+
 **时间戳格式**：本地时间 `YYYY-MM-DD HH:MM:SS.mmm`（非 UTC ISO 8601）。
 
 ## 故障排查

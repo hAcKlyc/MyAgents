@@ -4,7 +4,7 @@ import { getProjectAgent } from '@/config/services/agentConfigService';
 import { LOG_SESSION_HEADER } from '../../shared/types/log';
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
 import type { QueuedMessageInfo } from '@/types/queue';
-import type { ToolPermissionHints } from '../../shared/types/toolPermission';
+import type { PermissionRequest } from '@/components/PermissionPrompt';
 import { appendStreamingText, completeStreamingText } from '@/utils/streamingTextBlocks';
 import { sameAsyncQuestionReply, type AsyncQuestionReply, type AsyncQuestionSet } from '../../shared/asyncUserQuestions';
 /**
@@ -119,12 +119,7 @@ export interface FbActivity {
     tool?: ToolUseSimple;
 }
 
-export interface FbPermReq extends ToolPermissionHints {
-    requestId: string;
-    sessionId?: string | null;
-    toolName: string;
-    input: string;
-}
+export type FbPermReq = PermissionRequest;
 
 export interface FbSendOpts {
     asyncQuestionReply?: AsyncQuestionReply;
@@ -1132,12 +1127,8 @@ export function useFloatingSession(modeRef: React.MutableRefObject<'hidden' | 'p
                     const payload = data as FbPermReq | null;
                     if (payload?.requestId && isCurrentInteractiveEvent(payload.sessionId)) {
                         setPermReqs(prev => enqueuePermissionRequest(prev, {
-                            requestId: payload.requestId,
-                            sessionId: payload.sessionId,
-                            toolName: payload.toolName,
+                            ...payload,
                             input: payload.input || '',
-                            defaultToNo: payload.defaultToNo,
-                            suppressAlwaysAllowRule: payload.suppressAlwaysAllowRule,
                         }));
                     }
                     break;
@@ -1841,7 +1832,7 @@ export function useFloatingSession(modeRef: React.MutableRefObject<'hidden' | 'p
     );
 
     const respondPermission = useCallback(
-        async (decision: 'deny' | 'allow_once' | 'always_allow', requestIdOverride?: string) => {
+        async (decision: 'deny' | 'allow_once' | 'always_allow', requestIdOverride?: string, optionId?: string) => {
             const sid = sessionIdRef.current;
             const req = requestIdOverride
                 ? permReqs.find(item => item.requestId === requestIdOverride)
@@ -1856,7 +1847,7 @@ export function useFloatingSession(modeRef: React.MutableRefObject<'hidden' | 'p
                 const resp = await floatingProxyFetch(sid, '/api/permission/respond', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ requestId: req.requestId, decision }),
+                    body: JSON.stringify({ requestId: req.requestId, decision, ...(optionId === undefined ? {} : { optionId }) }),
                 });
                 // 后端真确认（success===true）后才清卡片——乐观清除 / 只查 resp.ok 会在
                 // POST 失败或后端回 {success:false}（过期/已轮换）时让 pending 永久挂起

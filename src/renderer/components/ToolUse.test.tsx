@@ -1,8 +1,9 @@
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { renderWithTheme as render } from '@/test/renderWithTheme';
 import type { ToolUseSimple } from '@/types/chat';
+import { TabApiContext } from '@/context/TabContext';
 
 import ToolUse from './ToolUse';
 
@@ -138,5 +139,52 @@ describe('ToolUse specialized result ownership', () => {
     expect(container).toHaveTextContent('/tmp/spilled-edit.ts');
     expect(container).not.toHaveTextContent('stale-proposal');
     expect(container).toHaveTextContent('变更过大，仅展示有界预览');
+  });
+
+  it('uses the native file span and returns the supplied read content', () => {
+    render(<ToolUse tool={{
+      id: 'read', name: 'Read', streamIndex: 0,
+      input: { file_path: '/workspace/file.ts', offset: 7, limit: 3 },
+      result: 'const answer = 42;',
+    }} />);
+    expect(screen.getByText('第 7–9 行')).toBeInTheDocument();
+    expect(screen.getByText('const answer = 42;')).toBeInTheDocument();
+  });
+
+  it('shows an exact single line separately from an open-ended read', () => {
+    const tool: ToolUseSimple = {
+      id: 'read-line', name: 'Read', streamIndex: 0,
+      input: { file_path: '/workspace/file.ts', offset: 14, limit: 1 },
+      result: '14: QUARTZ',
+    };
+    const { rerender } = render(<ToolUse tool={tool} />);
+    expect(screen.getByText('第 14 行')).toBeInTheDocument();
+    rerender(<ToolUse tool={{ ...tool, input: { file_path: '/workspace/file.ts', offset: 14 } }} />);
+    expect(screen.getByText('从第 14 行开始')).toBeInTheDocument();
+  });
+
+  it('loads a spilled text result for the current tool from the existing ref route', async () => {
+    const fetchMock = vi.fn(async () => new Response('complete tool output'));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      render(<TabApiContext.Provider value={{
+        tabId: 'tool-result-tab', agentDir: '/tmp',
+        apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(),
+      }}>
+        <ToolUse tool={{
+          id: 'large-tool', name: 'Tool', streamIndex: 0, input: {}, result: 'preview only',
+          resultMeta: { largeValueRef: {
+            kind: 'ref', id: 'a1b2c3d4', sizeBytes: 220_000, mimetype: 'text/plain; charset=utf-8',
+            preview: 'preview only', expiresAt: Date.now() + 1_000,
+          } },
+        }} />
+      </TabApiContext.Provider>);
+      expect(screen.getByText('preview only')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '加载完整输出' }));
+      expect(await screen.findByText('complete tool output')).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith('/refs/a1b2c3d4', { signal: expect.any(AbortSignal) });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

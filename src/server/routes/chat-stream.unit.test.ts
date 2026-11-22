@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
         timestamp: '2026-01-01T00:00:01.000Z',
       },
       systemInitPayload: { info: { model: 'claude' } },
+      agentPlan: [{ key: 'check', content: 'Check', activeForm: 'Checking', status: 'in_progress' as const }],
       pendingInteractiveRequests: [
         { type: 'chat:permission-request', data: { requestId: 'perm-1' } },
       ],
@@ -77,6 +78,13 @@ describe('handleChatStreamRoute', () => {
       },
       { event: 'chat:logs', data: { lines: ['log-1'] } },
       { event: 'chat:system-init', data: { info: { model: 'claude' }, sessionId: 'session-live', snapshotRevision: 42 } },
+      {
+        event: 'chat:agent-plan-update',
+        data: {
+          sessionId: 'session-live',
+          todos: [{ key: 'check', content: 'Check', activeForm: 'Checking', status: 'in_progress' }],
+        },
+      },
       { event: 'chat:permission-request', data: { requestId: 'perm-1' } },
     ]);
     expect(log).not.toHaveBeenCalled();

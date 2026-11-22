@@ -88,6 +88,22 @@ describe('RuntimeSelector i18n', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('Manage their settings and updates in the corresponding app.');
   });
 
+  it('distinguishes Antigravity detection progress and allows re-detection after a failure', async () => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    const missing = { ...detections, antigravity: { installed: false } };
+    const view = render(<RuntimeSelector value="builtin" detections={missing} onChange={vi.fn()} detecting onDetectAgain={retry} />);
+    await user.click(screen.getByTitle('Runtime: MyAgents (Claude Agent SDK)'));
+    expect(screen.getByTitle('Antigravity CLI')).toBeDisabled();
+    expect(screen.getByTitle('Antigravity CLI')).toHaveTextContent('Detecting…');
+    expect(screen.queryByText('Install agy')).not.toBeInTheDocument();
+    view.rerender(<RuntimeSelector value="builtin" detections={missing} onChange={vi.fn()} detectionFailed onDetectAgain={retry} />);
+    expect(screen.getByTitle('Antigravity CLI')).toBeDisabled();
+    expect(screen.getByTitle('Antigravity CLI')).toHaveTextContent('Detection failed');
+    await user.click(screen.getByRole('button', { name: 'Detect again' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it('does not expose Runtimes excluded by a custom distribution', async () => {
     const user = userEvent.setup();
     render(

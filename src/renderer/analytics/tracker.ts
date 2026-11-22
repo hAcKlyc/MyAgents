@@ -3,6 +3,7 @@
  * 核心追踪逻辑
  */
 
+import { antigravityToolTelemetryName } from '../../shared/antigravityToolTelemetry';
 import { isTauriEnvironment } from '@/utils/browserMock';
 import { isAnalyticsEnabled, getApiKey, getEndpoint } from './config';
 import { getDeviceId, getPlatform, getAppVersionSync, preloadAppVersion, preloadPlatform, preloadDeviceId } from './device';
@@ -194,6 +195,9 @@ const SESSION_SCOPED_AUTO_INJECT_EVENTS: ReadonlySet<string> = new Set([
 export function track(event: EventName | string, params: EventParams = {}): void {
   // 清理参数，确保可序列化
   const safeParams = sanitizeParams(params);
+  if (safeParams.runtime === 'antigravity' && typeof safeParams.tool === 'string') {
+    safeParams.tool = antigravityToolTelemetryName(safeParams.tool);
+  }
 
   // Active Context 自动注入：caller 显式值优先；session_id 仅限 allowlist 事件
   const shouldInjectSessionId =

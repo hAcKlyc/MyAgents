@@ -53,7 +53,7 @@ export async function modelContext(agentId: string, sessionId?: string, base?: P
   const options: ImModelOption[] = [];
   if (nativeCli) {
     const models = await queryRuntimeModels(runtime, { runtimeSource: current.runtimeSource ?? 'system-cli' });
-    for (const model of models as import('../../shared/types/runtime').RuntimeModelInfo[]) options.push({ selection: { kind: 'external-cli', runtime, runtimeSource: current.runtimeSource ?? 'system-cli', model: model.value }, group: runtime === 'antigravity' ? 'Antigravity CLI' : runtime === 'codex' ? 'Codex CLI' : 'Claude Code', name: model.displayName, isCurrent: current.model === model.value || (runtime === 'antigravity' && !!model.isDefault), requiresNewSession: false, capabilities: model });
+    for (const model of models as import('../../shared/types/runtime').RuntimeModelInfo[]) options.push({ selection: { kind: 'external-cli', runtime, runtimeSource: current.runtimeSource ?? 'system-cli', model: model.value }, group: runtime === 'antigravity' ? 'Antigravity CLI' : runtime === 'codex' ? 'Codex CLI' : 'Claude Code', name: model.displayName, isCurrent: current.model === model.value || (runtime === 'antigravity' && !!model.isCurrent), requiresNewSession: false, capabilities: model });
   } else {
     const managedModels = isManagedCodexProviderReady(config)
       ? await queryRuntimeModels('codex', { runtimeSource: 'managed-provider' }) : undefined;

@@ -232,7 +232,7 @@ export interface TabContextValue extends TabState {
     apiDelete: <T>(path: string, opts?: { signal?: AbortSignal }) => Promise<T>;
 
     // Permission handling
-    respondPermission: (decision: 'deny' | 'allow_once' | 'always_allow', requestId?: string) => Promise<void>;
+    respondPermission: (decision: 'deny' | 'allow_once' | 'always_allow', requestId?: string, optionId?: string) => Promise<void>;
 
     // AskUserQuestion handling
     respondAskUserQuestion: (requestId: string, answers: AskUserQuestionAnswers | null) => Promise<void>;

@@ -88,21 +88,26 @@ const ProcessRow = memo(function ProcessRow({
     const isFilePatchTool = isTool
         && !isServerTool
         && (block.tool?.name === 'Edit' || block.tool?.name === 'Write'
+            || block.tool?.name === 'MultiEdit'
             || block.tool?.name === 'edit' || block.tool?.name === 'write');
 
     // Thinking: 没有 isComplete 且正在 streaming 才是 active（避免历史消息计时器永跑）
     const isThinkingActive = isThinking && block.isComplete !== true && isStreaming;
 
-    // Tool: 是最后一个 block 且正在 streaming 且没有 result 就是 active
     const isTaskRunning = isTaskTool && isSubagentContainerRunning(block.tool);
     const subagentLifecycleStatus = isTaskTool
         ? getSubagentContainerLifecycleStatus(block.tool)
         : null;
+    const status = block.tool?.resultMeta?.status;
+    const isToolPending = isTool && status === 'pending' && block.tool?.isLoading === true;
+    const isToolDeclined = isTool && status === 'declined';
     const isToolActive = isServerTool ? providerOutcome === 'running' : isTool
-        && isLastBlock
         && isStreaming
-        && (Boolean(block.tool?.isLoading) || !block.tool?.result)
+        && !isToolPending
+        && (block.tool?.isLoading ?? (isLastBlock && block.tool?.result === undefined))
         && (!isTaskTool || isTaskRunning);
+    const isToolError = isTool && (block.tool?.isError || block.tool?.isFailed || isToolDeclined || subagentLifecycleStatus === 'failed');
+    const isToolStopped = isTool && (block.tool?.isStopped || subagentLifecycleStatus === 'interrupted');
 
     const isBlockActive = isThinkingActive || isToolActive || isTaskRunning;
     const wasToolActiveRef = useRef(false);
@@ -215,7 +220,9 @@ const ProcessRow = memo(function ProcessRow({
 
     const hasContent =
         (isThinking && block.thinking && block.thinking.length > 0) ||
-        (isTool && block.tool && (block.tool.inputJson || block.tool.result || block.tool.isLoading || block.tool.subagentCalls?.length || processAttachments.length > 0));
+        (isTool && block.tool && (block.tool.inputJson || Object.keys(block.tool.parsedInput ?? block.tool.input ?? {}).length > 0
+            || block.tool.result !== undefined || block.tool.isLoading || isToolError || isToolStopped
+            || block.tool.subagentCalls?.length || processAttachments.length > 0));
 
     // 派生展开状态（无 useEffect，避免无限循环）
     // thinking 与 tool 块都默认折叠，只由用户手动点击展开。
@@ -333,7 +340,7 @@ const ProcessRow = memo(function ProcessRow({
                 onClick={handleToggle}
                 disabled={!hasContent}
                 aria-expanded={hasContent ? isExpanded : undefined}
-                className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)]' : 'cursor-default'
+                className={`flex w-full min-w-0 items-center gap-3 px-4 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)] ${hasContent ? 'cursor-pointer hover:bg-[var(--hover-bg)]' : 'cursor-default'
                     }`}
             >
                 {/* Left indicator dot - smaller.
@@ -348,9 +355,9 @@ const ProcessRow = memo(function ProcessRow({
                  *  internal "执行中" badge. */}
                 <div className={`flex size-1.5 shrink-0 rounded-full ${isBlockActive
                     ? 'bg-[var(--success)] animate-pulse'
-                    : block.isFailed || block.tool?.isFailed || subagentLifecycleStatus === 'failed'
+                    : block.isFailed || isToolError
                         ? 'bg-[var(--error)]'
-                        : block.isStopped || block.tool?.isStopped || subagentLifecycleStatus === 'interrupted'
+                        : block.isStopped || isToolStopped
                             ? 'bg-[var(--warning)]'
                             : 'bg-[var(--ink-muted)]/40'
                     }`} />
@@ -362,7 +369,7 @@ const ProcessRow = memo(function ProcessRow({
 
                 {/* Main Label */}
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className={`text-sm leading-snug ${isThinking
+                    <span className={`min-w-0 truncate text-sm leading-snug ${isThinking
                         ? 'text-[var(--ink-secondary)]'
                         : 'text-[var(--ink)] font-medium'
                         }`}>
@@ -383,6 +390,11 @@ const ProcessRow = memo(function ProcessRow({
                             {t('shell.toolChrome.common.background')}
                         </span>
                     )}
+                    {!isServerTool && !isBlockActive && (isToolStopped || isToolError || isToolPending) && (
+                        <span className={`shrink-0 text-xs ${isToolError && !isToolDeclined ? 'text-[var(--error)]' : 'text-[var(--warning)]'}`}>
+                            {t(`shell.toolChrome.bash.status.${isToolStopped ? 'stopped' : isToolDeclined ? 'declined' : isToolError ? 'failed' : 'pending'}`)}
+                        </span>
+                    )}
                     {/* Task duration - similar to thinking duration */}
                     {isTaskTool && subagentLifecycleStatus === 'completed' && block.tool?.subagentLifecycle?.handleState === 'open' && (
                         <span className="text-xs text-[var(--success)]" data-subagent-continuable="true">
@@ -395,7 +407,7 @@ const ProcessRow = memo(function ProcessRow({
                         </span>
                     )}
                     {subLabel && subLabel !== mainLabel && (
-                        <span className="max-w-[60%] text-xs text-[var(--ink-muted)] font-mono truncate">
+                        <span className="max-w-[60%] min-w-0 truncate font-mono text-xs text-[var(--ink-muted)]">
                             {subLabel}
                         </span>
                     )}
@@ -412,7 +424,7 @@ const ProcessRow = memo(function ProcessRow({
 
                 {/* Chevron */}
                 {hasContent && (
-                    <ChevronDownIcon className={`size-4 text-[var(--ink-muted)] transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''
+                    <ChevronDownIcon className={`size-4 shrink-0 text-[var(--ink-muted)] transition-transform duration-200 motion-reduce:transition-none ${isExpanded ? 'rotate-180' : ''
                         }`} />
                 )}
             </button>

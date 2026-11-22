@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.15] - 2026-11-22
+
+### Changed
+
+- **Antigravity CLI 工具卡** 按文件读取、编辑、搜索、终端和子 Agent 分类展示。展开后可查看读取原文、命令输出、文件变更和子 Agent 的过程与报告。
+- **Antigravity CLI 交互** 支持原生审批选项与结构化问答，并改进模型和推理设置、会话 MCP 状态、原生命令提示及消息排队操作。
+
+### Fixed
+
+- 修复 Antigravity 子 Agent 回传结果后，主 Agent 的后续回复可能丢失的问题。关闭标签页后，会话能在后台继续，重开时仍可查看汇总和子 Agent 记录。
+- 修复 Antigravity 工具的原始命令、路径或自定义名称可能进入性能日志和工具统计字段的问题。
+
+---
+
 ## [0.5.14] - 2026-11-22
 
 ### Added

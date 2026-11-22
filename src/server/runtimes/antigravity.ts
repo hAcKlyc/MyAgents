@@ -14,9 +14,16 @@ import {
   type SessionUpdate,
   type ToolCallUpdate,
 } from "@agentclientprotocol/sdk/unstable";
+import {
+  antigravityBrainDirectory,
+  readAntigravityChildren,
+  type AntigravityChildSnapshot,
+} from "./antigravity-children";
+import { AntigravityChildTrace } from "./antigravity-child-trace";
 import { fingerprintSessionMcp } from "../session-core/mcp-sync-policy";
 import { resolveRemoteMcpTransportConfig } from "../session-core/mcp-template-resolution";
 import { buildMcpStdioLaunchConfig } from "../utils/mcp-command";
+import { classifyToolAttachmentPresentation } from "../utils/tool-result-attachments";
 import { MANAGED_BROWSER_MCP_ID } from "../../shared/browserTools";
 import {
   acquireBrowserCapability,
@@ -24,6 +31,7 @@ import {
 } from "../browser-host/capability-client";
 import { onOAuthCredentialChange, resolveAuthHeaders } from "../mcp-oauth";
 import { supportsHostAskUserQuestion } from "../host-interaction";
+import { classifyMcpFailure } from "../../shared/mcpFailure";
 import type { McpEffectiveServerSnapshot } from "../../shared/mcpEffectiveState";
 import { randomUUID } from "node:crypto";
 import type { McpServerDefinition } from "../../shared/config-types";
@@ -36,14 +44,20 @@ import {
 } from "../../shared/types/runtime";
 import type { AskUserQuestionAnswers } from "../../shared/types/askUserQuestion";
 import { ensureShellPath } from "../utils/shell";
+import { maybeSpill, releaseLargeValueRef } from "../utils/large-value-store";
 import { spawn, type SubprocessHandle } from "../utils/subprocess";
 import { antigravityForm } from "./antigravity-form";
+import { readAntigravityFileResult } from "./antigravity-native-result";
+import { readAntigravityParentAcknowledgements, readAntigravityParentTailStep } from "./antigravity-parent-ack";
+import { antigravityToolResult, presentAntigravityTool } from "./antigravity-tool";
 import { augmentedProcessEnv, resolveCommand } from "./env-utils";
 import type {
   AgentRuntime,
   ResolvedImagePayload,
   RuntimeProcess,
   SessionStartOptions,
+  SubAgentScope,
+  UnifiedEvent,
   UnifiedEventCallback,
 } from "./types";
 import {
@@ -78,23 +92,29 @@ async function queryCli(
   abort.throwIfAborted();
   const args = Array.isArray(arg) ? arg : [arg];
   const help = args.includes("--help");
+  const captureStderr = help || arg === "models";
   const child = spawn([path, ...args], {
     env,
     stdin: "ignore",
     stdout: "pipe",
-    stderr: help ? "pipe" : "ignore",
+    stderr: captureStderr ? "pipe" : "ignore",
   });
   const stop = () => child.kill("SIGKILL");
   abort.addEventListener("abort", stop, { once: true });
   try {
-    const [code, output, helpText] = await Promise.all([
+    const [code, output, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),
-      help ? new Response(child.stderr).text() : Promise.resolve(""),
+      captureStderr ? new Response(child.stderr).text() : Promise.resolve(""),
     ]);
     abort.throwIfAborted();
-    if (code !== 0) throw new Error("无法执行 agy " + arg);
-    return { path, output: (output || helpText).trim() };
+    if (code !== 0) {
+      if (arg === "models" && /not authenticated|authentication required|not logged in|sign in|login required/i.test(stderr || output)) {
+        throw new Error("请在终端运行 agy 并完成登录，然后重试");
+      }
+      throw new Error("无法执行 agy " + arg);
+    }
+    return { path, output: (output || (help ? stderr : "")).trim() };
   } finally {
     abort.removeEventListener("abort", stop);
   }
@@ -140,13 +160,14 @@ async function mcpServer(
       headers: pairs(transport.headers),
     };
   }
-  throw new Error("Antigravity 不支持当前 MCP 配置：" + server.id);
+  throw new Error("invalid configuration");
 }
 
 type PermissionDecision = "allow_once" | "deny" | "always_allow";
 type Pending = {
   cancel(): void;
   decide?(decision: PermissionDecision): void;
+  choose?(optionId: string): void;
   answer?(answers: AskUserQuestionAnswers | null): void;
 };
 interface ModelState {
@@ -162,7 +183,7 @@ class AntigravitySession implements RuntimeProcess {
   config: SessionConfigOption[] = [];
   defaultModel?: string;
   selectedModel?: string;
-  selectedEffort?: string;
+  private readonly defaultThoughtLevels = new Map<string, string>();
   exited = false;
   initialized = false;
   earlyCommands?: {
@@ -172,12 +193,26 @@ class AntigravitySession implements RuntimeProcess {
       { sessionUpdate: "available_commands_update" }
     >;
   };
-  active = false;
+  private turnKind: 'prompt' | 'continuation' | null = null;
+  private canContinue = false;
+  private readonly childLaunches = new Set<string>();
+  private readonly childSnapshots = new Map<string, AntigravityChildSnapshot>();
+  private readonly childTraces = new Map<string, AntigravityChildTrace>();
+  private childPoll?: NodeJS.Timeout;
+  private lastReplyText = '';
+  private parentPlannerStep = -1;
+  private readonly settledParentReplies: string[] = [];
+  private acknowledgedChildReports = new Set<string>();
+  get active() {
+    return this.turnKind !== null;
+  }
   private dispatched?: { resolve(): void; reject(reason: unknown): void };
   private stream: "text" | "thinking" | null = null;
   private turnId = "";
   private thinkingIndex = 0;
-  private readonly tools = new Map<string, ToolCallUpdate>();
+  private readonly tools = new Map<string, { snapshot: ToolCallUpdate; visibleOutput: string }>();
+  private readonly pendingReadResults = new Map<string, Extract<UnifiedEvent, { kind: "tool_result" }>>();
+  private readonly deniedTools = new Set<string>();
   readonly pending = new Map<string, Pending>();
   constructor(
     private readonly child: SubprocessHandle,
@@ -186,6 +221,7 @@ class AntigravitySession implements RuntimeProcess {
     readonly scenario: SessionStartOptions["scenario"],
     readonly productSessionId: string,
     readonly skipPermissions: boolean,
+    private readonly brainDirectory: string,
   ) {
     const app = new ClientApp();
     app.onNotification("session/update", ({ params }) => {
@@ -209,34 +245,43 @@ class AntigravitySession implements RuntimeProcess {
         this.emit({ kind: "runtime_title", title: params.update.title });
       } else if (params.update.sessionUpdate === "config_option_update")
         this.config = params.update.configOptions;
-      else if (this.active) this.update(params.update);
+      else this.receiveUpdate(params.update);
     });
     app.onRequest("session/request_permission", ({ params, signal }) => {
       if (
-        !this.active ||
         params.sessionId !== this.sessionId ||
-        !["desktop", "im", "agent-channel"].includes(this.scenario.type)
+        !["desktop", "im", "agent-channel"].includes(this.scenario.type) ||
+        (!this.active && !this.startContinuation())
       )
         return { outcome: { outcome: "cancelled" } };
       return new Promise<RequestPermissionResponse>((resolve) => {
         const id = randomUUID();
+        let inputRefId: string | undefined;
         const finish = (response: RequestPermissionResponse) => {
           this.pending.delete(id);
           signal.removeEventListener("abort", expired);
+          if (inputRefId) void releaseLargeValueRef(inputRefId);
           resolve(response);
         };
         const cancel = () => finish({ outcome: { outcome: "cancelled" } });
+        const permissionOptions = params.options.map(({ optionId, name, kind }) => ({
+          optionId, name, kind,
+        }));
+        const choose = (optionId: string) => {
+          const option = permissionOptions.find((candidate) => candidate.optionId === optionId);
+          if (!option) throw new Error("Antigravity 审批选项与当前请求不匹配");
+          if (option.kind === "reject_once" || option.kind === "reject_always")
+            this.deniedTools.add(params.toolCall.toolCallId);
+          finish({ outcome: { outcome: "selected", optionId } });
+        };
         const decide = (decision: PermissionDecision) => {
           const kind = {
             allow_once: "allow_once",
             always_allow: "allow_always",
             deny: "reject_once",
           }[decision];
-          const option = params.options.find((o) => o.kind === kind);
-          if (option)
-            finish({
-              outcome: { outcome: "selected", optionId: option.optionId },
-            });
+          const options = permissionOptions.filter((option) => option.kind === kind);
+          if (options.length === 1) choose(options[0].optionId);
           else cancel();
         };
         const expired = () => {
@@ -247,32 +292,57 @@ class AntigravitySession implements RuntimeProcess {
             status: "cancelled",
           });
         };
-        this.pending.set(id, { cancel, decide });
+        this.pending.set(id, { cancel, decide, choose });
         signal.addEventListener("abort", expired, { once: true });
         const tool = params.toolCall;
-        this.emit({
-          kind: "permission_request",
-          requestId: id,
-          toolUseId: tool.toolCallId,
-          toolName: tool.title || tool.kind || "Tool",
-          input: toolInput(tool),
-          interactionKind: "permission",
-          suppressAlwaysAllowRule: !params.options.some(
-            (o) => o.kind === "allow_always",
-          ),
+        const { toolName, input } = presentAntigravityTool(tool);
+        void maybeSpill(JSON.stringify(input), {
+          mimetype: "application/json",
+          inlineMaxBytes: 65_536,
+          previewBytes: 0,
+          sessionId: this.productSessionId,
+          ttlMs: Number.MAX_SAFE_INTEGER - Date.now(),
+        }).then((payload) => {
+          const inputRef = "inline" in payload ? undefined : payload;
+          if (!this.pending.has(id)) {
+            if (inputRef) void releaseLargeValueRef(inputRef.id);
+            return;
+          }
+          inputRefId = inputRef?.id;
+          this.emit({
+            kind: "permission_request",
+            requestId: id,
+            toolUseId: tool.toolCallId,
+            toolName,
+            input,
+            ...(inputRef ? { inputRef } : {}),
+            permissionOptions,
+            interactionKind: "permission",
+            suppressAlwaysAllowRule: !permissionOptions.some(
+              (option) => option.kind === "allow_always",
+            ),
+          });
+        }, () => {
+          if (!this.pending.has(id)) return;
+          cancel();
+          this.emit({
+            kind: "log",
+            level: "error",
+            message: "无法加载 Antigravity 审批详情，已取消该审批",
+          });
         });
       });
     });
     app.onRequest("elicitation/create", ({ params, signal }) => {
       if (
-        !this.active ||
         !(
           this.scenario.type === "desktop" ||
           supportsHostAskUserQuestion(this.scenario)
         ) ||
         !("sessionId" in params) ||
         params.sessionId !== this.sessionId ||
-        params.mode !== "form"
+        params.mode !== "form" ||
+        (!this.active && !this.startContinuation())
       )
         return { action: "cancel" };
       const form = antigravityForm(
@@ -346,6 +416,7 @@ class AntigravitySession implements RuntimeProcess {
     });
     void child.exited.then(() => {
       this.exited = true;
+      this.finishBackgroundWork();
       this.connection.close();
       this.cancelPending();
       if (this.initialized)
@@ -367,6 +438,7 @@ class AntigravitySession implements RuntimeProcess {
       commands: update.availableCommands.map((c) => ({
         name: c.name,
         description: c.description,
+        ...(c.input?.hint ? { argumentHint: c.input.hint } : {}),
         source: "sdk",
       })),
     });
@@ -393,11 +465,217 @@ class AntigravitySession implements RuntimeProcess {
       });
     }
   }
+  hasPendingBackgroundWork(): boolean {
+    return [...this.childLaunches].some((id) => {
+      const child = this.childSnapshots.get(id);
+      return !child || child.status === "running" ||
+        (child.deliveredAt !== undefined && (!child.reportId || !this.acknowledgedChildReports.has(child.reportId)));
+    });
+  }
+  private observeDelegation(toolUseId: string) {
+    this.childLaunches.add(toolUseId);
+    this.scheduleChildObservation();
+  }
+  private scheduleChildObservation() {
+    if (this.childPoll || this.exited) return;
+    const poll = setTimeout(async () => {
+      const wasPending = this.hasPendingBackgroundWork();
+      try {
+        const snapshots = await readAntigravityChildren(this.brainDirectory, this.sessionId, this.childLaunches);
+        if (this.childPoll !== poll || this.exited) return;
+        const reportIds = new Set(snapshots.flatMap(child => child.reportId ? [child.reportId] : []));
+        if (this.settledParentReplies.length || reportIds.size) {
+          const acknowledgement = readAntigravityParentAcknowledgements(
+            this.brainDirectory, this.sessionId, this.settledParentReplies, reportIds, this.parentPlannerStep,
+          );
+          this.parentPlannerStep = acknowledgement.plannerStep;
+          this.settledParentReplies.splice(0, acknowledgement.matchedReplies);
+          for (const id of acknowledgement.acknowledgedReportIds) this.acknowledgedChildReports.add(id);
+        }
+        for (const child of snapshots) {
+          if (!this.childLaunches.has(child.toolCallId)) continue;
+          const previous = this.childSnapshots.get(child.toolCallId);
+          this.childSnapshots.set(child.toolCallId, child);
+          if (!previous || previous.status === "running") {
+            let trace = this.childTraces.get(child.sessionId);
+            if (!trace) {
+              trace = new AntigravityChildTrace(child);
+              this.childTraces.set(child.sessionId, trace);
+            }
+            trace.observe(this.brainDirectory, this.emit);
+          }
+          if (previous?.status === child.status && previous?.deliveredAt === child.deliveredAt) continue;
+          this.emit({
+            kind: "subagent_lifecycle", parentToolUseId: child.toolCallId, agentId: child.sessionId,
+            status: child.status, startedAt: child.startedAt, observedAt: child.finishedAt ?? Date.now(),
+            description: child.role, agentType: child.agentType, result: child.result,
+            mode: "continuable", affectsRootActivity: false,
+          });
+        }
+      } catch {
+        this.emit({ kind: "log", level: "warn", message: "Antigravity 子 Agent 状态读取失败" });
+      } finally {
+        if (this.childPoll === poll) {
+          this.childPoll = undefined;
+          if (this.hasPendingBackgroundWork()) this.scheduleChildObservation();
+          else if (wasPending) this.emit({ kind: "background_work_settled" });
+        }
+      }
+    }, 400);
+    this.childPoll = poll;
+    poll.unref();
+  }
+  finishBackgroundWork() {
+    if (this.childPoll) clearTimeout(this.childPoll);
+    this.childPoll = undefined;
+    for (const child of this.childSnapshots.values()) {
+      if (child.status !== "running") continue;
+      this.emit({ kind: "subagent_lifecycle", parentToolUseId: child.toolCallId,
+        status: "interrupted", observedAt: Date.now(), affectsRootActivity: false });
+    }
+    this.childLaunches.clear();
+    this.childSnapshots.clear();
+    this.childTraces.clear();
+    this.acknowledgedChildReports.clear();
+    this.settledParentReplies.length = 0;
+  }
   private closeBlock() {
     if (this.stream === "text") this.emit({ kind: "text_stop" });
     if (this.stream === "thinking")
       this.emit({ kind: "thinking_stop", index: this.thinkingIndex });
     this.stream = null;
+  }
+  private receiveUpdate(update: SessionUpdate) {
+    const kind = update.sessionUpdate;
+    // Antigravity emits a final context snapshot after each unsolicited reply.
+    // A standalone usage update changes the context indicator, never the transcript.
+    if (kind === "usage_update") {
+      this.update(update);
+      if (this.turnKind === "continuation" && ![...this.tools.values()].some(({ snapshot }) =>
+        snapshot.status !== "completed" && snapshot.status !== "failed"
+      )) this.finishTurn("completed");
+      return;
+    }
+    if (!this.active) {
+      if (kind === "tool_call_update" && this.tools.has(update.toolCallId)) {
+        this.update(update);
+        return;
+      }
+      if (kind !== "agent_message_chunk" && kind !== "agent_thought_chunk" && kind !== "tool_call") return;
+      if (!this.startContinuation()) return;
+    }
+    this.update(update);
+  }
+  private startContinuation(): boolean {
+    if (!this.initialized || !this.canContinue || this.exited) return false;
+    this.beginTurn('continuation');
+    this.emit({
+      kind: "root_turn_admitted",
+      origin: "collaboration",
+      clientOperationId: this.turnId,
+      runtimeTurnId: this.turnId,
+    });
+    return true;
+  }
+  private beginTurn(kind: 'prompt' | 'continuation') {
+    if (kind === 'prompt' && !this.hasPendingBackgroundWork()) {
+      this.finishBackgroundWork();
+      this.parentPlannerStep = readAntigravityParentTailStep(this.brainDirectory, this.sessionId);
+    }
+    this.turnKind = kind;
+    this.turnId = randomUUID();
+    this.lastReplyText = '';
+    this.tools.clear();
+    this.deniedTools.clear();
+  }
+  private finishTurn(status: string, error?: string) {
+    this.publishReadResults(true);
+    this.closeBlock();
+    this.cancelPending();
+    this.turnKind = null;
+    this.canContinue = status === "completed";
+    if (this.canContinue && this.childLaunches.size && this.lastReplyText.trim()) {
+      this.settledParentReplies.push(this.lastReplyText);
+    }
+    this.emit({ kind: "turn_complete", status, error });
+  }
+  cancelTurn() {
+    if (this.turnKind === "continuation") this.finishTurn("cancelled");
+    else this.cancelPending();
+  }
+  private publishReadResults(turnEnded = false) {
+    for (const [id, result] of this.pendingReadResults) {
+      const content = readAntigravityFileResult(this.brainDirectory, this.sessionId, id);
+      if (content === undefined && !turnEnded) continue;
+      this.pendingReadResults.delete(id);
+      this.emit({ ...result, content: content ?? result.content });
+    }
+  }
+  private updateTool(update: ToolCallUpdate, subAgent?: SubAgentScope) {
+    const id = update.toolCallId;
+    const prior = this.tools.get(id);
+    if (prior?.snapshot.status === "completed" || prior?.snapshot.status === "failed") return;
+    const tool = { ...prior?.snapshot, ...update, name: update.name ?? prior?.snapshot.name };
+    const { toolName, input } = presentAntigravityTool(tool);
+    const { result, metadata } = antigravityToolResult(tool, toolName);
+    const state = { snapshot: tool, visibleOutput: prior?.visibleOutput ?? "" };
+    this.tools.set(id, state);
+    if (!prior) {
+      if (!subAgent) this.closeBlock();
+      this.emit({ kind: "tool_use_start", toolUseId: id, toolName, input, subAgent });
+    }
+    if (tool.status !== "completed" && tool.status !== "failed") {
+      // ACP content arrays are replacement snapshots. Preserve that boundary even
+      // when a tool rewrites or clears its output while it is still running.
+      if (result !== state.visibleOutput || tool.status !== prior?.snapshot.status) {
+        this.emit({ kind: "tool_result_update", toolUseId: id,
+          content: result, status: tool.status ?? undefined, subAgent });
+        state.visibleOutput = result;
+      }
+      return;
+    }
+
+    this.emit({ kind: "tool_use_stop", toolUseId: id, input, subAgent });
+    if (toolName === "CollabAgent" && tool.status === "completed") this.observeDelegation(id);
+    const presentation = classifyToolAttachmentPresentation(tool.name ?? toolName);
+    const attachments = tool.content?.flatMap((part) => {
+      if (part.type !== "content") return [];
+      const media = part.content;
+      const payload = media.type === "image" || media.type === "audio"
+        ? { data: media.data, mimeType: media.mimeType }
+        : media.type === "resource" && "blob" in media.resource
+          ? { data: media.resource.blob, mimeType: media.resource.mimeType ?? "application/octet-stream" }
+          : null;
+      if (!payload) return [];
+      const ctx = {
+        sessionId: this.productSessionId,
+        turnId: this.turnId,
+        toolUseId: id,
+        mimeType: payload.mimeType,
+        producedBy: "antigravity",
+      };
+      const { attachment, pendingId } = makePlaceholderAttachment(ctx);
+      trackInFlightSave(
+        saveToolAttachment({ kind: "base64", data: payload.data }, ctx)
+          .catch((error) => makeErrorAttachment(ctx, error, pendingId))
+          .then((saved) => this.emit({ kind: "tool_attachment_update",
+            toolUseId: id, pendingId, attachment: presentation === "process" ? { ...saved, presentation } : saved })),
+      );
+      return [presentation === "process" ? { ...attachment, presentation } : attachment];
+    });
+    const declined = this.deniedTools.delete(id);
+    const terminal: Extract<UnifiedEvent, { kind: "tool_result" }> = {
+      kind: "tool_result", toolUseId: id, content: result,
+      metadata: { ...metadata, ...(declined && tool.status === "failed" ? { status: "declined" } : {}) },
+      attachments, subAgent,
+      isError: tool.status === "failed" || (metadata.exitCode !== undefined && metadata.exitCode !== 0),
+    };
+    if (toolName === "Read" && !subAgent && !result && !attachments?.length && tool.status === "completed") {
+      this.pendingReadResults.set(id, terminal);
+      this.publishReadResults();
+      return;
+    }
+    this.emit(terminal);
   }
   private update(update: SessionUpdate) {
     switch (update.sessionUpdate) {
@@ -407,14 +685,17 @@ class AntigravitySession implements RuntimeProcess {
         const stream =
           update.sessionUpdate === "agent_message_chunk" ? "text" : "thinking";
         if (this.stream !== stream) {
+          this.publishReadResults();
           this.closeBlock();
           this.stream = stream;
+          if (stream === "text") this.lastReplyText = '';
           if (stream === "thinking")
             this.emit({ kind: "thinking_start", index: ++this.thinkingIndex });
         }
-        if (stream === "text")
+        if (stream === "text") {
+          if (this.childLaunches.size) this.lastReplyText += update.content.text;
           this.emit({ kind: "text_delta", text: update.content.text });
-        else
+        } else
           this.emit({
             kind: "thinking_delta",
             text: update.content.text,
@@ -423,82 +704,9 @@ class AntigravitySession implements RuntimeProcess {
         break;
       }
       case "tool_call":
-      case "tool_call_update": {
-        this.closeBlock();
-        const id = update.toolCallId;
-        const prior = this.tools.get(id);
-        if (prior?.status === "completed" || prior?.status === "failed") return;
-        const tool = { ...prior, ...update };
-        this.tools.set(id, tool);
-        if (!prior)
-          this.emit({
-            kind: "tool_use_start",
-            toolUseId: id,
-            toolName: tool.title || tool.kind || "Tool",
-            input: toolInput(tool),
-          });
-        if (tool.status === "completed" || tool.status === "failed") {
-          this.emit({
-            kind: "tool_use_stop",
-            toolUseId: id,
-            input: toolInput(tool),
-          });
-          const text = tool.content
-            ?.map((c) =>
-              c.type === "content" && c.content.type === "text"
-                ? c.content.text
-                : c.type === "diff"
-                  ? JSON.stringify({
-                      path: c.path,
-                      oldText: c.oldText,
-                      newText: c.newText,
-                    })
-                  : "",
-            )
-            .filter(Boolean)
-            .join("\n");
-          const attachments = tool.content?.flatMap((part) => {
-            if (part.type !== "content" || part.content.type !== "image")
-              return [];
-            const ctx = {
-              sessionId: this.productSessionId,
-              turnId: this.turnId,
-              toolUseId: id,
-              mimeType: part.content.mimeType,
-              producedBy: "antigravity",
-            };
-            const { attachment, pendingId } = makePlaceholderAttachment(ctx);
-            trackInFlightSave(
-              saveToolAttachment(
-                { kind: "base64", data: part.content.data },
-                ctx,
-              )
-                .catch((error) => makeErrorAttachment(ctx, error, pendingId))
-                .then((saved) =>
-                  this.emit({
-                    kind: "tool_attachment_update",
-                    toolUseId: id,
-                    pendingId,
-                    attachment: saved,
-                  }),
-                ),
-            );
-            return [attachment];
-          });
-          this.emit({
-            kind: "tool_result",
-            toolUseId: id,
-            content:
-              text ||
-              (typeof tool.rawOutput === "string"
-                ? tool.rawOutput
-                : JSON.stringify(tool.rawOutput ?? "")),
-            attachments,
-            isError: tool.status === "failed",
-          });
-        }
+      case "tool_call_update":
+        this.updateTool(update);
         break;
-      }
       case "usage_update":
         this.emit({
           kind: "context_update",
@@ -525,15 +733,7 @@ class AntigravitySession implements RuntimeProcess {
       throw new Error("Antigravity 会话当前无法接收消息");
     if (images.length && !this.image)
       throw new Error("当前 Antigravity CLI 不支持图片输入");
-    this.active = true;
-    this.turnId = randomUUID();
-    const complete = (status: string, error?: string) => {
-      this.closeBlock();
-      this.tools.clear();
-      this.cancelPending();
-      this.active = false;
-      this.emit({ kind: "turn_complete", status, error });
-    };
+    this.beginTurn('prompt');
     const written = new Promise<void>((resolve, reject) => {
       this.dispatched = { resolve, reject };
     });
@@ -554,19 +754,27 @@ class AntigravitySession implements RuntimeProcess {
           if (result.usage)
             this.emit({
               kind: "usage",
+              // agy reports this prompt's Gemini counters. Cached input
+              // and thinking are reported separately from regular tokens.
+              semantics: "delta",
               inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens,
+              outputTokens: result.usage.outputTokens + (result.usage.thoughtTokens ?? 0),
               cacheReadTokens: result.usage.cachedReadTokens ?? undefined,
               cacheCreationTokens: result.usage.cachedWriteTokens ?? undefined,
             });
-          if (result.stopReason === "end_turn") complete("completed");
-          else if (result.stopReason === "cancelled") complete("cancelled");
-          else complete("failed", "Antigravity: " + result.stopReason);
+          switch (result.stopReason) {
+            case "end_turn": this.finishTurn("completed"); break;
+            case "cancelled": this.finishTurn("cancelled"); break;
+            case "max_tokens": this.finishTurn("failed", "Antigravity 已达到此轮输出长度上限"); break;
+            case "max_turn_requests": this.finishTurn("failed", "Antigravity 已达到此轮请求次数上限"); break;
+            case "refusal": this.finishTurn("failed", "Antigravity 模型拒绝继续此轮请求"); break;
+            default: this.finishTurn("failed", "Antigravity 返回了未知的结束状态");
+          }
         },
         (e) => {
           const error = nativeError(e, "session/prompt");
           this.dispatched?.reject(error);
-          if (!this.exited) complete("failed", error.message);
+          if (!this.exited) this.finishTurn("failed", error.message);
         },
       );
     try {
@@ -582,8 +790,27 @@ class AntigravitySession implements RuntimeProcess {
       "options" in group ? group.options : [group],
     );
   }
+  selectedOption(id: string) {
+    const option = this.config.find((entry) => entry.id === id);
+    return option?.type === "select" ? option.currentValue : undefined;
+  }
   modelFamilies() {
     return this.selectOptions("model");
+  }
+  getCurrentModel() {
+    return this.selectedOption("model") ?? this.selectedModel ?? this.models?.currentModelId;
+  }
+  captureDefaultThoughtLevel(model = this.getCurrentModel()) {
+    // Keep the native starting value before the user overrides it. Selecting
+    // the same model again can leave an existing thought-level override applied.
+    const thoughtLevel = this.selectedOption("thought_level");
+    if (model && thoughtLevel && !this.defaultThoughtLevels.has(model)) {
+      this.defaultThoughtLevels.set(model, thoughtLevel);
+    }
+  }
+  getDefaultThoughtLevel() {
+    const model = this.selectedModel ?? this.getCurrentModel();
+    return model ? this.defaultThoughtLevels.get(model) : undefined;
   }
   requiresPermissionModeRestart(mode: string | undefined) {
     return this.skipPermissions !== (mode === ANTIGRAVITY_FULL_ACCESS);
@@ -599,18 +826,11 @@ class AntigravitySession implements RuntimeProcess {
         throw nativeError(error, "session/set_config_option");
       });
     this.config = result.configOptions;
-    if (this.config.find((o) => o.id === configId)?.currentValue !== value)
+    if (this.selectedOption(configId) !== value)
       throw new Error("Antigravity 未应用 " + configId);
   }
 }
 
-function toolInput(tool: ToolCallUpdate): Record<string, unknown> {
-  return tool.rawInput &&
-    typeof tool.rawInput === "object" &&
-    !Array.isArray(tool.rawInput)
-    ? (tool.rawInput as Record<string, unknown>)
-    : { title: tool.title, locations: tool.locations };
-}
 function nativeError(error: unknown, method: string) {
   if (error instanceof RequestError) {
     if (error.code === -32000 && /auth/i.test(error.message))
@@ -672,25 +892,29 @@ export class AntigravityRuntime implements AgentRuntime {
   ): Promise<RuntimeModelInfo[]> {
     if (options?.process) {
       const s = session(options.process);
-      const currentFamily = s.config.find(
-        (o) => o.id === "model",
-      )?.currentValue;
-      const efforts = s
-        .selectOptions("thought_level")
-        .map((o) => ({ reasoningEffort: o.value, description: o.name }));
-      const families = s.modelFamilies().map((o) => ({
-        value: o.value,
-        displayName: o.name,
-        ...(o.value === currentFamily
-          ? { supportedReasoningEfforts: efforts, isDefault: true }
-          : {}),
-      }));
-      return families.length
+      options.signal?.throwIfAborted();
+      const currentModel = s.getCurrentModel();
+      const currentReasoningEffort = s.selectedOption("thought_level");
+      const supportedReasoningEfforts = s.selectOptions("thought_level")
+        .map((option) => ({ reasoningEffort: option.value, description: option.name }));
+      const families = s.modelFamilies();
+      const modelOptions = families.length
         ? families
-        : (s.models?.availableModels ?? []).map((m) => ({
-            value: m.modelId,
-            displayName: m.name,
+        : (s.models?.availableModels ?? []).map((model) => ({
+            value: model.modelId,
+            name: model.name,
           }));
+      return modelOptions.map((model) => ({
+        value: model.value,
+        displayName: model.name,
+        ...(model.value === s.defaultModel ? { isDefault: true } : {}),
+        ...(model.value === currentModel ? {
+          isCurrent: true,
+          supportedReasoningEfforts,
+          currentReasoningEffort,
+          defaultReasoningEffort: s.getDefaultThoughtLevel(),
+        } : {}),
+      }));
     }
     const { output } = await queryCli(
       "models",
@@ -698,7 +922,7 @@ export class AntigravityRuntime implements AgentRuntime {
       options?.signal,
     );
     return output.split(/\r?\n/).flatMap((line) => {
-      const [value, displayName] = line.split("\t");
+      const [value, displayName] = line.split("\t").map((part) => part.trim());
       return value && displayName ? [{ value, displayName }] : [];
     });
   }
@@ -722,6 +946,7 @@ export class AntigravityRuntime implements AgentRuntime {
       options.scenario,
       options.sessionId,
       skipPermissions,
+      antigravityBrainDirectory(env),
     );
     const agent = s.connection.agent;
     let phase = "initialize";
@@ -788,11 +1013,12 @@ export class AntigravityRuntime implements AgentRuntime {
             ),
           );
           projected.push({ ...status, state: "unreported" });
-        } catch {
+        } catch (error) {
+          const errorCode = classifyMcpFailure(error);
           projected.push({
             ...status,
-            state: "failed",
-            errorCode: "mcp_projection_rejected",
+            state: errorCode === "MCP_NEEDS_AUTH" ? "needs_auth" : "failed",
+            errorCode,
           });
         }
       }
@@ -825,7 +1051,8 @@ export class AntigravityRuntime implements AgentRuntime {
       if (!s.sessionId) throw new Error("Antigravity 没有返回会话 ID");
       s.models = (opened as { models?: ModelState }).models;
       s.config = opened.configOptions ?? [];
-      s.defaultModel = s.models?.currentModelId;
+      s.defaultModel = s.getCurrentModel();
+    s.captureDefaultThoughtLevel();
       phase = "session/config";
       if (options.model) await this.setModel(s, options.model);
       if (options.reasoningEffort)
@@ -836,6 +1063,7 @@ export class AntigravityRuntime implements AgentRuntime {
         sessionId: s.sessionId,
         model: options.model ?? s.defaultModel ?? "",
         tools: [],
+        supportsImageInput: s.image,
       });
       s.initialized = true;
       if (s.earlyCommands?.sessionId === s.sessionId)
@@ -878,9 +1106,11 @@ export class AntigravityRuntime implements AgentRuntime {
     const s = session(process);
     const id = model || s.defaultModel;
     if (!id) throw new Error("Antigravity 没有报告默认模型");
-    if (s.modelFamilies().some((option) => option.value === id))
-      await s.setOption("model", id);
-    else
+    if (s.modelFamilies().some((option) => option.value === id)) {
+      if (id !== s.getCurrentModel()) {
+        await s.setOption("model", id);
+      }
+    } else {
       await s.connection.agent
         .request(
           "session/set_model",
@@ -890,23 +1120,15 @@ export class AntigravityRuntime implements AgentRuntime {
         .catch((error) => {
           throw nativeError(error, "session/set_model");
         });
+    }
     s.selectedModel = id;
-    if (s.selectedEffort) await s.setOption("thought_level", s.selectedEffort);
+    s.captureDefaultThoughtLevel(id);
   }
   async setReasoningEffort(process: RuntimeProcess, effort?: string) {
     const s = session(process);
-    if (effort) {
-      await s.setOption("thought_level", effort);
-      s.selectedEffort = effort;
-    } else {
-      const previous = s.selectedEffort;
-      s.selectedEffort = undefined;
-      try {
-        await this.setModel(s, s.selectedModel ?? s.defaultModel);
-      } catch (error) {
-        s.selectedEffort = previous;
-        throw error;
-      }
+    const thoughtLevel = effort ?? s.getDefaultThoughtLevel();
+    if (thoughtLevel !== undefined && thoughtLevel !== s.selectedOption("thought_level")) {
+      await s.setOption("thought_level", thoughtLevel);
     }
   }
   async setPermissionMode(process: RuntimeProcess, mode?: string) {
@@ -930,6 +1152,11 @@ export class AntigravityRuntime implements AgentRuntime {
     if (!pending?.decide) throw new Error("Antigravity 审批已结束");
     pending.decide(decision);
   }
+  async respondPermissionOption(process: RuntimeProcess, id: string, optionId: string) {
+    const pending = session(process).pending.get(id);
+    if (!pending?.choose) throw new Error("Antigravity 审批已结束");
+    pending.choose(optionId);
+  }
   async respondAskUserQuestion(
     process: RuntimeProcess,
     id: string,
@@ -945,7 +1172,7 @@ export class AntigravityRuntime implements AgentRuntime {
       await s.connection.agent.notify("session/cancel", {
         sessionId: s.sessionId,
       });
-      s.cancelPending();
+      s.cancelTurn();
     }
   }
   async stopSession(process: RuntimeProcess) {
@@ -961,6 +1188,7 @@ export class AntigravityRuntime implements AgentRuntime {
     } catch {
       /* Continue through process-tree cleanup if ACP is unavailable. */
     }
+    s.finishBackgroundWork();
     s.connection.close();
     if (s.pid <= 0) return;
     const result = await killWithEscalation(s, {

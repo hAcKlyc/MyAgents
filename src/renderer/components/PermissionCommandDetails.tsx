@@ -15,7 +15,7 @@ export interface PermissionCommandDisplay {
   command: string;
   cwd?: string;
   description?: string;
-  dialect: 'bash' | 'pwsh';
+  dialect: 'bash' | 'pwsh' | 'terminal';
 }
 
 /** Only renders the reviewed command. Copy and approval always retain its exact bytes. */
@@ -45,7 +45,7 @@ export function PermissionCommandDetails({ command, cwd, description, dialect }:
   };
   const pathSeparator = cwd ? Math.max(cwd.lastIndexOf('/'), cwd.lastIndexOf('\\')) : -1;
   // Large approval payloads stay complete without blocking the WebView on syntax parsing.
-  const highlight = command.length <= 16_384;
+  const highlight = dialect !== 'terminal' && command.length <= 16_384;
 
   return <>
     {description && <p className="mt-3 text-sm text-[var(--ink-secondary)]">

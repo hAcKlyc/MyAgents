@@ -454,7 +454,7 @@ describe('SimpleChatInput send paths', () => {
   it('cycles Claude Code choices without returning to hidden modes', () => {
     const onPermissionModeChange = vi.fn();
     renderInput({ runtime: 'claude-code', runtimePermissionModes: CC_PERMISSION_MODES, permissionMode: 'dontAsk' as PermissionMode, onPermissionModeChange });
-    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab', shiftKey: true });
     expect(onPermissionModeChange).toHaveBeenCalledWith('acceptEdits');
   });
 
@@ -1262,6 +1262,72 @@ describe('SimpleChatInput send paths', () => {
     expect(screen.getByRole('button', { name: 'Updated model' })).toBeVisible();
     view.rerender(input([]));
     expect(screen.getByText('暂未发现可用模型。')).toBeVisible();
+  });
+
+  it('uses the actual Antigravity command instead of a colliding project command', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    try {
+      renderInput({ runtime: 'antigravity', workspacePath: '/workspace',
+        workspaceSlashCommands: [
+          { name: 'inspect', description: 'Project description', source: 'custom' },
+          { name: 'project-only', description: 'Not an Antigravity command', source: 'custom' },
+        ],
+        sdkSlashCommands: [{ name: 'inspect', description: 'Native description', argumentHint: '<path>', source: 'sdk' }],
+      });
+      const textbox = screen.getByRole('textbox');
+      fireEvent.change(textbox, { target: { value: '/', selectionStart: 1 } });
+      expect(await screen.findByText('Native description · <path>')).toBeVisible();
+      expect(screen.queryByText('Project description')).not.toBeInTheDocument();
+      expect(screen.queryByText('/project-only')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByText('/inspect'));
+      expect(textbox).toHaveValue('/inspect ');
+    } finally {
+      if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
+  });
+
+  it('keeps the Antigravity image and text draft when the session rejects image input', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const onSend = renderInput({ runtime: 'antigravity', runtimeSupportsImageInput: false });
+    const textbox = screen.getByRole('textbox');
+    fireEvent.paste(textbox, { clipboardData: {
+      items: [{ kind: 'file', getAsFile: () => new File(['png'], 'clip.png', { type: 'image/png' }) }],
+    } });
+    await screen.findByRole('button', { name: 'clip.png' });
+    fireEvent.change(textbox, { target: { value: 'Inspect this image' } });
+    fireEvent.keyDown(textbox, { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(textbox).toHaveValue('Inspect this image');
+    expect(screen.getByRole('button', { name: 'clip.png' })).toBeVisible();
+    expect(screen.getByText(/当前运行环境不接收图片/)).toBeInTheDocument();
+  });
+
+  it('preserves the Antigravity draft and selected model while retrying discovery', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const retry = vi.fn();
+    renderInput({ runtime: 'antigravity', selectedModel: 'saved-model', runtimeModels: [], runtimeModelsError: true, onRuntimeModelsRetry: retry });
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'my draft' } });
+    fireEvent.click(screen.getByTitle('切换模型'));
+    expect(screen.getByRole('status')).toHaveTextContent('模型列表加载失败');
+    fireEvent.click(screen.getByRole('button', { name: '重新加载' }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.getByTitle('切换模型')).toHaveTextContent('saved-model');
+    expect(screen.getByRole('textbox')).toHaveValue('my draft');
+  });
+
+  it('cycles Antigravity permissions only from the focused composer and warns on full access', async () => {
+    await i18n.changeLanguage('zh-CN');
+    const onPermissionModeChange = vi.fn();
+    renderInput({ runtime: 'antigravity', runtimePermissionModes: ANTIGRAVITY_PERMISSION_MODES,
+      permissionMode: 'auto', onPermissionModeChange });
+    fireEvent.keyDown(screen.getByTitle('切换执行模式'), { key: 'Tab', shiftKey: true });
+    expect(onPermissionModeChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Tab', shiftKey: true });
+    expect(onPermissionModeChange).toHaveBeenCalledWith('dangerously-skip-permissions');
+    expect(screen.getByText(/完全访问权限允许 Antigravity/)).toBeInTheDocument();
   });
 
   it('does not show the custom model service row for user-managed CLI runtimes', async () => {

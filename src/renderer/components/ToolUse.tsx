@@ -1,10 +1,15 @@
 import type React from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ToolUseSimple } from '@/types/chat';
+import { fetchTextLargeValueRef } from '@/api/largeValueRef';
+import { getTabServerUrl } from '@/api/tauriClient';
+import { useTabApiOptional } from '@/context/TabContext';
+import { useNotifyRowLayoutChanged } from '@/context/ChatRowLayoutContext';
+import type { ToolInput, ToolUseSimple } from '@/types/chat';
+import { parsePartialJson } from '@/utils/parsePartialJson';
 
 import BashOutputTool from './tools/BashOutputTool';
 import BashTool from './tools/BashTool';
-import { CollapsibleTool } from './tools/CollapsibleTool';
 import EditTool from './tools/EditTool';
 import FilePatchTool from './tools/FilePatchTool';
 import EdgeTtsTool from './tools/EdgeTtsTool';
@@ -21,6 +26,7 @@ import TaskTodoTool from './tools/TaskTodoTool';
 import WebFetchTool from './tools/WebFetchTool';
 import WebSearchTool from './tools/WebSearchTool';
 import WriteTool from './tools/WriteTool';
+import { ExpandableContainer } from './tools/utils';
 import CronTaskCard from './scheduled-tasks/CronTaskCard';
 import { dshToolDisplayName } from '../../shared/toolDisplay/dshToolNames';
 
@@ -67,15 +73,51 @@ interface ToolUseProps {
 
 export default function ToolUse({ tool: rawTool }: ToolUseProps) {
   const { t } = useTranslation('chat');
-  // Bash and file-patch tools own specialized, bounded projections. Generic
-  // pre-clamping would corrupt their structured completion wrappers before the
-  // authoritative parser can separate streams or applied file changes.
-  const ownsBoundedProjection = ['Bash', 'bash', 'pwsh'].includes(rawTool.name)
-    || rawTool.name === 'PowerShell'
-    || dshToolDisplayName(rawTool.name) === 'Edit'
-    || rawTool.name === 'MultiEdit'
-    || dshToolDisplayName(rawTool.name) === 'Write';
-  const tool = ownsBoundedProjection ? rawTool : clampResult(rawTool, t);
+  const input = rawTool.parsedInput
+    ?? (rawTool.inputJson ? parsePartialJson(rawTool.inputJson) as ToolInput | null : null)
+    ?? (Object.keys(rawTool.input ?? {}).length > 0 ? rawTool.input as ToolInput : undefined);
+  const toolWithInput = input === rawTool.parsedInput ? rawTool : { ...rawTool, parsedInput: input };
+  const resultRef = toolWithInput.resultMeta?.largeValueRef;
+  if (resultRef) return <ToolUseWithResultRef key={resultRef.id} tool={toolWithInput} resultRef={resultRef} t={t} />;
+  return renderToolBody(toolWithInput, t);
+}
+
+function ToolUseWithResultRef({ tool, resultRef, t }: {
+  tool: ToolUseSimple;
+  resultRef: NonNullable<NonNullable<ToolUseSimple['resultMeta']>['largeValueRef']>;
+  t: ChatTranslator;
+}) {
+  const tab = useTabApiOptional();
+  const notifyRowLayoutChanged = useNotifyRowLayoutChanged();
+  const pending = useRef<AbortController | null>(null);
+  const [fullResult, setFullResult] = useState<string>();
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
+  useEffect(() => () => pending.current?.abort(), []);
+
+  const loadResult = async () => {
+    if (!tab || pending.current) return;
+    const controller = new AbortController();
+    pending.current = controller;
+    setLoadState('loading');
+    try {
+      const baseUrl = await getTabServerUrl(tab.tabId);
+      const value = await fetchTextLargeValueRef(baseUrl, resultRef, controller.signal);
+      if (controller.signal.aborted) return;
+      notifyRowLayoutChanged('expandable-container-expand');
+      setFullResult(value);
+      setLoadState('idle');
+    } catch {
+      if (!controller.signal.aborted) setLoadState('error');
+    } finally {
+      pending.current = null;
+    }
+  };
+
+  const displayedTool = fullResult === undefined ? tool : {
+    ...tool,
+    result: fullResult,
+    resultMeta: { ...tool.resultMeta, largeValueRef: undefined },
+  };
   // NOTE: tool.attachments are NOT rendered here. ToolUse lives inside
   // ProcessRow's collapsible body (BlockGroup), so rendering rich-media here
   // buried the player inside the folded tool window (PRD 0.2.30 bug). The
@@ -83,11 +125,32 @@ export default function ToolUse({ tool: rawTool }: ToolUseProps) {
   // message flow in Message.tsx (standalone, always-visible in-flow cards);
   // PROCESS media (screenshots) is rendered by ProcessRow right after this
   // component inside the expanded body — deliberately behind the fold.
-  return renderToolBody(tool);
+  return (
+    <div className="space-y-2">
+      {renderToolBody(displayedTool, t)}
+      {fullResult === undefined && tab && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={loadState === 'loading'}
+            onClick={() => void loadResult()}
+            className="min-h-8 rounded-md border border-[var(--line)] px-2 text-xs text-[var(--ink-secondary)] hover:bg-[var(--paper-inset)] disabled:cursor-wait"
+          >
+            {t(loadState === 'loading' ? 'shell.toolChrome.common.loadingOutput' : 'shell.toolChrome.common.loadOutput')}
+          </button>
+          {loadState === 'error' && <span role="alert" className="text-xs text-[var(--error)]">{t('shell.toolChrome.common.loadOutputFailed')}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function renderToolBody(tool: ToolUseSimple): React.JSX.Element {
-  switch (dshToolDisplayName(tool.name)) {
+function renderToolBody(fullTool: ToolUseSimple, t: ChatTranslator): React.JSX.Element {
+  const name = dshToolDisplayName(fullTool.name);
+  // These components parse their structured result before limiting its presentation.
+  const tool = ['Bash', 'PowerShell', 'bash', 'pwsh', 'Edit', 'MultiEdit', 'Write'].includes(name)
+    ? fullTool : clampResult(fullTool, t);
+  switch (name) {
     case 'bash':
     case 'pwsh':
     case 'Bash':
@@ -159,25 +222,33 @@ function renderToolBody(tool: ToolUseSimple): React.JSX.Element {
         }
       }
 
-      // Fallback for unknown tools - show raw JSON
-      const collapsedContent = (
-        <div className="text-sm text-[var(--ink-muted)]">
-          <span className="font-medium">{tool.name}</span>
-        </div>
-      );
-
-      const expandedContent =
-        tool.inputJson ?
-          <div className="ml-5">
-            <pre className="overflow-x-auto rounded bg-[var(--paper-inset)]/50 px-2 py-1.5 font-mono text-sm wrap-break-word whitespace-pre-wrap text-[var(--ink-secondary)]">
-              {tool.inputJson}
-            </pre>
-          </div>
-        : null;
-
       return (
-        <CollapsibleTool collapsedContent={collapsedContent} expandedContent={expandedContent} />
+        <div className="space-y-3">
+          {tool.parsedInput || tool.inputJson ? (
+            <ToolDetailsSection title={t('shell.toolChrome.common.parameters')}>
+              {tool.inputJson ?? JSON.stringify(tool.parsedInput, null, 2)}
+            </ToolDetailsSection>
+          ) : null}
+          {tool.result !== undefined || tool.isError || tool.isFailed || tool.isStopped ? (
+            <ToolDetailsSection title={t('shell.toolChrome.common.output')} error={tool.isError || tool.isFailed}>
+              {tool.result || t('shell.toolChrome.bash.noOutput')}
+            </ToolDetailsSection>
+          ) : null}
+        </div>
       );
     }
   }
+}
+
+function ToolDetailsSection({ title, children, error }: { title: string; children: string | undefined; error?: boolean }) {
+  return (
+    <section className="space-y-1" aria-label={title}>
+      <h3 className={`text-xs font-medium ${error ? 'text-[var(--error)]' : 'text-[var(--ink-muted)]'}`}>{title}</h3>
+      <ExpandableContainer wrapperClassName="rounded bg-[var(--paper-inset)]">
+        <pre className="whitespace-pre-wrap wrap-break-word px-2 py-1.5 font-mono text-sm text-[var(--ink-secondary)]">
+          {children}
+        </pre>
+      </ExpandableContainer>
+    </section>
+  );
 }

@@ -19,6 +19,7 @@ interface SlashCommandMenuProps {
     commands: SlashCommand[]; // Already filtered commands
     selectedIndex: number;
     onSelect: (command: SlashCommand) => void;
+    sdkSourceLabel?: string;
     isEmpty?: boolean; // True when search found no results
 }
 
@@ -27,6 +28,7 @@ export default function SlashCommandMenu({
     selectedIndex,
     onSelect,
     isEmpty = false,
+    sdkSourceLabel = 'plugin',
 }: SlashCommandMenuProps) {
     const { t } = useTranslation('chat');
     // Ref to track the selected item for auto-scroll
@@ -73,14 +75,14 @@ export default function SlashCommandMenu({
                     )}
                     {cmd.source === 'sdk' && (
                         <span className="text-xs text-[var(--ink-muted)]/60 bg-[var(--paper-inset)] px-1.5 py-0.5 rounded shrink-0">
-                            plugin
+                            {sdkSourceLabel}
                         </span>
                     )}
                     <span
                         className="text-[var(--ink-muted)] text-xs truncate flex-1"
-                        title={cmd.description}
+                        title={[cmd.description, cmd.argumentHint].filter(Boolean).join(' · ')}
                     >
-                        {cmd.description}
+                        {[cmd.description, cmd.argumentHint].filter(Boolean).join(' · ')}
                     </span>
                 </div>
             ))}

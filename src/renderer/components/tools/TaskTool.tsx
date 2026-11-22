@@ -2,7 +2,7 @@
 import type { AgentInput, BackgroundTaskStats, SubagentToolCall, ToolUseSimple, TaskStats } from '@/types/chat';
 
 import Markdown from '@/components/Markdown';
-import { formatDuration } from '@/components/tools/toolBadgeConfig';
+import { formatDuration, getToolBadgeConfig } from '@/components/tools/toolBadgeConfig';
 import {
   getSubagentContainerDurationMs,
   getSubagentContainerLifecycleStatus,
@@ -11,7 +11,9 @@ import {
   isSubagentContainerRunning,
 } from '@/components/tools/subagentActivity';
 import ToolAttachmentGallery from '@/components/tools/ToolAttachmentGallery';
+import BashTool from '@/components/tools/BashTool';
 import FilePatchTool from '@/components/tools/FilePatchTool';
+import ReadTool from '@/components/tools/ReadTool';
 import { ExpandableResult } from '@/components/tools/utils';
 import { useTabApiOptional, useTabStateOptional } from '@/context/TabContext';
 import { useBackgroundTaskPolling } from '@/hooks/useBackgroundTaskPolling';
@@ -24,13 +26,13 @@ import {
   CoinsIcon,
   LoaderIcon,
   StopCircleIcon,
-  TerminalIcon,
   WrenchIcon,
   XCircleIcon,
 } from '@/components/icons';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
+import { dshToolDisplayName } from '../../../shared/toolDisplay/dshToolNames';
 
 // Pattern 3 §3.2.3 — virtualize the expanded trace list when subagent calls are
 // numerous. Below this threshold the simple flow layout wins (no overscan
@@ -495,53 +497,46 @@ const SubagentCallItem = memo(function SubagentCallItem({ call }: { call: Subage
   }, [call.inputJson, call.input]);
 
   const isCallRunning = isSubagentCallRunning(call);
-  const isFilePatchCall = call.name === 'Edit' || call.name === 'Write'
-    || call.name === 'edit' || call.name === 'write';
+  const name = dshToolDisplayName(call.name);
+  const isFilePatchCall = name === 'Edit' || name === 'Write' || name === 'MultiEdit';
+  const tool: ToolUseSimple = {
+    ...call,
+    streamIndex: 0,
+    parsedInput: call.parsedInput ?? (call.input as ToolUseSimple['parsedInput']),
+  };
+  const specializedBody = isFilePatchCall ? <FilePatchTool tool={tool} />
+    : name === 'Read' ? <ReadTool tool={tool} />
+    : ['Bash', 'PowerShell', 'bash', 'pwsh'].includes(name) ? <BashTool tool={tool} /> : null;
+  const isPending = call.resultMeta?.status === 'pending';
 
   return (
     <div className="group flex flex-col gap-2 rounded-lg border border-[var(--line)] bg-[var(--paper)] p-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded bg-[var(--accent-cool)]/10 text-[var(--accent-cool)]">
-            <TerminalIcon className="size-3.5" />
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex size-6 shrink-0 items-center justify-center rounded bg-[var(--accent-cool)]/10 text-[var(--accent-cool)]">
+            {getToolBadgeConfig(call.name).icon}
           </div>
-          <span className="text-sm font-medium text-[var(--ink)]">{call.name}</span>
+          <span className="min-w-0 truncate text-sm font-medium text-[var(--ink)]">{call.name}</span>
         </div>
         {isCallRunning && (
-          <div className="flex items-center gap-1.5 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-xs font-medium text-[var(--accent)]">
-            <LoaderIcon className="size-3 animate-spin" />
-            <span>{t('shell.toolChrome.common.executing')}</span>
+          <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-xs font-medium text-[var(--accent)]">
+            {isPending ? <ClockIcon className="size-3" /> : <LoaderIcon className="size-3 animate-spin motion-reduce:animate-none" />}
+            <span>{t(isPending ? 'shell.toolChrome.bash.status.pending' : 'shell.toolChrome.common.executing')}</span>
           </div>
         )}
       </div>
 
       {description && <div className="text-xs text-[var(--ink-muted)]">{description}</div>}
 
-      {isFilePatchCall ? (
-        <FilePatchTool
-          tool={{
-            id: call.id,
-            name: call.name,
-            input: call.input,
-            streamIndex: 0,
-            inputJson: call.inputJson,
-            parsedInput: call.parsedInput,
-            result: call.result,
-            resultMeta: call.resultMeta,
-            isLoading: call.isLoading,
-            isError: call.isError,
-            attachments: call.attachments,
-          }}
-        />
-      ) : inputText && (
+      {specializedBody ?? (inputText && (
         <div className="relative overflow-hidden rounded-md bg-[var(--paper-inset)] border border-[var(--line-subtle)]">
           <pre className="max-h-32 overflow-y-auto p-2 font-mono text-xs text-[var(--ink-secondary)] whitespace-pre-wrap break-words">
             {inputText}
           </pre>
         </div>
-      )}
+      ))}
 
-      {call.result && !isFilePatchCall && (
+      {call.result && !specializedBody && (
         <div className="mt-1">
           <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--ink-muted)]">{t('shell.toolChrome.common.result')}</div>
           <ExpandableResult
