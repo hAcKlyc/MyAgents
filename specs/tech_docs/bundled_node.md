@@ -2,7 +2,7 @@
 
 MyAgents 随应用提供单一 Node.js v24，用于 Sidecar、Plugin Bridge、MCP Server 和 `myagents` CLI。用户不需要安装系统 Node 才能运行产品功能；内置 Node/npm 的精确组合以 `scripts/node-runtime.json` 为唯一构建权威，下载脚本和前端版本展示共同读取。
 
-开发与构建工具链由 `package.json#engines` / `devEngines` 定义最低版本：Node `>=24.14.0`、npm `>=11.15.0`，不要求与内置运行时相等。`.nvmrc` 只提供推荐安装版本；setup 的无依赖版本检查与 npm 的安装、构建检查通过回归测试保持一致。原生扩展仍须针对内置 Node 的 ABI 重建，不能用构建机版本替代运行时 identity。
+开发与构建工具链由 `package.json#engines` / `devEngines` 定义最低版本：Node `>=24.14.0`、npm `>=11.15.0`。`.nvmrc` 推荐与内置运行时一致的 Node 版本。setup 的无依赖版本检查与 npm 的安装、构建检查通过回归测试保持一致。原生扩展仍须针对内置 Node 的 ABI 重建，不能用构建机版本替代运行时 identity。
 
 ## 获取、缓存与打包
 

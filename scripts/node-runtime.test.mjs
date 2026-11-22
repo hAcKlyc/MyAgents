@@ -42,7 +42,7 @@ test('development version ranges stay separate from the pinned runtime', () => {
     packageManager: { name: 'npm', version: pkg.engines.npm, onFail: 'error' },
   });
   assert.equal(pkg.packageManager, undefined, 'do not override the npm range with an exact Corepack pin');
-  assert.equal(readFileSync(join(repo, '.nvmrc'), 'utf8').trim(), '24.14.0');
+  assert.equal(readFileSync(join(repo, '.nvmrc'), 'utf8').trim(), versions.node);
   const setup = readFileSync(join(repo, 'setup.sh'), 'utf8');
   for (const [name, range] of Object.entries(pkg.engines)) {
     const line = setup.split('\n').find((line) => line.includes(`$(${name} --version`));
