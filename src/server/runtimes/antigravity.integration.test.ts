@@ -746,30 +746,33 @@ it("maps legacy flat model IDs onto ACP family + thought_level options while pre
         { reasoningEffort: "high", description: "high" },
       ],
     },
-    {
-      value: "model-b",
-      defaultReasoningEffort: "low",
-      supportedReasoningEfforts: [
-        { reasoningEffort: "low", description: "Low" },
-        { reasoningEffort: "high", description: "High" },
-      ],
-    },
+    { value: "model-b", displayName: "model-b" },
   ]);
+  expect((await readCatalog())[1]?.supportedReasoningEfforts).toBeUndefined();
 
-  // Resetting effort back to default restores the family's native default ("high"), not "medium".
+  // Reapplying the persisted model at the next turn boundary keeps the reset.
   await runtime.setReasoningEffort(processHandle, undefined);
+  await runtime.setModel(processHandle, "model-a-medium");
   expect((await readCatalog())[0]?.currentReasoningEffort).toBe("high");
+
+  await runtime.setModel(processHandle, "model-b");
+  expect((await readCatalog())[1]).toMatchObject({
+    isCurrent: true,
+    defaultReasoningEffort: "low",
+    supportedReasoningEfforts: [{ reasoningEffort: "low", description: "low" }],
+  });
 });
 
-it("preserves native flat IDs when an ACP worker only advertises legacy models without configOptions", async () => {
+it("maps the Launcher family and effort to a supported flat model for a legacy ACP worker", async () => {
   const legacyFixture = `
 const lines = require('node:readline').createInterface({input: process.stdin});
 const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
 const available = [
   {modelId:'legacy-a-high', name:'Legacy A (High)'},
   {modelId:'legacy-a-low', name:'Legacy A (Low)'},
+  {modelId:'legacy-b', name:'Legacy B'},
 ];
-let current = 'legacy-a-high';
+let current = 'legacy-b';
 lines.on('line', line => {
   const f = JSON.parse(line);
   const reply = result => send({id:f.id, result});
@@ -785,13 +788,31 @@ lines.on('line', line => {
 });
 `;
   directory = await mkdtemp(join(tmpdir(), "MyAgents-legacy-models-"));
-  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
-    originalSpawn([process.execPath, "-e", legacyFixture], options));
+  const cliRows = "legacy-a-high\tLegacy A (High)\nlegacy-a-low\tLegacy A (Low)\nlegacy-b\tLegacy B";
+  vi.spyOn(subprocess, "spawn").mockImplementation((argv, options) =>
+    originalSpawn([
+      process.execPath,
+      "-e",
+      argv[1] === "models" ? `console.log(${JSON.stringify(cliRows)})` : legacyFixture,
+    ], options));
+  const [family] = await runtime.queryModels();
+  expect(family?.value).toBe("legacy-a");
   processHandle = await runtime.startSession(
-    { workspacePath: directory, sessionId: "legacy-product", scenario: { type: "desktop" } },
+    {
+      workspacePath: directory,
+      sessionId: "legacy-product",
+      scenario: { type: "desktop" },
+      model: family!.value,
+      reasoningEffort: "low",
+    },
     () => undefined,
   );
   const catalog = await runtime.queryModels({ process: processHandle });
-  expect(catalog.map((m) => m.value)).toEqual(["legacy-a-high", "legacy-a-low"]);
-  await expect(runtime.setModel(processHandle, catalog[1]!.value)).resolves.toBeUndefined();
+  expect(catalog.map((model) => model.value)).toEqual(["legacy-a-high", "legacy-a-low", "legacy-b"]);
+  expect(catalog.find((model) => model.isCurrent)?.value).toBe("legacy-a-low");
+  await runtime.setModel(processHandle, "legacy-a-high");
+  await runtime.setReasoningEffort(processHandle, "low");
+  await runtime.setModel(processHandle, family!.value);
+  expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
+    .toBe("legacy-a-low");
 });

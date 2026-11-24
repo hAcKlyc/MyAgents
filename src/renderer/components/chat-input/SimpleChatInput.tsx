@@ -456,10 +456,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     ? resolveAntigravityModelSelection(runtimeModels, selectedModel)
     : null;
   const antigravityEffortModel = runtime === 'antigravity'
-    ? (antigravitySelection?.model
-        ?? runtimeModels?.find(model => model.isCurrent)
-        ?? runtimeModels?.find(model => model.isDefault)
-        ?? runtimeModels?.[0])
+    ? (antigravitySelection?.model ?? (!selectedModel
+        ? runtimeModels?.find(model => model.isCurrent) ?? runtimeModels?.find(model => model.isDefault)
+        : undefined))
     : undefined;
   const effortModel = managedReasoningModel !== undefined
     ? managedReasoningModel

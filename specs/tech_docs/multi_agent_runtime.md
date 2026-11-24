@@ -198,7 +198,7 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 ### 5.5 Antigravity CLI
 
-选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。无活跃 ACP 进程时（起始页与尚未唤醒的对话页），模型菜单读取 `agy models` 并按与 ACP 一致的规则将多档推理强度变体折叠为「模型家族 + `supportedReasoningEfforts`」（单变体与非强度后缀条目保持原样）；会话唤醒后以本 Session worker 回报的 `configOptions`（`model` 与 `thought_level`）为运行期权威，同时兼容历史保存的扁平模型 ID（如 `gemini-4-neon-high`）的展示高亮与配置下发。macOS Dev 已验证 Antigravity CLI 1.5.14。
+选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。无活跃 ACP 进程时（起始页与尚未唤醒的对话页），模型菜单读取 `agy models` 并按与 ACP 一致的规则将多档推理强度变体折叠为「模型家族 + `supportedReasoningEfforts`」（单变体与非强度后缀条目保持原样）；会话唤醒后以本 Session worker 回报的 `configOptions`（`model` 与 `thought_level`）为运行期权威，推理档位只展示当前模型的已确认选项，同时兼容历史保存的扁平模型 ID（如 `gemini-4-neon-high`）的展示高亮与配置下发。仅提供扁平 ID 的旧 worker 继续接收原生 ID，用户选择的模型家族与档位由 adapter 映射到原生变体。目录未报告默认模型时，先通过显式选模确定可用档位。macOS Dev 已验证 Antigravity CLI 1.5.14。
 
 每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
 

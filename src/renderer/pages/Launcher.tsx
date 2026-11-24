@@ -1,5 +1,6 @@
 import { resolveDefaultWorkspaceProject } from '@/components/launcher/WorkspaceSelector';
 import { reasoningEffortAfterModelChange } from '../../shared/reasoningEffort';
+import { resolveAntigravityModelSelection } from '../../shared/antigravityModelCatalog';
 /**
  * Launcher - Main entry page for MyAgents
  * Lightweight new-work page. Global navigation and workspace/session history
@@ -680,6 +681,13 @@ export default function Launcher({
   // handed-off Chat tab seeds from the agent and pushes on connect).
   const handleLauncherReasoningEffortChange = useCallback(
     (effort: string) => {
+      const familyModel = launcherRuntime === 'antigravity'
+        ? resolveAntigravityModelSelection(launcherRuntimeModels, launcherSelectedModel).model
+        : undefined;
+      const normalizedModel = familyModel?.supportedReasoningEfforts?.length && familyModel.value !== launcherSelectedModel
+        ? familyModel.value
+        : undefined;
+      if (normalizedModel) setLauncherSelectedModel(normalizedModel);
       setLauncherReasoningEffort(effort);
       const model = launcherSelectedModel ?? launcherProvider?.primaryModel;
       const intent = usesManagedCodexProvider && launcherProvider && model
@@ -689,7 +697,11 @@ export default function Launcher({
           workspaceId: selectedWorkspace.id,
           agentId: selectedWorkspace.agentId ?? null,
           isExternalRuntime,
-          fields: { reasoningEffort: effort, ...(intent?.kind === 'runtime-backed-provider' ? { runtimeBackedProviderContext: intent } : {}) },
+          fields: {
+            reasoningEffort: effort,
+            ...(normalizedModel ? { runtimeModel: normalizedModel } : {}),
+            ...(intent?.kind === 'runtime-backed-provider' ? { runtimeBackedProviderContext: intent } : {}),
+          },
           patchProject,
           patchAgentConfig,
           patchAgentProjectConfig,
@@ -701,6 +713,7 @@ export default function Launcher({
       patchProject,
       isExternalRuntime,
       launcherSelectedModel, launcherProvider, usesManagedCodexProvider,
+      launcherRuntime, launcherRuntimeModels,
     ],
   );
 

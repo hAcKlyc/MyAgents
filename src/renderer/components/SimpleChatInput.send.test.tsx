@@ -1710,7 +1710,7 @@ describe('SimpleChatInput send paths', () => {
     expect(textarea).toHaveValue('workspace B draft');
   });
 
-  it('shows the split Antigravity reasoning-effort row before a session starts and maps legacy flat model IDs onto family rows', async () => {
+  it('shows Antigravity reasoning choices only for an identified model and maps legacy IDs onto family rows', async () => {
     const user = userEvent.setup();
     const onReasoningEffortChange = vi.fn();
     const onModelChange = vi.fn();
@@ -1732,7 +1732,7 @@ describe('SimpleChatInput send paths', () => {
       },
     ];
 
-    // 1. Pre-session Launcher/Chat with no selectedModel and no live isCurrent still shows the effort row.
+    // A cold catalog does not say which model the native worker will choose.
     const { unmount } = render(
       <ToastProvider>
         <ImagePreviewProvider>
@@ -1753,8 +1753,7 @@ describe('SimpleChatInput send paths', () => {
 
     const modelBtn = screen.getByRole('button', { name: i18n.t('chat:input.modelDefault') });
     await user.click(modelBtn);
-    expect(screen.getByRole('button', { name: /推理强度/ })).toBeTruthy();
-    expect(screen.getByText('默认 (high)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /推理强度/ })).toBeNull();
     unmount();
 
     // 2. Legacy persisted flat ID `gemini-4-neon-medium` maps onto family display name, selection highlight, and offline effort hint.

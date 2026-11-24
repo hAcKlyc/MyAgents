@@ -164,6 +164,7 @@ import { isDebugMode } from '@/utils/debug';
 import { getChannelTypeLabel } from '@/utils/taskCenterUtils';
 import { appendCronPromptToDraft } from '@/utils/cronComposerRecovery';
 import { resolveAgentRuntimeModelCatalogIdentity, runtimeModelCatalogPath } from '@/utils/runtimeModelCatalog';
+import { resolveAntigravityModelSelection } from '../../shared/antigravityModelCatalog';
 import { launchSupportDiagnostics } from '@/utils/supportDiagnostics';
 import { createDefaultSessionGoalDraftConfig } from '@/utils/sessionGoalDraft';
 import { MANAGED_CODEX_COMPACT_SLASH_COMMAND } from '@/utils/slashActions';
@@ -3911,10 +3912,14 @@ export default function Chat({
     if (lastPushedModelKeyRef.current === dedupeKey) return;
     lastPushedModelKeyRef.current = dedupeKey;
 
-    apiPost('/api/model/set', { model: modelToPush }).catch((err) => {
-      console.error('[Chat] sync model failed:', err);
-      lastPushedModelKeyRef.current = null; // allow retry
-    });
+    apiPost<{ success: boolean }>('/api/model/set', { model: modelToPush })
+      .then((result) => {
+        if (currentRuntime === 'antigravity' && result?.success) retryRuntimeModels();
+      })
+      .catch((err) => {
+        console.error('[Chat] sync model failed:', err);
+        lastPushedModelKeyRef.current = null; // allow retry
+      });
   }, [
     isConnected,
     sessionRuntime,
@@ -3929,6 +3934,7 @@ export default function Chat({
     sessionSnapshotOwnsConfig,
     sessionMeta?.model,
     currentRuntime,
+    retryRuntimeModels,
   ]);
 
   // #324 — NO mount-time effort-push effect, deliberately diverging from the
@@ -4538,14 +4544,18 @@ export default function Chat({
   const deferredEffortPushRef = useRef<string | null>(null);
   const pushReasoningEffort = useCallback(
     (effort: string) => {
-      apiPost('/api/reasoning-effort/set', { effort }).catch((err) => {
-        console.error(
-          '[Chat] push reasoning effort failed (send payload will correct at next message):',
-          err,
-        );
-      });
+      apiPost<{ success: boolean }>('/api/reasoning-effort/set', { effort })
+        .then((result) => {
+          if (currentRuntime === 'antigravity' && result?.success) retryRuntimeModels();
+        })
+        .catch((err) => {
+          console.error(
+            '[Chat] push reasoning effort failed (send payload will correct at next message):',
+            err,
+          );
+        });
     },
-    [apiPost],
+    [apiPost, currentRuntime, retryRuntimeModels],
   );
   useEffect(() => {
     if (configPending) return;
@@ -4558,7 +4568,13 @@ export default function Chat({
   const handleReasoningEffortChange = useCallback(
     async (effort: string) => {
       if (guardCronConfigMutation()) return;
-      if (reasoningEffort === effort) return;
+      const familyModel = currentRuntime === 'antigravity'
+        ? resolveAntigravityModelSelection(antigravityModels, runtimeModel).model
+        : undefined;
+      const normalizedModel = familyModel?.supportedReasoningEfforts?.length && familyModel.value !== runtimeModel
+        ? familyModel.value
+        : undefined;
+      if (reasoningEffort === effort && !normalizedModel) return;
       track('reasoning_effort_switch', {
         source: 'desktop',
         tab_id: tabId,
@@ -4569,8 +4585,10 @@ export default function Chat({
       });
       const persisted = await persistTabConfigChange({
         reasoningEffort: effort,
+        ...(normalizedModel ? { runtimeModel: normalizedModel } : {}),
       });
       if (!persisted) return;
+      if (normalizedModel) setRuntimeModel(normalizedModel);
       setReasoningEffort(effort);
       // Live push on explicit user intent only (see the no-mount-push note by
       // the model-push effect). defer-while-pending: while the sidecar
@@ -4587,6 +4605,8 @@ export default function Chat({
       tabId,
       currentRuntime,
       currentRuntimeSource,
+      antigravityModels,
+      runtimeModel,
       persistTabConfigChange,
       pushReasoningEffort,
       guardCronConfigMutation,

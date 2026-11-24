@@ -176,6 +176,9 @@ export function resolveAntigravityModelSelection(
   const exact = models.find((candidate) => candidate.value === selectedModel);
   if (exact) return { model: exact };
 
+  const legacyCurrent = models.find((model) => model.isCurrent
+    && splitAntigravityFlatModelId(model.value)?.familyId === selectedModel);
+  if (legacyCurrent) return { model: legacyCurrent };
   const split = splitAntigravityFlatModelId(selectedModel);
   if (!split) return { model: undefined };
   const family = models.find((candidate) => candidate.value === split.familyId);
