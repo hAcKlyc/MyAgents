@@ -25,6 +25,8 @@ const configOptions = () => [
   select('mode', mode, []),
 ];
 let turn;
+let settleAuthCancelledPrompt;
+let recoverAfterFramedQuote = false;
 lines.on('line', line => {
   const f = JSON.parse(line);
   const reply = result => send({id:f.id, result});
@@ -43,6 +45,11 @@ lines.on('line', line => {
   }
   if (f.method === 'session/new') return reply({sessionId:'native',configOptions:configOptions()});
   if (f.method === 'session/resume') return send({id:f.id,error:{code:-32602,message:'unknown session'}});
+  if (f.method === 'session/cancel' && settleAuthCancelledPrompt) {
+    const settle = settleAuthCancelledPrompt;
+    settleAuthCancelledPrompt = undefined;
+    return settle();
+  }
   if (f.method === 'session/close') return reply({});
   if (f.method === 'session/prompt') {
     turn = f.id;
@@ -60,17 +67,21 @@ lines.on('line', line => {
       const call = globalThis.__authCalls;
       if (globalThis.__authMode === 'auth-401-recover') {
         if (call === 1) {
+          update(textChunk('Started in the original session. '));
           update({sessionUpdate:'tool_call',toolCallId:'pre-401',title:'Check status',kind:'execute',status:'pending',rawInput:{CommandLine:'echo ok'}});
           update({sessionUpdate:'tool_call_update',toolCallId:'pre-401',status:'completed',content:[{type:'content',content:{type:'text',text:'ok'}}],rawOutput:{exit_code:0}});
           update(textChunk(auth401Text));
           return reply({stopReason:'end_turn',usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155}});
+        }
+        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !textPrompt.startsWith('Continue from where you stopped.')) {
+          return reply({stopReason:'refusal'});
         }
         if (call === 2) {
           update(textChunk(auth401Text));
           return reply({stopReason:'end_turn',usage:{inputTokens:10,outputTokens:0,thoughtTokens:0,cachedReadTokens:5,totalTokens:15}});
         }
         globalThis.__authMode = null;
-        update(textChunk('Recovered seamlessly after token refresh: ' + (textPrompt.startsWith('[System:') ? 'internal-continuation' : textPrompt)));
+        update(textChunk('Recovered in the same session.'));
         return reply({stopReason:'end_turn',usage:{inputTokens:40,outputTokens:12,thoughtTokens:3,cachedReadTokens:20,totalTokens:75}});
       }
       if (globalThis.__authMode === 'auth-401-exhaust') {
@@ -95,6 +106,31 @@ lines.on('line', line => {
         return reply({stopReason:'end_turn'});
       }
     }
+    if (textPrompt === 'auth-401-cancel-before-warning' || textPrompt === 'auth-401-cancel-after-warning') {
+      const warningBeforeCancel = textPrompt === 'auth-401-cancel-after-warning';
+      if (warningBeforeCancel) update(textChunk(auth401Text));
+      update({sessionUpdate:'usage_update',used:44,size:100});
+      settleAuthCancelledPrompt = () => {
+        if (!warningBeforeCancel) update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:25,outputTokens:2,totalTokens:27}});
+      };
+      return;
+    }
+    if (textPrompt === 'auth-401-warning-after-framed-quote') {
+      recoverAfterFramedQuote = true;
+      update(textChunk(auth401Text));
+      update(textChunk(auth401Text));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt.startsWith('auth-401-framed-quote-')) {
+      update(textChunk(auth401Text));
+      return reply({stopReason:textPrompt.slice('auth-401-framed-quote-'.length)});
+    }
+    if (textPrompt === 'auth-401-quoted-final-chunk') {
+      update(textChunk('Here is the exact error: '));
+      update(textChunk(auth401Text.trim()));
+      return reply({stopReason:'end_turn'});
+    }
     if (textPrompt === 'auth-401-quoted') {
       update(textChunk(auth401Text));
       update(textChunk('That error occurs when OAuth2 expires.'));
@@ -115,6 +151,11 @@ lines.on('line', line => {
       reply({stopReason:'end_turn',usage:{inputTokens:44,outputTokens:6,thoughtTokens:2,cachedReadTokens:12,totalTokens:64}});
       setTimeout(() => { process.exit(3); }, 25);
       return;
+    }
+    if (textPrompt.startsWith('Continue from where you stopped.')) {
+      update(textChunk(recoverAfterFramedQuote ? 'Continued after warning.' : 'UNEXPECTED_RETRY'));
+      recoverAfterFramedQuote = false;
+      return reply({stopReason:'end_turn'});
     }
     if (textPrompt === 'usage') return reply({
       stopReason:'end_turn',
@@ -404,7 +445,10 @@ it("silently retries transient mid-turn HTTP 401 warnings without leaking the ba
     .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
     .map((event) => event.text)
     .join("");
-  expect(combinedText).toBe("Recovered seamlessly after token refresh: internal-continuation");
+  expect(combinedText).toBe("Started in the original session. Recovered in the same session.");
+  expect(events.filter((event) => event.kind === "tool_result")).toMatchObject([
+    { toolUseId: "pre-401", isError: false },
+  ]);
   expect(combinedText).not.toContain("UNAUTHENTICATED");
 
   // Usage across initial + 2 retries is accumulated and emitted once for the Product Turn.
@@ -500,6 +544,64 @@ it("cancels cleanly without firing a pending HTTP 401 backoff retry when interru
       cacheCreationTokens: undefined,
     },
   ]);
+});
+
+it.each(["before-warning", "after-warning"])(
+  "honors cancel %s without interpreting the pending prompt response as success or retrying",
+  async (timing) => {
+    const reviewRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+    const { options, receive, events } = await setup();
+    processHandle = await reviewRuntime.startSession(options, receive);
+    await reviewRuntime.sendMessage(processHandle, `auth-401-cancel-${timing}`);
+    await expect.poll(() => events.some((event) => event.kind === "context_update")).toBe(true);
+
+    await reviewRuntime.interruptTurn(processHandle);
+    await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+    expect(events.filter((event) => event.kind === "usage")).toMatchObject([
+      { semantics: "delta", inputTokens: 25, outputTokens: 2 },
+    ]);
+    expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+
+    await reviewRuntime.sendMessage(processHandle, "usage");
+    await expect.poll(() => events.filter((event) => event.kind === "turn_complete").map((event) => event.status))
+      .toEqual(["cancelled", "completed"]);
+  },
+);
+
+it("preserves an unframed warning quoted verbatim in the last model chunk", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted-final-chunk");
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([
+    "Here is the exact error: ",
+    "⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+  ]);
+});
+
+it.each([
+  ["max_tokens", "failed"],
+  ["cancelled", "cancelled"],
+])("keeps a framed warning quote with the native stop reason %s", async (stopReason, status) => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, `auth-401-framed-quote-${stopReason}`);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe(status);
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([expect.stringMatching(/^\n⚠ UNAUTHENTICATED .*\n$/)]);
+});
+
+it("continues after a final native warning even when the previous chunk was an identical quote", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-warning-after-framed-quote");
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([expect.stringMatching(/^\n⚠ UNAUTHENTICATED .*\n$/), "Continued after warning."]);
 });
 
 it("flushes legitimately quoted 401 warning text intact across split or single chunks", async () => {

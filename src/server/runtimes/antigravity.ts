@@ -7,6 +7,7 @@ import {
   type ElicitationSchema,
   type NewSessionResponse,
   type ResumeSessionResponse,
+  type PromptRequest,
   type PromptResponse,
   type McpServer,
   type RequestPermissionResponse,
@@ -166,15 +167,17 @@ async function mcpServer(
 const ANTIGRAVITY_AUTH_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN = 4;
 const ANTIGRAVITY_AUTH_RETRY_PROMPT =
-  "[System: The previous model request was interrupted by a transient authentication token refresh error (HTTP 401). Continue directly from the current conversation state and latest tool results without repeating already completed actions.]";
+  "Continue from where you stopped. Use the conversation and tool results already in this session, and skip actions that are already complete.";
 const ANTIGRAVITY_AUTH_EXHAUSTED_ERROR =
-  "Antigravity 登录凭证已失效（HTTP 401），自动重试未恢复。请在终端运行 agy 重新登录后重试";
+  "Antigravity 连续返回登录错误（HTTP 401），自动续跑未恢复。请检查 agy 登录状态后重试";
 
 const ANTIGRAVITY_TRANSIENT_AUTH_WARNING_RE =
   /^⚠\s+UNAUTHENTICATED\s*\(code\s*401\):\s*Request had invalid authentication credentials\.\s*Expected OAuth 2 access token,\s*login cookie or other valid authentication credential\.(?:\s*See https:\/\/developers\.google\.com\/identity\/sign-in\/web\/devconsole-project\.)?$/i;
 
 function isAntigravityTransientAuthWarning(text: string): boolean {
-  return ANTIGRAVITY_TRANSIENT_AUTH_WARNING_RE.test(text.trim());
+  // agy wraps this standalone warning in newlines. Preserve plain-text quotes.
+  return text.startsWith("\n⚠ ") && text.endsWith("\n")
+    && ANTIGRAVITY_TRANSIENT_AUTH_WARNING_RE.test(text.trim());
 }
 
 interface AntigravityTurnUsageTotals {
@@ -237,6 +240,7 @@ class AntigravitySession implements RuntimeProcess {
   private turnId = "";
   private thinkingIndex = 0;
   private promptAttemptId = 0;
+  private promptCancellationRequested = false;
   private heldTransientAuthWarning: string | null = null;
   private authRetryTimer?: NodeJS.Timeout;
   private authRetryAbortCleanup?: () => void;
@@ -450,6 +454,7 @@ class AntigravitySession implements RuntimeProcess {
     });
     void child.exited.then(() => {
       this.exited = true;
+      if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
       this.clearAuthRetry();
       this.emitAccumulatedTurnUsage();
       this.finishBackgroundWork();
@@ -616,22 +621,15 @@ class AntigravitySession implements RuntimeProcess {
   isAwaitingAuthRetry(): boolean {
     return this.authRetryTimer !== undefined;
   }
-  clearAuthRetry(): boolean {
-    const wasPending = this.authRetryTimer !== undefined;
+  clearAuthRetry() {
     if (this.authRetryTimer) {
       clearTimeout(this.authRetryTimer);
       this.authRetryTimer = undefined;
-    }
-    if (this.authRetryAbortCleanup) {
-      const cleanup = this.authRetryAbortCleanup;
-      this.authRetryAbortCleanup = undefined;
-      cleanup();
-    }
-    this.heldTransientAuthWarning = null;
-    if (wasPending) {
       this.promptAttemptId += 1;
     }
-    return wasPending;
+    this.authRetryAbortCleanup?.();
+    this.authRetryAbortCleanup = undefined;
+    this.heldTransientAuthWarning = null;
   }
   private accumulateTurnUsage(usage: PromptResponse["usage"] | undefined) {
     if (!usage) return;
@@ -695,6 +693,7 @@ class AntigravitySession implements RuntimeProcess {
     }
     this.clearAuthRetry();
     this.turnKind = kind;
+    this.promptCancellationRequested = false;
     this.turnId = randomUUID();
     this.lastReplyText = '';
     this.consecutiveAuthRetries = 0;
@@ -704,29 +703,32 @@ class AntigravitySession implements RuntimeProcess {
     this.deniedTools.clear();
   }
   private finishTurn(status: string, error?: string) {
+    if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
     this.clearAuthRetry();
+    this.emitAccumulatedTurnUsage();
     this.publishReadResults(true);
     this.closeBlock();
     this.cancelPending();
     this.turnKind = null;
-    this.turnUsage = undefined;
     this.canContinue = status === "completed";
     if (this.canContinue && this.childLaunches.size && this.lastReplyText.trim()) {
       this.settledParentReplies.push(this.lastReplyText);
     }
     this.emit({ kind: "turn_complete", status, error });
   }
-  cancelTurn() {
-    if (this.turnKind === "continuation") {
+  async cancelTurn() {
+    if (!this.turnKind) return;
+    if (this.isAwaitingAuthRetry()) {
       this.finishTurn("cancelled");
       return;
     }
-    if (this.clearAuthRetry()) {
-      this.emitAccumulatedTurnUsage();
-      this.finishTurn("cancelled");
-      return;
-    }
-    this.cancelPending();
+    const turnId = this.turnId;
+    // ACP cancel is a notification. Record intent before its write can race the prompt result.
+    if (this.turnKind === "prompt") this.promptCancellationRequested = true;
+    await this.connection.agent.notify("session/cancel", { sessionId: this.sessionId });
+    if (this.turnId !== turnId || !this.active) return;
+    if (this.turnKind === "continuation") this.finishTurn("cancelled");
+    else this.cancelPending();
   }
   private publishReadResults(turnEnded = false) {
     for (const [id, result] of this.pendingReadResults) {
@@ -806,10 +808,10 @@ class AntigravitySession implements RuntimeProcess {
     switch (update.sessionUpdate) {
       case "agent_message_chunk": {
         if (update.content.type !== "text") return;
-        if (this.heldTransientAuthWarning !== null) {
-          this.flushHeldTransientAuthWarning();
-        } else if (
+        this.flushHeldTransientAuthWarning();
+        if (
           this.turnKind === "prompt" &&
+          !this.isAwaitingAuthRetry() &&
           isAntigravityTransientAuthWarning(update.content.text)
         ) {
           this.heldTransientAuthWarning = update.content.text;
@@ -873,8 +875,6 @@ class AntigravitySession implements RuntimeProcess {
       ) {
         return;
       }
-      this.clearAuthRetry();
-      this.emitAccumulatedTurnUsage();
       this.finishTurn(
         "failed",
         nativeError(new Error("ACP connection closed during auth retry"), "session/prompt").message,
@@ -899,11 +899,7 @@ class AntigravitySession implements RuntimeProcess {
         return;
       }
       if (this.connection.signal.aborted) {
-        this.emitAccumulatedTurnUsage();
-        this.finishTurn(
-          "failed",
-          nativeError(new Error("ACP connection closed during auth retry"), "session/prompt").message,
-        );
+        failDisconnected();
         return;
       }
       this.dispatchPromptRequest(
@@ -913,10 +909,7 @@ class AntigravitySession implements RuntimeProcess {
     }, delayMs);
   }
   private dispatchPromptRequest(
-    prompt: Array<
-      | { type: "text"; text: string }
-      | { type: "image"; mimeType: string; data: string }
-    >,
+    prompt: PromptRequest["prompt"],
     isInternalRetry: boolean,
   ) {
     const attemptId = ++this.promptAttemptId;
@@ -929,9 +922,12 @@ class AntigravitySession implements RuntimeProcess {
         (result) => {
           if (attemptId !== this.promptAttemptId || this.exited) return;
           this.accumulateTurnUsage(result.usage);
-          const transientAuthWarning = this.heldTransientAuthWarning;
-          this.heldTransientAuthWarning = null;
-          if (result.stopReason === "end_turn" && transientAuthWarning !== null) {
+          if (this.promptCancellationRequested) {
+            this.finishTurn("cancelled");
+            return;
+          }
+          if (result.stopReason === "end_turn" && this.heldTransientAuthWarning !== null) {
+            this.heldTransientAuthWarning = null;
             if (
               this.consecutiveAuthRetries < this.authRetryDelaysMs.length &&
               this.totalAuthRetries < ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN
@@ -939,7 +935,7 @@ class AntigravitySession implements RuntimeProcess {
               const delayMs = this.authRetryDelaysMs[this.consecutiveAuthRetries]!;
               this.consecutiveAuthRetries += 1;
               this.totalAuthRetries += 1;
-              this.publishReadResults(true);
+              this.publishReadResults();
               this.closeBlock();
               console.warn(
                 `[antigravity] Transient HTTP 401 mid-turn (session=${this.productSessionId}); retrying silently (${this.consecutiveAuthRetries}/${this.authRetryDelaysMs.length}, total=${this.totalAuthRetries}/${ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN}) in ${delayMs}ms`,
@@ -947,11 +943,9 @@ class AntigravitySession implements RuntimeProcess {
               this.scheduleAuthRetry(attemptId, delayMs);
               return;
             }
-            this.emitAccumulatedTurnUsage();
             this.finishTurn("failed", ANTIGRAVITY_AUTH_EXHAUSTED_ERROR);
             return;
           }
-          this.emitAccumulatedTurnUsage();
           switch (result.stopReason) {
             case "end_turn": this.finishTurn("completed"); break;
             case "cancelled": this.finishTurn("cancelled"); break;
@@ -966,8 +960,8 @@ class AntigravitySession implements RuntimeProcess {
           const error = nativeError(e, "session/prompt");
           if (!isInternalRetry) this.dispatched?.reject(error);
           if (!this.exited) {
-            this.emitAccumulatedTurnUsage();
-            this.finishTurn("failed", error.message);
+            if (this.promptCancellationRequested) this.finishTurn("cancelled");
+            else this.finishTurn("failed", error.message);
           }
         },
       );
@@ -1387,15 +1381,7 @@ export class AntigravityRuntime implements AgentRuntime {
     pending.answer(answers);
   }
   async interruptTurn(process: RuntimeProcess) {
-    const s = session(process);
-    if (s.active) {
-      if (!s.isAwaitingAuthRetry()) {
-        await s.connection.agent.notify("session/cancel", {
-          sessionId: s.sessionId,
-        });
-      }
-      s.cancelTurn();
-    }
+    await session(process).cancelTurn();
   }
   async stopSession(process: RuntimeProcess) {
     const s = session(process);
