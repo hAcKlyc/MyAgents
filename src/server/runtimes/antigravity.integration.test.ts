@@ -46,8 +46,77 @@ lines.on('line', line => {
   if (f.method === 'session/close') return reply({});
   if (f.method === 'session/prompt') {
     turn = f.id;
-    if (f.params.prompt[0].text === 'exit') return process.exit(2);
-    if (f.params.prompt[0].text === 'usage') return reply({
+    const textPrompt = f.params.prompt[0].text;
+    const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
+    const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
+    if (textPrompt === 'exit') return process.exit(2);
+    if (textPrompt === 'auth-401-recover' || textPrompt === 'auth-401-exhaust' || textPrompt === 'auth-401-cap' || textPrompt === 'auth-401-cancel') {
+      globalThis.__authMode = textPrompt;
+      globalThis.__authCalls = 0;
+    }
+    if (globalThis.__authMode) {
+      globalThis.__authCalls += 1;
+      const call = globalThis.__authCalls;
+      if (globalThis.__authMode === 'auth-401-recover') {
+        if (call === 1) {
+          update({sessionUpdate:'tool_call',toolCallId:'pre-401',title:'Check status',kind:'execute',status:'pending',rawInput:{CommandLine:'echo ok'}});
+          update({sessionUpdate:'tool_call_update',toolCallId:'pre-401',status:'completed',content:[{type:'content',content:{type:'text',text:'ok'}}],rawOutput:{exit_code:0}});
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155}});
+        }
+        if (call === 2) {
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:10,outputTokens:0,thoughtTokens:0,cachedReadTokens:5,totalTokens:15}});
+        }
+        globalThis.__authMode = null;
+        update(textChunk('Recovered seamlessly after token refresh: ' + (textPrompt.startsWith('[System:') ? 'internal-continuation' : textPrompt)));
+        return reply({stopReason:'end_turn',usage:{inputTokens:40,outputTokens:12,thoughtTokens:3,cachedReadTokens:20,totalTokens:75}});
+      }
+      if (globalThis.__authMode === 'auth-401-exhaust') {
+        update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:50,outputTokens:5,thoughtTokens:0,cachedReadTokens:10,totalTokens:65}});
+      }
+      if (globalThis.__authMode === 'auth-401-cap') {
+        // Every attempt makes real progress (a tool call) before hitting 401 again,
+        // exercising consecutive-retry reset + hard per-turn cap (4 total retries = 5 total prompts).
+        update({sessionUpdate:'tool_call',toolCallId:'step-' + call,title:'Step ' + call,kind:'execute',status:'pending',rawInput:{CommandLine:'echo ' + call}});
+        update({sessionUpdate:'tool_call_update',toolCallId:'step-' + call,status:'completed',content:[{type:'content',content:{type:'text',text:String(call)}}],rawOutput:{exit_code:0}});
+        update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:10,outputTokens:1,thoughtTokens:0,cachedReadTokens:0,totalTokens:11}});
+      }
+      if (globalThis.__authMode === 'auth-401-cancel') {
+        if (call === 1) {
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:25,outputTokens:2,thoughtTokens:0,cachedReadTokens:0,totalTokens:27}});
+        }
+        // Should never be reached if interrupted during backoff.
+        update(textChunk('SHOULD_NOT_RUN'));
+        return reply({stopReason:'end_turn'});
+      }
+    }
+    if (textPrompt === 'auth-401-quoted') {
+      update(textChunk(auth401Text));
+      update(textChunk('That error occurs when OAuth2 expires.'));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'auth-401-quoted-single-chunk') {
+      update(textChunk(auth401Text.trim() + ' That error occurs when OAuth2 expires.'));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'auth-401-disconnect-during-backoff') {
+      update(textChunk(auth401Text));
+      reply({stopReason:'end_turn',usage:{inputTokens:33,outputTokens:7,thoughtTokens:0,cachedReadTokens:5,totalTokens:45}});
+      setTimeout(() => { process.stdout.end(); }, 25);
+      return;
+    }
+    if (textPrompt === 'auth-401-exit-during-backoff') {
+      update(textChunk(auth401Text));
+      reply({stopReason:'end_turn',usage:{inputTokens:44,outputTokens:6,thoughtTokens:2,cachedReadTokens:12,totalTokens:64}});
+      setTimeout(() => { process.exit(3); }, 25);
+      return;
+    }
+    if (textPrompt === 'usage') return reply({
       stopReason:'end_turn',
       usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
     });
@@ -317,4 +386,205 @@ it("keeps the prompt usage delta independent from native context-window telemetr
     cacheCreationTokens: undefined, semantics: "delta",
   });
   expect(events.some((event) => event.kind === "context_update")).toBe(false);
+});
+
+it("silently retries transient mid-turn HTTP 401 warnings without leaking the banner or duplicating the user prompt", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [15, 25] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-recover");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  const terminal = events.find((event) => event.kind === "turn_complete");
+  expect(terminal).toMatchObject({ kind: "turn_complete", status: "completed" });
+  const combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toBe("Recovered seamlessly after token refresh: internal-continuation");
+  expect(combinedText).not.toContain("UNAUTHENTICATED");
+
+  // Usage across initial + 2 retries is accumulated and emitted once for the Product Turn.
+  const usageEvents = events.filter((event) => event.kind === "usage");
+  expect(usageEvents).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 150,
+      outputTokens: 40,
+      cacheReadTokens: 55,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("escalates to a failed turn once consecutive HTTP 401 retries are exhausted", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-exhaust");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "failed",
+    error: expect.stringContaining("HTTP 401"),
+  });
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+  // 1 initial attempt + 2 retries = 3 usage contributions accumulated.
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 150,
+      outputTokens: 15,
+      cacheReadTokens: 30,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("resets consecutive retry count after real progress while enforcing the per-turn cap of 4 retries", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [5, 10] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-cap");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "failed",
+    error: expect.stringContaining("HTTP 401"),
+  });
+  const toolStarts = events.filter((event) => event.kind === "tool_use_start");
+  expect(toolStarts).toHaveLength(5);
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+});
+
+it("cancels cleanly without firing a pending HTTP 401 backoff retry when interrupted", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-cancel");
+
+  // Wait until the first 401 attempt has resolved and entered the backoff window.
+  await expect
+    .poll(() => (processHandle as { isAwaitingAuthRetry?: () => boolean }).isAwaitingAuthRetry?.())
+    .toBe(true);
+  await slowRuntime.interruptTurn(processHandle);
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "cancelled",
+  });
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 25,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("flushes legitimately quoted 401 warning text intact across split or single chunks", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "completed",
+  });
+  let combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toContain("⚠ UNAUTHENTICATED (code 401):");
+  expect(combinedText).toContain("That error occurs when OAuth2 expires.");
+
+  events.length = 0;
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted-single-chunk");
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "completed",
+  });
+  combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toContain("⚠ UNAUTHENTICATED (code 401):");
+  expect(combinedText).toContain("That error occurs when OAuth2 expires.");
+});
+
+it("settles the turn and flushes accumulated usage when ACP disconnects during auth retry backoff", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-disconnect-during-backoff");
+
+  await expect
+    .poll(() => events.find((event) => event.kind === "turn_complete"))
+    .toMatchObject({
+      kind: "turn_complete",
+      status: "failed",
+    });
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 33,
+      outputTokens: 7,
+      cacheReadTokens: 5,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("flushes accumulated usage before reporting worker exit during auth retry backoff", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-exit-during-backoff");
+
+  await expect
+    .poll(() => events.find((event) => event.kind === "session_complete"))
+    .toMatchObject({
+      kind: "session_complete",
+      subtype: "error",
+    });
+  const usageIndex = events.findIndex((event) => event.kind === "usage");
+  const sessionCompleteIndex = events.findIndex((event) => event.kind === "session_complete");
+  expect(usageIndex).toBeGreaterThanOrEqual(0);
+  expect(usageIndex).toBeLessThan(sessionCompleteIndex);
+  expect(events[usageIndex]).toEqual({
+    kind: "usage",
+    semantics: "delta",
+    inputTokens: 44,
+    outputTokens: 8,
+    cacheReadTokens: 12,
+    cacheCreationTokens: undefined,
+  });
 });
