@@ -482,6 +482,56 @@ describe("Chat execution selection (#685)", () => {
     expect(mocks.input?.runtimeModels).toEqual([]);
   });
 
+  it("persists a legacy Antigravity model and explicit default as a family, then refreshes native effort", async () => {
+    const metadata = {
+      ...ownedMetadata(),
+      runtime: "antigravity",
+      runtimeSource: "system-cli",
+      model: "model-a-medium",
+      reasoningEffort: "medium",
+      providerExecutionIdentity: undefined,
+    } as SessionMetadata;
+    mocks.patchSession.mockImplementation(
+      async (_id: string, patch: Partial<SessionMetadata>) => ({ ...metadata, ...patch }),
+    );
+    const get = mocks.get.getMockImplementation()!;
+    let currentReasoningEffort = "medium";
+    mocks.get.mockImplementation((path: string) => path === "/api/runtime/models?type=antigravity"
+      ? Promise.resolve({
+          models: [{
+            value: "model-a",
+            displayName: "Model A",
+            isCurrent: true,
+            currentReasoningEffort,
+            defaultReasoningEffort: "high",
+            supportedReasoningEfforts: [{ reasoningEffort: "medium" }, { reasoningEffort: "high" }],
+          }],
+        })
+      : get(path));
+    const post = mocks.post.getMockImplementation()!;
+    mocks.post.mockImplementation(async <T,>(path: string, ...args: unknown[]) => {
+      if (path === "/api/reasoning-effort/set") currentReasoningEffort = "high";
+      return post(path, args[0]) as Promise<T>;
+    });
+    try {
+      render(<Harness runtime="antigravity" source="system-cli" metadata={metadata} sidecarConfigDisposition="push" />);
+      await waitFor(() => expect(mocks.input?.runtimeModels?.[0]?.currentReasoningEffort).toBe("medium"));
+
+      await act(async () => {
+        await mocks.input?.onReasoningEffortChange?.("default");
+      });
+
+      expect(mocks.patchSession).toHaveBeenCalledWith(metadata.id, expect.objectContaining({
+        model: "model-a",
+        reasoningEffort: "default",
+      }), { type: "tab", id: "tab-selection" });
+      expect(mocks.post).toHaveBeenCalledWith("/api/reasoning-effort/set", { effort: "default" });
+      await waitFor(() => expect(mocks.input?.runtimeModels?.[0]?.currentReasoningEffort).toBe("high"));
+    } finally {
+      mocks.post.mockImplementation(post);
+    }
+  });
+
   it.each([undefined, "gemini-3.8-flash-low"])(
     "uses the Antigravity CLI model %s when the workspace retains a Codex subscription",
     async (model) => {

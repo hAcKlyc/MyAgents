@@ -7,6 +7,7 @@ import {
   type ElicitationSchema,
   type NewSessionResponse,
   type ResumeSessionResponse,
+  type PromptRequest,
   type PromptResponse,
   type McpServer,
   type RequestPermissionResponse,
@@ -42,6 +43,10 @@ import {
   type RuntimeEnvPolicy,
   type RuntimeModelInfo,
 } from "../../shared/types/runtime";
+import {
+  normalizeAntigravityFlatModels,
+  splitAntigravityFlatModelId,
+} from "../../shared/antigravityModelCatalog";
 import type { AskUserQuestionAnswers } from "../../shared/types/askUserQuestion";
 import { ensureShellPath } from "../utils/shell";
 import { maybeSpill, releaseLargeValueRef } from "../utils/large-value-store";
@@ -163,6 +168,34 @@ async function mcpServer(
   throw new Error("invalid configuration");
 }
 
+const ANTIGRAVITY_AUTH_RETRY_DELAYS_MS = [2_000, 5_000] as const;
+const ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN = 4;
+const ANTIGRAVITY_AUTH_RETRY_PROMPT =
+  "Continue from where you stopped. Use the conversation and tool results already in this session, and skip actions that are already complete.";
+const ANTIGRAVITY_AUTH_EXHAUSTED_ERROR =
+  "Antigravity 连续返回登录错误（HTTP 401），自动续跑未恢复。请检查 agy 登录状态后重试";
+
+const ANTIGRAVITY_TRANSIENT_AUTH_WARNING_RE =
+  /^⚠\s+UNAUTHENTICATED\s*\(code\s*401\):\s*Request had invalid authentication credentials\.\s*Expected OAuth 2 access token,\s*login cookie or other valid authentication credential\.(?:\s*See https:\/\/developers\.google\.com\/identity\/sign-in\/web\/devconsole-project\.)?$/i;
+
+function isAntigravityTransientAuthWarning(text: string): boolean {
+  // agy wraps this standalone warning in newlines. Preserve plain-text quotes.
+  return text.startsWith("\n⚠ ") && text.endsWith("\n")
+    && ANTIGRAVITY_TRANSIENT_AUTH_WARNING_RE.test(text.trim());
+}
+
+interface AntigravityTurnUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+}
+
+export interface AntigravityRuntimeOptions {
+  /** Override backoff delays (ms) for transient mid-turn HTTP 401 recovery (primarily for deterministic tests). */
+  authRetryDelaysMs?: readonly number[];
+}
+
 type PermissionDecision = "allow_once" | "deny" | "always_allow";
 type Pending = {
   cancel(): void;
@@ -210,6 +243,14 @@ class AntigravitySession implements RuntimeProcess {
   private stream: "text" | "thinking" | null = null;
   private turnId = "";
   private thinkingIndex = 0;
+  private promptAttemptId = 0;
+  private promptCancellationRequested = false;
+  private heldTransientAuthWarning: string | null = null;
+  private authRetryTimer?: NodeJS.Timeout;
+  private authRetryAbortCleanup?: () => void;
+  private consecutiveAuthRetries = 0;
+  private totalAuthRetries = 0;
+  private turnUsage?: AntigravityTurnUsageTotals;
   private readonly tools = new Map<string, { snapshot: ToolCallUpdate; visibleOutput: string }>();
   private readonly pendingReadResults = new Map<string, Extract<UnifiedEvent, { kind: "tool_result" }>>();
   private readonly deniedTools = new Set<string>();
@@ -222,6 +263,7 @@ class AntigravitySession implements RuntimeProcess {
     readonly productSessionId: string,
     readonly skipPermissions: boolean,
     private readonly brainDirectory: string,
+    private readonly authRetryDelaysMs: readonly number[] = ANTIGRAVITY_AUTH_RETRY_DELAYS_MS,
   ) {
     const app = new ClientApp();
     app.onNotification("session/update", ({ params }) => {
@@ -416,6 +458,9 @@ class AntigravitySession implements RuntimeProcess {
     });
     void child.exited.then(() => {
       this.exited = true;
+      if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
+      this.clearAuthRetry();
+      this.emitAccumulatedTurnUsage();
       this.finishBackgroundWork();
       this.connection.close();
       this.cancelPending();
@@ -577,18 +622,94 @@ class AntigravitySession implements RuntimeProcess {
     });
     return true;
   }
+  isAwaitingAuthRetry(): boolean {
+    return this.authRetryTimer !== undefined;
+  }
+  clearAuthRetry() {
+    if (this.authRetryTimer) {
+      clearTimeout(this.authRetryTimer);
+      this.authRetryTimer = undefined;
+      this.promptAttemptId += 1;
+    }
+    this.authRetryAbortCleanup?.();
+    this.authRetryAbortCleanup = undefined;
+    this.heldTransientAuthWarning = null;
+  }
+  private accumulateTurnUsage(usage: PromptResponse["usage"] | undefined) {
+    if (!usage) return;
+    const outputTokens = usage.outputTokens + (usage.thoughtTokens ?? 0);
+    if (!this.turnUsage) {
+      this.turnUsage = {
+        inputTokens: usage.inputTokens,
+        outputTokens,
+        cacheReadTokens: usage.cachedReadTokens ?? undefined,
+        cacheCreationTokens: usage.cachedWriteTokens ?? undefined,
+      };
+      return;
+    }
+    this.turnUsage.inputTokens += usage.inputTokens;
+    this.turnUsage.outputTokens += outputTokens;
+    if (usage.cachedReadTokens !== undefined && usage.cachedReadTokens !== null) {
+      this.turnUsage.cacheReadTokens =
+        (this.turnUsage.cacheReadTokens ?? 0) + usage.cachedReadTokens;
+    }
+    if (usage.cachedWriteTokens !== undefined && usage.cachedWriteTokens !== null) {
+      this.turnUsage.cacheCreationTokens =
+        (this.turnUsage.cacheCreationTokens ?? 0) + usage.cachedWriteTokens;
+    }
+  }
+  private emitAccumulatedTurnUsage() {
+    if (!this.turnUsage) return;
+    const usage = this.turnUsage;
+    this.turnUsage = undefined;
+    this.emit({
+      kind: "usage",
+      // agy reports this prompt's Gemini counters. Cached input
+      // and thinking are reported separately from regular tokens.
+      semantics: "delta",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+    });
+  }
+  private emitTextChunk(text: string) {
+    if (this.stream !== "text") {
+      this.publishReadResults();
+      this.closeBlock();
+      this.stream = "text";
+      this.lastReplyText = "";
+    }
+    if (this.childLaunches.size) this.lastReplyText += text;
+    this.emit({ kind: "text_delta", text });
+  }
+  private flushHeldTransientAuthWarning() {
+    if (this.heldTransientAuthWarning === null) return;
+    const held = this.heldTransientAuthWarning;
+    this.heldTransientAuthWarning = null;
+    this.consecutiveAuthRetries = 0;
+    this.emitTextChunk(held);
+  }
   private beginTurn(kind: 'prompt' | 'continuation') {
     if (kind === 'prompt' && !this.hasPendingBackgroundWork()) {
       this.finishBackgroundWork();
       this.parentPlannerStep = readAntigravityParentTailStep(this.brainDirectory, this.sessionId);
     }
+    this.clearAuthRetry();
     this.turnKind = kind;
+    this.promptCancellationRequested = false;
     this.turnId = randomUUID();
     this.lastReplyText = '';
+    this.consecutiveAuthRetries = 0;
+    this.totalAuthRetries = 0;
+    this.turnUsage = undefined;
     this.tools.clear();
     this.deniedTools.clear();
   }
   private finishTurn(status: string, error?: string) {
+    if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
+    this.clearAuthRetry();
+    this.emitAccumulatedTurnUsage();
     this.publishReadResults(true);
     this.closeBlock();
     this.cancelPending();
@@ -599,7 +720,17 @@ class AntigravitySession implements RuntimeProcess {
     }
     this.emit({ kind: "turn_complete", status, error });
   }
-  cancelTurn() {
+  async cancelTurn() {
+    if (!this.turnKind) return;
+    if (this.isAwaitingAuthRetry()) {
+      this.finishTurn("cancelled");
+      return;
+    }
+    const turnId = this.turnId;
+    // ACP cancel is a notification. Record intent before its write can race the prompt result.
+    if (this.turnKind === "prompt") this.promptCancellationRequested = true;
+    await this.connection.agent.notify("session/cancel", { sessionId: this.sessionId });
+    if (this.turnId !== turnId || !this.active) return;
     if (this.turnKind === "continuation") this.finishTurn("cancelled");
     else this.cancelPending();
   }
@@ -679,32 +810,43 @@ class AntigravitySession implements RuntimeProcess {
   }
   private update(update: SessionUpdate) {
     switch (update.sessionUpdate) {
-      case "agent_message_chunk":
+      case "agent_message_chunk": {
+        if (update.content.type !== "text") return;
+        this.flushHeldTransientAuthWarning();
+        if (
+          this.turnKind === "prompt" &&
+          !this.isAwaitingAuthRetry() &&
+          isAntigravityTransientAuthWarning(update.content.text)
+        ) {
+          this.heldTransientAuthWarning = update.content.text;
+          return;
+        }
+        this.consecutiveAuthRetries = 0;
+        this.emitTextChunk(update.content.text);
+        break;
+      }
       case "agent_thought_chunk": {
         if (update.content.type !== "text") return;
-        const stream =
-          update.sessionUpdate === "agent_message_chunk" ? "text" : "thinking";
-        if (this.stream !== stream) {
+        this.flushHeldTransientAuthWarning();
+        if (this.stream !== "thinking") {
           this.publishReadResults();
           this.closeBlock();
-          this.stream = stream;
-          if (stream === "text") this.lastReplyText = '';
-          if (stream === "thinking")
-            this.emit({ kind: "thinking_start", index: ++this.thinkingIndex });
+          this.stream = "thinking";
+          this.emit({ kind: "thinking_start", index: ++this.thinkingIndex });
         }
-        if (stream === "text") {
-          if (this.childLaunches.size) this.lastReplyText += update.content.text;
-          this.emit({ kind: "text_delta", text: update.content.text });
-        } else
-          this.emit({
-            kind: "thinking_delta",
-            text: update.content.text,
-            index: this.thinkingIndex,
-          });
+        this.emit({
+          kind: "thinking_delta",
+          text: update.content.text,
+          index: this.thinkingIndex,
+        });
         break;
       }
       case "tool_call":
       case "tool_call_update":
+        this.flushHeldTransientAuthWarning();
+        if (update.sessionUpdate === "tool_call") {
+          this.consecutiveAuthRetries = 0;
+        }
         this.updateTool(update);
         break;
       case "usage_update":
@@ -728,40 +870,86 @@ class AntigravitySession implements RuntimeProcess {
         break;
     }
   }
-  async prompt(message: string, images: ResolvedImagePayload[] = []) {
-    if (this.active || this.connection.signal.aborted)
-      throw new Error("Antigravity 会话当前无法接收消息");
-    if (images.length && !this.image)
-      throw new Error("当前 Antigravity CLI 不支持图片输入");
-    this.beginTurn('prompt');
-    const written = new Promise<void>((resolve, reject) => {
-      this.dispatched = { resolve, reject };
-    });
+  private scheduleAuthRetry(expectedAttemptId: number, delayMs: number) {
+    const failDisconnected = () => {
+      if (
+        expectedAttemptId !== this.promptAttemptId ||
+        this.exited ||
+        this.turnKind !== "prompt"
+      ) {
+        return;
+      }
+      this.finishTurn(
+        "failed",
+        nativeError(new Error("ACP connection closed during auth retry"), "session/prompt").message,
+      );
+    };
+    if (this.connection.signal.aborted) {
+      failDisconnected();
+      return;
+    }
+    this.connection.signal.addEventListener("abort", failDisconnected, { once: true });
+    this.authRetryAbortCleanup = () => {
+      this.connection.signal.removeEventListener("abort", failDisconnected);
+    };
+    this.authRetryTimer = setTimeout(() => {
+      this.authRetryTimer = undefined;
+      if (this.authRetryAbortCleanup) {
+        const cleanup = this.authRetryAbortCleanup;
+        this.authRetryAbortCleanup = undefined;
+        cleanup();
+      }
+      if (expectedAttemptId !== this.promptAttemptId || this.exited || this.turnKind !== "prompt") {
+        return;
+      }
+      if (this.connection.signal.aborted) {
+        failDisconnected();
+        return;
+      }
+      this.dispatchPromptRequest(
+        [{ type: "text", text: ANTIGRAVITY_AUTH_RETRY_PROMPT }],
+        true,
+      );
+    }, delayMs);
+  }
+  private dispatchPromptRequest(
+    prompt: PromptRequest["prompt"],
+    isInternalRetry: boolean,
+  ) {
+    const attemptId = ++this.promptAttemptId;
     void this.connection.agent
       .request<PromptResponse>("session/prompt", {
         sessionId: this.sessionId,
-        prompt: [
-          { type: "text", text: message },
-          ...images.map((i) => ({
-            type: "image" as const,
-            mimeType: i.mimeType,
-            data: i.data,
-          })),
-        ],
+        prompt,
       })
       .then(
         (result) => {
-          if (result.usage)
-            this.emit({
-              kind: "usage",
-              // agy reports this prompt's Gemini counters. Cached input
-              // and thinking are reported separately from regular tokens.
-              semantics: "delta",
-              inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens + (result.usage.thoughtTokens ?? 0),
-              cacheReadTokens: result.usage.cachedReadTokens ?? undefined,
-              cacheCreationTokens: result.usage.cachedWriteTokens ?? undefined,
-            });
+          if (attemptId !== this.promptAttemptId || this.exited) return;
+          this.accumulateTurnUsage(result.usage);
+          if (this.promptCancellationRequested) {
+            this.finishTurn("cancelled");
+            return;
+          }
+          if (result.stopReason === "end_turn" && this.heldTransientAuthWarning !== null) {
+            this.heldTransientAuthWarning = null;
+            if (
+              this.consecutiveAuthRetries < this.authRetryDelaysMs.length &&
+              this.totalAuthRetries < ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN
+            ) {
+              const delayMs = this.authRetryDelaysMs[this.consecutiveAuthRetries]!;
+              this.consecutiveAuthRetries += 1;
+              this.totalAuthRetries += 1;
+              this.publishReadResults();
+              this.closeBlock();
+              console.warn(
+                `[antigravity] Transient HTTP 401 mid-turn (session=${this.productSessionId}); retrying silently (${this.consecutiveAuthRetries}/${this.authRetryDelaysMs.length}, total=${this.totalAuthRetries}/${ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN}) in ${delayMs}ms`,
+              );
+              this.scheduleAuthRetry(attemptId, delayMs);
+              return;
+            }
+            this.finishTurn("failed", ANTIGRAVITY_AUTH_EXHAUSTED_ERROR);
+            return;
+          }
           switch (result.stopReason) {
             case "end_turn": this.finishTurn("completed"); break;
             case "cancelled": this.finishTurn("cancelled"); break;
@@ -772,11 +960,36 @@ class AntigravitySession implements RuntimeProcess {
           }
         },
         (e) => {
+          if (attemptId !== this.promptAttemptId) return;
           const error = nativeError(e, "session/prompt");
-          this.dispatched?.reject(error);
-          if (!this.exited) this.finishTurn("failed", error.message);
+          if (!isInternalRetry) this.dispatched?.reject(error);
+          if (!this.exited) {
+            if (this.promptCancellationRequested) this.finishTurn("cancelled");
+            else this.finishTurn("failed", error.message);
+          }
         },
       );
+  }
+  async prompt(message: string, images: ResolvedImagePayload[] = []) {
+    if (this.active || this.connection.signal.aborted)
+      throw new Error("Antigravity 会话当前无法接收消息");
+    if (images.length && !this.image)
+      throw new Error("当前 Antigravity CLI 不支持图片输入");
+    this.beginTurn('prompt');
+    const written = new Promise<void>((resolve, reject) => {
+      this.dispatched = { resolve, reject };
+    });
+    this.dispatchPromptRequest(
+      [
+        { type: "text", text: message },
+        ...images.map((i) => ({
+          type: "image" as const,
+          mimeType: i.mimeType,
+          data: i.data,
+        })),
+      ],
+      false,
+    );
     try {
       await written;
     } finally {
@@ -809,8 +1022,22 @@ class AntigravitySession implements RuntimeProcess {
     }
   }
   getDefaultThoughtLevel() {
-    const model = this.selectedModel ?? this.getCurrentModel();
+    const model = this.getCurrentModel();
     return model ? this.defaultThoughtLevels.get(model) : undefined;
+  }
+  legacyFlatModelForFamily(familyId: string, effort?: string) {
+    const models = (this.models?.availableModels ?? []).map((model) => ({
+      value: model.modelId,
+      displayName: model.name,
+    }));
+    const family = normalizeAntigravityFlatModels(models)
+      .find((model) => model.value === familyId && model.supportedReasoningEfforts?.length);
+    if (!family) return undefined;
+    const targetEffort = effort ?? family.defaultReasoningEffort;
+    return models.find(({ value }) => {
+      const variant = splitAntigravityFlatModelId(value);
+      return variant?.familyId === familyId && variant.effort === targetEffort;
+    })?.value;
   }
   requiresPermissionModeRestart(mode: string | undefined) {
     return this.skipPermissions !== (mode === ANTIGRAVITY_FULL_ACCESS);
@@ -857,6 +1084,10 @@ function session(process: RuntimeProcess) {
 
 export class AntigravityRuntime implements AgentRuntime {
   readonly type = "antigravity";
+  private readonly authRetryDelaysMs: readonly number[];
+  constructor(options?: AntigravityRuntimeOptions) {
+    this.authRetryDelaysMs = options?.authRetryDelaysMs ?? ANTIGRAVITY_AUTH_RETRY_DELAYS_MS;
+  }
   getPermissionModes() {
     return ANTIGRAVITY_PERMISSION_MODES;
   }
@@ -895,7 +1126,7 @@ export class AntigravityRuntime implements AgentRuntime {
       options.signal?.throwIfAborted();
       const currentModel = s.getCurrentModel();
       const currentReasoningEffort = s.selectedOption("thought_level");
-      const supportedReasoningEfforts = s.selectOptions("thought_level")
+      const liveReasoningEfforts = s.selectOptions("thought_level")
         .map((option) => ({ reasoningEffort: option.value, description: option.name }));
       const families = s.modelFamilies();
       const modelOptions = families.length
@@ -904,15 +1135,16 @@ export class AntigravityRuntime implements AgentRuntime {
             value: model.modelId,
             name: model.name,
           }));
+      const defaultReasoningEffort = s.getDefaultThoughtLevel();
       return modelOptions.map((model) => ({
         value: model.value,
         displayName: model.name,
         ...(model.value === s.defaultModel ? { isDefault: true } : {}),
         ...(model.value === currentModel ? {
           isCurrent: true,
-          supportedReasoningEfforts,
-          currentReasoningEffort,
-          defaultReasoningEffort: s.getDefaultThoughtLevel(),
+          ...(liveReasoningEfforts.length ? { supportedReasoningEfforts: liveReasoningEfforts } : {}),
+          ...(currentReasoningEffort !== undefined ? { currentReasoningEffort } : {}),
+          ...(defaultReasoningEffort !== undefined ? { defaultReasoningEffort } : {}),
         } : {}),
       }));
     }
@@ -921,10 +1153,11 @@ export class AntigravityRuntime implements AgentRuntime {
       options?.envPolicy,
       options?.signal,
     );
-    return output.split(/\r?\n/).flatMap((line) => {
+    const rawEntries = output.split(/\r?\n/).flatMap((line) => {
       const [value, displayName] = line.split("\t").map((part) => part.trim());
       return value && displayName ? [{ value, displayName }] : [];
     });
+    return normalizeAntigravityFlatModels(rawEntries);
   }
   async startSession(options: SessionStartOptions, emit: UnifiedEventCallback) {
     const { path, env } = await executable(options.envPolicy);
@@ -947,6 +1180,7 @@ export class AntigravityRuntime implements AgentRuntime {
       options.sessionId,
       skipPermissions,
       antigravityBrainDirectory(env),
+      this.authRetryDelaysMs,
     );
     const agent = s.connection.agent;
     let phase = "initialize";
@@ -1052,7 +1286,7 @@ export class AntigravityRuntime implements AgentRuntime {
       s.models = (opened as { models?: ModelState }).models;
       s.config = opened.configOptions ?? [];
       s.defaultModel = s.getCurrentModel();
-    s.captureDefaultThoughtLevel();
+      s.captureDefaultThoughtLevel();
       phase = "session/config";
       if (options.model) await this.setModel(s, options.model);
       if (options.reasoningEffort)
@@ -1106,27 +1340,66 @@ export class AntigravityRuntime implements AgentRuntime {
     const s = session(process);
     const id = model || s.defaultModel;
     if (!id) throw new Error("Antigravity 没有报告默认模型");
-    if (s.modelFamilies().some((option) => option.value === id)) {
+    const families = s.modelFamilies();
+    if (families.some((option) => option.value === id)) {
       if (id !== s.getCurrentModel()) {
         await s.setOption("model", id);
       }
-    } else {
-      await s.connection.agent
-        .request(
-          "session/set_model",
-          { sessionId: s.sessionId, modelId: id },
-          rpcDeadline(),
-        )
-        .catch((error) => {
-          throw nativeError(error, "session/set_model");
-        });
+      s.selectedModel = id;
+      s.captureDefaultThoughtLevel(id);
+      return;
     }
-    s.selectedModel = id;
-    s.captureDefaultThoughtLevel(id);
+    const legacyFlat = splitAntigravityFlatModelId(id);
+    if (legacyFlat && families.some((option) => option.value === legacyFlat.familyId)) {
+      const currentModel = s.getCurrentModel();
+      if (s.selectedModel === id && currentModel === legacyFlat.familyId) return;
+      if (legacyFlat.familyId !== currentModel) {
+        await s.setOption("model", legacyFlat.familyId);
+      }
+      // Capture the family's native default thought level before applying the
+      // effort encoded in the legacy flat ID so resetting to `default` works.
+      s.captureDefaultThoughtLevel(legacyFlat.familyId);
+      if (
+        s.selectOptions("thought_level").some((option) => option.value === legacyFlat.effort) &&
+        legacyFlat.effort !== s.selectedOption("thought_level")
+      ) {
+        await s.setOption("thought_level", legacyFlat.effort);
+      }
+      s.selectedModel = id;
+      return;
+    }
+    const legacyFamilyModel = families.length || s.models?.availableModels.some((model) => model.modelId === id)
+      ? undefined
+      : s.legacyFlatModelForFamily(id);
+    const currentModel = s.getCurrentModel();
+    // An old worker stores effort in the selected flat ID. Reapplying the
+    // family at a turn boundary keeps its current native variant.
+    if (legacyFamilyModel && splitAntigravityFlatModelId(currentModel)?.familyId === id) return;
+    const nativeModel = legacyFamilyModel ?? id;
+    if (nativeModel === currentModel) return;
+    await s.connection.agent
+      .request(
+        "session/set_model",
+        { sessionId: s.sessionId, modelId: nativeModel },
+        rpcDeadline(),
+      )
+      .catch((error) => {
+        throw nativeError(error, "session/set_model");
+      });
+    s.selectedModel = nativeModel;
+    s.captureDefaultThoughtLevel(nativeModel);
   }
   async setReasoningEffort(process: RuntimeProcess, effort?: string) {
     const s = session(process);
     const thoughtLevel = effort ?? s.getDefaultThoughtLevel();
+    if (effort && !s.modelFamilies().length && !s.selectOptions("thought_level").length) {
+      const familyId = splitAntigravityFlatModelId(s.getCurrentModel())?.familyId;
+      const model = familyId && s.legacyFlatModelForFamily(familyId, effort);
+      if (model) {
+        await this.setModel(s, model);
+        return;
+      }
+    }
     if (thoughtLevel !== undefined && thoughtLevel !== s.selectedOption("thought_level")) {
       await s.setOption("thought_level", thoughtLevel);
     }
@@ -1167,13 +1440,7 @@ export class AntigravityRuntime implements AgentRuntime {
     pending.answer(answers);
   }
   async interruptTurn(process: RuntimeProcess) {
-    const s = session(process);
-    if (s.active) {
-      await s.connection.agent.notify("session/cancel", {
-        sessionId: s.sessionId,
-      });
-      s.cancelTurn();
-    }
+    await session(process).cancelTurn();
   }
   async stopSession(process: RuntimeProcess) {
     const s = session(process);
@@ -1188,6 +1455,7 @@ export class AntigravityRuntime implements AgentRuntime {
     } catch {
       /* Continue through process-tree cleanup if ACP is unavailable. */
     }
+    s.clearAuthRetry();
     s.finishBackgroundWork();
     s.connection.close();
     if (s.pid <= 0) return;

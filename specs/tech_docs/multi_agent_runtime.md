@@ -198,7 +198,7 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 ### 5.5 Antigravity CLI
 
-选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。模型菜单读取 `agy models`；聊天中的模型及推理档位以本 Session worker 回报为准。macOS Dev 已验证 Antigravity CLI 1.5.14。
+选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。无活跃 ACP 进程时（起始页与尚未唤醒的对话页），模型菜单读取 `agy models` 并按与 ACP 一致的规则将多档推理强度变体折叠为「模型家族 + `supportedReasoningEfforts`」（单变体与非强度后缀条目保持原样）；会话唤醒后以本 Session worker 回报的 `configOptions`（`model` 与 `thought_level`）为运行期权威，推理档位只展示当前模型的已确认选项，同时兼容历史保存的扁平模型 ID（如 `gemini-4-neon-high`）的展示高亮与配置下发。仅提供扁平 ID 的旧 worker 继续接收原生 ID，用户选择的模型家族与档位由 adapter 映射到原生变体。目录未报告默认模型时，先通过显式选模确定可用档位。macOS Dev 已验证 Antigravity CLI 1.5.14。
 
 每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
 
@@ -206,7 +206,7 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 | 产品交互 | Antigravity 行为 |
 |---|---|
-| 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，停止由原生 cancel 结束当前轮；普通停止和指定排队项优先发送分别复用现有队列语义。 |
+| 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，普通停止和指定排队项优先发送分别复用现有队列语义。若 prompt 以独立 ACP 文本块中的原生格式临时鉴权警告和 `end_turn` 结束，adapter 在同一个原生会话发送简短续跑消息，沿用现有上下文。续跑有退避和次数上限，整个产品轮次合计用量。停止请求会阻止迟到的回包派发续跑，重试用尽以 `failed` 结束。 |
 | 审批与问答 | 保留 CLI 提供的选项 ID、类型和文案。共享审批卡投影操作、目录及可用的文件 diff。支持可无损往返的标量表单。后台无交互入口时结束请求。 |
 | 工具与附件 | 用原生工具语义在既有 Shell、Read/Edit、搜索、子 Agent 与通用卡展示。ACP 活动输出是替换快照，按原调用更新内容和状态。1.5.14 Read 的正文按当前 native conversation 与原工具调用 ID，从 CLI 持久化的实际结果投影。 |
 | 子 Agent | 按当前 worker 已观察的 invoke_subagent 调用 ID，把原生子会话、内部工具与回复、报告、终态对齐到委派卡。父 prompt 返回后仍处理同一 ACP Session 的新内容，使用既有外部 Session 协作接纳与 V2 投影。收到 usage_update 后结算该次父续答，按已完成父回复的原生步骤顺序确认该轮消费了哪些报告。全部子任务结算及报告得到确认后释放后台工作。 |

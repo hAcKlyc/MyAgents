@@ -25,6 +25,8 @@ const configOptions = () => [
   select('mode', mode, []),
 ];
 let turn;
+let settleAuthCancelledPrompt;
+let recoverAfterFramedQuote = false;
 lines.on('line', line => {
   const f = JSON.parse(line);
   const reply = result => send({id:f.id, result});
@@ -41,13 +43,133 @@ lines.on('line', line => {
     else return send({id:f.id,error:{code:-32602,message:'invalid config option'}});
     return reply({configOptions:configOptions()});
   }
-  if (f.method === 'session/new') return reply({sessionId:'native',configOptions:configOptions()});
+  if (f.method === 'session/new') return reply({
+    sessionId:'native',
+    configOptions:configOptions(),
+    models:{
+      currentModelId:'model-a-high',
+      availableModels:[
+        {modelId:'model-a-high',name:'Model A (High)'},
+        {modelId:'model-a-medium',name:'Model A (Medium)'},
+        {modelId:'model-b-low',name:'Model B (Low)'},
+        {modelId:'model-b-high',name:'Model B (High)'},
+      ],
+    },
+  });
   if (f.method === 'session/resume') return send({id:f.id,error:{code:-32602,message:'unknown session'}});
+  if (f.method === 'session/cancel' && settleAuthCancelledPrompt) {
+    const settle = settleAuthCancelledPrompt;
+    settleAuthCancelledPrompt = undefined;
+    return settle();
+  }
   if (f.method === 'session/close') return reply({});
   if (f.method === 'session/prompt') {
     turn = f.id;
-    if (f.params.prompt[0].text === 'exit') return process.exit(2);
-    if (f.params.prompt[0].text === 'usage') return reply({
+    const textPrompt = f.params.prompt[0].text;
+    const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
+    const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
+    if (textPrompt === 'exit') return process.exit(2);
+    if (textPrompt === 'auth-401-recover' || textPrompt === 'auth-401-exhaust' || textPrompt === 'auth-401-cap' || textPrompt === 'auth-401-cancel') {
+      globalThis.__authMode = textPrompt;
+      globalThis.__authCalls = 0;
+    }
+    if (globalThis.__authMode) {
+      globalThis.__authCalls += 1;
+      const call = globalThis.__authCalls;
+      if (globalThis.__authMode === 'auth-401-recover') {
+        if (call === 1) {
+          update(textChunk('Started in the original session. '));
+          update({sessionUpdate:'tool_call',toolCallId:'pre-401',title:'Check status',kind:'execute',status:'pending',rawInput:{CommandLine:'echo ok'}});
+          update({sessionUpdate:'tool_call_update',toolCallId:'pre-401',status:'completed',content:[{type:'content',content:{type:'text',text:'ok'}}],rawOutput:{exit_code:0}});
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155}});
+        }
+        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !textPrompt.startsWith('Continue from where you stopped.')) {
+          return reply({stopReason:'refusal'});
+        }
+        if (call === 2) {
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:10,outputTokens:0,thoughtTokens:0,cachedReadTokens:5,totalTokens:15}});
+        }
+        globalThis.__authMode = null;
+        update(textChunk('Recovered in the same session.'));
+        return reply({stopReason:'end_turn',usage:{inputTokens:40,outputTokens:12,thoughtTokens:3,cachedReadTokens:20,totalTokens:75}});
+      }
+      if (globalThis.__authMode === 'auth-401-exhaust') {
+        update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:50,outputTokens:5,thoughtTokens:0,cachedReadTokens:10,totalTokens:65}});
+      }
+      if (globalThis.__authMode === 'auth-401-cap') {
+        // Every attempt makes real progress (a tool call) before hitting 401 again,
+        // exercising consecutive-retry reset + hard per-turn cap (4 total retries = 5 total prompts).
+        update({sessionUpdate:'tool_call',toolCallId:'step-' + call,title:'Step ' + call,kind:'execute',status:'pending',rawInput:{CommandLine:'echo ' + call}});
+        update({sessionUpdate:'tool_call_update',toolCallId:'step-' + call,status:'completed',content:[{type:'content',content:{type:'text',text:String(call)}}],rawOutput:{exit_code:0}});
+        update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:10,outputTokens:1,thoughtTokens:0,cachedReadTokens:0,totalTokens:11}});
+      }
+      if (globalThis.__authMode === 'auth-401-cancel') {
+        if (call === 1) {
+          update(textChunk(auth401Text));
+          return reply({stopReason:'end_turn',usage:{inputTokens:25,outputTokens:2,thoughtTokens:0,cachedReadTokens:0,totalTokens:27}});
+        }
+        // Should never be reached if interrupted during backoff.
+        update(textChunk('SHOULD_NOT_RUN'));
+        return reply({stopReason:'end_turn'});
+      }
+    }
+    if (textPrompt === 'auth-401-cancel-before-warning' || textPrompt === 'auth-401-cancel-after-warning') {
+      const warningBeforeCancel = textPrompt === 'auth-401-cancel-after-warning';
+      if (warningBeforeCancel) update(textChunk(auth401Text));
+      update({sessionUpdate:'usage_update',used:44,size:100});
+      settleAuthCancelledPrompt = () => {
+        if (!warningBeforeCancel) update(textChunk(auth401Text));
+        return reply({stopReason:'end_turn',usage:{inputTokens:25,outputTokens:2,totalTokens:27}});
+      };
+      return;
+    }
+    if (textPrompt === 'auth-401-warning-after-framed-quote') {
+      recoverAfterFramedQuote = true;
+      update(textChunk(auth401Text));
+      update(textChunk(auth401Text));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt.startsWith('auth-401-framed-quote-')) {
+      update(textChunk(auth401Text));
+      return reply({stopReason:textPrompt.slice('auth-401-framed-quote-'.length)});
+    }
+    if (textPrompt === 'auth-401-quoted-final-chunk') {
+      update(textChunk('Here is the exact error: '));
+      update(textChunk(auth401Text.trim()));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'auth-401-quoted') {
+      update(textChunk(auth401Text));
+      update(textChunk('That error occurs when OAuth2 expires.'));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'auth-401-quoted-single-chunk') {
+      update(textChunk(auth401Text.trim() + ' That error occurs when OAuth2 expires.'));
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'auth-401-disconnect-during-backoff') {
+      update(textChunk(auth401Text));
+      reply({stopReason:'end_turn',usage:{inputTokens:33,outputTokens:7,thoughtTokens:0,cachedReadTokens:5,totalTokens:45}});
+      setTimeout(() => { process.stdout.end(); }, 25);
+      return;
+    }
+    if (textPrompt === 'auth-401-exit-during-backoff') {
+      update(textChunk(auth401Text));
+      reply({stopReason:'end_turn',usage:{inputTokens:44,outputTokens:6,thoughtTokens:2,cachedReadTokens:12,totalTokens:64}});
+      setTimeout(() => { process.exit(3); }, 25);
+      return;
+    }
+    if (textPrompt.startsWith('Continue from where you stopped.')) {
+      update(textChunk(recoverAfterFramedQuote ? 'Continued after warning.' : 'UNEXPECTED_RETRY'));
+      recoverAfterFramedQuote = false;
+      return reply({stopReason:'end_turn'});
+    }
+    if (textPrompt === 'usage') return reply({
       stopReason:'end_turn',
       usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
     });
@@ -317,4 +439,380 @@ it("keeps the prompt usage delta independent from native context-window telemetr
     cacheCreationTokens: undefined, semantics: "delta",
   });
   expect(events.some((event) => event.kind === "context_update")).toBe(false);
+});
+
+it("silently retries transient mid-turn HTTP 401 warnings without leaking the banner or duplicating the user prompt", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [15, 25] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-recover");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  const terminal = events.find((event) => event.kind === "turn_complete");
+  expect(terminal).toMatchObject({ kind: "turn_complete", status: "completed" });
+  const combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toBe("Started in the original session. Recovered in the same session.");
+  expect(events.filter((event) => event.kind === "tool_result")).toMatchObject([
+    { toolUseId: "pre-401", isError: false },
+  ]);
+  expect(combinedText).not.toContain("UNAUTHENTICATED");
+
+  // Usage across initial + 2 retries is accumulated and emitted once for the Product Turn.
+  const usageEvents = events.filter((event) => event.kind === "usage");
+  expect(usageEvents).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 150,
+      outputTokens: 40,
+      cacheReadTokens: 55,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("escalates to a failed turn once consecutive HTTP 401 retries are exhausted", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-exhaust");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "failed",
+    error: expect.stringContaining("HTTP 401"),
+  });
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+  // 1 initial attempt + 2 retries = 3 usage contributions accumulated.
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 150,
+      outputTokens: 15,
+      cacheReadTokens: 30,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("resets consecutive retry count after real progress while enforcing the per-turn cap of 4 retries", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [5, 10] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-cap");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "failed",
+    error: expect.stringContaining("HTTP 401"),
+  });
+  const toolStarts = events.filter((event) => event.kind === "tool_use_start");
+  expect(toolStarts).toHaveLength(5);
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+});
+
+it("cancels cleanly without firing a pending HTTP 401 backoff retry when interrupted", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-cancel");
+
+  // Wait until the first 401 attempt has resolved and entered the backoff window.
+  await expect
+    .poll(() => (processHandle as { isAwaitingAuthRetry?: () => boolean }).isAwaitingAuthRetry?.())
+    .toBe(true);
+  await slowRuntime.interruptTurn(processHandle);
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "cancelled",
+  });
+  expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 25,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it.each(["before-warning", "after-warning"])(
+  "honors cancel %s without interpreting the pending prompt response as success or retrying",
+  async (timing) => {
+    const reviewRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+    const { options, receive, events } = await setup();
+    processHandle = await reviewRuntime.startSession(options, receive);
+    await reviewRuntime.sendMessage(processHandle, `auth-401-cancel-${timing}`);
+    await expect.poll(() => events.some((event) => event.kind === "context_update")).toBe(true);
+
+    await reviewRuntime.interruptTurn(processHandle);
+    await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+    expect(events.filter((event) => event.kind === "usage")).toMatchObject([
+      { semantics: "delta", inputTokens: 25, outputTokens: 2 },
+    ]);
+    expect(events.some((event) => event.kind === "text_delta")).toBe(false);
+
+    await reviewRuntime.sendMessage(processHandle, "usage");
+    await expect.poll(() => events.filter((event) => event.kind === "turn_complete").map((event) => event.status))
+      .toEqual(["cancelled", "completed"]);
+  },
+);
+
+it("preserves an unframed warning quoted verbatim in the last model chunk", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted-final-chunk");
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([
+    "Here is the exact error: ",
+    "⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+  ]);
+});
+
+it.each([
+  ["max_tokens", "failed"],
+  ["cancelled", "cancelled"],
+])("keeps a framed warning quote with the native stop reason %s", async (stopReason, status) => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, `auth-401-framed-quote-${stopReason}`);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe(status);
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([expect.stringMatching(/^\n⚠ UNAUTHENTICATED .*\n$/)]);
+});
+
+it("continues after a final native warning even when the previous chunk was an identical quote", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-warning-after-framed-quote");
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text).toEqual([expect.stringMatching(/^\n⚠ UNAUTHENTICATED .*\n$/), "Continued after warning."]);
+});
+
+it("flushes legitimately quoted 401 warning text intact across split or single chunks", async () => {
+  const fastRuntime = new AntigravityRuntime({ authRetryDelaysMs: [10, 15] });
+  const { options, receive, events } = await setup();
+  processHandle = await fastRuntime.startSession(options, receive);
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted");
+
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "completed",
+  });
+  let combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toContain("⚠ UNAUTHENTICATED (code 401):");
+  expect(combinedText).toContain("That error occurs when OAuth2 expires.");
+
+  events.length = 0;
+  await fastRuntime.sendMessage(processHandle, "auth-401-quoted-single-chunk");
+  await expect
+    .poll(() => events.filter((event) => event.kind === "turn_complete").length)
+    .toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    kind: "turn_complete",
+    status: "completed",
+  });
+  combinedText = events
+    .filter((event): event is Extract<UnifiedEvent, { kind: "text_delta" }> => event.kind === "text_delta")
+    .map((event) => event.text)
+    .join("");
+  expect(combinedText).toContain("⚠ UNAUTHENTICATED (code 401):");
+  expect(combinedText).toContain("That error occurs when OAuth2 expires.");
+});
+
+it("settles the turn and flushes accumulated usage when ACP disconnects during auth retry backoff", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-disconnect-during-backoff");
+
+  await expect
+    .poll(() => events.find((event) => event.kind === "turn_complete"))
+    .toMatchObject({
+      kind: "turn_complete",
+      status: "failed",
+    });
+  expect(events.filter((event) => event.kind === "usage")).toEqual([
+    {
+      kind: "usage",
+      semantics: "delta",
+      inputTokens: 33,
+      outputTokens: 7,
+      cacheReadTokens: 5,
+      cacheCreationTokens: undefined,
+    },
+  ]);
+});
+
+it("flushes accumulated usage before reporting worker exit during auth retry backoff", async () => {
+  const slowRuntime = new AntigravityRuntime({ authRetryDelaysMs: [2_000, 5_000] });
+  const { options, receive, events } = await setup();
+  processHandle = await slowRuntime.startSession(options, receive);
+  await slowRuntime.sendMessage(processHandle, "auth-401-exit-during-backoff");
+
+  await expect
+    .poll(() => events.find((event) => event.kind === "session_complete"))
+    .toMatchObject({
+      kind: "session_complete",
+      subtype: "error",
+    });
+  const usageIndex = events.findIndex((event) => event.kind === "usage");
+  const sessionCompleteIndex = events.findIndex((event) => event.kind === "session_complete");
+  expect(usageIndex).toBeGreaterThanOrEqual(0);
+  expect(usageIndex).toBeLessThan(sessionCompleteIndex);
+  expect(events[usageIndex]).toEqual({
+    kind: "usage",
+    semantics: "delta",
+    inputTokens: 44,
+    outputTokens: 8,
+    cacheReadTokens: 12,
+    cacheCreationTokens: undefined,
+  });
+});
+
+it("normalizes flat agy models CLI output into families with reasoning efforts", async () => {
+  const cliLines = [
+    "gemini-4-neon-high\\tGemini 4 Neon (High)",
+    "gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)",
+    "gemini-4-neon-low\\tGemini 4 Neon (Low)",
+    "gemini-pro-orchestrator-neon\\tOrchestrator (Neon)",
+    "gpt-oss-120b-medium\\tGPT-OSS 120B (Medium)",
+  ].join("\\n");
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", `console.log("${cliLines}")`], options));
+
+  expect(await runtime.queryModels()).toEqual([
+    {
+      value: "gemini-4-neon",
+      displayName: "Gemini 4 Neon",
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "Low" },
+        { reasoningEffort: "high", description: "High" },
+        { reasoningEffort: "xhigh", description: "Extra" },
+      ],
+    },
+    { value: "gemini-pro-orchestrator-neon", displayName: "Orchestrator (Neon)" },
+    { value: "gpt-oss-120b-medium", displayName: "GPT-OSS 120B (Medium)" },
+  ]);
+});
+
+it("maps legacy flat model IDs onto ACP family + thought_level options while preserving default reset", async () => {
+  const { options, receive } = await setup();
+  processHandle = await runtime.startSession({ ...options, model: "model-a-medium" }, receive);
+  const readCatalog = () => runtime.queryModels({ process: processHandle });
+  expect(await readCatalog()).toMatchObject([
+    {
+      value: "model-a",
+      isDefault: true,
+      isCurrent: true,
+      currentReasoningEffort: "medium",
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "medium", description: "medium" },
+        { reasoningEffort: "high", description: "high" },
+      ],
+    },
+    { value: "model-b", displayName: "model-b" },
+  ]);
+  expect((await readCatalog())[1]?.supportedReasoningEfforts).toBeUndefined();
+
+  // Reapplying the persisted model at the next turn boundary keeps the reset.
+  await runtime.setReasoningEffort(processHandle, undefined);
+  await runtime.setModel(processHandle, "model-a-medium");
+  expect((await readCatalog())[0]?.currentReasoningEffort).toBe("high");
+
+  await runtime.setModel(processHandle, "model-b");
+  expect((await readCatalog())[1]).toMatchObject({
+    isCurrent: true,
+    defaultReasoningEffort: "low",
+    supportedReasoningEfforts: [{ reasoningEffort: "low", description: "low" }],
+  });
+});
+
+it("maps the Launcher family and effort to a supported flat model for a legacy ACP worker", async () => {
+  const legacyFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+const available = [
+  {modelId:'legacy-a-high', name:'Legacy A (High)'},
+  {modelId:'legacy-a-low', name:'Legacy A (Low)'},
+  {modelId:'legacy-b', name:'Legacy B'},
+];
+let current = 'legacy-b';
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'legacy',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],models:{currentModelId:current,availableModels:available}});
+  if (f.method === 'session/set_config_option') return reply({configOptions:[{id:'mode',name:'mode',type:'select',currentValue:f.params.value,options:[]}]});
+  if (f.method === 'session/set_model') {
+    if (!available.some(m => m.modelId === f.params.modelId)) return send({id:f.id,error:{code:-32602,message:'unknown model'}});
+    current = f.params.modelId;
+    return reply({});
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-legacy-models-"));
+  const cliRows = "legacy-a-high\tLegacy A (High)\nlegacy-a-low\tLegacy A (Low)\nlegacy-b\tLegacy B";
+  vi.spyOn(subprocess, "spawn").mockImplementation((argv, options) =>
+    originalSpawn([
+      process.execPath,
+      "-e",
+      argv[1] === "models" ? `console.log(${JSON.stringify(cliRows)})` : legacyFixture,
+    ], options));
+  const [family] = await runtime.queryModels();
+  expect(family?.value).toBe("legacy-a");
+  processHandle = await runtime.startSession(
+    {
+      workspacePath: directory,
+      sessionId: "legacy-product",
+      scenario: { type: "desktop" },
+      model: family!.value,
+      reasoningEffort: "low",
+    },
+    () => undefined,
+  );
+  const catalog = await runtime.queryModels({ process: processHandle });
+  expect(catalog.map((model) => model.value)).toEqual(["legacy-a-high", "legacy-a-low", "legacy-b"]);
+  expect(catalog.find((model) => model.isCurrent)?.value).toBe("legacy-a-low");
+  await runtime.setModel(processHandle, "legacy-a-high");
+  await runtime.setReasoningEffort(processHandle, "low");
+  await runtime.setModel(processHandle, family!.value);
+  expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
+    .toBe("legacy-a-low");
 });
