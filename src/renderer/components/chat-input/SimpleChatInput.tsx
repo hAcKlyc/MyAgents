@@ -52,6 +52,7 @@ import { hasUserEditableMcpSettings } from '../../../shared/browserTools';
 import { CUSTOM_EVENTS } from '../../../shared/constants';
 import { IMAGE_UNDERSTANDING_TOOL_ID } from '../../../shared/official-tools';
 import { reasoningEffortChoices, REASONING_EFFORT_DESCRIPTIONS, REASONING_EFFORT_DEFAULT } from '../../../shared/reasoningEffort';
+import { resolveAntigravityModelSelection } from '../../../shared/antigravityModelCatalog';
 import { ANTIGRAVITY_FULL_ACCESS } from '../../../shared/types/runtime';
 import { retainFocusOnMouseDown } from '@/utils/focusRetention';
 import { detectExcessiveRepetition } from '@/utils/excessiveRepetition';
@@ -451,15 +452,23 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   const effortCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // null = this surface has no reasoning-effort knob (unknown) → row hidden.
   const managedEffort = isRuntimeBackedProvider(provider);
+  const antigravitySelection = runtime === 'antigravity'
+    ? resolveAntigravityModelSelection(runtimeModels, selectedModel)
+    : null;
   const antigravityEffortModel = runtime === 'antigravity'
-    ? (runtimeModels?.find(model => model.value === selectedModel) ?? runtimeModels?.find(model => model.isCurrent))
+    ? (antigravitySelection?.model
+        ?? runtimeModels?.find(model => model.isCurrent)
+        ?? runtimeModels?.find(model => model.isDefault)
+        ?? runtimeModels?.[0])
     : undefined;
   const effortModel = managedReasoningModel !== undefined
     ? managedReasoningModel
     : antigravityEffortModel ?? provider?.models?.find(model => model.model === (selectedModel ?? provider.primaryModel));
   const reportedDefaultEffort = runtime === 'antigravity'
     ? (reasoningEffort === REASONING_EFFORT_DEFAULT
-        ? antigravityEffortModel?.currentReasoningEffort
+        ? (antigravityEffortModel?.currentReasoningEffort
+            ?? antigravitySelection?.legacyEffort
+            ?? antigravityEffortModel?.defaultReasoningEffort)
         : antigravityEffortModel?.defaultReasoningEffort)
     : managedEffort ? effortModel?.defaultReasoningEffort : undefined;
   const defaultEffortLabel = reportedDefaultEffort
@@ -467,7 +476,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
     : t('input.reasoningDefault');
   const effortChoices = onReasoningEffortChange
     ? runtime === 'antigravity'
-      ? antigravityEffortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? null
+      ? (antigravityEffortModel?.supportedReasoningEfforts?.length
+          ? antigravityEffortModel.supportedReasoningEfforts.map(option => option.reasoningEffort)
+          : null)
       : managedEffort
       ? (effortModel?.supportedReasoningEfforts?.map(option => option.reasoningEffort) ?? [])
       : reasoningEffortChoices(
@@ -515,7 +526,9 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
   // Derive current model ID from prop or provider default — no hardcoded fallback
   // Get display name for current model (runtime-aware)
   const currentModelName = isExternalRuntime
-    ? (runtimeModels?.find(m => m.value === selectedModel)?.displayName
+    ? ((runtime === 'antigravity'
+        ? antigravitySelection?.model?.displayName
+        : runtimeModels?.find(m => m.value === selectedModel)?.displayName)
       ?? (runtime === 'antigravity' ? selectedModel || runtimeModels?.find(m => m.isCurrent)?.displayName : undefined)
       ?? runtimeModels?.find(m => m.isDefault)?.displayName
       ?? t('input.modelDefault'))
@@ -2074,8 +2087,11 @@ const SimpleChatInput = memo(forwardRef<SimpleChatInputHandle, SimpleChatInputPr
                       <div className="px-3 py-2 text-sm text-[var(--ink-muted)]">{t('input.modelCatalogEmpty')}</div>
                     ))}
                     {runtimeModels.map(model => {
-                      const isSelected = selectedModel === model.value
-                        || (!selectedModel && (runtime === 'antigravity' ? model.isCurrent ?? model.isDefault : model.isDefault));
+                      const isSelected = runtime === 'antigravity'
+                        ? (antigravitySelection?.model
+                            ? antigravitySelection.model.value === model.value
+                            : (!selectedModel && Boolean(model.isCurrent ?? model.isDefault)))
+                        : (selectedModel === model.value || (!selectedModel && Boolean(model.isDefault)));
                       return (
                         <button
                           ref={isSelected ? selectedModelRowRef : undefined}

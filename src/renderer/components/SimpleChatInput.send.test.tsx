@@ -1709,4 +1709,112 @@ describe('SimpleChatInput send paths', () => {
 
     expect(textarea).toHaveValue('workspace B draft');
   });
+
+  it('shows the split Antigravity reasoning-effort row before a session starts and maps legacy flat model IDs onto family rows', async () => {
+    const user = userEvent.setup();
+    const onReasoningEffortChange = vi.fn();
+    const onModelChange = vi.fn();
+    const normalizedModels = [
+      {
+        value: 'gemini-4-neon',
+        displayName: 'Gemini 4 Neon',
+        defaultReasoningEffort: 'high',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Low' },
+          { reasoningEffort: 'medium', description: 'Medium' },
+          { reasoningEffort: 'high', description: 'High' },
+          { reasoningEffort: 'xhigh', description: 'Extra' },
+        ],
+      },
+      {
+        value: 'gpt-oss-120b-medium',
+        displayName: 'GPT-OSS 120B (Medium)',
+      },
+    ];
+
+    // 1. Pre-session Launcher/Chat with no selectedModel and no live isCurrent still shows the effort row.
+    const { unmount } = render(
+      <ToastProvider>
+        <ImagePreviewProvider>
+          <SimpleChatInput
+            mode="launcher"
+            runtime="antigravity"
+            usesExternalRuntimeControls={true}
+            runtimeModels={normalizedModels}
+            reasoningEffort="default"
+            onReasoningEffortChange={onReasoningEffortChange}
+            onModelChange={onModelChange}
+            isLoading={false}
+            onSend={vi.fn()}
+          />
+        </ImagePreviewProvider>
+      </ToastProvider>,
+    );
+
+    const modelBtn = screen.getByRole('button', { name: i18n.t('chat:input.modelDefault') });
+    await user.click(modelBtn);
+    expect(screen.getByRole('button', { name: /推理强度/ })).toBeTruthy();
+    expect(screen.getByText('默认 (high)')).toBeTruthy();
+    unmount();
+
+    // 2. Legacy persisted flat ID `gemini-4-neon-medium` maps onto family display name, selection highlight, and offline effort hint.
+    const { unmount: unmountLegacyOffline } = render(
+      <ToastProvider>
+        <ImagePreviewProvider>
+          <SimpleChatInput
+            mode="chat"
+            runtime="antigravity"
+            usesExternalRuntimeControls={true}
+            runtimeModels={normalizedModels}
+            selectedModel="gemini-4-neon-medium"
+            reasoningEffort="default"
+            onReasoningEffortChange={onReasoningEffortChange}
+            onModelChange={onModelChange}
+            isLoading={false}
+            onSend={vi.fn()}
+          />
+        </ImagePreviewProvider>
+      </ToastProvider>,
+    );
+
+    const familyBtn = screen.getByRole('button', { name: 'Gemini 4 Neon' });
+    expect(screen.queryByText('gemini-4-neon-medium')).toBeNull();
+    await user.click(familyBtn);
+    const selectedRow = document.querySelector('[data-selected-model-row]');
+    expect(selectedRow?.textContent).toBe('Gemini 4 Neon');
+    expect(screen.getByRole('button', { name: /推理强度/ })).toBeTruthy();
+    expect(screen.getByText('默认 (medium)')).toBeTruthy();
+    unmountLegacyOffline();
+
+    // 3. Once ACP reports live currentReasoningEffort (e.g. after resetting to default), live runtime state wins over legacy suffix.
+    const liveModels = [
+      {
+        ...normalizedModels[0]!,
+        isCurrent: true,
+        currentReasoningEffort: 'high',
+      },
+      normalizedModels[1]!,
+    ];
+    render(
+      <ToastProvider>
+        <ImagePreviewProvider>
+          <SimpleChatInput
+            mode="chat"
+            runtime="antigravity"
+            usesExternalRuntimeControls={true}
+            runtimeModels={liveModels}
+            selectedModel="gemini-4-neon-medium"
+            reasoningEffort="default"
+            onReasoningEffortChange={onReasoningEffortChange}
+            onModelChange={onModelChange}
+            isLoading={false}
+            onSend={vi.fn()}
+          />
+        </ImagePreviewProvider>
+      </ToastProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Gemini 4 Neon' }));
+    expect(screen.getByText('默认 (high)')).toBeTruthy();
+  });
 });
