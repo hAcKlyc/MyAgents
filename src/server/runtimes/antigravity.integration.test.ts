@@ -41,7 +41,19 @@ lines.on('line', line => {
     else return send({id:f.id,error:{code:-32602,message:'invalid config option'}});
     return reply({configOptions:configOptions()});
   }
-  if (f.method === 'session/new') return reply({sessionId:'native',configOptions:configOptions()});
+  if (f.method === 'session/new') return reply({
+    sessionId:'native',
+    configOptions:configOptions(),
+    models:{
+      currentModelId:'model-a-high',
+      availableModels:[
+        {modelId:'model-a-high',name:'Model A (High)'},
+        {modelId:'model-a-medium',name:'Model A (Medium)'},
+        {modelId:'model-b-low',name:'Model B (Low)'},
+        {modelId:'model-b-high',name:'Model B (High)'},
+      ],
+    },
+  });
   if (f.method === 'session/resume') return send({id:f.id,error:{code:-32602,message:'unknown session'}});
   if (f.method === 'session/close') return reply({});
   if (f.method === 'session/prompt') {
@@ -317,4 +329,97 @@ it("keeps the prompt usage delta independent from native context-window telemetr
     cacheCreationTokens: undefined, semantics: "delta",
   });
   expect(events.some((event) => event.kind === "context_update")).toBe(false);
+});
+
+it("normalizes flat agy models CLI output into families with reasoning efforts", async () => {
+  const cliLines = [
+    "gemini-4-neon-high\\tGemini 4 Neon (High)",
+    "gemini-4-neon-xhigh\\tGemini 4 Neon (XHigh)",
+    "gemini-4-neon-low\\tGemini 4 Neon (Low)",
+    "gemini-pro-orchestrator-neon\\tOrchestrator (Neon)",
+    "gpt-oss-120b-medium\\tGPT-OSS 120B (Medium)",
+  ].join("\\n");
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", `console.log("${cliLines}")`], options));
+
+  expect(await runtime.queryModels()).toEqual([
+    {
+      value: "gemini-4-neon",
+      displayName: "Gemini 4 Neon",
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "Low" },
+        { reasoningEffort: "high", description: "High" },
+        { reasoningEffort: "xhigh", description: "Extra" },
+      ],
+    },
+    { value: "gemini-pro-orchestrator-neon", displayName: "Orchestrator (Neon)" },
+    { value: "gpt-oss-120b-medium", displayName: "GPT-OSS 120B (Medium)" },
+  ]);
+});
+
+it("maps legacy flat model IDs onto ACP family + thought_level options while preserving default reset", async () => {
+  const { options, receive } = await setup();
+  processHandle = await runtime.startSession({ ...options, model: "model-a-medium" }, receive);
+  const readCatalog = () => runtime.queryModels({ process: processHandle });
+  expect(await readCatalog()).toMatchObject([
+    {
+      value: "model-a",
+      isDefault: true,
+      isCurrent: true,
+      currentReasoningEffort: "medium",
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "medium", description: "medium" },
+        { reasoningEffort: "high", description: "high" },
+      ],
+    },
+    {
+      value: "model-b",
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "Low" },
+        { reasoningEffort: "high", description: "High" },
+      ],
+    },
+  ]);
+
+  // Resetting effort back to default restores the family's native default ("high"), not "medium".
+  await runtime.setReasoningEffort(processHandle, undefined);
+  expect((await readCatalog())[0]?.currentReasoningEffort).toBe("high");
+});
+
+it("preserves native flat IDs when an ACP worker only advertises legacy models without configOptions", async () => {
+  const legacyFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+const available = [
+  {modelId:'legacy-a-high', name:'Legacy A (High)'},
+  {modelId:'legacy-a-low', name:'Legacy A (Low)'},
+];
+let current = 'legacy-a-high';
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'legacy',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],models:{currentModelId:current,availableModels:available}});
+  if (f.method === 'session/set_config_option') return reply({configOptions:[{id:'mode',name:'mode',type:'select',currentValue:f.params.value,options:[]}]});
+  if (f.method === 'session/set_model') {
+    if (!available.some(m => m.modelId === f.params.modelId)) return send({id:f.id,error:{code:-32602,message:'unknown model'}});
+    current = f.params.modelId;
+    return reply({});
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-legacy-models-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", legacyFixture], options));
+  processHandle = await runtime.startSession(
+    { workspacePath: directory, sessionId: "legacy-product", scenario: { type: "desktop" } },
+    () => undefined,
+  );
+  const catalog = await runtime.queryModels({ process: processHandle });
+  expect(catalog.map((m) => m.value)).toEqual(["legacy-a-high", "legacy-a-low"]);
+  await expect(runtime.setModel(processHandle, catalog[1]!.value)).resolves.toBeUndefined();
 });

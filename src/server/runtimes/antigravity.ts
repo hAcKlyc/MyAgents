@@ -42,6 +42,10 @@ import {
   type RuntimeEnvPolicy,
   type RuntimeModelInfo,
 } from "../../shared/types/runtime";
+import {
+  normalizeAntigravityFlatModels,
+  splitAntigravityFlatModelId,
+} from "../../shared/antigravityModelCatalog";
 import type { AskUserQuestionAnswers } from "../../shared/types/askUserQuestion";
 import { ensureShellPath } from "../utils/shell";
 import { maybeSpill, releaseLargeValueRef } from "../utils/large-value-store";
@@ -895,8 +899,16 @@ export class AntigravityRuntime implements AgentRuntime {
       options.signal?.throwIfAborted();
       const currentModel = s.getCurrentModel();
       const currentReasoningEffort = s.selectedOption("thought_level");
-      const supportedReasoningEfforts = s.selectOptions("thought_level")
+      const liveReasoningEfforts = s.selectOptions("thought_level")
         .map((option) => ({ reasoningEffort: option.value, description: option.name }));
+      const fallbackByFamily = new Map(
+        normalizeAntigravityFlatModels(
+          (s.models?.availableModels ?? []).map((model) => ({
+            value: model.modelId,
+            displayName: model.name,
+          })),
+        ).map((model) => [model.value, model] as const),
+      );
       const families = s.modelFamilies();
       const modelOptions = families.length
         ? families
@@ -904,27 +916,46 @@ export class AntigravityRuntime implements AgentRuntime {
             value: model.modelId,
             name: model.name,
           }));
-      return modelOptions.map((model) => ({
-        value: model.value,
-        displayName: model.name,
-        ...(model.value === s.defaultModel ? { isDefault: true } : {}),
-        ...(model.value === currentModel ? {
-          isCurrent: true,
-          supportedReasoningEfforts,
-          currentReasoningEffort,
-          defaultReasoningEffort: s.getDefaultThoughtLevel(),
-        } : {}),
-      }));
+      return modelOptions.map((model) => {
+        const fallback = families.length ? fallbackByFamily.get(model.value) : undefined;
+        if (model.value === currentModel) {
+          return {
+            value: model.value,
+            displayName: model.name,
+            ...(model.value === s.defaultModel ? { isDefault: true } : {}),
+            isCurrent: true,
+            ...(liveReasoningEfforts.length > 0
+              ? { supportedReasoningEfforts: liveReasoningEfforts }
+              : {}),
+            ...(currentReasoningEffort !== undefined ? { currentReasoningEffort } : {}),
+            ...(s.getDefaultThoughtLevel() !== undefined
+              ? { defaultReasoningEffort: s.getDefaultThoughtLevel() }
+              : {}),
+          };
+        }
+        return {
+          value: model.value,
+          displayName: model.name,
+          ...(model.value === s.defaultModel ? { isDefault: true } : {}),
+          ...(fallback?.supportedReasoningEfforts?.length
+            ? { supportedReasoningEfforts: fallback.supportedReasoningEfforts }
+            : {}),
+          ...(fallback?.defaultReasoningEffort
+            ? { defaultReasoningEffort: fallback.defaultReasoningEffort }
+            : {}),
+        };
+      });
     }
     const { output } = await queryCli(
       "models",
       options?.envPolicy,
       options?.signal,
     );
-    return output.split(/\r?\n/).flatMap((line) => {
+    const rawEntries = output.split(/\r?\n/).flatMap((line) => {
       const [value, displayName] = line.split("\t").map((part) => part.trim());
       return value && displayName ? [{ value, displayName }] : [];
     });
+    return normalizeAntigravityFlatModels(rawEntries);
   }
   async startSession(options: SessionStartOptions, emit: UnifiedEventCallback) {
     const { path, env } = await executable(options.envPolicy);
@@ -1106,21 +1137,41 @@ export class AntigravityRuntime implements AgentRuntime {
     const s = session(process);
     const id = model || s.defaultModel;
     if (!id) throw new Error("Antigravity 没有报告默认模型");
-    if (s.modelFamilies().some((option) => option.value === id)) {
+    const families = s.modelFamilies();
+    if (families.some((option) => option.value === id)) {
       if (id !== s.getCurrentModel()) {
         await s.setOption("model", id);
       }
-    } else {
-      await s.connection.agent
-        .request(
-          "session/set_model",
-          { sessionId: s.sessionId, modelId: id },
-          rpcDeadline(),
-        )
-        .catch((error) => {
-          throw nativeError(error, "session/set_model");
-        });
+      s.selectedModel = id;
+      s.captureDefaultThoughtLevel(id);
+      return;
     }
+    const legacyFlat = splitAntigravityFlatModelId(id);
+    if (legacyFlat && families.some((option) => option.value === legacyFlat.familyId)) {
+      if (legacyFlat.familyId !== s.getCurrentModel()) {
+        await s.setOption("model", legacyFlat.familyId);
+      }
+      s.selectedModel = legacyFlat.familyId;
+      // Capture the family's native default thought level before applying the
+      // effort encoded in the legacy flat ID so resetting to `default` works.
+      s.captureDefaultThoughtLevel(legacyFlat.familyId);
+      if (
+        s.selectOptions("thought_level").some((option) => option.value === legacyFlat.effort) &&
+        legacyFlat.effort !== s.selectedOption("thought_level")
+      ) {
+        await s.setOption("thought_level", legacyFlat.effort);
+      }
+      return;
+    }
+    await s.connection.agent
+      .request(
+        "session/set_model",
+        { sessionId: s.sessionId, modelId: id },
+        rpcDeadline(),
+      )
+      .catch((error) => {
+        throw nativeError(error, "session/set_model");
+      });
     s.selectedModel = id;
     s.captureDefaultThoughtLevel(id);
   }
