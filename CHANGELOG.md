@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.16] - 2026-11-25
+
+### Fixed
+
+- **Antigravity 长任务** 遇到临时登录错误时，会在当前会话里沿着已有上下文自动续跑。自动续跑失败时会给出错误提示，用户也可随时停止。
+
+---
+
 ## [0.5.15] - 2026-11-22
 
 ### Changed
