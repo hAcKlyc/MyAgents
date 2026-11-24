@@ -683,16 +683,18 @@ export function getDefaultRuntimePermissionMode(runtime: RuntimeType): string {
  * deadline.
  *
  * Per-runtime mapping:
- *   - builtin     → 'fullAgency'        (mapToSdkPermissionMode → bypassPermissions)
- *   - claude-code → 'bypassPermissions' (CC CLI native value, no translation)
- *   - codex       → 'no-restrictions'   (Codex sandbox: skip approvals + sandbox)
+ *   - dsh         → 'full-autonomous'            (DSH unrestricted mode)
+ *   - builtin     → 'fullAgency'                 (mapToSdkPermissionMode → bypassPermissions)
+ *   - claude-code → 'bypassPermissions'          (CC CLI native value, no translation)
+ *   - antigravity → 'dangerously-skip-permissions' (agy --dangerously-skip-permissions)
+ *   - codex       → 'no-restrictions'            (Codex sandbox: skip approvals + sandbox)
  */
 export function getMaxPermissionForRuntime(runtime: RuntimeType): string {
   switch (runtime) {
     case 'dsh':         return 'full-autonomous';
     case 'builtin':     return 'fullAgency';
     case 'claude-code': return 'bypassPermissions';
-    case 'antigravity': return 'auto';
+    case 'antigravity': return ANTIGRAVITY_FULL_ACCESS;
     case 'codex':       return 'no-restrictions';
     default:            return 'fullAgency';
   }

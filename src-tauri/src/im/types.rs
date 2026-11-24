@@ -1481,7 +1481,7 @@ pub(crate) fn max_permission_for_runtime(runtime: Option<&str>) -> &'static str 
     match runtime {
         Some("dsh") => "full-autonomous",
         Some("claude-code") => "bypassPermissions",
-        Some("antigravity") => "auto",
+        Some("antigravity") => "dangerously-skip-permissions",
         Some("codex") => "no-restrictions",
         _ => "fullAgency",
     }
@@ -2160,7 +2160,10 @@ mod tests {
             "bypassPermissions"
         );
         agent.runtime = Some("antigravity".to_string());
-        assert_eq!(channel.to_im_config(&agent).permission_mode, "auto");
+        assert_eq!(
+            channel.to_im_config(&agent).permission_mode,
+            "dangerously-skip-permissions"
+        );
     }
 
     #[test]

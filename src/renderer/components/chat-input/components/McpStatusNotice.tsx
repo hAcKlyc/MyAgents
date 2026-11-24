@@ -18,6 +18,7 @@ export function McpStatusNotice({ server, stale, busy, onRetry }: {
   const pending = useRef(false);
   const failed = server.state === 'failed';
   const stopped = server.state === 'stopped';
+  const unreported = server.state === 'unreported';
   const connecting = retrying || acceptedSnapshot === server
     || server.state === 'starting' || server.state === 'queued';
   if (server.state === 'ready' || server.state === 'disabled') return null;
@@ -55,7 +56,7 @@ export function McpStatusNotice({ server, stale, busy, onRetry }: {
   };
   return (
     <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--ink-muted)]">
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${stopped || connecting ? 'bg-[var(--ink-muted)]' : 'bg-amber-500'}`} />
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${stopped || connecting || unreported ? 'bg-[var(--ink-muted)]' : 'bg-amber-500'}`} />
       <span className="min-w-0" role="status">
         {retryFailure?.snapshot === server ? retryFailure.message
           : connecting ? t('input.mcpStatus.starting')

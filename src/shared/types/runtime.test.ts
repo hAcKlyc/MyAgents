@@ -251,8 +251,9 @@ describe('getMaxPermissionForRuntime — unattended max-agency mode per runtime'
   // non-bypass mode, /api/memory/update on that runtime would hang to its 60-min
   // timeout instead of completing. (memory-update external-routing fix.)
   test('maps each runtime to its bypass / full-access mode', () => {
-    expect(getMaxPermissionForRuntime('antigravity')).toBe('auto');
+    expect(getMaxPermissionForRuntime('antigravity')).toBe('dangerously-skip-permissions');
     expect(getDefaultRuntimePermissionMode('antigravity')).toBe('accept-edits');
+    expect(getMaxPermissionForRuntime('dsh')).toBe('full-autonomous');
     expect(getMaxPermissionForRuntime('builtin')).toBe('fullAgency');
     expect(getMaxPermissionForRuntime('claude-code')).toBe('bypassPermissions');
     expect(getMaxPermissionForRuntime('codex')).toBe('no-restrictions');
@@ -287,6 +288,14 @@ describe('resolveCronPermissionMode', () => {
   test('skips stale payload mode before falling back to runtimeConfig mode', () => {
     expect(resolveCronPermissionMode('auto', 'full-auto', 'codex')).toBe('full-auto');
   });
+
+  test('defaults unspecified Antigravity cron runs to dangerously-skip-permissions while honoring explicit overrides', () => {
+    expect(resolveCronPermissionMode(undefined, undefined, 'antigravity')).toBe('dangerously-skip-permissions');
+    expect(resolveCronPermissionMode('', '', 'antigravity')).toBe('dangerously-skip-permissions');
+    expect(resolveCronPermissionMode('fullAgency', undefined, 'antigravity')).toBe('dangerously-skip-permissions');
+    expect(resolveCronPermissionMode('auto', undefined, 'antigravity')).toBe('auto');
+    expect(resolveCronPermissionMode('accept-edits', undefined, 'antigravity')).toBe('accept-edits');
+  });
 });
 
 describe('resolveScheduledTurnPermissionMode', () => {
@@ -296,6 +305,7 @@ describe('resolveScheduledTurnPermissionMode', () => {
 
   test('elevates an unset CLI Goal to the external runtime maximum', () => {
     expect(resolveScheduledTurnPermissionMode('goal', '', 'full-auto', 'codex')).toBe('no-restrictions');
+    expect(resolveScheduledTurnPermissionMode('goal', '', 'accept-edits', 'antigravity')).toBe('dangerously-skip-permissions');
   });
 
   test('preserves the session snapshot fallback for ordinary Cron', () => {

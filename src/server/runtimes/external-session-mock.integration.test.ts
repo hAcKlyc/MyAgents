@@ -94,6 +94,7 @@ type TurnScript =
 
 class FakeRuntimeProcess implements RuntimeProcess {
   requiresPermissionModeRestart?: RuntimeProcess['requiresPermissionModeRestart'];
+  hasPendingBackgroundWork?: RuntimeProcess['hasPendingBackgroundWork'];
   readonly pid = 4242;
   exited = false;
   loadedSkillNames: readonly string[] = [];
@@ -173,6 +174,8 @@ class FakeRuntime implements AgentRuntime {
   private readonly rejectConfig: boolean;
   private readonly rejectPermissionConfig: boolean;
   effectivePermissionMode = '';
+  pendingBackgroundWork = false;
+  readonly startSessionSystemPrompts: Array<string | undefined> = [];
   private readonly emitInterruptedOnStop: boolean;
   private readonly emitSessionCompleteOnStop: boolean;
   private nextTurnNumber = 1;
@@ -378,6 +381,7 @@ class FakeRuntime implements AgentRuntime {
     this.effectiveEffort = options.reasoningEffort ?? '';
     this.startSessionInitialMessages.push(options.initialTurn?.message);
     this.startSessionResumeIds.push(options.resumeSessionId);
+    this.startSessionSystemPrompts.push(options.systemPromptAppend);
     this.startSessionSystemContexts.push(options.systemContext);
     this.startSessionHasHostDispatcher.push(
       Boolean(
@@ -398,6 +402,7 @@ class FakeRuntime implements AgentRuntime {
     if (this.type === 'antigravity') {
       const full = options.permissionMode === 'dangerously-skip-permissions';
       process.requiresPermissionModeRestart = mode => full !== (mode === 'dangerously-skip-permissions');
+      process.hasPendingBackgroundWork = () => this.pendingBackgroundWork;
     }
     process.loadedSkillNames = (
       options.managedCodexExtensions?.skills ??
@@ -10882,6 +10887,306 @@ describe('external SessionEngine with fake runtime', () => {
       expect(harness.runtime.sentMessages).toEqual(['A', 'C', 'B']);
     }
     expect(harness.engine.getQueueStatus()).toEqual([]);
+  });
+
+  it('keeps IM ReplySlot open across Antigravity subagent delegation until background work settles with the final summary', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const { imEventBus } = await import('../utils/im-event-bus');
+    const { imRequestRegistry } = await import('../utils/im-request-registry');
+    const events: Array<{ requestId: string | null; type: string; data?: unknown }> = [];
+    const unsubscribe = imEventBus.subscribe(imEventBus.currentSeq(), event => events.push(event));
+    const sessionId = 'agy-im-subagent-settlement';
+    const workspacePath = join(harness.home, 'workspace');
+    const requestId = 'im-req-agy-subagent-1';
+    try {
+      imRequestRegistry.register(requestId, sessionId, 'feishu_private');
+      const admitted = await harness.engine.enqueueImMessage({
+        message: 'Investigate in parallel and summarize.',
+        requestId,
+        sessionId,
+        workspacePath,
+        scenario: { type: 'agent-channel', platform: 'feishu', sourceType: 'private' },
+        permissionMode: getMaxPermissionForRuntime('antigravity'),
+        metadataBirthPending: true,
+      });
+      expect(admitted.success).toBe(true);
+      if (admitted.dispatchAcceptance) {
+        await expect(admitted.dispatchAcceptance).resolves.toEqual({ accepted: true });
+      }
+      await vi.waitFor(() => expect(harness.runtime.sentMessages).toEqual(['Investigate in parallel and summarize.']));
+
+      const emit = (event: UnifiedEvent) => harness.runtime.emitForTest(event);
+      harness.runtime.pendingBackgroundWork = true;
+      emit({ kind: 'tool_use_start', toolUseId: 'sub-1', toolName: 'CollabAgent', input: { description: 'Check repo' } });
+      emit({ kind: 'tool_use_stop', toolUseId: 'sub-1' });
+      emit({ kind: 'tool_result', toolUseId: 'sub-1', content: '' });
+      emit({ kind: 'subagent_lifecycle', parentToolUseId: 'sub-1', status: 'running', agentId: 'child-1', observedAt: 10, affectsRootActivity: false });
+      emit({ kind: 'text_delta', text: 'Delegating to subagent.' });
+      emit({ kind: 'text_stop' });
+      emit({ kind: 'turn_complete', status: 'completed' });
+
+      // Wait for intermediate persistTurnResult to complete, and assert IM ReplySlot is NOT closed yet.
+      await vi.waitFor(async () => {
+        const messages = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+        expect(messages.length).toBeGreaterThanOrEqual(2);
+      });
+      expect(events.some(event => event.requestId === requestId && event.type === 'complete')).toBe(false);
+      expect(imRequestRegistry.get(requestId)).toBeDefined();
+      expect(harness.engine.getLiveSessionState().sessionState).toBe('running');
+
+      // Child finishes and parent emits continuation summary.
+      emit({ kind: 'subagent_lifecycle', parentToolUseId: 'sub-1', status: 'completed', agentId: 'child-1', observedAt: 20, result: 'Child findings', affectsRootActivity: false });
+      emit({ kind: 'root_turn_admitted', origin: 'collaboration', runtimeTurnId: 'cont-1', clientOperationId: 'cont-1' });
+      emit({ kind: 'text_delta', text: 'Final complete IM summary.' });
+      emit({ kind: 'text_stop' });
+      emit({ kind: 'turn_complete', status: 'completed' });
+
+      await vi.waitFor(async () => {
+        const messages = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+        expect(messages).toHaveLength(3);
+      });
+      // Still waiting for background_work_settled acknowledgement.
+      expect(events.some(event => event.requestId === requestId && event.type === 'complete')).toBe(false);
+
+      harness.runtime.pendingBackgroundWork = false;
+      emit({ kind: 'background_work_settled' });
+
+      await vi.waitFor(() => {
+        const terminals = events.filter(event => event.requestId === requestId && event.type === 'complete');
+        expect(terminals).toHaveLength(1);
+        expect(terminals[0]?.data).toMatchObject({
+          finalPayloads: [{ text: 'Final complete IM summary.' }],
+        });
+      });
+      expect(imRequestRegistry.get(requestId)).toBeUndefined();
+      expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('waits for Antigravity subagent settlement before finalizing a Task turn and supports clean stop/crash settlement', async () => {
+    const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const sessionId = 'agy-task-subagent-settlement';
+    const workspacePath = join(harness.home, 'workspace');
+    let settledResult: Awaited<ReturnType<typeof runInjectedTurn>> | undefined;
+    const taskPromise = runInjectedTurn(harness, {
+      prompt: 'Run background research task.',
+      sessionId,
+      workspacePath,
+      scenario: { type: 'cron', taskId: 'task-agy-subagent', intervalMinutes: 15, aiCanExit: true },
+      permissionMode: getMaxPermissionForRuntime('antigravity'),
+      turnOwner: { kind: 'task', id: 'task-agy-subagent' },
+      queueId: 'q-agy-task-1',
+      timeoutMs: 5_000,
+    }).then(result => {
+      settledResult = result;
+      return result;
+    });
+
+    await vi.waitFor(() => expect(harness.runtime.sentMessages).toEqual(['Run background research task.']));
+    const emit = (event: UnifiedEvent) => harness.runtime.emitForTest(event);
+    harness.runtime.pendingBackgroundWork = true;
+    emit({ kind: 'tool_use_start', toolUseId: 'sub-task-1', toolName: 'CollabAgent', input: { description: 'Audit' } });
+    emit({ kind: 'tool_use_stop', toolUseId: 'sub-task-1' });
+    emit({ kind: 'tool_result', toolUseId: 'sub-task-1', content: '' });
+    emit({ kind: 'text_delta', text: 'Waiting on audit child.' });
+    emit({ kind: 'text_stop' });
+    emit({ kind: 'turn_complete', status: 'completed' });
+
+    await vi.waitFor(async () => {
+      const messages = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+    });
+    // Task turn must NOT finalize prematurely while subagent work is pending.
+    expect(settledResult).toBeUndefined();
+    expect(harness.engine.getCurrentTurnIdentity()).toEqual({
+      queueId: 'q-agy-task-1',
+      owner: { kind: 'task', id: 'task-agy-subagent' },
+    });
+
+    // Continuation delivers the final report and background_work_settled completes the Task.
+    emit({ kind: 'root_turn_admitted', origin: 'collaboration', runtimeTurnId: 'task-cont-1', clientOperationId: 'task-cont-1' });
+    emit({ kind: 'text_delta', text: 'Task complete with full child report.' });
+    emit({ kind: 'text_stop' });
+    emit({ kind: 'turn_complete', status: 'completed' });
+    await vi.waitFor(async () => {
+      const messages = (await harness.sessionStore.getSessionData(sessionId))?.messages ?? [];
+      expect(messages).toHaveLength(3);
+    });
+    const beforeSettleCount = broadcastEvents.length;
+    harness.runtime.pendingBackgroundWork = false;
+    emit({ kind: 'background_work_settled' });
+
+    const completed = await taskPromise;
+    expect(completed).toMatchObject({
+      success: true,
+      enqueued: true,
+      text: 'Task complete with full child report.',
+    });
+    const settledCompleteEvents = broadcastEvents
+      .slice(beforeSettleCount)
+      .filter((event) => event.event === 'chat:message-complete');
+    expect(settledCompleteEvents).toHaveLength(1);
+    expect(settledCompleteEvents[0]?.data).toMatchObject({
+      completionTerminal: expect.objectContaining({
+        sessionId,
+        status: 'complete',
+      }),
+    });
+    expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(false);
+
+    // Explicit stop while subagents are pending must cleanly settle the Task turn without hanging.
+    const stopHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const stopTaskPromise = runInjectedTurn(stopHarness, {
+      prompt: 'Run stoppable task.',
+      sessionId: 'agy-task-stop-subagent',
+      workspacePath: join(stopHarness.home, 'workspace'),
+      scenario: { type: 'cron', taskId: 'task-agy-stop', intervalMinutes: 15, aiCanExit: false },
+      permissionMode: getMaxPermissionForRuntime('antigravity'),
+      turnOwner: { kind: 'task', id: 'task-agy-stop' },
+      queueId: 'q-agy-stop-1',
+      timeoutMs: 5_000,
+    });
+    await vi.waitFor(() => expect(stopHarness.runtime.sentMessages).toEqual(['Run stoppable task.']));
+    stopHarness.runtime.pendingBackgroundWork = true;
+    stopHarness.runtime.emitForTest({ kind: 'text_delta', text: 'Delegating before stop.' });
+    stopHarness.runtime.emitForTest({ kind: 'text_stop' });
+    stopHarness.runtime.emitForTest({ kind: 'turn_complete', status: 'completed' });
+    await vi.waitFor(() => expect(stopHarness.engine.getLiveSessionState().sessionState).toBe('running'));
+    const stopResult = await stopHarness.engine.stopOwnedTurn({ kind: 'task', id: 'task-agy-stop' });
+    expect(stopResult).toEqual({ success: true, alreadyStopped: false });
+    const stoppedOutcome = await stopTaskPromise;
+    expect(stoppedOutcome.success).toBe(false);
+    expect(stopHarness.externalSession.__isExternalWatchdogArmedForTests()).toBe(false);
+
+    // Unexpected worker crash AFTER intermediate persistence completes (so sessionPlan.kind === 'failure')
+    // must still settle the deferred Task turn cleanly instead of hanging until timeout.
+    const crashHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const crashSessionId = 'agy-task-crash-subagent';
+    const crashTaskPromise = runInjectedTurn(crashHarness, {
+      prompt: 'Run crashing task.',
+      sessionId: crashSessionId,
+      workspacePath: join(crashHarness.home, 'workspace'),
+      scenario: { type: 'cron', taskId: 'task-agy-crash', intervalMinutes: 15, aiCanExit: false },
+      permissionMode: getMaxPermissionForRuntime('antigravity'),
+      turnOwner: { kind: 'task', id: 'task-agy-crash' },
+      queueId: 'q-agy-crash-1',
+      timeoutMs: 5_000,
+    });
+    await vi.waitFor(() => expect(crashHarness.runtime.sentMessages).toEqual(['Run crashing task.']));
+    crashHarness.runtime.pendingBackgroundWork = true;
+    crashHarness.runtime.emitForTest({ kind: 'text_delta', text: 'Delegating before delayed crash.' });
+    crashHarness.runtime.emitForTest({ kind: 'text_stop' });
+    crashHarness.runtime.emitForTest({ kind: 'turn_complete', status: 'completed' });
+    await vi.waitFor(async () => {
+      const messages = (await crashHarness.sessionStore.getSessionData(crashSessionId))?.messages ?? [];
+      expect(messages.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(crashHarness.engine.getLiveSessionState().sessionState).toBe('running');
+    crashHarness.runtime.pendingBackgroundWork = false;
+    crashHarness.runtime.emitForTest({ kind: 'session_complete', subtype: 'error', result: 'Antigravity CLI 已退出' });
+    const crashedOutcome = await crashTaskPromise;
+    expect(crashedOutcome).toMatchObject({ success: false, enqueued: true });
+    expect(crashedOutcome.error).toContain('Antigravity CLI 已退出');
+    expect(await crashHarness.engine.waitIdle(2000, 10)).toBe(true);
+
+    // Worker crash while intermediate persistence is still awaiting must NOT emit
+    // a contradictory chat:message-complete after chat:message-error when persistence resumes.
+    const raceHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
+    const raceSessionId = 'agy-task-crash-during-persist';
+    const { trackInFlightSave } = await import('./tool-attachments');
+    let releasePersist!: () => void;
+    const persistGate = new Promise<void>((resolve) => {
+      releasePersist = resolve;
+    });
+    const raceTaskPromise = runInjectedTurn(raceHarness, {
+      prompt: 'Run persist-race task.',
+      sessionId: raceSessionId,
+      workspacePath: join(raceHarness.home, 'workspace'),
+      scenario: { type: 'cron', taskId: 'task-agy-race', intervalMinutes: 15, aiCanExit: false },
+      permissionMode: getMaxPermissionForRuntime('antigravity'),
+      turnOwner: { kind: 'task', id: 'task-agy-race' },
+      queueId: 'q-agy-race-1',
+      timeoutMs: 5_000,
+    });
+    await vi.waitFor(() => expect(raceHarness.runtime.sentMessages).toEqual(['Run persist-race task.']));
+    raceHarness.runtime.pendingBackgroundWork = true;
+    trackInFlightSave(persistGate);
+    raceHarness.runtime.emitForTest({ kind: 'text_delta', text: 'Intermediate before crash.' });
+    raceHarness.runtime.emitForTest({ kind: 'text_stop' });
+    raceHarness.runtime.emitForTest({ kind: 'turn_complete', status: 'completed' });
+    await Promise.resolve();
+
+    const beforeCrashBroadcasts = broadcastEvents.length;
+    raceHarness.runtime.pendingBackgroundWork = false;
+    raceHarness.runtime.emitForTest({
+      kind: 'session_complete',
+      subtype: 'error',
+      result: 'worker crashed during persistence',
+    });
+    releasePersist();
+
+    const raceOutcome = await raceTaskPromise;
+    expect(raceOutcome).toMatchObject({ success: false, enqueued: true });
+    expect(raceOutcome.error).toContain('worker crashed during persistence');
+    expect(await raceHarness.engine.waitIdle(2000, 10)).toBe(true);
+    const afterCrashBroadcasts = broadcastEvents.slice(beforeCrashBroadcasts);
+    expect(afterCrashBroadcasts.filter((event) => event.event === 'chat:message-error')).toHaveLength(1);
+    expect(afterCrashBroadcasts.filter((event) => event.event === 'chat:message-complete')).toHaveLength(0);
+  });
+
+  it('projects enabled global and .claude skills into Antigravity systemPromptAppend while deduplicating native .agents/skills and excluding disabled skills', async () => {
+    const harness = await createHarness([{ kind: 'success', text: 'ok' }], { runtimeType: 'antigravity' });
+    const workspacePath = join(harness.home, 'workspace');
+    const globalSkillsRoot = join(harness.home, '.myagents', 'skills');
+    const { realpathSync, symlinkSync } = await import('node:fs');
+
+    const writeSkill = (dir: string, folder: string, name: string, description: string) => {
+      const target = join(dir, folder);
+      mkdirSync(target, { recursive: true });
+      const filePath = join(target, 'SKILL.md');
+      writeFileSync(filePath, `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n`, 'utf8');
+      return realpathSync(filePath);
+    };
+
+    const globalEnabledPath = writeSkill(globalSkillsRoot, 'global-enabled', 'global-enabled', 'Global enabled skill.');
+    writeSkill(globalSkillsRoot, 'global-disabled', 'global-disabled', 'Disabled in workspace config.');
+    const claudeLocalPath = writeSkill(join(workspacePath, '.claude', 'skills'), 'claude-local', 'claude-local', 'Workspace Claude skill.');
+    writeSkill(join(workspacePath, '.agents', 'skills'), 'native-agent-skill', 'native-agent-skill', 'Already natively loaded by agy.');
+
+    // Simulate MyAgents' symlink projection into .claude/skills as well.
+    symlinkSync(join(globalSkillsRoot, 'global-enabled'), join(workspacePath, '.claude', 'skills', 'global-enabled'), 'junction');
+
+    writeFileSync(join(harness.home, '.myagents', 'projects.json'), JSON.stringify([
+      { id: 'proj-agy-skills', path: workspacePath, agentId: 'agent-agy-skills' },
+    ]));
+    writeFileSync(join(harness.home, '.myagents', 'config.json'), JSON.stringify({
+      agents: [{
+        id: 'agent-agy-skills',
+        name: 'AGY Skills',
+        enabled: true,
+        runtime: 'antigravity',
+        capabilitySelection: {
+          version: 1,
+          disabled: { skills: ['global:skill:global-disabled'], commands: [] },
+        },
+      }],
+    }));
+
+    const sent = await harness.engine.sendDesktopMessage({
+      ...desktopRequest('agy-skill-projection', workspacePath, 'hello'),
+      permissionMode: 'accept-edits',
+    });
+    await expect(sent.dispatchAcceptance).resolves.toEqual({ accepted: true });
+    expect(await harness.engine.waitIdle(2000, 10)).toBe(true);
+
+    const promptAppend = harness.runtime.startSessionSystemPrompts[0] ?? '';
+    expect(promptAppend).toContain('<myagents-skills>');
+    expect(promptAppend).toContain(`global-enabled (${globalEnabledPath}): Global enabled skill.`);
+    expect(promptAppend).toContain(`claude-local (${claudeLocalPath}): Workspace Claude skill.`);
+    expect(promptAppend).not.toContain('native-agent-skill');
+    expect(promptAppend).not.toContain('global-disabled');
   });
 
 });

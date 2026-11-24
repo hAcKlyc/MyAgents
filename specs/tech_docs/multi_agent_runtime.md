@@ -202,15 +202,18 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
 
-桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。未显式指定权限的后台任务沿用 `auto`。
+桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。新 IM 会话和未显式指定权限的后台任务 / Goal 与其它 Runtime 一致，解析为最高无人值守权限 `dangerously-skip-permissions`，且不回改已有持久 Session 快照。
+
+启动 `agy acp` 前先按用户 Shell PATH 解析 `agy` 可执行文件，随后向子进程注入当前 Session 的内部 CLI 环境（`~/.myagents/bin` 优先于 `PATH`、`PWD`、`MYAGENTS_PORT`、`MYAGENTS_SESSION_ID`、`MYAGENTS_INTERNAL_CLI_TOKEN`），确保桌面、IM 与后台任务轮次均可稳定调用 `myagents` CLI。
 
 | 产品交互 | Antigravity 行为 |
 |---|---|
 | 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，停止由原生 cancel 结束当前轮；普通停止和指定排队项优先发送分别复用现有队列语义。 |
 | 审批与问答 | 保留 CLI 提供的选项 ID、类型和文案。共享审批卡投影操作、目录及可用的文件 diff。支持可无损往返的标量表单。后台无交互入口时结束请求。 |
 | 工具与附件 | 用原生工具语义在既有 Shell、Read/Edit、搜索、子 Agent 与通用卡展示。ACP 活动输出是替换快照，按原调用更新内容和状态。1.5.14 Read 的正文按当前 native conversation 与原工具调用 ID，从 CLI 持久化的实际结果投影。 |
-| 子 Agent | 按当前 worker 已观察的 invoke_subagent 调用 ID，把原生子会话、内部工具与回复、报告、终态对齐到委派卡。父 prompt 返回后仍处理同一 ACP Session 的新内容，使用既有外部 Session 协作接纳与 V2 投影。收到 usage_update 后结算该次父续答，按已完成父回复的原生步骤顺序确认该轮消费了哪些报告。全部子任务结算及报告得到确认后释放后台工作。 |
-| 会话级 MCP | 按现有产品选择投影 stdio 和协商支持的远程传输；由 CLI 拥有的全局工具遵循其配置。选择或凭据变化在空闲边界重启并恢复同一 native session。ACP 未报告当前工具目录时显示状态待确认。 |
+| 子 Agent | 按当前 worker 已观察的 invoke_subagent 调用 ID，把原生子会话、内部工具与回复、报告、终态对齐到委派卡。父 prompt 返回后仍处理同一 ACP Session 的新内容，使用既有外部 Session 协作接纳与 V2 投影。收到 usage_update 后结算该次父续答，按已完成父回复的原生步骤顺序确认该轮消费了哪些报告。全部子任务结算及报告得到确认后发射 `background_work_settled` 并释放后台工作。IM 与 Task / Goal 轮次若在中间 `end_turn` 仍有未结算子 Agent，保持 `ReplySlot` 与 `runInjectedTurn` 绑定打开，直到全部子 Agent 结算与最终父续答完成再统一收口；显式停止、watchdog 超时或进程异常退出时立即清理并终止，不悬空。 |
+| 会话级 MCP | 按现有产品选择投影 stdio 和协商支持的远程传输；由 CLI 拥有的全局工具遵循其配置。选择或凭据变化在空闲边界重启并恢复同一 native session。无选中 MCP 时 `dispatch` 结算为 `settled/ready`；成功传入 ACP 但上游未回报工具目录时标记 `state: "unreported"` 与 `dispatch.releaseReason: "status_unreported"`（不误报 `status_read_failed`）；全部本地配置失败时标记 `terminal_status`。 |
+| Skills 投影 | `agy 1.5.14` 仅原生发现工作区内 `.agents/skills`（及 `.agent/`、`_agents/`、`_agent/`）并跳过指向工作区外的符号链接。Host 不污染用户仓库或全局 `~/.gemini`，在启动/恢复会话时通过 `_meta.antigravity.systemPrompt.append` 注入精简 `<myagents-skills>` 渐进披露索引（名称、摘要与规范 `SKILL.md` 绝对路径），并严格按规范路径与名称排除 `agy` 已原生加载的目录，同时遵循 `project-capabilities.ts` 的启用/禁用选择与必需系统 Skill 策略。 |
 | 历史与命令 | 产品拥有 transcript，CLI 拥有执行上下文。原生命令、标题和计划投影至现有界面。精确 Fork、Rewind、历史 Retry、同轮 steer 和手动压缩依照能力门控。 |
 
 后台父回复直接作为助手段持久化。子状态、读取结果和步骤来自 CLI 拥有的原生记录，父回复内容继续来自同一 ACP 连接。PromptResponse 的 Antigravity 1.5.14 用量是本轮增量，usage_update 是上下文占用。普通测试使用替代 ACP 子进程和临时工作区。带账号验证用 `MYAGENTS_TEST_AGY=1 npm run test:credentialed -- src/server/runtimes/antigravity.credentialed.test.ts`，覆盖真实写入审批、取消后磁盘无副作用、换进程恢复和会话级 MCP 撤销。

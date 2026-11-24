@@ -169,7 +169,7 @@ Prompt 中出现一个能力名称，不等于真实 Tool 已被注册或授权�
 | ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Builtin Claude Agent SDK | Claude Code preset + `systemPrompt.append`                  | `settingSources: ['project']` 原生读取项目配置；全局启用 Skill 先投影到项目目录                               |
 | Claude Code CLI          | 临时文件 + `--append-system-prompt-file`                    | Claude Code 原生发现 `CLAUDE.md` / rules                                                                      |
-| Antigravity CLI          | ACP 建立或恢复会话时传入 `_meta.antigravity.systemPrompt.append` | Host 将根目录的 `CLAUDE.md`、`.claude/CLAUDE.md` 和 `.claude/rules/` 下的规则与产品指令合并 |
+| Antigravity CLI          | ACP 建立或恢复会话时传入 `_meta.antigravity.systemPrompt.append` | Host 补充根目录 `CLAUDE.md`（若工作区内 `AGENTS.md` / `GEMINI.md` 已通过同路径或等价内容原生加载则去重跳过）、`.claude/CLAUDE.md`、`.claude/rules/`，以及去重后的启用 Skill `<myagents-skills>` 渐进披露索引 |
 | Codex                    | `thread/start` / `thread/resume` 的 `developerInstructions` | Codex 原生发现 `AGENTS.md`，并将 `CLAUDE.md` 配为 fallback；MyAgents 另外把 `.claude/rules/*.md` 格式化后追加 |
 | Integrated DSH           | 当前生成契约中的 `systemContext.sections/contexts`        | DSH 每目录互斥加载 `CLAUDE.md` → `AGENTS.override.md` → `AGENTS.md`；Host 仅冻结 `.claude/CLAUDE.md` 与 rules companion supplement |
 
@@ -341,7 +341,8 @@ badge、visible tail、标题、预览、搜索和测试 Checklist。
 | `src/server/utils/cli-tools-registry.ts`           | 用户 CLI 工具注册表的 Prompt projection 与缓存                        |
 | `src/server/agent-session.ts`                      | Builtin SDK systemPrompt append、persistent Query 生命周期            |
 | `src/server/runtimes/external-session.ts`          | External Runtime 的统一组装、Workspace merge、Runtime-specific append |
-| `src/server/runtimes/workspace-instructions.ts`    | Codex 指令兼容读取、DSH companion 补充与安全上限                       |
+| `src/server/runtimes/workspace-instructions.ts`    | Codex/Antigravity 指令兼容与去重、DSH companion 补充与安全上限        |
+| `src/server/runtimes/antigravity-skills.ts`        | Antigravity 启用 Skill 渐进披露目录投影与原生发现去重                 |
 | `src/server/runtimes/claude-code.ts`               | Claude Code append-system-prompt 临时文件投送                         |
 | `src/server/runtimes/codex.ts`                     | Codex developerInstructions 投送                                      |
 | `src/shared/systemReminder.ts`                     | 通用 reminder 解析、escaping 与共享 builders                          |
