@@ -318,3 +318,147 @@ it("keeps the prompt usage delta independent from native context-window telemetr
   });
   expect(events.some((event) => event.kind === "context_update")).toBe(false);
 });
+
+it("fails closed with an actionable error when the CLI session does not offer auto mode, and skips redundant mode RPCs", async () => {
+  const restrictedFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+let mode = 'accept-edits';
+let setModeCalls = 0;
+const select = (id, currentValue, values) => ({
+  id, name:id, type:'select', currentValue,
+  options: values.map(value => ({value, name:value})),
+});
+const configOptions = () => [
+  select('model', 'model-a', ['model-a']),
+  select('thought_level', 'high', ['medium', 'high']),
+  select('mode', mode, ['default', 'accept-edits', 'plan']),
+];
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'restricted',configOptions:configOptions()});
+  if (f.method === 'session/set_config_option') {
+    if (f.params.configId === 'mode') setModeCalls++;
+    if (f.params.configId === 'mode' && ['default', 'accept-edits', 'plan'].includes(f.params.value)) {
+      mode = f.params.value;
+      return reply({configOptions:configOptions()});
+    }
+    return send({id:f.id, error:{code:-32602, message:'Unknown mode: ' + f.params.value}});
+  }
+  if (f.method === 'session/prompt') {
+    send({method:'session/update',params:{sessionId:'restricted',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'modeCalls=' + setModeCalls}}}});
+    return reply({stopReason:'end_turn'});
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-restricted-mode-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", restrictedFixture], options));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  await expect(
+    runtime.startSession(
+      { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "auto" },
+      () => undefined,
+    ),
+  ).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("Permission mode 'auto' is not offered"));
+
+  const events: UnifiedEvent[] = [];
+  processHandle = await runtime.startSession(
+    { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "accept-edits" },
+    (e) => events.push(e),
+  );
+  await runtime.sendMessage(processHandle, "check");
+  await expect.poll(() => events.find((e) => e.kind === "turn_complete")?.status).toBe("completed");
+  // Mode was already accept-edits on session/new so no redundant set_config_option RPC was sent.
+  expect(events.find((e) => e.kind === "text_delta")).toMatchObject({ text: "modeCalls=0" });
+
+  await expect(runtime.setPermissionMode(processHandle, "auto")).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+});
+
+it("translates raw ACP -32602 on mode=auto when the worker omits mode option lists", async () => {
+  const opaqueModeFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'opaque',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'default',options:[]}]});
+  if (f.method === 'session/set_config_option') return send({id:f.id, error:{code:-32602, message:'Unknown mode: auto'}});
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-opaque-mode-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", opaqueModeFixture], options));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  await expect(
+    runtime.startSession(
+      { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "auto" },
+      () => undefined,
+    ),
+  ).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("configId=mode value=auto"));
+});
+
+it("reconciles unsupported persisted reasoningEffort at startup while rejecting unsupported live switches", async () => {
+  const { options, receive } = await setup();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  // Persisted 'max' is not in model-a's offered ['medium', 'high']: startup keeps native 'high' instead of crashing.
+  processHandle = await runtime.startSession({ ...options, model: "model-a", reasoningEffort: "max" }, receive);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("Ignoring unsupported persisted reasoningEffort='max'"));
+  const catalog = await runtime.queryModels({ process: processHandle });
+  expect(catalog[0]).toMatchObject({ value: "model-a", isCurrent: true, currentReasoningEffort: "high" });
+
+  // Explicit live switch to an unsupported level fails clearly instead of leaking raw ACP -32602.
+  await expect(runtime.setReasoningEffort(processHandle, "max")).rejects.toThrow(/推理强度 "max".*medium、high/);
+});
+
+it("maps a family model ID to a matching legacy flat model ID and ignores thought_level when legacy ACP has none", async () => {
+  const legacyFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+const available = [
+  {modelId:'legacy-a-high', name:'Legacy A (High)'},
+  {modelId:'legacy-a-low', name:'Legacy A (Low)'},
+];
+let current = 'legacy-a-high';
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'legacy',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],models:{currentModelId:current,availableModels:available}});
+  if (f.method === 'session/set_config_option') return send({id:f.id, error:{code:-32602, message:'unsupported config'}});
+  if (f.method === 'session/set_model') {
+    if (!available.some(m => m.modelId === f.params.modelId)) return send({id:f.id, error:{code:-32602, message:'unknown model'}});
+    current = f.params.modelId;
+    return reply({});
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-legacy-family-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", legacyFixture], options));
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  processHandle = await runtime.startSession(
+    {
+      workspacePath: directory,
+      sessionId: "legacy-product",
+      scenario: { type: "desktop" },
+      model: "legacy-a",
+      reasoningEffort: "low",
+      permissionMode: "accept-edits",
+    },
+    () => undefined,
+  );
+  const catalog = await runtime.queryModels({ process: processHandle });
+  expect(catalog.find((m) => m.isCurrent)?.value).toBe("legacy-a-low");
+});

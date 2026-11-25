@@ -4891,7 +4891,7 @@ async function _doStartExternalSession(options: {
   }
 
   console.log(
-    `[external-session] Starting ${runtimeType} session for ${options.sessionId}, model=${startModel || '(default)'}, permissionMode=${startPermissionMode || '(default)'}${runtimePermissionMode !== startPermissionMode ? ` -> runtime:${runtimePermissionMode}` : ''}, scenario=${options.scenario.type}, resume=${Boolean(options.resumeSessionId)}`,
+    `[external-session] Starting ${runtimeType} session for ${options.sessionId}, model=${startModel || '(default)'}, permissionMode=${startPermissionMode || '(default)'}${runtimePermissionMode !== startPermissionMode ? ` -> runtime:${runtimePermissionMode}` : ''}, effort=${startReasoningEffort || '(default)'}, scenario=${options.scenario.type}, resume=${Boolean(options.resumeSessionId)}`,
   );
   // Detect pre-warm: prewarmExternalSession calls us with initialMessage=undefined.
   // Stamp this onto the session_init broadcast so the frontend doesn't enter the
