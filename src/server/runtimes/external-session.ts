@@ -5323,6 +5323,8 @@ async function _doStartExternalSession(options: {
           : undefined,
         permissionMode: runtimePermissionMode,
         reasoningEffort: startReasoningEffort,
+        requireReasoningEffort: existingMetadataAtStart?.materializationState === 'prepared' &&
+          existingMetadataAtStart.origin?.kind === 'session-inbox',
         scenario: options.scenario,
         resumeSessionId: resumeId,
         disallowedTools,

@@ -18,6 +18,7 @@ export interface AntigravityTaskUpdates {
 }
 
 export interface AntigravityTaskObservation {
+  filesObservable: boolean;
   settledTaskIds: string[];
   progressed: boolean;
   latestMessageTimestamp: number;
@@ -155,6 +156,7 @@ export async function observeAntigravityBackgroundTasks(
   const nextLogSnapshots = new Map<string, AntigravityTaskLogSnapshot>(previousLogSnapshots);
   if (!NATIVE_ID.test(nativeSessionId) || activeTaskIds.size === 0) {
     return {
+      filesObservable: false,
       settledTaskIds: [],
       progressed: false,
       latestMessageTimestamp: previousMessageTimestamp,
@@ -168,6 +170,7 @@ export async function observeAntigravityBackgroundTasks(
   } catch (error) {
     if (fileNotPresent(error)) {
       return {
+        filesObservable: false,
         settledTaskIds: [],
         progressed: false,
         latestMessageTimestamp: previousMessageTimestamp,
@@ -177,6 +180,7 @@ export async function observeAntigravityBackgroundTasks(
     throw error;
   }
 
+  let filesObservable = false;
   let progressed = false;
   let latestMessageTimestamp = previousMessageTimestamp;
   const settled = new Set<string>();
@@ -187,6 +191,7 @@ export async function observeAntigravityBackgroundTasks(
       join(brainRoot, nativeSessionId, '.system_generated', 'tasks'),
     );
     if (withinBrain(brainRoot, tasksDir)) {
+      filesObservable = true;
       for (const taskSlug of activeTaskIds) {
         if (!SAFE_TASK_SLUG.test(taskSlug)) continue;
         const logPath = join(tasksDir, `${taskSlug}.log`);
@@ -219,6 +224,7 @@ export async function observeAntigravityBackgroundTasks(
     );
     if (withinBrain(brainRoot, messagesDir)) {
       const entries = await readdir(messagesDir, { withFileTypes: true });
+      filesObservable = true;
       const senderToSlug = new Map<string, string>();
       for (const taskSlug of activeTaskIds) {
         if (SAFE_TASK_SLUG.test(taskSlug)) {
@@ -258,6 +264,7 @@ export async function observeAntigravityBackgroundTasks(
   }
 
   return {
+    filesObservable,
     settledTaskIds: [...settled],
     progressed,
     latestMessageTimestamp,

@@ -228,7 +228,7 @@ backend-created target 只有在 Runtime dispatch claim 成功后才发布 prepa
 
 Builtin SDK 创建 Query 时，若尚未收到显式 MCP 配置，则按目标 Session 的 metadata 解析名单并应用当前全局开关。这样后台 Inbox 首轮也能使用会话选择的工具。显式空名单保持为空，缺少快照标记的旧会话沿用原有配置解析规则。
 
-Session Inbox 与用户手动 query 的投递时机独立：通用 `chatQueueResponseMode` 只控制手动 query；builtin / DSH / Codex 的 Inbox 固定 realtime。原 Runtime queue 负责接纳与派发，native receipt 决定消费与上屏；排队 HTTP 回执不代表模型已感知。A 运行、手动 B 等下一轮时，Inbox C 可在 A 的安全消费点进入 A，B 仍等待 A terminal。已消费的多个请求由原 turn owner 保存关联，在 terminal 前同步取走快照，分别返回同轮结果；未消费输入不能借用 A 的结果，reply / watch notification 也不触发自动回复。
+Session Inbox 与用户手动 query 的投递时机独立：通用 `chatQueueResponseMode` 只控制手动 query；builtin / DSH / Codex / Antigravity 的 Inbox 固定 realtime。原 Runtime queue 负责接纳与派发，native receipt 决定消费与上屏；排队 HTTP 回执不代表模型已感知。A 运行、手动 B 等下一轮时，Inbox C 可在 A 的安全消费点进入 A，B 仍等待 A terminal。已消费的多个请求由原 turn owner 保存关联，在 terminal 前同步取走快照，分别返回同轮结果；未消费输入不能借用 A 的结果，reply / watch notification 也不触发自动回复。
 
 `myagents session get` 不进入 Inbox、不唤醒 Runtime，也不创建 turn。它按 message id 合并持久 snapshot、活跃内存与 streaming overlay，先严格投影 user/assistant 的可见顶层 text，再执行 `before`/`limit` 分页。user 正文与请求气泡共用 `parseLeadingSystemReminder` / `parseSessionSendRequestDisplay`：可见 tail 优先，无 tail 的 `send.request` 只显示请求 payload；自动 result/watch 及其它纯隐藏提醒不显示。旧已存请求同样按此规则读取，不改写历史；裸历史 XML 保持原可见文本语义。疑似结构化 assistant 内容只要解析或 block schema 异常就 fail closed，工具、思考、隐藏控制信息和无 text 结构块绝不回退为原始 JSON。活跃 owner 的 `liveSessionState` 与 `session state` 共用 `projectSessionActivity` 的 idle/running/waiting_user_action 三态；无 live owner 时仍返回 `isLive=false / liveSessionState=null`，不采样调用方状态。Rust 在 owner transport 或响应体失败时释放旧 dispatch、重新解析当前 owner 并只重试一次；最终错误保留 `SESSION_OWNER_UNAVAILABLE` 与 `SESSION_OWNER_INVALID_RESPONSE` 的区别。锚点只在可读文本序列内成立，失效时明确报错，避免静默重复或漏读。
 

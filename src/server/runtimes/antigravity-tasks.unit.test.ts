@@ -86,6 +86,7 @@ describe('observeAntigravityBackgroundTasks', () => {
       new Map(),
       0,
     );
+    expect(first.filesObservable).toBe(true);
     expect(first.progressed).toBe(false);
     expect(first.settledTaskIds).toEqual([]);
     expect(first.nextLogSnapshots.has('task-104')).toBe(true);
@@ -157,6 +158,7 @@ describe('observeAntigravityBackgroundTasks', () => {
       new Map(),
       0,
     );
+    expect(observation.filesObservable).toBe(false);
     expect(observation.progressed).toBe(false);
     expect(observation.settledTaskIds).toEqual([]);
   });

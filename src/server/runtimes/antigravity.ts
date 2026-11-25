@@ -7,7 +7,6 @@ import {
   type ElicitationSchema,
   type NewSessionResponse,
   type ResumeSessionResponse,
-  type PromptRequest,
   type PromptResponse,
   type McpServer,
   type RequestPermissionResponse,
@@ -305,6 +304,7 @@ interface PromptRun {
   accepted: boolean;
   outcome?: PromptSettlement;
   supersededBy?: PromptRun;
+  predecessorAwaitedAuth?: boolean;
 }
 
 class AntigravitySession implements RuntimeProcess {
@@ -339,6 +339,7 @@ class AntigravitySession implements RuntimeProcess {
   private backgroundTaskLogSnapshots = new Map<string, AntigravityTaskLogSnapshot>();
   private lastTaskMessageTimestamp = 0;
   private backgroundTaskPoll?: NodeJS.Timeout;
+  private taskFilesObservable = false;
   private lastAsyncProgressAt = 0;
   private lastReplyText = '';
   private parentPlannerStep = -1;
@@ -641,7 +642,7 @@ class AntigravitySession implements RuntimeProcess {
     return {
       activeAsyncWork:
         hasInFlightTool ||
-        this.activeBackgroundTasks.size > 0 ||
+        (this.taskFilesObservable && this.activeBackgroundTasks.size > 0) ||
         this.hasPendingBackgroundWork(),
       ...(this.lastAsyncProgressAt > 0
         ? { lastAsyncProgressAt: this.lastAsyncProgressAt }
@@ -688,6 +689,7 @@ class AntigravitySession implements RuntimeProcess {
           this.lastTaskMessageTimestamp,
         );
         if (this.backgroundTaskPoll !== poll || this.exited) return;
+        this.taskFilesObservable = observation.filesObservable;
         this.backgroundTaskLogSnapshots = observation.nextLogSnapshots;
         this.lastTaskMessageTimestamp = observation.latestMessageTimestamp;
         for (const slug of observation.settledTaskIds) {
@@ -697,7 +699,7 @@ class AntigravitySession implements RuntimeProcess {
           this.lastAsyncProgressAt = Date.now();
         }
       } catch {
-        // Degrade silently to the default watchdog if native task files are unavailable.
+        if (this.backgroundTaskPoll === poll) this.taskFilesObservable = false;
       } finally {
         if (this.backgroundTaskPoll === poll) {
           this.backgroundTaskPoll = undefined;
@@ -717,6 +719,7 @@ class AntigravitySession implements RuntimeProcess {
   private clearBackgroundTasks() {
     this.stopBackgroundTaskPoll();
     this.activeBackgroundTasks.clear();
+    this.taskFilesObservable = false;
     this.backgroundTaskLogSnapshots.clear();
   }
   private observeDelegation(toolUseId: string) {
@@ -812,6 +815,7 @@ class AntigravitySession implements RuntimeProcess {
     }
     if (
       this.activePrompt?.supersededBy &&
+      this.activePrompt.supersededBy.outcome === undefined &&
       !(kind === "tool_call_update" && this.tools.has(update.toolCallId)) &&
       (kind === "agent_message_chunk" ||
         kind === "agent_thought_chunk" ||
@@ -1216,15 +1220,28 @@ class AntigravitySession implements RuntimeProcess {
       this.finishPromptResult(outcome.result);
       return;
     }
+    const retryPredecessor = run.predecessorAwaitedAuth && !run.accepted;
     this.cancelUnconfirmedSteeredPrompt(run);
+    if (retryPredecessor && !this.connection.signal.aborted && !this.exited) {
+      this.retryAfterAuthWarning();
+      return;
+    }
     if (!this.exited) {
       this.finishTurn("failed", nativeError(outcome.error, "session/prompt").message);
     }
   }
   private handoffSteeredPrompt(next: PromptRun, yieldedCleanly: boolean) {
+    // Before either response, ambiguous updates belong to the predecessor unless
+    // the successor is first to settle. Later updates belong to the predecessor.
+    if (!next.outcome) this.flushPendingSteerUpdates();
+    if (yieldedCleanly && this.heldTransientAuthWarning !== null) {
+      next.predecessorAwaitedAuth = true;
+      this.heldTransientAuthWarning = null;
+    } else if (!this.promptCancellationRequested) {
+      this.flushHeldTransientAuthWarning();
+    }
+    this.activePrompt = next;
     if (next.outcome) {
-      if (yieldedCleanly) this.heldTransientAuthWarning = null;
-      this.activePrompt = next;
       if (
         next.outcome.kind === "resolved" &&
         next.outcome.result.stopReason !== "cancelled" &&
@@ -1236,12 +1253,6 @@ class AntigravitySession implements RuntimeProcess {
       this.settleActivePrompt(next, next.outcome);
       return;
     }
-    // Updates buffered before the predecessor settled belong to the predecessor
-    // unless `next` already completed out-of-order above. Replay them first so
-    // they never confirm an unconfirmed successor that may still reject.
-    this.flushPendingSteerUpdates();
-    if (yieldedCleanly) this.heldTransientAuthWarning = null;
-    this.activePrompt = next;
     // An unanswered permission/question that remains open across a clean
     // predecessor yield belongs to the successor prompt.
     if (yieldedCleanly && this.pending.size > 0 && !this.promptCancellationRequested) {
@@ -1765,14 +1776,24 @@ export class AntigravityRuntime implements AgentRuntime {
       s.defaultModel = s.getCurrentModel();
       s.captureDefaultThoughtLevel();
       phase = "session/config";
-      if (options.model) await this.setModel(s, options.model, options.reasoningEffort);
-      if (options.reasoningEffort)
-        await this.applyStartupReasoningEffort(s, options.reasoningEffort);
+      if (options.model) await this.setModel(s, options.model);
+      if (options.reasoningEffort) {
+        const effort = options.reasoningEffort;
+        if (!(await this.applyReasoningEffort(s, effort))) {
+          const offered = s.selectOptions("thought_level").map((option) => option.value);
+          if (options.requireReasoningEffort) {
+            throw unsupportedConfigOptionError("thought_level", effort, offered);
+          }
+          console.warn(
+            `[antigravity] Ignoring unsupported persisted reasoningEffort='${effort}' for model='${s.getCurrentModel() ?? "(unknown)"}'; offered=[${offered.join(",")}]`,
+          );
+        }
+      }
       await this.setPermissionMode(s, options.permissionMode);
       emit({
         kind: "session_init",
         sessionId: s.sessionId,
-        model: options.model ?? s.defaultModel ?? "",
+        model: options.model ?? s.getCurrentModel() ?? "",
         tools: [],
         supportsImageInput: s.image,
       });
@@ -1819,7 +1840,7 @@ export class AntigravityRuntime implements AgentRuntime {
       throw error instanceof RequestError ? nativeError(error, phase) : error;
     }
   }
-  async setModel(process: RuntimeProcess, model?: string, preferredEffort?: string) {
+  async setModel(process: RuntimeProcess, model?: string) {
     const s = session(process);
     const id = model || s.defaultModel;
     if (!id) throw new Error("Antigravity 没有报告默认模型");
@@ -1853,11 +1874,11 @@ export class AntigravityRuntime implements AgentRuntime {
     }
     const legacyFamilyModel = families.length || s.models?.availableModels.some((model) => model.modelId === id)
       ? undefined
-      : (preferredEffort && s.legacyFlatModelForFamily(id, preferredEffort)) || s.legacyFlatModelForFamily(id);
+      : s.legacyFlatModelForFamily(id);
     const currentModel = s.getCurrentModel();
     // An old worker stores effort in the selected flat ID. Reapplying the
     // family at a turn boundary keeps its current native variant.
-    if (!preferredEffort && legacyFamilyModel && splitAntigravityFlatModelId(currentModel)?.familyId === id) return;
+    if (legacyFamilyModel && splitAntigravityFlatModelId(currentModel)?.familyId === id) return;
     const nativeModel = legacyFamilyModel ?? id;
     if (nativeModel === currentModel) return;
     await s.connection.agent
@@ -1872,44 +1893,31 @@ export class AntigravityRuntime implements AgentRuntime {
     s.selectedModel = nativeModel;
     s.captureDefaultThoughtLevel(nativeModel);
   }
-  private async applyStartupReasoningEffort(s: AntigravitySession, effort: string) {
-    const supported = s.selectOptions("thought_level").map((option) => option.value);
+  private async applyReasoningEffort(s: AntigravitySession, effort: string): Promise<boolean> {
     if (!s.hasConfigOption("thought_level")) {
-      if (!s.modelFamilies().length && splitAntigravityFlatModelId(s.getCurrentModel())?.effort === effort) return;
-      console.warn(
-        `[antigravity] Ignoring persisted reasoningEffort='${effort}' for model='${s.getCurrentModel() ?? "(unknown)"}': model does not expose thought_level`,
-      );
-      return;
+      if (s.modelFamilies().length) return false;
+      const current = splitAntigravityFlatModelId(s.getCurrentModel());
+      if (current?.effort === effort) return true;
+      const variant = current && s.legacyFlatModelForFamily(current.familyId, effort);
+      if (!variant) return false;
+      await this.setModel(s, variant);
+      return true;
     }
-    if (supported.length > 0 && !supported.includes(effort)) {
-      console.warn(
-        `[antigravity] Ignoring unsupported persisted reasoningEffort='${effort}' for model='${s.getCurrentModel() ?? "(unknown)"}'; offered=[${supported.join(",")}]`,
-      );
-      return;
-    }
+    const supported = s.selectOptions("thought_level").map((option) => option.value);
+    if (supported.length > 0 && !supported.includes(effort)) return false;
     if (effort !== s.selectedOption("thought_level")) {
       await s.setOption("thought_level", effort);
     }
+    return true;
   }
   async setReasoningEffort(process: RuntimeProcess, effort?: string) {
     const s = session(process);
     const thoughtLevel = effort ?? s.getDefaultThoughtLevel();
-    if (effort && !s.modelFamilies().length && !s.selectOptions("thought_level").length) {
-      const familyId = splitAntigravityFlatModelId(s.getCurrentModel())?.familyId;
-      const model = familyId && s.legacyFlatModelForFamily(familyId, effort);
-      if (model) {
-        await this.setModel(s, model);
-        return;
-      }
-    }
-    if (thoughtLevel === undefined) return;
-    const supported = s.selectOptions("thought_level").map((option) => option.value);
-    if (!s.hasConfigOption("thought_level") || (supported.length > 0 && !supported.includes(thoughtLevel))) {
-      if (effort === undefined) return;
-      throw unsupportedConfigOptionError("thought_level", thoughtLevel, supported);
-    }
-    if (thoughtLevel !== s.selectedOption("thought_level")) {
-      await s.setOption("thought_level", thoughtLevel);
+    if (thoughtLevel === undefined || await this.applyReasoningEffort(s, thoughtLevel)) return;
+    if (effort !== undefined) {
+      throw unsupportedConfigOptionError(
+        "thought_level", thoughtLevel, s.selectOptions("thought_level").map((option) => option.value),
+      );
     }
   }
   async setPermissionMode(process: RuntimeProcess, mode?: string) {

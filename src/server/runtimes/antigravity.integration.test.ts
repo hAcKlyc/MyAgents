@@ -93,21 +93,37 @@ lines.on('line', line => {
     }
     const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
     const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
-    if (turn !== undefined && ['steer-auth-predecessor', 'steer-auth-successor'].includes(promptText)) {
+    if (turn !== undefined && ['steer-auth-predecessor', 'steer-auth-successor', 'steer-auth-late-predecessor', 'steer-auth-rejected'].includes(promptText)) {
       const predecessor = turn;
       turn = f.id;
-      if (promptText === 'steer-auth-predecessor') update(textChunk(auth401Text));
-      send({id:predecessor,result:{stopReason:'end_turn',usage:{inputTokens:3,outputTokens:1,totalTokens:4}}});
+      const predecessorResult = {stopReason:'end_turn',usage:{inputTokens:3,outputTokens:1,totalTokens:4}};
+      const successorResult = {stopReason:'end_turn',usage:{inputTokens:4,outputTokens:2,totalTokens:6}};
+      if (promptText === 'steer-auth-late-predecessor') {
+        update(textChunk('The user follow-up finished first.'));
+        reply(successorResult);
+        setTimeout(() => {
+          turn = undefined;
+          update(textChunk(auth401Text));
+          send({id:predecessor,result:predecessorResult});
+        }, 30);
+        return;
+      }
+      if (promptText === 'steer-auth-predecessor' || promptText === 'steer-auth-rejected') update(textChunk(auth401Text));
+      send({id:predecessor,result:predecessorResult});
       setTimeout(() => {
         const successor = turn;
         turn = undefined;
+        if (promptText === 'steer-auth-rejected') {
+          recoverAfterFramedQuote = true;
+          return send({id:successor,error:{code:-32602,message:'The successor was rejected before execution.'}});
+        }
         if (promptText === 'steer-auth-successor') {
           recoverAfterFramedQuote = true;
           update(textChunk(auth401Text));
         } else {
           update(textChunk('The user follow-up took over.'));
         }
-        send({id:successor,result:{stopReason:'end_turn',usage:{inputTokens:4,outputTokens:2,totalTokens:6}}});
+        send({id:successor,result:successorResult});
       }, 30);
       return;
     }
@@ -1012,6 +1028,14 @@ it("reconciles unsupported persisted reasoningEffort at startup while rejecting 
   await expect(runtime.setReasoningEffort(processHandle, "max")).rejects.toThrow(/推理强度 "max".*medium、high/);
 });
 
+it("rejects a fresh guarded configuration whose effort cannot be applied", async () => {
+  const { options, receive, events } = await setup();
+  await expect(runtime.startSession({
+    ...options, model: "model-a", reasoningEffort: "max", requireReasoningEffort: true,
+  }, receive)).rejects.toThrow(/推理强度 "max".*medium、high/);
+  expect(events.some((event) => event.kind === "session_init")).toBe(false);
+});
+
 it("maps the Launcher family and effort to a supported flat model for a legacy ACP worker", async () => {
   const legacyFixture = `
 const lines = require('node:readline').createInterface({input: process.stdin});
@@ -1064,6 +1088,16 @@ lines.on('line', line => {
   await runtime.setModel(processHandle, family!.value);
   expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
     .toBe("legacy-a-low");
+  await runtime.stopSession(processHandle);
+  processHandle = await runtime.startSession({
+    workspacePath: directory,
+    sessionId: "legacy-flat-product",
+    scenario: { type: "desktop" },
+    model: "legacy-a-high",
+    reasoningEffort: "low",
+  }, () => undefined);
+  expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
+    .toBe("legacy-a-low");
 });
 
 it("reports active background task watchdog state and observes native task log progress and settlement", async () => {
@@ -1103,10 +1137,7 @@ lines.on('line', line => {
   const fakeHome = join(directory, "home");
   const tasksDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "tasks");
   const messagesDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "messages");
-  await mkdir(tasksDir, { recursive: true });
-  await mkdir(messagesDir, { recursive: true });
   const logPath = join(tasksDir, "task-104.log");
-  await writeFile(logPath, "[1s] status=RUNNING\n", "utf8");
 
   const homeKey = process.platform === "win32" ? "USERPROFILE" : "HOME";
   const prevHome = process.env[homeKey];
@@ -1120,12 +1151,16 @@ lines.on('line', line => {
     );
     await runtime.sendMessage(processHandle, "run long spark query");
 
-    await expect.poll(() => processHandle?.getWatchdogState?.().activeAsyncWork).toBe(true);
+    await expect.poll(() => processHandle?.getWatchdogState?.().lastAsyncProgressAt ?? 0).toBeGreaterThan(0);
+    expect(processHandle.getWatchdogState?.().activeAsyncWork).toBe(false);
+    await mkdir(tasksDir, { recursive: true });
+    await mkdir(messagesDir, { recursive: true });
+    await writeFile(logPath, "[1s] status=RUNNING\n", "utf8");
+    await expect.poll(() => processHandle?.getWatchdogState?.().activeAsyncWork, { timeout: 5_000 }).toBe(true);
     const initialProgress = processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0;
     expect(initialProgress).toBeGreaterThan(0);
 
-    // Wait for baseline poll, then grow the native task log and verify watchdog progress advances.
-    await new Promise((resolve) => setTimeout(resolve, 1_700));
+    // The first observation captured the log baseline.
     await appendFile(logPath, "[60s] status=RUNNING\n", "utf8");
     await expect
       .poll(() => processHandle?.getWatchdogState?.().lastAsyncProgressAt ?? 0, { timeout: 5_000 })
@@ -1402,23 +1437,28 @@ it("confirms a steered prompt when an unanswered permission stays open across ha
 });
 
 it.each([
-  ["steer-auth-predecessor", "The user follow-up took over."],
-  ["steer-auth-successor", "Continued after warning."],
-])("keeps recovery on the owning prompt when %s reports an auth warning", async (steer, reply) => {
+  ["steer-auth-predecessor", "The user follow-up took over.", true],
+  ["steer-auth-successor", "Continued after warning.", true],
+  ["steer-auth-late-predecessor", "The user follow-up finished first.", true],
+  ["steer-auth-rejected", "Continued after warning.", false],
+])("keeps recovery on the owning prompt when %s reports an auth warning", async (steer, reply, consumed) => {
   const adapter = new AntigravityRuntime({ authRetryDelaysMs: [5] });
   const { options, receive, events } = await setup();
   processHandle = await adapter.startSession(options, receive);
   await adapter.sendMessage(processHandle, "steer-root");
   await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
-  await adapter.steerMessage(processHandle, steer, undefined, "follow-up");
+  await adapter.steerMessage(processHandle, steer, undefined, { clientUserMessageId: "follow-up" });
   await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
   const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
   expect(text.join("")).toBe("Working before steer." + reply);
-  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual([
+  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual(consumed ? [
     { kind: "user_message_accepted", clientUserMessageId: "follow-up" },
+  ] : []);
+  expect(events.filter((event) => event.kind === "user_message_cancelled")).toEqual(consumed ? [] : [
+    { kind: "user_message_cancelled", clientUserMessageId: "follow-up" },
   ]);
   expect(events.filter((event) => event.kind === "turn_complete")).toHaveLength(1);
   expect(events.filter((event) => event.kind === "usage")).toMatchObject([
-    { semantics: "delta", inputTokens: 7, outputTokens: 3 },
+    { semantics: "delta", inputTokens: consumed ? 7 : 3, outputTokens: consumed ? 3 : 1 },
   ]);
 });

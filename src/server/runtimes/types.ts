@@ -88,6 +88,8 @@ export interface SessionStartOptions {
   /** #324 — NORMALIZED reasoning effort level (never 'default'); absent =
    *  runtime default. CC maps to `--effort`, Codex to `turn/start.effort`. */
   reasoningEffort?: string;
+  /** Fresh guarded dispatch must execute with its accepted reasoning setting. */
+  requireReasoningEffort?: boolean;
   maxTurns?: number;
   resumeSessionId?: string;
   disallowedTools?: string[];

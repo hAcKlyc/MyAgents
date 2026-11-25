@@ -216,6 +216,8 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 | Skills 投影 | `agy 1.5.14` 仅原生发现工作区内 `.agents/skills`（及 `.agent/`、`_agents/`、`_agent/`）并跳过指向工作区外的符号链接。Host 不污染用户仓库或全局 `~/.gemini`，在启动/恢复会话时通过 `_meta.antigravity.systemPrompt.append` 注入精简 `<myagents-skills>` 渐进披露索引（名称、摘要与规范 `SKILL.md` 绝对路径），并严格按规范路径与名称排除 `agy` 已原生加载的目录，同时遵循 `project-capabilities.ts` 的启用/禁用选择与必需系统 Skill 策略。 |
 | 历史与命令 | 产品拥有 transcript，CLI 拥有执行上下文。原生命令、标题和计划投影至现有界面。精确 Fork、Rewind、历史 Retry 和手动压缩依照能力门控。 |
 
+watchdog 由外部 Session owner 统一结算。Antigravity adapter 报告当前工具与子 Agent 的活动，以及可观察的原生后台任务进度。工作活跃时允许最长 60 分钟无进展。后台任务记录不可用时，已知任务 ID 本身不延长 watchdog，独立的工具和子 Agent 活动仍有效。历史会话保存的推理档位已不可用时可沿用原生可用档位恢复；新 Inbox 会话必须应用其请求的档位后才接纳首次执行。
+
 后台父回复直接作为助手段持久化。子状态、读取结果和步骤来自 CLI 拥有的原生记录，父回复内容继续来自同一 ACP 连接。PromptResponse 的 Antigravity 1.5.14 用量是本轮增量，usage_update 是上下文占用。普通测试使用替代 ACP 子进程和临时工作区。带账号验证用 `MYAGENTS_TEST_AGY=1 npm run test:credentialed -- src/server/runtimes/antigravity.credentialed.test.ts`，覆盖真实写入审批、取消后磁盘无副作用、换进程恢复和会话级 MCP 撤销。
 
 ## 6. External Session owner
