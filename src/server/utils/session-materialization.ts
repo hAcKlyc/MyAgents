@@ -1,5 +1,6 @@
 import type { AgentConfig } from '../../shared/types/agent';
 import type { RuntimeSource, RuntimeType } from '../../shared/types/runtime';
+import type { SessionBirthOverrides } from '../../shared/sessionPermissionCeiling';
 import { originFromMaterializationScenario } from '../../shared/session-origin';
 import type { SessionOrigin } from '../../shared/session-origin';
 import { createSessionMetadata, type SessionMetadata } from '../types/session';
@@ -14,7 +15,13 @@ export function isLiveFollowScenario(scenario: SessionMaterializationScenario): 
 export function snapshotForMaterializedSession(
   agent: AgentConfig,
   scenario: SessionMaterializationScenario,
-  options?: { runtimeOverride?: RuntimeType; runtimeSourceOverride?: RuntimeSource; managedCodexProviderReady?: boolean },
+  options?: {
+    runtimePolicy?: { defaultIntegratedRuntime?: unknown };
+    runtimeOverride?: RuntimeType;
+    runtimeSourceOverride?: RuntimeSource;
+    managedCodexProviderReady?: boolean;
+    birthOverrides?: SessionBirthOverrides;
+  },
 ): Partial<SessionMetadata> {
   if (scenario === 'registeredAgent') return snapshotForRegisteredAgentSession(agent, options);
   if (scenario === 'im' || scenario === 'agent-channel') return snapshotForImSession(agent, options);
@@ -36,18 +43,22 @@ export function createMaterializedSessionMetadata(params: {
   sessionId: string;
   scenario: SessionMaterializationScenario;
   agent?: AgentConfig;
+  runtimePolicy?: { defaultIntegratedRuntime?: unknown };
   runtimeOverride?: RuntimeType;
   runtimeSourceOverride?: RuntimeSource;
   managedCodexProviderReady?: boolean;
+  birthOverrides?: SessionBirthOverrides;
   fallbackRuntime?: RuntimeType;
   title?: string;
   origin?: SessionOrigin;
 }): SessionMetadata {
   const snapshot = params.agent
     ? snapshotForMaterializedSession(params.agent, params.scenario, {
+        runtimePolicy: params.runtimePolicy,
         runtimeOverride: params.runtimeOverride,
         runtimeSourceOverride: params.runtimeSourceOverride,
         managedCodexProviderReady: params.managedCodexProviderReady,
+        birthOverrides: params.birthOverrides,
       })
     : undefined;
   const fallbackRuntime = params.runtimeOverride ?? params.fallbackRuntime;

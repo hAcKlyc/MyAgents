@@ -18,6 +18,7 @@ import {
   managedCodexProviderPermissionToRuntimePermission,
 } from '../../shared/providerExecution';
 import { createDshBinding, resolveDshPlatformTarget } from '../../shared/integrated-runtimes/identity';
+import type { SessionBirthOverrides } from '../../shared/sessionPermissionCeiling';
 
 /** Complete Product Session execution snapshots. Desktop, Task and IM share
  * the owned snapshot compiler; IM changes only its birth permission policy.
@@ -101,6 +102,11 @@ interface SessionSnapshotRuntimeOptions {
    * helpers stay pure and do not read config.json themselves.
    */
   managedCodexProviderReady?: boolean;
+  /**
+   * One-shot birth overrides (e.g. local `myagents session start --runtime ...`).
+   * Written solely to this Session's birth snapshot without mutating AgentConfig.
+   */
+  birthOverrides?: SessionBirthOverrides;
 }
 
 export function snapshotRuntimeIdentity(
@@ -265,21 +271,64 @@ export function snapshotForOwnedSession(
   agent: AgentConfig,
   options?: SessionSnapshotRuntimeOptions,
 ): OwnedSessionSnapshot & Pick<SessionMetadata, 'configSnapshotAt'> {
-  if (shouldSnapshotManagedCodexProvider(agent, options)) {
+  const birthOverrides = options?.birthOverrides;
+  const effectiveOptions: SessionSnapshotRuntimeOptions | undefined = birthOverrides
+    ? {
+        ...options,
+        runtimeOverride: options?.runtimeOverride ?? birthOverrides.runtime,
+        runtimeSourceOverride: options?.runtimeSourceOverride ?? birthOverrides.runtimeSource,
+      }
+    : options;
+  const managedCodexAgent: AgentConfig = birthOverrides
+    ? {
+        ...agent,
+        ...(birthOverrides.providerId !== undefined ? { providerId: birthOverrides.providerId } : {}),
+        ...(birthOverrides.model !== undefined ? { model: birthOverrides.model } : {}),
+      }
+    : agent;
+  const agentEffectiveRuntime: RuntimeType = agentUsesManagedCodexProvider(agent)
+    ? 'codex'
+    : resolveEffectiveRuntime(
+        agent.runtime,
+        agent.runtimePreference,
+        agent.runtimeConfig?.source,
+        agent.providerId,
+        undefined,
+        options?.runtimePolicy?.defaultIntegratedRuntime,
+      );
+  const agentEffectiveSource: RuntimeSource | undefined = agentUsesManagedCodexProvider(agent)
+    ? 'managed-provider'
+    : (agentEffectiveRuntime === 'builtin'
+      ? undefined
+      : agentEffectiveRuntime === 'dsh'
+        ? 'integrated'
+        : (agent.runtimeConfig?.source ?? 'system-cli'));
+  const birthSwitchedRuntime = Boolean(
+    birthOverrides?.runtime !== undefined
+    && (birthOverrides.runtime !== agentEffectiveRuntime
+      || (birthOverrides.runtimeSource !== undefined
+        && birthOverrides.runtimeSource !== agentEffectiveSource)),
+  );
+  if (shouldSnapshotManagedCodexProvider(managedCodexAgent, effectiveOptions)) {
     const providerExecutionIdentity = createRuntimeBackedProviderIdentity({
       providerId: CODEX_SUBSCRIPTION_PROVIDER_ID,
-      model: agent.model,
+      model: managedCodexAgent.model,
     });
+    const rawEffort = birthOverrides
+      ? (birthOverrides.reasoningEffort ?? (birthSwitchedRuntime ? undefined : agent.runtimeConfig?.reasoningEffort))
+      : agent.runtimeConfig?.reasoningEffort;
+    const effectivePermissionMode = birthOverrides?.permissionMode
+      ?? managedCodexProviderPermissionToRuntimePermission(agent.permissionMode)
+      ?? 'auto-edit';
     return {
       runtime: providerExecutionIdentity.runtime,
       runtimeSource: providerExecutionIdentity.runtimeSource,
       model: providerExecutionIdentity.model,
       reasoningEffort: coerceReasoningEffortSettingForRuntime(
-        agent.runtimeConfig?.reasoningEffort,
+        rawEffort,
         providerExecutionIdentity.runtime,
       ),
-      permissionMode: managedCodexProviderPermissionToRuntimePermission(agent.permissionMode)
-        ?? 'auto-edit',
+      permissionMode: effectivePermissionMode,
       mcpEnabledServers: agent.mcpEnabledServers ? [...agent.mcpEnabledServers] : undefined,
       enabledPluginIds: agent.enabledPluginIds ? [...agent.enabledPluginIds] : undefined,
       enabledOfficialToolIds: agent.enabledOfficialToolIds ? [...agent.enabledOfficialToolIds] : undefined,
@@ -290,40 +339,70 @@ export function snapshotForOwnedSession(
       configSnapshotAt: new Date().toISOString(),
     };
   }
-  const snapshotAgent = agentForSnapshotRuntime(agent, options);
+  const snapshotAgent = agentForSnapshotRuntime(agent, effectiveOptions);
   const runtime = snapshotAgent.runtime ?? 'builtin';
   const isDsh = runtime === 'dsh';
   const isExternal = runtime !== 'builtin' && !isDsh;
-  const hasStaleManagedProviderId = snapshotAgent.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID;
-  const builtinProviderId = !isExternal && !hasStaleManagedProviderId
-    ? snapshotAgent.providerId
+  const rawProviderId = !isExternal
+    ? (birthOverrides?.providerId ?? (birthSwitchedRuntime && agentEffectiveRuntime !== 'builtin' && agentEffectiveRuntime !== 'dsh' ? undefined : snapshotAgent.providerId))
     : undefined;
+  const hasStaleManagedProviderId = rawProviderId === CODEX_SUBSCRIPTION_PROVIDER_ID;
+  const builtinProviderId = !isExternal && !hasStaleManagedProviderId
+    ? rawProviderId
+    : undefined;
+  const switchedProviderOrRuntime = Boolean(
+    birthOverrides?.providerId !== undefined
+    || birthSwitchedRuntime,
+  );
   const model = isExternal
-    ? coerceModelForRuntime(snapshotAgent.runtimeConfig?.model, runtime)
-    : (hasStaleManagedProviderId ? undefined : snapshotAgent.model);
+    ? coerceModelForRuntime(
+        birthOverrides
+          ? (birthOverrides.model ?? (birthSwitchedRuntime ? undefined : snapshotAgent.runtimeConfig?.model))
+          : snapshotAgent.runtimeConfig?.model,
+        runtime,
+      )
+    : (birthOverrides?.model
+      ?? (hasStaleManagedProviderId
+        || (birthOverrides?.providerId !== undefined && birthOverrides.providerId !== snapshotAgent.providerId)
+        || (birthSwitchedRuntime && agentEffectiveRuntime !== 'builtin' && agentEffectiveRuntime !== 'dsh')
+        ? undefined
+        : snapshotAgent.model));
   const providerRoute: ProviderRoute | undefined = builtinProviderId && model
     ? createConcreteProviderRoute(builtinProviderId, model)
     : undefined;
+  const resolvedPermissionMode = birthOverrides?.permissionMode
+    ?? (isExternal
+      ? projectPermissionModeForRuntime(snapshotAgent.runtimeConfig?.permissionMode, runtime)
+      : snapshotAgent.permissionMode);
+  const rawReasoningEffort = birthOverrides
+    ? (birthOverrides.reasoningEffort !== undefined
+      ? birthOverrides.reasoningEffort
+      : birthSwitchedRuntime
+        ? undefined
+        : isExternal
+          ? snapshotAgent.runtimeConfig?.reasoningEffort
+          : snapshotAgent.reasoningEffort)
+    : isExternal
+      ? snapshotAgent.runtimeConfig?.reasoningEffort
+      : snapshotAgent.reasoningEffort;
   return {
     ...snapshotRuntimeIdentity(
       runtime,
-      options?.runtimeSourceOverride ?? snapshotAgent.runtimeConfig?.source,
+      effectiveOptions?.runtimeSourceOverride ?? snapshotAgent.runtimeConfig?.source,
     ),
     model,
     // #324 — same runtime-aware dispatch as model (issue #224 rationale).
     reasoningEffort: isExternal
-      ? coerceReasoningEffortSettingForRuntime(snapshotAgent.runtimeConfig?.reasoningEffort, runtime)
-      : snapshotAgent.reasoningEffort,
-    permissionMode: isExternal
-      ? projectPermissionModeForRuntime(snapshotAgent.runtimeConfig?.permissionMode, runtime)
-      : snapshotAgent.permissionMode,
+      ? coerceReasoningEffortSettingForRuntime(rawReasoningEffort, runtime)
+      : rawReasoningEffort,
+    permissionMode: resolvedPermissionMode,
     mcpEnabledServers: snapshotAgent.mcpEnabledServers ? [...snapshotAgent.mcpEnabledServers] : undefined,
     enabledPluginIds: snapshotAgent.enabledPluginIds ? [...snapshotAgent.enabledPluginIds] : undefined,
     enabledOfficialToolIds: snapshotAgent.enabledOfficialToolIds ? [...snapshotAgent.enabledOfficialToolIds] : undefined,
     providerId: builtinProviderId,
     providerRoute,
     providerExecutionIdentity: undefined,
-    providerEnvJson: isExternal || providerRoute || hasStaleManagedProviderId
+    providerEnvJson: isExternal || providerRoute || hasStaleManagedProviderId || switchedProviderOrRuntime
       ? undefined
       : snapshotAgent.providerEnvJson,
     configSnapshotAt: new Date().toISOString(),

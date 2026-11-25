@@ -487,12 +487,14 @@ Examples:
   myagents runtime diagnose codex             # auth / features / MCP / apps / env snapshot (issue #194)
   myagents diagnose runtime codex             # alias for runtime diagnose
   myagents agent list --archived              # archived Agent workspaces
+  myagents agent templates --json             # workspace templates for agent create
+  myagents agent create --name "Code Reviewer" --runtime codex --json
   myagents agent create --workspacePath /absolute/path --json
   myagents agent current --json               # compact current context diagnostic
   myagents agent show <agentId>                # identity + effective defaults
   myagents agent network-diagnose --json      # protocol/devices/connection state
   myagents session list --agent <agentId>      # recent reusable contexts
-  myagents session start --agent <agentId> -p "review this" # fresh context
+  myagents session start --agent <agentId> --runtime codex --model gpt-5.4 -p "review this" # one-shot fresh context
   myagents session get <sessionId> --limit 5 --json
   myagents agent archive <agent-id>
   myagents agent unarchive <agent-id>
@@ -991,17 +993,12 @@ export function printResult(
     }
     return;
   }
+  if (group === 'agent' && action === 'templates') {
+    printAgentTemplates((result.data as Array<Record<string, unknown>>) ?? []);
+    return;
+  }
   if (group === 'agent' && action === 'create') {
-    const data = (result.data as Record<string, unknown>) ?? {};
-    console.log(
-      data.created
-        ? '✓ Workspace Agent created'
-        : '✓ Workspace Agent already exists',
-    );
-    console.log(`  agent:     ${String(data.agentId ?? '')}`);
-    console.log(`  project:   ${String(data.projectId ?? '')}`);
-    console.log(`  workspace: ${String(data.workspacePath ?? '')}`);
-    console.log(`  enabled:   ${String(data.enabled ?? false)}`);
+    printAgentCreate((result.data as Record<string, unknown>) ?? {});
     return;
   }
   if (group === 'cron' && action === 'list') {
@@ -1287,11 +1284,24 @@ export function printResult(
     console.log(`  agent:   ${String(result.agentId ?? '(unknown)')}`);
     console.log(`  session: ${String(result.sessionId ?? '(unknown)')}`);
     console.log(`  message: ${String(result.messageId ?? '(unknown)')}`);
+    const eff = result.effectiveConfig as Record<string, unknown> | undefined;
+    if (eff && typeof eff === 'object') {
+      const parts = [
+        eff.runtime ? `runtime=${String(eff.runtime)}` : null,
+        eff.providerId ? `provider=${String(eff.providerId)}` : null,
+        eff.model ? `model=${String(eff.model)}` : null,
+        eff.reasoningEffort ? `effort=${String(eff.reasoningEffort)}` : null,
+        eff.permissionMode ? `permission=${String(eff.permissionMode)}` : null,
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        console.log(`  config:  ${parts.join('  ')} (one-shot for this Session)`);
+      }
+    }
     console.log('  state:   accepted; target is running asynchronously');
     if (result.replyBack === false) {
       console.log('  result:  one-way; MyAgents will not push the target turn result back here.');
     } else {
-      console.log('  result:  MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block.');
+      console.log('  result:  MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block. End your turn and wait — do not poll session state.');
     }
     console.log(`  follow-up: myagents session send ${String(result.sessionId ?? '<sessionId>')} -p "<prompt>"`);
     console.log('  observation: start/send already return the result automatically; use watch for separately observed work.');
@@ -1334,7 +1344,7 @@ export function printResult(
     if (result.replyBack === false) {
       console.log('  notification: one-way; MyAgents will not push the target turn result back here.');
     } else {
-      console.log('  notification: MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block.');
+      console.log('  notification: MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block. End your turn and wait — do not poll session state.');
     }
     return;
   }
@@ -1946,7 +1956,12 @@ function printAgentShow(data: Record<string, unknown>): void {
   console.log(`  model:          ${fmt(defaults.model)}`);
   console.log(`  permissionMode: ${fmt(defaults.permissionMode)}`);
   if (defaults.permissionModeSource) console.log(`  permission source: ${fmt(defaults.permissionModeSource)}`);
-  console.log(`  providerId:     ${fmt(defaults.providerId)}`);
+  const isSystemCli = defaults.runtimeSource === 'system-cli';
+  if (isSystemCli && (defaults.providerId === null || defaults.providerId === undefined)) {
+    console.log('  providerId:     (managed by runtime)');
+  } else {
+    console.log(`  providerId:     ${fmt(defaults.providerId)}`);
+  }
   if (defaults.runtimeConfig) {
     console.log(`  runtimeConfig:  ${JSON.stringify(defaults.runtimeConfig)}`);
   }
@@ -1954,7 +1969,56 @@ function printAgentShow(data: Record<string, unknown>): void {
   console.log(`  Claude plugins: ${fmt(defaults.enabledPluginIds)}`);
   console.log(`  official tools: ${fmt(defaults.enabledOfficialToolIds)}`);
   console.log('');
-  console.log('Describe this runtime:  myagents runtime describe <runtime>');
+  const runtimeArg = typeof defaults.runtime === 'string' && defaults.runtime.trim()
+    ? defaults.runtime.trim()
+    : '<runtime>';
+  console.log(`Describe this runtime:  myagents runtime describe ${runtimeArg}`);
+}
+
+function printAgentTemplates(templates: Array<Record<string, unknown>>): void {
+  if (!templates || templates.length === 0) {
+    console.log('No workspace templates available.');
+    return;
+  }
+  const pad = (s: string, n: number) => s.padEnd(n);
+  const idWidth = Math.max(16, ...templates.map((t) => String(t.id ?? '').length + 2));
+  console.log(pad('ID', idWidth) + pad('Source', 10) + pad('Name', 18) + 'Description');
+  for (const t of templates) {
+    console.log(
+      pad(String(t.id ?? ''), idWidth)
+      + pad(String(t.source ?? ''), 10)
+      + pad(String(t.name ?? ''), 18)
+      + singleLine(t.description ?? ''),
+    );
+  }
+}
+
+function printAgentCreate(data: Record<string, unknown>): void {
+  if (!data) {
+    console.log('✓ agent created');
+    return;
+  }
+  console.log(data.created === false ? '✓ agent already registered (reused)' : '✓ agent created');
+  console.log(`  agentId:   ${String(data.agentId ?? '')}`);
+  console.log(`  projectId: ${String(data.projectId ?? '')}`);
+  console.log(`  name:      ${String(data.name ?? '')}`);
+  console.log(`  workspace: ${String(data.workspacePath ?? '')}`);
+  console.log(`  proactive: ${data.enabled ? 'enabled' : 'disabled'}`);
+  if (data.templateId) {
+    console.log(`  template:  ${String(data.templateId)} (${String(data.templateSource ?? 'builtin')})`);
+  }
+  const defaults = data.effectiveDefaults as Record<string, unknown> | undefined;
+  if (defaults && typeof defaults === 'object') {
+    const parts = [
+      defaults.runtime ? `runtime=${String(defaults.runtime)}` : null,
+      defaults.providerId ? `provider=${String(defaults.providerId)}` : null,
+      defaults.model ? `model=${String(defaults.model)}` : null,
+      defaults.permissionMode ? `permission=${String(defaults.permissionMode)}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) {
+      console.log(`  defaults:  ${parts.join('  ')}`);
+    }
+  }
 }
 
 /**
@@ -2105,12 +2169,13 @@ export function printModelList(providers: Array<Record<string, unknown>>): void 
     return;
   }
   const pad = (s: string, n: number) => s.padEnd(n);
-  console.log(pad('ID', 24) + pad('Status', 12) + 'Name');
+  const idWidth = Math.max(24, ...providers.map((p) => String(p.id ?? '').length + 2));
+  console.log(pad('ID', idWidth) + pad('Status', 12) + 'Name');
   for (const p of providers) {
     // Disabled providers retain their verify status but the disabled label
     // overrides — they can't be used until re-enabled in Settings.
     const status = p.enabled === false ? 'disabled' : String(p.status);
-    console.log(pad(String(p.id), 24) + pad(status, 12) + String(p.name));
+    console.log(pad(String(p.id), idWidth) + pad(status, 12) + String(p.name));
     const models = Array.isArray(p.models)
       ? p.models.flatMap(model => {
         if (!model || typeof model !== 'object') return [];
@@ -2153,6 +2218,14 @@ export function printAgentList(agents: Array<Record<string, unknown>>): void {
     );
     if (separateId) console.log(`  Agent ID: ${id}`);
     if (remote) console.log(`  Remote: ${String(a.networkName ?? 'unknown network')} / ${String(a.deviceName ?? 'unknown device')}`);
+    const desc = typeof a.description === 'string' && a.description.trim()
+      ? singleLine(a.description.trim()).slice(0, 120)
+      : '';
+    if (desc) {
+      console.log(`  Description: ${desc}`);
+    } else if (!remote && typeof a.workspacePath === 'string' && a.workspacePath.trim()) {
+      console.log(`  Workspace: ${a.workspacePath.trim()}`);
+    }
   }
   if (agents.some(agent => agent.isCurrent === true)) {
     console.log('\n* current Agent for this CLI caller');
@@ -3184,7 +3257,9 @@ async function main(): Promise<void> {
   const invocationError = process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim()
     ? validateInternalCliInvocation(positional, flags)
     : validateExternalCliInvocation(positional, flags);
-  if (invocationError) return exitAgentCliError(flags, invocationError);
+  if (invocationError) {
+    return exitAgentCliError(flags, invocationError, localArgErrorExitCode(positional));
+  }
 
   // Top-level help (no args, or bare --help)
   if (positional.length === 0) {
@@ -3199,10 +3274,14 @@ async function main(): Promise<void> {
   if (!flags.help) rejectUnsupportedSpaceDryRun(positional, flags);
 
   const commandError = validateCliCommand(positional, !!flags.help);
-  if (commandError) return exitAgentCliError(flags, commandError);
+  if (commandError) {
+    return exitAgentCliError(flags, commandError, localArgErrorExitCode(positional));
+  }
   if (!flags.help) {
     const dryRunError = validateDryRunSupport(positional, flags);
-    if (dryRunError) return exitAgentCliError(flags, dryRunError);
+    if (dryRunError) {
+      return exitAgentCliError(flags, dryRunError, localArgErrorExitCode(positional));
+    }
   }
 
   if (flags.help && !process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim()) {
@@ -3467,7 +3546,7 @@ const PUBLISHED_ADMIN_ROUTES = new Set([
   'tool/list', 'tool/info', 'tool/add', 'tool/remove', 'tool/enable', 'tool/disable', 'tool/readme', 'tool/env',
   'vision/readme', 'vision/models', 'vision/analyze',
   'model/list', 'model/add', 'model/remove', 'model/set-key', 'model/set-default', 'model/verify',
-  'agent/list', 'agent/create', 'agent/current', 'agent/show', 'agent/enable', 'agent/disable', 'agent/archive', 'agent/unarchive',
+  'agent/list', 'agent/create', 'agent/templates', 'agent/current', 'agent/show', 'agent/enable', 'agent/disable', 'agent/archive', 'agent/unarchive',
   'agent/set', 'agent/channel/list', 'agent/channel/add', 'agent/channel/remove', 'agent/runtime-status',
   'runtime/list', 'runtime/describe', 'runtime/diagnose', 'diagnose/runtime',
   'cron/list', 'cron/add', 'cron/start', 'cron/run-now', 'cron/stop', 'cron/remove', 'cron/update', 'cron/runs',
@@ -3695,6 +3774,16 @@ type AgentCliError = {
   suggestion?: string;
   suggestedCommand?: string;
 };
+
+function localArgErrorExitCode(positional: readonly string[]): number {
+  if (
+    positional[0] === 'session'
+    && ['start', 'send', 'watch', 'list'].includes(positional[1] ?? '')
+  ) {
+    return 3;
+  }
+  return 2;
+}
 
 function exitAgentCliError(
   flags: Record<string, unknown>,
@@ -3947,6 +4036,46 @@ export function readWorkspaceTextFile(path: string, workspacePath = process.cwd(
 
 function readLocalTextFile(path: string, basePath = process.cwd()): string {
   return readGuardedTextFile(path, { kind: 'local', basePath });
+}
+
+export function readGuardedStdinText(
+  maxBytes = 1024 * 1024,
+  deps: {
+    isTTY?: boolean;
+    readChunk?: (buffer: Buffer) => number;
+  } = {},
+): string {
+  const tty = require('node:tty') as typeof import('node:tty');
+  const isTTY = deps.isTTY ?? tty.isatty(0);
+  if (isTTY) {
+    throw new Error('stdin is a TTY; pipe input or use a heredoc with --prompt-file -');
+  }
+  const fs = require('node:fs') as typeof import('node:fs');
+  const readChunk = deps.readChunk ?? ((buffer: Buffer) => fs.readSync(0, buffer, 0, buffer.length, null));
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const chunkBuf = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let bytesRead: number;
+    try {
+      bytesRead = readChunk(chunkBuf);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'EAGAIN' || code === 'EINTR') continue;
+      throw err;
+    }
+    if (bytesRead === 0) break;
+    total += bytesRead;
+    if (total > maxBytes) {
+      throw new Error(`stdin exceeds the ${maxBytes} byte limit`);
+    }
+    chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+  }
+  const text = Buffer.concat(chunks, total).toString('utf8');
+  if (text.includes('\0')) {
+    throw new Error('stdin contains NUL bytes');
+  }
+  return text;
 }
 
 function readTextFileFlag(path: string, flagName: string, exitCode = 1): string {
@@ -4629,15 +4758,30 @@ function resolveSessionPromptText(
         3,
       );
     }
-    promptText = readTextFileFlag(promptFile, 'prompt-file', 3);
+    if (promptFile === '-') {
+      try {
+        promptText = readGuardedStdinText(1024 * 1024);
+      } catch (err) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'STDIN_READ_FAILED',
+            error: `Failed to read --prompt-file -: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          3,
+        );
+      }
+    } else {
+      promptText = readTextFileFlag(promptFile, 'prompt-file', 3);
+    }
   }
 
-  if (!promptText || promptText.length === 0) {
+  if (!promptText || !promptText.trim()) {
     return exitAgentCliError(
       flags,
       {
         code: 'PROMPT_REQUIRED',
-        error: `session ${action} requires --prompt "<text>" or --prompt-file <path>`,
+        error: `session ${action} requires non-empty --prompt "<text>" or --prompt-file <path|->`,
         suggestedCommand: `myagents session ${action} --help`,
       },
       3,
@@ -5629,20 +5773,74 @@ export function buildRequestBody(
       }
       return { cursor: flags.cursor, limit, network:typeof flags.network === 'string' ? flags.network : undefined };
     }
+    if (action === 'templates') return {};
     if (action === 'create') {
       const workspacePath =
         typeof flags.workspacePath === 'string'
           ? flags.workspacePath.trim()
           : '';
-      if (!workspacePath) {
+      const name =
+        typeof flags.name === 'string'
+          ? flags.name.trim()
+          : '';
+      const template =
+        typeof flags.template === 'string'
+          ? flags.template.trim()
+          : '';
+      if (flags.workspacePath !== undefined && !workspacePath) {
         return exitAgentCliError(flags, {
           code: 'WORKSPACE_PATH_REQUIRED',
-          error: 'agent create requires --workspacePath <absolute-path>.',
-          suggestedCommand:
-            'myagents agent create --workspacePath /absolute/path --json',
+          error: '--workspacePath requires an absolute directory path.',
+          suggestedCommand: 'myagents agent create --help',
         });
       }
-      return { workspacePath };
+      if (flags.name !== undefined && !name) {
+        return exitAgentCliError(flags, {
+          code: 'INVALID_WORKSPACE_NAME',
+          error: '--name requires a non-empty value.',
+          suggestedCommand: 'myagents agent create --help',
+        });
+      }
+      if (flags.template !== undefined && !template) {
+        return exitAgentCliError(flags, {
+          code: 'TEMPLATE_REQUIRED',
+          error: '--template requires a template ID (run `myagents agent templates`).',
+          suggestedCommand: 'myagents agent templates',
+        });
+      }
+      if (!workspacePath && !name) {
+        return exitAgentCliError(flags, {
+          code: 'WORKSPACE_OR_NAME_REQUIRED',
+          error: 'agent create requires --name <name> (creates ~/.myagents/projects/<name>) or --workspacePath <absolute-path>.',
+          suggestedCommand: 'myagents agent create --name my-agent --json',
+        });
+      }
+      if (workspacePath && template) {
+        return exitAgentCliError(flags, {
+          code: 'TEMPLATE_REQUIRES_NEW_WORKSPACE',
+          error: '--template cannot be combined with --workspacePath; omit --workspacePath to create a new managed workspace from a template.',
+          suggestedCommand: 'myagents agent create --name my-agent --template mino --json',
+        });
+      }
+      const configFlags: Record<string, string> = {};
+      for (const field of ['runtime', 'providerId', 'model', 'permissionMode', 'reasoningEffort'] as const) {
+        const raw = flags[field];
+        if (raw === undefined) continue;
+        if (typeof raw !== 'string' || !raw.trim()) {
+          return exitAgentCliError(flags, {
+            code: 'ARGUMENT_INVALID',
+            error: `--${field} requires a non-empty value.`,
+            suggestedCommand: 'myagents agent create --help',
+          });
+        }
+        configFlags[field] = raw.trim();
+      }
+      return {
+        ...(workspacePath ? { workspacePath } : {}),
+        ...(name ? { name } : {}),
+        ...(template ? { template } : {}),
+        ...configFlags,
+      };
     }
     if (action === 'list') {
       if (flags.archived && flags.active) {
@@ -5663,7 +5861,66 @@ export function buildRequestBody(
       ),
     };
     if (action === 'current') return {};
-    if (action === 'set') return { id: rest[0], key: rest[1], value: tryParseJson(rest[2]) };
+    if (action === 'set') {
+      const id = rest[0];
+      if (!id) {
+        return exitAgentCliError(flags, {
+          code: 'AGENT_REQUIRED',
+          error: 'agent set requires <agentId>.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      const patchFlagKeys = [
+        'name', 'enabled', 'runtime', 'providerId', 'model',
+        'permissionMode', 'reasoningEffort', 'runtimeConfig',
+        'mcpEnabledServers', 'enabledPluginIds',
+      ] as const;
+      const providedPatchFlags = patchFlagKeys.filter((k) => flags[k] !== undefined);
+      const hasPositionalPair = rest[1] !== undefined || rest[2] !== undefined;
+      if (providedPatchFlags.length > 0 && hasPositionalPair) {
+        return exitAgentCliError(flags, {
+          code: 'ARGUMENT_INVALID',
+          error: 'Do not mix positional <key> <value> with named flags in agent set.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      if (providedPatchFlags.length > 0) {
+        const patch: Record<string, unknown> = {};
+        for (const k of providedPatchFlags) {
+          const raw = flags[k];
+          if (k === 'enabled') {
+            if (typeof raw === 'boolean') {
+              patch[k] = raw;
+            } else if (raw === 'true' || raw === 'false') {
+              patch[k] = raw === 'true';
+            } else {
+              return exitAgentCliError(flags, {
+                code: 'ARGUMENT_INVALID',
+                error: '--enabled requires true or false.',
+              });
+            }
+          } else if (k === 'runtimeConfig' || k === 'mcpEnabledServers' || k === 'enabledPluginIds') {
+            patch[k] = typeof raw === 'string' ? tryParseJson(raw) : raw;
+          } else if (typeof raw !== 'string' || !raw.trim()) {
+            return exitAgentCliError(flags, {
+              code: 'ARGUMENT_INVALID',
+              error: `--${k} requires a non-empty value.`,
+            });
+          } else {
+            patch[k] = raw.trim();
+          }
+        }
+        return { id, patch };
+      }
+      if (rest.length > 3) {
+        return exitAgentCliError(flags, {
+          code: 'ARGUMENT_INVALID',
+          error: 'Unexpected positional arguments for agent set.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      return { id, key: rest[1], value: tryParseJson(rest[2]) };
+    }
     if (action === 'channel') {
       const channelAction = rest[0] || 'list'; // list | add | remove
       if (channelAction === 'list') return { agentId: requirePositional(rest[1] ?? flags.agentId as string | undefined, 'agent-id', 'agent channel list', 'agent') };
@@ -6432,41 +6689,72 @@ export function buildRequestBody(
           3,
         );
       }
+      const optionalOverrides: Record<string, string> = {};
+      for (const [key, cliName] of [
+        ['runtime', 'runtime'],
+        ['providerId', 'providerId'],
+        ['model', 'model'],
+        ['reasoningEffort', 'reasoningEffort'],
+        ['permissionMode', 'permissionMode'],
+      ] as const) {
+        const raw = flags[key];
+        if (raw === undefined) continue;
+        if (typeof raw !== 'string' || !raw.trim()) {
+          return exitAgentCliError(
+            flags,
+            {
+              code: 'ARGUMENT_INVALID',
+              error: `--${cliName} requires a non-empty value.`,
+              suggestedCommand: 'myagents session start --help',
+            },
+            3,
+          );
+        }
+        optionalOverrides[key] = raw.trim();
+      }
       return {
         agentId,
         prompt: resolveSessionPromptText(flags, 'start'),
         replyBack: !flags.noReply,
+        ...optionalOverrides,
       };
     }
     if (action === 'send') {
       // Positional: <sessionId>
       // Flags: -p / --prompt | --prompt-file (mutually exclusive), --no-reply
-      const toSessionId = requirePositional(
-        rest[0] ?? (flags.toSessionId as string | undefined) ?? (flags.to as string | undefined),
-        'sessionId',
-        'session send',
-        'toSessionId',
-      );
+      const rawToSessionId = rest[0] ?? flags.toSessionId ?? flags.to;
+      if (typeof rawToSessionId !== 'string' || !rawToSessionId.trim() || rest.length > 1) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'SESSION_REQUIRED',
+            error: 'session send requires exactly one <sessionId> argument.',
+            suggestedCommand: 'myagents session send --help',
+          },
+          3,
+        );
+      }
 
       return {
-        toSessionId,
+        toSessionId: rawToSessionId.trim(),
         prompt: resolveSessionPromptText(flags, 'send'),
         replyBack: !flags.noReply,
       };
     }
     if (action === 'get') {
-      const sessionId = requirePositional(
-        rest[0] ?? (flags.sessionId as string | undefined),
-        'sessionId',
-        'session get',
-        'sessionId',
-      );
-      if (rest.length > 1) {
-        return exitAgentCliError(flags, {
-          code: 'ARGUMENT_INVALID',
-          error: 'session get accepts exactly one <sessionId> argument.',
-        });
+      const rawSessionId = rest[0] ?? flags.sessionId;
+      if (typeof rawSessionId !== 'string' || !rawSessionId.trim() || rest.length > 1) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'SESSION_REQUIRED',
+            error: 'session get requires exactly one <sessionId> argument.',
+            suggestedCommand: 'myagents session get --help',
+          },
+          2,
+        );
       }
+      const sessionId = rawSessionId.trim();
       const limit = flags.limit === undefined ? 5 : Number(flags.limit);
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
         return exitAgentCliError(flags, {
@@ -6507,12 +6795,20 @@ export function buildRequestBody(
     if (action === 'watch') {
       const targetSessionId = rest[0] ?? flags.targetSessionId ?? flags.to;
       if (typeof targetSessionId !== 'string' || !targetSessionId.trim() || rest.length > 1) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: 'myagents session watch --help' });
+        return exitAgentCliError(
+          flags,
+          { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: 'myagents session watch --help' },
+          3,
+        );
       }
       const unsupportedFlag = ['prompt', 'promptFile', 'then', 'thenFile', 'thenPrompt', 'thenPromptFile']
         .find((key) => flags[key] !== undefined);
       if (unsupportedFlag) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch does not accept prompt/then flags. Use `myagents session send` to ask the target session to do new work.' });
+        return exitAgentCliError(
+          flags,
+          { code: 'ARGUMENT_INVALID', error: 'session watch does not accept prompt/then flags. Use `myagents session send` to ask the target session to do new work.' },
+          3,
+        );
       }
       return { targetSessionId: targetSessionId.trim() };
     }

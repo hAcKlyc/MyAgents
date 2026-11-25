@@ -26,6 +26,7 @@ import {
   printGoalResult,
   printResult,
   publicCliHelp,
+  readGuardedStdinText,
   readWorkspaceTextFile,
   rejectUnsupportedSpaceDryRun,
   resolveCliPort,
@@ -118,7 +119,8 @@ describe('Session observation CLI', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`exit:${code}`); });
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(() => buildRequestBody(group, action, [...rest], flags)).toThrow('exit:2');
+      const expectedExit = group === 'session' && action === 'watch' ? 'exit:3' : 'exit:2';
+      expect(() => buildRequestBody(group, action, [...rest], flags)).toThrow(expectedExit);
     } finally { exit.mockRestore(); error.mockRestore(); }
   });
 
@@ -2240,7 +2242,7 @@ describe('myagents CLI Agent / Session collaboration contracts', () => {
         promptFile: '/definitely/missing/myagents-prompt.txt',
       })).toThrow('process.exit(3)');
       expect(() => buildRequestBody('agent', 'create', [], {})).toThrow('process.exit(2)');
-      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('process.exit(1)');
+      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('process.exit(2)');
       expect(() => buildRequestBody('session', 'get', ['session-1'], { limit: 0 }))
         .toThrow('process.exit(2)');
       expect(() => buildRequestBody('session', 'get', ['session-1'], { limit: 501 }))
@@ -2931,10 +2933,110 @@ describe('internal CLI command admission', () => {
     [[], { frobnicate: true }],
     [['session', 'get', 'session-id'], { bogusflag: true }],
     [['task', 'create-direct'], { totallyBogusFlag: 'yes' }],
-    [['session', 'start'], { model: 'ignored-model' }],
+    [['session', 'start'], { mcpEnabledServers: '["playwright"]' }],
     [['agent', 'channel'], { frobnicate: true }],
   ])('rejects silently ignored options before dispatch', (positional, flags) => {
     expect(validateInternalCliInvocation(positional as string[], flags)).toMatchObject({ code: 'UNKNOWN_FLAG' });
+  });
+  it('admits one-shot local session start overrides and forwards them cleanly in buildRequestBody', () => {
+    const parsed = parseArgs([
+      'session',
+      'start',
+      '--agent',
+      'agent-1',
+      '--runtime',
+      'codex',
+      '--model',
+      'gpt-5.5',
+      '--reasoningEffort',
+      'high',
+      '--permissionMode',
+      'suggest',
+      '-p',
+      'Audit this change',
+    ]);
+    expect(validateInternalCliInvocation(parsed.positional, parsed.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsed.positional, parsed.flags)).toBeUndefined();
+    expect(buildRequestBody('session', 'start', parsed.positional.slice(2), parsed.flags)).toEqual({
+      agentId: 'agent-1',
+      prompt: 'Audit this change',
+      replyBack: true,
+      runtime: 'codex',
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      permissionMode: 'suggest',
+    });
+  });
+  it('reads guarded stdin text for --prompt-file - and rejects TTY, NUL, and >1MB inputs', () => {
+    const payload = Buffer.from('line 1\nline 2\n', 'utf8');
+    let offset = 0;
+    const text = readGuardedStdinText(1024, {
+      isTTY: false,
+      readChunk: (buf) => {
+        if (offset >= payload.length) return 0;
+        const n = payload.copy(buf, 0, offset, Math.min(offset + 5, payload.length));
+        offset += n;
+        return n;
+      },
+    });
+    expect(text).toBe('line 1\nline 2\n');
+
+    expect(() => readGuardedStdinText(1024, { isTTY: true })).toThrow(/TTY/);
+    expect(() => {
+      let sent = false;
+      readGuardedStdinText(1024, {
+        isTTY: false,
+        readChunk: (buf) => {
+          if (sent) return 0;
+          sent = true;
+          return Buffer.from('abc\0def').copy(buf);
+        },
+      });
+    }).toThrow(/NUL/);
+    expect(() => {
+      readGuardedStdinText(10, {
+        isTTY: false,
+        readChunk: (buf) => Buffer.from('0123456789ab').copy(buf),
+      });
+    }).toThrow(/limit/);
+  });
+  it('enforces exit code 3 for session send/watch/start argument errors, exit code 2 for session get, and renders effectiveConfig', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`EXIT:${String(code)}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(() => buildRequestBody('session', 'send', [], { prompt: 'hi' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'watch', [], {})).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'watch', ['s1'], { prompt: 'hi' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'start', [], { agent: 'a1', prompt: 'hi', promptFile: '-' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('EXIT:2');
+
+      printResult('session', 'start', {
+        success: true,
+        accepted: true,
+        agentId: 'agent-1',
+        sessionId: 'sess-1',
+        messageId: 'msg-1',
+        replyBack: true,
+        effectiveConfig: {
+          runtime: 'codex',
+          model: 'gpt-5.5',
+          reasoningEffort: 'high',
+          permissionMode: 'no-restrictions',
+        },
+      }, false);
+      const output = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('runtime=codex');
+      expect(output).toContain('model=gpt-5.5');
+      expect(output).toContain('permission=no-restrictions');
+      expect(output).toContain('do not poll session state');
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
   it('rejects a positional argument on readme and preserves real Record filters', () => {
     expect(validateInternalCliInvocation(['vision', 'readme', 'extra-arg'], {})).toMatchObject({ code: 'ARGUMENT_INVALID' });
@@ -2971,5 +3073,143 @@ describe('channel message CLI contract', () => {
       expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual(data);
       expect(error).not.toHaveBeenCalled();
     } finally {log.mockRestore();error.mockRestore();}
+  });
+});
+
+describe('Batch 2 CLI ergonomics: agent create/templates/set, model list spacing, agent show/list rendering', () => {
+  it('validates and builds request bodies for agent create, agent templates, and atomic multi-field agent set', () => {
+    const parsedCreate = parseArgs([
+      'agent', 'create', '--name', 'Code Reviewer', '--template', 'mino',
+      '--runtime', 'dsh', '--providerId', 'deepseek', '--model', 'deepseek-v4-pro',
+      '--permissionMode', 'full-autonomous', '--reasoningEffort', 'high', '--json',
+    ]);
+    expect(validateCliCommand(parsedCreate.positional)).toBeUndefined();
+    expect(validateInternalCliInvocation(parsedCreate.positional, parsedCreate.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsedCreate.positional, parsedCreate.flags)).toBeUndefined();
+    expect(buildRequestBody('agent', 'create', [], parsedCreate.flags)).toEqual({
+      name: 'Code Reviewer',
+      template: 'mino',
+      runtime: 'dsh',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      permissionMode: 'full-autonomous',
+      reasoningEffort: 'high',
+    });
+
+    const parsedTemplates = parseArgs(['agent', 'templates', '--json']);
+    expect(validateCliCommand(parsedTemplates.positional)).toBeUndefined();
+    expect(validateInternalCliInvocation(parsedTemplates.positional, parsedTemplates.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsedTemplates.positional, parsedTemplates.flags)).toBeUndefined();
+    expect(buildRoute('agent', 'templates', [])).toBe('agent/templates');
+    expect(buildRequestBody('agent', 'templates', [], parsedTemplates.flags)).toEqual({});
+
+    const parsedMultiSet = parseArgs([
+      'agent', 'set', 'agent-1', '--name', 'Reviewer', '--runtime', 'codex',
+      '--model', 'gpt-5.4', '--permissionMode', 'no-restrictions', '--reasoningEffort', 'high',
+    ]);
+    expect(validateInternalCliInvocation(parsedMultiSet.positional, parsedMultiSet.flags)).toBeUndefined();
+    expect(buildRequestBody('agent', 'set', ['agent-1'], parsedMultiSet.flags)).toEqual({
+      id: 'agent-1',
+      patch: {
+        name: 'Reviewer',
+        runtime: 'codex',
+        model: 'gpt-5.4',
+        permissionMode: 'no-restrictions',
+        reasoningEffort: 'high',
+      },
+    });
+
+    // Mixing positional key/value with named flags must fail closed.
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`EXIT:${String(code)}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() =>
+        buildRequestBody('agent', 'set', ['agent-1', 'model', 'gpt-5.4'], { runtime: 'codex' }),
+      ).toThrow('EXIT:2');
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('dynamically widens model list ID column so long provider IDs never concatenate with status', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printModelList([{
+        id: 'custom-very-long-provider-id-2026',
+        name: 'Long Provider',
+        isDefault: false,
+        status: 'valid',
+        primaryModel: 'model-a',
+        models: [{ id: 'model-a', name: 'Model A' }],
+      }]);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toMatch(/custom-very-long-provider-id-2026\s{2,}valid\s{2,}Long Provider/);
+      expect(output).not.toContain('custom-very-long-provider-id-2026valid');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('renders agent show with (managed by runtime) for system-cli and substitutes actual runtime in footer', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printResult('agent', 'show', {
+        success: true,
+        data: {
+          agentId: 'agent-codex',
+          name: 'Codex Agent',
+          workspacePath: '/tmp/ws',
+          enabled: false,
+          effectiveDefaults: {
+            runtime: 'codex',
+            runtimeSource: 'system-cli',
+            providerId: null,
+            model: 'gpt-5.4',
+            permissionMode: 'no-restrictions',
+          },
+        },
+      }, false);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('(managed by runtime)');
+      expect(output).toContain('myagents runtime describe codex');
+      expect(output).not.toContain('runtime describe <runtime>');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('renders agent templates, agent create effectiveDefaults, and agent list Description/Workspace details', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printResult('agent', 'templates', {
+        success: true,
+        data: [{ id: 'mino', name: 'Mino', source: 'builtin', description: 'Built-in assistant template' }],
+      }, false);
+      printResult('agent', 'create', {
+        success: true,
+        data: {
+          created: true,
+          agentId: 'agent-new',
+          projectId: 'proj-new',
+          workspacePath: '/Users/test/.myagents/projects/Reviewer',
+          enabled: false,
+          effectiveDefaults: { runtime: 'dsh', providerId: 'deepseek', model: 'deepseek-v4-pro', permissionMode: 'fullAgency' },
+        },
+      }, false);
+      printAgentList([
+        { agentId: 'a1', name: 'Local One', isLocal: true, workspacePath: '/tmp/local-one', enabled: false },
+        { agentId: 'a2', name: 'Remote Two', isLocal: false, deviceName: 'MacBook', description: 'Handles design reviews', enabled: true },
+      ]);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('mino');
+      expect(output).toContain('runtime=dsh');
+      expect(output).toContain('Workspace: /tmp/local-one');
+      expect(output).toContain('Description: Handles design reviews');
+    } finally {
+      log.mockRestore();
+    }
   });
 });

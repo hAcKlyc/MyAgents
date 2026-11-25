@@ -744,6 +744,78 @@ describe('session-engine selector and adapters', () => {
     );
   });
 
+  it('hydrates owned birth snapshots on enqueueInboxMessage including sdk-native subscription clearing and DSH providerRoute', async () => {
+    mocks.state.useExternal = false;
+    mocks.getSessionMetadata.mockReturnValueOnce({
+      id: 'fresh-sub-session',
+      agentDir: '/workspace',
+      configSnapshotAt: '2026-11-25T10:00:00.000Z',
+    });
+    mocks.resolveWorkspaceConfig.mockReturnValueOnce({
+      mcpServers: [],
+      permissionMode: 'fullAgency',
+      model: 'claude-sonnet-4-6',
+      providerRoute: { kind: 'subscription', providerId: 'anthropic-sub', model: 'claude-sonnet-4-6' },
+      providerEnv: undefined,
+      reasoningEffort: 'high',
+    } as never);
+    mocks.resolveSubscriptionAuthKind.mockReturnValueOnce('sdk-native');
+
+    await getSessionEngine().enqueueInboxMessage({
+      text: 'Run under anthropic-sub',
+      sessionId: 'fresh-sub-session',
+      workspacePath: '/workspace',
+    });
+    expect(mocks.enqueueUserMessage).toHaveBeenLastCalledWith(
+      'Run under anthropic-sub',
+      undefined,
+      'fullAgency',
+      'claude-sonnet-4-6',
+      'subscription',
+      'high',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.objectContaining({
+        queueResponseModeOverride: 'realtime',
+        inputSource: 'inbox',
+      }),
+    );
+
+    // DSH / external adapter forwards providerRoute from owned birth snapshot
+    mocks.state.useExternal = true;
+    mocks.getSessionMetadata.mockReturnValueOnce({
+      id: 'fresh-sub-session',
+      agentDir: '/workspace',
+      configSnapshotAt: '2026-11-25T10:00:00.000Z',
+    });
+    mocks.resolveWorkspaceConfig.mockReturnValueOnce({
+      mcpServers: [],
+      permissionMode: 'full-autonomous',
+      model: 'deepseek-v4-pro',
+      providerRoute: { kind: 'api', providerId: 'deepseek', model: 'deepseek-v4-pro' },
+      reasoningEffort: 'high',
+    } as never);
+    await getSessionEngine().enqueueInboxMessage({
+      text: 'Run under dsh',
+      sessionId: 'fresh-sub-session',
+      workspacePath: '/workspace',
+    });
+    expect(mocks.enqueueExternalSendForInbox).toHaveBeenLastCalledWith(
+      'Run under dsh',
+      expect.objectContaining({
+        sessionId: 'fresh-sub-session',
+        model: 'deepseek-v4-pro',
+        permissionMode: 'full-autonomous',
+        reasoningEffort: 'high',
+        providerRoute: { kind: 'api', providerId: 'deepseek', model: 'deepseek-v4-pro' },
+      }),
+      undefined,
+    );
+  });
+
   it('carries Channel handoff images and the binding guard through both Runtime adapters', async () => {
     const images = [{ kind: 'inline_base64' as const, name: 'photo.png', mimeType: 'image/png', data: 'eA==' }];
     const beforeDispatch = vi.fn(async () => ({ accepted: true }));

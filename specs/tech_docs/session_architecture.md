@@ -224,7 +224,7 @@ Goal 的详细产品行为和 Task/Goal provider routing 见 [`task_center.md`](
 
 backend-created target 只有在 Runtime dispatch claim 成功后才发布 prepared Session；ACK 不明时保留 identity，不能自动重试导致重复执行。`session start/send` 的每一层外部 timeout 都大于内层 owner/ACK timeout；transport error、成功状态但不可解析的 ACK 和外层超时统一是 `admission_unconfirmed`，只有明确拒绝才是 definitive failure。
 
-本地与跨设备 fresh Inbox 共用上述出生入口。目标 Sidecar 启动时 metadata 尚不存在；出生完成后，DSH/外部 adapter 必须在 Inbox admission 从已写入的 owned Session snapshot 捕获权限、模型与推理配置，不能沿用 bootstrap 的空 desired state。已有 owned Session 的缺失字段仍按产品默认解析，不重新继承 Agent 当前设置。DSH 原生 Plan 状态只更新 Runtime 的 Plan owner，不投影为权限变化或写回 Session permission snapshot。
+本地与跨设备 fresh Inbox 共用上述出生入口。目标 Sidecar 启动时 metadata 尚不存在；本地 `session start` 可携带可选的一次性 `birthOverrides`（`SessionBirthOverrides`，仅限 `runtime`/`providerId`/`model`/`reasoningEffort`/`permissionMode`，经 `src/shared/sessionPermissionCeiling.ts` 4-tier 权限天花板校验且不修改 Agent 默认），在目标 Sidecar 写 `prepared` birth snapshot 前按当前持久化状态复检并写入新 Session 快照（`providerId`/`model`/`reasoningEffort` 跨 runtime 切换时按目标 runtime 清洗，不泄漏源 runtime 残留）。出生完成后，builtin/DSH/外部 adapter 必须在 Inbox admission 从已写入的 owned Session snapshot 捕获权限、模型、Provider 环境与推理配置，不能沿用 bootstrap 的空 desired state。已有 owned Session 的缺失字段仍按产品默认解析，不重新继承 Agent 当前设置。DSH 原生 Plan 状态只更新 Runtime 的 Plan owner，不投影为权限变化或写回 Session permission snapshot。
 
 Builtin SDK 创建 Query 时，若尚未收到显式 MCP 配置，则按目标 Session 的 metadata 解析名单并应用当前全局开关。这样后台 Inbox 首轮也能使用会话选择的工具。显式空名单保持为空，缺少快照标记的旧会话沿用原有配置解析规则。
 

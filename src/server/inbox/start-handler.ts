@@ -1,6 +1,15 @@
 import type { AgentConfig } from '../../shared/types/agent';
 import type { RuntimeSource, RuntimeType } from '../../shared/types/runtime';
+import {
+  resolveSessionStartPermissionMode,
+  type SessionBirthOverrides,
+} from '../../shared/sessionPermissionCeiling';
 import { deriveSessionTitle } from '../../shared/sessionTitle';
+import type {
+  AdminAppConfig,
+  AgentConfigSlim,
+  ProjectSlim,
+} from '../utils/admin-config';
 import {
   claimPreparedSessionForTurnAdmission,
   deleteSession,
@@ -11,15 +20,19 @@ import { createMaterializedSessionMetadata } from '../utils/session-materializat
 import type { InboxAdmissionResult } from '../session-engine/types';
 import type { DispatchGuard } from '../session-core/turn-queue';
 import { buildSessionEventPrompt, buildTurnMeta } from './drain-handler';
+import { resolveTargetAgentDefaults } from './start-admin-handler';
 import type { PendingInboxMessage } from './types';
 
 export interface FreshSessionStartContext {
   sessionId: string;
   workspacePath: string;
   agent: AgentConfig;
+  project?: ProjectSlim;
+  config?: AdminAppConfig;
   runtime: RuntimeType;
   runtimeSource?: RuntimeSource;
   managedCodexProviderReady?: boolean;
+  birthOverrides?: SessionBirthOverrides;
 }
 
 export type FreshSessionInjector = (
@@ -71,15 +84,43 @@ export async function handleFreshSessionStart(
     return { accepted: false, reason: 'target Session metadata already exists' };
   }
 
+  // Re-validate birthOverrides permissionMode against the target Sidecar's
+  // freshly loaded persisted Agent/Project/Config before writing metadata so a
+  // concurrent `agent set` lowering the Agent's ceiling during Sidecar cold-start
+  // cannot be bypassed (TOCTOU defense-in-depth).
+  if (context.birthOverrides?.permissionMode && context.config) {
+    const freshDefaults = resolveTargetAgentDefaults(
+      context.agent as unknown as AgentConfigSlim,
+      context.project,
+      context.config,
+    );
+    const permCheck = resolveSessionStartPermissionMode({
+      targetRuntime: freshDefaults.runtime,
+      targetRuntimeSource: freshDefaults.runtimeSource,
+      targetEffectivePermissionMode: freshDefaults.permissionMode,
+      requestedRuntime: context.runtime,
+      requestedRuntimeSource: context.runtimeSource,
+      requestedPermissionMode: context.birthOverrides.permissionMode,
+    });
+    if (!permCheck.ok) {
+      return { accepted: false, reason: permCheck.message };
+    }
+  }
+
   const origin = { kind: 'session-inbox', surface: 'session_send' } as const;
   const metadata = createMaterializedSessionMetadata({
     agentDir: context.workspacePath,
     sessionId: context.sessionId,
     scenario: 'desktop',
     agent: context.agent,
+    runtimePolicy:
+      context.config?.defaultIntegratedRuntime !== undefined
+        ? { defaultIntegratedRuntime: context.config.defaultIntegratedRuntime }
+        : undefined,
     runtimeOverride: context.runtime,
     runtimeSourceOverride: context.runtimeSource,
     managedCodexProviderReady: context.managedCodexProviderReady,
+    birthOverrides: context.birthOverrides,
     title: deriveSessionTitle(message.text, 40) || 'New Chat',
     origin,
   });
