@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -91,6 +91,26 @@ lines.on('line', line => {
     if (turn !== undefined && promptText === 'steer-invalid') {
       return send({id:f.id,error:{code:-32602,message:'Empty prompt'}});
     }
+    const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
+    const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
+    if (turn !== undefined && ['steer-auth-predecessor', 'steer-auth-successor'].includes(promptText)) {
+      const predecessor = turn;
+      turn = f.id;
+      if (promptText === 'steer-auth-predecessor') update(textChunk(auth401Text));
+      send({id:predecessor,result:{stopReason:'end_turn',usage:{inputTokens:3,outputTokens:1,totalTokens:4}}});
+      setTimeout(() => {
+        const successor = turn;
+        turn = undefined;
+        if (promptText === 'steer-auth-successor') {
+          recoverAfterFramedQuote = true;
+          update(textChunk(auth401Text));
+        } else {
+          update(textChunk('The user follow-up took over.'));
+        }
+        send({id:successor,result:{stopReason:'end_turn',usage:{inputTokens:4,outputTokens:2,totalTokens:6}}});
+      }, 30);
+      return;
+    }
     if (turn !== undefined && promptText === 'steer-one') {
       const prev = turn;
       turn = f.id;
@@ -174,8 +194,6 @@ lines.on('line', line => {
       return;
     }
     turn = f.id;
-    const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
-    const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
     if (promptText === 'exit') return process.exit(2);
     if (promptText === 'auth-401-recover' || promptText === 'auth-401-exhaust' || promptText === 'auth-401-cap' || promptText === 'auth-401-cancel') {
       globalThis.__authMode = promptText;
@@ -1381,4 +1399,26 @@ it("confirms a steered prompt when an unanswered permission stays open across ha
   await runtime.interruptTurn(processHandle);
   await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
   expect(events.some((event) => event.kind === "user_message_cancelled")).toBe(false);
+});
+
+it.each([
+  ["steer-auth-predecessor", "The user follow-up took over."],
+  ["steer-auth-successor", "Continued after warning."],
+])("keeps recovery on the owning prompt when %s reports an auth warning", async (steer, reply) => {
+  const adapter = new AntigravityRuntime({ authRetryDelaysMs: [5] });
+  const { options, receive, events } = await setup();
+  processHandle = await adapter.startSession(options, receive);
+  await adapter.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+  await adapter.steerMessage(processHandle, steer, undefined, "follow-up");
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text.join("")).toBe("Working before steer." + reply);
+  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual([
+    { kind: "user_message_accepted", clientUserMessageId: "follow-up" },
+  ]);
+  expect(events.filter((event) => event.kind === "turn_complete")).toHaveLength(1);
+  expect(events.filter((event) => event.kind === "usage")).toMatchObject([
+    { semantics: "delta", inputTokens: 7, outputTokens: 3 },
+  ]);
 });
