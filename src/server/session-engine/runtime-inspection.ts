@@ -1,10 +1,11 @@
 import type { RuntimeSource, RuntimeType } from '../../shared/types/runtime';
 import { isManagedCodexRuntimeInstalled } from '../runtimes/codex-command-context';
 import { getExternalRuntime, isRuntimeSupported } from '../runtimes/factory';
-import { getSessionEngine } from './selector';
+export { queryRuntimeModels } from '../runtimes/external-session';
 
 /** Ask the Session owner first; an installation-only probe never starts a Session. */
 export async function inspectRuntime(runtime: RuntimeType) {
+  const { getSessionEngine } = await import('./selector');
   const active = await getSessionEngine().inspectRuntime?.(runtime);
   if (active) return active;
   if (runtime === 'builtin') return null;

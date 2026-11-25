@@ -48,7 +48,7 @@ import {
 } from '../utils/agent-workspace-identity';
 import { cancellableFetch } from '../utils/cancellation';
 import { managementRequestHeaders } from '../utils/management-api-client';
-import { detectRuntimeInstallation, queryRuntimeModels } from '../session-engine';
+import { detectRuntimeInstallation, queryRuntimeModels } from '../session-engine/runtime-inspection';
 import { getSessionMetadata } from '../SessionStore';
 import { deriveCallerInboxLabel } from './admin-handler';
 

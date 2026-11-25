@@ -27,7 +27,7 @@ vi.mock('../utils/admin-config', () => ({
 vi.mock('../utils/managed-codex-readiness', () => ({
   isManagedCodexProviderReady: mocks.isManagedCodexProviderReady,
 }));
-vi.mock('../session-engine', () => ({
+vi.mock('../session-engine/runtime-inspection', () => ({
   detectRuntimeInstallation: mocks.detectRuntimeInstallation,
   queryRuntimeModels: mocks.queryRuntimeModels,
 }));

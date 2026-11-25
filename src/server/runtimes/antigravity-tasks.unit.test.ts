@@ -151,12 +151,13 @@ describe('observeAntigravityBackgroundTasks', () => {
   });
 
   it('requires evidence for the tracked task inside the exact native Session', async () => {
-    tempBrain = await mkdtemp(join(tmpdir(), 'MyAgents-agy-tasks-'));
-    const sessionRoot = join(tempBrain, SESSION_ID, '.system_generated');
+    const root = await mkdtemp(join(tmpdir(), 'MyAgents-agy-tasks-'));
+    tempBrain = root;
+    const sessionRoot = join(root, SESSION_ID, '.system_generated');
     const messagesDir = join(sessionRoot, 'messages');
-    const otherTasks = join(tempBrain, 'other-session', '.system_generated', 'tasks');
+    const otherTasks = join(root, 'other-session', '.system_generated', 'tasks');
     const tracked = new Set(['task-104']);
-    const observe = () => observeAntigravityBackgroundTasks(tempBrain, SESSION_ID, tracked, new Map(), 0);
+    const observe = () => observeAntigravityBackgroundTasks(root, SESSION_ID, tracked, new Map(), 0);
     await mkdir(messagesDir, { recursive: true });
     expect((await observe()).filesObservable).toBe(false);
     await mkdir(otherTasks, { recursive: true });

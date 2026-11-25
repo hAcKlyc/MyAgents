@@ -35,5 +35,3 @@ export type {
 export { inspectRuntime } from './runtime-inspection';
 
 export { queryRuntimeModels } from '../runtimes/external-session';
-
-export { detectRuntimeInstallation } from './runtime-inspection';
