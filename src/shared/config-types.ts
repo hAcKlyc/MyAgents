@@ -988,7 +988,7 @@ export interface AppConfig {
   chatSendShortcut?: 'enter' | 'modEnter';
   /** 桌面 Chat 与 IM 手动连续发送 query 时的队列投递策略。
    *  'realtime'（默认）= busy 时尽快交给可实时响应的 runtime
-   *  （builtin SDK async queue；DSH turn/followUp；Codex app-server turn/steer）；
+   *  （builtin SDK async queue；DSH turn/followUp；Codex app-server turn/steer；Antigravity ACP concurrent session/prompt）；
    *  'turn' = busy 时留在 turn-boundary queue，上一轮结束后再作为下一轮发送。
    *  不支持实时 steering 的 external runtime 自动 fallback 到 'turn' 行为。
    *  仅用户手动 query 读取；Session Inbox 固定实时投递；其它来源保持既有语义。 */

@@ -4,7 +4,10 @@ import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { setSidecarPort } from "../session-core/sidecar-port";
 import * as subprocess from "../utils/subprocess";
-import type { UnifiedEvent } from "./types";
+import {
+  isRuntimeSteerUnavailableError,
+  type UnifiedEvent,
+} from "./types";
 import { AntigravityRuntime } from "./antigravity";
 
 // Keep real SDK framing, pipes and process teardown. Only substitute the external executable.
@@ -64,15 +67,118 @@ lines.on('line', line => {
     return settle();
   }
   if (f.method === 'session/close') return reply({});
+  if (f.method === 'session/cancel') {
+    if (turn !== undefined) {
+      const cancelled = turn;
+      turn = undefined;
+      send({id:cancelled,result:{stopReason:'cancelled'}});
+    }
+    return;
+  }
   if (f.method === 'session/prompt') {
-    turn = f.id;
-    const textPrompt = f.params.prompt[0].text;
+    const promptText = f.params.prompt[0]?.text ?? '';
     const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    const content = text => ({type:'content',content:{type:'text',text}});
+    if (turn !== undefined && promptText === 'steer-permission-race') {
+      return send({
+        id:f.id,
+        error:{
+          code:-32603,
+          message:"Can't add this prompt to session native: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again",
+        },
+      });
+    }
+    if (turn !== undefined && promptText === 'steer-invalid') {
+      return send({id:f.id,error:{code:-32602,message:'Empty prompt'}});
+    }
+    if (turn !== undefined && promptText === 'steer-one') {
+      const prev = turn;
+      turn = f.id;
+      send({
+        id:prev,
+        result:{
+          stopReason:'end_turn',
+          usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:10,totalTokens:135},
+        },
+      });
+      setTimeout(() => {
+        update({sessionUpdate:'tool_call_update',toolCallId:'steer-cmd',status:'completed',content:[content('done')],rawOutput:{exit_code:0,duration_ms:15}});
+      }, 15);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-two') {
+      const prev = turn;
+      turn = f.id;
+      send({id:prev,result:{stopReason:'end_turn'}});
+      setTimeout(() => {
+        update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Final steered answer.'}});
+        const finished = turn;
+        turn = undefined;
+        send({
+          id:finished,
+          result:{
+            stopReason:'end_turn',
+            usage:{inputTokens:40,outputTokens:10,thoughtTokens:2,cachedReadTokens:20,totalTokens:72},
+          },
+        });
+      }, 15);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-cancel-target') {
+      const prev = turn;
+      turn = f.id;
+      send({id:prev,result:{stopReason:'end_turn'}});
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-next-first') {
+      const prev = turn;
+      turn = undefined;
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Early successor reply.'}});
+      reply({stopReason:'max_tokens'});
+      setTimeout(() => send({id:prev,result:{stopReason:'end_turn'}}), 25);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-old-before-rejection') {
+      const prev = turn;
+      turn = undefined;
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Tail from predecessor.'}});
+      send({id:prev,result:{stopReason:'end_turn'}});
+      setTimeout(() => {
+        update({sessionUpdate:'usage_update',used:42,size:100});
+        send({
+          id:f.id,
+          error:{
+            code:-32603,
+            message:"Can't add this prompt to session native: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again",
+          },
+        });
+      }, 25);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-early-permission') {
+      const prev = turn;
+      turn = f.id;
+      send({
+        id:401,
+        method:'session/request_permission',
+        params:{
+          sessionId:'native',
+          toolCall:{toolCallId:'perm-401',title:'Approve steered action'},
+          options:[
+            {kind:'allow_once',optionId:'allow-401',name:'Yes'},
+            {kind:'reject_once',optionId:'deny-401',name:'No'},
+          ],
+        },
+      });
+      setTimeout(() => send({id:prev,result:{stopReason:'end_turn'}}), 20);
+      return;
+    }
+    turn = f.id;
     const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
     const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
-    if (textPrompt === 'exit') return process.exit(2);
-    if (textPrompt === 'auth-401-recover' || textPrompt === 'auth-401-exhaust' || textPrompt === 'auth-401-cap' || textPrompt === 'auth-401-cancel') {
-      globalThis.__authMode = textPrompt;
+    if (promptText === 'exit') return process.exit(2);
+    if (promptText === 'auth-401-recover' || promptText === 'auth-401-exhaust' || promptText === 'auth-401-cap' || promptText === 'auth-401-cancel') {
+      globalThis.__authMode = promptText;
       globalThis.__authCalls = 0;
     }
     if (globalThis.__authMode) {
@@ -86,7 +192,7 @@ lines.on('line', line => {
           update(textChunk(auth401Text));
           return reply({stopReason:'end_turn',usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155}});
         }
-        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !textPrompt.startsWith('Continue from where you stopped.')) {
+        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !promptText.startsWith('Continue from where you stopped.')) {
           return reply({stopReason:'refusal'});
         }
         if (call === 2) {
@@ -119,8 +225,8 @@ lines.on('line', line => {
         return reply({stopReason:'end_turn'});
       }
     }
-    if (textPrompt === 'auth-401-cancel-before-warning' || textPrompt === 'auth-401-cancel-after-warning') {
-      const warningBeforeCancel = textPrompt === 'auth-401-cancel-after-warning';
+    if (promptText === 'auth-401-cancel-before-warning' || promptText === 'auth-401-cancel-after-warning') {
+      const warningBeforeCancel = promptText === 'auth-401-cancel-after-warning';
       if (warningBeforeCancel) update(textChunk(auth401Text));
       update({sessionUpdate:'usage_update',used:44,size:100});
       settleAuthCancelledPrompt = () => {
@@ -129,56 +235,74 @@ lines.on('line', line => {
       };
       return;
     }
-    if (textPrompt === 'auth-401-warning-after-framed-quote') {
+    if (promptText === 'auth-401-warning-after-framed-quote') {
       recoverAfterFramedQuote = true;
       update(textChunk(auth401Text));
       update(textChunk(auth401Text));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt.startsWith('auth-401-framed-quote-')) {
+    if (promptText.startsWith('auth-401-framed-quote-')) {
       update(textChunk(auth401Text));
-      return reply({stopReason:textPrompt.slice('auth-401-framed-quote-'.length)});
+      return reply({stopReason:promptText.slice('auth-401-framed-quote-'.length)});
     }
-    if (textPrompt === 'auth-401-quoted-final-chunk') {
+    if (promptText === 'auth-401-quoted-final-chunk') {
       update(textChunk('Here is the exact error: '));
       update(textChunk(auth401Text.trim()));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-quoted') {
+    if (promptText === 'auth-401-quoted') {
       update(textChunk(auth401Text));
       update(textChunk('That error occurs when OAuth2 expires.'));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-quoted-single-chunk') {
+    if (promptText === 'auth-401-quoted-single-chunk') {
       update(textChunk(auth401Text.trim() + ' That error occurs when OAuth2 expires.'));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-disconnect-during-backoff') {
+    if (promptText === 'auth-401-disconnect-during-backoff') {
       update(textChunk(auth401Text));
       reply({stopReason:'end_turn',usage:{inputTokens:33,outputTokens:7,thoughtTokens:0,cachedReadTokens:5,totalTokens:45}});
       setTimeout(() => { process.stdout.end(); }, 25);
       return;
     }
-    if (textPrompt === 'auth-401-exit-during-backoff') {
+    if (promptText === 'auth-401-exit-during-backoff') {
       update(textChunk(auth401Text));
       reply({stopReason:'end_turn',usage:{inputTokens:44,outputTokens:6,thoughtTokens:2,cachedReadTokens:12,totalTokens:64}});
       setTimeout(() => { process.exit(3); }, 25);
       return;
     }
-    if (textPrompt.startsWith('Continue from where you stopped.')) {
+    if (promptText.startsWith('Continue from where you stopped.')) {
       update(textChunk(recoverAfterFramedQuote ? 'Continued after warning.' : 'UNEXPECTED_RETRY'));
       recoverAfterFramedQuote = false;
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'usage') return reply({
-      stopReason:'end_turn',
-      usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
-    });
-    if (f.params.prompt[0].text === 'delegate') {
-      const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    if (promptText === 'usage') {
+      turn = undefined;
+      return reply({
+        stopReason:'end_turn',
+        usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
+      });
+    }
+    if (promptText === 'steer-root') {
+      update({sessionUpdate:'tool_call',toolCallId:'steer-cmd',title:'sleep 4',kind:'execute',status:'in_progress',rawInput:{CommandLine:'sleep 4'}});
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Working before steer.'}});
+      return;
+    }
+    if (promptText === 'steer-root-finishable') {
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Still running.'}});
+      setTimeout(() => {
+        if (turn === f.id) {
+          turn = undefined;
+          reply({stopReason:'end_turn'});
+        }
+      }, 80);
+      return;
+    }
+    if (promptText === 'delegate') {
       const text = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
       const usage = {sessionUpdate:'usage_update',used:40,size:100};
       update(text('Waiting for delegated work.'));
+      turn = undefined;
       reply({stopReason:'end_turn'});
       setTimeout(() => {
         update(usage);
@@ -191,9 +315,7 @@ lines.on('line', line => {
       }, 25);
       return;
     }
-    if (f.params.prompt[0].text === 'tool projection') {
-      const update = data => send({method:'session/update',params:{sessionId:'native',update:data}});
-      const content = text => ({type:'content',content:{type:'text',text}});
+    if (promptText === 'tool projection') {
       update({sessionUpdate:'tool_call',toolCallId:'cmd',title:'printf synthetic-private-value',kind:'execute',status:'pending',rawInput:{CommandLine:'printf synthetic-private-value',toolSummary:'Print a marker'}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'in_progress',content:[content('first')]});
       update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'still'}});
@@ -202,9 +324,10 @@ lines.on('line', line => {
       update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:' writing'}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'failed',content:[content('final output')],rawOutput:{exit_code:6,duration_ms:25}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'failed',content:[content('do not duplicate')]});
+      turn = undefined;
       return reply({stopReason:'end_turn'});
     }
-    if (f.params.prompt[0].text === 'exact permission choices') {
+    if (promptText === 'exact permission choices') {
       for (const id of [301,302]) send({id,method:'session/request_permission',params:{
         sessionId:'native',
         toolCall:{toolCallId:String(id),title:'Run synthetic command',kind:'execute',rawInput:{CommandLine:'printf '+ 'x'.repeat(1500)}},
@@ -219,16 +342,22 @@ lines.on('line', line => {
     for (const id of [101,102]) send({id,method:'session/request_permission',params:{sessionId:'native',toolCall:{toolCallId:String(id),title:'file '+id},options:[{kind:'allow_once',optionId:'a'+id,name:'Yes'},{kind:'reject_once',optionId:'d'+id,name:'No'}]}});
   } else if ([301,302].includes(f.id)) {
     approvals.set(f.id,f.result.outcome);
-    if (approvals.size === 2) send({id:turn,result:{
-      stopReason: approvals.get(301).optionId === 'exact-301' && approvals.get(302).optionId === 'reject-302'
-        ? 'end_turn' : 'refusal',
-    }});
+    if (approvals.size === 2 && turn !== undefined) {
+      const done = turn;
+      turn = undefined;
+      send({id:done,result:{
+        stopReason: approvals.get(301).optionId === 'exact-301' && approvals.get(302).optionId === 'reject-302'
+          ? 'end_turn' : 'refusal',
+      }});
+    }
   } else if ([101,102].includes(f.id)) {
     approvals.set(f.id,f.result.outcome);
-    if(approvals.size === 2) {
+    if(approvals.size === 2 && turn !== undefined) {
+      const done = turn;
+      turn = undefined;
       const ok = approvals.get(101).optionId === 'a101' && approvals.get(102).optionId === 'd102';
       const cancelled = [...approvals.values()].every(v => v.outcome === 'cancelled');
-      send({id:turn,result:{stopReason: ok ? 'end_turn' : cancelled ? 'cancelled' : 'refusal'}});
+      send({id:done,result:{stopReason: ok ? 'end_turn' : cancelled ? 'cancelled' : 'refusal'}});
     }
   }
 });
@@ -1080,4 +1209,176 @@ it("emits accurate MCP dispatch semantics instead of status_read_failed", async 
     dispatch: { state: "released", releaseReason: "terminal_status" },
     servers: [expect.objectContaining({ id: "bad-remote", desired: true, state: "failed" })],
   });
+});
+
+it("steers an active prompt in-place via concurrent session/prompt, preserves in-flight tools, and accumulates delta usage", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect(
+    runtime.steerMessage(processHandle, "too early", undefined, { clientUserMessageId: "u-idle" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-one", undefined, {
+    clientUserMessageId: "u-steer-1",
+  });
+  expect(events.some((event) => event.kind === "turn_complete")).toBe(false);
+  // Pre-steer tool completion settles in the original assistant segment before
+  // `steer-one` is confirmed.
+  await expect.poll(() => events.some((event) => event.kind === "tool_result" && event.toolUseId === "steer-cmd")).toBe(true);
+  expect(events.filter((event) => event.kind === "tool_use_start" && event.toolUseId === "steer-cmd")).toHaveLength(1);
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-two", undefined, {
+    clientUserMessageId: "u-steer-2",
+  });
+  await expect.poll(() => events.filter((event) => event.kind === "turn_complete").length).toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({ status: "completed" });
+  const stopIdx = events.findIndex((event) => event.kind === "text_stop");
+  const accepted1Idx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-steer-1",
+  );
+  const accepted2Idx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-steer-2",
+  );
+  const finalTextIdx = events.findIndex(
+    (event) => event.kind === "text_delta" && event.text === "Final steered answer.",
+  );
+  expect(stopIdx).toBeGreaterThanOrEqual(0);
+  expect(accepted1Idx).toBeGreaterThan(stopIdx);
+  expect(accepted2Idx).toBeGreaterThan(accepted1Idx);
+  expect(finalTextIdx).toBeGreaterThan(accepted2Idx);
+  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual([
+    { kind: "user_message_accepted", clientUserMessageId: "u-steer-1" },
+    { kind: "user_message_accepted", clientUserMessageId: "u-steer-2" },
+  ]);
+  const usages = events.filter((event) => event.kind === "usage");
+  expect(usages.at(-1)).toEqual({
+    kind: "usage",
+    inputTokens: 140,
+    outputTokens: 37,
+    cacheReadTokens: 30,
+    cacheCreationTokens: undefined,
+    semantics: "delta",
+  });
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+});
+
+it("falls back to RuntimeSteerUnavailableError when a permission is pending or races on the wire", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "permissions");
+  await expect.poll(() => events.filter((event) => event.kind === "permission_request").length).toBe(2);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect(
+    runtime.steerMessage(processHandle, "blocked by local pending", undefined, { clientUserMessageId: "u-perm-local" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+  await runtime.interruptTurn(processHandle);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+
+  const startIdx = events.length;
+  await runtime.sendMessage(processHandle, "steer-root-finishable");
+  await expect.poll(() => events.slice(startIdx).some((event) => event.kind === "text_delta")).toBe(true);
+  await expect(
+    runtime.steerMessage(processHandle, "steer-permission-race", undefined, { clientUserMessageId: "u-perm-race" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+  expect(events.slice(startIdx).some((event) => event.kind === "user_message_accepted")).toBe(false);
+  await expect.poll(() => events.slice(startIdx).find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+});
+
+it("preserves the active turn on non-retryable steer errors and cancels a steered turn cleanly", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  const invalidError = await runtime
+    .steerMessage(processHandle, "steer-invalid", undefined, { clientUserMessageId: "u-invalid" })
+    .then(() => null, (error: unknown) => error);
+  expect(invalidError).toBeInstanceOf(Error);
+  expect(isRuntimeSteerUnavailableError(invalidError)).toBe(false);
+  expect(events.some((event) => event.kind === "turn_complete")).toBe(false);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-cancel-target", undefined, {
+    clientUserMessageId: "u-cancel",
+  });
+  await runtime.interruptTurn(processHandle);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+  expect(events).toContainEqual({ kind: "user_message_cancelled", clientUserMessageId: "u-cancel" });
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  expect(events.filter((event) => event.kind === "turn_complete")).toHaveLength(1);
+});
+
+it("preserves the successor terminal when out-of-order responses settle the steered prompt first", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-next-first", undefined, {
+    clientUserMessageId: "u-next-first",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "turn_complete")).toBe(true);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    status: "failed",
+    error: "Antigravity 已达到此轮输出长度上限",
+  });
+  const acceptedIdx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-next-first",
+  );
+  const earlyTextIdx = events.findIndex(
+    (event) => event.kind === "text_delta" && event.text === "Early successor reply.",
+  );
+  const completeIdx = events.findIndex((event) => event.kind === "turn_complete");
+  expect(acceptedIdx).toBeGreaterThanOrEqual(0);
+  expect(earlyTextIdx).toBeGreaterThan(acceptedIdx);
+  expect(completeIdx).toBeGreaterThan(earlyTextIdx);
+});
+
+it("does not confirm consumption from predecessor tail text or delayed usage_update before a late steer rejection", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-old-before-rejection", undefined, {
+    clientUserMessageId: "u-late-reject",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "turn_complete")).toBe(true);
+  expect(events).toContainEqual({ kind: "text_delta", text: "Tail from predecessor." });
+  expect(events.some((event) => event.kind === "context_update")).toBe(true);
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  const cancelledIdx = events.findIndex(
+    (event) => event.kind === "user_message_cancelled" && event.clientUserMessageId === "u-late-reject",
+  );
+  const completeIdx = events.findIndex((event) => event.kind === "turn_complete");
+  expect(cancelledIdx).toBeGreaterThanOrEqual(0);
+  expect(completeIdx).toBeGreaterThan(cancelledIdx);
+});
+
+it("confirms a steered prompt when an unanswered permission stays open across handoff", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-early-permission", undefined, {
+    clientUserMessageId: "u-early-perm",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "permission_request")).toBe(true);
+  expect(events).toContainEqual({
+    kind: "user_message_accepted",
+    clientUserMessageId: "u-early-perm",
+  });
+
+  await runtime.interruptTurn(processHandle);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+  expect(events.some((event) => event.kind === "user_message_cancelled")).toBe(false);
 });

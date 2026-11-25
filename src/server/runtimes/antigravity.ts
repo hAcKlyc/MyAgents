@@ -65,15 +65,16 @@ import { readAntigravityFileResult } from "./antigravity-native-result";
 import { readAntigravityParentAcknowledgements, readAntigravityParentTailStep } from "./antigravity-parent-ack";
 import { antigravityToolResult, presentAntigravityTool } from "./antigravity-tool";
 import { augmentedProcessEnv, resolveCommand } from "./env-utils";
-import type {
-  AgentRuntime,
-  ResolvedImagePayload,
-  RuntimeProcess,
-  RuntimeWatchdogState,
-  SessionStartOptions,
-  SubAgentScope,
-  UnifiedEvent,
-  UnifiedEventCallback,
+import {
+  RuntimeSteerUnavailableError,
+  type AgentRuntime,
+  type ResolvedImagePayload,
+  type RuntimeProcess,
+  type RuntimeWatchdogState,
+  type SessionStartOptions,
+  type SubAgentScope,
+  type UnifiedEvent,
+  type UnifiedEventCallback,
 } from "./types";
 import {
   makeErrorAttachment,
@@ -258,7 +259,6 @@ interface ModeState {
   availableModes?: { id: string; name?: string }[];
 }
 
-
 function sanitizeNativeConfigMessage(message: string): string {
   const collapsed = message.replace(/\s+/g, " ").trim();
   return collapsed.length > 160 ? `${collapsed.slice(0, 157)}...` : collapsed;
@@ -294,6 +294,19 @@ function unsupportedConfigOptionError(
   );
 }
 
+type PromptSettlement =
+  | { kind: "resolved"; result: PromptResponse }
+  | { kind: "rejected"; error: unknown };
+interface PromptRun {
+  readonly settled: Promise<PromptSettlement>;
+  readonly settle: (outcome: PromptSettlement) => void;
+  readonly clientUserMessageId?: string;
+  readonly steered: boolean;
+  accepted: boolean;
+  outcome?: PromptSettlement;
+  supersededBy?: PromptRun;
+}
+
 class AntigravitySession implements RuntimeProcess {
   readonly connection: ClientConnection;
   sessionId = "";
@@ -314,6 +327,9 @@ class AntigravitySession implements RuntimeProcess {
     >;
   };
   private turnKind: 'prompt' | 'continuation' | null = null;
+  private activePrompt: PromptRun | null = null;
+  private steering = false;
+  private readonly pendingSteerUpdates: SessionUpdate[] = [];
   private canContinue = false;
   private readonly childLaunches = new Set<string>();
   private readonly childSnapshots = new Map<string, AntigravityChildSnapshot>();
@@ -335,7 +351,6 @@ class AntigravitySession implements RuntimeProcess {
   private stream: "text" | "thinking" | null = null;
   private turnId = "";
   private thinkingIndex = 0;
-  private promptAttemptId = 0;
   private promptCancellationRequested = false;
   private heldTransientAuthWarning: string | null = null;
   private authRetryTimer?: NodeJS.Timeout;
@@ -433,6 +448,7 @@ class AntigravitySession implements RuntimeProcess {
         };
         this.pending.set(id, { cancel, decide, choose });
         signal.addEventListener("abort", expired, { once: true });
+        this.confirmActiveSteeredPrompt();
         const tool = params.toolCall;
         const { toolName, input } = presentAntigravityTool(tool);
         void maybeSpill(JSON.stringify(input), {
@@ -521,6 +537,7 @@ class AntigravitySession implements RuntimeProcess {
               : cancel(),
         });
         signal.addEventListener("abort", expired, { once: true });
+        this.confirmActiveSteeredPrompt();
         this.emit({
           kind: "permission_request",
           requestId: id,
@@ -558,6 +575,9 @@ class AntigravitySession implements RuntimeProcess {
       if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
       this.clearAuthRetry();
       this.emitAccumulatedTurnUsage();
+      this.pendingSteerUpdates.length = 0;
+      this.cancelPendingSteers();
+      this.activePrompt = null;
       this.finishBackgroundWork();
       this.connection.close();
       this.cancelPending();
@@ -781,12 +801,25 @@ class AntigravitySession implements RuntimeProcess {
   private receiveUpdate(update: SessionUpdate) {
     const kind = update.sessionUpdate;
     // Antigravity emits a final context snapshot after each unsolicited reply.
-    // A standalone usage update changes the context indicator, never the transcript.
+    // A standalone usage update changes the context indicator, never the transcript,
+    // and cannot confirm consumption of a specific steered prompt.
     if (kind === "usage_update") {
       this.update(update);
       if (this.turnKind === "continuation" && ![...this.tools.values()].some(({ snapshot }) =>
         snapshot.status !== "completed" && snapshot.status !== "failed"
       )) this.finishTurn("completed");
+      return;
+    }
+    if (
+      this.activePrompt?.supersededBy &&
+      !(kind === "tool_call_update" && this.tools.has(update.toolCallId)) &&
+      (kind === "agent_message_chunk" ||
+        kind === "agent_thought_chunk" ||
+        kind === "tool_call" ||
+        kind === "tool_call_update" ||
+        kind === "plan")
+    ) {
+      this.pendingSteerUpdates.push(update);
       return;
     }
     if (!this.active) {
@@ -797,7 +830,29 @@ class AntigravitySession implements RuntimeProcess {
       if (kind !== "agent_message_chunk" && kind !== "agent_thought_chunk" && kind !== "tool_call") return;
       if (!this.startContinuation()) return;
     }
+    if (
+      this.activePrompt?.steered &&
+      !this.activePrompt.accepted &&
+      !this.promptCancellationRequested &&
+      !(kind === "agent_message_chunk" && update.content.type === "text" &&
+        isAntigravityTransientAuthWarning(update.content.text)) &&
+      !(kind === "tool_call_update" && this.tools.has(update.toolCallId)) &&
+      (kind === "agent_message_chunk" ||
+        kind === "agent_thought_chunk" ||
+        kind === "tool_call" ||
+        kind === "tool_call_update" ||
+        kind === "plan")
+    ) {
+      this.confirmActiveSteeredPrompt();
+    }
     this.update(update);
+  }
+  private flushPendingSteerUpdates() {
+    if (!this.pendingSteerUpdates.length) return;
+    const queued = this.pendingSteerUpdates.splice(0);
+    for (const update of queued) {
+      this.update(update);
+    }
   }
   private startContinuation(): boolean {
     if (!this.initialized || !this.canContinue || this.exited) return false;
@@ -817,7 +872,6 @@ class AntigravitySession implements RuntimeProcess {
     if (this.authRetryTimer) {
       clearTimeout(this.authRetryTimer);
       this.authRetryTimer = undefined;
-      this.promptAttemptId += 1;
     }
     this.authRetryAbortCleanup?.();
     this.authRetryAbortCleanup = undefined;
@@ -901,15 +955,18 @@ class AntigravitySession implements RuntimeProcess {
     if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
     this.clearAuthRetry();
     this.emitAccumulatedTurnUsage();
+    this.pendingSteerUpdates.length = 0;
     this.publishReadResults(true);
     this.closeBlock();
     this.cancelPending();
+    this.cancelPendingSteers();
     this.turnKind = null;
     if (status === "completed") {
       this.stopBackgroundTaskPoll();
     } else {
       this.clearBackgroundTasks();
     }
+    this.activePrompt = null;
     this.canContinue = status === "completed";
     if (!this.canContinue) {
       this.finishBackgroundWork();
@@ -931,6 +988,18 @@ class AntigravitySession implements RuntimeProcess {
     if (this.turnId !== turnId || !this.active) return;
     if (this.turnKind === "continuation") this.finishTurn("cancelled");
     else this.cancelPending();
+  }
+  canSteer(): boolean {
+    return (
+      !this.exited &&
+      !this.connection.signal.aborted &&
+      this.turnKind === "prompt" &&
+      this.activePrompt !== null &&
+      !this.steering &&
+      !this.promptCancellationRequested &&
+      this.pending.size === 0 &&
+      !this.hasPendingBackgroundWork()
+    );
   }
   private publishReadResults(turnEnded = false) {
     for (const [id, result] of this.pendingReadResults) {
@@ -1069,19 +1138,143 @@ class AntigravitySession implements RuntimeProcess {
         break;
     }
   }
-  private scheduleAuthRetry(expectedAttemptId: number, delayMs: number) {
-    const failDisconnected = () => {
-      if (
-        expectedAttemptId !== this.promptAttemptId ||
-        this.exited ||
-        this.turnKind !== "prompt"
-      ) {
+  private createPromptRun(options?: { clientUserMessageId?: string; steered?: boolean }): PromptRun {
+    let settle!: (outcome: PromptSettlement) => void;
+    const settled = new Promise<PromptSettlement>((resolve) => {
+      settle = resolve;
+    });
+    return {
+      settled,
+      settle,
+      clientUserMessageId: options?.clientUserMessageId,
+      steered: options?.steered === true,
+      accepted: options?.steered !== true,
+    };
+  }
+  private buildPromptBlocks(message: string, images: ResolvedImagePayload[] = []) {
+    return [
+      { type: "text" as const, text: message },
+      ...images.map((i) => ({
+        type: "image" as const,
+        mimeType: i.mimeType,
+        data: i.data,
+      })),
+    ];
+  }
+  private finishPromptResult(result: PromptResponse) {
+    switch (result.stopReason) {
+      case "end_turn": this.finishTurn("completed"); break;
+      case "cancelled": this.finishTurn("cancelled"); break;
+      case "max_tokens": this.finishTurn("failed", "Antigravity 已达到此轮输出长度上限"); break;
+      case "max_turn_requests": this.finishTurn("failed", "Antigravity 已达到此轮请求次数上限"); break;
+      case "refusal": this.finishTurn("failed", "Antigravity 模型拒绝继续此轮请求"); break;
+      default: this.finishTurn("failed", "Antigravity 返回了未知的结束状态");
+    }
+  }
+  private confirmSteeredPrompt(run: PromptRun) {
+    if (!run.steered || run.accepted) return;
+    run.accepted = true;
+    this.publishReadResults();
+    this.closeBlock();
+    this.emit({
+      kind: "user_message_accepted",
+      clientUserMessageId: run.clientUserMessageId,
+    });
+  }
+  private confirmActiveSteeredPrompt() {
+    if (this.activePrompt && !this.promptCancellationRequested) this.confirmSteeredPrompt(this.activePrompt);
+  }
+  private cancelUnconfirmedSteeredPrompt(run: PromptRun) {
+    if (!run.steered || run.accepted || !run.clientUserMessageId) return;
+    run.accepted = true;
+    this.emit({
+      kind: "user_message_cancelled",
+      clientUserMessageId: run.clientUserMessageId,
+    });
+  }
+  private cancelPendingSteers() {
+    const run = this.activePrompt;
+    if (!run) return;
+    this.cancelUnconfirmedSteeredPrompt(run);
+    if (run.supersededBy) this.cancelUnconfirmedSteeredPrompt(run.supersededBy);
+  }
+  private settleActivePrompt(run: PromptRun, outcome: PromptSettlement) {
+    if (this.promptCancellationRequested) {
+      this.finishTurn("cancelled");
+      return;
+    }
+    if (outcome.kind === "resolved") {
+      if (outcome.result.stopReason === "cancelled") {
+        this.cancelUnconfirmedSteeredPrompt(run);
+      } else {
+        this.confirmSteeredPrompt(run);
+      }
+      if (outcome.result.stopReason === "end_turn" && this.heldTransientAuthWarning !== null) {
+        this.retryAfterAuthWarning();
         return;
       }
-      this.finishTurn(
-        "failed",
-        nativeError(new Error("ACP connection closed during auth retry"), "session/prompt").message,
-      );
+      this.finishPromptResult(outcome.result);
+      return;
+    }
+    this.cancelUnconfirmedSteeredPrompt(run);
+    if (!this.exited) {
+      this.finishTurn("failed", nativeError(outcome.error, "session/prompt").message);
+    }
+  }
+  private handoffSteeredPrompt(next: PromptRun, yieldedCleanly: boolean) {
+    if (next.outcome) {
+      if (yieldedCleanly) this.heldTransientAuthWarning = null;
+      this.activePrompt = next;
+      if (
+        next.outcome.kind === "resolved" &&
+        next.outcome.result.stopReason !== "cancelled" &&
+        !this.promptCancellationRequested
+      ) {
+        this.confirmSteeredPrompt(next);
+      }
+      this.flushPendingSteerUpdates();
+      this.settleActivePrompt(next, next.outcome);
+      return;
+    }
+    // Updates buffered before the predecessor settled belong to the predecessor
+    // unless `next` already completed out-of-order above. Replay them first so
+    // they never confirm an unconfirmed successor that may still reject.
+    this.flushPendingSteerUpdates();
+    if (yieldedCleanly) this.heldTransientAuthWarning = null;
+    this.activePrompt = next;
+    // An unanswered permission/question that remains open across a clean
+    // predecessor yield belongs to the successor prompt.
+    if (yieldedCleanly && this.pending.size > 0 && !this.promptCancellationRequested) {
+      this.confirmSteeredPrompt(next);
+    }
+  }
+  private retryAfterAuthWarning() {
+    this.heldTransientAuthWarning = null;
+    if (
+      this.consecutiveAuthRetries >= this.authRetryDelaysMs.length ||
+      this.totalAuthRetries >= ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN
+    ) {
+      this.finishTurn("failed", ANTIGRAVITY_AUTH_EXHAUSTED_ERROR);
+      return;
+    }
+    const delayMs = this.authRetryDelaysMs[this.consecutiveAuthRetries]!;
+    this.consecutiveAuthRetries += 1;
+    this.totalAuthRetries += 1;
+    this.publishReadResults();
+    this.closeBlock();
+    this.activePrompt = null;
+    console.warn(
+      `[antigravity] Transient HTTP 401 mid-turn (session=${this.productSessionId}); retrying silently (${this.consecutiveAuthRetries}/${this.authRetryDelaysMs.length}, total=${this.totalAuthRetries}/${ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN}) in ${delayMs}ms`,
+    );
+    const turnId = this.turnId;
+    const isCurrentTurn = () => !this.exited && this.turnKind === "prompt" && this.turnId === turnId;
+    const failDisconnected = () => {
+      if (isCurrentTurn()) {
+        this.finishTurn(
+          "failed",
+          nativeError(new Error("ACP connection closed during auth retry"), "session/prompt").message,
+        );
+      }
     };
     if (this.connection.signal.aborted) {
       failDisconnected();
@@ -1093,79 +1286,83 @@ class AntigravitySession implements RuntimeProcess {
     };
     this.authRetryTimer = setTimeout(() => {
       this.authRetryTimer = undefined;
-      if (this.authRetryAbortCleanup) {
-        const cleanup = this.authRetryAbortCleanup;
-        this.authRetryAbortCleanup = undefined;
-        cleanup();
-      }
-      if (expectedAttemptId !== this.promptAttemptId || this.exited || this.turnKind !== "prompt") {
-        return;
-      }
+      this.authRetryAbortCleanup?.();
+      this.authRetryAbortCleanup = undefined;
+      if (!isCurrentTurn()) return;
       if (this.connection.signal.aborted) {
         failDisconnected();
         return;
       }
-      this.dispatchPromptRequest(
-        [{ type: "text", text: ANTIGRAVITY_AUTH_RETRY_PROMPT }],
-        true,
-      );
+      const run = this.createPromptRun();
+      this.activePrompt = run;
+      this.sendPromptRpc(run, ANTIGRAVITY_AUTH_RETRY_PROMPT, []);
     }, delayMs);
   }
-  private dispatchPromptRequest(
-    prompt: PromptRequest["prompt"],
-    isInternalRetry: boolean,
+  private sendPromptRpc(
+    run: PromptRun,
+    message: string,
+    images: ResolvedImagePayload[],
+    options?: {
+      parent?: PromptRun;
+      dispatched?: { resolve(): void; reject(reason: unknown): void };
+    },
   ) {
-    const attemptId = ++this.promptAttemptId;
     void this.connection.agent
       .request<PromptResponse>("session/prompt", {
         sessionId: this.sessionId,
-        prompt,
+        prompt: this.buildPromptBlocks(message, images),
       })
       .then(
         (result) => {
-          if (attemptId !== this.promptAttemptId || this.exited) return;
-          this.accumulateTurnUsage(result.usage);
-          if (this.promptCancellationRequested) {
-            this.finishTurn("cancelled");
-            return;
+          if (this.activePrompt === run || options?.parent?.supersededBy === run) {
+            this.accumulateTurnUsage(result.usage);
           }
-          if (result.stopReason === "end_turn" && this.heldTransientAuthWarning !== null) {
-            this.heldTransientAuthWarning = null;
-            if (
-              this.consecutiveAuthRetries < this.authRetryDelaysMs.length &&
-              this.totalAuthRetries < ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN
-            ) {
-              const delayMs = this.authRetryDelaysMs[this.consecutiveAuthRetries]!;
-              this.consecutiveAuthRetries += 1;
-              this.totalAuthRetries += 1;
-              this.publishReadResults();
-              this.closeBlock();
-              console.warn(
-                `[antigravity] Transient HTTP 401 mid-turn (session=${this.productSessionId}); retrying silently (${this.consecutiveAuthRetries}/${this.authRetryDelaysMs.length}, total=${this.totalAuthRetries}/${ANTIGRAVITY_MAX_TOTAL_AUTH_RETRIES_PER_TURN}) in ${delayMs}ms`,
-              );
-              this.scheduleAuthRetry(attemptId, delayMs);
+          const outcome: PromptSettlement = { kind: "resolved", result };
+          run.outcome = outcome;
+          if (this.activePrompt === run) {
+            if (run.supersededBy) {
+              const next = run.supersededBy;
+              run.supersededBy = undefined;
+              if (result.stopReason === "cancelled" || this.promptCancellationRequested) {
+                this.cancelUnconfirmedSteeredPrompt(run);
+              } else {
+                this.confirmSteeredPrompt(run);
+              }
+              this.handoffSteeredPrompt(next, result.stopReason === "end_turn");
+              run.settle(outcome);
               return;
             }
-            this.finishTurn("failed", ANTIGRAVITY_AUTH_EXHAUSTED_ERROR);
+            run.settle(outcome);
+            this.settleActivePrompt(run, outcome);
             return;
           }
-          switch (result.stopReason) {
-            case "end_turn": this.finishTurn("completed"); break;
-            case "cancelled": this.finishTurn("cancelled"); break;
-            case "max_tokens": this.finishTurn("failed", "Antigravity 已达到此轮输出长度上限"); break;
-            case "max_turn_requests": this.finishTurn("failed", "Antigravity 已达到此轮请求次数上限"); break;
-            case "refusal": this.finishTurn("failed", "Antigravity 模型拒绝继续此轮请求"); break;
-            default: this.finishTurn("failed", "Antigravity 返回了未知的结束状态");
-          }
+          // `run` resolved before its predecessor settled. Keep `parent.supersededBy`
+          // intact so `parent`'s settlement hands off and applies `run.outcome`.
+          run.settle(outcome);
         },
         (e) => {
-          if (attemptId !== this.promptAttemptId) return;
           const error = nativeError(e, "session/prompt");
-          if (!isInternalRetry) this.dispatched?.reject(error);
-          if (!this.exited) {
-            if (this.promptCancellationRequested) this.finishTurn("cancelled");
-            else this.finishTurn("failed", error.message);
+          options?.dispatched?.reject(error);
+          const outcome: PromptSettlement = { kind: "rejected", error: e };
+          run.outcome = outcome;
+          if (this.activePrompt === run) {
+            if (run.supersededBy && !this.exited && !this.connection.signal.aborted) {
+              const next = run.supersededBy;
+              run.supersededBy = undefined;
+              this.cancelUnconfirmedSteeredPrompt(run);
+              this.handoffSteeredPrompt(next, false);
+              run.settle(outcome);
+              return;
+            }
+            run.settle(outcome);
+            this.settleActivePrompt(run, outcome);
+            return;
           }
+          if (options?.parent?.supersededBy === run) {
+            options.parent.supersededBy = undefined;
+            this.flushPendingSteerUpdates();
+          }
+          run.settle(outcome);
         },
       );
   }
@@ -1175,24 +1372,68 @@ class AntigravitySession implements RuntimeProcess {
     if (images.length && !this.image)
       throw new Error("当前 Antigravity CLI 不支持图片输入");
     this.beginTurn('prompt');
+    const run = this.createPromptRun();
+    this.activePrompt = run;
+    let dispatched!: { resolve(): void; reject(reason: unknown): void };
     const written = new Promise<void>((resolve, reject) => {
-      this.dispatched = { resolve, reject };
+      dispatched = { resolve, reject };
+      this.dispatched = dispatched;
     });
-    this.dispatchPromptRequest(
-      [
-        { type: "text", text: message },
-        ...images.map((i) => ({
-          type: "image" as const,
-          mimeType: i.mimeType,
-          data: i.data,
-        })),
-      ],
-      false,
-    );
+    this.sendPromptRpc(run, message, images, { dispatched });
     try {
       await written;
     } finally {
-      this.dispatched = undefined;
+      if (this.dispatched === dispatched) this.dispatched = undefined;
+    }
+  }
+  async steer(
+    message: string,
+    images: ResolvedImagePayload[] = [],
+    clientUserMessageId?: string,
+  ) {
+    if (this.exited || this.connection.signal.aborted)
+      throw new Error("Antigravity CLI 已退出");
+    if (images.length && !this.image)
+      throw new Error("当前 Antigravity CLI 不支持图片输入");
+    if (!this.canSteer())
+      throw new RuntimeSteerUnavailableError("Antigravity 当前轮次无法实时插入消息");
+    const previous = this.activePrompt!;
+    const next = this.createPromptRun({ clientUserMessageId, steered: true });
+    previous.supersededBy = next;
+    this.steering = true;
+    this.sendPromptRpc(next, message, images, { parent: previous });
+    try {
+      const winner = await Promise.race([
+        previous.settled.then((outcome) => ({ source: "previous" as const, outcome })),
+        next.settled.then((outcome) => ({ source: "next" as const, outcome })),
+      ]);
+      if (winner.source === "next") {
+        if (winner.outcome.kind === "rejected") {
+          if (isAntigravitySteerUnavailableError(winner.outcome.error))
+            throw new RuntimeSteerUnavailableError(
+              winner.outcome.error instanceof Error
+                ? winner.outcome.error.message
+                : String(winner.outcome.error),
+            );
+          throw nativeError(winner.outcome.error, "session/prompt");
+        }
+        // `next` resolved before `previous` settled; wait for `previous` so
+        // handoff applies `next`'s real terminal in chronological order.
+        await previous.settled;
+        return;
+      }
+      if (this.exited || this.connection.signal.aborted)
+        throw new Error("Antigravity CLI 已退出");
+      if (
+        this.promptCancellationRequested &&
+        this.activePrompt === next
+      ) {
+        await this.connection.agent
+          .notify("session/cancel", { sessionId: this.sessionId })
+          .catch(() => undefined);
+      }
+    } finally {
+      this.steering = false;
     }
   }
   selectOptions(id: string) {
@@ -1285,6 +1526,12 @@ class AntigravitySession implements RuntimeProcess {
   }
 }
 
+function isAntigravitySteerUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof RequestError &&
+    /waiting for a permission or question answer/i.test(error.message)
+  );
+}
 function nativeError(error: unknown, method: string) {
   if (error instanceof RequestError) {
     if (error.code === -32000 && /auth/i.test(error.message))
@@ -1687,6 +1934,17 @@ export class AntigravityRuntime implements AgentRuntime {
     images?: ResolvedImagePayload[],
   ) {
     return session(process).prompt(message, images);
+  }
+  canSteerMessage(process: RuntimeProcess): boolean {
+    return session(process).canSteer();
+  }
+  steerMessage(
+    process: RuntimeProcess,
+    message: string,
+    images?: ResolvedImagePayload[],
+    options?: { clientUserMessageId?: string },
+  ) {
+    return session(process).steer(message, images, options?.clientUserMessageId);
   }
   async respondPermission(
     process: RuntimeProcess,
