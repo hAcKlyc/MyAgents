@@ -425,7 +425,11 @@ describe('persisted Agent workspace identity', () => {
       await expect(registerWorkspaceAgent(projectsRoot)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
       await expect(registerWorkspaceAgent(nestedDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
       await expect(registerWorkspaceAgent(evilSymlink)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
-      expect(() => resolveManagedWorkspaceCreationPath('evil-link')).toThrow(/already exists/i);
+      const link = resolveManagedWorkspaceCreationPath('evil-link');
+      await expect(registerWorkspaceAgent(link.workspacePath, {
+        name: link.displayName,
+        createManagedDirectory: () => createEmptyManagedWorkspaceDir(link.projectsRoot, link.workspacePath),
+      })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
 
       const direct = resolveManagedWorkspaceCreationPath('QA Helper');
       const created = await registerWorkspaceAgent(direct.workspacePath, {
@@ -447,8 +451,12 @@ describe('persisted Agent workspace identity', () => {
       expect(savedAgent?.heartbeat).toBeUndefined();
       expect(savedAgent?.memoryAutoUpdate).toBeUndefined();
       expect(savedAgent?.memoryEvolution).toBeUndefined();
-      // Re-resolving same name must fail closed with WORKSPACE_ALREADY_EXISTS.
-      expect(() => resolveManagedWorkspaceCreationPath('QA Helper')).toThrow(/already exists/i);
+      await expect(registerWorkspaceAgent(direct.workspacePath, {
+        name: 'QA Helper',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: () => createEmptyManagedWorkspaceDir(direct.projectsRoot, direct.workspacePath),
+      })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
     });
 
     it('rolls back managed dir before projects.json commit, but preserves it if atomicModifyConfig defers after Project commit', async () => {
@@ -476,19 +484,26 @@ describe('persisted Agent workspace identity', () => {
       // the directory MUST stay on disk so retrying reuses the saved Project claim cleanly.
       const target3 = resolveManagedWorkspaceCreationPath('Deferred Config');
       state.failConfigOnce = true;
-      await expect(
-        registerWorkspaceAgent(target3.workspacePath, {
-          name: 'Deferred Config',
-          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target3.projectsRoot, target3.workspacePath),
-        }),
-      ).rejects.toMatchObject({ code: 'AGENT_MATERIALIZATION_DEFERRED' });
+      const retryOptions: Parameters<typeof registerWorkspaceAgent>[1] = {
+        name: 'Deferred Config',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: vi.fn(() => createEmptyManagedWorkspaceDir(target3.projectsRoot, target3.workspacePath)),
+        applyInitialAgentPatch: (agent) => ({ ok: true, agent: { ...agent, model: 'retry-model' } }),
+      };
+      await expect(registerWorkspaceAgent(target3.workspacePath, retryOptions))
+        .rejects.toMatchObject({ code: 'AGENT_MATERIALIZATION_DEFERRED' });
       expect(existsSync(target3.workspacePath)).toBe(true);
       const committedAgentId = state.projects[0]?.agentId;
       expect(committedAgentId).toBeTruthy();
 
-      const retried = await registerWorkspaceAgent(target3.workspacePath);
+      const retryTarget = resolveManagedWorkspaceCreationPath('Deferred Config');
+      const retried = await registerWorkspaceAgent(retryTarget.workspacePath, retryOptions);
       expect(retried.agentId).toBe(committedAgentId);
       expect(retried.enabled).toBe(false);
+      expect(retried.templateId).toBe('mino');
+      expect(retryOptions.createManagedDirectory).toHaveBeenCalledTimes(1);
+      expect(state.config.agents?.[0]).toMatchObject({ model: 'retry-model' });
     });
 
     it('fails closed with WORKSPACE_ALREADY_REGISTERED when rejectIfAlreadyRegistered is true (project-linked and legacy)', async () => {

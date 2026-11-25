@@ -211,8 +211,8 @@ export function sanitizeManagedWorkspaceDirName(rawName: string): string {
 
 /**
  * Resolve the target path under `~/.myagents/projects/<sanitized-name>` for a
- * newly created managed workspace, failing closed if the directory or symlink
- * already exists on disk.
+ * managed workspace. The registration intent owner checks existing claims before
+ * the directory materializer runs.
  */
 export function resolveManagedWorkspaceCreationPath(rawName: string): {
   displayName: string;
@@ -231,20 +231,6 @@ export function resolveManagedWorkspaceCreationPath(rawName: string): {
     throw new WorkspaceAgentRegistrationError(
       'WORKSPACE_PATH_UNSAFE',
       'Managed workspace must resolve to a direct child of ~/.myagents/projects/.',
-    );
-  }
-  let exists = false;
-  try {
-    lstatSync(workspacePath);
-    exists = true;
-  } catch {
-    exists = false;
-  }
-  if (exists) {
-    throw new WorkspaceAgentRegistrationError(
-      'WORKSPACE_ALREADY_EXISTS',
-      `Managed workspace directory already exists: ${workspacePath}. Choose a different --name or pass --workspacePath "${workspacePath}" to register/reuse it.`,
-      { workspacePath },
     );
   }
   return { displayName, sanitizedDirName, workspacePath, projectsRoot };
@@ -338,7 +324,7 @@ export interface RegisterWorkspaceAgentOptions {
   /**
    * Optional directory materializer invoked inside `withAgentConfigIntentLock`
    * ONLY for managed `~/.myagents/projects/<direct-child>` creation. If any
-   * subsequent step fails, the created directory is removed before throwing.
+   * step before the Project claim commits fails, the directory is removed.
    */
   createManagedDirectory?: () => Promise<string> | string;
   /**
@@ -384,15 +370,26 @@ export async function registerWorkspaceAgent(
           workspacePathsEqual(project.path, requestedPath),
         );
         if (preliminaryConflict) {
-          throw new WorkspaceAgentRegistrationError(
-            'WORKSPACE_ALREADY_EXISTS',
-            `A workspace is already registered at ${requestedPath}. Choose a different --name or pass --workspacePath "${requestedPath}" to reuse it.`,
-            { workspacePath: requestedPath, projectId: preliminaryConflict.id, agentId: preliminaryConflict.agentId },
-          );
+          const claimedAgentId = preliminaryConflict.agentId;
+          const awaitingAgent = claimedAgentId &&
+            preliminaryConflict.name === options.name &&
+            preliminaryConflict.templateId === options.templateId &&
+            preliminaryConflict.templateSource === options.templateSource &&
+            lstatSync(requestedPath, { throwIfNoEntry: false })?.isDirectory() &&
+            !(loadConfig().agents ?? []).some((agent) => agent.id === claimedAgentId);
+          if (!awaitingAgent) {
+            throw new WorkspaceAgentRegistrationError(
+              'WORKSPACE_ALREADY_EXISTS',
+              `A workspace is already registered at ${requestedPath}. Choose a different --name or pass --workspacePath "${requestedPath}" to reuse it.`,
+              { workspacePath: requestedPath, projectId: preliminaryConflict.id, agentId: claimedAgentId },
+            );
+          }
+          workspacePath = validateWorkspaceForRegistration(requestedPath);
+        } else {
+          const materializedPath = await options.createManagedDirectory();
+          createdManagedDirPath = materializedPath;
+          workspacePath = validateWorkspaceForRegistration(materializedPath);
         }
-        const materializedPath = await options.createManagedDirectory();
-        createdManagedDirPath = materializedPath;
-        workspacePath = validateWorkspaceForRegistration(materializedPath);
       } else {
         workspacePath = validateWorkspaceForRegistration(requestedPath);
       }

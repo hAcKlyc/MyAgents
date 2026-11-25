@@ -206,8 +206,8 @@ describe('sessionPermissionCeiling', () => {
   });
 
   it('enforces Managed Codex (codex/managed-provider) permission rules excluding full-auto', () => {
-    expect(canonicalPermissionModeForTier('codex', 2, 'managed-provider')).toBeNull();
-    // Tier 2 target switching to Managed Codex safely maps down to auto-edit (Tier 1)
+    expect(canonicalPermissionModeForTier('codex', 1, 'managed-provider')).toBeNull();
+    expect(canonicalPermissionModeForTier('codex', 2, 'managed-provider')).toBe('auto-edit');
     expect(
       resolveSessionStartPermissionMode({
         targetRuntime: 'codex',
@@ -220,7 +220,7 @@ describe('sessionPermissionCeiling', () => {
       ok: true,
       permissionMode: 'auto-edit',
       ceilingTier: 2,
-      effectiveTier: 1,
+      effectiveTier: 2,
     });
     // Tier 3 unrestricted still aligns 1-to-1 to no-restrictions
     expect(
@@ -251,5 +251,29 @@ describe('sessionPermissionCeiling', () => {
       code: 'INVALID_PERMISSION_MODE',
       ceilingTier: 3,
     });
+  });
+  it('keeps automatic review and auto-approved edits above a human approval ceiling', () => {
+    const source = {
+      targetRuntime: 'codex',
+      targetRuntimeSource: 'system-cli',
+      targetEffectivePermissionMode: 'auto-edit',
+    } as const;
+    const managed = { requestedRuntime: 'codex', requestedRuntimeSource: 'managed-provider' } as const;
+    expect(resolveSessionStartPermissionMode({ ...source, ...managed })).toMatchObject({
+      ok: true,
+      permissionMode: 'suggest',
+      effectiveTier: 0,
+    });
+    expect(resolveSessionStartPermissionMode({
+      ...source, ...managed, requestedPermissionMode: 'auto-edit',
+    })).toMatchObject({ ok: false, code: 'PERMISSION_ESCALATION_FORBIDDEN' });
+    expect(resolveSessionStartPermissionMode({ ...source, requestedRuntime: 'claude-code' })).toMatchObject({
+      ok: true,
+      permissionMode: 'manual',
+      effectiveTier: 1,
+    });
+    expect(resolveSessionStartPermissionMode({
+      ...source, requestedRuntime: 'claude-code', requestedPermissionMode: 'acceptEdits',
+    })).toMatchObject({ ok: false, code: 'PERMISSION_ESCALATION_FORBIDDEN' });
   });
 });

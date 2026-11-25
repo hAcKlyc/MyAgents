@@ -52,7 +52,7 @@ const RUNTIME_MODE_TIERS: Readonly<Record<RuntimeType, Readonly<Record<string, P
   'claude-code': {
     plan: 0,
     manual: 1,
-    acceptEdits: 1,
+    acceptEdits: 2,
     dontAsk: 1,
     auto: 2,
     bypassPermissions: 3,
@@ -87,7 +87,7 @@ const CANONICAL_MODE_BY_TIER: Readonly<Record<RuntimeType, Readonly<Record<Permi
   },
   'claude-code': {
     0: 'plan',
-    1: 'acceptEdits',
+    1: 'manual',
     2: 'auto',
     3: 'bypassPermissions',
   },
@@ -108,11 +108,16 @@ const CANONICAL_MODE_BY_TIER: Readonly<Record<RuntimeType, Readonly<Record<Permi
 export function permissionTierForMode(
   runtime: RuntimeType,
   mode: string | null | undefined,
+  runtimeSource?: RuntimeSource,
 ): PermissionCeilingTier | null {
   const trimmed = typeof mode === 'string' ? mode.trim() : '';
-  if (!trimmed) return null;
-  const tier = RUNTIME_MODE_TIERS[runtime]?.[trimmed];
-  return tier === undefined ? null : tier;
+  if (runtime === 'codex' && runtimeSource === 'managed-provider') {
+    // Managed auto-edit uses the automatic reviewer, like system full-auto.
+    if (trimmed === 'auto-edit') return 2;
+    if (trimmed === 'full-auto') return null;
+  }
+  const modes = RUNTIME_MODE_TIERS[runtime];
+  return Object.hasOwn(modes, trimmed) ? modes[trimmed] ?? null : null;
 }
 
 export function canonicalPermissionModeForTier(
@@ -120,9 +125,9 @@ export function canonicalPermissionModeForTier(
   tier: PermissionCeilingTier,
   runtimeSource?: RuntimeSource,
 ): string | null {
-  // Managed Codex forbids system-Codex-only `full-auto` (see providerExecution.ts).
-  if (runtime === 'codex' && runtimeSource === 'managed-provider' && tier === 2) {
-    return null;
+  if (runtime === 'codex' && runtimeSource === 'managed-provider') {
+    if (tier === 1) return null;
+    if (tier === 2) return 'auto-edit';
   }
   return CANONICAL_MODE_BY_TIER[runtime]?.[tier] ?? null;
 }
@@ -164,7 +169,7 @@ export function resolveSessionStartPermissionMode(params: {
   requestedPermissionMode?: string;
 }): SessionStartPermissionResolution {
   const targetMode = params.targetEffectivePermissionMode.trim();
-  const ceilingTier = permissionTierForMode(params.targetRuntime, targetMode);
+  const ceilingTier = permissionTierForMode(params.targetRuntime, targetMode, params.targetRuntimeSource);
   if (ceilingTier === null) {
     return {
       ok: false,
@@ -189,7 +194,7 @@ export function resolveSessionStartPermissionMode(params: {
         ceilingTier,
       };
     }
-    const requestedTier = permissionTierForMode(params.requestedRuntime, explicit);
+    const requestedTier = permissionTierForMode(params.requestedRuntime, explicit, params.requestedRuntimeSource);
     if (requestedTier === null) {
       return {
         ok: false,
@@ -224,6 +229,7 @@ export function resolveSessionStartPermissionMode(params: {
       || params.requestedRuntimeSource === params.targetRuntimeSource);
   if (
     sameIdentity
+    && permissionTierForMode(params.requestedRuntime, targetMode, params.requestedRuntimeSource) === ceilingTier
     && isPermissionModeForRuntimeIdentity(
       targetMode,
       params.requestedRuntime,
