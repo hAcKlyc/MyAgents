@@ -207,12 +207,53 @@ interface ModelState {
   currentModelId: string;
   availableModels: { modelId: string; name: string }[];
 }
+interface ModeState {
+  currentModeId?: string;
+  availableModes?: { id: string; name?: string }[];
+}
+
+
+function sanitizeNativeConfigMessage(message: string): string {
+  const collapsed = message.replace(/\s+/g, " ").trim();
+  return collapsed.length > 160 ? `${collapsed.slice(0, 157)}...` : collapsed;
+}
+
+function unsupportedConfigOptionError(
+  configId: string,
+  value: string,
+  offered: readonly string[],
+  detail?: string,
+): Error {
+  if (configId === "mode") {
+    if (value === "auto") {
+      return new Error(
+        "当前环境的 Antigravity CLI 不支持「帮我批准（auto）」权限模式（Windows 需开启终端沙箱 / Windows 11 24H2+，或受账号/CLI 版本限制），请切换为「请求批准」或「完全访问权限」后重试",
+      );
+    }
+    return new Error(
+      offered.length > 0
+        ? `当前 Antigravity CLI 不支持权限模式 "${value}"（当前可用：${offered.join("、")}），请切换权限模式后重试`
+        : `当前 Antigravity CLI 不支持权限模式 "${value}"，请切换权限模式后重试`,
+    );
+  }
+  if (configId === "thought_level") {
+    return new Error(
+      offered.length > 0
+        ? `当前 Antigravity 模型不支持推理强度 "${value}"（当前可用：${offered.join("、")}）`
+        : `当前 Antigravity 模型不支持设置推理强度 "${value}"`,
+    );
+  }
+  return new Error(
+    `Antigravity 不支持配置项 ${configId}="${value}"${detail ? `（${detail}）` : ""}`,
+  );
+}
 
 class AntigravitySession implements RuntimeProcess {
   readonly connection: ClientConnection;
   sessionId = "";
   image = false;
   models?: ModelState;
+  modes?: ModeState;
   config: SessionConfigOption[] = [];
   defaultModel?: string;
   selectedModel?: string;
@@ -287,6 +328,11 @@ class AntigravitySession implements RuntimeProcess {
         this.emit({ kind: "runtime_title", title: params.update.title });
       } else if (params.update.sessionUpdate === "config_option_update")
         this.config = params.update.configOptions;
+      else if (
+        params.update.sessionUpdate === "current_mode_update" &&
+        this.modes
+      )
+        this.modes = { ...this.modes, currentModeId: params.update.currentModeId };
       else this.receiveUpdate(params.update);
     });
     app.onRequest("session/request_permission", ({ params, signal }) => {
@@ -1003,9 +1049,22 @@ class AntigravitySession implements RuntimeProcess {
       "options" in group ? group.options : [group],
     );
   }
+  hasConfigOption(id: string) {
+    return this.config.some((entry) => entry.id === id);
+  }
   selectedOption(id: string) {
     const option = this.config.find((entry) => entry.id === id);
     return option?.type === "select" ? option.currentValue : undefined;
+  }
+  offeredPermissionModes(): string[] {
+    const fromConfig = this.selectOptions("mode").map((option) => option.value);
+    if (fromConfig.length > 0) return fromConfig;
+    return (this.modes?.availableModes ?? [])
+      .map((mode) => mode.id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+  }
+  selectedPermissionMode(): string | undefined {
+    return this.selectedOption("mode") ?? this.modes?.currentModeId ?? undefined;
   }
   modelFamilies() {
     return this.selectOptions("model");
@@ -1050,7 +1109,22 @@ class AntigravitySession implements RuntimeProcess {
         rpcDeadline(),
       )
       .catch((error) => {
-        throw nativeError(error, "session/set_config_option");
+        const offered =
+          configId === "mode"
+            ? this.offeredPermissionModes()
+            : this.selectOptions(configId).map((option) => option.value);
+        const code = error instanceof RequestError ? error.code : undefined;
+        const detail =
+          error instanceof RequestError
+            ? sanitizeNativeConfigMessage(error.message)
+            : undefined;
+        console.warn(
+          `[antigravity] session/set_config_option failed: configId=${configId} value=${value} offered=[${offered.join(",")}] code=${code ?? "unknown"}${detail ? ` detail=${JSON.stringify(detail)}` : ""}`,
+        );
+        if (error instanceof RequestError && error.code === -32602) {
+          throw unsupportedConfigOptionError(configId, value, offered, detail);
+        }
+        throw nativeError(error, `session/set_config_option(${configId})`);
       });
     this.config = result.configOptions;
     if (this.selectedOption(configId) !== value)
@@ -1284,13 +1358,14 @@ export class AntigravityRuntime implements AgentRuntime {
           : "");
       if (!s.sessionId) throw new Error("Antigravity 没有返回会话 ID");
       s.models = (opened as { models?: ModelState }).models;
+      s.modes = (opened as { modes?: ModeState }).modes;
       s.config = opened.configOptions ?? [];
       s.defaultModel = s.getCurrentModel();
       s.captureDefaultThoughtLevel();
       phase = "session/config";
-      if (options.model) await this.setModel(s, options.model);
+      if (options.model) await this.setModel(s, options.model, options.reasoningEffort);
       if (options.reasoningEffort)
-        await this.setReasoningEffort(s, options.reasoningEffort);
+        await this.applyStartupReasoningEffort(s, options.reasoningEffort);
       await this.setPermissionMode(s, options.permissionMode);
       emit({
         kind: "session_init",
@@ -1336,7 +1411,7 @@ export class AntigravityRuntime implements AgentRuntime {
       throw error instanceof RequestError ? nativeError(error, phase) : error;
     }
   }
-  async setModel(process: RuntimeProcess, model?: string) {
+  async setModel(process: RuntimeProcess, model?: string, preferredEffort?: string) {
     const s = session(process);
     const id = model || s.defaultModel;
     if (!id) throw new Error("Antigravity 没有报告默认模型");
@@ -1370,11 +1445,11 @@ export class AntigravityRuntime implements AgentRuntime {
     }
     const legacyFamilyModel = families.length || s.models?.availableModels.some((model) => model.modelId === id)
       ? undefined
-      : s.legacyFlatModelForFamily(id);
+      : (preferredEffort && s.legacyFlatModelForFamily(id, preferredEffort)) || s.legacyFlatModelForFamily(id);
     const currentModel = s.getCurrentModel();
     // An old worker stores effort in the selected flat ID. Reapplying the
     // family at a turn boundary keeps its current native variant.
-    if (legacyFamilyModel && splitAntigravityFlatModelId(currentModel)?.familyId === id) return;
+    if (!preferredEffort && legacyFamilyModel && splitAntigravityFlatModelId(currentModel)?.familyId === id) return;
     const nativeModel = legacyFamilyModel ?? id;
     if (nativeModel === currentModel) return;
     await s.connection.agent
@@ -1389,6 +1464,25 @@ export class AntigravityRuntime implements AgentRuntime {
     s.selectedModel = nativeModel;
     s.captureDefaultThoughtLevel(nativeModel);
   }
+  private async applyStartupReasoningEffort(s: AntigravitySession, effort: string) {
+    const supported = s.selectOptions("thought_level").map((option) => option.value);
+    if (!s.hasConfigOption("thought_level")) {
+      if (!s.modelFamilies().length && splitAntigravityFlatModelId(s.getCurrentModel())?.effort === effort) return;
+      console.warn(
+        `[antigravity] Ignoring persisted reasoningEffort='${effort}' for model='${s.getCurrentModel() ?? "(unknown)"}': model does not expose thought_level`,
+      );
+      return;
+    }
+    if (supported.length > 0 && !supported.includes(effort)) {
+      console.warn(
+        `[antigravity] Ignoring unsupported persisted reasoningEffort='${effort}' for model='${s.getCurrentModel() ?? "(unknown)"}'; offered=[${supported.join(",")}]`,
+      );
+      return;
+    }
+    if (effort !== s.selectedOption("thought_level")) {
+      await s.setOption("thought_level", effort);
+    }
+  }
   async setReasoningEffort(process: RuntimeProcess, effort?: string) {
     const s = session(process);
     const thoughtLevel = effort ?? s.getDefaultThoughtLevel();
@@ -1400,14 +1494,31 @@ export class AntigravityRuntime implements AgentRuntime {
         return;
       }
     }
-    if (thoughtLevel !== undefined && thoughtLevel !== s.selectedOption("thought_level")) {
+    if (thoughtLevel === undefined) return;
+    const supported = s.selectOptions("thought_level").map((option) => option.value);
+    if (!s.hasConfigOption("thought_level") || (supported.length > 0 && !supported.includes(thoughtLevel))) {
+      if (effort === undefined) return;
+      throw unsupportedConfigOptionError("thought_level", thoughtLevel, supported);
+    }
+    if (thoughtLevel !== s.selectedOption("thought_level")) {
       await s.setOption("thought_level", thoughtLevel);
     }
   }
   async setPermissionMode(process: RuntimeProcess, mode?: string) {
     const s = session(process);
-    if (s.requiresPermissionModeRestart(mode)) throw new Error("切换完全访问权限需要重新启动 Antigravity CLI");
-    if (!s.skipPermissions) await s.setOption("mode", mode || getDefaultRuntimePermissionMode("antigravity"));
+    if (s.requiresPermissionModeRestart(mode))
+      throw new Error("切换完全访问权限需要重新启动 Antigravity CLI");
+    if (s.skipPermissions) return;
+    const target = mode || getDefaultRuntimePermissionMode("antigravity");
+    const offered = s.offeredPermissionModes();
+    if (offered.length > 0 && !offered.includes(target)) {
+      console.warn(
+        `[antigravity] Permission mode '${target}' is not offered by this CLI session; offered=[${offered.join(",")}]`,
+      );
+      throw unsupportedConfigOptionError("mode", target, offered);
+    }
+    if (s.selectedPermissionMode() === target) return;
+    await s.setOption("mode", target);
   }
   sendMessage(
     process: RuntimeProcess,
