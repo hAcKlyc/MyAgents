@@ -130,6 +130,19 @@ export interface SessionStartOptions {
 }
 
 /**
+ * Runtime-owned async/background work state inspected by the external turn watchdog.
+ */
+export interface RuntimeWatchdogState {
+  /** True while the runtime holds live async work (e.g. background shell task,
+   *  in-flight tool call, or subagent) that may legitimately produce no
+   *  foreground stream frames for an extended interval. */
+  activeAsyncWork: boolean;
+  /** Epoch timestamp (ms) of the latest observed background progress (e.g. task
+   *  log growth or child step update). Advances reset the inactivity clock. */
+  lastAsyncProgressAt?: number;
+}
+
+/**
  * A handle to a running runtime subprocess
  */
 export interface RuntimeProcess {
@@ -137,6 +150,8 @@ export interface RuntimeProcess {
   readonly sessionMcpFingerprint?: string;
   /** Adapter-observed work that continues between foreground turns. */
   hasPendingBackgroundWork?(): boolean;
+  /** Optional probe for runtime-owned async work during watchdog evaluation. */
+  getWatchdogState?(): RuntimeWatchdogState;
   /** True when the next permission selection requires different subprocess launch flags. */
   requiresPermissionModeRestart?(mode: string | undefined): boolean;
   /** Optional adapter-owned identity for generation-scoped projections/callbacks. */
