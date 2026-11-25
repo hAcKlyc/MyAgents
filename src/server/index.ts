@@ -1631,6 +1631,8 @@ async function routeAdminApi(
     );
   if (route === 'agent/create')
     return await api.handleAgentCreate(payload as Parameters<typeof api.handleAgentCreate>[0]);
+  if (route === 'agent/templates')
+    return await api.handleAgentTemplates();
   if (route === 'agent/resolve-conflict')
     return api.handleAgentResolveConflict(payload as Parameters<typeof api.handleAgentResolveConflict>[0]);
   if (route === 'agent/current') return await api.handleAgentCurrent();

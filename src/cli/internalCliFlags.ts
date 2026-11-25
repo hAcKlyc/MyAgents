@@ -31,6 +31,7 @@ export const INTERNAL_CLI_FLAGS: Readonly<Record<string, readonly string[]>> = {
   "agent/disable": ["id"],
   "agent/archive": ["id"],
   "agent/unarchive": ["id"],
+  "agent/set": ["name","enabled","runtime","providerId","model","permissionMode","reasoningEffort","runtimeConfig","mcpEnabledServers","enabledPluginIds"],
   "agent/channel/list": ["agentId"],
   "agent/channel/add": ["agentId","id","type","name","enabled","config","botToken","appId","appSecret","channelId","chatId","model","providerId","runtime","permissionMode"],
   "runtime/diagnose": ["runtime","workspacePath"],

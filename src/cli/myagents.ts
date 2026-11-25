@@ -487,12 +487,14 @@ Examples:
   myagents runtime diagnose codex             # auth / features / MCP / apps / env snapshot (issue #194)
   myagents diagnose runtime codex             # alias for runtime diagnose
   myagents agent list --archived              # archived Agent workspaces
+  myagents agent templates --json             # workspace templates for agent create
+  myagents agent create --name "Code Reviewer" --runtime codex --json
   myagents agent create --workspacePath /absolute/path --json
   myagents agent current --json               # compact current context diagnostic
   myagents agent show <agentId>                # identity + effective defaults
   myagents agent network-diagnose --json      # protocol/devices/connection state
   myagents session list --agent <agentId>      # recent reusable contexts
-  myagents session start --agent <agentId> -p "review this" # fresh context
+  myagents session start --agent <agentId> --runtime codex --model gpt-5.4 -p "review this" # one-shot fresh context
   myagents session get <sessionId> --limit 5 --json
   myagents agent archive <agent-id>
   myagents agent unarchive <agent-id>
@@ -991,17 +993,12 @@ export function printResult(
     }
     return;
   }
+  if (group === 'agent' && action === 'templates') {
+    printAgentTemplates((result.data as Array<Record<string, unknown>>) ?? []);
+    return;
+  }
   if (group === 'agent' && action === 'create') {
-    const data = (result.data as Record<string, unknown>) ?? {};
-    console.log(
-      data.created
-        ? '✓ Workspace Agent created'
-        : '✓ Workspace Agent already exists',
-    );
-    console.log(`  agent:     ${String(data.agentId ?? '')}`);
-    console.log(`  project:   ${String(data.projectId ?? '')}`);
-    console.log(`  workspace: ${String(data.workspacePath ?? '')}`);
-    console.log(`  enabled:   ${String(data.enabled ?? false)}`);
+    printAgentCreate((result.data as Record<string, unknown>) ?? {});
     return;
   }
   if (group === 'cron' && action === 'list') {
@@ -1959,7 +1956,12 @@ function printAgentShow(data: Record<string, unknown>): void {
   console.log(`  model:          ${fmt(defaults.model)}`);
   console.log(`  permissionMode: ${fmt(defaults.permissionMode)}`);
   if (defaults.permissionModeSource) console.log(`  permission source: ${fmt(defaults.permissionModeSource)}`);
-  console.log(`  providerId:     ${fmt(defaults.providerId)}`);
+  const isSystemCli = defaults.runtimeSource === 'system-cli';
+  if (isSystemCli && (defaults.providerId === null || defaults.providerId === undefined)) {
+    console.log('  providerId:     (managed by runtime)');
+  } else {
+    console.log(`  providerId:     ${fmt(defaults.providerId)}`);
+  }
   if (defaults.runtimeConfig) {
     console.log(`  runtimeConfig:  ${JSON.stringify(defaults.runtimeConfig)}`);
   }
@@ -1967,7 +1969,56 @@ function printAgentShow(data: Record<string, unknown>): void {
   console.log(`  Claude plugins: ${fmt(defaults.enabledPluginIds)}`);
   console.log(`  official tools: ${fmt(defaults.enabledOfficialToolIds)}`);
   console.log('');
-  console.log('Describe this runtime:  myagents runtime describe <runtime>');
+  const runtimeArg = typeof defaults.runtime === 'string' && defaults.runtime.trim()
+    ? defaults.runtime.trim()
+    : '<runtime>';
+  console.log(`Describe this runtime:  myagents runtime describe ${runtimeArg}`);
+}
+
+function printAgentTemplates(templates: Array<Record<string, unknown>>): void {
+  if (!templates || templates.length === 0) {
+    console.log('No workspace templates available.');
+    return;
+  }
+  const pad = (s: string, n: number) => s.padEnd(n);
+  const idWidth = Math.max(16, ...templates.map((t) => String(t.id ?? '').length + 2));
+  console.log(pad('ID', idWidth) + pad('Source', 10) + pad('Name', 18) + 'Description');
+  for (const t of templates) {
+    console.log(
+      pad(String(t.id ?? ''), idWidth)
+      + pad(String(t.source ?? ''), 10)
+      + pad(String(t.name ?? ''), 18)
+      + singleLine(t.description ?? ''),
+    );
+  }
+}
+
+function printAgentCreate(data: Record<string, unknown>): void {
+  if (!data) {
+    console.log('✓ agent created');
+    return;
+  }
+  console.log(data.created === false ? '✓ agent already registered (reused)' : '✓ agent created');
+  console.log(`  agentId:   ${String(data.agentId ?? '')}`);
+  console.log(`  projectId: ${String(data.projectId ?? '')}`);
+  console.log(`  name:      ${String(data.name ?? '')}`);
+  console.log(`  workspace: ${String(data.workspacePath ?? '')}`);
+  console.log(`  proactive: ${data.enabled ? 'enabled' : 'disabled'}`);
+  if (data.templateId) {
+    console.log(`  template:  ${String(data.templateId)} (${String(data.templateSource ?? 'builtin')})`);
+  }
+  const defaults = data.effectiveDefaults as Record<string, unknown> | undefined;
+  if (defaults && typeof defaults === 'object') {
+    const parts = [
+      defaults.runtime ? `runtime=${String(defaults.runtime)}` : null,
+      defaults.providerId ? `provider=${String(defaults.providerId)}` : null,
+      defaults.model ? `model=${String(defaults.model)}` : null,
+      defaults.permissionMode ? `permission=${String(defaults.permissionMode)}` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) {
+      console.log(`  defaults:  ${parts.join('  ')}`);
+    }
+  }
 }
 
 /**
@@ -2118,12 +2169,13 @@ export function printModelList(providers: Array<Record<string, unknown>>): void 
     return;
   }
   const pad = (s: string, n: number) => s.padEnd(n);
-  console.log(pad('ID', 24) + pad('Status', 12) + 'Name');
+  const idWidth = Math.max(24, ...providers.map((p) => String(p.id ?? '').length + 2));
+  console.log(pad('ID', idWidth) + pad('Status', 12) + 'Name');
   for (const p of providers) {
     // Disabled providers retain their verify status but the disabled label
     // overrides — they can't be used until re-enabled in Settings.
     const status = p.enabled === false ? 'disabled' : String(p.status);
-    console.log(pad(String(p.id), 24) + pad(status, 12) + String(p.name));
+    console.log(pad(String(p.id), idWidth) + pad(status, 12) + String(p.name));
     const models = Array.isArray(p.models)
       ? p.models.flatMap(model => {
         if (!model || typeof model !== 'object') return [];
@@ -2166,6 +2218,14 @@ export function printAgentList(agents: Array<Record<string, unknown>>): void {
     );
     if (separateId) console.log(`  Agent ID: ${id}`);
     if (remote) console.log(`  Remote: ${String(a.networkName ?? 'unknown network')} / ${String(a.deviceName ?? 'unknown device')}`);
+    const desc = typeof a.description === 'string' && a.description.trim()
+      ? singleLine(a.description.trim()).slice(0, 120)
+      : '';
+    if (desc) {
+      console.log(`  Description: ${desc}`);
+    } else if (!remote && typeof a.workspacePath === 'string' && a.workspacePath.trim()) {
+      console.log(`  Workspace: ${a.workspacePath.trim()}`);
+    }
   }
   if (agents.some(agent => agent.isCurrent === true)) {
     console.log('\n* current Agent for this CLI caller');
@@ -3486,7 +3546,7 @@ const PUBLISHED_ADMIN_ROUTES = new Set([
   'tool/list', 'tool/info', 'tool/add', 'tool/remove', 'tool/enable', 'tool/disable', 'tool/readme', 'tool/env',
   'vision/readme', 'vision/models', 'vision/analyze',
   'model/list', 'model/add', 'model/remove', 'model/set-key', 'model/set-default', 'model/verify',
-  'agent/list', 'agent/create', 'agent/current', 'agent/show', 'agent/enable', 'agent/disable', 'agent/archive', 'agent/unarchive',
+  'agent/list', 'agent/create', 'agent/templates', 'agent/current', 'agent/show', 'agent/enable', 'agent/disable', 'agent/archive', 'agent/unarchive',
   'agent/set', 'agent/channel/list', 'agent/channel/add', 'agent/channel/remove', 'agent/runtime-status',
   'runtime/list', 'runtime/describe', 'runtime/diagnose', 'diagnose/runtime',
   'cron/list', 'cron/add', 'cron/start', 'cron/run-now', 'cron/stop', 'cron/remove', 'cron/update', 'cron/runs',
@@ -5713,20 +5773,74 @@ export function buildRequestBody(
       }
       return { cursor: flags.cursor, limit, network:typeof flags.network === 'string' ? flags.network : undefined };
     }
+    if (action === 'templates') return {};
     if (action === 'create') {
       const workspacePath =
         typeof flags.workspacePath === 'string'
           ? flags.workspacePath.trim()
           : '';
-      if (!workspacePath) {
+      const name =
+        typeof flags.name === 'string'
+          ? flags.name.trim()
+          : '';
+      const template =
+        typeof flags.template === 'string'
+          ? flags.template.trim()
+          : '';
+      if (flags.workspacePath !== undefined && !workspacePath) {
         return exitAgentCliError(flags, {
           code: 'WORKSPACE_PATH_REQUIRED',
-          error: 'agent create requires --workspacePath <absolute-path>.',
-          suggestedCommand:
-            'myagents agent create --workspacePath /absolute/path --json',
+          error: '--workspacePath requires an absolute directory path.',
+          suggestedCommand: 'myagents agent create --help',
         });
       }
-      return { workspacePath };
+      if (flags.name !== undefined && !name) {
+        return exitAgentCliError(flags, {
+          code: 'INVALID_WORKSPACE_NAME',
+          error: '--name requires a non-empty value.',
+          suggestedCommand: 'myagents agent create --help',
+        });
+      }
+      if (flags.template !== undefined && !template) {
+        return exitAgentCliError(flags, {
+          code: 'TEMPLATE_REQUIRED',
+          error: '--template requires a template ID (run `myagents agent templates`).',
+          suggestedCommand: 'myagents agent templates',
+        });
+      }
+      if (!workspacePath && !name) {
+        return exitAgentCliError(flags, {
+          code: 'WORKSPACE_OR_NAME_REQUIRED',
+          error: 'agent create requires --name <name> (creates ~/.myagents/projects/<name>) or --workspacePath <absolute-path>.',
+          suggestedCommand: 'myagents agent create --name my-agent --json',
+        });
+      }
+      if (workspacePath && template) {
+        return exitAgentCliError(flags, {
+          code: 'TEMPLATE_REQUIRES_NEW_WORKSPACE',
+          error: '--template cannot be combined with --workspacePath; omit --workspacePath to create a new managed workspace from a template.',
+          suggestedCommand: 'myagents agent create --name my-agent --template mino --json',
+        });
+      }
+      const configFlags: Record<string, string> = {};
+      for (const field of ['runtime', 'providerId', 'model', 'permissionMode', 'reasoningEffort'] as const) {
+        const raw = flags[field];
+        if (raw === undefined) continue;
+        if (typeof raw !== 'string' || !raw.trim()) {
+          return exitAgentCliError(flags, {
+            code: 'ARGUMENT_INVALID',
+            error: `--${field} requires a non-empty value.`,
+            suggestedCommand: 'myagents agent create --help',
+          });
+        }
+        configFlags[field] = raw.trim();
+      }
+      return {
+        ...(workspacePath ? { workspacePath } : {}),
+        ...(name ? { name } : {}),
+        ...(template ? { template } : {}),
+        ...configFlags,
+      };
     }
     if (action === 'list') {
       if (flags.archived && flags.active) {
@@ -5747,7 +5861,66 @@ export function buildRequestBody(
       ),
     };
     if (action === 'current') return {};
-    if (action === 'set') return { id: rest[0], key: rest[1], value: tryParseJson(rest[2]) };
+    if (action === 'set') {
+      const id = rest[0];
+      if (!id) {
+        return exitAgentCliError(flags, {
+          code: 'AGENT_REQUIRED',
+          error: 'agent set requires <agentId>.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      const patchFlagKeys = [
+        'name', 'enabled', 'runtime', 'providerId', 'model',
+        'permissionMode', 'reasoningEffort', 'runtimeConfig',
+        'mcpEnabledServers', 'enabledPluginIds',
+      ] as const;
+      const providedPatchFlags = patchFlagKeys.filter((k) => flags[k] !== undefined);
+      const hasPositionalPair = rest[1] !== undefined || rest[2] !== undefined;
+      if (providedPatchFlags.length > 0 && hasPositionalPair) {
+        return exitAgentCliError(flags, {
+          code: 'ARGUMENT_INVALID',
+          error: 'Do not mix positional <key> <value> with named flags in agent set.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      if (providedPatchFlags.length > 0) {
+        const patch: Record<string, unknown> = {};
+        for (const k of providedPatchFlags) {
+          const raw = flags[k];
+          if (k === 'enabled') {
+            if (typeof raw === 'boolean') {
+              patch[k] = raw;
+            } else if (raw === 'true' || raw === 'false') {
+              patch[k] = raw === 'true';
+            } else {
+              return exitAgentCliError(flags, {
+                code: 'ARGUMENT_INVALID',
+                error: '--enabled requires true or false.',
+              });
+            }
+          } else if (k === 'runtimeConfig' || k === 'mcpEnabledServers' || k === 'enabledPluginIds') {
+            patch[k] = typeof raw === 'string' ? tryParseJson(raw) : raw;
+          } else if (typeof raw !== 'string' || !raw.trim()) {
+            return exitAgentCliError(flags, {
+              code: 'ARGUMENT_INVALID',
+              error: `--${k} requires a non-empty value.`,
+            });
+          } else {
+            patch[k] = raw.trim();
+          }
+        }
+        return { id, patch };
+      }
+      if (rest.length > 3) {
+        return exitAgentCliError(flags, {
+          code: 'ARGUMENT_INVALID',
+          error: 'Unexpected positional arguments for agent set.',
+          suggestedCommand: 'myagents agent set --help',
+        });
+      }
+      return { id, key: rest[1], value: tryParseJson(rest[2]) };
+    }
     if (action === 'channel') {
       const channelAction = rest[0] || 'list'; // list | add | remove
       if (channelAction === 'list') return { agentId: requirePositional(rest[1] ?? flags.agentId as string | undefined, 'agent-id', 'agent channel list', 'agent') };

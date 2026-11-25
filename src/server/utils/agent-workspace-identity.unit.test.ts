@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -55,9 +55,14 @@ vi.mock('./admin-config', async importOriginal => {
 });
 
 import {
+  createEmptyManagedWorkspaceDir,
+  getManagedProjectsRoot,
   registerWorkspaceAgent,
+  resolveManagedWorkspaceCreationPath,
   resolvePersistedAgentWorkspaceRegistry,
   resolvePersistedAgentWorkspaceConflict,
+  sanitizeManagedWorkspaceDirName,
+  stripWindowsVerbatimPrefix,
 } from './agent-workspace-identity';
 
 function project(overrides: Partial<ProjectSlim> = {}): ProjectSlim {
@@ -359,6 +364,153 @@ describe('persisted Agent workspace identity', () => {
     ];
     await expect(registerWorkspaceAgent(workspace())).rejects.toMatchObject({
       code: 'WORKSPACE_ARCHIVED',
+    });
+  });
+
+  describe('managed workspace creation under ~/.myagents/projects/', () => {
+    const originalHome = process.env.HOME;
+    let fakeHome: string | null = null;
+
+    beforeEach(() => {
+      // Use a temp dir under process.cwd() rather than os.tmpdir() because
+      // macOS tmpdir lives under /var (/private/var), which path-safety blocks.
+      fakeHome = mkdtempSync(join(process.cwd(), '.myagents-managed-home-'));
+      process.env.HOME = fakeHome;
+      state.projects = [];
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (fakeHome) rmSync(fakeHome, { recursive: true, force: true });
+      fakeHome = null;
+    });
+
+    it('sanitizes valid display names and rejects path traversal, empty, or Windows reserved device names', () => {
+      expect(sanitizeManagedWorkspaceDirName('Code Reviewer')).toBe('Code-Reviewer');
+      expect(sanitizeManagedWorkspaceDirName('设计评审助手')).toBe('设计评审助手');
+      for (const bad of [
+        '', '   ', '..', '.', '../evil', 'a/b', 'a\\b', 'foo\0bar', '!!!',
+        'CON', 'prn', 'aux', 'NUL', 'COM1', 'lpt9', 'con.txt',
+      ]) {
+        expect(() => sanitizeManagedWorkspaceDirName(bad), `expected reject for '${bad}'`).toThrow();
+      }
+      expect(stripWindowsVerbatimPrefix('\\\\?\\C:\\Users\\demo\\.myagents\\projects\\foo')).toBe(
+        'C:\\Users\\demo\\.myagents\\projects\\foo',
+      );
+      expect(stripWindowsVerbatimPrefix('//?/C:/Users/demo/.myagents')).toBe(
+        'C:/Users/demo/.myagents',
+      );
+      expect(stripWindowsVerbatimPrefix('\\\\?\\UNC\\server\\share\\ws')).toBe(
+        '\\\\server\\share\\ws',
+      );
+    });
+
+    it('allows direct children of ~/.myagents/projects/ while still blocking ~/.myagents internals, nested paths, and symlink escapes', async () => {
+      const myagentsDir = join(fakeHome!, '.myagents');
+      const credsDir = join(myagentsDir, 'credentials');
+      const projectsRoot = getManagedProjectsRoot();
+      const nestedDir = join(projectsRoot, 'parent', 'nested');
+      mkdirSync(credsDir, { recursive: true });
+      mkdirSync(nestedDir, { recursive: true });
+
+      const evilSymlink = join(projectsRoot, 'evil-link');
+      symlinkSync(credsDir, evilSymlink);
+
+      await expect(registerWorkspaceAgent(myagentsDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(credsDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(projectsRoot)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(nestedDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(evilSymlink)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      expect(() => resolveManagedWorkspaceCreationPath('evil-link')).toThrow(/already exists/i);
+
+      const direct = resolveManagedWorkspaceCreationPath('QA Helper');
+      const created = await registerWorkspaceAgent(direct.workspacePath, {
+        name: 'QA Helper',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: () => createEmptyManagedWorkspaceDir(direct.projectsRoot, direct.workspacePath),
+      });
+      expect(created.created).toBe(true);
+      expect(created.enabled).toBe(false);
+      expect(created.workspacePath).toBe(realpathSync(direct.workspacePath));
+      // CLI-created mino Agents MUST NOT inherit template proactive tasks (Heartbeat/Memory).
+      const savedAgent = state.config.agents?.[0];
+      expect(savedAgent).toMatchObject({
+        id: created.agentId,
+        name: 'QA Helper',
+        enabled: false,
+      });
+      expect(savedAgent?.heartbeat).toBeUndefined();
+      expect(savedAgent?.memoryAutoUpdate).toBeUndefined();
+      expect(savedAgent?.memoryEvolution).toBeUndefined();
+      // Re-resolving same name must fail closed with WORKSPACE_ALREADY_EXISTS.
+      expect(() => resolveManagedWorkspaceCreationPath('QA Helper')).toThrow(/already exists/i);
+    });
+
+    it('rolls back managed dir before projects.json commit, but preserves it if atomicModifyConfig defers after Project commit', async () => {
+      const target1 = resolveManagedWorkspaceCreationPath('Rollback Patch');
+      await expect(
+        registerWorkspaceAgent(target1.workspacePath, {
+          name: 'Rollback Patch',
+          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target1.projectsRoot, target1.workspacePath),
+          applyInitialAgentPatch: () => ({ ok: false, code: 'INVALID_CONFIG', message: 'bad initial config' }),
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+      expect(existsSync(target1.workspacePath)).toBe(false);
+
+      const target2 = resolveManagedWorkspaceCreationPath('Rollback Project');
+      state.failProjectOnce = true;
+      await expect(
+        registerWorkspaceAgent(target2.workspacePath, {
+          name: 'Rollback Project',
+          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target2.projectsRoot, target2.workspacePath),
+        }),
+      ).rejects.toThrow('projects write interrupted');
+      expect(existsSync(target2.workspacePath)).toBe(false);
+
+      // If projects.json commits and config.json fails (AGENT_MATERIALIZATION_DEFERRED),
+      // the directory MUST stay on disk so retrying reuses the saved Project claim cleanly.
+      const target3 = resolveManagedWorkspaceCreationPath('Deferred Config');
+      state.failConfigOnce = true;
+      await expect(
+        registerWorkspaceAgent(target3.workspacePath, {
+          name: 'Deferred Config',
+          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target3.projectsRoot, target3.workspacePath),
+        }),
+      ).rejects.toMatchObject({ code: 'AGENT_MATERIALIZATION_DEFERRED' });
+      expect(existsSync(target3.workspacePath)).toBe(true);
+      const committedAgentId = state.projects[0]?.agentId;
+      expect(committedAgentId).toBeTruthy();
+
+      const retried = await registerWorkspaceAgent(target3.workspacePath);
+      expect(retried.agentId).toBe(committedAgentId);
+      expect(retried.enabled).toBe(false);
+    });
+
+    it('fails closed with WORKSPACE_ALREADY_REGISTERED when rejectIfAlreadyRegistered is true (project-linked and legacy)', async () => {
+      const ws = workspace();
+      await registerWorkspaceAgent(ws);
+      await expect(
+        registerWorkspaceAgent(ws, { name: 'New Name', rejectIfAlreadyRegistered: true }),
+      ).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_REGISTERED' });
+
+      state.projects = [];
+      state.config = {
+        defaultPermissionMode: 'auto',
+        agents: [{
+          id: 'legacy-existing',
+          name: 'Legacy',
+          enabled: true,
+          workspacePath: ws,
+        } as unknown as NonNullable<AdminAppConfig['agents']>[number]],
+      };
+      await expect(
+        registerWorkspaceAgent(ws, { name: 'Overwrite Legacy', rejectIfAlreadyRegistered: true }),
+      ).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_REGISTERED' });
     });
   });
 });

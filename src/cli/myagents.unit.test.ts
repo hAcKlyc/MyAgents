@@ -3075,3 +3075,141 @@ describe('channel message CLI contract', () => {
     } finally {log.mockRestore();error.mockRestore();}
   });
 });
+
+describe('Batch 2 CLI ergonomics: agent create/templates/set, model list spacing, agent show/list rendering', () => {
+  it('validates and builds request bodies for agent create, agent templates, and atomic multi-field agent set', () => {
+    const parsedCreate = parseArgs([
+      'agent', 'create', '--name', 'Code Reviewer', '--template', 'mino',
+      '--runtime', 'dsh', '--providerId', 'deepseek', '--model', 'deepseek-v4-pro',
+      '--permissionMode', 'full-autonomous', '--reasoningEffort', 'high', '--json',
+    ]);
+    expect(validateCliCommand(parsedCreate.positional)).toBeUndefined();
+    expect(validateInternalCliInvocation(parsedCreate.positional, parsedCreate.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsedCreate.positional, parsedCreate.flags)).toBeUndefined();
+    expect(buildRequestBody('agent', 'create', [], parsedCreate.flags)).toEqual({
+      name: 'Code Reviewer',
+      template: 'mino',
+      runtime: 'dsh',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      permissionMode: 'full-autonomous',
+      reasoningEffort: 'high',
+    });
+
+    const parsedTemplates = parseArgs(['agent', 'templates', '--json']);
+    expect(validateCliCommand(parsedTemplates.positional)).toBeUndefined();
+    expect(validateInternalCliInvocation(parsedTemplates.positional, parsedTemplates.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsedTemplates.positional, parsedTemplates.flags)).toBeUndefined();
+    expect(buildRoute('agent', 'templates', [])).toBe('agent/templates');
+    expect(buildRequestBody('agent', 'templates', [], parsedTemplates.flags)).toEqual({});
+
+    const parsedMultiSet = parseArgs([
+      'agent', 'set', 'agent-1', '--name', 'Reviewer', '--runtime', 'codex',
+      '--model', 'gpt-5.4', '--permissionMode', 'no-restrictions', '--reasoningEffort', 'high',
+    ]);
+    expect(validateInternalCliInvocation(parsedMultiSet.positional, parsedMultiSet.flags)).toBeUndefined();
+    expect(buildRequestBody('agent', 'set', ['agent-1'], parsedMultiSet.flags)).toEqual({
+      id: 'agent-1',
+      patch: {
+        name: 'Reviewer',
+        runtime: 'codex',
+        model: 'gpt-5.4',
+        permissionMode: 'no-restrictions',
+        reasoningEffort: 'high',
+      },
+    });
+
+    // Mixing positional key/value with named flags must fail closed.
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`EXIT:${String(code)}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect(() =>
+        buildRequestBody('agent', 'set', ['agent-1', 'model', 'gpt-5.4'], { runtime: 'codex' }),
+      ).toThrow('EXIT:2');
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
+  it('dynamically widens model list ID column so long provider IDs never concatenate with status', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printModelList([{
+        id: 'custom-very-long-provider-id-2026',
+        name: 'Long Provider',
+        isDefault: false,
+        status: 'valid',
+        primaryModel: 'model-a',
+        models: [{ id: 'model-a', name: 'Model A' }],
+      }]);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toMatch(/custom-very-long-provider-id-2026\s{2,}valid\s{2,}Long Provider/);
+      expect(output).not.toContain('custom-very-long-provider-id-2026valid');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('renders agent show with (managed by runtime) for system-cli and substitutes actual runtime in footer', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printResult('agent', 'show', {
+        success: true,
+        data: {
+          agentId: 'agent-codex',
+          name: 'Codex Agent',
+          workspacePath: '/tmp/ws',
+          enabled: false,
+          effectiveDefaults: {
+            runtime: 'codex',
+            runtimeSource: 'system-cli',
+            providerId: null,
+            model: 'gpt-5.4',
+            permissionMode: 'no-restrictions',
+          },
+        },
+      }, false);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('(managed by runtime)');
+      expect(output).toContain('myagents runtime describe codex');
+      expect(output).not.toContain('runtime describe <runtime>');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('renders agent templates, agent create effectiveDefaults, and agent list Description/Workspace details', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      printResult('agent', 'templates', {
+        success: true,
+        data: [{ id: 'mino', name: 'Mino', source: 'builtin', description: 'Built-in assistant template' }],
+      }, false);
+      printResult('agent', 'create', {
+        success: true,
+        data: {
+          created: true,
+          agentId: 'agent-new',
+          projectId: 'proj-new',
+          workspacePath: '/Users/test/.myagents/projects/Reviewer',
+          enabled: false,
+          effectiveDefaults: { runtime: 'dsh', providerId: 'deepseek', model: 'deepseek-v4-pro', permissionMode: 'fullAgency' },
+        },
+      }, false);
+      printAgentList([
+        { agentId: 'a1', name: 'Local One', isLocal: true, workspacePath: '/tmp/local-one', enabled: false },
+        { agentId: 'a2', name: 'Remote Two', isLocal: false, deviceName: 'MacBook', description: 'Handles design reviews', enabled: true },
+      ]);
+      const output = log.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('mino');
+      expect(output).toContain('runtime=dsh');
+      expect(output).toContain('Workspace: /tmp/local-one');
+      expect(output).toContain('Description: Handles design reviews');
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
