@@ -94,6 +94,7 @@ type TurnScript =
 
 class FakeRuntimeProcess implements RuntimeProcess {
   requiresPermissionModeRestart?: RuntimeProcess['requiresPermissionModeRestart'];
+  getWatchdogState?: RuntimeProcess['getWatchdogState'];
   readonly pid = 4242;
   exited = false;
   loadedSkillNames: readonly string[] = [];
@@ -9011,6 +9012,64 @@ describe('external SessionEngine with fake runtime', () => {
     expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(
       false,
     );
+  });
+
+  it('keeps an active async-work turn alive past 10 minutes and restores the 10-minute budget after background settlement', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const harness = await createHarness([{ kind: 'silent' }], {
+      runtimeType: 'antigravity',
+    });
+    const sessionId = 'session-antigravity-async-watchdog';
+    const workspacePath = join(harness.home, 'workspace');
+    mkdirSync(workspacePath, { recursive: true });
+
+    let watchdogState: { activeAsyncWork: boolean; lastAsyncProgressAt?: number } = {
+      activeAsyncWork: true,
+      lastAsyncProgressAt: Date.now(),
+    };
+    const origStart = harness.runtime.startSession.bind(harness.runtime);
+    vi.spyOn(harness.runtime, 'startSession').mockImplementation(async (opts, cb) => {
+      const proc = (await origStart(opts, cb)) as FakeRuntimeProcess;
+      proc.getWatchdogState = () => watchdogState;
+      return proc;
+    });
+
+    try {
+      const turn = await harness.engine.sendDesktopMessage({
+        ...desktopRequest(sessionId, workspacePath, 'wait on long spark query'),
+        permissionMode: 'accept-edits',
+      });
+      await expect(turn.dispatchAcceptance).resolves.toEqual({ accepted: true });
+      expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(true);
+
+      // 20 minutes of silent wait while activeAsyncWork=true must NOT trigger the 10-minute kill.
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(true);
+      expect(
+        broadcastEvents.some(
+          (entry) =>
+            entry.event === 'chat:message-error' &&
+            entry.data === 'External runtime timed out',
+        ),
+      ).toBe(false);
+
+      // Background task settles and bumps lastAsyncProgressAt, giving the parent a fresh 10-minute foreground budget.
+      watchdogState = { activeAsyncWork: false, lastAsyncProgressAt: Date.now() };
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(true);
+
+      // After >10 minutes of total silence with no activeAsyncWork, watchdog still catches a real hang.
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      expect(
+        broadcastEvents.some(
+          (entry) =>
+            entry.event === 'chat:message-error' &&
+            entry.data === 'External runtime timed out',
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 

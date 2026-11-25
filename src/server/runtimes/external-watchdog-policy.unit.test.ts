@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX_LONG_CONTEXT_MAX_TIMEOUT_MS,
   CODEX_LONG_CONTEXT_MIN_TIMEOUT_MS,
+  EXTERNAL_WATCHDOG_ASYNC_WORK_TIMEOUT_MS,
   EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS,
   estimatedContextTokensFromMessages,
   externalRuntimeWatchdogTimeoutMs,
@@ -13,6 +14,18 @@ describe('externalRuntimeWatchdogTimeoutMs', () => {
     expect(externalRuntimeWatchdogTimeoutMs('claude-code', { inputTokens: 8_000_000, outputTokens: 0 })).toBe(
       EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS,
     );
+  });
+
+  it('uses the bounded async-work ceiling when a runtime reports active background work', () => {
+    expect(
+      externalRuntimeWatchdogTimeoutMs('antigravity', null, { activeAsyncWork: true }),
+    ).toBe(EXTERNAL_WATCHDOG_ASYNC_WORK_TIMEOUT_MS);
+    expect(
+      externalRuntimeWatchdogTimeoutMs('antigravity', null, { activeAsyncWork: false }),
+    ).toBe(EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS);
+    expect(
+      externalRuntimeWatchdogTimeoutMs('codex', { inputTokens: 2_000_000, outputTokens: 0 }, { activeAsyncWork: true }),
+    ).toBe(EXTERNAL_WATCHDOG_ASYNC_WORK_TIMEOUT_MS);
   });
 
   it('keeps the default timeout for small Codex contexts', () => {

@@ -1606,6 +1606,7 @@ function resetModuleState(): void {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
   }
+  lastObservedAsyncProgressAt = 0;
   currentWatchdogTimeoutMs = EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS;
   externalWatchdog.setTimeoutMs(EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS);
   resetExternalRuntimeConfigState();
@@ -2625,6 +2626,13 @@ const externalWatchdog = new InactivityWatchdog({
   intervalMs: WATCHDOG_INTERVAL_MS,
 });
 let currentWatchdogTimeoutMs = EXTERNAL_WATCHDOG_DEFAULT_TIMEOUT_MS;
+let lastObservedAsyncProgressAt = 0;
+
+function readActiveProcessWatchdogState() {
+  const process = getExternalActiveProcess();
+  if (!process || process.exited) return undefined;
+  return process.getWatchdogState?.();
+}
 
 function usageForWatchdogBudget(): MessageUsage | null {
   const estimatedInputTokens = getExternalCurrentTurnEstimatedInputTokens();
@@ -2646,13 +2654,16 @@ function usageForWatchdogBudget(): MessageUsage | null {
   };
 }
 
-function refreshWatchdogTimeout(): void {
+function refreshWatchdogTimeout(
+  watchdogState = readActiveProcessWatchdogState(),
+): void {
   const runtimeType =
     getExternalActiveRuntime()?.type ?? getCurrentRuntimeType();
   const usageForBudget = usageForWatchdogBudget();
   const nextTimeoutMs = externalRuntimeWatchdogTimeoutMs(
     runtimeType,
     usageForBudget,
+    { activeAsyncWork: watchdogState?.activeAsyncWork === true },
   );
   if (nextTimeoutMs === currentWatchdogTimeoutMs) return;
 
@@ -2662,7 +2673,7 @@ function refreshWatchdogTimeout(): void {
   const minutes = Math.round(nextTimeoutMs / 60_000);
   const tokens = observedContextTokens(usageForBudget);
   console.log(
-    `[external-session] Watchdog: timeout adjusted to ${minutes} minutes for ${runtimeType} contextTokens=${tokens}`,
+    `[external-session] Watchdog: timeout adjusted to ${minutes} minutes for ${runtimeType} contextTokens=${tokens}${watchdogState?.activeAsyncWork ? ' activeAsyncWork=true' : ''}`,
   );
 }
 
@@ -2671,10 +2682,20 @@ function resetWatchdog(): void {
   refreshWatchdogTimeout();
   externalWatchdog.markActivity();
   if (watchdogTimer) return; // already armed — markActivity above is the reset
+  lastObservedAsyncProgressAt = readActiveProcessWatchdogState()?.lastAsyncProgressAt ?? 0;
   externalWatchdog.reset();
   watchdogTimer = setInterval(() => {
     clearWatchdogIfDispatchSettled();
     if (!watchdogTimer) return;
+    const watchdogState = readActiveProcessWatchdogState();
+    refreshWatchdogTimeout(watchdogState);
+    if (
+      typeof watchdogState?.lastAsyncProgressAt === 'number' &&
+      watchdogState.lastAsyncProgressAt > lastObservedAsyncProgressAt
+    ) {
+      lastObservedAsyncProgressAt = watchdogState.lastAsyncProgressAt;
+      externalWatchdog.markActivity();
+    }
     const { fire, suspendedMs } = externalWatchdog.evaluateTick();
     if (suspendedMs > 0) {
       console.log(
@@ -2713,6 +2734,7 @@ function clearWatchdog(): void {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
   }
+  lastObservedAsyncProgressAt = 0;
 }
 
 /** A consumed steer may still own dispatch after its turn has completed. */

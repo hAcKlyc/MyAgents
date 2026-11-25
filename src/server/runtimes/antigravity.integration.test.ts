@@ -917,3 +917,91 @@ lines.on('line', line => {
   expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
     .toBe("legacy-a-low");
 });
+
+it("reports active background task watchdog state and observes native task log progress and settlement", async () => {
+  const nativeSid = "87361ac8-8654-4053-91b5-163b1affdfaa";
+  const bgFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({
+    sessionId:'${nativeSid}',
+    configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],
+  });
+  if (f.method === 'session/set_config_option') return reply({
+    configOptions:[{id:'mode',name:'mode',type:'select',currentValue:f.params.value,options:[]}],
+  });
+  if (f.method === 'session/prompt') {
+    const update = data => send({method:'session/update',params:{sessionId:'${nativeSid}',update:data}});
+    update({
+      sessionUpdate:'tool_call',
+      toolCallId:'bg-cmd',
+      title:'Run spark query',
+      kind:'execute',
+      status:'completed',
+      rawInput:{CommandLine:'python3 run_sql.py'},
+      content:[{type:'content',content:{type:'text',text:'Tool is running as a background task with task id: ${nativeSid}/task-104'}}],
+    });
+    // Keep session/prompt open while waiting for the background task, matching real agy ACP reactive wakeup.
+    return;
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-bg-task-"));
+  const fakeHome = join(directory, "home");
+  const tasksDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "tasks");
+  const messagesDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "messages");
+  await mkdir(tasksDir, { recursive: true });
+  await mkdir(messagesDir, { recursive: true });
+  const logPath = join(tasksDir, "task-104.log");
+  await writeFile(logPath, "[1s] status=RUNNING\n", "utf8");
+
+  const homeKey = process.platform === "win32" ? "USERPROFILE" : "HOME";
+  const prevHome = process.env[homeKey];
+  process.env[homeKey] = fakeHome;
+  try {
+    vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+      originalSpawn([process.execPath, "-e", bgFixture], options));
+    processHandle = await runtime.startSession(
+      { workspacePath: directory, sessionId: "product-bg", scenario: { type: "desktop" } },
+      () => undefined,
+    );
+    await runtime.sendMessage(processHandle, "run long spark query");
+
+    await expect.poll(() => processHandle?.getWatchdogState?.().activeAsyncWork).toBe(true);
+    const initialProgress = processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0;
+    expect(initialProgress).toBeGreaterThan(0);
+
+    // Wait for baseline poll, then grow the native task log and verify watchdog progress advances.
+    await new Promise((resolve) => setTimeout(resolve, 1_700));
+    await appendFile(logPath, "[60s] status=RUNNING\n", "utf8");
+    await expect
+      .poll(() => processHandle?.getWatchdogState?.().lastAsyncProgressAt ?? 0, { timeout: 5_000 })
+      .toBeGreaterThan(initialProgress);
+    const progressBeforeFinish = processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0;
+
+    // Native task completion message settles activeAsyncWork and bumps progress for parent wakeup.
+    await writeFile(
+      join(messagesDir, "done.json"),
+      JSON.stringify({
+        id: "done",
+        sender: `${nativeSid}/task-104`,
+        recipient: nativeSid,
+        timestamp: new Date().toISOString(),
+        content: `Task id "${nativeSid}/task-104" finished with result:\nCommand exited with code 0.`,
+      }),
+      "utf8",
+    );
+    await expect
+      .poll(() => processHandle?.getWatchdogState?.().activeAsyncWork, { timeout: 5_000 })
+      .toBe(false);
+    expect(processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0).toBeGreaterThan(progressBeforeFinish);
+  } finally {
+    if (prevHome === undefined) delete process.env[homeKey];
+    else process.env[homeKey] = prevHome;
+  }
+});

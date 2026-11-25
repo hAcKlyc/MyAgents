@@ -21,6 +21,11 @@ import {
   type AntigravityChildSnapshot,
 } from "./antigravity-children";
 import { AntigravityChildTrace } from "./antigravity-child-trace";
+import {
+  extractAntigravityTaskUpdates,
+  observeAntigravityBackgroundTasks,
+  type AntigravityTaskLogSnapshot,
+} from "./antigravity-tasks";
 import { fingerprintSessionMcp } from "../session-core/mcp-sync-policy";
 import { resolveRemoteMcpTransportConfig } from "../session-core/mcp-template-resolution";
 import { buildMcpStdioLaunchConfig } from "../utils/mcp-command";
@@ -60,6 +65,7 @@ import type {
   AgentRuntime,
   ResolvedImagePayload,
   RuntimeProcess,
+  RuntimeWatchdogState,
   SessionStartOptions,
   SubAgentScope,
   UnifiedEvent,
@@ -273,6 +279,11 @@ class AntigravitySession implements RuntimeProcess {
   private readonly childSnapshots = new Map<string, AntigravityChildSnapshot>();
   private readonly childTraces = new Map<string, AntigravityChildTrace>();
   private childPoll?: NodeJS.Timeout;
+  private readonly activeBackgroundTasks = new Set<string>();
+  private backgroundTaskLogSnapshots = new Map<string, AntigravityTaskLogSnapshot>();
+  private lastTaskMessageTimestamp = 0;
+  private backgroundTaskPoll?: NodeJS.Timeout;
+  private lastAsyncProgressAt = 0;
   private lastReplyText = '';
   private parentPlannerStep = -1;
   private readonly settledParentReplies: string[] = [];
@@ -563,8 +574,94 @@ class AntigravitySession implements RuntimeProcess {
         (child.deliveredAt !== undefined && (!child.reportId || !this.acknowledgedChildReports.has(child.reportId)));
     });
   }
+  getWatchdogState(): RuntimeWatchdogState {
+    const hasInFlightTool = [...this.tools.values()].some(
+      ({ snapshot }) => snapshot.status !== "completed" && snapshot.status !== "failed",
+    );
+    return {
+      activeAsyncWork:
+        hasInFlightTool ||
+        this.activeBackgroundTasks.size > 0 ||
+        this.hasPendingBackgroundWork(),
+      ...(this.lastAsyncProgressAt > 0
+        ? { lastAsyncProgressAt: this.lastAsyncProgressAt }
+        : {}),
+    };
+  }
+  private observeBackgroundTasksFromTool(content: string) {
+    if (!this.sessionId || !content) return;
+    const { active, settled } = extractAntigravityTaskUpdates(this.sessionId, content);
+    let changed = false;
+    for (const slug of active) {
+      if (!this.activeBackgroundTasks.has(slug)) {
+        this.activeBackgroundTasks.add(slug);
+        changed = true;
+      }
+    }
+    for (const slug of settled) {
+      if (this.activeBackgroundTasks.delete(slug)) {
+        this.backgroundTaskLogSnapshots.delete(slug);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.lastAsyncProgressAt = Date.now();
+    }
+    if (this.activeBackgroundTasks.size > 0) {
+      this.scheduleBackgroundTaskObservation();
+    } else if (this.backgroundTaskPoll) {
+      clearTimeout(this.backgroundTaskPoll);
+      this.backgroundTaskPoll = undefined;
+    }
+  }
+  private scheduleBackgroundTaskObservation() {
+    if (this.backgroundTaskPoll || this.exited || !this.active || this.activeBackgroundTasks.size === 0) {
+      return;
+    }
+    const poll = setTimeout(async () => {
+      try {
+        const observation = await observeAntigravityBackgroundTasks(
+          this.brainDirectory,
+          this.sessionId,
+          this.activeBackgroundTasks,
+          this.backgroundTaskLogSnapshots,
+          this.lastTaskMessageTimestamp,
+        );
+        if (this.backgroundTaskPoll !== poll || this.exited) return;
+        this.backgroundTaskLogSnapshots = observation.nextLogSnapshots;
+        this.lastTaskMessageTimestamp = observation.latestMessageTimestamp;
+        for (const slug of observation.settledTaskIds) {
+          this.activeBackgroundTasks.delete(slug);
+        }
+        if (observation.progressed) {
+          this.lastAsyncProgressAt = Date.now();
+        }
+      } catch {
+        // Degrade silently to the default watchdog if native task files are unavailable.
+      } finally {
+        if (this.backgroundTaskPoll === poll) {
+          this.backgroundTaskPoll = undefined;
+          if (this.active && this.activeBackgroundTasks.size > 0 && !this.exited) {
+            this.scheduleBackgroundTaskObservation();
+          }
+        }
+      }
+    }, 1_500);
+    this.backgroundTaskPoll = poll;
+    poll.unref();
+  }
+  private stopBackgroundTaskPoll() {
+    if (this.backgroundTaskPoll) clearTimeout(this.backgroundTaskPoll);
+    this.backgroundTaskPoll = undefined;
+  }
+  private clearBackgroundTasks() {
+    this.stopBackgroundTaskPoll();
+    this.activeBackgroundTasks.clear();
+    this.backgroundTaskLogSnapshots.clear();
+  }
   private observeDelegation(toolUseId: string) {
     this.childLaunches.add(toolUseId);
+    this.lastAsyncProgressAt = Date.now();
     this.scheduleChildObservation();
   }
   private scheduleChildObservation() {
@@ -593,9 +690,13 @@ class AntigravitySession implements RuntimeProcess {
               trace = new AntigravityChildTrace(child);
               this.childTraces.set(child.sessionId, trace);
             }
-            trace.observe(this.brainDirectory, this.emit);
+            trace.observe(this.brainDirectory, (event) => {
+              this.lastAsyncProgressAt = Date.now();
+              this.emit(event);
+            });
           }
           if (previous?.status === child.status && previous?.deliveredAt === child.deliveredAt) continue;
+          this.lastAsyncProgressAt = Date.now();
           this.emit({
             kind: "subagent_lifecycle", parentToolUseId: child.toolCallId, agentId: child.sessionId,
             status: child.status, startedAt: child.startedAt, observedAt: child.finishedAt ?? Date.now(),
@@ -619,6 +720,7 @@ class AntigravitySession implements RuntimeProcess {
   finishBackgroundWork() {
     if (this.childPoll) clearTimeout(this.childPoll);
     this.childPoll = undefined;
+    this.clearBackgroundTasks();
     for (const child of this.childSnapshots.values()) {
       if (child.status !== "running") continue;
       this.emit({ kind: "subagent_lifecycle", parentToolUseId: child.toolCallId,
@@ -751,6 +853,9 @@ class AntigravitySession implements RuntimeProcess {
     this.turnUsage = undefined;
     this.tools.clear();
     this.deniedTools.clear();
+    if (this.activeBackgroundTasks.size > 0) {
+      this.scheduleBackgroundTaskObservation();
+    }
   }
   private finishTurn(status: string, error?: string) {
     if (!this.promptCancellationRequested) this.flushHeldTransientAuthWarning();
@@ -760,6 +865,11 @@ class AntigravitySession implements RuntimeProcess {
     this.closeBlock();
     this.cancelPending();
     this.turnKind = null;
+    if (status === "completed") {
+      this.stopBackgroundTaskPoll();
+    } else {
+      this.clearBackgroundTasks();
+    }
     this.canContinue = status === "completed";
     if (this.canContinue && this.childLaunches.size && this.lastReplyText.trim()) {
       this.settledParentReplies.push(this.lastReplyText);
@@ -814,6 +924,7 @@ class AntigravitySession implements RuntimeProcess {
 
     this.emit({ kind: "tool_use_stop", toolUseId: id, input, subAgent });
     if (toolName === "CollabAgent" && tool.status === "completed") this.observeDelegation(id);
+    if (!subAgent && result) this.observeBackgroundTasksFromTool(result);
     const presentation = classifyToolAttachmentPresentation(tool.name ?? toolName);
     const attachments = tool.content?.flatMap((part) => {
       if (part.type !== "content") return [];
