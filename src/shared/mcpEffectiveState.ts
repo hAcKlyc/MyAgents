@@ -40,7 +40,7 @@ export interface McpEffectiveSnapshot {
   browserHostGeneration?: number;
   dispatch: {
     state: McpDispatchState;
-    releaseReason?: 'ready' | 'timeout' | 'terminal_status' | 'status_read_failed' | 'cancelled';
+    releaseReason?: 'ready' | 'timeout' | 'terminal_status' | 'status_read_failed' | 'status_unreported' | 'cancelled';
   };
   servers: McpEffectiveServerSnapshot[];
   /** Only tools proven callable in this exact catalog generation. */

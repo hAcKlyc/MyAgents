@@ -40,7 +40,10 @@ import { supportsHostAskUserQuestion } from "../host-interaction";
 import { classifyMcpFailure } from "../../shared/mcpFailure";
 import type { McpEffectiveServerSnapshot } from "../../shared/mcpEffectiveState";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 import type { McpServerDefinition } from "../../shared/config-types";
+import { INTERNAL_CLI_TOKEN_ENV } from "../../shared/externalCliCapabilities";
 import {
   ANTIGRAVITY_FULL_ACCESS,
   ANTIGRAVITY_PERMISSION_MODES,
@@ -53,6 +56,7 @@ import {
   splitAntigravityFlatModelId,
 } from "../../shared/antigravityModelCatalog";
 import type { AskUserQuestionAnswers } from "../../shared/types/askUserQuestion";
+import { getSidecarPort } from "../session-core/sidecar-port";
 import { ensureShellPath } from "../utils/shell";
 import { maybeSpill, releaseLargeValueRef } from "../utils/large-value-store";
 import { spawn, type SubprocessHandle } from "../utils/subprocess";
@@ -88,6 +92,42 @@ async function executable(policy?: RuntimeEnvPolicy) {
   await ensureShellPath();
   const env = augmentedProcessEnv('antigravity', policy);
   return { env, path: resolveCommand("agy", env) };
+}
+
+function prependMyAgentsBinToPath(env: Record<string, string | undefined>): void {
+  const isWindows = process.platform === "win32";
+  const pathKey = isWindows ? "Path" : "PATH";
+  const home = (isWindows ? env.USERPROFILE : env.HOME) || homedir();
+  if (!home) return;
+  const binDir = join(home, ".myagents", "bin");
+  const currentPath = env[pathKey] ?? env.PATH ?? "";
+  const existingEntries = currentPath.split(delimiter).filter(Boolean);
+  const comparableBin = isWindows ? binDir.toLowerCase() : binDir;
+  const filtered = existingEntries.filter(
+    (entry) => (isWindows ? entry.toLowerCase() : entry) !== comparableBin,
+  );
+  delete env.PATH;
+  delete env.Path;
+  env[pathKey] = [binDir, ...filtered].join(delimiter);
+}
+
+function buildAntigravitySessionEnv(
+  baseEnv: Record<string, string | undefined>,
+  options: Pick<SessionStartOptions, "sessionId" | "workspacePath">,
+): Record<string, string | undefined> {
+  const sessionEnv: Record<string, string | undefined> = { ...baseEnv };
+  prependMyAgentsBinToPath(sessionEnv);
+  sessionEnv.PWD = options.workspacePath;
+  sessionEnv.MYAGENTS_SESSION_ID = options.sessionId;
+  const sidecarPort = getSidecarPort();
+  if (sidecarPort > 0) {
+    sessionEnv.MYAGENTS_PORT = String(sidecarPort);
+  }
+  const internalCliToken = process.env[INTERNAL_CLI_TOKEN_ENV]?.trim();
+  if (internalCliToken) {
+    sessionEnv[INTERNAL_CLI_TOKEN_ENV] = internalCliToken;
+  }
+  return sessionEnv;
 }
 
 async function queryCli(
@@ -871,7 +911,9 @@ class AntigravitySession implements RuntimeProcess {
       this.clearBackgroundTasks();
     }
     this.canContinue = status === "completed";
-    if (this.canContinue && this.childLaunches.size && this.lastReplyText.trim()) {
+    if (!this.canContinue) {
+      this.finishBackgroundWork();
+    } else if (this.childLaunches.size && this.lastReplyText.trim()) {
       this.settledParentReplies.push(this.lastReplyText);
     }
     this.emit({ kind: "turn_complete", status, error });
@@ -1345,7 +1387,8 @@ export class AntigravityRuntime implements AgentRuntime {
     return normalizeAntigravityFlatModels(rawEntries);
   }
   async startSession(options: SessionStartOptions, emit: UnifiedEventCallback) {
-    const { path, env } = await executable(options.envPolicy);
+    const { path, env: resolvedEnv } = await executable(options.envPolicy);
+    const env = buildAntigravitySessionEnv(resolvedEnv, options);
     const skipPermissions = options.permissionMode === ANTIGRAVITY_FULL_ACCESS;
     const args = [path, "acp", "--process-per-session"];
     if (skipPermissions) args.push("--dangerously-skip-permissions");
@@ -1356,6 +1399,7 @@ export class AntigravityRuntime implements AgentRuntime {
       stdout: "pipe",
       stderr: "ignore",
       detached: process.platform !== "win32",
+      windowsHide: true,
     });
     const s = new AntigravitySession(
       child,
@@ -1489,12 +1533,18 @@ export class AntigravityRuntime implements AgentRuntime {
       if (s.earlyCommands?.sessionId === s.sessionId)
         s.publishCommands(s.earlyCommands.update);
       s.earlyCommands = undefined;
+      const mcpDispatch =
+        projected.length === 0
+          ? ({ state: "settled", releaseReason: "ready" } as const)
+          : projected.some((server) => server.state === "unreported")
+            ? ({ state: "released", releaseReason: "status_unreported" } as const)
+            : ({ state: "released", releaseReason: "terminal_status" } as const);
       emit({
         kind: "mcp_effective_update",
         configGeneration: 1,
         catalogGeneration: 1,
         configFingerprint: s.sessionMcpFingerprint,
-        dispatch: { state: "released", releaseReason: "status_read_failed" },
+        dispatch: mcpDispatch,
         servers: projected,
         tools: [],
       });

@@ -4,7 +4,11 @@ import { fingerprintSessionMcp } from '../session-core/mcp-sync-policy';
 import { CHANNEL_MANAGED_CODEX_LIMITS } from '../../shared/channelPrompt';
 import { readChannelPromptOptions } from '../tools/channel-messaging';
 import { captureChannelTurn, effectiveChannelDelivery, channelContextForInput, decorateChannelQuery, channelInputSource } from '../session-core/channel-context';
-import { getExternalChannelSnapshot, setExternalChannelSnapshot } from './external-session/turn-lifecycle';
+import {
+  getExternalChannelSnapshot,
+  setExternalChannelSnapshot,
+} from './external-session/turn-lifecycle';
+import type { InboxTurnMeta } from '../inbox/types';
 import { desktopContextOf } from '../../shared/agentMentions';
 import { runtimeProviderAnalytics } from '../session-core/turn-analytics';
 import type { AskUserQuestionAnswers } from '../../shared/types/askUserQuestion';
@@ -101,6 +105,7 @@ import {
   resolveCodexWorkspaceInstructions,
   resolveDshWorkspaceSupplement,
 } from './workspace-instructions';
+import { resolveAntigravitySkillSupplement } from './antigravity-skills';
 import {
   runtimeSupportsPrewarm,
   type RuntimeEnvPolicy,
@@ -673,9 +678,81 @@ function hasPendingDshNativeWork(): boolean {
     Boolean(active?.runtime.getActiveRootOperation?.(active.process))
   );
 }
+type PendingBackgroundTurnSettlement = {
+  runtimeGeneration: number;
+  terminalGeneration: number;
+  sessionId: string;
+  turnId?: string;
+  assistantMessageId?: string;
+  startedAt: number;
+  inboxMetas: InboxTurnMeta[];
+  attachmentHints: string[];
+  turnActivityFacts: SessionActivityTurnFacts | null;
+  latestText: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  terminated?: boolean;
+};
+let pendingBackgroundTurnSettlement: PendingBackgroundTurnSettlement | null = null;
+
+function cancelPendingBackgroundTurnSettlement(): PendingBackgroundTurnSettlement | null {
+  const settlement = pendingBackgroundTurnSettlement;
+  pendingBackgroundTurnSettlement = null;
+  if (settlement) {
+    settlement.terminated = true;
+  }
+  return settlement;
+}
+
+function mergeUniqueInboxMetas(
+  existing: readonly InboxTurnMeta[],
+  incoming: readonly InboxTurnMeta[],
+): InboxTurnMeta[] {
+  const merged = [...existing];
+  for (const meta of incoming) {
+    if (
+      !merged.some(
+        (item) =>
+          item.originalMessageId === meta.originalMessageId &&
+          item.fromSessionId === meta.fromSessionId,
+      )
+    ) {
+      merged.push(meta);
+    }
+  }
+  return merged;
+}
+
+function mergeExternalTurnUsageSummary(
+  existing: { inputTokens: number; outputTokens: number } | undefined,
+  incoming: { inputTokens: number; outputTokens: number } | undefined,
+): { inputTokens: number; outputTokens: number } | undefined {
+  if (!existing) return incoming;
+  if (!incoming) return existing;
+  return {
+    inputTokens: existing.inputTokens + incoming.inputTokens,
+    outputTokens: existing.outputTokens + incoming.outputTokens,
+  };
+}
+
+function restoreDeferredInboxMetas(
+  settlement: PendingBackgroundTurnSettlement | null,
+): void {
+  if (!settlement) return;
+  for (const meta of settlement.inboxMetas) {
+    appendExternalTurnInboxMeta(meta);
+  }
+}
+
 function hasPendingAntigravityWork(): boolean {
   if (getCurrentRuntimeType() !== 'antigravity') return false;
-  return pendingAntigravityProductEvents > 0 || getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true;
+  return (
+    pendingAntigravityProductEvents > 0 ||
+    pendingBackgroundTurnSettlement !== null ||
+    getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true
+  );
 }
 let currentTurnTraceRequestId: string | undefined;
 let currentTurnTraceRuntime = '';
@@ -1616,6 +1693,7 @@ function resetModuleState(): void {
   activeExternalEnvPolicy = undefined;
   clearPendingExternalProcessConfigRestarts();
   antigravityMcpIds = null;
+  cancelPendingBackgroundTurnSettlement();
   resetManagedCodexExtensionState();
   dshDesiredExtensionSnapshot = null;
   dshExtensionStatus = null;
@@ -2717,12 +2795,33 @@ function resetWatchdog(): void {
     console.error(
       `[external-session] Watchdog: no runtime activity for ${minutes} minutes of active time, killing process`,
     );
-    if (!isExternalTurnCompleted()) {
+    if (!isExternalTurnCompleted() || pendingBackgroundTurnSettlement !== null) {
+      const timeoutMessage = 'External runtime timed out';
       broadcast('chat:agent-error', {
         message: `External runtime timed out (no activity for ${minutes} minutes)`,
       });
-      broadcast('chat:message-error', 'External runtime timed out');
-      fireExternalImCallback('error', buildImErrorPayload('External runtime timed out'));
+      broadcast('chat:message-error', timeoutMessage);
+      const timedOutDeferred = cancelPendingBackgroundTurnSettlement();
+      if (timedOutDeferred !== null) {
+        restoreDeferredInboxMetas(timedOutDeferred);
+        notifyExternalTurnOutcome(timedOutDeferred.terminalGeneration, {
+          success: false,
+          text: timedOutDeferred.latestText,
+          error: timeoutMessage,
+        });
+        clearExternalTurnActivityFacts(timedOutDeferred.turnActivityFacts);
+        fireExternalImCallback('error', buildImErrorPayload(timeoutMessage));
+        finalizeExternalActiveRequest('failed');
+        deliverExternalWatchError({
+          turnId: timedOutDeferred.turnId,
+          sessionId: timedOutDeferred.sessionId || getExternalLifecycleSessionId(),
+          text: timedOutDeferred.latestText,
+          errorCode: 'turn_failed',
+          errorMessage: timeoutMessage,
+        });
+      } else {
+        fireExternalImCallback('error', buildImErrorPayload(timeoutMessage));
+      }
     }
     void stopExternalSession({ reason: 'failure' });
   }, WATCHDOG_INTERVAL_MS);
@@ -2737,16 +2836,25 @@ function clearWatchdog(): void {
   lastObservedAsyncProgressAt = 0;
 }
 
-/** A consumed steer may still own dispatch after its turn has completed. */
+/** A consumed steer or detached Antigravity background work may still own activity after turn_complete. */
 function clearWatchdogIfDispatchSettled(): void {
-  if (isExternalTurnCompleted() && !hasExternalSendInFlight()) clearWatchdog();
+  if (
+    isExternalTurnCompleted() &&
+    !hasExternalSendInFlight() &&
+    !hasPendingAntigravityWork()
+  ) {
+    clearWatchdog();
+  }
 }
 
 function recordRuntimeActivity(): void {
   if (getExternalUserRequestedStop()) return;
   if (isExternalTurnCompleted()) {
-    // Extend only an already monitored send; idle/prewarm never acquires a timer.
-    if (watchdogTimer && hasExternalSendInFlight()) externalWatchdog.markActivity();
+    // Extend only an already monitored send or deferred Antigravity background work;
+    // idle/prewarm never acquires a timer.
+    if (watchdogTimer && (hasExternalSendInFlight() || hasPendingAntigravityWork())) {
+      externalWatchdog.markActivity();
+    }
     return;
   }
   if (getExternalTurnStartTime() === 0) return;
@@ -4850,6 +4958,20 @@ async function _doStartExternalSession(options: {
   const externalSkillAdmission =
     options.skillAdmission ??
     buildCurrentExternalSkillAdmission(options.workspacePath);
+  if (runtimeType === 'antigravity') {
+    const skillSupplement = resolveAntigravitySkillSupplement(
+      options.workspacePath,
+      externalSkillAdmission.capabilitySnapshot,
+    );
+    if (skillSupplement) {
+      console.log(
+        `[external-session] Injecting Antigravity skill supplement (${skillSupplement.length} bytes)`,
+      );
+      systemPromptAppend = systemPromptAppend
+        ? `${systemPromptAppend}\n\n${skillSupplement}`
+        : skillSupplement;
+    }
+  }
   let managedCodexExtensionSnapshot =
     runtimeType === 'codex' && runtimeSource === 'managed-provider'
       ? buildCurrentManagedCodexExtensionSnapshot({
@@ -7990,7 +8112,8 @@ export async function stopExternalSession(options?: {
   preservePromotion?: ExternalTurnPromotionToken | null;
 }): Promise<boolean> {
   const stoppedExecutionTurnId = getExternalExecutionTurnId() ?? undefined;
-  const turnWasCompleted = isExternalTurnCompleted();
+  const hadDeferredBackgroundTurn = pendingBackgroundTurnSettlement !== null;
+  const turnWasCompleted = isExternalTurnCompleted() && !hadDeferredBackgroundTurn;
   clearWatchdog();
   const preserveQueue = options?.preserveQueue === true;
   const preserveCurrentPromotion = Boolean(
@@ -8163,8 +8286,10 @@ export async function stopExternalSession(options?: {
   });
   // Stopping a leftover dispatch/idle process must not finish an already
   // terminal Product turn again (or replace its successful completion).
+  const stoppedDeferred = cancelPendingBackgroundTurnSettlement();
+  const stoppedTurnText = currentExternalTurnTextSnapshot() || stoppedDeferred?.latestText || '';
   const completionTerminal = turnWasCompleted ? null : finalizeStoppedExternalTurn(
-    currentExternalTurnTextSnapshot(), consumeExternalTurnMetrics(), !isConfigRestart,
+    stoppedTurnText, consumeExternalTurnMetrics(), !isConfigRestart,
   );
   if (!turnWasCompleted) {
     await persistExternalPartialAssistantProjection('stopped').catch((error) => {
@@ -8183,19 +8308,20 @@ export async function stopExternalSession(options?: {
   drainPendingInteractiveRequestsAsExpired('stop');
   setExternalSystemInitPayload(null);
   if (!isConfigRestart && !turnWasCompleted) {
+    restoreDeferredInboxMetas(stoppedDeferred);
     fireExternalImCallback('cancelled', buildImCancelledPayload());
     finalizeExternalActiveRequest('failed');
     deliverExternalWatchError({
-      turnId: stoppedExecutionTurnId,
-      sessionId: getExternalLifecycleSessionId(),
-      text: currentExternalTurnTextSnapshot(),
+      turnId: stoppedExecutionTurnId ?? stoppedDeferred?.turnId,
+      sessionId: getExternalLifecycleSessionId() || stoppedDeferred?.sessionId,
+      text: stoppedTurnText,
       errorCode: 'session_aborted',
       errorMessage:
         'external runtime session was stopped before turn completed',
     });
     clearExternalInboxMetaOnRejection({
-      turnId: stoppedExecutionTurnId,
-      sessionId: getExternalLifecycleSessionId(),
+      turnId: stoppedExecutionTurnId ?? stoppedDeferred?.turnId,
+      sessionId: getExternalLifecycleSessionId() || stoppedDeferred?.sessionId,
       errorCode: 'session_aborted',
       errorMessage:
         'external runtime session was stopped before turn completed',
@@ -9693,6 +9819,125 @@ export function getRuntimePermissionModes(runtimeType: RuntimeType): unknown[] {
 
 // ─── Private: shared turn finalization (used by both turn_complete and session_complete) ───
 
+function emitSettledExternalTurnCallbacks(params: {
+  sessionId: string;
+  turnId?: string;
+  terminalGeneration: number;
+  succeeded: boolean;
+  text: string;
+  error?: string;
+  durationMs?: number;
+  usage?: { inputTokens: number; outputTokens: number };
+  inboxMetas: InboxTurnMeta[];
+  attachmentHints: string[];
+  turnActivityFacts: SessionActivityTurnFacts | null;
+}): void {
+  if (params.sessionId) {
+    const watchError = params.succeeded
+      ? undefined
+      : {
+          code: 'turn_failed',
+          message:
+            params.error ??
+            'external runtime turn did not complete successfully',
+        };
+    void import('../inbox/watch-deliver')
+      .then(({ deliverSessionWatchEvents }) =>
+        deliverSessionWatchEvents(
+          params.sessionId,
+          {
+            text: params.text,
+            turnId: params.turnId,
+            terminalStatus: params.succeeded ? 'complete' : 'error',
+            requestEventIds: params.inboxMetas.map((meta) => meta.originalMessageId),
+            error: watchError,
+            attachmentHints:
+              params.attachmentHints.length > 0 ? params.attachmentHints : undefined,
+          },
+          params.inboxMetas,
+        ),
+      )
+      .catch((err) =>
+        console.error(
+          '[session-watch] external turn-end watch push failed:',
+          err,
+        ),
+      );
+  }
+
+  notifyExternalTurnOutcome(params.terminalGeneration, {
+    success: params.succeeded,
+    text: params.text,
+    ...(params.durationMs !== undefined ? { durationMs: params.durationMs } : {}),
+    ...(params.usage ? { usage: params.usage } : {}),
+    ...(params.error ? { error: params.error } : {}),
+  });
+  clearExternalTurnActivityFacts(params.turnActivityFacts);
+
+  setExternalSessionState('idle');
+  if (params.succeeded) {
+    fireExternalImCallback('complete', buildImCompletePayload(params.text));
+  } else {
+    fireExternalImCallback(
+      'error',
+      buildImErrorPayload(
+        params.error ?? 'external runtime turn did not complete successfully',
+      ),
+    );
+  }
+  finalizeExternalActiveRequest(params.succeeded ? 'completed' : 'failed');
+}
+
+function settlePendingBackgroundTurn(): boolean {
+  const settlement = pendingBackgroundTurnSettlement;
+  if (!settlement) return false;
+  pendingBackgroundTurnSettlement = null;
+  if (settlement.runtimeGeneration !== getExternalRuntimeGeneration()) {
+    return false;
+  }
+  const completionTerminal = recordExternalCompletionTerminal('complete');
+  const durationMs =
+    settlement.startedAt > 0 ? Date.now() - settlement.startedAt : undefined;
+  broadcast(
+    'chat:message-complete',
+    withSessionCompletionTerminal(
+      {
+        ...(settlement.assistantMessageId
+          ? { assistant_message_id: settlement.assistantMessageId }
+          : {}),
+        ...(durationMs ? { duration_ms: durationMs } : {}),
+        completed_at: new Date().toISOString(),
+      },
+      completionTerminal,
+    ),
+  );
+  emitSettledExternalTurnCallbacks({
+    sessionId: settlement.sessionId || getExternalLifecycleSessionId(),
+    turnId: settlement.turnId,
+    terminalGeneration: settlement.terminalGeneration,
+    succeeded: true,
+    text: settlement.latestText,
+    durationMs,
+    usage: settlement.usage,
+    inboxMetas: settlement.inboxMetas,
+    attachmentHints: settlement.attachmentHints,
+    turnActivityFacts: settlement.turnActivityFacts,
+  });
+  clearWatchdogIfDispatchSettled();
+  void applyPendingExternalProcessConfigInvalidation()
+    .catch((error) => {
+      console.warn(
+        '[external-session] deferred config invalidation after background work failed:',
+        summarizeExternalRuntimeMessageForLog(error),
+      );
+    })
+    .finally(() => {
+      setTimeout(() => drainExternalQueueAfterTurn(), 0);
+      clearExternalTurnTrace();
+    });
+  return true;
+}
+
 /** Flush accumulated content blocks, persist to SessionStore, and broadcast completion.
  * Called by both turn_complete (Codex) and session_complete (CC) to avoid duplication. */
 async function persistTurnResult(
@@ -9745,7 +9990,61 @@ async function persistTurnResult(
   const turnContextUsage = getExternalCurrentTurnContextUsage();
   const runtimeType = getCurrentRuntimeType();
   const runtimeSource = getCurrentRuntimeSource();
+  const runtimeGenerationAtEntry = getExternalRuntimeGeneration();
   const lifecycleSessionId = getExternalLifecycleSessionId();
+  const turnStartTimeAtEntry = getExternalTurnStartTime();
+  const turnUsageSummary = settledTurnUsage
+    ? {
+        inputTokens: settledTurnUsage.inputTokens,
+        outputTokens: settledTurnUsage.outputTokens,
+      }
+    : undefined;
+  // Synchronously preserve/merge deferred settlement state before any await when
+  // Antigravity launches detached subagents. Stop/crash/continuation races during
+  // disk persistence then always observe the exact open turn owner and reply slot.
+  let entryDeferredSettlement: PendingBackgroundTurnSettlement | null = null;
+  if (
+    turnSucceededAtTerminal &&
+    runtimeType === 'antigravity' &&
+    (pendingBackgroundTurnSettlement !== null ||
+      getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true)
+  ) {
+    if (
+      pendingBackgroundTurnSettlement &&
+      pendingBackgroundTurnSettlement.runtimeGeneration === runtimeGenerationAtEntry
+    ) {
+      pendingBackgroundTurnSettlement.terminalGeneration = terminalGeneration;
+      pendingBackgroundTurnSettlement.inboxMetas = mergeUniqueInboxMetas(
+        pendingBackgroundTurnSettlement.inboxMetas,
+        turnInboxMetas,
+      );
+      pendingBackgroundTurnSettlement.attachmentHints = [
+        ...pendingBackgroundTurnSettlement.attachmentHints,
+        ...turnAttachmentHints,
+      ];
+      pendingBackgroundTurnSettlement.turnActivityFacts =
+        pendingBackgroundTurnSettlement.turnActivityFacts ?? turnActivityFacts;
+      pendingBackgroundTurnSettlement.usage = mergeExternalTurnUsageSummary(
+        pendingBackgroundTurnSettlement.usage,
+        turnUsageSummary,
+      );
+      entryDeferredSettlement = pendingBackgroundTurnSettlement;
+    } else {
+      pendingBackgroundTurnSettlement = {
+        runtimeGeneration: runtimeGenerationAtEntry,
+        terminalGeneration,
+        sessionId: lifecycleSessionId,
+        turnId: resultTurnId,
+        startedAt: turnStartTimeAtEntry || Date.now(),
+        inboxMetas: [...turnInboxMetas],
+        attachmentHints: [...turnAttachmentHints],
+        turnActivityFacts,
+        latestText: '',
+        usage: turnUsageSummary,
+      };
+      entryDeferredSettlement = pendingBackgroundTurnSettlement;
+    }
+  }
   const turnModel = settledTurnUsage?.model
     || getExternalRuntimeLiveReportedModel() || getExternalRuntimeDesiredModel() || null;
   let providerAnalytics = runtimeProviderAnalytics(runtimeType);
@@ -9818,6 +10117,13 @@ async function persistTurnResult(
     capturedReplyText = productTranscript
       ? getLastExternalAssistantTextFromTranscript()
       : getExternalTurnContentSnapshotText(turnContentSnapshot);
+    if (
+      pendingBackgroundTurnSettlement &&
+      pendingBackgroundTurnSettlement.runtimeGeneration === runtimeGenerationAtEntry &&
+      capturedReplyText.trim()
+    ) {
+      pendingBackgroundTurnSettlement.latestText = capturedReplyText;
+    }
 
     // PRD 0.2.15 Review A4 fix — drain in-flight attachment saves so the
     // placeholder attachments embedded in the turn's content blocks get patched
@@ -9917,7 +10223,9 @@ async function persistTurnResult(
         );
       }
     }
+    const deferredCancelled = entryDeferredSettlement?.terminated === true;
     if (
+      !deferredCancelled &&
       turnSucceededAtTerminal &&
       persistResult.ok &&
       assistantChannelDeliveryBatch
@@ -9934,11 +10242,33 @@ async function persistTurnResult(
       },
     });
 
+    const deferringForBackgroundWork =
+      !deferredCancelled &&
+      turnSucceededAtTerminal &&
+      !persistFailed &&
+      pendingBackgroundTurnSettlement !== null &&
+      pendingBackgroundTurnSettlement.runtimeGeneration === runtimeGenerationAtEntry &&
+      (getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true ||
+        !isExternalTurnGenerationCurrent(terminalGeneration));
+    if (
+      deferringForBackgroundWork &&
+      pendingBackgroundTurnSettlement &&
+      persistResult.assistantMessageId
+    ) {
+      pendingBackgroundTurnSettlement.assistantMessageId =
+        persistResult.assistantMessageId;
+    }
     const completionStatus =
       turnSucceededAtTerminal && !persistFailed ? 'complete' : 'error';
     const completionTerminal =
-      recordExternalCompletionTerminal(completionStatus);
-    if (persistFailed) {
+      deferredCancelled || deferringForBackgroundWork
+        ? null
+        : recordExternalCompletionTerminal(completionStatus);
+    if (deferredCancelled) {
+      // Stop, crash, or watchdog timeout already settled this deferred turn
+      // while disk persistence was awaiting. Do not emit a contradictory
+      // completion or error broadcast.
+    } else if (persistFailed) {
       if (isExternalTurnGenerationCurrent(terminalGeneration)) {
         setExternalLastTurnSucceeded(false);
       }
@@ -10051,95 +10381,103 @@ async function persistTurnResult(
       }
     }
     const finalizedTurnSucceeded = turnSucceededAtTerminal && !persistFailed;
-    // PRD 0.2.18 Session Inbox — reply pushback for external runtime.
-    // Use the meta/hints snapshotted at entry (NOT module-level slots, which
-    // may have been overwritten by a concurrent sendExternalMessage during
-    // the await chain above).
     const lifecycleSessionId = getExternalLifecycleSessionId();
-    if (lifecycleSessionId) {
-      const watchText = capturedReplyText || getExternalAssistantText().trim();
-      const watchError = finalizedTurnSucceeded
-        ? undefined
-        : {
-            code: 'turn_failed',
-            message:
-              persistFailureReason ??
-              'external runtime turn did not complete successfully',
-          };
-      void import('../inbox/watch-deliver')
-        .then(({ deliverSessionWatchEvents }) =>
-          deliverSessionWatchEvents(lifecycleSessionId, {
-            text: watchText,
-            turnId: resultTurnId, terminalStatus: finalizedTurnSucceeded ? 'complete' : 'error',
-            requestEventIds: turnInboxMetas.map(meta => meta.originalMessageId),
-            error: watchError,
-            attachmentHints:
-              turnAttachmentHints.length > 0 ? turnAttachmentHints : undefined,
-          }, turnInboxMetas),
-        )
-        .catch((err) =>
-          console.error(
-            '[session-watch] external turn-end watch push failed:',
-            err,
-          ),
+    const fallbackReplyText = capturedReplyText || getExternalAssistantText().trim();
+    const deferredCancelledInFinally = entryDeferredSettlement?.terminated === true;
+    const stillPendingBackground =
+      !deferredCancelledInFinally &&
+      finalizedTurnSucceeded &&
+      pendingBackgroundTurnSettlement !== null &&
+      pendingBackgroundTurnSettlement.runtimeGeneration === runtimeGenerationAtEntry &&
+      (getExternalActiveProcess()?.hasPendingBackgroundWork?.() === true ||
+        !isExternalTurnGenerationCurrent(terminalGeneration));
+
+    if (deferredCancelledInFinally) {
+      // Stop, crash, or watchdog timeout already settled this deferred turn
+      // while persistence was in flight. Only finish local idle/watchdog/queue
+      // cleanup if no newer turn has replaced this generation.
+      if (
+        getExternalRuntimeGeneration() === runtimeGenerationAtEntry &&
+        !isExternalTurnBusy()
+      ) {
+        setExternalSessionState('idle');
+      }
+      clearWatchdogIfDispatchSettled();
+      setTimeout(() => drainExternalQueueAfterTurn(), 0);
+      clearExternalTurnTrace();
+    } else if (stillPendingBackground) {
+      // The prompt and detached child work have different terminal boundaries.
+      // Keep the IM ReplySlot, Task/Goal turn binding, and running/Stop surface
+      // open until Antigravity's launched children and parent summary settle.
+      if (fallbackReplyText && pendingBackgroundTurnSettlement) {
+        pendingBackgroundTurnSettlement.latestText = fallbackReplyText;
+      }
+      setExternalSessionState('running');
+      resetWatchdog();
+      try {
+        await reconcileDshExtensionsAtTurnBoundary();
+      } catch (error) {
+        console.warn(
+          '[external-session] DSH extension boundary reconciliation failed:',
+          summarizeExternalRuntimeMessageForLog(error),
         );
-    }
-
-    notifyExternalTurnOutcome(terminalGeneration, {
-      success: finalizedTurnSucceeded,
-      text: capturedReplyText || getExternalAssistantText().trim(),
-      ...(settledTurnDurationMs !== undefined
-        ? { durationMs: settledTurnDurationMs }
-        : {}),
-      ...(settledTurnUsage
-        ? {
-            usage: {
-              inputTokens: settledTurnUsage.inputTokens,
-              outputTokens: settledTurnUsage.outputTokens,
-            },
-          }
-        : {}),
-      ...(persistFailureReason ? { error: persistFailureReason } : {}),
-    });
-    clearExternalTurnActivityFacts(turnActivityFacts);
-
-    // The prompt and detached child work have different terminal boundaries.
-    // Preserve the existing running/Stop surface while AGY still owns work.
-    setExternalSessionState(getExternalActiveProcess()?.hasPendingBackgroundWork?.() ? 'running' : 'idle');
-    if (finalizedTurnSucceeded) {
-      fireExternalImCallback(
-        'complete',
-        buildImCompletePayload(
-          capturedReplyText || getExternalAssistantText().trim(),
-        ),
-      );
+      }
+      await applyPendingExternalProcessConfigInvalidation();
     } else {
-      fireExternalImCallback(
-        'error',
-        buildImErrorPayload(
-          persistFailureReason ??
-            'external runtime turn did not complete successfully',
-        ),
-      );
+      const deferredSettlement =
+        pendingBackgroundTurnSettlement &&
+        pendingBackgroundTurnSettlement.runtimeGeneration === runtimeGenerationAtEntry
+          ? pendingBackgroundTurnSettlement
+          : null;
+      if (deferredSettlement) {
+        pendingBackgroundTurnSettlement = null;
+      }
+
+      const settledText = fallbackReplyText || deferredSettlement?.latestText || '';
+      const settledInboxMetas = deferredSettlement
+        ? deferredSettlement.inboxMetas
+        : turnInboxMetas;
+      const settledAttachmentHints = deferredSettlement
+        ? deferredSettlement.attachmentHints
+        : turnAttachmentHints;
+      const settledActivityFacts =
+        deferredSettlement?.turnActivityFacts ?? turnActivityFacts;
+      const settledDurationMs = deferredSettlement
+        ? deferredSettlement.startedAt > 0
+          ? Date.now() - deferredSettlement.startedAt
+          : settledTurnDurationMs
+        : settledTurnDurationMs;
+      const settledUsage = deferredSettlement?.usage ?? turnUsageSummary;
+
+      emitSettledExternalTurnCallbacks({
+        sessionId: lifecycleSessionId || deferredSettlement?.sessionId || '',
+        turnId: resultTurnId ?? deferredSettlement?.turnId,
+        terminalGeneration,
+        succeeded: finalizedTurnSucceeded,
+        text: settledText,
+        error: persistFailureReason,
+        durationMs: settledDurationMs,
+        usage: settledUsage,
+        inboxMetas: settledInboxMetas,
+        attachmentHints: settledAttachmentHints,
+        turnActivityFacts: settledActivityFacts,
+      });
+      clearWatchdogIfDispatchSettled();
+      try {
+        await reconcileDshExtensionsAtTurnBoundary();
+      } catch (error) {
+        console.warn(
+          '[external-session] DSH extension boundary reconciliation failed:',
+          summarizeExternalRuntimeMessageForLog(error),
+        );
+      }
+      await applyPendingExternalProcessConfigInvalidation();
+      // Mid-turn queue drain: a turn just ended (completed OR interrupted via force) → surface +
+      // send the next queued desktop message. Deferred to the next macrotask so queue:started
+      // never races chat:message-complete / chat:status idle on the SSE wire.
+      setTimeout(() => drainExternalQueueAfterTurn(), 0);
+      clearExternalTurnTrace();
     }
-    // Pattern B/C: turn complete — clear active trace ID + unregister from registry.
-    finalizeExternalActiveRequest(
-      finalizedTurnSucceeded ? 'completed' : 'failed',
-    );
-    try {
-      await reconcileDshExtensionsAtTurnBoundary();
-    } catch (error) {
-      console.warn(
-        '[external-session] DSH extension boundary reconciliation failed:',
-        summarizeExternalRuntimeMessageForLog(error),
-      );
-    }
-    await applyPendingExternalProcessConfigInvalidation();
-    // Mid-turn queue drain: a turn just ended (completed OR interrupted via force) → surface +
-    // send the next queued desktop message. Deferred to the next macrotask so queue:started
-    // never races chat:message-complete / chat:status idle on the SSE wire.
-    setTimeout(() => drainExternalQueueAfterTurn(), 0);
-    clearExternalTurnTrace();
   }
 }
 
@@ -10688,8 +11026,13 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       break;
 
     case 'background_work_settled':
-      if (isExternalTurnCompleted()) setExternalSessionState('idle');
-      scheduleExternalQueueDrainAfterTurnBoundary();
+      if (isExternalTurnCompleted() && !isExternalTurnFinalizationInFlight()) {
+        if (!settlePendingBackgroundTurn()) {
+          setExternalSessionState('idle');
+          clearWatchdogIfDispatchSettled();
+          scheduleExternalQueueDrainAfterTurnBoundary();
+        }
+      }
       break;
 
     case 'turn_started':
@@ -11514,7 +11857,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
     case 'turn_complete': {
       if (getExternalUserRequestedStop() && isExternalTurnCompleted()) break;
       // Mark turn complete — session_complete will follow for CC -p mode
-      if (!hasExternalSendInFlight()) clearWatchdog();
+      if (!hasExternalSendInFlight() && !hasPendingAntigravityWork()) clearWatchdog();
       // Defensive fallback: Codex should emit item/started userMessage for
       // accepted turn/steer input. If an older app-server does not, promote an
       // RPC-acknowledged pill at the turn boundary. An unresolved RPC is not
@@ -11537,6 +11880,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
       const terminalGeneration = getExternalTurnTerminalGeneration();
 
       if (turnPlan.kind !== 'persist-success') {
+        const failedDeferred =
+          turnPlan.kind === 'defer-to-stop'
+            ? null
+            : cancelPendingBackgroundTurnSettlement();
+        if (!hasExternalSendInFlight()) clearWatchdog();
         const message = turnPlan.message;
         let dshTerminalSettlement: Promise<void> | null = null;
         if (
@@ -11566,10 +11914,15 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
         }
         let completionTerminal: SessionCompletionTerminal | null = null;
         if (
-          terminalGeneration > terminalGenerationBefore &&
-          turnPlan.kind === 'failure'
+          turnPlan.kind === 'failure' &&
+          (terminalGeneration > terminalGenerationBefore || failedDeferred !== null)
         ) {
-          const terminalText = currentExternalTurnTextSnapshot();
+          const terminalText =
+            currentExternalTurnTextSnapshot() || failedDeferred?.latestText || '';
+          const effectiveTerminalGen =
+            terminalGeneration > terminalGenerationBefore
+              ? terminalGeneration
+              : failedDeferred!.terminalGeneration;
           if (turnPlan.cleanup === 'stopped') {
             completionTerminal = finalizeStoppedExternalTurn(
               terminalText,
@@ -11577,10 +11930,13 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
             );
           } else {
             completionTerminal = notifyFailedExternalTurn(
-              terminalGeneration,
+              effectiveTerminalGen,
               terminalText,
               message,
             );
+          }
+          if (failedDeferred) {
+            clearExternalTurnActivityFacts(failedDeferred.turnActivityFacts);
           }
         }
         console.warn(
@@ -11590,6 +11946,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
           console.log(
             '[external-session] turn_complete arrived during intentional stop; deferring idle/drain cleanup to stopExternalSession',
           );
+          restoreDeferredInboxMetas(failedDeferred);
           clearExternalPermissionSuggestions();
           drainPendingInteractiveRequestsAsExpired('stop');
           if (dshTerminalSettlement) {
@@ -11619,12 +11976,13 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
             withSessionCompletionTerminal(message, completionTerminal),
           );
         }
+        restoreDeferredInboxMetas(failedDeferred);
         fireExternalImCallback('error', buildImErrorPayload(message));
         finalizeExternalActiveRequest('failed');
         deliverExternalWatchError({
-            turnId: eventExecutionTurnId,
-          sessionId: getExternalLifecycleSessionId(),
-          text: currentExternalTurnTextSnapshot(),
+          turnId: eventExecutionTurnId ?? failedDeferred?.turnId,
+          sessionId: getExternalLifecycleSessionId() || failedDeferred?.sessionId,
+          text: currentExternalTurnTextSnapshot() || failedDeferred?.latestText || '',
           errorCode: cleanup === 'stopped' ? 'session_aborted' : 'turn_failed',
           errorMessage: message,
         });
@@ -11768,6 +12126,7 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
         // idle.
       } else {
         const errorMessage = sessionPlan.message;
+        const crashedDeferred = cancelPendingBackgroundTurnSettlement();
         let completionTerminal: SessionCompletionTerminal | null = null;
         if (
           terminalGeneration > terminalGenerationBefore &&
@@ -11776,11 +12135,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
         ) {
           completionTerminal = notifyFailedExternalTurn(
             terminalGeneration,
-            currentExternalTurnTextSnapshot(),
+            currentExternalTurnTextSnapshot() || crashedDeferred?.latestText || '',
             errorMessage,
           );
         }
-        if (sessionPlan.kind === 'ignore-idle') {
+        if (sessionPlan.kind === 'ignore-idle' && !crashedDeferred) {
           console.log(
             `[external-session] Ignoring idle-exit ${summarizeExternalRuntimeMessageForLog(errorMessage)} — process was between turns; next message will auto-resume`,
           );
@@ -11795,10 +12154,11 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
           console.log(
             `[external-session] Suppressing error banner for intentional interruption (was: ${summarizeExternalRuntimeMessageForLog(errorMessage)})`,
           );
+          restoreDeferredInboxMetas(crashedDeferred);
           deliverExternalWatchError({
-            turnId: eventExecutionTurnId,
-            sessionId: getExternalLifecycleSessionId(),
-            text: currentExternalTurnTextSnapshot(),
+            turnId: eventExecutionTurnId ?? crashedDeferred?.turnId,
+            sessionId: getExternalLifecycleSessionId() || crashedDeferred?.sessionId,
+            text: currentExternalTurnTextSnapshot() || crashedDeferred?.latestText || '',
             errorCode: 'session_aborted',
             errorMessage:
               'external runtime session was stopped before turn completed',
@@ -11837,6 +12197,16 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
               error: summarizeExternalRuntimeMessageForLog(errorMessage),
             },
           });
+          if (crashedDeferred && completionTerminal === null) {
+            completionTerminal = notifyFailedExternalTurn(
+              terminalGeneration,
+              currentExternalTurnTextSnapshot() || crashedDeferred.latestText,
+              errorMessage,
+            );
+            clearExternalTurnActivityFacts(crashedDeferred.turnActivityFacts);
+          } else if (crashedDeferred) {
+            clearExternalTurnActivityFacts(crashedDeferred.turnActivityFacts);
+          }
           if (!isExternalTurnCompleted()) {
             void persistExternalPartialAssistantProjection('error').catch(
               (error) => {
@@ -11855,11 +12225,13 @@ function applyUnifiedEvent(event: UnifiedEvent): void {
             'chat:message-error',
             withSessionCompletionTerminal(errorMessage, completionTerminal),
           );
+          restoreDeferredInboxMetas(crashedDeferred);
           fireExternalImCallback('error', buildImErrorPayload(errorMessage));
+          finalizeExternalActiveRequest('failed');
           deliverExternalWatchError({
-            turnId: eventExecutionTurnId,
-            sessionId: getExternalLifecycleSessionId(),
-            text: currentExternalTurnTextSnapshot(),
+            turnId: eventExecutionTurnId ?? crashedDeferred?.turnId,
+            sessionId: getExternalLifecycleSessionId() || crashedDeferred?.sessionId,
+            text: currentExternalTurnTextSnapshot() || crashedDeferred?.latestText || '',
             errorCode: 'turn_failed',
             errorMessage,
           });

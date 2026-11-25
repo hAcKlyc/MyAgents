@@ -2309,6 +2309,88 @@ describe('session-engine selector and adapters', () => {
     );
   });
 
+  it('defaults unspecified Antigravity scheduled Task turns to dangerously-skip-permissions while honoring explicit overrides', async () => {
+    mocks.state.useExternal = true;
+    mocks.getActiveRuntimeType.mockReturnValue('antigravity');
+    mocks.state.sessionMetadata.set('agy-task-session', {
+      id: 'agy-task-session',
+      agentDir: '/workspace',
+      title: 'AGY Task',
+      runtime: 'antigravity',
+      runtimeSource: 'system-cli',
+      permissionMode: 'accept-edits',
+      configSnapshotAt: '2026-11-22T00:00:00.000Z',
+      createdAt: '2026-11-22T00:00:00.000Z',
+      lastActiveAt: '2026-11-22T00:00:00.000Z',
+    });
+    mocks.getCurrentBoundSessionId.mockReturnValue('agy-task-session');
+    mocks.isExternalSessionStateRestoredFor.mockReturnValue(true);
+
+    const omittedResult = await getSessionEngine().prepareScheduledTurn({
+      sessionId: 'agy-task-session',
+      workspacePath: '/workspace',
+      scenario: {
+        type: 'cron',
+        taskId: 'task-agy-default',
+        intervalMinutes: 15,
+        aiCanExit: false,
+      },
+      operation: {
+        kind: 'task',
+        initializeSession: false,
+        beforeDispatch: vi.fn(async () => ({ accepted: true })),
+      },
+    });
+    expect(omittedResult).toMatchObject({
+      success: true,
+      permissionMode: 'dangerously-skip-permissions',
+    });
+
+    const emptyResult = await getSessionEngine().prepareScheduledTurn({
+      sessionId: 'agy-task-session',
+      workspacePath: '/workspace',
+      scenario: {
+        type: 'cron',
+        taskId: 'task-agy-empty',
+        intervalMinutes: 15,
+        aiCanExit: false,
+      },
+      operation: {
+        kind: 'task',
+        initializeSession: false,
+        permissionMode: '',
+        beforeDispatch: vi.fn(async () => ({ accepted: true })),
+      },
+    });
+    expect(emptyResult).toMatchObject({
+      success: true,
+      permissionMode: 'dangerously-skip-permissions',
+    });
+
+    const explicitResult = await getSessionEngine().prepareScheduledTurn({
+      sessionId: 'agy-task-session',
+      workspacePath: '/workspace',
+      scenario: {
+        type: 'cron',
+        taskId: 'task-agy-explicit',
+        intervalMinutes: 15,
+        aiCanExit: false,
+      },
+      operation: {
+        kind: 'task',
+        initializeSession: false,
+        permissionMode: 'auto',
+        beforeDispatch: vi.fn(async () => ({ accepted: true })),
+      },
+    });
+    expect(explicitResult).toMatchObject({
+      success: true,
+      permissionMode: 'auto',
+    });
+    // Existing persisted session snapshot must never be mutated by Task preparation.
+    expect(mocks.state.sessionMetadata.get('agy-task-session')?.permissionMode).toBe('accept-edits');
+  });
+
   it('does not overwrite a coherently bound external Session before a scheduled turn', async () => {
     mocks.state.useExternal = true;
     mocks.getCurrentBoundSessionId.mockReturnValue('external-session');

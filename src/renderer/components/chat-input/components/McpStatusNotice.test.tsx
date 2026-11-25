@@ -24,10 +24,14 @@ describe('MCP status and explicit retry', () => {
     expect(screen.queryByText('upstream-new-code')).not.toBeInTheDocument();
   });
 
-  it('distinguishes stale observation, authorization and ready state', () => {
+  it('distinguishes stale observation, unreported CLI catalog, authorization and ready state', () => {
     const retry = vi.fn();
     const view = render(notice({ stale: true }));
     expect(screen.getByText('状态待确认')).toBeInTheDocument();
+    view.rerender(notice({ server: { ...failed, state: 'unreported', errorCode: undefined }, onRetry: retry }));
+    expect(screen.getByText('已传入会话，CLI 未上报工具目录')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(view.container.querySelector('.bg-amber-500')).toBeNull();
     view.rerender(notice({ server: { ...failed, state: 'needs_auth' }, onRetry: retry }));
     expect(screen.getByText('需要登录授权')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

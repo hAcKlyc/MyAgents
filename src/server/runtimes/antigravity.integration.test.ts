@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { setSidecarPort } from "../session-core/sidecar-port";
 import * as subprocess from "../utils/subprocess";
 import type { UnifiedEvent } from "./types";
 import { AntigravityRuntime } from "./antigravity";
@@ -1004,4 +1005,79 @@ lines.on('line', line => {
     if (prevHome === undefined) delete process.env[homeKey];
     else process.env[homeKey] = prevHome;
   }
+});
+
+it("propagates session-scoped internal myagents CLI env and bin PATH precedence to agy", async () => {
+  const { options, receive, spawn } = await setup();
+  vi.stubEnv("MYAGENTS_INTERNAL_CLI_TOKEN", "internal-cli-test-token");
+  setSidecarPort(41234);
+  try {
+    processHandle = await runtime.startSession(
+      { ...options, sessionId: "product-session-cli-env" },
+      receive,
+    );
+    const spawnEnv = spawn.mock.calls[0]?.[1]?.env as Record<string, string | undefined>;
+    expect(spawnEnv).toBeDefined();
+    expect(spawnEnv.MYAGENTS_PORT).toBe("41234");
+    expect(spawnEnv.MYAGENTS_INTERNAL_CLI_TOKEN).toBe("internal-cli-test-token");
+    expect(spawnEnv.MYAGENTS_SESSION_ID).toBe("product-session-cli-env");
+    expect(spawnEnv.PWD).toBe(options.workspacePath);
+    const pathKey = process.platform === "win32" ? "Path" : "PATH";
+    const home = (process.platform === "win32" ? spawnEnv.USERPROFILE : spawnEnv.HOME) || homedir();
+    const firstPathEntry = (spawnEnv[pathKey] ?? "").split(delimiter)[0];
+    expect(firstPathEntry).toBe(join(home, ".myagents", "bin"));
+  } finally {
+    setSidecarPort(0);
+    vi.unstubAllEnvs();
+  }
+});
+
+it("emits accurate MCP dispatch semantics instead of status_read_failed", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  const emptyMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(emptyMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "settled", releaseReason: "ready" },
+    servers: [],
+    tools: [],
+  });
+  await runtime.stopSession(processHandle);
+  processHandle = undefined;
+
+  events.length = 0;
+  processHandle = await runtime.startSession(
+    {
+      ...options,
+      mcpServers: [
+        { id: "local-tool", name: "Local Tool", type: "stdio", command: process.execPath, args: ["-v"], isBuiltin: false },
+      ],
+    },
+    receive,
+  );
+  const projectedMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(projectedMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "released", releaseReason: "status_unreported" },
+    servers: [expect.objectContaining({ id: "local-tool", desired: true, state: "unreported" })],
+  });
+  await runtime.stopSession(processHandle);
+  processHandle = undefined;
+
+  events.length = 0;
+  processHandle = await runtime.startSession(
+    {
+      ...options,
+      mcpServers: [
+        { id: "bad-remote", name: "Bad Remote", type: "http", url: "https://example.invalid/mcp", isBuiltin: false },
+      ],
+    },
+    receive,
+  );
+  const failedMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(failedMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "released", releaseReason: "terminal_status" },
+    servers: [expect.objectContaining({ id: "bad-remote", desired: true, state: "failed" })],
+  });
 });
