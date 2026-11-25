@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.17] - 2026-11-26
+
+### Added
+
+- **Antigravity 支持实时追加指令。** 在实时响应模式下，可在当前轮执行时补充要求或调整方向，正在执行的工具可继续工作。
+- **MyAgents CLI 支持按任务选择执行配置。** 启动本机 Agent 的新会话时可以临时选择运行方式、模型、推理强度和权限。CLI 也可以直接创建工作区、套用模板或一次更新多项 Agent 设置。
+
+### Fixed
+
+- **Antigravity 会话启动与恢复更稳定。** 自动识别当前可用的推理档位和权限选项，遇到当前环境不支持的权限模式时给出明确提示。
+- **Antigravity 后台工作能正确等待和收尾。** 等待后台命令或子 Agent 时更少误超时，IM 和自动化任务会等主 Agent 汇总后再报告完成。
+- **Antigravity 工作区更易复用。** 可发现 MyAgents 已启用的 Skills，避免重复读取同一份工作区规则，并准确提示尚未获知的 MCP 状态。
+
+---
+
 ## [0.5.16] - 2026-11-25
 
 ### Fixed
