@@ -1,5 +1,6 @@
 import type { AgentConfig } from '../../shared/types/agent';
 import type { RuntimeSource, RuntimeType } from '../../shared/types/runtime';
+import type { SessionBirthOverrides } from '../../shared/sessionPermissionCeiling';
 import { deriveSessionTitle } from '../../shared/sessionTitle';
 import {
   claimPreparedSessionForTurnAdmission,
@@ -20,6 +21,7 @@ export interface FreshSessionStartContext {
   runtime: RuntimeType;
   runtimeSource?: RuntimeSource;
   managedCodexProviderReady?: boolean;
+  birthOverrides?: SessionBirthOverrides;
 }
 
 export type FreshSessionInjector = (
@@ -80,6 +82,7 @@ export async function handleFreshSessionStart(
     runtimeOverride: context.runtime,
     runtimeSourceOverride: context.runtimeSource,
     managedCodexProviderReady: context.managedCodexProviderReady,
+    birthOverrides: context.birthOverrides,
     title: deriveSessionTitle(message.text, 40) || 'New Chat',
     origin,
   });

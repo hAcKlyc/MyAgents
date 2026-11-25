@@ -26,6 +26,7 @@ import {
   printGoalResult,
   printResult,
   publicCliHelp,
+  readGuardedStdinText,
   readWorkspaceTextFile,
   rejectUnsupportedSpaceDryRun,
   resolveCliPort,
@@ -118,7 +119,8 @@ describe('Session observation CLI', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((code) => { throw new Error(`exit:${code}`); });
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
-      expect(() => buildRequestBody(group, action, [...rest], flags)).toThrow('exit:2');
+      const expectedExit = group === 'session' && action === 'watch' ? 'exit:3' : 'exit:2';
+      expect(() => buildRequestBody(group, action, [...rest], flags)).toThrow(expectedExit);
     } finally { exit.mockRestore(); error.mockRestore(); }
   });
 
@@ -2240,7 +2242,7 @@ describe('myagents CLI Agent / Session collaboration contracts', () => {
         promptFile: '/definitely/missing/myagents-prompt.txt',
       })).toThrow('process.exit(3)');
       expect(() => buildRequestBody('agent', 'create', [], {})).toThrow('process.exit(2)');
-      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('process.exit(1)');
+      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('process.exit(2)');
       expect(() => buildRequestBody('session', 'get', ['session-1'], { limit: 0 }))
         .toThrow('process.exit(2)');
       expect(() => buildRequestBody('session', 'get', ['session-1'], { limit: 501 }))
@@ -2931,10 +2933,110 @@ describe('internal CLI command admission', () => {
     [[], { frobnicate: true }],
     [['session', 'get', 'session-id'], { bogusflag: true }],
     [['task', 'create-direct'], { totallyBogusFlag: 'yes' }],
-    [['session', 'start'], { model: 'ignored-model' }],
+    [['session', 'start'], { mcpEnabledServers: '["playwright"]' }],
     [['agent', 'channel'], { frobnicate: true }],
   ])('rejects silently ignored options before dispatch', (positional, flags) => {
     expect(validateInternalCliInvocation(positional as string[], flags)).toMatchObject({ code: 'UNKNOWN_FLAG' });
+  });
+  it('admits one-shot local session start overrides and forwards them cleanly in buildRequestBody', () => {
+    const parsed = parseArgs([
+      'session',
+      'start',
+      '--agent',
+      'agent-1',
+      '--runtime',
+      'codex',
+      '--model',
+      'gpt-5.5',
+      '--reasoningEffort',
+      'high',
+      '--permissionMode',
+      'suggest',
+      '-p',
+      'Audit this change',
+    ]);
+    expect(validateInternalCliInvocation(parsed.positional, parsed.flags)).toBeUndefined();
+    expect(validateExternalCliInvocation(parsed.positional, parsed.flags)).toBeUndefined();
+    expect(buildRequestBody('session', 'start', parsed.positional.slice(2), parsed.flags)).toEqual({
+      agentId: 'agent-1',
+      prompt: 'Audit this change',
+      replyBack: true,
+      runtime: 'codex',
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      permissionMode: 'suggest',
+    });
+  });
+  it('reads guarded stdin text for --prompt-file - and rejects TTY, NUL, and >1MB inputs', () => {
+    const payload = Buffer.from('line 1\nline 2\n', 'utf8');
+    let offset = 0;
+    const text = readGuardedStdinText(1024, {
+      isTTY: false,
+      readChunk: (buf) => {
+        if (offset >= payload.length) return 0;
+        const n = payload.copy(buf, 0, offset, Math.min(offset + 5, payload.length));
+        offset += n;
+        return n;
+      },
+    });
+    expect(text).toBe('line 1\nline 2\n');
+
+    expect(() => readGuardedStdinText(1024, { isTTY: true })).toThrow(/TTY/);
+    expect(() => {
+      let sent = false;
+      readGuardedStdinText(1024, {
+        isTTY: false,
+        readChunk: (buf) => {
+          if (sent) return 0;
+          sent = true;
+          return Buffer.from('abc\0def').copy(buf);
+        },
+      });
+    }).toThrow(/NUL/);
+    expect(() => {
+      readGuardedStdinText(10, {
+        isTTY: false,
+        readChunk: (buf) => Buffer.from('0123456789ab').copy(buf),
+      });
+    }).toThrow(/limit/);
+  });
+  it('enforces exit code 3 for session send/watch/start argument errors, exit code 2 for session get, and renders effectiveConfig', () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((code) => {
+      throw new Error(`EXIT:${String(code)}`);
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(() => buildRequestBody('session', 'send', [], { prompt: 'hi' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'watch', [], {})).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'watch', ['s1'], { prompt: 'hi' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'start', [], { agent: 'a1', prompt: 'hi', promptFile: '-' })).toThrow('EXIT:3');
+      expect(() => buildRequestBody('session', 'get', [], {})).toThrow('EXIT:2');
+
+      printResult('session', 'start', {
+        success: true,
+        accepted: true,
+        agentId: 'agent-1',
+        sessionId: 'sess-1',
+        messageId: 'msg-1',
+        replyBack: true,
+        effectiveConfig: {
+          runtime: 'codex',
+          model: 'gpt-5.5',
+          reasoningEffort: 'high',
+          permissionMode: 'no-restrictions',
+        },
+      }, false);
+      const output = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+      expect(output).toContain('runtime=codex');
+      expect(output).toContain('model=gpt-5.5');
+      expect(output).toContain('permission=no-restrictions');
+      expect(output).toContain('do not poll session state');
+    } finally {
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
   it('rejects a positional argument on readme and preserves real Record filters', () => {
     expect(validateInternalCliInvocation(['vision', 'readme', 'extra-arg'], {})).toMatchObject({ code: 'ARGUMENT_INVALID' });

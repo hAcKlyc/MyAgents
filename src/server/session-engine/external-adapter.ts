@@ -578,6 +578,7 @@ export function createExternalSessionEngine(): SessionEngine {
             model: config.model,
             permissionMode: config.permissionMode,
             reasoningEffort: config.reasoningEffort ?? 'default',
+            ...(config.providerRoute ? { providerRoute: config.providerRoute } : {}),
           } : {}),
           inboxMeta: request.inboxMeta,
           metadataBirthPending: request.allowLazySessionMaterialization === true,

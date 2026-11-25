@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentConfig } from '../../shared/types/agent';
+import { IMAGE_UNDERSTANDING_TOOL_ID } from '../../shared/official-tools';
 import {
   bindOwnedSnapshotToRuntimeIdentity,
   createMaterializedSessionMetadata,
@@ -229,5 +230,148 @@ describe('createMaterializedSessionMetadata', () => {
     expect(meta.permissionMode).toBeUndefined();
     expect(meta.configSnapshotAt).toBeUndefined();
     expect(meta.title).toBe('Agent');
+  });
+
+  it('applies one-shot birthOverrides to SessionMetadata without mutating the source AgentConfig', () => {
+    const sourceAgent = makeAgent({
+      runtime: 'antigravity',
+      providerId: 'codex-sub',
+      model: 'claude-opus-4-7',
+      permissionMode: 'fullAgency',
+      mcpEnabledServers: ['playwright'],
+      enabledPluginIds: ['my-plugin@local'],
+      enabledOfficialToolIds: [IMAGE_UNDERSTANDING_TOOL_ID],
+      runtimeConfig: {
+        source: 'system-cli',
+        model: 'gemini-4-neon',
+        permissionMode: 'dangerously-skip-permissions',
+      },
+    });
+    const beforeSnapshot = JSON.stringify(sourceAgent);
+
+    const dshMeta = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'dsh-override-session',
+      scenario: 'desktop',
+      agent: sourceAgent,
+      runtimeOverride: 'dsh',
+      runtimeSourceOverride: 'integrated',
+      birthOverrides: {
+        runtime: 'dsh',
+        runtimeSource: 'integrated',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        reasoningEffort: 'high',
+        permissionMode: 'full-autonomous',
+      },
+    });
+
+    expect(dshMeta.runtime).toBe('dsh');
+    expect(dshMeta.runtimeSource).toBe('integrated');
+    expect(dshMeta.providerId).toBe('deepseek');
+    expect(dshMeta.model).toBe('deepseek-v4-pro');
+    expect(dshMeta.providerRoute).toMatchObject({ providerId: 'deepseek', model: 'deepseek-v4-pro' });
+    expect(dshMeta.reasoningEffort).toBe('high');
+    expect(dshMeta.permissionMode).toBe('full-autonomous');
+    expect(dshMeta.mcpEnabledServers).toEqual(['playwright']);
+    expect(dshMeta.enabledPluginIds).toEqual(['my-plugin@local']);
+    expect(dshMeta.enabledOfficialToolIds).toEqual([IMAGE_UNDERSTANDING_TOOL_ID]);
+    expect(dshMeta.configSnapshotAt).toBeTruthy();
+    expect(JSON.stringify(sourceAgent)).toBe(beforeSnapshot);
+
+    const codexMeta = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'codex-override-session',
+      scenario: 'desktop',
+      agent: sourceAgent,
+      runtimeOverride: 'codex',
+      runtimeSourceOverride: 'system-cli',
+      birthOverrides: {
+        runtime: 'codex',
+        runtimeSource: 'system-cli',
+        model: 'gpt-5.5',
+        reasoningEffort: 'high',
+        permissionMode: 'no-restrictions',
+      },
+    });
+
+    expect(codexMeta.runtime).toBe('codex');
+    expect(codexMeta.runtimeSource).toBe('system-cli');
+    expect(codexMeta.providerId).toBeUndefined();
+    expect(codexMeta.providerRoute).toBeUndefined();
+    expect(codexMeta.model).toBe('gpt-5.5');
+    expect(codexMeta.reasoningEffort).toBe('high');
+    expect(codexMeta.permissionMode).toBe('no-restrictions');
+    expect(codexMeta.mcpEnabledServers).toEqual(['playwright']);
+    expect(JSON.stringify(sourceAgent)).toBe(beforeSnapshot);
+  });
+
+  it('scrubs stale reasoningEffort and dormant model when birthOverrides switches runtimes without specifying them', () => {
+    const builtinAgent = makeAgent({
+      runtime: 'builtin',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoningEffort: 'max',
+      permissionMode: 'fullAgency',
+      runtimeConfig: { reasoningEffort: 'xhigh' },
+    });
+
+    const dshMeta = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'dsh-no-effort-leak',
+      scenario: 'desktop',
+      agent: builtinAgent,
+      runtimeOverride: 'dsh',
+      runtimeSourceOverride: 'integrated',
+      birthOverrides: {
+        runtime: 'dsh',
+        runtimeSource: 'integrated',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        permissionMode: 'full-autonomous',
+      },
+    });
+    expect(dshMeta.reasoningEffort).toBeUndefined();
+
+    const managedCodexMeta = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'managed-codex-no-effort-leak',
+      scenario: 'desktop',
+      agent: builtinAgent,
+      runtimeOverride: 'codex',
+      runtimeSourceOverride: 'managed-provider',
+      managedCodexProviderReady: true,
+      birthOverrides: {
+        runtime: 'codex',
+        runtimeSource: 'managed-provider',
+        providerId: 'codex-sub',
+        model: 'gpt-5.5',
+        permissionMode: 'no-restrictions',
+      },
+    });
+    expect(managedCodexMeta.reasoningEffort).toBeUndefined();
+    expect(managedCodexMeta.permissionMode).toBe('no-restrictions');
+
+    const externalAgentWithDormantModel = makeAgent({
+      runtime: 'antigravity',
+      providerId: 'custom-p',
+      model: 'stale-dormant-model',
+      reasoningEffort: 'high',
+      runtimeConfig: { source: 'system-cli', model: 'gemini-4-neon', permissionMode: 'dangerously-skip-permissions' },
+    });
+    const switchedToBuiltin = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'builtin-no-dormant-leak',
+      scenario: 'desktop',
+      agent: externalAgentWithDormantModel,
+      runtimeOverride: 'builtin',
+      birthOverrides: {
+        runtime: 'builtin',
+        providerId: 'custom-p',
+        permissionMode: 'fullAgency',
+      },
+    });
+    expect(switchedToBuiltin.model).toBeUndefined();
+    expect(switchedToBuiltin.reasoningEffort).toBeUndefined();
   });
 });

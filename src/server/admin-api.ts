@@ -5053,33 +5053,48 @@ WHEN TO CALL
 EFFECT
   Atomically creates a fresh Session and admits its first prompt. Returns
   immediately after admission; it does not wait for completion.
+  Optional one-shot overrides (--runtime/--providerId/--model/--reasoningEffort/
+  --permissionMode) apply ONLY to this new Session's birth snapshot and NEVER
+  modify the target Agent's persisted defaults or IM Channels.
 
 OPTIONS
-  --agent <agentId>    Required target from agent list
-  -p, --prompt TEXT    Short single-line prompt; exclusive with --prompt-file
-  --prompt-file PATH   Prompt file for multiline/long text (maximum 1 MB)
-  --no-reply           Do not push the target turn result back
-  --json               Machine-readable receipt
+  --agent <agentId>          Required target from agent list
+  -p, --prompt TEXT          Short single-line prompt; exclusive with --prompt-file
+  --prompt-file <path|->     Prompt file or '-' for stdin/heredoc (maximum 1 MB)
+  --runtime <runtime>        Optional one-shot runtime for local Agents (builtin|dsh|claude-code|codex|antigravity)
+  --providerId <id>          Optional one-shot provider for local integrated runtimes
+  --model <id>               Optional one-shot model for local Agents
+  --reasoningEffort <level>  Optional one-shot reasoning effort (default|low|medium|high|...)
+  --permissionMode <mode>    Optional one-shot permission mode (must stay <= target Agent ceiling)
+  --no-reply                 Do not push the target turn result back
+  --json                     Machine-readable receipt
 
 OUTPUT
   accepted asynchronous receipt with agentId, new sessionId, messageId,
-  replyBack, and (when replyBack=true) resultDelivery=send.result. messageId
-  correlates with the later send.result requestEventId. No completion is implied.
+  replyBack, effectiveConfig, and (when replyBack=true) resultDelivery=send.result.
+  messageId correlates with the later send.result requestEventId.
+  When replyBack=true, end your current turn and wait for the system-delivered
+  <myagents-session-event type="send.result"> block — do NOT poll session state in a loop.
 
 IDENTITY / PERMISSIONS
-  Must be called from a real MyAgents Session. The target Agent owns runtime,
-  model, permission, provider, MCP, plugin, and tool defaults; caller overrides
-  are rejected.
+  Internal callers must run from a real MyAgents Session. Local Agents allow
+  one-shot execution overrides under the target Agent's 4-tier permission ceiling
+  (unrestricted aligns to unrestricted; lower tiers never escalate; explicit
+  --permissionMode can only equal or restrict the ceiling). MCP, plugin, and tool
+  overrides are always rejected. Remote ma-agent:1 targets reject all overrides.
 
 EXAMPLES
   myagents session start --agent <agentId> -p "Review this change"
+  myagents session start --agent <agentId> --runtime codex --model gpt-5.5 --prompt-file - <<'EOF'
+  Review the staged changes for edge cases.
+  EOF
   myagents session start --agent <agentId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Agent/lifecycle rejection. Exit 2: delivery rejection, transport
   failure, or admission unconfirmed. Exit 3: local argument error. On an
   unconfirmed receipt, keep its IDs, run session list --agent <agentId>, and do
-  not automatically resend. Inline newline or >4 KB input must use a file.`,
+  not automatically resend. Inline newline or >4 KB input must use --prompt-file.`,
 
   'session/send': `myagents session send <sessionId> — Assign work in existing context
 
@@ -5091,15 +5106,16 @@ EFFECT
   delivery, not completion. An idle/dead target can be awakened.
 
 OPTIONS
-  <sessionId>           Required target Session ID
-  -p, --prompt TEXT     Short single-line prompt; exclusive with --prompt-file
-  --prompt-file PATH    Prompt file for multiline/long text (maximum 1 MB)
-  --no-reply            One-way delivery; suppress automatic result push
-  --json                Machine-readable receipt
+  <sessionId>             Required target Session ID
+  -p, --prompt TEXT       Short single-line prompt; exclusive with --prompt-file
+  --prompt-file <path|->  Prompt file or '-' for stdin/heredoc (maximum 1 MB)
+  --no-reply              One-way delivery; suppress automatic result push
+  --json                  Machine-readable receipt
 
 OUTPUT
   Delivery receipt with message ID. By default a later send.result event is
-  pushed to the caller Session.
+  pushed to the caller Session. End your current turn and wait for
+  <myagents-session-event type="send.result"> — do NOT poll session state in a loop.
 
 IDENTITY / PERMISSIONS
   Caller label is derived from Session metadata. The target keeps its own
@@ -5107,11 +5123,14 @@ IDENTITY / PERMISSIONS
 
 EXAMPLES
   myagents session send <sessionId> -p "Run the focused tests"
+  myagents session send <sessionId> --prompt-file - <<'EOF'
+  Check the failing test and summarize the cause.
+  EOF
   myagents session send <sessionId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: delivery failure/rejection.
-  Exit 3: argument error. Inline newline or >4 KB input must use a file.`,
+  Exit 3: argument error. Inline newline or >4 KB input must use --prompt-file.`,
 
   'session/state': `myagents session state <sessionId> — Read current activity
 
@@ -5168,7 +5187,7 @@ EXAMPLE
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: watch delivery failure.
-  Discover Sessions with session list --agent <agentId>.`,
+  Exit 3: local argument error. Discover Sessions with session list --agent <agentId>.`,
 };
 
 export function handleHelp(payload: { path?: string[] }): AdminResponse {

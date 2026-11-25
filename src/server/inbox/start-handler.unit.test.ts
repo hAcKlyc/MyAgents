@@ -115,6 +115,28 @@ describe('handleFreshSessionStart', () => {
     );
   });
 
+  it('forwards one-shot birthOverrides into createMaterializedSessionMetadata', async () => {
+    const birthOverrides = {
+      runtime: 'codex' as const,
+      runtimeSource: 'system-cli' as const,
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      permissionMode: 'no-restrictions',
+    };
+    const inject = vi.fn<FreshSessionInjector>(async (_text, options) => ({
+      queued: true,
+      dispatchAcceptance: Promise.resolve(await options.beforeDispatch()),
+    }));
+
+    await handleFreshSessionStart(message, { ...context, birthOverrides }, inject);
+
+    expect(mocks.createMaterializedSessionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        birthOverrides,
+      }),
+    );
+  });
+
   it('rolls back prepared metadata on an explicit Runtime dispatch rejection', async () => {
     mocks.claimPreparedSessionForTurnAdmission.mockResolvedValue({
       status: 'conflict',

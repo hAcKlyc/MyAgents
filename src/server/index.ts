@@ -11611,11 +11611,18 @@ description: >
           const body = (await request.json().catch(() => null)) as {
             agentId?: unknown;
             message?: unknown;
+            birthOverrides?: unknown;
           } | null;
           const agentId = typeof body?.agentId === 'string' ? body.agentId : '';
           const message = body?.message as
             | import('./inbox/types').PendingInboxMessage
             | undefined;
+          const rawBirthOverrides =
+            body?.birthOverrides &&
+            typeof body.birthOverrides === 'object' &&
+            !Array.isArray(body.birthOverrides)
+              ? (body.birthOverrides as import('../shared/sessionPermissionCeiling').SessionBirthOverrides)
+              : undefined;
           if (!agentId || !message) {
             return jsonResponse(
               { accepted: false, reason: 'invalid body' },
@@ -11648,6 +11655,20 @@ description: >
           }
           const engine = getSessionEngine();
           const runtimeIdentity = engine.getRuntimeIdentity();
+          if (
+            (rawBirthOverrides?.runtime &&
+              rawBirthOverrides.runtime !== runtimeIdentity.runtime) ||
+            (rawBirthOverrides?.runtimeSource &&
+              rawBirthOverrides.runtimeSource !== runtimeIdentity.runtimeSource)
+          ) {
+            return jsonResponse(
+              {
+                accepted: false,
+                reason: `target Sidecar runtime mismatch (expected ${rawBirthOverrides.runtime ?? runtimeIdentity.runtime}/${rawBirthOverrides.runtimeSource ?? ''}, got ${runtimeIdentity.runtime}/${runtimeIdentity.runtimeSource ?? ''})`,
+              },
+              409,
+            );
+          }
           const currentSessionContext = engine.getCurrentSessionContext();
           const currentWorkspacePath =
             currentSessionContext.workspacePath ?? currentAgentDir;
@@ -11676,6 +11697,7 @@ description: >
               managedCodexProviderReady: isManagedCodexProviderReady(
                 registry.config,
               ),
+              birthOverrides: rawBirthOverrides,
             },
             (text, options) =>
               engine.enqueueInboxMessage({

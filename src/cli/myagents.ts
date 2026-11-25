@@ -1287,11 +1287,24 @@ export function printResult(
     console.log(`  agent:   ${String(result.agentId ?? '(unknown)')}`);
     console.log(`  session: ${String(result.sessionId ?? '(unknown)')}`);
     console.log(`  message: ${String(result.messageId ?? '(unknown)')}`);
+    const eff = result.effectiveConfig as Record<string, unknown> | undefined;
+    if (eff && typeof eff === 'object') {
+      const parts = [
+        eff.runtime ? `runtime=${String(eff.runtime)}` : null,
+        eff.providerId ? `provider=${String(eff.providerId)}` : null,
+        eff.model ? `model=${String(eff.model)}` : null,
+        eff.reasoningEffort ? `effort=${String(eff.reasoningEffort)}` : null,
+        eff.permissionMode ? `permission=${String(eff.permissionMode)}` : null,
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        console.log(`  config:  ${parts.join('  ')} (one-shot for this Session)`);
+      }
+    }
     console.log('  state:   accepted; target is running asynchronously');
     if (result.replyBack === false) {
       console.log('  result:  one-way; MyAgents will not push the target turn result back here.');
     } else {
-      console.log('  result:  MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block.');
+      console.log('  result:  MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block. End your turn and wait — do not poll session state.');
     }
     console.log(`  follow-up: myagents session send ${String(result.sessionId ?? '<sessionId>')} -p "<prompt>"`);
     console.log('  observation: start/send already return the result automatically; use watch for separately observed work.');
@@ -1334,7 +1347,7 @@ export function printResult(
     if (result.replyBack === false) {
       console.log('  notification: one-way; MyAgents will not push the target turn result back here.');
     } else {
-      console.log('  notification: MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block.');
+      console.log('  notification: MyAgents will push the target turn result back as a <myagents-session-event type="send.result"> block. End your turn and wait — do not poll session state.');
     }
     return;
   }
@@ -3184,7 +3197,9 @@ async function main(): Promise<void> {
   const invocationError = process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim()
     ? validateInternalCliInvocation(positional, flags)
     : validateExternalCliInvocation(positional, flags);
-  if (invocationError) return exitAgentCliError(flags, invocationError);
+  if (invocationError) {
+    return exitAgentCliError(flags, invocationError, localArgErrorExitCode(positional));
+  }
 
   // Top-level help (no args, or bare --help)
   if (positional.length === 0) {
@@ -3199,10 +3214,14 @@ async function main(): Promise<void> {
   if (!flags.help) rejectUnsupportedSpaceDryRun(positional, flags);
 
   const commandError = validateCliCommand(positional, !!flags.help);
-  if (commandError) return exitAgentCliError(flags, commandError);
+  if (commandError) {
+    return exitAgentCliError(flags, commandError, localArgErrorExitCode(positional));
+  }
   if (!flags.help) {
     const dryRunError = validateDryRunSupport(positional, flags);
-    if (dryRunError) return exitAgentCliError(flags, dryRunError);
+    if (dryRunError) {
+      return exitAgentCliError(flags, dryRunError, localArgErrorExitCode(positional));
+    }
   }
 
   if (flags.help && !process.env.MYAGENTS_INTERNAL_CLI_TOKEN?.trim()) {
@@ -3696,6 +3715,16 @@ type AgentCliError = {
   suggestedCommand?: string;
 };
 
+function localArgErrorExitCode(positional: readonly string[]): number {
+  if (
+    positional[0] === 'session'
+    && ['start', 'send', 'watch', 'list'].includes(positional[1] ?? '')
+  ) {
+    return 3;
+  }
+  return 2;
+}
+
 function exitAgentCliError(
   flags: Record<string, unknown>,
   error: AgentCliError,
@@ -3947,6 +3976,46 @@ export function readWorkspaceTextFile(path: string, workspacePath = process.cwd(
 
 function readLocalTextFile(path: string, basePath = process.cwd()): string {
   return readGuardedTextFile(path, { kind: 'local', basePath });
+}
+
+export function readGuardedStdinText(
+  maxBytes = 1024 * 1024,
+  deps: {
+    isTTY?: boolean;
+    readChunk?: (buffer: Buffer) => number;
+  } = {},
+): string {
+  const tty = require('node:tty') as typeof import('node:tty');
+  const isTTY = deps.isTTY ?? tty.isatty(0);
+  if (isTTY) {
+    throw new Error('stdin is a TTY; pipe input or use a heredoc with --prompt-file -');
+  }
+  const fs = require('node:fs') as typeof import('node:fs');
+  const readChunk = deps.readChunk ?? ((buffer: Buffer) => fs.readSync(0, buffer, 0, buffer.length, null));
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const chunkBuf = Buffer.allocUnsafe(64 * 1024);
+  for (;;) {
+    let bytesRead: number;
+    try {
+      bytesRead = readChunk(chunkBuf);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'EAGAIN' || code === 'EINTR') continue;
+      throw err;
+    }
+    if (bytesRead === 0) break;
+    total += bytesRead;
+    if (total > maxBytes) {
+      throw new Error(`stdin exceeds the ${maxBytes} byte limit`);
+    }
+    chunks.push(Buffer.from(chunkBuf.subarray(0, bytesRead)));
+  }
+  const text = Buffer.concat(chunks, total).toString('utf8');
+  if (text.includes('\0')) {
+    throw new Error('stdin contains NUL bytes');
+  }
+  return text;
 }
 
 function readTextFileFlag(path: string, flagName: string, exitCode = 1): string {
@@ -4629,15 +4698,30 @@ function resolveSessionPromptText(
         3,
       );
     }
-    promptText = readTextFileFlag(promptFile, 'prompt-file', 3);
+    if (promptFile === '-') {
+      try {
+        promptText = readGuardedStdinText(1024 * 1024);
+      } catch (err) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'STDIN_READ_FAILED',
+            error: `Failed to read --prompt-file -: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          3,
+        );
+      }
+    } else {
+      promptText = readTextFileFlag(promptFile, 'prompt-file', 3);
+    }
   }
 
-  if (!promptText || promptText.length === 0) {
+  if (!promptText || !promptText.trim()) {
     return exitAgentCliError(
       flags,
       {
         code: 'PROMPT_REQUIRED',
-        error: `session ${action} requires --prompt "<text>" or --prompt-file <path>`,
+        error: `session ${action} requires non-empty --prompt "<text>" or --prompt-file <path|->`,
         suggestedCommand: `myagents session ${action} --help`,
       },
       3,
@@ -6432,41 +6516,72 @@ export function buildRequestBody(
           3,
         );
       }
+      const optionalOverrides: Record<string, string> = {};
+      for (const [key, cliName] of [
+        ['runtime', 'runtime'],
+        ['providerId', 'providerId'],
+        ['model', 'model'],
+        ['reasoningEffort', 'reasoningEffort'],
+        ['permissionMode', 'permissionMode'],
+      ] as const) {
+        const raw = flags[key];
+        if (raw === undefined) continue;
+        if (typeof raw !== 'string' || !raw.trim()) {
+          return exitAgentCliError(
+            flags,
+            {
+              code: 'ARGUMENT_INVALID',
+              error: `--${cliName} requires a non-empty value.`,
+              suggestedCommand: 'myagents session start --help',
+            },
+            3,
+          );
+        }
+        optionalOverrides[key] = raw.trim();
+      }
       return {
         agentId,
         prompt: resolveSessionPromptText(flags, 'start'),
         replyBack: !flags.noReply,
+        ...optionalOverrides,
       };
     }
     if (action === 'send') {
       // Positional: <sessionId>
       // Flags: -p / --prompt | --prompt-file (mutually exclusive), --no-reply
-      const toSessionId = requirePositional(
-        rest[0] ?? (flags.toSessionId as string | undefined) ?? (flags.to as string | undefined),
-        'sessionId',
-        'session send',
-        'toSessionId',
-      );
+      const rawToSessionId = rest[0] ?? flags.toSessionId ?? flags.to;
+      if (typeof rawToSessionId !== 'string' || !rawToSessionId.trim() || rest.length > 1) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'SESSION_REQUIRED',
+            error: 'session send requires exactly one <sessionId> argument.',
+            suggestedCommand: 'myagents session send --help',
+          },
+          3,
+        );
+      }
 
       return {
-        toSessionId,
+        toSessionId: rawToSessionId.trim(),
         prompt: resolveSessionPromptText(flags, 'send'),
         replyBack: !flags.noReply,
       };
     }
     if (action === 'get') {
-      const sessionId = requirePositional(
-        rest[0] ?? (flags.sessionId as string | undefined),
-        'sessionId',
-        'session get',
-        'sessionId',
-      );
-      if (rest.length > 1) {
-        return exitAgentCliError(flags, {
-          code: 'ARGUMENT_INVALID',
-          error: 'session get accepts exactly one <sessionId> argument.',
-        });
+      const rawSessionId = rest[0] ?? flags.sessionId;
+      if (typeof rawSessionId !== 'string' || !rawSessionId.trim() || rest.length > 1) {
+        return exitAgentCliError(
+          flags,
+          {
+            code: 'SESSION_REQUIRED',
+            error: 'session get requires exactly one <sessionId> argument.',
+            suggestedCommand: 'myagents session get --help',
+          },
+          2,
+        );
       }
+      const sessionId = rawSessionId.trim();
       const limit = flags.limit === undefined ? 5 : Number(flags.limit);
       if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
         return exitAgentCliError(flags, {
@@ -6507,12 +6622,20 @@ export function buildRequestBody(
     if (action === 'watch') {
       const targetSessionId = rest[0] ?? flags.targetSessionId ?? flags.to;
       if (typeof targetSessionId !== 'string' || !targetSessionId.trim() || rest.length > 1) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: 'myagents session watch --help' });
+        return exitAgentCliError(
+          flags,
+          { code: 'ARGUMENT_INVALID', error: 'session watch requires exactly one Session reference.', suggestedCommand: 'myagents session watch --help' },
+          3,
+        );
       }
       const unsupportedFlag = ['prompt', 'promptFile', 'then', 'thenFile', 'thenPrompt', 'thenPromptFile']
         .find((key) => flags[key] !== undefined);
       if (unsupportedFlag) {
-        return exitAgentCliError(flags, { code: 'ARGUMENT_INVALID', error: 'session watch does not accept prompt/then flags. Use `myagents session send` to ask the target session to do new work.' });
+        return exitAgentCliError(
+          flags,
+          { code: 'ARGUMENT_INVALID', error: 'session watch does not accept prompt/then flags. Use `myagents session send` to ask the target session to do new work.' },
+          3,
+        );
       }
       return { targetSessionId: targetSessionId.trim() };
     }
