@@ -769,14 +769,27 @@ fn validate_managed_workspace_destination(
     projects_dir: &Path,
     dest_path: &Path,
 ) -> Result<PathBuf, String> {
-    fs::create_dir_all(projects_dir)
-        .map_err(|e| format!("Failed to prepare managed projects dir: {}", e))?;
-    let canon_projects = projects_dir
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve managed projects dir: {}", e))?;
+    let data_dir = projects_dir
+        .parent()
+        .ok_or_else(|| "Invalid managed projects directory".to_string())?;
+    for directory in [data_dir, projects_dir] {
+        match fs::symlink_metadata(directory) {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && !crate::workspace_files::path_safety::metadata_is_link_like(&metadata) => {}
+            Ok(_) => return Err("Managed projects root or its parent is a link or not a directory".to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Failed to inspect managed projects root: {error}")),
+        }
+    }
     let parent = dest_path
         .parent()
         .ok_or_else(|| "Destination path must be inside ~/.myagents/projects/".to_string())?;
+    fs::create_dir_all(projects_dir)
+        .map_err(|e| format!("Failed to prepare managed projects dir: {e}"))?;
+    let canon_projects = projects_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve managed projects dir: {e}"))?;
     let canon_parent = parent
         .canonicalize()
         .map_err(|_| "Destination parent directory must be ~/.myagents/projects/".to_string())?;
@@ -882,12 +895,21 @@ pub(crate) fn materialize_template_into_managed_workspace_at(
             copy_template_atomically(&canon_src, &safe_dest)?;
             Ok(safe_dest)
         }
-        _ => Err("Provide either a bundled templateId or a user template sourcePath".to_string()),
+        (None, None) => {
+            fs::create_dir(&safe_dest).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!("Workspace directory already exists: {}", safe_dest.display())
+                } else {
+                    format!("Failed to create managed workspace directory: {error}")
+                }
+            })?;
+            Ok(safe_dest)
+        }
+        _ => Err("Provide at most one workspace template source".to_string()),
     }
 }
 
-/// Materialize a bundled or user workspace template into a brand-new direct child of
-/// `~/.myagents/projects/` for CLI `myagents agent create --template <id>`.
+/// Materialize an empty or templated workspace as a direct child of the managed root.
 pub(crate) fn materialize_template_into_managed_workspace<R: Runtime>(
     app_handle: &AppHandle<R>,
     template_source: &str,
@@ -901,6 +923,15 @@ pub(crate) fn materialize_template_into_managed_workspace<R: Runtime>(
     let dst = PathBuf::from(dest_path);
 
     let materialized = match template_source {
+        "empty" if template_id.is_none() && source_path.is_none() => {
+            materialize_template_into_managed_workspace_at(
+                &projects_dir,
+                &templates_dir,
+                None,
+                None,
+                &dst,
+            )?
+        }
         "builtin" => {
             let id = template_id.ok_or("Missing templateId for builtin template")?;
             validate_template_id(id)?;
@@ -1834,10 +1865,47 @@ mod bundled_workspace_template_tests {
             .collect();
         assert!(leaked_staging.is_empty(), "staging dir leaked: {:?}", leaked_staging);
 
+        let empty = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            None,
+            None,
+            &projects.join("empty"),
+        )
+        .unwrap();
+        assert!(empty.read_dir().unwrap().next().is_none());
+
         // 8. Symlink escape tests (Unix)
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
+            let redirected_projects = root.join("redirected-projects");
+            symlink(&outside, &redirected_projects).unwrap();
+            let root_error = materialize_template_into_managed_workspace_at(
+                &redirected_projects,
+                &templates,
+                None,
+                None,
+                &redirected_projects.join("escaped-empty"),
+            )
+            .unwrap_err();
+            assert!(root_error.contains("link"), "got: {root_error}");
+            assert!(!outside.join("escaped-empty").exists());
+
+            let redirected_data = root.join("redirected-data");
+            symlink(&outside, &redirected_data).unwrap();
+            let projects_below_link = redirected_data.join("projects");
+            let parent_error = materialize_template_into_managed_workspace_at(
+                &projects_below_link,
+                &templates,
+                Some(&mino_src),
+                None,
+                &projects_below_link.join("escaped-template"),
+            )
+            .unwrap_err();
+            assert!(parent_error.contains("link"), "got: {parent_error}");
+            assert!(!outside.join("projects").exists());
+
             let evil_tpl_link = templates.join("evil-link");
             symlink(&outside, &evil_tpl_link).unwrap();
             let sym_src_err = materialize_template_into_managed_workspace_at(

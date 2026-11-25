@@ -55,7 +55,6 @@ vi.mock('./admin-config', async importOriginal => {
 });
 
 import {
-  createEmptyManagedWorkspaceDir,
   getManagedProjectsRoot,
   registerWorkspaceAgent,
   resolveManagedWorkspaceCreationPath,
@@ -72,6 +71,13 @@ function project(overrides: Partial<ProjectSlim> = {}): ProjectSlim {
     path: '/repo/current',
     ...overrides,
   };
+}
+
+function materializeTestWorkspace(root: string, path: string): string {
+  mkdirSync(root, { recursive: true });
+  if (existsSync(path)) throw Object.assign(new Error('Directory already exists'), { code: 'WORKSPACE_ALREADY_EXISTS' });
+  mkdirSync(path);
+  return realpathSync(path);
 }
 
 describe('persisted Agent workspace identity', () => {
@@ -428,7 +434,7 @@ describe('persisted Agent workspace identity', () => {
       const link = resolveManagedWorkspaceCreationPath('evil-link');
       await expect(registerWorkspaceAgent(link.workspacePath, {
         name: link.displayName,
-        createManagedDirectory: () => createEmptyManagedWorkspaceDir(link.projectsRoot, link.workspacePath),
+        createManagedDirectory: () => materializeTestWorkspace(link.projectsRoot, link.workspacePath),
       })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
 
       const direct = resolveManagedWorkspaceCreationPath('QA Helper');
@@ -436,7 +442,7 @@ describe('persisted Agent workspace identity', () => {
         name: 'QA Helper',
         templateId: 'mino',
         templateSource: 'builtin',
-        createManagedDirectory: () => createEmptyManagedWorkspaceDir(direct.projectsRoot, direct.workspacePath),
+        createManagedDirectory: () => materializeTestWorkspace(direct.projectsRoot, direct.workspacePath),
       });
       expect(created.created).toBe(true);
       expect(created.enabled).toBe(false);
@@ -455,7 +461,7 @@ describe('persisted Agent workspace identity', () => {
         name: 'QA Helper',
         templateId: 'mino',
         templateSource: 'builtin',
-        createManagedDirectory: () => createEmptyManagedWorkspaceDir(direct.projectsRoot, direct.workspacePath),
+        createManagedDirectory: () => materializeTestWorkspace(direct.projectsRoot, direct.workspacePath),
       })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
     });
 
@@ -464,7 +470,7 @@ describe('persisted Agent workspace identity', () => {
       await expect(
         registerWorkspaceAgent(target1.workspacePath, {
           name: 'Rollback Patch',
-          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target1.projectsRoot, target1.workspacePath),
+          createManagedDirectory: () => materializeTestWorkspace(target1.projectsRoot, target1.workspacePath),
           applyInitialAgentPatch: () => ({ ok: false, code: 'INVALID_CONFIG', message: 'bad initial config' }),
         }),
       ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
@@ -475,7 +481,7 @@ describe('persisted Agent workspace identity', () => {
       await expect(
         registerWorkspaceAgent(target2.workspacePath, {
           name: 'Rollback Project',
-          createManagedDirectory: () => createEmptyManagedWorkspaceDir(target2.projectsRoot, target2.workspacePath),
+          createManagedDirectory: () => materializeTestWorkspace(target2.projectsRoot, target2.workspacePath),
         }),
       ).rejects.toThrow('projects write interrupted');
       expect(existsSync(target2.workspacePath)).toBe(false);
@@ -488,7 +494,7 @@ describe('persisted Agent workspace identity', () => {
         name: 'Deferred Config',
         templateId: 'mino',
         templateSource: 'builtin',
-        createManagedDirectory: vi.fn(() => createEmptyManagedWorkspaceDir(target3.projectsRoot, target3.workspacePath)),
+        createManagedDirectory: vi.fn(() => materializeTestWorkspace(target3.projectsRoot, target3.workspacePath)),
         applyInitialAgentPatch: (agent) => ({ ok: true, agent: { ...agent, model: 'retry-model' } }),
       };
       await expect(registerWorkspaceAgent(target3.workspacePath, retryOptions))

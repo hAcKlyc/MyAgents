@@ -422,7 +422,7 @@ session 选择、结构化事件生成与投递确认。
 | 子命令 | 事件 | 关键不变量 |
 |--------|------|------------|
 | `myagents agent templates` | 无 | 在 Node Admin API 中直接读取内置 `PRESET_TEMPLATES`（如 `mino`）与 `~/.myagents/templates.json`（限制在 `~/.myagents/templates/` 内）只读目录，供 `agent create --template` 发现（不暴露内部文件系统路径） |
-| `myagents agent create` | 无 | 支持两种模式：(1) `--name <name> [--template <id>]` 在受管根目录 `~/.myagents/projects/<sanitized-name>` 创建空目录或经 Rust Management API 原子物化模板，冲突 fail closed (`WORKSPACE_ALREADY_EXISTS`)；(2) `--workspacePath <abs-existing-dir> [--name <name>]` 注册已有目录（不 mkdir、禁止 `--template`）。支持原子初始执行配置 flag；新建 Agent 固定 `enabled=false`；在跨进程 intent lock 内 Project-first 提交，注册失败回滚新建目录 |
+| `myagents agent create` | 无 | 支持两种模式：(1) `--name <name> [--template <id>]` 在受管根目录 `~/.myagents/projects/<sanitized-name>` 经 Rust Management API 创建空目录或原子物化模板，冲突 fail closed (`WORKSPACE_ALREADY_EXISTS`)；(2) `--workspacePath <abs-existing-dir> [--name <name>]` 注册已有目录（不 mkdir、禁止 `--template`）。支持原子初始执行配置 flag；新建 Agent 固定 `enabled=false`；在跨进程 intent lock 内 Project-first 提交；提交 Project 前失败回滚新目录，提交后可对未完成的同名注册重试 |
 | `myagents agent list/show` | 无 | exact Agent ID 是 selector；Project-backed 与历史 extra/orphan 均可发现；只有 Project 选中的 Agent 可为 `isCurrent`；目标 claim conflict 局部失败 |
 | `myagents session list --agent` | 无 | 只读 `sessions.json` 的 history-visible metadata，按 `lastActiveAt` 倒序；不唤醒、不探测 live、不读 transcript |
 | `myagents session start --agent` | `send.request` / 可选 `send.result` | Rust 生成 Session/request ID；本地调用支持一次性 `--runtime/--providerId/--model/--reasoningEffort/--permissionMode` 覆盖（按 4-tier 跨 5-runtime 权限天花板校验，不改写目标 Agent 默认；禁止覆盖能力字段及远端 Agent）；目标 Sidecar 将解析结果写入 owned birth snapshot，Runtime dispatch acceptance 是成功点，CLI receipt 不等待 terminal |

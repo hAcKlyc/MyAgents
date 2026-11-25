@@ -48,9 +48,7 @@ import {
 } from '../utils/agent-workspace-identity';
 import { cancellableFetch } from '../utils/cancellation';
 import { managementRequestHeaders } from '../utils/management-api-client';
-import { isManagedCodexRuntimeInstalled } from '../runtimes/codex-command-context';
-import { queryRuntimeModels } from '../runtimes/external-session';
-import { getExternalRuntime, isRuntimeSupported } from '../runtimes/factory';
+import { detectRuntimeInstallation, queryRuntimeModels } from '../session-engine';
 import { getSessionMetadata } from '../SessionStore';
 import { deriveCallerInboxLabel } from './admin-handler';
 
@@ -243,31 +241,6 @@ function invalidOverrideError(
       ...(recoveryHint ? { recoveryHint } : {}),
     },
   };
-}
-
-const RUNTIME_DETECT_TIMEOUT_MS = 5_000;
-
-async function isRuntimeInstalledForStart(
-  runtime: RuntimeType,
-  runtimeSource: RuntimeSource | undefined,
-): Promise<boolean> {
-  if (runtime === 'builtin') return true;
-  if (runtime === 'codex' && runtimeSource === 'managed-provider') {
-    return isManagedCodexRuntimeInstalled();
-  }
-  if (!isRuntimeSupported(runtime)) return false;
-  try {
-    const rt = getExternalRuntime(runtime);
-    const detection = await Promise.race([
-      rt.detect(),
-      new Promise<{ installed: boolean }>((resolve) =>
-        setTimeout(() => resolve({ installed: false }), RUNTIME_DETECT_TIMEOUT_MS),
-      ),
-    ]);
-    return detection.installed === true;
-  } catch {
-    return false;
-  }
 }
 
 async function validateExternalModelForStart(
@@ -508,7 +481,7 @@ export async function handleAdminSessionStart(
           { recoveryCommand: 'myagents model list', message: 'Inspect configured providers.' },
         );
       }
-      const installed = await isRuntimeInstalledForStart('codex', 'managed-provider');
+      const installed = await detectRuntimeInstallation('codex', 'managed-provider').catch(() => false);
       if (!installed) {
         return invalidOverrideError(
           'RUNTIME_NOT_INSTALLED',
@@ -517,7 +490,7 @@ export async function handleAdminSessionStart(
         );
       }
     } else if (rawOverrides.runtime !== undefined || runtimeChanged) {
-      const installed = await isRuntimeInstalledForStart(requestedRuntime, requestedRuntimeSource);
+      const installed = await detectRuntimeInstallation(requestedRuntime, requestedRuntimeSource).catch(() => false);
       if (!installed) {
         return invalidOverrideError(
           'RUNTIME_NOT_INSTALLED',

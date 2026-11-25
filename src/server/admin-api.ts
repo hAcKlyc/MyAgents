@@ -119,7 +119,6 @@ import { getSessionEngine, inspectRuntime } from './session-engine';
 import { getSessionsByAgentDir, isHistoryVisibleSession } from './SessionStore';
 import {
   agentWorkspaceIdentityFailure,
-  createEmptyManagedWorkspaceDir,
   registerWorkspaceAgent,
   resolveManagedWorkspaceCreationPath,
   resolvePersistedAgentWorkspaceRegistry,
@@ -177,7 +176,7 @@ import {
 } from '../shared/types/runtime';
 import { getExternalRuntime, isRuntimeSupported } from './runtimes/factory';
 import { queryRuntimeModels } from './runtimes/external-session';
-import { isManagedCodexRuntimeInstalled } from './runtimes/codex-command-context';
+import { detectRuntimeInstallation } from './session-engine/runtime-inspection';
 import { trackServer } from './analytics';
 
 /**
@@ -1796,33 +1795,25 @@ export async function handleAgentCreate(payload: {
     if (!workspacePath) {
       const managed = resolveManagedWorkspaceCreationPath(name);
       targetWorkspacePath = managed.workspacePath;
-      if (matchedTemplate) {
-        const tpl = matchedTemplate;
-        createManagedDirectory = async () => {
-          const resp = await managementApi('/api/workspace/materialize-template', 'POST', {
-            templateSource: tpl.source,
-            ...(tpl.source === 'builtin' ? { templateId: tpl.id } : { sourcePath: tpl.path }),
-            destPath: managed.workspacePath,
-          });
-          if (!resp.ok) {
-            const errMsg = typeof resp.error === 'string'
-              ? resp.error
-              : 'Failed to materialize workspace template.';
-            const code = errMsg.toLowerCase().includes('already exists')
-              ? 'WORKSPACE_ALREADY_EXISTS'
-              : 'TEMPLATE_MATERIALIZE_FAILED';
-            throw new WorkspaceAgentRegistrationError(
-              code,
-              errMsg,
-              { workspacePath: managed.workspacePath },
-            );
-          }
-          return typeof resp.path === 'string' && resp.path ? resp.path : managed.workspacePath;
-        };
-      } else {
-        createManagedDirectory = () =>
-          createEmptyManagedWorkspaceDir(managed.projectsRoot, managed.workspacePath);
-      }
+      const template = matchedTemplate;
+      createManagedDirectory = async () => {
+        const response = await managementApi('/api/workspace/materialize-template', 'POST', {
+          templateSource: template?.source ?? 'empty',
+          ...(template?.source === 'builtin' ? { templateId: template.id } : {}),
+          ...(template?.source === 'user' ? { sourcePath: template.path } : {}),
+          destPath: managed.workspacePath,
+        });
+        if (!response.ok || typeof response.path !== 'string' || !response.path) {
+          const message = typeof response.error === 'string'
+            ? response.error
+            : 'Failed to materialize managed workspace.';
+          const code = message.toLowerCase().includes('already exists')
+            ? 'WORKSPACE_ALREADY_EXISTS'
+            : template ? 'TEMPLATE_MATERIALIZE_FAILED' : 'WORKSPACE_MATERIALIZE_FAILED';
+          throw new WorkspaceAgentRegistrationError(code, message, { workspacePath: managed.workspacePath });
+        }
+        return response.path;
+      };
     }
 
     const result = await registerWorkspaceAgent(targetWorkspacePath, {
@@ -9557,11 +9548,7 @@ async function validateTaskOverrides(
   }
   if (effectiveRuntime !== 'builtin' && isRuntimeSupported(effectiveRuntime)) {
     try {
-      const installed =
-        effectiveRuntime === 'codex' &&
-        effectiveRuntimeSource === 'managed-provider'
-          ? isManagedCodexRuntimeInstalled()
-          : (await getExternalRuntime(effectiveRuntime).detect()).installed;
+      const installed = await detectRuntimeInstallation(effectiveRuntime, effectiveRuntimeSource);
       if (!installed) {
         return {
           success: false,

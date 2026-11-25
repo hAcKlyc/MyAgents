@@ -5114,6 +5114,16 @@ describe('Batch 2 CLI ergonomics: agent templates, create, atomic set, and show'
       const missing = await handleAgentCreate({});
       expect(missing).toMatchObject({ success: false, code: 'WORKSPACE_OR_NAME_REQUIRED' });
 
+      managementApiMocks.managementApi.mockImplementation(async (path?: string, _method?: string, body?: unknown) => {
+        if (path === '/api/workspace/materialize-template') {
+          const request = body as { destPath: string; templateSource: string };
+          expect(request.templateSource).toBe('empty');
+          mkdirSync(request.destPath, { recursive: true });
+          return { ok: true, path: request.destPath };
+        }
+        return { ok: true };
+      });
+
       const created = await handleAgentCreate({ name: 'Code Reviewer' });
       expect(created.success, created.error).toBe(true);
       const createdData = created.data as Record<string, unknown>;

@@ -5593,8 +5593,8 @@ struct WorkspaceMaterializeTemplateRequest {
     dest_path: String,
 }
 
-/// `POST /api/workspace/materialize-template` — copy a bundled or user workspace
-/// template into a brand-new direct child directory under `~/.myagents/projects/`.
+/// `POST /api/workspace/materialize-template` — create a managed workspace, optionally
+/// materializing a bundled or user template into the new directory.
 async fn workspace_materialize_template_handler(
     Json(req): Json<WorkspaceMaterializeTemplateRequest>,
 ) -> Json<serde_json::Value> {

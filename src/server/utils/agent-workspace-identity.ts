@@ -17,7 +17,7 @@ import {
 import { isWindowsReservedName } from '../../shared/utils';
 import type { AgentConfig } from '../../shared/types/agent';
 import { randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, isAbsolute, parse, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { broadcastAppConfigChanged } from './app-config-events';
@@ -703,31 +703,6 @@ export async function registerWorkspaceAgent(
       throw error;
     }
   });
-}
-
-/**
- * Create a brand-new empty directory strictly as a direct child of
- * `~/.myagents/projects/` without `{ recursive: true }` on the leaf so
- * concurrent creation races fail closed with `WORKSPACE_ALREADY_EXISTS`.
- */
-export function createEmptyManagedWorkspaceDir(
-  projectsRoot: string,
-  targetPath: string,
-): string {
-  mkdirSync(projectsRoot, { recursive: true });
-  try {
-    mkdirSync(targetPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === 'EEXIST') {
-      throw new WorkspaceAgentRegistrationError(
-        'WORKSPACE_ALREADY_EXISTS',
-        `Managed workspace directory already exists: ${targetPath}. Choose a different --name or pass --workspacePath "${targetPath}" to register/reuse it.`,
-        { workspacePath: targetPath },
-      );
-    }
-    throw error;
-  }
-  return targetPath;
 }
 
 /** Bounded explicit repair. While claims remain ambiguous, fresh starts fail closed.

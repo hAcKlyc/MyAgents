@@ -34,8 +34,8 @@ function fileNotPresent(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP';
 }
 
-function withinBrain(brainRoot: string, candidate: string): boolean {
-  const fromRoot = relative(brainRoot, candidate);
+function withinDirectory(root: string, candidate: string): boolean {
+  const fromRoot = relative(root, candidate);
   return !isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`);
 }
 
@@ -164,19 +164,21 @@ export async function observeAntigravityBackgroundTasks(
     };
   }
 
-  let brainRoot: string;
+  const noObservation: AntigravityTaskObservation = {
+    filesObservable: false,
+    settledTaskIds: [],
+    progressed: false,
+    latestMessageTimestamp: previousMessageTimestamp,
+    nextLogSnapshots,
+  };
+  let sessionRoot: string;
   try {
-    brainRoot = await realpath(brainDirectory);
+    const brainRoot = await realpath(brainDirectory);
+    const expected = join(brainRoot, nativeSessionId);
+    sessionRoot = await realpath(expected);
+    if (sessionRoot !== expected) return noObservation;
   } catch (error) {
-    if (fileNotPresent(error)) {
-      return {
-        filesObservable: false,
-        settledTaskIds: [],
-        progressed: false,
-        latestMessageTimestamp: previousMessageTimestamp,
-        nextLogSnapshots,
-      };
-    }
+    if (fileNotPresent(error)) return noObservation;
     throw error;
   }
 
@@ -188,18 +190,18 @@ export async function observeAntigravityBackgroundTasks(
   // 1. Check task log growth (size / mtimeMs) as a lightweight progress signal.
   try {
     const tasksDir = await realpath(
-      join(brainRoot, nativeSessionId, '.system_generated', 'tasks'),
+      join(sessionRoot, '.system_generated', 'tasks'),
     );
-    if (withinBrain(brainRoot, tasksDir)) {
-      filesObservable = true;
+    if (withinDirectory(sessionRoot, tasksDir)) {
       for (const taskSlug of activeTaskIds) {
         if (!SAFE_TASK_SLUG.test(taskSlug)) continue;
         const logPath = join(tasksDir, `${taskSlug}.log`);
         try {
           const resolvedLog = await realpath(logPath);
-          if (!withinBrain(brainRoot, resolvedLog)) continue;
+          if (!withinDirectory(sessionRoot, resolvedLog)) continue;
           const info = await stat(resolvedLog);
           if (!info.isFile()) continue;
+          filesObservable = true;
           const next = { size: info.size, mtimeMs: info.mtimeMs };
           const prev = previousLogSnapshots.get(taskSlug);
           if (!prev) {
@@ -220,11 +222,10 @@ export async function observeAntigravityBackgroundTasks(
   // 2. Check native session inbox messages for task progress or completion.
   try {
     const messagesDir = await realpath(
-      join(brainRoot, nativeSessionId, '.system_generated', 'messages'),
+      join(sessionRoot, '.system_generated', 'messages'),
     );
-    if (withinBrain(brainRoot, messagesDir)) {
+    if (withinDirectory(sessionRoot, messagesDir)) {
       const entries = await readdir(messagesDir, { withFileTypes: true });
-      filesObservable = true;
       const senderToSlug = new Map<string, string>();
       for (const taskSlug of activeTaskIds) {
         if (SAFE_TASK_SLUG.test(taskSlug)) {
@@ -241,6 +242,7 @@ export async function observeAntigravityBackgroundTasks(
         }
         const taskSlug = senderToSlug.get(record.sender);
         if (!taskSlug) continue;
+        filesObservable = true;
         const ts = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN;
         if (Number.isFinite(ts) && ts > latestMessageTimestamp) {
           latestMessageTimestamp = ts;

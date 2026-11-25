@@ -10,9 +10,7 @@ const mocks = vi.hoisted(() => ({
   getAllEffectiveProviders: vi.fn(),
   getProviderSelectionError: vi.fn(),
   isManagedCodexProviderReady: vi.fn(),
-  isManagedCodexRuntimeInstalled: vi.fn(),
-  isRuntimeSupported: vi.fn(),
-  getExternalRuntime: vi.fn(),
+  detectRuntimeInstallation: vi.fn(),
   queryRuntimeModels: vi.fn(),
 }));
 
@@ -29,15 +27,9 @@ vi.mock('../utils/admin-config', () => ({
 vi.mock('../utils/managed-codex-readiness', () => ({
   isManagedCodexProviderReady: mocks.isManagedCodexProviderReady,
 }));
-vi.mock('../runtimes/codex-command-context', () => ({
-  isManagedCodexRuntimeInstalled: mocks.isManagedCodexRuntimeInstalled,
-}));
-vi.mock('../runtimes/external-session', () => ({
+vi.mock('../session-engine', () => ({
+  detectRuntimeInstallation: mocks.detectRuntimeInstallation,
   queryRuntimeModels: mocks.queryRuntimeModels,
-}));
-vi.mock('../runtimes/factory', () => ({
-  isRuntimeSupported: mocks.isRuntimeSupported,
-  getExternalRuntime: mocks.getExternalRuntime,
 }));
 
 import { handleAdminSessionStart } from './start-admin-handler';
@@ -136,11 +128,7 @@ describe('handleAdminSessionStart', () => {
     ]);
     mocks.getProviderSelectionError.mockReturnValue(null);
     mocks.isManagedCodexProviderReady.mockReturnValue(true);
-    mocks.isManagedCodexRuntimeInstalled.mockReturnValue(true);
-    mocks.isRuntimeSupported.mockReturnValue(true);
-    mocks.getExternalRuntime.mockReturnValue({
-      detect: vi.fn().mockResolvedValue({ installed: true }),
-    });
+    mocks.detectRuntimeInstallation.mockResolvedValue(true);
     mocks.queryRuntimeModels.mockResolvedValue([
       { value: 'gpt-5.5', label: 'GPT-5.5' },
       { value: 'gpt-5.4', label: 'GPT-5.4' },
@@ -356,9 +344,7 @@ describe('handleAdminSessionStart', () => {
       response: { error: { code: 'REMOTE_TARGET_CONFIG_OVERRIDE_FORBIDDEN' } },
     });
 
-    mocks.getExternalRuntime.mockReturnValue({
-      detect: vi.fn().mockResolvedValue({ installed: false }),
-    });
+    mocks.detectRuntimeInstallation.mockResolvedValue(false);
     const notInstalled = await handleAdminSessionStart('source-session', {
       agentId: 'agent-1',
       prompt: 'Review this',

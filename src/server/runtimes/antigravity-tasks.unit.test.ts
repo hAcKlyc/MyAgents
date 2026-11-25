@@ -1,4 +1,4 @@
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -148,6 +148,23 @@ describe('observeAntigravityBackgroundTasks', () => {
     expect(fourth.progressed).toBe(true);
     expect(fourth.settledTaskIds).toEqual(['task-104']);
     expect(fourth.nextLogSnapshots.has('task-104')).toBe(false);
+  });
+
+  it('requires evidence for the tracked task inside the exact native Session', async () => {
+    tempBrain = await mkdtemp(join(tmpdir(), 'MyAgents-agy-tasks-'));
+    const sessionRoot = join(tempBrain, SESSION_ID, '.system_generated');
+    const messagesDir = join(sessionRoot, 'messages');
+    const otherTasks = join(tempBrain, 'other-session', '.system_generated', 'tasks');
+    const tracked = new Set(['task-104']);
+    const observe = () => observeAntigravityBackgroundTasks(tempBrain, SESSION_ID, tracked, new Map(), 0);
+    await mkdir(messagesDir, { recursive: true });
+    expect((await observe()).filesObservable).toBe(false);
+    await mkdir(otherTasks, { recursive: true });
+    await writeFile(join(otherTasks, 'task-104.log'), 'a different session');
+    if (process.platform !== 'win32') {
+      await symlink(otherTasks, join(sessionRoot, 'tasks'));
+      expect((await observe()).filesObservable).toBe(false);
+    }
   });
 
   it('degrades cleanly when the native brain directory does not exist', async () => {
