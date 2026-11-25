@@ -11694,6 +11694,8 @@ description: >
               sessionId: message.toSessionId,
               workspacePath: identity.workspacePath,
               agent: identity.agent as unknown as AgentConfig,
+              project: identity.project,
+              config: registry.config,
               runtime: runtimeIdentity.runtime,
               runtimeSource: runtimeIdentity.runtimeSource,
               managedCodexProviderReady: isManagedCodexProviderReady(

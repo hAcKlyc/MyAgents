@@ -5566,10 +5566,12 @@ OUTPUT
   or runtimeConfig.
 
 IDENTITY / PERMISSIONS
-  Defaults belong to the target Agent. A later session start uses them and does
-  not accept caller overrides. These are future-session defaults; local output
-  marks effectiveDefaults.scope as agent-default-for-future-sessions. They do
-  not describe an existing Session's effective gate.
+  Defaults belong to the target Agent. A later local session start uses them
+  unless given one-shot execution overrides within this Agent's permission
+  ceiling (which never modify Agent defaults); remote ma-agent:1 targets reject
+  all overrides. These are future-session defaults; local output marks
+  effectiveDefaults.scope as agent-default-for-future-sessions. They do not
+  describe an existing Session's effective gate.
 
 EXAMPLE
   myagents agent show <agentId>

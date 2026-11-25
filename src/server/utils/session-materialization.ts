@@ -16,6 +16,7 @@ export function snapshotForMaterializedSession(
   agent: AgentConfig,
   scenario: SessionMaterializationScenario,
   options?: {
+    runtimePolicy?: { defaultIntegratedRuntime?: unknown };
     runtimeOverride?: RuntimeType;
     runtimeSourceOverride?: RuntimeSource;
     managedCodexProviderReady?: boolean;
@@ -42,6 +43,7 @@ export function createMaterializedSessionMetadata(params: {
   sessionId: string;
   scenario: SessionMaterializationScenario;
   agent?: AgentConfig;
+  runtimePolicy?: { defaultIntegratedRuntime?: unknown };
   runtimeOverride?: RuntimeType;
   runtimeSourceOverride?: RuntimeSource;
   managedCodexProviderReady?: boolean;
@@ -52,6 +54,7 @@ export function createMaterializedSessionMetadata(params: {
 }): SessionMetadata {
   const snapshot = params.agent
     ? snapshotForMaterializedSession(params.agent, params.scenario, {
+        runtimePolicy: params.runtimePolicy,
         runtimeOverride: params.runtimeOverride,
         runtimeSourceOverride: params.runtimeSourceOverride,
         managedCodexProviderReady: params.managedCodexProviderReady,

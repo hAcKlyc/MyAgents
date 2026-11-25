@@ -142,7 +142,7 @@ interface TargetAgentEffectiveDefaults {
   permissionMode: string;
 }
 
-function resolveTargetAgentDefaults(
+export function resolveTargetAgentDefaults(
   agent: AgentConfigSlim,
   project: ProjectSlim | undefined,
   config: AdminAppConfig,

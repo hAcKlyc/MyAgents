@@ -288,7 +288,14 @@ export function snapshotForOwnedSession(
     : agent;
   const agentEffectiveRuntime: RuntimeType = agentUsesManagedCodexProvider(agent)
     ? 'codex'
-    : (agent.runtime ?? 'builtin');
+    : resolveEffectiveRuntime(
+        agent.runtime,
+        agent.runtimePreference,
+        agent.runtimeConfig?.source,
+        agent.providerId,
+        undefined,
+        options?.runtimePolicy?.defaultIntegratedRuntime,
+      );
   const agentEffectiveSource: RuntimeSource | undefined = agentUsesManagedCodexProvider(agent)
     ? 'managed-provider'
     : (agentEffectiveRuntime === 'builtin'

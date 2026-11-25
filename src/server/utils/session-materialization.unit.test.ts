@@ -373,5 +373,34 @@ describe('createMaterializedSessionMetadata', () => {
     });
     expect(switchedToBuiltin.model).toBeUndefined();
     expect(switchedToBuiltin.reasoningEffort).toBeUndefined();
+
+    // Implicit defaultIntegratedRuntime='dsh' Agent (agent.runtime undefined) switching to builtin
+    // must treat the switch as a cross-runtime switch and scrub DSH reasoningEffort & providerEnvJson.
+    const implicitDshAgent = makeAgent({
+      runtime: undefined,
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+      reasoningEffort: 'max',
+      providerEnvJson: '{"ANTHROPIC_BASE_URL":"https://api.deepseek.com"}',
+    });
+    const switchedFromImplicitDsh = createMaterializedSessionMetadata({
+      agentDir: '/tmp/workspace',
+      sessionId: 'implicit-dsh-to-builtin',
+      scenario: 'desktop',
+      agent: implicitDshAgent,
+      runtimePolicy: { defaultIntegratedRuntime: 'dsh' },
+      runtimeOverride: 'builtin',
+      birthOverrides: {
+        runtime: 'builtin',
+        providerId: 'xai-sub',
+        model: 'grok-4.3',
+        permissionMode: 'fullAgency',
+      },
+    });
+    expect(switchedFromImplicitDsh.runtime).toBe('builtin');
+    expect(switchedFromImplicitDsh.providerId).toBe('xai-sub');
+    expect(switchedFromImplicitDsh.model).toBe('grok-4.3');
+    expect(switchedFromImplicitDsh.reasoningEffort).toBeUndefined();
+    expect(switchedFromImplicitDsh.providerEnvJson).toBeUndefined();
   });
 });

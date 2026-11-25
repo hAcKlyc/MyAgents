@@ -217,4 +217,76 @@ describe('handleFreshSessionStart', () => {
     expect(mocks.saveSessionMetadata).not.toHaveBeenCalled();
     expect(inject).not.toHaveBeenCalled();
   });
+
+  it('re-validates birthOverrides permission ceiling against freshly persisted Agent/Project/Config before writing metadata', async () => {
+    const inject = vi.fn<FreshSessionInjector>();
+    const result = await handleFreshSessionStart(
+      message,
+      {
+        ...context,
+        runtime: 'codex',
+        runtimeSource: 'system-cli',
+        agent: { ...context.agent, runtime: 'builtin', permissionMode: 'plan' },
+        config: { defaultPermissionMode: 'auto' },
+        birthOverrides: {
+          runtime: 'codex',
+          runtimeSource: 'system-cli',
+          permissionMode: 'no-restrictions',
+        },
+      },
+      inject,
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toMatch(/ceiling|exceed/i);
+    expect(mocks.saveSessionMetadata).not.toHaveBeenCalled();
+    expect(inject).not.toHaveBeenCalled();
+  });
+
+  it('forwards config.defaultIntegratedRuntime into birth snapshot so implicit-DSH to builtin switches scrub reasoningEffort', async () => {
+    const inject: FreshSessionInjector = async (_text, options) => {
+      await options.beforeDispatch();
+      return {
+        queued: true,
+        dispatchAcceptance: Promise.resolve({ accepted: true }),
+      };
+    };
+    const result = await handleFreshSessionStart(
+      message,
+      {
+        ...context,
+        runtime: 'builtin',
+        agent: {
+          ...context.agent,
+          runtime: undefined,
+          providerId: 'deepseek',
+          model: 'deepseek-v4-pro',
+          permissionMode: 'full-autonomous',
+          reasoningEffort: 'max',
+        } as unknown as typeof context.agent,
+        config: { defaultIntegratedRuntime: 'dsh', defaultPermissionMode: 'auto' },
+        birthOverrides: {
+          runtime: 'builtin',
+          providerId: 'xai-sub',
+          model: 'grok-4.3',
+          permissionMode: 'fullAgency',
+        },
+      },
+      inject,
+    );
+
+    expect(result).toEqual({ accepted: true });
+    expect(mocks.createMaterializedSessionMetadata).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimePolicy: { defaultIntegratedRuntime: 'dsh' },
+        runtimeOverride: 'builtin',
+        birthOverrides: expect.objectContaining({
+          runtime: 'builtin',
+          providerId: 'xai-sub',
+          model: 'grok-4.3',
+          permissionMode: 'fullAgency',
+        }),
+      }),
+    );
+  });
 });
