@@ -357,6 +357,11 @@ pub async fn start_management_api() -> Result<u16, String> {
         )
         // Session Event watch registration (PRD 0.2.37)
         .route("/api/session/watch", post(session_watch_handler))
+        // Managed workspace template materialization for `myagents agent create --template`
+        .route(
+            "/api/workspace/materialize-template",
+            post(workspace_materialize_template_handler),
+        )
         // Secret-bearing internal route. Identity is validated against the
         // live Session:Sidecar generation; responses are never cacheable.
         .route("/api/grok/bearer", post(grok_bearer_handler))
@@ -5575,6 +5580,48 @@ async fn session_watch_handler(
         "ok": true,
         "result": result,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceMaterializeTemplateRequest {
+    template_source: String,
+    #[serde(default)]
+    template_id: Option<String>,
+    #[serde(default)]
+    source_path: Option<String>,
+    dest_path: String,
+}
+
+/// `POST /api/workspace/materialize-template` — create a managed workspace, optionally
+/// materializing a bundled or user template into the new directory.
+async fn workspace_materialize_template_handler(
+    Json(req): Json<WorkspaceMaterializeTemplateRequest>,
+) -> Json<serde_json::Value> {
+    let Some(app_handle) = crate::logger::get_app_handle().cloned() else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": "global AppHandle not initialized — cannot materialize workspace template"
+        }));
+    };
+    let result = tokio::task::spawn_blocking(move || {
+        crate::commands::materialize_template_into_managed_workspace(
+            &app_handle,
+            &req.template_source,
+            req.template_id.as_deref(),
+            req.source_path.as_deref(),
+            &req.dest_path,
+        )
+    })
+    .await;
+    match result {
+        Ok(Ok(path)) => Json(serde_json::json!({ "ok": true, "path": path })),
+        Ok(Err(error)) => Json(serde_json::json!({ "ok": false, "error": error })),
+        Err(error) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("template materialization task failed: {}", error)
+        })),
+    }
 }
 
 #[derive(Debug, Deserialize)]

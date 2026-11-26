@@ -578,6 +578,7 @@ export function createExternalSessionEngine(): SessionEngine {
             model: config.model,
             permissionMode: config.permissionMode,
             reasoningEffort: config.reasoningEffort ?? 'default',
+            ...(config.providerRoute ? { providerRoute: config.providerRoute } : {}),
           } : {}),
           inboxMeta: request.inboxMeta,
           metadataBirthPending: request.allowLazySessionMaterialization === true,
@@ -672,8 +673,7 @@ export function createExternalSessionEngine(): SessionEngine {
           source: operation.runtimeConfig?.source ?? resolved.runtimeSource ?? runtimeConfig?.source,
           model: operation.runtimeConfig?.model ?? resolved.model,
           permissionMode: operation.runtimeConfig?.permissionMode
-            ?? operation.permissionMode
-            ?? resolved.permissionMode,
+            ?? (operation.permissionMode?.trim() ? operation.permissionMode : undefined),
         };
       }
       if (operation.permissionMode) {

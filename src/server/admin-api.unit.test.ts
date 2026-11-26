@@ -232,12 +232,39 @@ describe('current Runtime configuration ownership', () => {
   it('reports the bundled SDK implementation version in both runtime discovery receipts', async () => {
     const { CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } = await import('../shared/integrated-runtimes/identity');
     const { getExternalRuntime } = await import('./runtimes/factory');
-    const spies = (['dsh', 'claude-code', 'codex'] as const).map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockResolvedValue({ installed: false }));
+    const spies = (['dsh', 'claude-code', 'codex', 'antigravity'] as const).map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockResolvedValue({ installed: false }));
     try {
       const { handleRuntimeList, handleRuntimeDescribe } = await import('./admin-api');
       expect(await handleRuntimeList()).toMatchObject({ success: true, data: expect.arrayContaining([{ runtime: 'builtin', displayName: expect.any(String), installed: true, version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION }]) });
       expect(await handleRuntimeDescribe({ runtime: 'builtin' })).toMatchObject({ success: true, data: { runtime: 'builtin', version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } });
     } finally { for (const spy of spies) spy.mockRestore(); }
+  });
+
+  it('starts runtime list probes concurrently and keeps an installation whose version is unavailable', async () => {
+    const { getExternalRuntime } = await import('./runtimes/factory');
+    const { handleRuntimeList } = await import('./admin-api');
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const runtimes = ['dsh', 'claude-code', 'codex', 'antigravity'] as const;
+    const spies = runtimes.map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockImplementation(
+      async () => {
+        await promise;
+        return runtime === 'antigravity' ? { installed: true, path: '/fixture/agy' } : { installed: false };
+      },
+    ));
+    try {
+      const response = handleRuntimeList();
+      for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
+      resolve();
+      expect(await response).toMatchObject({
+        success: true,
+        data: expect.arrayContaining([expect.objectContaining({
+          runtime: 'antigravity', installed: true, path: '/fixture/agy',
+        })]),
+      });
+    } finally {
+      resolve();
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   it('routes reload through the SessionEngine and uses its workspace instead of dormant SDK state', async () => {
@@ -5066,5 +5093,368 @@ describe('Record details and deletion owner routing', () => {
     const { handleTaskGet } = await import('./admin-api');
     managementApiMocks.managementApi.mockResolvedValueOnce({ ok: false, error: JSON.stringify({ code: 'not_found', message: 'Task not found: missing' }) });
     await expect(handleTaskGet({ id: 'missing' })).resolves.toMatchObject({ success: false, code: 'not_found', error: 'Task not found: missing' });
+  });
+});
+
+describe('Batch 2 CLI ergonomics: agent templates, create, atomic set, and show', () => {
+  it('lists built-in mino and safe user templates while ignoring templates outside ~/.myagents/templates', async () => {
+    const templatesRoot = join(scratch, '.myagents', 'templates');
+    const validTpl = join(templatesRoot, 'research-kit');
+    const outsideTpl = join(scratch, 'outside-tpl');
+    mkdirSync(validTpl, { recursive: true });
+    mkdirSync(outsideTpl, { recursive: true });
+    writeJson(join(scratch, '.myagents', 'templates.json'), [
+      { id: 'research-kit', name: 'Research Kit', path: validTpl, description: 'Safe user template' },
+      { id: 'escape-tpl', name: 'Escape', path: outsideTpl, description: 'Should be ignored' },
+    ]);
+
+    const { handleAgentTemplates } = await import('./admin-api');
+    const result = await handleAgentTemplates();
+    expect(result.success).toBe(true);
+    const items = result.data as Array<Record<string, unknown>>;
+    expect(items.some((item) => item.id === 'mino' && item.source === 'builtin')).toBe(true);
+    expect(items).toContainEqual({
+      id: 'research-kit',
+      name: 'Research Kit',
+      source: 'user',
+      description: 'Safe user template',
+    });
+    expect(items.some((item) => item.id === 'escape-tpl')).toBe(false);
+    // Internal filesystem path must not leak in public template listing.
+    for (const item of items) {
+      expect(item).not.toHaveProperty('path');
+    }
+  });
+
+  it('creates an empty managed workspace under ~/.myagents/projects/<name>, starts disabled, and fails closed on conflict', async () => {
+    // Use a temp HOME under process.cwd() rather than os.tmpdir() because
+    // macOS tmpdir lives under /var (/private/var), which path-safety blocks.
+    const safeHome = mkdtempSync(join(process.cwd(), '.myagents-admin-home-'));
+    const prevHome = process.env.HOME;
+    process.env.HOME = safeHome;
+    try {
+      mkdirSync(join(safeHome, '.myagents'), { recursive: true });
+      writeJson(join(safeHome, '.myagents', 'config.json'), { defaultPermissionMode: 'auto', agents: [] });
+      writeJson(join(safeHome, '.myagents', 'projects.json'), []);
+      const { handleAgentCreate } = await import('./admin-api');
+
+      const missing = await handleAgentCreate({});
+      expect(missing).toMatchObject({ success: false, code: 'WORKSPACE_OR_NAME_REQUIRED' });
+
+      managementApiMocks.managementApi.mockImplementation(async (path?: string, _method?: string, body?: unknown) => {
+        if (path === '/api/workspace/materialize-template') {
+          const request = body as { destPath: string; templateSource: string };
+          expect(request.templateSource).toBe('empty');
+          mkdirSync(request.destPath, { recursive: true });
+          return { ok: true, path: request.destPath };
+        }
+        return { ok: true };
+      });
+
+      const created = await handleAgentCreate({ name: 'Code Reviewer' });
+      expect(created.success, created.error).toBe(true);
+      const createdData = created.data as Record<string, unknown>;
+      const expectedPath = realpathSync(join(safeHome, '.myagents', 'projects', 'Code-Reviewer'));
+      expect(createdData).toMatchObject({
+        created: true,
+        enabled: false,
+        workspacePath: expectedPath,
+        effectiveDefaults: expect.objectContaining({ scope: 'agent-default-for-future-sessions' }),
+      });
+      expect(existsSync(expectedPath)).toBe(true);
+      const savedConfig = JSON.parse(readFileSync(join(safeHome, '.myagents', 'config.json'), 'utf8')) as Record<string, unknown>;
+      expect((savedConfig.agents as Array<Record<string, unknown>>)[0]).toMatchObject({
+        id: createdData.agentId,
+        name: 'Code Reviewer',
+        enabled: false,
+      });
+
+      // Repeating with the same name must fail closed with WORKSPACE_ALREADY_EXISTS (never create -2).
+      const conflict = await handleAgentCreate({ name: 'Code Reviewer' });
+      expect(conflict).toMatchObject({ success: false, code: 'WORKSPACE_ALREADY_EXISTS' });
+      expect(existsSync(join(safeHome, '.myagents', 'projects', 'Code-Reviewer-2'))).toBe(false);
+    } finally {
+      process.env.HOME = prevHome;
+      rmSync(safeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('materializes --template mino via Rust Management API, keeps enabled=false, applies atomic initial config, and rejects --workspacePath + --template', async () => {
+    const safeHome = mkdtempSync(join(process.cwd(), '.myagents-admin-tpl-'));
+    const prevHome = process.env.HOME;
+    process.env.HOME = safeHome;
+    try {
+      mkdirSync(join(safeHome, '.myagents'), { recursive: true });
+      writeJson(join(safeHome, '.myagents', 'config.json'), {
+        defaultPermissionMode: 'auto',
+        providerApiKeys: { deepseek: 'fixture-key' },
+        agents: [],
+      });
+      writeJson(join(safeHome, '.myagents', 'projects.json'), []);
+      const { handleAgentCreate } = await import('./admin-api');
+
+      const existingDir = join(safeHome, 'existing-dir');
+      mkdirSync(existingDir, { recursive: true });
+      expect(
+        await handleAgentCreate({ workspacePath: existingDir, template: 'mino' }),
+      ).toMatchObject({ success: false, code: 'TEMPLATE_REQUIRES_NEW_WORKSPACE' });
+
+      expect(
+        await handleAgentCreate({ name: 'Unknown Tpl', template: 'does-not-exist' }),
+      ).toMatchObject({ success: false, code: 'TEMPLATE_NOT_FOUND' });
+
+      // Pre-validation must fail before touching disk when initial config is invalid.
+      const invalidCfg = await handleAgentCreate({
+        name: 'Invalid Config Agent',
+        runtime: 'codex',
+        providerId: 'deepseek',
+      });
+      expect(invalidCfg.success).toBe(false);
+      expect(existsSync(join(safeHome, '.myagents', 'projects', 'Invalid-Config-Agent'))).toBe(false);
+
+      // Mock Rust Management API template materialization creating the target directory.
+      managementApiMocks.managementApi.mockImplementation(async (path?: string, _method?: string, body?: unknown) => {
+        if (path === '/api/workspace/materialize-template') {
+          const destPath = (body as { destPath: string }).destPath;
+          mkdirSync(destPath, { recursive: true });
+          writeFileSync(join(destPath, 'CLAUDE.md'), '# Mino');
+          return { ok: true, path: destPath };
+        }
+        return { ok: true };
+      });
+
+      const created = await handleAgentCreate({
+        name: 'Mino Helper',
+        template: 'mino',
+        runtime: 'dsh',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        permissionMode: 'full-autonomous',
+      });
+      expect(created.success, created.error).toBe(true);
+      const data = created.data as Record<string, unknown>;
+      expect(data).toMatchObject({
+        created: true,
+        enabled: false,
+        effectiveDefaults: expect.objectContaining({
+          runtime: 'dsh',
+          providerId: 'deepseek',
+          model: 'deepseek-v4-pro',
+        }),
+      });
+      const savedConfig = JSON.parse(readFileSync(join(safeHome, '.myagents', 'config.json'), 'utf8')) as Record<string, unknown>;
+      const savedAgent = (savedConfig.agents as Array<Record<string, unknown>>)[0];
+      expect(savedAgent).toMatchObject({
+        name: 'Mino Helper',
+        enabled: false,
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+      });
+      expect(savedAgent.heartbeat).toBeUndefined();
+      expect(savedAgent.memoryAutoUpdate).toBeUndefined();
+      expect(savedAgent.memoryEvolution).toBeUndefined();
+      const savedProject = readJson(join(safeHome, '.myagents', 'projects.json'))[0];
+      expect(savedProject).toMatchObject({
+        name: 'Mino Helper',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+      });
+      expect(managementApiMocks.managementApi).toHaveBeenCalledWith(
+        '/api/workspace/materialize-template',
+        'POST',
+        expect.objectContaining({
+          templateSource: 'builtin',
+          templateId: 'mino',
+        }),
+      );
+
+      // Existing workspacePath with custom name/config succeeds once, then fails closed if re-run with overrides.
+      const regFirst = await handleAgentCreate({
+        workspacePath: existingDir,
+        name: 'Custom Existing',
+        runtime: 'codex',
+        permissionMode: 'auto-edit',
+      });
+      expect(regFirst.success, regFirst.error).toBe(true);
+      const regAgainWithOverrides = await handleAgentCreate({
+        workspacePath: existingDir,
+        name: 'Overwrite Attempt',
+      });
+      expect(regAgainWithOverrides).toMatchObject({
+        success: false,
+        code: 'WORKSPACE_ALREADY_REGISTERED',
+      });
+    } finally {
+      process.env.HOME = prevHome;
+      rmSync(safeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('supports atomic multi-field agent set (name, runtime+provider+model+permissionMode, reasoningEffort) and hides stale providerId on system-cli agent show', async () => {
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      defaultPermissionMode: 'auto',
+      providerApiKeys: { deepseek: 'fixture-key' },
+      providerVerifyStatus: {
+        'anthropic-sub': { status: 'valid', verifiedAt: '2026-10-01T00:00:00.000Z' },
+      },
+      agents: [{
+        id: 'agent-atomic',
+        name: 'Old Name',
+        enabled: false,
+        runtime: 'builtin',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-flash',
+        permissionMode: 'auto',
+      }],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [{
+      id: 'proj-atomic',
+      name: 'Old Name',
+      path: '/tmp/atomic-ws',
+      agentId: 'agent-atomic',
+    }]);
+
+    const { handleAgentSet, handleAgentShow } = await import('./admin-api');
+
+    // Rename syncs both AgentConfig and ProjectSlim.
+    const renamed = await handleAgentSet({ id: 'agent-atomic', key: 'name', value: 'Renamed Agent' });
+    expect(renamed.success, renamed.error).toBe(true);
+    expect((readConfig().agents as Array<Record<string, unknown>>)[0].name).toBe('Renamed Agent');
+    expect(readJson(join(scratch, '.myagents', 'projects.json'))[0].name).toBe('Renamed Agent');
+
+    // Atomic multi-field switch from builtin -> dsh + deepseek + deepseek-v4-pro + full-autonomous.
+    const toDsh = await handleAgentSet({
+      id: 'agent-atomic',
+      patch: {
+        runtime: 'dsh',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-pro',
+        permissionMode: 'full-autonomous',
+      },
+    });
+    expect(toDsh.success, toDsh.error).toBe(true);
+    expect(await handleAgentShow({ id: 'agent-atomic' })).toMatchObject({
+      success: true,
+      data: {
+        effectiveDefaults: {
+          runtime: 'dsh',
+          providerId: 'deepseek',
+          model: 'deepseek-v4-pro',
+          permissionMode: 'full-autonomous',
+        },
+      },
+    });
+
+    // Atomic multi-field switch from dsh -> codex system-cli + permissionMode + reasoningEffort;
+    // agent show must return providerId: null (hiding stale deepseek).
+    const toCodex = await handleAgentSet({
+      id: 'agent-atomic',
+      patch: {
+        runtime: 'codex',
+        permissionMode: 'no-restrictions',
+        reasoningEffort: 'high',
+      },
+    });
+    expect(toCodex.success, toCodex.error).toBe(true);
+    expect(await handleAgentShow({ id: 'agent-atomic' })).toMatchObject({
+      success: true,
+      data: {
+        effectiveDefaults: {
+          runtime: 'codex',
+          runtimeSource: 'system-cli',
+          providerId: null,
+          permissionMode: 'no-restrictions',
+        },
+      },
+    });
+  });
+
+  it('rejects DSH ineligible providers when switching from anthropic-sub/codex-sub, keeps multi-field --enabled atomic, and forwards livePatch.runtimeConfig', async () => {
+    writeJson(join(scratch, '.myagents', 'config.json'), {
+      defaultPermissionMode: 'auto',
+      providerApiKeys: { deepseek: 'fixture-key' },
+      providerVerifyStatus: {
+        'anthropic-sub': { status: 'valid', verifiedAt: '2026-10-01T00:00:00.000Z' },
+      },
+      agents: [
+        {
+          id: 'agent-sub',
+          name: 'Sub Agent',
+          enabled: false,
+          runtime: 'builtin',
+          providerId: 'anthropic-sub',
+        },
+        {
+          id: 'agent-archived',
+          name: 'Archived Agent',
+          enabled: false,
+          runtime: 'builtin',
+        },
+      ],
+    });
+    writeJson(join(scratch, '.myagents', 'projects.json'), [
+      { id: 'proj-sub', name: 'Sub Agent', path: '/tmp/sub-ws', agentId: 'agent-sub' },
+      {
+        id: 'proj-archived',
+        name: 'Archived Agent',
+        path: '/tmp/archived-ws',
+        agentId: 'agent-archived',
+        archivedAt: '2026-10-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { handleAgentSet } = await import('./admin-api');
+
+    // Switching from anthropic-sub to --runtime dsh --providerId anthropic-sub must fail closed.
+    const badDshSub = await handleAgentSet({
+      id: 'agent-sub',
+      patch: { runtime: 'dsh', providerId: 'anthropic-sub' },
+    });
+    expect(badDshSub.success).toBe(false);
+    expect(badDshSub.error).toMatch(/dsh/i);
+
+    // Switching from anthropic-sub to --runtime dsh --providerId deepseek must succeed and persist runtime='dsh'.
+    const goodDsh = await handleAgentSet({
+      id: 'agent-sub',
+      patch: { runtime: 'dsh', providerId: 'deepseek', model: 'deepseek-v4-pro' },
+    });
+    expect(goodDsh.success, goodDsh.error).toBe(true);
+    expect((readConfig().agents as Array<Record<string, unknown>>)[0]).toMatchObject({
+      runtime: 'dsh',
+      providerId: 'deepseek',
+      model: 'deepseek-v4-pro',
+    });
+
+    // Multi-field --runtime codex --runtimeConfig must forward the new runtimeConfig in livePatch (not null).
+    managementApiMocks.managementApi.mockClear();
+    const rcSet = await handleAgentSet({
+      id: 'agent-sub',
+      patch: {
+        runtime: 'codex',
+        runtimeConfig: { model: 'o3', permissionMode: 'full-auto' },
+      },
+    });
+    expect(rcSet.success, rcSet.error).toBe(true);
+    expect(managementApiMocks.managementApi).toHaveBeenCalledWith(
+      '/api/agent/reload-config',
+      'POST',
+      expect.objectContaining({
+        agentId: 'agent-sub',
+        patch: expect.objectContaining({
+          runtime: 'codex',
+          runtimeConfig: { model: 'o3', permissionMode: 'full-auto' },
+        }),
+      }),
+    );
+
+    // Multi-field --name + --enabled true on an archived agent must fail closed WITHOUT persisting name.
+    const archivedEnable = await handleAgentSet({
+      id: 'agent-archived',
+      patch: { name: 'Should Not Persist', enabled: true },
+    });
+    expect(archivedEnable.success).toBe(false);
+    expect((readConfig().agents as Array<Record<string, unknown>>)[1].name).toBe('Archived Agent');
   });
 });

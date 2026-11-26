@@ -130,6 +130,7 @@ pub(crate) async fn prepare(
             from_label,
             prompt: params.prompt.clone(),
             reply_back: params.reply_back,
+            birth_overrides: None,
         };
         let mut prepared = crate::inbox::deliver::prepare_fresh_session(
             app,

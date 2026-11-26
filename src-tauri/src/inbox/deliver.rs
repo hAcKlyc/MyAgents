@@ -68,6 +68,23 @@ fn drain_outcome(message_id: &str, response: Result<DrainResponse, String>) -> D
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBirthOverrides {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FreshSessionStartRequest {
@@ -80,6 +97,8 @@ pub struct FreshSessionStartRequest {
     pub from_label: String,
     pub prompt: String,
     pub reply_back: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub birth_overrides: Option<SessionBirthOverrides>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,19 +231,25 @@ async fn http_post_fresh_start(
     port: u16,
     agent_id: &str,
     message: &PendingInboxMessage,
+    birth_overrides: Option<&SessionBirthOverrides>,
 ) -> Result<FreshStartTargetResponse, String> {
     let url = format!("http://127.0.0.1:{}/api/inbox/start", port);
     let client = crate::local_http::json_client(Duration::from_secs(30));
+    let mut payload = serde_json::json!({
+        "agentId": agent_id,
+        "message": message
+    });
+    if let Some(overrides) = birth_overrides {
+        payload["birthOverrides"] = serde_json::to_value(overrides)
+            .map_err(|error| format!("failed to serialize birthOverrides: {error}"))?;
+    }
     let response = client
         .post(&url)
         .header(
             crate::external_cli::INTERNAL_TOKEN_HEADER,
             crate::external_cli::internal_token(),
         )
-        .json(&serde_json::json!({
-            "agentId": agent_id,
-            "message": message
-        }))
+        .json(&payload)
         .send()
         .await
         .map_err(|error| format!("admission acknowledgement was not confirmed: {error}"))?;
@@ -332,7 +357,13 @@ impl PreparedFreshSession {
     }
     async fn complete_admission(mut self, app_handle: &AppHandle) -> FreshSessionStartOutcome {
         let outcome = |status: &str, reason: Option<String>| self.outcome(status, reason);
-        let target = http_post_fresh_start(self.port, &self.request.agent_id, &self.message).await;
+        let target = http_post_fresh_start(
+            self.port,
+            &self.request.agent_id,
+            &self.message,
+            self.request.birth_overrides.as_ref(),
+        )
+        .await;
         let result = match target {
             Ok(response) if response.accepted == Some(true) => {
                 if start_headless_completion(app_handle, &self.manager, &self.session_id) {
@@ -379,6 +410,26 @@ impl PreparedFreshSession {
         self.lifecycle.take();
         result
     }
+}
+
+fn resolve_fresh_start_runtime_identity(
+    birth_overrides: Option<&SessionBirthOverrides>,
+    agent_runtime: Option<String>,
+    agent_runtime_source: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if let Some(overrides) = birth_overrides {
+        if let Some(runtime) = overrides.runtime.clone() {
+            let source = overrides.runtime_source.clone().or_else(|| {
+                match runtime.as_str() {
+                    "builtin" => None,
+                    "dsh" => Some("integrated".to_string()),
+                    _ => Some("system-cli".to_string()),
+                }
+            });
+            return (Some(runtime), source);
+        }
+    }
+    (agent_runtime, agent_runtime_source)
 }
 
 pub(crate) async fn prepare_fresh_session(
@@ -436,12 +487,15 @@ pub(crate) async fn prepare_fresh_session(
     let runtime_identity = crate::sidecar::resolve_agent_runtime_identity_by_id_from_config(
         &prepared.request.agent_id,
     );
-    let runtime_override = runtime_identity
-        .as_ref()
-        .map(|identity| identity.runtime.clone());
-    let runtime_source_override = runtime_identity
-        .as_ref()
-        .and_then(|identity| identity.runtime_source.clone());
+    let (runtime_override, runtime_source_override) = resolve_fresh_start_runtime_identity(
+        prepared.request.birth_overrides.as_ref(),
+        runtime_identity
+            .as_ref()
+            .map(|identity| identity.runtime.clone()),
+        runtime_identity
+            .as_ref()
+            .and_then(|identity| identity.runtime_source.clone()),
+    );
     let ensure =
         crate::sidecar::ensure_session_sidecar_with_runtime_identity_override_lifecycle_held(
             lifecycle.clone(),
@@ -715,6 +769,7 @@ mod tests {
             from_label: "Source Agent".to_string(),
             prompt: "Review this".to_string(),
             reply_back: true,
+            birth_overrides: None,
         };
 
         assert_eq!(
@@ -732,6 +787,75 @@ mod tests {
     }
 
     #[test]
+    fn fresh_start_request_serializes_birth_overrides_when_present() {
+        let request = FreshSessionStartRequest {
+            agent_id: "agent-1".to_string(),
+            workspace_path: "/workspace".to_string(),
+            from_session_id: Some("source-session".to_string()),
+            source_kind: InboxSourceKind::InternalSession,
+            from_label: "Source Agent".to_string(),
+            prompt: "Review this".to_string(),
+            reply_back: true,
+            birth_overrides: Some(SessionBirthOverrides {
+                runtime: Some("codex".to_string()),
+                runtime_source: Some("system-cli".to_string()),
+                provider_id: None,
+                model: Some("gpt-5.5".to_string()),
+                reasoning_effort: Some("high".to_string()),
+                permission_mode: Some("no-restrictions".to_string()),
+            }),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "agentId": "agent-1",
+                "workspacePath": "/workspace",
+                "fromSessionId": "source-session",
+                "sourceKind": "internal-session",
+                "fromLabel": "Source Agent",
+                "prompt": "Review this",
+                "replyBack": true,
+                "birthOverrides": {
+                    "runtime": "codex",
+                    "runtimeSource": "system-cli",
+                    "model": "gpt-5.5",
+                    "reasoningEffort": "high",
+                    "permissionMode": "no-restrictions",
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn birth_overrides_runtime_takes_precedence_over_agent_default_identity() {
+        let overrides = SessionBirthOverrides {
+            runtime: Some("dsh".to_string()),
+            runtime_source: Some("integrated".to_string()),
+            provider_id: Some("deepseek".to_string()),
+            model: Some("deepseek-v4-pro".to_string()),
+            reasoning_effort: None,
+            permission_mode: Some("full-autonomous".to_string()),
+        };
+        assert_eq!(
+            resolve_fresh_start_runtime_identity(
+                Some(&overrides),
+                Some("antigravity".to_string()),
+                Some("system-cli".to_string()),
+            ),
+            (Some("dsh".to_string()), Some("integrated".to_string()))
+        );
+        assert_eq!(
+            resolve_fresh_start_runtime_identity(
+                None,
+                Some("antigravity".to_string()),
+                Some("system-cli".to_string()),
+            ),
+            (Some("antigravity".to_string()), Some("system-cli".to_string()))
+        );
+    }
+
+    #[test]
     fn fresh_external_start_has_no_source_session_or_reply_channel() {
         let request = FreshSessionStartRequest {
             agent_id: "agent-1".to_string(),
@@ -741,6 +865,7 @@ mod tests {
             from_label: "External CLI".to_string(),
             prompt: "Review this".to_string(),
             reply_back: false,
+            birth_overrides: None,
         };
 
         assert_eq!(

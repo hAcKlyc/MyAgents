@@ -515,6 +515,7 @@ pub fn run() {
             commands::cmd_remove_bot_workspace,
             // Agent Runtime detection (v0.1.59)
             commands::cmd_detect_runtimes,
+            commands::cmd_system_codex_version,
             managed_codex::cmd_managed_codex_status,
             managed_codex::cmd_managed_codex_download,
             managed_codex::cmd_managed_codex_check_update,

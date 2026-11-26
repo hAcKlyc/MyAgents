@@ -118,6 +118,24 @@ describe('snapshotForOwnedSession — reasoning effort capture (#324)', () => {
     expect(snap.reasoningEffort).toBe('max');
     expect(snap.permissionMode).toBe('fullAgency');
   });
+
+  it('IM snapshots Antigravity with dangerously-skip-permissions while desktop owned sessions keep interactive config', () => {
+    const agyAgent = makeAgent({
+      runtime: 'antigravity',
+      runtimePreference: { family: 'external', id: 'antigravity' },
+      runtimeConfig: { permissionMode: 'accept-edits' },
+    });
+    expect(snapshotForImSession(agyAgent)).toMatchObject({
+      runtime: 'antigravity',
+      runtimeSource: 'system-cli',
+      permissionMode: 'dangerously-skip-permissions',
+    });
+    expect(snapshotForOwnedSession(agyAgent)).toMatchObject({
+      runtime: 'antigravity',
+      runtimeSource: 'system-cli',
+      permissionMode: 'accept-edits',
+    });
+  });
   it('uses desktop distribution and subscription constraints for IM template births', () => {
     const options = { runtimePolicy: { defaultIntegratedRuntime: 'dsh' } };
     expect(snapshotForImSession(makeAgent({ runtime: 'dsh', runtimePreference: { family: 'integrated', id: 'dsh' },

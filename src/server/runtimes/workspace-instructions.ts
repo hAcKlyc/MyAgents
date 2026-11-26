@@ -18,8 +18,8 @@
 //   - File count / per-file size / total size caps to prevent prompt inflation attacks
 //     and excessive context usage.
 
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync, type Dirent } from 'fs';
-import { join, extname, relative } from 'path';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync, type Dirent } from 'fs';
+import { extname, isAbsolute, join, relative, sep } from 'path';
 
 // ─── Constants (replicated from Claude Code utils/claudemd.ts) ───
 
@@ -215,11 +215,74 @@ function formatInstructions(instructions: WorkspaceInstruction[]): string {
  * CLAUDE.md itself is handled by Codex's native file discovery via
  * `-c 'project_doc_fallback_filenames=["CLAUDE.md"]'` CLI arg.
  */
+const ANTIGRAVITY_NATIVE_INSTRUCTION_FILES = ['AGENTS.md', 'GEMINI.md'] as const;
+
+function isWithinDirectory(rootRealPath: string, candidateRealPath: string): boolean {
+  const rel = relative(rootRealPath, candidateRealPath);
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
+}
+
+function normalizePathKey(filePath: string): string {
+  return process.platform === 'win32' ? filePath.toLowerCase() : filePath;
+}
+
+/**
+ * Antigravity CLI (`agy`) natively discovers root `AGENTS.md` and `GEMINI.md`
+ * into `<user_rules>`. Skip injecting root `CLAUDE.md` when either native file
+ * resolves to the same in-workspace file (e.g. `AGENTS.md -> CLAUDE.md`) or
+ * carries identical trimmed content, while still refusing to follow symlinks
+ * that escape the workspace root.
+ */
+function isRootClaudeNativelyLoadedByAntigravity(
+  workspacePath: string,
+  claudeDoc: WorkspaceInstruction,
+): boolean {
+  let workspaceRealPath: string;
+  let claudeRealPath: string;
+  try {
+    workspaceRealPath = realpathSync(workspacePath);
+    claudeRealPath = realpathSync(claudeDoc.path);
+  } catch {
+    return false;
+  }
+
+  for (const nativeName of ANTIGRAVITY_NATIVE_INSTRUCTION_FILES) {
+    const nativePath = join(workspacePath, nativeName);
+    let nativeRealPath: string;
+    try {
+      nativeRealPath = realpathSync(nativePath);
+    } catch {
+      continue;
+    }
+    // Symlink-escape safety: never read or trust targets outside the workspace.
+    if (!isWithinDirectory(workspaceRealPath, nativeRealPath)) continue;
+    if (normalizePathKey(nativeRealPath) === normalizePathKey(claudeRealPath)) {
+      return true;
+    }
+    try {
+      const st = statSync(nativeRealPath);
+      if (!st.isFile() || st.size > MAX_BYTES_PER_FILE) continue;
+      const content = readFileSync(nativeRealPath, 'utf-8').trim();
+      if (content === claudeDoc.content) {
+        return true;
+      }
+    } catch {
+      // Skip unreadable native candidates
+    }
+  }
+  return false;
+}
+
 export function resolveAntigravityWorkspaceInstructions(workspacePath: string): string {
-  const names = isInstructionDirectory(join(workspacePath, '.claude')) ? ['CLAUDE.md', '.claude/CLAUDE.md'] : ['CLAUDE.md'];
-  const instructions = names
-    .map(name => readIfExists(join(workspacePath, name)))
-    .filter((entry): entry is WorkspaceInstruction => entry !== null);
+  const instructions: WorkspaceInstruction[] = [];
+  const rootClaude = readIfExists(join(workspacePath, 'CLAUDE.md'));
+  if (rootClaude && !isRootClaudeNativelyLoadedByAntigravity(workspacePath, rootClaude)) {
+    instructions.push(rootClaude);
+  }
+  if (isInstructionDirectory(join(workspacePath, '.claude'))) {
+    const companionClaude = readIfExists(join(workspacePath, '.claude', 'CLAUDE.md'));
+    if (companionClaude) instructions.push(companionClaude);
+  }
   return formatInstructions([...instructions, ...readClaudeRulesOnly(workspacePath)]);
 }
 

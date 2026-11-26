@@ -14,10 +14,11 @@ import {
   normalizeWorkspacePathIdentity,
   workspacePathsEqual,
 } from '../../shared/workspacePath';
+import { isWindowsReservedName } from '../../shared/utils';
 import type { AgentConfig } from '../../shared/types/agent';
 import { randomUUID } from 'node:crypto';
-import { lstatSync } from 'node:fs';
-import { basename, isAbsolute, parse, resolve } from 'node:path';
+import { lstatSync, realpathSync, rmSync } from 'node:fs';
+import { basename, dirname, isAbsolute, parse, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { broadcastAppConfigChanged } from './app-config-events';
 import {
@@ -118,6 +119,123 @@ export class WorkspaceAgentRegistrationError extends Error {
   }
 }
 
+/**
+ * Strip Windows extended-length verbatim prefixes (`\\?\` or `//?/`) before
+ * lexical identity comparison or persistence so Windows `canonicalize()` /
+ * verbatim CLI inputs cannot diverge from standard `C:\...` identities or
+ * bypass `~/.myagents` private-directory containment.
+ */
+export function stripWindowsVerbatimPrefix(rawPath: string): string {
+  if (rawPath.startsWith('\\\\?\\UNC\\') || rawPath.startsWith('//?/UNC/')) {
+    return `\\\\${rawPath.slice(8)}`;
+  }
+  if (rawPath.startsWith('\\\\?\\') || rawPath.startsWith('//?/')) {
+    return rawPath.slice(4);
+  }
+  return rawPath;
+}
+
+function normalizeContainedPathIdentity(rawPath: string): string {
+  return normalizeWorkspacePathIdentity(stripWindowsVerbatimPrefix(rawPath));
+}
+
+function resolveCanonicalIfExists(targetPath: string): string {
+  try {
+    return stripWindowsVerbatimPrefix(realpathSync(targetPath));
+  } catch {
+    return stripWindowsVerbatimPrefix(resolve(targetPath));
+  }
+}
+
+export function getManagedProjectsRoot(): string {
+  return resolve(resolveCanonicalIfExists(homedir()), '.myagents', 'projects');
+}
+
+function isDirectChildOfManagedProjects(normalizedIdentity: string): boolean {
+  const managedProjectsIdentity = normalizeContainedPathIdentity(
+    resolveCanonicalIfExists(getManagedProjectsRoot()),
+  );
+  if (!managedProjectsIdentity) return false;
+  const prefix = `${managedProjectsIdentity}/`;
+  if (!normalizedIdentity.startsWith(prefix)) return false;
+  const remainder = normalizedIdentity.slice(prefix.length);
+  return remainder.length > 0 && !remainder.includes('/');
+}
+
+/**
+ * Validate and sanitize a workspace display name into a safe single directory
+ * component under `~/.myagents/projects/`. Rejects path separators, `..`, NUL
+ * bytes, and names that become empty after sanitization (fail closed).
+ */
+export function sanitizeManagedWorkspaceDirName(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (
+    !trimmed ||
+    trimmed.includes('\0') ||
+    trimmed.includes('/') ||
+    trimmed.includes('\\') ||
+    trimmed.includes('..') ||
+    trimmed === '.'
+  ) {
+    throw new WorkspaceAgentRegistrationError(
+      'INVALID_WORKSPACE_NAME',
+      `Invalid workspace name '${rawName}': must be a non-empty name without path separators or '..'.`,
+    );
+  }
+  let sanitized = '';
+  for (const ch of trimmed) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (/^[A-Za-z0-9_-]$/.test(ch)) {
+      sanitized += ch;
+    } else if (ch === ' ' || ch === '@') {
+      sanitized += '-';
+    } else if (code > 0x2e7f) {
+      sanitized += ch;
+    }
+  }
+  const collapsed = sanitized.replace(/-+/g, '-').replace(/^-+|-+$/g, '').replace(/^\.+|\.+$/g, '');
+  if (
+    !collapsed ||
+    collapsed === '.' ||
+    collapsed === '..' ||
+    isWindowsReservedName(trimmed) ||
+    isWindowsReservedName(collapsed)
+  ) {
+    throw new WorkspaceAgentRegistrationError(
+      'INVALID_WORKSPACE_NAME',
+      `Workspace name '${rawName}' produces an invalid or reserved directory name after sanitization.`,
+    );
+  }
+  return collapsed;
+}
+
+/**
+ * Resolve the target path under `~/.myagents/projects/<sanitized-name>` for a
+ * managed workspace. The registration intent owner checks existing claims before
+ * the directory materializer runs.
+ */
+export function resolveManagedWorkspaceCreationPath(rawName: string): {
+  displayName: string;
+  sanitizedDirName: string;
+  workspacePath: string;
+  projectsRoot: string;
+} {
+  const displayName = rawName.trim();
+  const sanitizedDirName = sanitizeManagedWorkspaceDirName(displayName);
+  const projectsRoot = getManagedProjectsRoot();
+  const workspacePath = resolve(projectsRoot, sanitizedDirName);
+  if (
+    normalizeWorkspacePathIdentity(dirname(workspacePath)) !==
+    normalizeWorkspacePathIdentity(projectsRoot)
+  ) {
+    throw new WorkspaceAgentRegistrationError(
+      'WORKSPACE_PATH_UNSAFE',
+      'Managed workspace must resolve to a direct child of ~/.myagents/projects/.',
+    );
+  }
+  return { displayName, sanitizedDirName, workspacePath, projectsRoot };
+}
+
 function validateWorkspaceForRegistration(rawPath: string): string {
   const workspacePath = rawPath.trim();
   if (!workspacePath || !isAbsolute(workspacePath)) {
@@ -148,21 +266,23 @@ function validateWorkspaceForRegistration(rawPath: string): string {
       `Workspace path is not a directory: ${workspacePath}`,
     );
   }
-  const normalized = resolve(safety.canonical);
-  const identity = normalizeWorkspacePathIdentity(normalized);
-  const rootIdentity = normalizeWorkspacePathIdentity(parse(normalized).root);
-  const privateDataIdentity = normalizeWorkspacePathIdentity(
-    resolve(homedir(), '.myagents'),
+  const normalized = stripWindowsVerbatimPrefix(resolve(safety.canonical));
+  const identity = normalizeContainedPathIdentity(normalized);
+  const rootIdentity = normalizeContainedPathIdentity(parse(normalized).root);
+  const privateDataIdentity = normalizeContainedPathIdentity(
+    resolveCanonicalIfExists(resolve(resolveCanonicalIfExists(homedir()), '.myagents')),
   );
+  const isInsidePrivateData =
+    identity === privateDataIdentity ||
+    identity.startsWith(`${privateDataIdentity}/`);
   if (
     !identity ||
     identity === rootIdentity ||
-    identity === privateDataIdentity ||
-    identity.startsWith(`${privateDataIdentity}/`)
+    (isInsidePrivateData && !isDirectChildOfManagedProjects(identity))
   ) {
     throw new WorkspaceAgentRegistrationError(
       'WORKSPACE_PATH_UNSAFE',
-      'Filesystem roots and the MyAgents private data directory cannot be registered as Agent workspaces.',
+      'Filesystem roots and MyAgents private data directories (outside direct children of ~/.myagents/projects/) cannot be registered as Agent workspaces.',
     );
   }
   return normalized;
@@ -172,10 +292,12 @@ function buildAgentForPersistedProject(
   project: ProjectSlim,
   config: AdminAppConfig,
   requestedAgentId?: string,
+  options: { suppressTemplateDefaults?: boolean } = {},
 ): AgentConfigSlim {
   return buildAgentForProject(asProjectBuildSource(project), {
     agentId: requestedAgentId,
     defaultPermissionMode: config.defaultPermissionMode,
+    ...(options.suppressTemplateDefaults ? { agentDefaults: {} } : {}),
   }) as AgentConfig as AgentConfigSlim;
 }
 
@@ -187,222 +309,399 @@ export interface RegisterWorkspaceAgentResult {
   workspacePath: string;
   enabled: boolean;
   archived: false;
+  templateId?: string;
+  templateSource?: 'builtin' | 'user';
+}
+
+export interface RegisterWorkspaceAgentOptions {
+  /** Optional explicit display name for a newly registered workspace. */
+  name?: string;
+  /** Optional template provenance when materialized under ~/.myagents/projects/. */
+  templateId?: string;
+  templateSource?: 'builtin' | 'user';
+  /** Fail closed instead of returning idempotently if the workspace is already registered. */
+  rejectIfAlreadyRegistered?: boolean;
+  /**
+   * Optional directory materializer invoked inside `withAgentConfigIntentLock`
+   * ONLY for managed `~/.myagents/projects/<direct-child>` creation. If any
+   * step before the Project claim commits fails, the directory is removed.
+   */
+  createManagedDirectory?: () => Promise<string> | string;
+  /**
+   * Optional atomic initial Agent/Project patch applied ONLY to a newly created
+   * Agent inside the same `withAgentConfigIntentLock` transaction. `enabled`
+   * remains fixed at `false`.
+   */
+  applyInitialAgentPatch?: (
+    agent: AgentConfigSlim,
+    config: AdminAppConfig,
+  ) => {
+    ok: true;
+    agent: AgentConfigSlim;
+    projectPatch?: Partial<ProjectSlim>;
+  } | {
+    ok: false;
+    code: string;
+    message: string;
+  };
 }
 
 /**
- * Register an existing directory as the one Project-backed Agent identity.
+ * Register an existing directory (or newly materialized managed directory under
+ * `~/.myagents/projects/<name>`) as the one Project-backed Agent identity.
  * The outer intent lock serializes the two existing per-file authorities.
  * Project.agentId commits first, so a retry after an interrupted Agent write
  * reuses the same identity instead of minting a duplicate.
  */
 export async function registerWorkspaceAgent(
   requestedPath: string,
+  options: RegisterWorkspaceAgentOptions = {},
 ): Promise<RegisterWorkspaceAgentResult> {
-  const workspacePath = validateWorkspaceForRegistration(requestedPath);
+  if (!options.createManagedDirectory) {
+    validateWorkspaceForRegistration(requestedPath);
+  }
   return withAgentConfigIntentLock(async () => {
-    const initialProjects = loadProjects();
-    const initialConfig = loadConfig();
-    const matches = initialProjects.filter((project) =>
-      workspacePathsEqual(project.path, workspacePath),
-    );
-    if (matches.length > 1) {
-      throw new WorkspaceAgentRegistrationError(
-        'DUPLICATE_PROJECT_WORKSPACE',
-        'Multiple Projects resolve to the requested workspace; repair the conflict in MyAgents before retrying.',
-        { projectIds: matches.map((project) => project.id) },
-      );
-    }
-
-    const existing = matches[0];
-    if (existing) {
-      if (
-        existing.internal === true ||
-        existing.hidden === true ||
-        existing.workspaceType === 'system-preset'
-      ) {
-        throw new WorkspaceAgentRegistrationError(
-          'WORKSPACE_NOT_EXTERNALLY_REGISTERABLE',
-          'This workspace is hidden, internal, or system-owned and cannot be changed by the external CLI.',
-          { projectId: existing.id },
+    let createdManagedDirPath: string | null = null;
+    let workspacePath: string;
+    try {
+      if (options.createManagedDirectory) {
+        const preliminaryProjects = loadProjects();
+        const preliminaryConflict = preliminaryProjects.find((project) =>
+          workspacePathsEqual(project.path, requestedPath),
         );
+        if (preliminaryConflict) {
+          const claimedAgentId = preliminaryConflict.agentId;
+          const awaitingAgent = claimedAgentId &&
+            preliminaryConflict.name === options.name &&
+            preliminaryConflict.templateId === options.templateId &&
+            preliminaryConflict.templateSource === options.templateSource &&
+            lstatSync(requestedPath, { throwIfNoEntry: false })?.isDirectory() &&
+            !(loadConfig().agents ?? []).some((agent) => agent.id === claimedAgentId);
+          if (!awaitingAgent) {
+            throw new WorkspaceAgentRegistrationError(
+              'WORKSPACE_ALREADY_EXISTS',
+              `A workspace is already registered at ${requestedPath}. Choose a different --name or pass --workspacePath "${requestedPath}" to reuse it.`,
+              { workspacePath: requestedPath, projectId: preliminaryConflict.id, agentId: claimedAgentId },
+            );
+          }
+          workspacePath = validateWorkspaceForRegistration(requestedPath);
+        } else {
+          const materializedPath = await options.createManagedDirectory();
+          createdManagedDirPath = materializedPath;
+          workspacePath = validateWorkspaceForRegistration(materializedPath);
+        }
+      } else {
+        workspacePath = validateWorkspaceForRegistration(requestedPath);
       }
-      if (
-        typeof existing.archivedAt === 'string' &&
-        existing.archivedAt.length > 0
-      ) {
-        throw new WorkspaceAgentRegistrationError(
-          'WORKSPACE_ARCHIVED',
-          'This workspace is archived. Unarchive it in MyAgents before retrying.',
-          { projectId: existing.id, agentId: existing.agentId },
-        );
-      }
-    }
 
-    const initialProjection = resolveAgentWorkspaceProjections(
-      initialProjects,
-      initialConfig.agents ?? [],
-    );
-    const relevantDiagnostic = initialProjection.diagnostics.find(
-      (diagnostic) =>
-        (!!existing && diagnostic.projectIds.includes(existing.id)) ||
-        (!!existing?.agentId && diagnostic.agentIds.includes(existing.agentId)),
-    );
-    if (relevantDiagnostic) {
-      throw new WorkspaceAgentRegistrationError(
-        relevantDiagnostic.code,
-        relevantDiagnostic.message,
-        {
-          projectIds: relevantDiagnostic.projectIds,
-          agentIds: relevantDiagnostic.agentIds,
-        },
-      );
-    }
-    const priorIdentity = existing
-      ? initialProjection.agentProjections.find(
-          (projection) =>
-            projection.association === 'project-linked' &&
-            projection.projectId === existing.id,
-        )
-      : undefined;
-
-    const legacyMatches = initialProjection.agentProjections.filter(
-      (projection) =>
-        projection.association !== 'project-linked' &&
-        workspacePathsEqual(projection.workspacePath, workspacePath),
-    );
-    if (legacyMatches.length > 1) {
-      throw new WorkspaceAgentRegistrationError(
-        'WORKSPACE_REGISTRATION_CONFLICT',
-        'Multiple legacy Agents resolve to the requested workspace; repair the conflict before retrying.',
-        { agentIds: legacyMatches.map((projection) => projection.agentId) },
-      );
-    }
-    const legacyIdentity = legacyMatches[0];
-
-    const projectId = existing?.id ?? randomUUID();
-    const stableAgentId =
-      existing?.agentId ??
-      priorIdentity?.agentId ??
-      legacyIdentity?.agentId ??
-      randomUUID();
-    const projectName =
-      existing?.name || basename(workspacePath) || 'Workspace';
-    let projectAfterCommit: ProjectSlim | undefined;
-
-    const projects = await atomicModifyProjects((currentProjects) => {
-      const currentMatches = currentProjects.filter((project) =>
+      const initialProjects = loadProjects();
+      const initialConfig = loadConfig();
+      const matches = initialProjects.filter((project) =>
         workspacePathsEqual(project.path, workspacePath),
       );
-      if (currentMatches.length > 1) {
+      if (matches.length > 1) {
         throw new WorkspaceAgentRegistrationError(
           'DUPLICATE_PROJECT_WORKSPACE',
-          'Multiple Projects resolve to the requested workspace.',
+          'Multiple Projects resolve to the requested workspace; repair the conflict in MyAgents before retrying.',
+          { projectIds: matches.map((project) => project.id) },
         );
       }
-      if (currentMatches.length === 0) {
-        const project: ProjectSlim = {
+
+      const existing = matches[0];
+      if (existing) {
+        if (
+          existing.internal === true ||
+          existing.hidden === true ||
+          existing.workspaceType === 'system-preset'
+        ) {
+          throw new WorkspaceAgentRegistrationError(
+            'WORKSPACE_NOT_EXTERNALLY_REGISTERABLE',
+            'This workspace is hidden, internal, or system-owned and cannot be changed by the external CLI.',
+            { projectId: existing.id },
+          );
+        }
+        if (
+          typeof existing.archivedAt === 'string' &&
+          existing.archivedAt.length > 0
+        ) {
+          throw new WorkspaceAgentRegistrationError(
+            'WORKSPACE_ARCHIVED',
+            'This workspace is archived. Unarchive it in MyAgents before retrying.',
+            { projectId: existing.id, agentId: existing.agentId },
+          );
+        }
+      }
+
+      const initialProjection = resolveAgentWorkspaceProjections(
+        initialProjects,
+        initialConfig.agents ?? [],
+      );
+      const relevantDiagnostic = initialProjection.diagnostics.find(
+        (diagnostic) =>
+          (!!existing && diagnostic.projectIds.includes(existing.id)) ||
+          (!!existing?.agentId && diagnostic.agentIds.includes(existing.agentId)),
+      );
+      if (relevantDiagnostic) {
+        throw new WorkspaceAgentRegistrationError(
+          relevantDiagnostic.code,
+          relevantDiagnostic.message,
+          {
+            projectIds: relevantDiagnostic.projectIds,
+            agentIds: relevantDiagnostic.agentIds,
+          },
+        );
+      }
+      const priorIdentity = existing
+        ? initialProjection.agentProjections.find(
+            (projection) =>
+              projection.association === 'project-linked' &&
+              projection.projectId === existing.id,
+          )
+        : undefined;
+
+      if (priorIdentity && options.rejectIfAlreadyRegistered) {
+        throw new WorkspaceAgentRegistrationError(
+          'WORKSPACE_ALREADY_REGISTERED',
+          `Workspace '${workspacePath}' is already registered as Agent '${priorIdentity.agentId}'. Use 'myagents agent set ${priorIdentity.agentId} ...' to change its name or settings.`,
+          { agentId: priorIdentity.agentId, projectId: priorIdentity.projectId ?? existing?.id },
+        );
+      }
+
+      const legacyMatches = initialProjection.agentProjections.filter(
+        (projection) =>
+          projection.association !== 'project-linked' &&
+          workspacePathsEqual(projection.workspacePath, workspacePath),
+      );
+      if (legacyMatches.length > 1) {
+        throw new WorkspaceAgentRegistrationError(
+          'WORKSPACE_REGISTRATION_CONFLICT',
+          'Multiple legacy Agents resolve to the requested workspace; repair the conflict before retrying.',
+          { agentIds: legacyMatches.map((projection) => projection.agentId) },
+        );
+      }
+      const legacyIdentity = legacyMatches[0];
+      if (legacyIdentity && options.rejectIfAlreadyRegistered) {
+        throw new WorkspaceAgentRegistrationError(
+          'WORKSPACE_ALREADY_REGISTERED',
+          `Workspace '${workspacePath}' is already registered as Agent '${legacyIdentity.agentId}'. Use 'myagents agent set ${legacyIdentity.agentId} ...' to change its name or settings.`,
+          { agentId: legacyIdentity.agentId },
+        );
+      }
+
+      const projectId = existing?.id ?? randomUUID();
+      const stableAgentId =
+        existing?.agentId ??
+        priorIdentity?.agentId ??
+        legacyIdentity?.agentId ??
+        randomUUID();
+      const explicitName = options.name?.trim();
+      const projectName =
+        existing?.name || explicitName || basename(workspacePath) || 'Workspace';
+
+      // Pre-validate initial patch against the draft Agent before committing any
+      // Project/Config files so invalid options leave zero disk artifacts.
+      let initialPatchResult: {
+        agent: AgentConfigSlim;
+        projectPatch?: Partial<ProjectSlim>;
+      } | undefined;
+      if (!priorIdentity && options.applyInitialAgentPatch) {
+        const draftProject: ProjectSlim = {
           id: projectId,
           agentId: stableAgentId,
           name: projectName,
           path: workspacePath,
           lastOpened: new Date().toISOString(),
+          ...(options.templateId ? { templateId: options.templateId, templateSource: options.templateSource } : {}),
         };
-        projectAfterCommit = project;
-        return [...currentProjects, project];
-      }
-      const current = currentMatches[0];
-      if (current.id !== projectId) {
-        throw new WorkspaceAgentRegistrationError(
-          'WORKSPACE_REGISTRATION_CONFLICT',
-          'The workspace registration changed concurrently; retry the command.',
+        const draftAgent = buildAgentForPersistedProject(
+          draftProject,
+          initialConfig,
+          stableAgentId,
+          { suppressTemplateDefaults: true },
         );
+        const applied = options.applyInitialAgentPatch(draftAgent, initialConfig);
+        if (!applied.ok) {
+          throw new WorkspaceAgentRegistrationError(applied.code, applied.message);
+        }
+        initialPatchResult = {
+          agent: { ...applied.agent, id: stableAgentId, name: projectName, enabled: false },
+          projectPatch: applied.projectPatch,
+        };
       }
-      const currentConfig = loadConfig();
-      const reconciled = reconcileAgentWorkspaceIdentities(
-        currentProjects,
-        currentConfig.agents ?? [],
-        {
-          buildAgent: (project, requestedAgentId) =>
-            buildAgentForPersistedProject(
-              project,
-              currentConfig,
-              requestedAgentId,
-            ),
-        },
-      );
-      projectAfterCommit = reconciled.projects.find(
-        (project) => project.id === projectId,
-      );
-      return reconciled.projects;
-    });
 
-    projectAfterCommit ??= projects.find((project) => project.id === projectId);
-    if (!projectAfterCommit?.agentId) {
-      throw new WorkspaceAgentRegistrationError(
-        'AGENT_PROJECT_CLAIM_FAILED',
-        'The Project identity could not be committed.',
-        { projectId },
-      );
-    }
+      let projectAfterCommit: ProjectSlim | undefined;
 
-    let configResult:
-      | ReturnType<
-          typeof reconcileAgentWorkspaceIdentities<ProjectSlim, AgentConfigSlim>
-        >
-      | undefined;
-    let config: AdminAppConfig;
-    try {
-      config = await atomicModifyConfig((current) => {
-        configResult = reconcileAgentWorkspaceIdentities(
-          projects,
-          current.agents ?? [],
+      const projects = await atomicModifyProjects((currentProjects) => {
+        const currentMatches = currentProjects.filter((project) =>
+          workspacePathsEqual(project.path, workspacePath),
+        );
+        if (currentMatches.length > 1) {
+          throw new WorkspaceAgentRegistrationError(
+            'DUPLICATE_PROJECT_WORKSPACE',
+            'Multiple Projects resolve to the requested workspace.',
+          );
+        }
+        if (currentMatches.length === 0) {
+          const project: ProjectSlim = {
+            id: projectId,
+            agentId: stableAgentId,
+            name: projectName,
+            path: workspacePath,
+            lastOpened: new Date().toISOString(),
+            ...(options.templateId ? { templateId: options.templateId, templateSource: options.templateSource } : {}),
+            ...(initialPatchResult?.projectPatch ?? {}),
+          };
+          projectAfterCommit = project;
+          return [...currentProjects, project];
+        }
+        const current = currentMatches[0];
+        if (current.id !== projectId) {
+          throw new WorkspaceAgentRegistrationError(
+            'WORKSPACE_REGISTRATION_CONFLICT',
+            'The workspace registration changed concurrently; retry the command.',
+          );
+        }
+        const currentConfig = loadConfig();
+        const reconciled = reconcileAgentWorkspaceIdentities(
+          currentProjects,
+          currentConfig.agents ?? [],
           {
             buildAgent: (project, requestedAgentId) =>
-              buildAgentForPersistedProject(project, current, requestedAgentId),
+              buildAgentForPersistedProject(
+                project,
+                currentConfig,
+                requestedAgentId,
+              ),
           },
         );
-        return configResult.changed
-          ? { ...current, agents: configResult.agents }
-          : current;
+        projectAfterCommit = reconciled.projects.find(
+          (project) => project.id === projectId,
+        );
+        return reconciled.projects;
       });
-    } catch (error) {
-      throw new WorkspaceAgentRegistrationError(
-        'AGENT_MATERIALIZATION_DEFERRED',
-        'The Project claim was saved, but Agent materialization was not confirmed. Retry the same command; it will reuse the same identity.',
-        {
-          projectId,
-          agentId: projectAfterCommit.agentId,
-          cause: error instanceof Error ? error.message : String(error),
-        },
-      );
-    }
 
-    const finalAgentId = projectAfterCommit.agentId;
-    const agent = (config.agents ?? []).find(
-      (candidate) => candidate.id === finalAgentId,
-    );
-    if (!agent || !configResult) {
-      throw new WorkspaceAgentRegistrationError(
-        'AGENT_MATERIALIZATION_DEFERRED',
-        'Agent materialization was not confirmed. Retry the same command.',
-        { projectId, agentId: finalAgentId },
+      projectAfterCommit ??= projects.find((project) => project.id === projectId);
+      if (!projectAfterCommit?.agentId) {
+        throw new WorkspaceAgentRegistrationError(
+          'AGENT_PROJECT_CLAIM_FAILED',
+          'The Project identity could not be committed.',
+          { projectId },
+        );
+      }
+      // Once projects.json has durably committed the workspace claim, the
+      // managed directory belongs to that Project and MUST remain on disk so
+      // an interrupted Agent write (`AGENT_MATERIALIZATION_DEFERRED`) can
+      // retry and reuse the saved Project claim cleanly.
+      createdManagedDirPath = null;
+
+      let configResult:
+        | ReturnType<
+            typeof reconcileAgentWorkspaceIdentities<ProjectSlim, AgentConfigSlim>
+          >
+        | undefined;
+      let config: AdminAppConfig;
+      try {
+        config = await atomicModifyConfig((current) => {
+          configResult = reconcileAgentWorkspaceIdentities(
+            projects,
+            current.agents ?? [],
+            {
+              buildAgent: (project, requestedAgentId) => {
+                const isTargetProject = project.id === projectId;
+                const built = buildAgentForPersistedProject(
+                  project,
+                  current,
+                  requestedAgentId,
+                  { suppressTemplateDefaults: isTargetProject },
+                );
+                if (isTargetProject && built.id === stableAgentId) {
+                  // CLI-created / registered Agents always start with enabled=false
+                  // and never auto-enable template proactive tasks (Heartbeat/Memory).
+                  return {
+                    ...built,
+                    ...(initialPatchResult ? initialPatchResult.agent : {}),
+                    id: stableAgentId,
+                    name: projectName,
+                    enabled: false,
+                  };
+                }
+                return built;
+              },
+            },
+          );
+          let agents = configResult.agents;
+          let changed = configResult.changed;
+          if (initialPatchResult) {
+            const idx = agents.findIndex((candidate) => candidate.id === stableAgentId);
+            if (idx >= 0) {
+              agents = [...agents];
+              agents[idx] = {
+                ...agents[idx],
+                ...initialPatchResult.agent,
+                id: stableAgentId,
+                name: projectName,
+                enabled: false,
+              };
+              changed = true;
+            }
+          }
+          return changed ? { ...current, agents } : current;
+        });
+      } catch (error) {
+        throw new WorkspaceAgentRegistrationError(
+          'AGENT_MATERIALIZATION_DEFERRED',
+          'The Project claim was saved, but Agent materialization was not confirmed. Retry the same command; it will reuse the same identity.',
+          {
+            projectId,
+            agentId: projectAfterCommit.agentId,
+            cause: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+
+      const finalAgentId = projectAfterCommit.agentId;
+      const agent = (config.agents ?? []).find(
+        (candidate) => candidate.id === finalAgentId,
       );
+      if (!agent || !configResult) {
+        throw new WorkspaceAgentRegistrationError(
+          'AGENT_MATERIALIZATION_DEFERRED',
+          'Agent materialization was not confirmed. Retry the same command.',
+          { projectId, agentId: finalAgentId },
+        );
+      }
+      await broadcastAppConfigChanged({
+        section: 'agent-identity',
+        action: priorIdentity ? 'register-idempotent' : 'register',
+        projectId,
+        agentId: finalAgentId,
+      });
+      return {
+        created: !priorIdentity,
+        agentId: finalAgentId,
+        projectId,
+        name: agent.name,
+        workspacePath: projectAfterCommit.path,
+        enabled: agent.enabled === true,
+        archived: false,
+        ...(projectAfterCommit.templateId ? { templateId: String(projectAfterCommit.templateId) } : {}),
+        ...(projectAfterCommit.templateSource === 'builtin' || projectAfterCommit.templateSource === 'user'
+          ? { templateSource: projectAfterCommit.templateSource }
+          : {}),
+      };
+    } catch (error) {
+      if (createdManagedDirPath) {
+        const normalizedCreated = normalizeContainedPathIdentity(resolve(createdManagedDirPath));
+        if (isDirectChildOfManagedProjects(normalizedCreated)) {
+          try {
+            rmSync(createdManagedDirPath, { recursive: true, force: true });
+          } catch {
+            // Best-effort rollback of newly created managed directory
+          }
+        }
+      }
+      throw error;
     }
-    await broadcastAppConfigChanged({
-      section: 'agent-identity',
-      action: priorIdentity ? 'register-idempotent' : 'register',
-      projectId,
-      agentId: finalAgentId,
-    });
-    return {
-      created: !priorIdentity,
-      agentId: finalAgentId,
-      projectId,
-      name: agent.name,
-      workspacePath: projectAfterCommit.path,
-      enabled: agent.enabled === true,
-      archived: false,
-    };
   });
 }
 

@@ -162,7 +162,13 @@ myagents model verify <id> [--model <某个具体模型>]      # 实际发一条
 
 ```bash
 myagents agent list                                     # 发现本机和同账号在线设备的可调用 Agent
-myagents agent create --workspacePath /absolute/path    # 把既有目录幂等注册成 Project-backed Agent
+myagents agent templates [--json]                       # 列出可用于 agent create --template 的工作区模板
+myagents agent create --name "<显示名>" [--template <id>] \
+  [--runtime X --providerId X --model X --reasoningEffort X --permissionMode X]
+                                                        # 在 ~/.myagents/projects/<name> 创建空工作区或从模板物化，并注册为 Agent（重名直接报错）
+myagents agent create --workspacePath /absolute/path [--name "<显示名>"] \
+  [--runtime X --providerId X --model X --reasoningEffort X --permissionMode X]
+                                                        # 把既有目录注册成 Project-backed Agent；无额外覆盖时同路径幂等，带配置/改名时已存在则拒绝
 myagents agent current --json                          # 只看当前 Agent/workspace/Session
 myagents agent list --active                            # 只列出未归档 Agent 工作区
 myagents agent list --archived                          # 只列出已归档 Agent 工作区
@@ -172,8 +178,10 @@ myagents agent disable <id>                             # 暂停主动能力，�
 myagents agent archive <id>                             # 归档 Agent 工作区，并暂停 proactive Channel
 myagents agent unarchive <id>                           # 取消归档；若归档前是 proactive，会恢复启用
 myagents agent set <id> <key> <value>                   # 改本机单个字段；合法 JSON 会解析，否则保留字符串
-                                                        # key 仅限 enabled/runtime/runtimeConfig/providerId/model/permissionMode
+                                                        # key 仅限 name/enabled/runtime/runtimeConfig/providerId/model/permissionMode/reasoningEffort/mcpEnabledServers/enabledPluginIds
                                                         # id / channels 用专用命令；未知 key 会在写盘前拒绝
+myagents agent set <id> --runtime X --providerId Y --model Z [--reasoningEffort R --permissionMode P --name "..."]
+                                                        # 一次原子修改多个字段（跨 runtime 切换首选，避免单字段中间态校验冲突）
 myagents agent channel list <agentId>                   # 列出某 Agent 的所有 Channel
 myagents agent channel add <agentId> --type <平台> --<凭证flag> ...
                                                         # 添加 Channel（telegram / feishu / dingtalk / openclaw:xxx；先查 help）
@@ -182,15 +190,16 @@ myagents agent runtime-status                           # 看本机 Channel 运�
 ```
 
 **何时用：**
-- "我那个 Agent 现在啥配置" → `agent show <id>`，按 runtime 正确解析过 effective 值
-- "把这个本地目录注册成 Agent 工作区" → `agent create --workspacePath <绝对且已存在的目录>`；不创建目录，不初始化 Git/模板
-- "把 Agent X 的 model 改成 Y" → `agent set X model '"Y"'`（注意 JSON 字符串要双层引号）
-- "把 permissionMode 改成 plan" → `agent set X permissionMode '"plan"'`
+- "我那个 Agent 现在啥配置" → `agent show <id>`，按 runtime 正确解析过 effective 值；`system-cli` 运行时的 Provider 显示为 `(managed by runtime)`
+- "帮我新建一个独立的 Agent 工作区" → `agent create --name "Code Reviewer"`（在 `~/.myagents/projects/` 下建空目录）；需要复用内置 Mino 等模板先 `agent templates` 再加 `--template mino`；目录冲突直接报错，不会静默改名，且新建 Agent 固定 `enabled=false`
+- "把这个本地目录注册成 Agent 工作区" → `agent create --workspacePath <绝对且已存在的目录>`（可一并传初始 `--runtime/--providerId/--model/--permissionMode`）；不自动 mkdir 任意路径，`--template` 不能与 `--workspacePath` 同用
+- "把 Agent X 的 model 改成 Y" → `agent set X --model Y` 或 `agent set X model '"Y"'`；跨 runtime/provider 联动切换时优先用多字段 flag 一次原子提交
+- "把 permissionMode 改成 plan" → `agent set X --permissionMode plan`
 - "项目结束了，先收起来" → `agent archive <id>`；需要恢复时用 `agent unarchive <id>`
 - "飞书 Bot 在线吗" → `agent runtime-status`；`agent list` 的网络发现不证明 Channel 在线
 - 配 Channel 详见下方 §配置 Agent Channel 流程
 
-`agent show` 读 Agent 的执行默认，`agent set` 写本机单个字段。只使用 canonical key；`provider` / `permission` 不是 alias，分别用 `providerId` / `permissionMode`。Provider/model/permission 会校验后同步 Project 镜像和运行中的 Channel；已有 Session 仍由自己的生命周期管理。权限值先查 `runtime describe` 和 leaf help，不复用旧 Codex 模式映射。复杂 Channel 改动走 `agent channel`；这些写命令不管理远端 Agent。
+`agent show` 读 Agent 的执行默认，`agent set` 写本机单个或多个关联字段。只使用 canonical key；`provider` / `permission` 不是 alias，分别用 `providerId` / `permissionMode`。Provider/model/permission/reasoningEffort 会校验后同步 Project 镜像和运行中的 Channel；已有 Session 仍由自己的生命周期管理。权限值先查 `runtime describe` 和 leaf help，不复用旧 Codex 模式映射。复杂 Channel 改动走 `agent channel`；这些写命令不管理远端 Agent。
 
 ### Agent Runtime 发现（runtime）
 
@@ -492,15 +501,16 @@ myagents agent network-diagnose --json                 # 本机连接、协议�
 # 查看某 Agent 最近可复用的历史上下文（只读，不唤醒）
 myagents session list --agent <agentId> [--limit 10]
 
-# 在目标 Agent 下开启干净的新上下文
+# 在目标 Agent 下开启干净的新上下文（支持本机一次性的 runtime/provider/model/reasoningEffort/permissionMode 覆盖）
 myagents session start --agent <agentId> -p "<prompt>"
 myagents session start --agent <agentId> --prompt-file <abs-path>
+myagents session start --agent <agentId> --runtime codex --model gpt-5.4 --prompt-file -   # 从 stdin 读多行 prompt
 
 # 在已知 Session 的既有上下文里继续做新工作
 myagents session send <sessionId> -p "<prompt>"
-myagents session send <sessionId> --prompt-file <abs-path>   # 多行/长文本(>4KB)必用,跨平台稳定
+myagents session send <sessionId> --prompt-file <abs-path>   # 多行/长文本(>4KB)必用；也支持 --prompt-file - 从 stdin 读
 
-# start / send 默认在目标 turn 结束后把结果推回当前 Session
+# start / send 默认在目标 turn 结束后把结果推回当前 Session（不要轮询等待！）
 # 仅通知、不需要结果回流时加 --no-reply
 myagents session start --agent <agentId> -p "<prompt>" --no-reply
 
@@ -527,11 +537,14 @@ myagents session --help                                      # 完整用法 / EX
 - 同账号远端设备必须入网、在线且开放目标 Agent；`enabled`、IM Channel 与网络开放互相独立。发现结果 `complete=false` 时不要把缺项当作不存在
 - `session get` 默认最近 5 条按旧到新返回；`before` 排除锚点，用当前页第一条 message id 向前翻页。只读可见正文，不含工具、思考与隐藏控制事件
 
-**异步语义(关键):**
+**异步语义与一次性覆盖(关键):**
 - `start` / `send` CLI 成功只表示首条请求已接纳，**不表示工作完成**
-- App 内真实 Session 发起 `start/send` 默认回传；授权的外部终端为单向投递，不支持 watch/观察管理。目标按自己的 runtime/model/permission/MCP/plugin/tool 配置执行，不接受调用方覆盖
-- `start` receipt 返回新的 `sessionId`、`messageId`；`messageId` 对应稍后 `send.result.requestEventId`
-- 默认期待结果推回：对方处理完后，系统向来源 Session 投递 `<myagents-session-event type="send.result">`，不需要主动轮询或再发工作
+- **本机 `session start` 一次性覆盖**：可对本机可见未归档 Agent（含自己所在 Agent）指定 `--runtime` / `--providerId` / `--model` / `--reasoningEffort` / `--permissionMode`。覆盖**仅写入本次新建 Session 的 birth snapshot**，绝不修改目标 Agent 默认配置、Project 镜像或在线 IM Channel。
+  - **跨 5-runtime 统一权限天花板**：新建 Session 的有效权限严格 `<=` 目标 Agent 默认权限级别（跨 `builtin` / `dsh` / `claude-code` / `codex` / `antigravity` 按 4 档语义对齐：Tier 3 无限制互相对齐，Tier 0 只读/规划不可放宽；切到 DSH 时 Tier 0 会显式拒绝 `PERMISSION_CEILING_UNSATISFIABLE`）。显式 `--permissionMode` 超过天花板会拒绝并提示安全上限。
+  - **不开放的覆盖**：远端跨设备 Agent（`ma-agent:1:...`）禁止覆盖；MCP/Plugin/OfficialTool/`runtimeConfig`/`runtimeSource` 等能力字段禁止在 `session start` 临时覆盖。
+- App 内真实 Session 发起 `start/send` 默认回传；授权的外部终端为单向投递，不支持 watch/观察管理。
+- `start` receipt 返回新的 `sessionId`、`messageId` 及 `effectiveConfig`；`messageId` 对应稍后 `send.result.requestEventId`
+- 默认期待结果推回：对方处理完后，系统向来源 Session 投递 `<myagents-session-event type="send.result">`，**不要写 `sleep` / `session state` 轮询循环**，直接结束当前等待并等待系统自动唤醒即可
 - `--no-reply`:仅通知,reply 不回流(对方按自己呈现路径输出)
 - `send` 的 target session idle/dead 不影响投递——系统会自动唤起
 - `watch` 一次性观察目标真实轮次；idle 时直接返回 `watch.already_idle` 与最近结果，按 live/history/none/unavailable 和 terminalStatus 判断，不能当作某次请求的成功证明
@@ -541,9 +554,9 @@ myagents session --help                                      # 完整用法 / EX
 - `waiting_user_action` 需要目标用户审批/确认/回答；来源不能代批。`idle` 不是成功状态
 - start/send 接纳未知或回执丢失时保留 receipt/request IDs，先用 get/state/list 观察，**不要自动重试**。真实断线无离线补投，目标已接纳工作仍可能继续
 
-**Windows 安全:**
+**Windows 安全与多行输入:**
 - `-p` 内容含 `\n` 或 > 4KB → CLI 立即 fail-fast(exit 3),提示切到 `--prompt-file`
-- 习惯上长 / 多行内容**永远**走 `--prompt-file`,跨平台一致
+- 习惯上长 / 多行内容**永远**走 `--prompt-file <path>` 或 `--prompt-file -`（stdin heredoc / pipe，上限 1 MiB，拒绝交互式 TTY 挂起），跨平台一致
 
 ### Generative UI Widget 设计文档（widget）
 

@@ -377,3 +377,57 @@ it.skipIf(process.env.MYAGENTS_TEST_AGY !== "1")(
   },
   300000,
 );
+
+it.skipIf(process.env.MYAGENTS_TEST_AGY !== "1")(
+  "steers an active turn in-place with a concurrent prompt and keeps a single completed turn",
+  async () => {
+    const runtime = new AntigravityRuntime();
+    const workspacePath = await mkdtemp(join(tmpdir(), "myagents-agy-steer-"));
+    const events: UnifiedEvent[] = [];
+    let proc: RuntimeProcess | undefined;
+    try {
+      proc = await runtime.startSession(
+        {
+          workspacePath,
+          sessionId: randomUUID(),
+          scenario: { type: "desktop" },
+          permissionMode: "dangerously-skip-permissions",
+        },
+        (e) => events.push(e),
+      );
+      await runtime.sendMessage(
+        proc,
+        "Run the shell command `sleep 4 && echo DONE_SLEEP` first, then reply with ONLY the word APPLE.",
+      );
+      await expect
+        .poll(() => events.some((e) => e.kind === "tool_use_start"), { timeout: 90_000 })
+        .toBe(true);
+      expect(runtime.canSteerMessage(proc)).toBe(true);
+      await runtime.steerMessage(
+        proc,
+        "Change of plan: do NOT say APPLE. After the command finishes, reply with ONLY the exact word BANANA.",
+        undefined,
+        { clientUserMessageId: "u-steer-live" },
+      );
+      expect(events.some((e) => e.kind === "turn_complete")).toBe(false);
+      await expect
+        .poll(() => events.find((e) => e.kind === "turn_complete")?.status, { timeout: 90_000 })
+        .toBe("completed");
+      expect(events.filter((e) => e.kind === "turn_complete")).toHaveLength(1);
+      const acceptedIdx = events.findIndex(
+        (e) => e.kind === "user_message_accepted" && e.clientUserMessageId === "u-steer-live",
+      );
+      const completeIdx = events.findIndex((e) => e.kind === "turn_complete");
+      expect(acceptedIdx).toBeGreaterThanOrEqual(0);
+      expect(completeIdx).toBeGreaterThan(acceptedIdx);
+      const replyText = events
+        .flatMap((e) => (e.kind === "text_delta" ? [e.text] : []))
+        .join("");
+      expect(replyText).toMatch(/BANANA/i);
+    } finally {
+      if (proc) await runtime.stopSession(proc);
+      await rm(workspacePath, { recursive: true, force: true });
+    }
+  },
+  150_000,
+);

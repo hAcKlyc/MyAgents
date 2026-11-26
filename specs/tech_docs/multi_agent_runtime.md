@@ -198,20 +198,25 @@ DSH 权限选择先存为 Session 的期望模式；当前 turn 使用 admission
 
 ### 5.5 Antigravity CLI
 
-选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面探测检查可执行文件版本及独立 ACP worker 能力。无活跃 ACP 进程时（起始页与尚未唤醒的对话页），模型菜单读取 `agy models` 并按与 ACP 一致的规则将多档推理强度变体折叠为「模型家族 + `supportedReasoningEfforts`」（单变体与非强度后缀条目保持原样）；会话唤醒后以本 Session worker 回报的 `configOptions`（`model` 与 `thought_level`）为运行期权威，推理档位只展示当前模型的已确认选项，同时兼容历史保存的扁平模型 ID（如 `gemini-4-neon-high`）的展示高亮与配置下发。仅提供扁平 ID 的旧 worker 继续接收原生 ID，用户选择的模型家族与档位由 adapter 映射到原生变体。目录未报告默认模型时，先通过显式选模确定可用档位。macOS Dev 已验证 Antigravity CLI 1.5.14。
+选择器中的 Antigravity CLI 使用 `system-cli`。用户在终端安装、运行 `agy` 并登录一次。桌面发现仅解析系统 CLI 路径，允许启动页立即展示已安装的外部 Runtime。CLI 版本是可选元数据，超时只省略版本，真实会话启动通过 `agy acp --process-per-session` 和 `initialize` 验证 worker 与 ACP 版本。Global Sidecar 的 Antigravity 模型发现合并并发请求，并缓存非空目录 60 秒。无活跃 ACP 进程时（起始页与尚未唤醒的对话页），模型菜单读取 `agy models` 并按与 ACP 一致的规则将多档推理强度变体折叠为「模型家族 + `supportedReasoningEfforts`」（单变体与非强度后缀条目保持原样）；会话唤醒后以本 Session worker 回报的 `configOptions`（`model` 与 `thought_level`）为运行期权威，推理档位只展示当前模型的已确认选项，同时兼容历史保存的扁平模型 ID（如 `gemini-4-neon-high`）的展示高亮与配置下发。仅提供扁平 ID 的旧 worker 继续接收原生 ID，用户选择的模型家族与档位由 adapter 映射到原生变体。目录未报告默认模型时，先通过显式选模确定可用档位。macOS Dev 已验证 Antigravity CLI 1.5.14。
 
 每个使用中的 Session 由 adapter 启动一个 `agy acp --process-per-session`，通过 ACP stdio 直接通信。权限、原生工具执行和登录归 CLI 所有。Sidecar 通过 `session/new` 或 `session/resume` 传入 cwd、当前 MCP 和追加的场景指令，分别保留产品 ID 和原生 ID。原生会话可能先于产品首条消息建立，首次接纳必须把该 ID 和产品会话一并落盘。恢复失败保留原绑定和产品历史；已有历史但缺失绑定时仍可阅读，继续发送会收到明确错误。启动与恢复均重新下发显式模型、推理强度和权限模式。
 
-桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。未显式指定权限的后台任务沿用 `auto`。
+桌面权限菜单提供「请求批准」(`accept-edits`)、「帮我批准」(`auto`) 和「完全访问权限」(`--dangerously-skip-permissions`)。前两项通过 ACP 的 `mode` 更新。完全访问权限属于 CLI 启动参数，进入或退出时由 Session 在轮次边界替换进程，用同一个原生 Session ID 恢复。新交互会话默认请求批准，历史 `default` / `plan` 仍按保存值执行。新 IM 会话和未显式指定权限的后台任务 / Goal 与其它 Runtime 一致，解析为最高无人值守权限 `dangerously-skip-permissions`，且不回改已有持久 Session 快照。
+
+启动 `agy acp` 前先按用户 Shell PATH 解析 `agy` 可执行文件，随后向子进程注入当前 Session 的内部 CLI 环境（`~/.myagents/bin` 优先于 `PATH`、`PWD`、`MYAGENTS_PORT`、`MYAGENTS_SESSION_ID`、`MYAGENTS_INTERNAL_CLI_TOKEN`），确保桌面、IM 与后台任务轮次均可稳定调用 `myagents` CLI。
 
 | 产品交互 | Antigravity 行为 |
 |---|---|
-| 发送、停止、立即发送 | prompt 写入后确认派发。运行中新消息进入现有队列，普通停止和指定排队项优先发送分别复用现有队列语义。若 prompt 以独立 ACP 文本块中的原生格式临时鉴权警告和 `end_turn` 结束，adapter 在同一个原生会话发送简短续跑消息，沿用现有上下文。续跑有退避和次数上限，整个产品轮次合计用量。停止请求会阻止迟到的回包派发续跑，重试用尽以 `failed` 结束。 |
+| 发送、停止、立即发送 | prompt 写入后确认派发。运行中遵循 `chatQueueResponseMode`：`realtime` 模式（及 Inbox 实时投递）通过同会话并发 `session/prompt` 实时插入当前轮，旧 prompt 让出所有权并累计其 delta 用量，新 prompt 在观察到后续原生进展、被更晚 steer 接替或正常终结时才确认消费（迟到拒绝或未消费即取消则发出 `user_message_cancelled` 而非伪确认）；若当前正在等待审批或问答、或存在未结算子 Agent 后台工作，明确返回不可 steer 并按原顺序降级至 turn-boundary 队列。`turn` 模式直接进入现有队列。停止由原生 cancel 结束当前轮；普通停止和指定排队项优先发送分别复用现有队列语义。若当前 prompt 以原生格式临时鉴权警告和 `end_turn` 结束且没有接手的后继 prompt，adapter 在同一原生会话按有界退避续跑；整个产品轮次合计用量。 |
 | 审批与问答 | 保留 CLI 提供的选项 ID、类型和文案。共享审批卡投影操作、目录及可用的文件 diff。支持可无损往返的标量表单。后台无交互入口时结束请求。 |
 | 工具与附件 | 用原生工具语义在既有 Shell、Read/Edit、搜索、子 Agent 与通用卡展示。ACP 活动输出是替换快照，按原调用更新内容和状态。1.5.14 Read 的正文按当前 native conversation 与原工具调用 ID，从 CLI 持久化的实际结果投影。 |
-| 子 Agent | 按当前 worker 已观察的 invoke_subagent 调用 ID，把原生子会话、内部工具与回复、报告、终态对齐到委派卡。父 prompt 返回后仍处理同一 ACP Session 的新内容，使用既有外部 Session 协作接纳与 V2 投影。收到 usage_update 后结算该次父续答，按已完成父回复的原生步骤顺序确认该轮消费了哪些报告。全部子任务结算及报告得到确认后释放后台工作。 |
-| 会话级 MCP | 按现有产品选择投影 stdio 和协商支持的远程传输；由 CLI 拥有的全局工具遵循其配置。选择或凭据变化在空闲边界重启并恢复同一 native session。ACP 未报告当前工具目录时显示状态待确认。 |
-| 历史与命令 | 产品拥有 transcript，CLI 拥有执行上下文。原生命令、标题和计划投影至现有界面。精确 Fork、Rewind、历史 Retry、同轮 steer 和手动压缩依照能力门控。 |
+| 子 Agent | 按当前 worker 已观察的 invoke_subagent 调用 ID，把原生子会话、内部工具与回复、报告、终态对齐到委派卡。父 prompt 返回后仍处理同一 ACP Session 的新内容，使用既有外部 Session 协作接纳与 V2 投影。收到 usage_update 后结算该次父续答，按已完成父回复的原生步骤顺序确认该轮消费了哪些报告。全部子任务结算及报告得到确认后发射 `background_work_settled` 并释放后台工作。IM 与 Task / Goal 轮次若在中间 `end_turn` 仍有未结算子 Agent，保持 `ReplySlot` 与 `runInjectedTurn` 绑定打开，直到全部子 Agent 结算与最终父续答完成再统一收口；显式停止、watchdog 超时或进程异常退出时立即清理并终止，不悬空。 |
+| 会话级 MCP | 按现有产品选择投影 stdio 和协商支持的远程传输；由 CLI 拥有的全局工具遵循其配置。选择或凭据变化在空闲边界重启并恢复同一 native session。无选中 MCP 时 `dispatch` 结算为 `settled/ready`；成功传入 ACP 但上游未回报工具目录时标记 `state: "unreported"` 与 `dispatch.releaseReason: "status_unreported"`（不误报 `status_read_failed`）；全部本地配置失败时标记 `terminal_status`。 |
+| Skills 投影 | `agy 1.5.14` 仅原生发现工作区内 `.agents/skills`（及 `.agent/`、`_agents/`、`_agent/`）并跳过指向工作区外的符号链接。Host 不污染用户仓库或全局 `~/.gemini`，在启动/恢复会话时通过 `_meta.antigravity.systemPrompt.append` 注入精简 `<myagents-skills>` 渐进披露索引（名称、摘要与规范 `SKILL.md` 绝对路径），并严格按规范路径与名称排除 `agy` 已原生加载的目录，同时遵循 `project-capabilities.ts` 的启用/禁用选择与必需系统 Skill 策略。 |
+| 历史与命令 | 产品拥有 transcript，CLI 拥有执行上下文。原生命令、标题和计划投影至现有界面。精确 Fork、Rewind、历史 Retry 和手动压缩依照能力门控。 |
+
+watchdog 由外部 Session owner 统一结算。Antigravity adapter 报告当前工具与子 Agent 的活动，以及可观察的原生后台任务进度。工作活跃时允许最长 60 分钟无进展。后台任务记录不可用时，已知任务 ID 本身不延长 watchdog，独立的工具和子 Agent 活动仍有效。历史会话保存的推理档位已不可用时可沿用原生可用档位恢复；新 Inbox 会话必须应用其请求的档位后才接纳首次执行。
 
 后台父回复直接作为助手段持久化。子状态、读取结果和步骤来自 CLI 拥有的原生记录，父回复内容继续来自同一 ACP 连接。PromptResponse 的 Antigravity 1.5.14 用量是本轮增量，usage_update 是上下文占用。普通测试使用替代 ACP 子进程和临时工作区。带账号验证用 `MYAGENTS_TEST_AGY=1 npm run test:credentialed -- src/server/runtimes/antigravity.credentialed.test.ts`，覆盖真实写入审批、取消后磁盘无副作用、换进程恢复和会话级 MCP 撤销。
 
@@ -258,7 +263,7 @@ Desktop 与 IM 手动输入共用 AppConfig 的 `chatQueueResponseMode`，决定
 
 native steer 明确返回“未接收”时，同一个 operation 可以按原 admission order降级到 turn-boundary queue；timeout、process exit 等不确定错误不能自动重放。same-turn steer 不应用新的 model/permission/reasoning snapshot。
 
-SessionEngine 的可信 Inbox ingress 固定 realtime，不读取手动 query 设置，也不根据正文的 `system-reminder` 标签判断来源。原 operation queue 在 running 时选择可实时消费的输入，可越过等待下一轮的手动消息与配置 operation；配置仍只在 boundary 生效。同消费时机的输入保持接纳顺序。builtin 使用 SDK async queue，DSH 使用 `turn/followUp`，Codex 使用 `turn/steer`；native 消费回执才上屏并关联到实际轮次，RPC ack 不能代替消费确认。多个同轮已消费的请求各自保留 Inbox 回复关联，共享 terminal 结果；reply/watch notification 不注册自动回复。
+SessionEngine 的可信 Inbox ingress 固定 realtime，不读取手动 query 设置，也不根据正文的 `system-reminder` 标签判断来源。原 operation queue 在 running 时选择可实时消费的输入，可越过等待下一轮的手动消息与配置 operation；配置仍只在 boundary 生效。同消费时机的输入保持接纳顺序。builtin 使用 SDK async queue，DSH 使用 `turn/followUp`，Codex 使用 `turn/steer`，Antigravity 使用同会话并发 `session/prompt`；native 消费回执才上屏并关联到实际轮次，RPC ack 不能代替消费确认。多个同轮已消费的请求各自保留 Inbox 回复关联，共享 terminal 结果；reply/watch notification 不注册自动回复。
 
 Task 的直接执行、scheduled turn 以及 Goal 等显式 `turnBoundaryOnly` 工作保持 turn-level admission；`runInjectedTurn` 固定取得自己轮次的 terminal。External adapter 通过 `enqueueExternalIndependentTurn` 接纳，独立时机与人工输入的设置解析分开，再复用同一完整 admission 流程。不能替换成无条件入队：idle/error 下仍须保留直接启动和恢复路径。Task 结果交接走普通 Inbox 接纳路径，以准确 dispatch acceptance 结算；见 [Session 的 Task 结果事件](session_architecture.md#task-结果事件)。
 

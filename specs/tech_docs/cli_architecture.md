@@ -176,13 +176,13 @@ myagents session list --agent <agent-id>          # 看最近可复用的 persis
 这三条命令的存在让 `task create-direct --runtime X --model Y --permissionMode Z` 的值空间对 AI 完全自解释 —— `--help` 里只列 flag，值通过 `runtime describe` 查，避免 `--help` 文案与实际可用值漂移。
 
 `agent set` 不是裸 JSON 属性写入：只接受帮助中列出的 canonical 字段
-`enabled/runtime/runtimeConfig/providerId/model/permissionMode`，未知字段在写盘前拒绝；
+`name/enabled/runtime/runtimeConfig/providerId/model/permissionMode/reasoningEffort/mcpEnabledServers/enabledPluginIds`，同时支持单字段位置形态与多字段 flag 原子提交（如 `--runtime ... --providerId ... --model ... --reasoningEffort ... --permissionMode ...`），未知字段或混用位置与 flag 均在写盘前拒绝；
 `provider` / `permission` 不作为第二套 alias；未知字段应明确提示 canonical
-`providerId` / `permissionMode`。providerId/model/permissionMode 属于配置 intent，
-必须在 Admin API 边界校验并同步 Agent 权威记录、Project 兼容镜像和运行中的
+`providerId` / `permissionMode`。providerId/model/reasoningEffort/permissionMode 属于配置 intent，
+必须在 Admin API 边界按目标最终配置态统一校验，并同步 Agent 权威记录、Project 兼容镜像和运行中的
 Agent/IM Channel。Managed Codex 的 Agent 配置只接受产品 permission
 （`auto | plan | fullAgency`）；`agent show` 再精确投影为 effective Codex
-runtime permission。Native 值属于 Session 执行快照，不能写入 Agent 的产品字段。
+runtime permission（对 `system-cli` 运行时，`agent show` 返回 `providerId: null` 并在文本输出显示 `(managed by runtime)`，不泄漏残留 Provider）。Native 值属于 Session 执行快照，不能写入 Agent 的产品字段。
 `full-auto` 保留 workspace-write sandbox，不能当作 `fullAgency` 或升级为
 `no-restrictions`。任何单字段更新不得重置未涉及的 provider/model/permission 字段。
 Provider 目录、credential/readiness 与 model 校验必须在 `agent-config-intent.lock`
@@ -421,11 +421,12 @@ session 选择、结构化事件生成与投递确认。
 
 | 子命令 | 事件 | 关键不变量 |
 |--------|------|------------|
-| `myagents agent create --workspacePath <absolute-existing-directory>` | 无 | 在跨进程 intent lock 内 Project-first 注册；同路径幂等，不创建目录；hidden/internal/system/archived 与 identity conflict fail closed |
+| `myagents agent templates` | 无 | 在 Node Admin API 中直接读取内置 `PRESET_TEMPLATES`（如 `mino`）与 `~/.myagents/templates.json`（限制在 `~/.myagents/templates/` 内）只读目录，供 `agent create --template` 发现（不暴露内部文件系统路径） |
+| `myagents agent create` | 无 | 支持两种模式：(1) `--name <name> [--template <id>]` 在受管根目录 `~/.myagents/projects/<sanitized-name>` 经 Rust Management API 创建空目录或原子物化模板，冲突 fail closed (`WORKSPACE_ALREADY_EXISTS`)；(2) `--workspacePath <abs-existing-dir> [--name <name>]` 注册已有目录（不 mkdir、禁止 `--template`）。支持原子初始执行配置 flag；新建 Agent 固定 `enabled=false`；在跨进程 intent lock 内 Project-first 提交；提交 Project 前失败回滚新目录，提交后可对未完成的同名注册重试 |
 | `myagents agent list/show` | 无 | exact Agent ID 是 selector；Project-backed 与历史 extra/orphan 均可发现；只有 Project 选中的 Agent 可为 `isCurrent`；目标 claim conflict 局部失败 |
 | `myagents session list --agent` | 无 | 只读 `sessions.json` 的 history-visible metadata，按 `lastActiveAt` 倒序；不唤醒、不探测 live、不读 transcript |
-| `myagents session start --agent` | `send.request` / 可选 `send.result` | Rust 生成 Session/request ID，目标 Sidecar 按 Agent 当前有效配置创建 owned snapshot；Runtime dispatch acceptance 是成功点，CLI receipt 不等待 terminal |
-| `myagents session send` | `send.request` / 可选 `send.result` | 目标 session 收到 `<myagents-session-event type="send.request">`；只有内部 Session 调用可回投，外部调用固定 one-way；ACK 解析失败或 transport 超时返回 `admission_unconfirmed`，不得假报成功或自动重发 |
+| `myagents session start --agent` | `send.request` / 可选 `send.result` | Rust 生成 Session/request ID；本地调用支持一次性 `--runtime/--providerId/--model/--reasoningEffort/--permissionMode` 覆盖（按 4-tier 跨 5-runtime 权限天花板校验，不改写目标 Agent 默认；禁止覆盖能力字段及远端 Agent）；目标 Sidecar 将解析结果写入 owned birth snapshot，Runtime dispatch acceptance 是成功点，CLI receipt 不等待 terminal |
+| `myagents session send` | `send.request` / 可选 `send.result` | 目标 session 收到 `<myagents-session-event type="send.request">`；支持 `-p`、`--prompt-file <path>` 与 `--prompt-file -`（非交互 stdin，上限 1 MiB）；只有内部 Session 调用可回投，外部调用固定 one-way；ACK 解析失败或 transport 超时返回 `admission_unconfirmed`，不得假报成功或自动重发 |
 | `myagents session get` | 无 | 只读合并持久/内存/live transcript；过滤后分页，默认 5、最大 500、正序；只返回 user/assistant 顶层 text，不回退工具/思考 JSON，不创建 turn；owner transport/body 失败只重解析 owner 后重试一次 |
 | `myagents session watch` | `watch.already_idle` / `watch.completed` / `watch.error` | Rust Management API 先确认目标 live state；目标忙时在目标 Sidecar 注册 pending watch，完成事件确认送达后才 ack 清理；目标已 idle 时调用方立即收到最近结果 |
 
@@ -444,10 +445,11 @@ ACK 丢失返回 unconfirmed receipt 并保留 ID、不自动重试。Rust 复�
 
 超时预算按调用层级严格递增：target owner 的单次 ACK 最短，Rust 的有界 owner 重解析覆盖其上，Node Admin 再覆盖 Rust，CLI 最外层最后超时。读操作只允许 `session get` 在 owner generation 可能切换时做一次立即重解析；`start/send` 不做 blind retry。
 
-调用方只能提交 `agentId + prompt + replyBack`。内部调用显式携带 `sourceKind=internal-session`
+本地 `session start` 允许调用方提交 `agentId + prompt + replyBack` 以及可选的一次性出生覆盖 `overrides`（仅限 `runtime`/`providerId`/`model`/`reasoningEffort`/`permissionMode`）。内部调用显式携带 `sourceKind=internal-session`
 和真实 sourceSessionId，保留默认回投；外部 Host 注入 `sourceKind=external-cli`，不接受来源伪造、
-不携带 sourceSessionId 且强制 one-way。目标 Agent 是 runtime/model/permission/provider/MCP/plugin/tool birth authority；
-Admin API 对调用方同名 override fail closed。默认 terminal 结果复用既有 `send.result` 回投，
+不携带 sourceSessionId 且强制 one-way。一次性覆盖仅写入新 Session 的 birth snapshot，绝不写回目标 Agent/Project 配置；
+跨 5-runtime 统一由 `src/shared/sessionPermissionCeiling.ts` 的 4-tier 天花板策略裁决（默认不高于目标 Agent 权限档位，Tier 3 无限制互相对齐，Tier 0 切到 DSH fail closed，Managed Codex 排除系统独有的 `full-auto`），并由目标 Sidecar 在写 metadata 前再次按当前持久化状态校验。
+远端网络 Agent 与能力字段（`mcpEnabledServers`/`enabledPluginIds`/`enabledOfficialToolIds`/`runtimeConfig`/`runtimeSource`）仍由 Admin API fail closed 拒绝。默认 terminal 结果复用既有 `send.result` 回投，
 receipt 的 `messageId` 对应后续 `requestEventId`。
 
 本地与远端的 Admin 路由都显式传递同一份准入结果派生的 `sourceKind`；本地 start/send handler 不提供默认来源类型，遗漏由类型检查拒绝。外部调用即使直连 Session Sidecar，也不能借用该进程的 Session identity 或建立回投。发布 bundle 回归从普通终端 CLI 与 Global/Session HTTP 入口验证实际下发 envelope，不能只靠直接传入 external 类型的 handler 单测。start/send 的失败诊断只记录 dispatch stage、route、caller kind、code 和 unconfirmed，不记录 token 或 prompt。

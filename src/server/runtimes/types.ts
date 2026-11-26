@@ -88,6 +88,8 @@ export interface SessionStartOptions {
   /** #324 — NORMALIZED reasoning effort level (never 'default'); absent =
    *  runtime default. CC maps to `--effort`, Codex to `turn/start.effort`. */
   reasoningEffort?: string;
+  /** Fresh guarded dispatch must execute with its accepted reasoning setting. */
+  requireReasoningEffort?: boolean;
   maxTurns?: number;
   resumeSessionId?: string;
   disallowedTools?: string[];
@@ -130,6 +132,19 @@ export interface SessionStartOptions {
 }
 
 /**
+ * Runtime-owned async/background work state inspected by the external turn watchdog.
+ */
+export interface RuntimeWatchdogState {
+  /** True while the runtime holds live async work (e.g. background shell task,
+   *  in-flight tool call, or subagent) that may legitimately produce no
+   *  foreground stream frames for an extended interval. */
+  activeAsyncWork: boolean;
+  /** Epoch timestamp (ms) of the latest observed background progress (e.g. task
+   *  log growth or child step update). Advances reset the inactivity clock. */
+  lastAsyncProgressAt?: number;
+}
+
+/**
  * A handle to a running runtime subprocess
  */
 export interface RuntimeProcess {
@@ -137,6 +152,8 @@ export interface RuntimeProcess {
   readonly sessionMcpFingerprint?: string;
   /** Adapter-observed work that continues between foreground turns. */
   hasPendingBackgroundWork?(): boolean;
+  /** Optional probe for runtime-owned async work during watchdog evaluation. */
+  getWatchdogState?(): RuntimeWatchdogState;
   /** True when the next permission selection requires different subprocess launch flags. */
   requiresPermissionModeRestart?(mode: string | undefined): boolean;
   /** Optional adapter-owned identity for generation-scoped projections/callbacks. */
@@ -511,6 +528,11 @@ export class RuntimeConversationBranchError extends Error {
   }
 }
 
+export interface RuntimeDetectionOptions {
+  /** Read optional CLI version metadata. Installation never depends on it. */
+  includeVersion?: boolean;
+}
+
 /**
  * AgentRuntime interface — one implementation per CLI type
  */
@@ -524,7 +546,7 @@ export interface AgentRuntime {
   getTurnProviderAnalytics?(process: RuntimeProcess): TurnProviderAnalytics;
 
   /** Check if the CLI is installed and get version info */
-  detect(): Promise<RuntimeDetection>;
+  detect(options?: RuntimeDetectionOptions): Promise<RuntimeDetection>;
 
   /** Read-only resources plus the supplied lifecycle-owned process, if any. */
   inspectRuntime?(process?: RuntimeProcess): Promise<import('../../shared/types/runtime').RuntimeInspection>;

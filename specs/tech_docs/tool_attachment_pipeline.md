@@ -50,6 +50,8 @@ Builtin tool result 还会从结构化 image block、data URL、file ref 和受�
 
 Builtin SDK 同时提供模型侧 `tool_result.content` 和辅助 `tool_use_result`。后者也可能含 Read 的 image/PDF 字节，不能在提取前者后再原样序列化辅助结果。`extractSdkToolResultRenderParts()` 在分发到主 Agent / sub-agent 前统一转换两种表示：保留可解析的结构化结果、移除明确媒体字段中的内联字节，并延续 `_meta` envelope 的显示隔离。辅助结果中的普通 Read/Bash/search 文本不得套用未知块的 base64 猜测规则，否则 `data:` 开头的 YAML 或长字母序列会被误删。SDK 0.3.243+ PDF 分页图片从 `tool_result.content` 提取；完整 PDF 文档块只保留脱敏文本，不额外创建卡片。已持久化的历史结果不在此入口重写。
 
+Builtin SDK 的大体积 MCP 成功转存通知在 `PostToolUse` 被规范为成功语义，再送入模型。只匹配含文件引用的 SDK 通知，保留文件路径与读取指引。真实失败和普通输出原样传递。
+
 SDK 辅助 `tool_use_result` 中的 `structuredContentOmitted` 是省略通知，显示应保留 content 正文、附件和省略说明，不能把标记 JSON 当作正文。MCP `_meta` 因大小上限被移除时，仍识别仅含 MCP CallToolResult 字段的 content envelope，普通 Read/Bash/search 结构化对象保持原语义。`detachedToolCall: true` 表示该调用转到后台并等待后续实际结果；SDK ingress 在主 Agent / sub-agent 分流和工具完成计数前跳过该回执，不发布 completed、不结束 loading，也不减少 in-flight 工具数量。
 
 Codex adapter 从 `imageGeneration`、`mcpToolCall`、`dynamicToolCall` 等原生 item 提取附件；Runtime schema 的完整事件映射由 `src/server/runtimes/codex.ts` 和对应协议测试维护，不在文档复制字段清单。

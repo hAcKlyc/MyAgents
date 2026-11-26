@@ -20,11 +20,12 @@ import { CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } from '../shared/integrated-ru
 import { channelExecutionConfigChangeError } from '../shared/types/agent';
 import type { PluginEntry } from '../shared/types/plugin';
 import { execFile } from 'node:child_process';
-import { lstatSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { cp as fsCp } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import {
   CODEX_SUBSCRIPTION_PROVIDER_ID,
+  PRESET_TEMPLATES,
   isProjectArchived,
   isProjectVisibleToUser,
   splitProviderModelInput,
@@ -32,12 +33,24 @@ import {
   type PermissionMode,
   type Provider,
   type ProxySettings,
+  type WorkspaceTemplate,
 } from '../shared/config-types';
 import {
   agentUsesManagedCodexProvider,
+  createRuntimeBackedProviderIdentity,
   isPermissionModeForRuntimeIdentity,
   managedCodexProviderPermissionToRuntimePermission,
 } from '../shared/providerExecution';
+import {
+  REASONING_EFFORT_DEFAULT,
+  normalizeReasoningEffort,
+  reasoningEffortChoices,
+} from '../shared/reasoningEffort';
+import {
+  isDshModelSelectable,
+  isDshProviderEligible,
+  providerRequiresClaudeSdk,
+} from '../shared/integrated-runtimes/provider-constraints';
 import {
   deriveCliToolKind,
   type CliToolRegistryEntry,
@@ -107,8 +120,10 @@ import { getSessionsByAgentDir, isHistoryVisibleSession } from './SessionStore';
 import {
   agentWorkspaceIdentityFailure,
   registerWorkspaceAgent,
+  resolveManagedWorkspaceCreationPath,
   resolvePersistedAgentWorkspaceRegistry,
   resolvePersistedAgentWorkspaceConflict,
+  WorkspaceAgentRegistrationError,
   type PersistedAgentWorkspaceProjection,
 } from './utils/agent-workspace-identity';
 import { buildProactiveAgentTogglePatch } from '../shared/proactiveAgentPolicy';
@@ -155,14 +170,12 @@ import {
   type RecoveryHint,
   type RuntimePermissionMode,
   type RuntimeModelInfo,
-  type RuntimeDetection,
   type RuntimeConfig,
   type RuntimeSource,
 } from '../shared/types/runtime';
 import { getExternalRuntime, isRuntimeSupported } from './runtimes/factory';
 import { queryRuntimeModels } from './runtimes/external-session';
-import { isDshModelSelectable } from '../shared/integrated-runtimes/provider-constraints';
-import { isManagedCodexRuntimeInstalled } from './runtimes/codex-command-context';
+import { detectRuntimeInstallation } from './session-engine/runtime-inspection';
 import { trackServer } from './analytics';
 
 /**
@@ -1611,22 +1624,240 @@ export async function handleModelRemove(payload: {
 // Agent Handlers
 // ---------------------------------------------------------------------------
 
+export interface WorkspaceTemplateSummary {
+  id: string;
+  name: string;
+  source: 'builtin' | 'user';
+  description: string;
+  /** Internal only — used when materializing user templates via Rust Management API. */
+  path?: string;
+}
+
+function listAvailableWorkspaceTemplatesWithPaths(): WorkspaceTemplateSummary[] {
+  const templates: WorkspaceTemplateSummary[] = PRESET_TEMPLATES.map((tpl) => ({
+    id: tpl.id,
+    name: tpl.name,
+    source: 'builtin' as const,
+    description: tpl.description || '',
+  }));
+
+  const home = getHomeDirOrNull();
+  if (!home) return templates;
+  const templatesFile = join(home, '.myagents', 'templates.json');
+  const templatesRoot = resolve(home, '.myagents', 'templates');
+  if (!existsSync(templatesFile) || !existsSync(templatesRoot)) return templates;
+  try {
+    const canonRoot = realpathSync(templatesRoot);
+    const raw = JSON.parse(readFileSync(templatesFile, 'utf8')) as unknown;
+    const entries: WorkspaceTemplate[] = Array.isArray(raw) ? raw : [];
+    const seen = new Set(templates.map((t) => t.id));
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const id = typeof entry.id === 'string' ? entry.id.trim() : '';
+      const rawPath = typeof entry.path === 'string' ? entry.path.trim() : '';
+      if (!id || seen.has(id) || !rawPath || !existsSync(rawPath)) continue;
+      try {
+        const canonPath = realpathSync(rawPath);
+        if (
+          canonPath === canonRoot ||
+          !(canonPath.startsWith(`${canonRoot}/`) || canonPath.startsWith(`${canonRoot}\\`))
+        ) {
+          continue;
+        }
+        if (!lstatSync(canonPath).isDirectory()) continue;
+        seen.add(id);
+        templates.push({
+          id,
+          name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : id,
+          source: 'user',
+          description: typeof entry.description === 'string' ? entry.description : '',
+          path: canonPath,
+        });
+      } catch {
+        // Ignore broken or inaccessible user template entries
+      }
+    }
+  } catch {
+    // Malformed templates.json does not break built-in template discovery
+  }
+  return templates;
+}
+
+export async function handleAgentTemplates(): Promise<AdminResponse> {
+  const items = listAvailableWorkspaceTemplatesWithPaths().map(
+    ({ id, name, source, description }) => ({
+      id,
+      name,
+      source,
+      description,
+    }),
+  );
+  return { success: true, data: items };
+}
+
 export async function handleAgentCreate(payload: {
   workspacePath?: string;
+  name?: string;
+  template?: string;
+  runtime?: string;
+  providerId?: string;
+  model?: string;
+  permissionMode?: string;
+  reasoningEffort?: string;
 }): Promise<AdminResponse> {
   const workspacePath = typeof payload.workspacePath === 'string'
     ? payload.workspacePath.trim()
     : '';
-  if (!workspacePath) {
+  const name = typeof payload.name === 'string' ? payload.name.trim() : '';
+  const templateId = typeof payload.template === 'string' ? payload.template.trim() : '';
+
+  if (!workspacePath && !name) {
     return {
       success: false,
-      code: 'WORKSPACE_PATH_REQUIRED',
-      error: 'agent create requires --workspacePath <absolute-path>.',
+      code: 'WORKSPACE_OR_NAME_REQUIRED',
+      error: 'agent create requires --name <name> (creates under ~/.myagents/projects/<name>) or --workspacePath <absolute-path>.',
+      recoveryHint: {
+        recoveryCommand: 'myagents agent create --help',
+        message: 'See both managed-directory creation and existing-directory registration forms.',
+      },
     };
   }
+  if (workspacePath && templateId) {
+    return {
+      success: false,
+      code: 'TEMPLATE_REQUIRES_NEW_WORKSPACE',
+      error: '--template can only be used when creating a new managed workspace (omit --workspacePath) so existing directories are never overwritten.',
+      recoveryHint: {
+        recoveryCommand: 'myagents agent create --name <name> --template mino --json',
+        message: 'Omit --workspacePath to initialize a new managed workspace from a template.',
+      },
+    };
+  }
+
+  // Validate template lookup before touching disk.
+  let matchedTemplate: WorkspaceTemplateSummary | undefined;
+  if (templateId) {
+    matchedTemplate = listAvailableWorkspaceTemplatesWithPaths().find(
+      (candidate) => candidate.id === templateId,
+    );
+    if (!matchedTemplate) {
+      return {
+        success: false,
+        code: 'TEMPLATE_NOT_FOUND',
+        error: `Unknown workspace template '${templateId}'.`,
+        recoveryHint: {
+          recoveryCommand: 'myagents agent templates',
+          message: 'List available built-in and user workspace templates.',
+        },
+      };
+    }
+  }
+
+  // Collect optional atomic initial execution config fields.
+  const initialPatch: Record<string, unknown> = {};
+  for (const field of ['runtime', 'providerId', 'model', 'permissionMode', 'reasoningEffort'] as const) {
+    const raw = payload[field];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return {
+        success: false,
+        code: 'ARGUMENT_INVALID',
+        error: `--${field} must be a non-empty string.`,
+      };
+    }
+    initialPatch[field] = raw.trim();
+  }
+  const hasInitialConfig = Object.keys(initialPatch).length > 0;
+
+  // Pre-validate initial config against current disk config before creating any directory.
+  if (hasInitialConfig) {
+    const currentConfig = loadConfig();
+    const dryDraft: AgentConfigSlim = {
+      id: 'draft-agent',
+      name: name || 'Workspace',
+      enabled: false,
+      permissionMode: (currentConfig.defaultPermissionMode as PermissionMode | undefined) ?? 'auto',
+      channels: [],
+    };
+    const precheck = resolveAgentConfigPatchIntent(dryDraft, currentConfig, initialPatch, {
+      allowEnabled: false,
+    });
+    if (!precheck.ok) {
+      return precheck.response;
+    }
+  }
+
   try {
-    const result = await registerWorkspaceAgent(workspacePath);
-    return { success: true, data: result };
+    let targetWorkspacePath = workspacePath;
+    let createManagedDirectory: (() => Promise<string> | string) | undefined;
+
+    if (!workspacePath) {
+      const managed = resolveManagedWorkspaceCreationPath(name);
+      targetWorkspacePath = managed.workspacePath;
+      const template = matchedTemplate;
+      createManagedDirectory = async () => {
+        const response = await managementApi('/api/workspace/materialize-template', 'POST', {
+          templateSource: template?.source ?? 'empty',
+          ...(template?.source === 'builtin' ? { templateId: template.id } : {}),
+          ...(template?.source === 'user' ? { sourcePath: template.path } : {}),
+          destPath: managed.workspacePath,
+        });
+        if (!response.ok || typeof response.path !== 'string' || !response.path) {
+          const message = typeof response.error === 'string'
+            ? response.error
+            : 'Failed to materialize managed workspace.';
+          const code = message.toLowerCase().includes('already exists')
+            ? 'WORKSPACE_ALREADY_EXISTS'
+            : template ? 'TEMPLATE_MATERIALIZE_FAILED' : 'WORKSPACE_MATERIALIZE_FAILED';
+          throw new WorkspaceAgentRegistrationError(code, message, { workspacePath: managed.workspacePath });
+        }
+        return response.path;
+      };
+    }
+
+    const result = await registerWorkspaceAgent(targetWorkspacePath, {
+      ...(name ? { name } : {}),
+      ...(matchedTemplate
+        ? { templateId: matchedTemplate.id, templateSource: matchedTemplate.source }
+        : {}),
+      rejectIfAlreadyRegistered: Boolean(workspacePath && (hasInitialConfig || name)),
+      createManagedDirectory,
+      ...(hasInitialConfig
+        ? {
+            applyInitialAgentPatch: (draftAgent, currentConfig) => {
+              const applied = resolveAgentConfigPatchIntent(draftAgent, currentConfig, initialPatch, {
+                allowEnabled: false,
+              });
+              if (!applied.ok) {
+                return {
+                  ok: false as const,
+                  code: String(applied.response.code ?? 'INVALID_AGENT_CONFIG'),
+                  message: String(applied.response.error ?? 'Invalid initial Agent configuration.'),
+                };
+              }
+              return {
+                ok: true as const,
+                agent: { ...applied.agent, enabled: false },
+                projectPatch: applied.projectPatch,
+              };
+            },
+          }
+        : {}),
+    });
+
+    // Attach effectiveDefaults summary so callers immediately observe birth defaults.
+    const showResp = await handleAgentShow({ agentId: result.agentId });
+    const effectiveDefaults =
+      showResp.success && showResp.data && typeof showResp.data === 'object'
+        ? (showResp.data as Record<string, unknown>).effectiveDefaults
+        : undefined;
+    return {
+      success: true,
+      data: {
+        ...result,
+        ...(effectiveDefaults ? { effectiveDefaults } : {}),
+      },
+    };
   } catch (error) {
     return agentWorkspaceIdentityFailure(error);
   }
@@ -1837,10 +2068,7 @@ export async function handleAgentCurrent(): Promise<AdminResponse> {
   }
 }
 
-export async function handleAgentEnable(payload: {
-  id: string;
-}): Promise<AdminResponse> {
-  const { id } = payload;
+async function ensureAgentCanEnable(id: string): Promise<AdminResponse | null> {
   let registry: Awaited<
     ReturnType<typeof resolvePersistedAgentWorkspaceRegistry>
   >;
@@ -1869,6 +2097,15 @@ export async function handleAgentEnable(payload: {
       },
     };
   }
+  return null;
+}
+
+export async function handleAgentEnable(payload: {
+  id: string;
+}): Promise<AdminResponse> {
+  const { id } = payload;
+  const blocked = await ensureAgentCanEnable(id);
+  if (blocked) return blocked;
   return modifyAgentConfigIntent(
     id,
     (agent) => {
@@ -2138,353 +2375,694 @@ export async function handleAgentUnarchive(payload: {
 }
 
 const AGENT_SET_FIELDS = [
+  'name',
   'enabled',
   'runtime',
   'runtimeConfig',
   'providerId',
   'model',
   'permissionMode',
+  'reasoningEffort',
   'mcpEnabledServers',
   'enabledPluginIds',
 ] as const;
 
-export async function handleAgentSet(payload: {
-  id: string;
-  key: string;
-  value: unknown;
-}): Promise<AdminResponse> {
-  const { id, key, value } = payload;
-  if (!id) return { success: false, error: 'Missing required field: id' };
-  if (!key) return { success: false, error: 'Missing required field: key' };
+type AgentPatchIntentResult =
+  | {
+      ok: true;
+      agent: AgentConfigSlim;
+      projectPatch?: Partial<ProjectSlim>;
+      livePatch?: Record<string, unknown>;
+    }
+  | {
+      ok: false;
+      response: AdminResponse;
+    };
 
-  // Protect sensitive/structural fields
-  const protectedFields = ['id', 'channels'];
-  if (protectedFields.includes(key)) {
+/**
+ * Atomic, multi-field Agent configuration intent validator and compiler.
+ * Validates all fields against the post-patch effective `(runtime, runtimeSource, providerId)`
+ * inside the caller's locked disk snapshot so switching runtime + provider + model + permission
+ * together never fails on intermediate states.
+ */
+function resolveAgentConfigPatchIntent(
+  agent: AgentConfigSlim,
+  currentConfig: AdminAppConfig,
+  rawPatch: Record<string, unknown>,
+  options: { allowEnabled?: boolean } = {},
+): AgentPatchIntentResult {
+  const entries = Object.entries(rawPatch).filter(([, v]) => v !== undefined);
+  if (entries.length === 0) {
     return {
-      success: false,
-      error: `Cannot directly set field '${key}'. Use specific commands instead.`,
+      ok: false,
+      response: { success: false, error: 'No configuration fields supplied.' },
     };
   }
-  if (!AGENT_SET_FIELDS.includes(key as (typeof AGENT_SET_FIELDS)[number])) {
-    const canonicalKey =
-      key === 'provider'
-        ? 'providerId'
-        : key === 'permission'
-          ? 'permissionMode'
-          : undefined;
-    return {
-      success: false,
-      error: canonicalKey
-        ? `Unknown Agent field '${key}'; use '${canonicalKey}'. Supported fields: ${AGENT_SET_FIELDS.join(', ')}.`
-        : `Unknown Agent field '${key}'. Supported fields: ${AGENT_SET_FIELDS.join(', ')}.`,
-    };
-  }
 
-  if (key === 'enabled') {
-    if (typeof value !== 'boolean') {
-      return { success: false, error: 'enabled must be a boolean' };
+  for (const [key] of entries) {
+    if (key === 'id' || key === 'channels') {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: `Cannot directly set field '${key}'. Use specific commands instead.`,
+        },
+      };
     }
-    return value ? handleAgentEnable({ id }) : handleAgentDisable({ id });
-  }
-
-  if (key === 'mcpEnabledServers') {
-    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
-      return { success: false, error: 'mcpEnabledServers must be a JSON array of server IDs' };
+    if (!AGENT_SET_FIELDS.includes(key as (typeof AGENT_SET_FIELDS)[number])) {
+      const canonicalKey =
+        key === 'provider'
+          ? 'providerId'
+          : key === 'permission'
+            ? 'permissionMode'
+            : undefined;
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: canonicalKey
+            ? `Unknown Agent field '${key}'; use '${canonicalKey}'. Supported fields: ${AGENT_SET_FIELDS.join(', ')}.`
+            : `Unknown Agent field '${key}'. Supported fields: ${AGENT_SET_FIELDS.join(', ')}.`,
+        },
+      };
     }
-    return modifyAgentConfigIntent(id, (agent, config) => {
-      const catalogue = getAllMcpServers(config);
-      const unknown = value.filter(serverId => !catalogue.some(server => server.id === serverId));
-      if (unknown.length) return { ok: false, response: { success: false, error: `Unknown MCP server IDs: ${unknown.join(', ')}` } };
-      return agentMcpSelectionIntent(agent, config, value);
-    }, 'set');
+    if (key === 'enabled' && options.allowEnabled === false) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: 'New Agents always start with enabled=false; use `myagents agent enable <agentId>` afterwards if proactive capabilities are desired.',
+        },
+      };
+    }
   }
 
-  if (key === 'enabledPluginIds') {
-    if (!Array.isArray(value) || !value.every(item => typeof item === 'string')) {
-      return { success: false, error: 'enabledPluginIds must be a JSON array of plugin IDs' };
+  let nextAgent: AgentConfigSlim = { ...agent };
+  const projectPatch: Partial<ProjectSlim> = {};
+  const livePatch: Record<string, unknown> = {};
+
+  // 1. Name
+  if (rawPatch.name !== undefined) {
+    if (typeof rawPatch.name !== 'string' || !rawPatch.name.trim()) {
+      return {
+        ok: false,
+        response: { success: false, error: 'name must be a non-empty string' },
+      };
+    }
+    const trimmedName = rawPatch.name.trim();
+    nextAgent = { ...nextAgent, name: trimmedName };
+    projectPatch.name = trimmedName;
+    livePatch.name = trimmedName;
+  }
+
+  // 2. MCP & Claude Plugin selections
+  if (rawPatch.mcpEnabledServers !== undefined) {
+    const value = rawPatch.mcpEnabledServers;
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+      return {
+        ok: false,
+        response: { success: false, error: 'mcpEnabledServers must be a JSON array of server IDs' },
+      };
+    }
+    const catalogue = getAllMcpServers(currentConfig);
+    const unknown = value.filter((serverId) => !catalogue.some((server) => server.id === serverId));
+    if (unknown.length) {
+      return {
+        ok: false,
+        response: { success: false, error: `Unknown MCP server IDs: ${unknown.join(', ')}` },
+      };
+    }
+    const mcpResult = agentMcpSelectionIntent(nextAgent, currentConfig, value);
+    if (!mcpResult.ok) return mcpResult;
+    nextAgent = mcpResult.agent;
+    if (mcpResult.projectPatch) Object.assign(projectPatch, mcpResult.projectPatch);
+    if (mcpResult.livePatch) Object.assign(livePatch, mcpResult.livePatch);
+  }
+
+  if (rawPatch.enabledPluginIds !== undefined) {
+    const value = rawPatch.enabledPluginIds;
+    if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+      return {
+        ok: false,
+        response: { success: false, error: 'enabledPluginIds must be a JSON array of plugin IDs' },
+      };
     }
     const ids = [...new Set(value)];
-    return modifyAgentConfigIntent(id, (agent, config) => {
-      const { diagnostics } = resolveAgentWorkspaceProjections(loadProjects(), config.agents ?? []);
-      const conflict = diagnostics.find(item => item.agentIds.includes(id));
-      if (conflict) {
-        return { ok: false, response: { success: false, error: conflict.message, code: conflict.code } };
-      }
-      const plugins = Array.isArray(config.plugins) ? config.plugins as PluginEntry[] : [];
-      const unknown = ids.filter(pluginId => !plugins.some(plugin => plugin?.id === pluginId));
-      if (unknown.length) {
-        return { ok: false, response: { success: false, error: `Unknown Claude plugin IDs: ${unknown.join(', ')}` } };
-      }
+    const { diagnostics } = resolveAgentWorkspaceProjections(loadProjects(), currentConfig.agents ?? []);
+    const conflict = diagnostics.find((item) => item.agentIds.includes(nextAgent.id));
+    if (conflict) {
       return {
-        ok: true,
-        agent: { ...agent, enabledPluginIds: ids },
-        projectPatch: { enabledPluginIds: ids },
+        ok: false,
+        response: { success: false, error: conflict.message, code: conflict.code },
       };
-    }, 'set');
+    }
+    const plugins = Array.isArray(currentConfig.plugins) ? (currentConfig.plugins as PluginEntry[]) : [];
+    const unknown = ids.filter((pluginId) => !plugins.some((plugin) => plugin?.id === pluginId));
+    if (unknown.length) {
+      return {
+        ok: false,
+        response: { success: false, error: `Unknown Claude plugin IDs: ${unknown.join(', ')}` },
+      };
+    }
+    nextAgent = { ...nextAgent, enabledPluginIds: ids };
+    projectPatch.enabledPluginIds = ids;
   }
 
-  // Use the same locked Agent mutation as the desktop Runtime pickers.
-  if (key === 'runtime') {
-    if (typeof value !== 'string') {
-      return { success: false, error: 'runtime must be a string' };
-    }
-    if (!VALID_RUNTIMES.includes(value as RuntimeType)) {
+  // 3. Runtime switch first so subsequent provider/model/permission/effort validate against target runtime
+  const explicitRuntime = rawPatch.runtime;
+  if (explicitRuntime !== undefined) {
+    if (typeof explicitRuntime !== 'string') {
       return {
-        success: false,
-        error: `Unknown runtime: '${value}'. Valid: ${VALID_RUNTIMES.join(', ')}.`,
+        ok: false,
+        response: { success: false, error: 'runtime must be a string' },
       };
     }
-    return modifyAgentConfigIntent(
-      id,
-      (agent) => {
-        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { runtime: value as RuntimeType });
-        return {
-          ok: true,
-          agent: { ...agent, ...patch } as AgentConfigSlim,
-          projectPatch: patch.permissionMode ? { permissionMode: patch.permissionMode } : undefined,
-          livePatch: { ...patch, runtimeConfig: patch.runtimeConfig ?? null },
-        };
-      },
-      'set',
+    if (!VALID_RUNTIMES.includes(explicitRuntime as RuntimeType)) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: `Unknown runtime: '${explicitRuntime}'. Valid: ${VALID_RUNTIMES.join(', ')}.`,
+          recoveryHint: {
+            recoveryCommand: 'myagents runtime list',
+            message: 'See valid runtimes and install status.',
+          },
+        },
+      };
+    }
+    // If switching explicitly to `dsh` while simultaneously supplying a non-codex-sub
+    // providerId, clear stale `codex-sub`/`anthropic-sub` on the seed agent so
+    // `resolveAgentConfigMutation` keeps `runtime: 'dsh'` instead of clamping to `'builtin'`.
+    const incomingProviderId =
+      typeof rawPatch.providerId === 'string' ? rawPatch.providerId.trim() : undefined;
+    const runtimeSeedAgent: AgentConfigSlim =
+      explicitRuntime === 'dsh' &&
+      incomingProviderId &&
+      incomingProviderId !== CODEX_SUBSCRIPTION_PROVIDER_ID &&
+      (nextAgent.providerId === CODEX_SUBSCRIPTION_PROVIDER_ID ||
+        (typeof nextAgent.providerId === 'string' && providerRequiresClaudeSdk(nextAgent.providerId)))
+        ? { ...nextAgent, providerId: undefined }
+        : nextAgent;
+    const rtPatch = resolveAgentConfigMutation(
+      runtimeSeedAgent as import('../shared/types/agent').AgentConfig,
+      { runtime: explicitRuntime as RuntimeType },
     );
+    nextAgent = { ...nextAgent, ...rtPatch } as AgentConfigSlim;
+    if (rtPatch.permissionMode) projectPatch.permissionMode = rtPatch.permissionMode;
+    Object.assign(livePatch, { ...rtPatch, runtimeConfig: rtPatch.runtimeConfig ?? null });
   }
 
-  if (key === 'permissionMode') {
-    if (typeof value !== 'string') {
-      return { success: false, error: 'permissionMode must be a string' };
+  // 4. Optional raw runtimeConfig object
+  if (rawPatch.runtimeConfig !== undefined) {
+    const value = rawPatch.runtimeConfig;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {
+        ok: false,
+        response: { success: false, error: 'runtimeConfig must be a JSON object.' },
+      };
+    }
+    const runtimeConfig = value as RuntimeConfig;
+    const targetManagedCodex = agentUsesManagedCodexProvider({
+      runtimePreference: nextAgent.runtimePreference,
+      providerId: nextAgent.providerId,
+      runtime: typeof nextAgent.runtime === 'string' ? nextAgent.runtime : undefined,
+      runtimeConfig,
+    });
+    if (
+      targetManagedCodex &&
+      (runtimeConfig.source !== undefined ||
+        runtimeConfig.model !== undefined ||
+        runtimeConfig.permissionMode !== undefined ||
+        runtimeConfig.additionalArgs !== undefined)
+    ) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: 'Managed Codex Agent defaults keep provider/model/permission in product fields, not runtimeConfig.',
+        },
+      };
+    }
+    if (runtimeConfig.source === 'managed-provider' && !targetManagedCodex) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: 'runtimeConfig.source=managed-provider requires the complete managed Codex provider identity.',
+        },
+      };
+    }
+    if (runtimeConfig.permissionMode !== undefined) {
+      if (typeof runtimeConfig.permissionMode !== 'string') {
+        return {
+          ok: false,
+          response: { success: false, error: 'runtimeConfig.permissionMode must be a string.' },
+        };
+      }
+      const runtime = (nextAgent.runtime ?? 'builtin') as RuntimeType;
+      if (runtime === 'builtin' || !isRuntimePermissionMode(runtimeConfig.permissionMode, runtime)) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid runtimeConfig.permissionMode for ${runtime}. Run 'myagents runtime describe ${runtime}' for valid values.`,
+          },
+        };
+      }
+    }
+    nextAgent = { ...nextAgent, runtimeConfig };
+    livePatch.runtimeConfig = runtimeConfig;
+  }
+
+  // Resolve post-runtime effective identity before applying provider/model/permission/reasoningEffort.
+  // Check the Agent's own identity (not rawPatch.providerId), so leaving Managed Codex
+  // by setting providerId='deepseek' without explicit --runtime restores the integrated base
+  // instead of being mistaken for system-cli codex.
+  const wasManagedCodex = agentUsesManagedCodexProvider({
+    runtimePreference: nextAgent.runtimePreference,
+    providerId: nextAgent.providerId,
+    runtime: typeof nextAgent.runtime === 'string' ? nextAgent.runtime : undefined,
+    runtimeConfig: nextAgent.runtimeConfig as { source?: string } | undefined,
+  });
+  const currentRuntimeBeforeProvider = resolveEffectiveRuntime(
+    typeof nextAgent.runtime === 'string' ? (nextAgent.runtime as RuntimeType) : undefined,
+    nextAgent.runtimePreference,
+    (nextAgent.runtimeConfig as RuntimeConfig | undefined)?.source,
+    nextAgent.providerId,
+    undefined,
+    currentConfig.defaultIntegratedRuntime,
+  );
+  const currentIsExternalCli =
+    currentRuntimeBeforeProvider === 'claude-code' ||
+    currentRuntimeBeforeProvider === 'antigravity' ||
+    (currentRuntimeBeforeProvider === 'codex' && !wasManagedCodex);
+
+  // 5. ProviderId
+  if (rawPatch.providerId !== undefined) {
+    if (typeof rawPatch.providerId !== 'string' || !rawPatch.providerId.trim()) {
+      return {
+        ok: false,
+        response: { success: false, error: 'providerId must be a non-empty string' },
+      };
+    }
+    const providerId = rawPatch.providerId.trim();
+    if (currentIsExternalCli) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: `Runtime '${currentRuntimeBeforeProvider}' manages its own authentication and cannot be combined with providerId.`,
+        },
+      };
+    }
+    const provider = getAllEffectiveProviders(currentConfig).find(
+      (candidate) => candidate.id === providerId,
+    );
+    if (!provider) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: `Unknown providerId: '${providerId}'. Run 'myagents model list' to inspect available providers.`,
+        },
+      };
+    }
+    const selectionError = getProviderSelectionError(provider, currentConfig);
+    if (selectionError) {
+      return {
+        ok: false,
+        response: { success: false, error: selectionError },
+      };
+    }
+    const targetIsDsh = explicitRuntime === 'dsh' || currentRuntimeBeforeProvider === 'dsh';
+    if (
+      targetIsDsh &&
+      ((providerId === CODEX_SUBSCRIPTION_PROVIDER_ID && explicitRuntime === 'dsh') ||
+        providerRequiresClaudeSdk(providerId) ||
+        (providerId !== CODEX_SUBSCRIPTION_PROVIDER_ID &&
+          !isDshProviderEligible(provider as unknown as Provider)))
+    ) {
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: `Provider '${providerId}' cannot run on runtime 'dsh'. Choose an enabled ordinary API provider or switch to 'builtin'.`,
+        },
+      };
+    }
+    if (providerId === CODEX_SUBSCRIPTION_PROVIDER_ID) {
+      const modelStr =
+        typeof rawPatch.model === 'string' && rawPatch.model.trim()
+          ? rawPatch.model.trim()
+          : typeof nextAgent.model === 'string' && nextAgent.model.trim()
+            ? nextAgent.model.trim()
+            : '';
+      const patch = modelStr
+        ? resolveAgentConfigMutation(nextAgent as import('../shared/types/agent').AgentConfig, {
+            runtimeBackedProviderSelection: createRuntimeBackedProviderIdentity({
+              providerId: CODEX_SUBSCRIPTION_PROVIDER_ID,
+              model: modelStr,
+            }),
+          })
+        : resolveAgentConfigMutation(nextAgent as import('../shared/types/agent').AgentConfig, {
+            providerId,
+          });
+      nextAgent = { ...nextAgent, ...patch } as AgentConfigSlim;
+      projectPatch.providerId = providerId;
+      if (patch.permissionMode) projectPatch.permissionMode = patch.permissionMode;
+      Object.assign(livePatch, {
+        ...patch,
+        providerEnvJson: null,
+        ...(Object.hasOwn(patch, 'runtimeConfig') ? { runtimeConfig: patch.runtimeConfig ?? null } : {}),
+      });
+    } else {
+      const env = resolveProviderEnv(providerId, currentConfig);
+      const providerEnvJson = env ? JSON.stringify(env) : undefined;
+      const patch = resolveAgentConfigMutation(
+        nextAgent as import('../shared/types/agent').AgentConfig,
+        { providerId, providerEnvJson },
+      );
+      nextAgent = { ...nextAgent, ...patch } as AgentConfigSlim;
+      projectPatch.providerId = providerId;
+      if (patch.permissionMode) projectPatch.permissionMode = patch.permissionMode;
+      Object.assign(livePatch, {
+        ...patch,
+        providerEnvJson: providerEnvJson ?? null,
+        ...(Object.hasOwn(patch, 'runtimeConfig') ? { runtimeConfig: patch.runtimeConfig ?? null } : {}),
+      });
     }
   }
 
-  if (
-    (key === 'providerId' || key === 'model') &&
-    (typeof value !== 'string' || !value.trim())
-  ) {
-    return { success: false, error: `${key} must be a non-empty string` };
+  // Recompute final effective runtime identity after providerId
+  const finalUsesManagedCodex = agentUsesManagedCodexProvider({
+    runtimePreference: nextAgent.runtimePreference,
+    providerId: nextAgent.providerId,
+    runtime: typeof nextAgent.runtime === 'string' ? nextAgent.runtime : undefined,
+    runtimeConfig: nextAgent.runtimeConfig as { source?: string } | undefined,
+  });
+  const finalPreferredRuntime = resolveEffectiveRuntime(
+    typeof nextAgent.runtime === 'string' ? (nextAgent.runtime as RuntimeType) : undefined,
+    nextAgent.runtimePreference,
+    (nextAgent.runtimeConfig as RuntimeConfig | undefined)?.source,
+    nextAgent.providerId,
+    undefined,
+    currentConfig.defaultIntegratedRuntime,
+  );
+  const finalRuntime: RuntimeType =
+    finalPreferredRuntime === 'builtin' && finalUsesManagedCodex
+      ? 'codex'
+      : finalPreferredRuntime;
+  const finalIsExternalCli =
+    finalRuntime === 'claude-code' ||
+    finalRuntime === 'antigravity' ||
+    (finalRuntime === 'codex' && !finalUsesManagedCodex);
+
+  // 6. Model
+  let resolvedProviderForEffort: Record<string, unknown> | undefined;
+  if (rawPatch.model !== undefined) {
+    if (typeof rawPatch.model !== 'string' || !rawPatch.model.trim()) {
+      return {
+        ok: false,
+        response: { success: false, error: 'model must be a non-empty string' },
+      };
+    }
+    const modelStr = rawPatch.model.trim();
+    if (finalIsExternalCli) {
+      const existingRc =
+        (nextAgent.runtimeConfig as RuntimeConfig | undefined) ?? {};
+      const nextRc: RuntimeConfig = { ...existingRc, model: modelStr };
+      nextAgent = { ...nextAgent, runtimeConfig: nextRc };
+      livePatch.runtimeConfig = nextRc;
+    } else {
+      const providerId =
+        typeof nextAgent.providerId === 'string' && nextAgent.providerId.trim()
+          ? nextAgent.providerId.trim()
+          : currentConfig.defaultProviderId;
+      const provider = providerId
+        ? getAllEffectiveProviders(currentConfig).find(
+            (candidate) => candidate.id === providerId,
+          )
+        : undefined;
+      if (!provider) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: 'Cannot validate model without an Agent providerId. Set providerId first.',
+          },
+        };
+      }
+      const selectionError = getProviderSelectionError(provider, currentConfig);
+      if (selectionError) {
+        return {
+          ok: false,
+          response: { success: false, error: selectionError },
+        };
+      }
+      const registeredModels = Array.isArray(provider.models)
+        ? provider.models.flatMap((entry) => {
+            if (!entry || typeof entry !== 'object') return [];
+            const m = (entry as Record<string, unknown>).model;
+            return typeof m === 'string' && m.trim() ? [m.trim()] : [];
+          })
+        : [];
+      if (registeredModels.length > 0 && !registeredModels.includes(modelStr)) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Model '${modelStr}' is not registered for provider '${provider.id}'.`,
+          },
+        };
+      }
+      if (
+        finalRuntime === 'dsh' &&
+        !isDshModelSelectable(provider as unknown as Provider, modelStr)
+      ) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Provider/model '${provider.id}/${modelStr}' is not an enabled ordinary API route configured for DSH.`,
+          },
+        };
+      }
+      resolvedProviderForEffort = provider as unknown as Record<string, unknown>;
+      nextAgent = { ...nextAgent, model: modelStr };
+      projectPatch.model = modelStr;
+      livePatch.model = modelStr;
+    }
+  }
+
+  // 7. PermissionMode
+  if (rawPatch.permissionMode !== undefined) {
+    if (typeof rawPatch.permissionMode !== 'string' || !rawPatch.permissionMode.trim()) {
+      return {
+        ok: false,
+        response: { success: false, error: 'permissionMode must be a non-empty string' },
+      };
+    }
+    const requestedMode = rawPatch.permissionMode.trim();
+    if (finalUsesManagedCodex) {
+      const validModes: PermissionMode[] = ['auto', 'plan', 'fullAgency'];
+      if (!validModes.includes(requestedMode as PermissionMode)) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid managed Codex permissionMode. Valid: ${validModes.join(', ')}.`,
+          },
+        };
+      }
+      nextAgent = { ...nextAgent, permissionMode: requestedMode };
+      projectPatch.permissionMode = requestedMode;
+      livePatch.permissionMode = requestedMode;
+    } else if (finalIsExternalCli) {
+      if (!isPermissionModeForRuntimeIdentity(requestedMode, finalRuntime, 'system-cli')) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid permissionMode '${requestedMode}' for ${finalRuntime}. Run 'myagents runtime describe ${finalRuntime}' for valid values.`,
+          },
+        };
+      }
+      const existingRc =
+        (nextAgent.runtimeConfig as RuntimeConfig | undefined) ?? {};
+      const nextRc: RuntimeConfig = { ...existingRc, permissionMode: requestedMode };
+      nextAgent = { ...nextAgent, runtimeConfig: nextRc };
+      livePatch.runtimeConfig = nextRc;
+    } else if (finalRuntime === 'dsh') {
+      if (!isPermissionModeForRuntimeIdentity(requestedMode, 'dsh', 'integrated')) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid permissionMode '${requestedMode}' for dsh. Run 'myagents runtime describe dsh' for valid values.`,
+          },
+        };
+      }
+      nextAgent = { ...nextAgent, permissionMode: requestedMode };
+      projectPatch.permissionMode = requestedMode;
+      livePatch.permissionMode = requestedMode;
+    } else {
+      const validModes: PermissionMode[] = ['auto', 'plan', 'fullAgency'];
+      if (!validModes.includes(requestedMode as PermissionMode)) {
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid permissionMode. Valid: ${validModes.join(', ')}.`,
+          },
+        };
+      }
+      nextAgent = { ...nextAgent, permissionMode: requestedMode };
+      projectPatch.permissionMode = requestedMode;
+      livePatch.permissionMode = requestedMode;
+    }
+  }
+
+  // 8. ReasoningEffort
+  if (rawPatch.reasoningEffort !== undefined) {
+    if (typeof rawPatch.reasoningEffort !== 'string' || !rawPatch.reasoningEffort.trim()) {
+      return {
+        ok: false,
+        response: { success: false, error: 'reasoningEffort must be a non-empty string' },
+      };
+    }
+    const requestedEffort = rawPatch.reasoningEffort.trim();
+    let effectiveEffort = requestedEffort;
+    if (requestedEffort !== REASONING_EFFORT_DEFAULT) {
+      const normalized = normalizeReasoningEffort(requestedEffort);
+      const effectiveProviderId =
+        !finalIsExternalCli && typeof nextAgent.providerId === 'string'
+          ? nextAgent.providerId
+          : !finalIsExternalCli
+            ? currentConfig.defaultProviderId
+            : undefined;
+      const providerRec =
+        resolvedProviderForEffort ??
+        (effectiveProviderId
+          ? (getAllEffectiveProviders(currentConfig).find((p) => p.id === effectiveProviderId) as
+              | Record<string, unknown>
+              | undefined)
+          : undefined);
+      const providerConfig = providerRec?.config as { apiProtocol?: string; baseUrl?: string } | undefined;
+      const rawProto =
+        typeof providerRec?.apiProtocol === 'string'
+          ? providerRec.apiProtocol
+          : providerConfig?.apiProtocol;
+      const proto: 'anthropic' | 'openai' | undefined =
+        finalRuntime === 'builtin' || finalRuntime === 'dsh'
+          ? rawProto === 'openai'
+            ? 'openai'
+            : 'anthropic'
+          : undefined;
+      const effectiveModel =
+        finalIsExternalCli
+          ? (nextAgent.runtimeConfig as RuntimeConfig | undefined)?.model
+          : typeof nextAgent.model === 'string'
+            ? nextAgent.model
+            : undefined;
+      const choices = reasoningEffortChoices(
+        finalRuntime,
+        proto,
+        effectiveProviderId,
+        effectiveModel,
+        typeof providerConfig?.baseUrl === 'string' ? providerConfig.baseUrl : undefined,
+      );
+      const openEnded = finalRuntime === 'codex' || finalRuntime === 'antigravity';
+      const ok =
+        normalized !== undefined &&
+        (openEnded ? true : choices !== null && choices.includes(normalized));
+      if (!ok) {
+        const hintList = choices ? choices.join(', ') : null;
+        return {
+          ok: false,
+          response: {
+            success: false,
+            error: `Invalid reasoningEffort '${requestedEffort}' for runtime '${finalRuntime}'. Valid: default${hintList ? `, ${hintList}` : ''}.`,
+          },
+        };
+      }
+      effectiveEffort = normalized;
+    }
+    if (finalIsExternalCli || finalUsesManagedCodex) {
+      const existingRc =
+        (nextAgent.runtimeConfig as RuntimeConfig | undefined) ?? {};
+      const nextRc: RuntimeConfig = { ...existingRc, reasoningEffort: effectiveEffort };
+      nextAgent = { ...nextAgent, runtimeConfig: nextRc };
+      livePatch.runtimeConfig = nextRc;
+    } else {
+      nextAgent = { ...nextAgent, reasoningEffort: effectiveEffort };
+      livePatch.reasoningEffort = effectiveEffort;
+    }
+  }
+
+  // 8. Optional enabled toggle committed atomically inside the same intent lock.
+  if (rawPatch.enabled !== undefined) {
+    if (typeof rawPatch.enabled !== 'boolean') {
+      return {
+        ok: false,
+        response: { success: false, error: 'enabled must be a boolean' },
+      };
+    }
+    const togglePatch = buildProactiveAgentTogglePatch(nextAgent, rawPatch.enabled);
+    nextAgent = { ...nextAgent, ...togglePatch };
+    Object.assign(livePatch, {
+      enabled: rawPatch.enabled,
+      heartbeatConfigJson: JSON.stringify(togglePatch.heartbeat),
+      memoryAutoUpdateConfigJson: JSON.stringify(togglePatch.memoryAutoUpdate),
+      memoryEvolutionConfigJson: JSON.stringify(togglePatch.memoryEvolution),
+    });
+  }
+
+  return {
+    ok: true,
+    agent: nextAgent,
+    projectPatch: Object.keys(projectPatch).length > 0 ? projectPatch : undefined,
+    livePatch: Object.keys(livePatch).length > 0 ? livePatch : undefined,
+  };
+}
+
+export async function handleAgentSet(payload: {
+  id: string;
+  key?: string;
+  value?: unknown;
+  patch?: Record<string, unknown>;
+}): Promise<AdminResponse> {
+  const { id } = payload;
+  if (!id) return { success: false, error: 'Missing required field: id' };
+
+  const patch: Record<string, unknown> = payload.patch
+    ? { ...payload.patch }
+    : payload.key
+      ? { [payload.key]: payload.value }
+      : {};
+  const keys = Object.keys(patch).filter((k) => patch[k] !== undefined);
+  if (keys.length === 0) {
+    return { success: false, error: 'Missing required field: key (or configuration flags)' };
+  }
+
+  // Single-field `enabled` continues to go through the dedicated enable/disable lifecycle owner.
+  if (keys.length === 1 && keys[0] === 'enabled') {
+    if (typeof patch.enabled !== 'boolean') {
+      return { success: false, error: 'enabled must be a boolean' };
+    }
+    return patch.enabled ? handleAgentEnable({ id }) : handleAgentDisable({ id });
+  }
+  if (patch.enabled !== undefined && typeof patch.enabled !== 'boolean') {
+    return { success: false, error: 'enabled must be a boolean' };
+  }
+  if (patch.enabled === true) {
+    const blocked = await ensureAgentCanEnable(id);
+    if (blocked) return blocked;
   }
 
   return modifyAgentConfigIntent(
     id,
-    (agent, currentConfig) => {
-      let normalizedValue = value;
-      if (key === 'runtimeConfig') {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error: 'runtimeConfig must be a JSON object.',
-            },
-          };
-        }
-        const runtimeConfig = value as RuntimeConfig;
-        const targetManagedCodex = agentUsesManagedCodexProvider({
-          runtimePreference: agent.runtimePreference,
-          providerId: agent.providerId,
-          runtime:
-            typeof agent.runtime === 'string' ? agent.runtime : undefined,
-          runtimeConfig,
-        });
-        if (
-          targetManagedCodex &&
-          (runtimeConfig.source !== undefined ||
-            runtimeConfig.model !== undefined ||
-            runtimeConfig.permissionMode !== undefined ||
-            runtimeConfig.additionalArgs !== undefined)
-        ) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error:
-                'Managed Codex Agent defaults keep provider/model/permission in product fields, not runtimeConfig.',
-            },
-          };
-        }
-        if (
-          runtimeConfig.source === 'managed-provider' &&
-          !targetManagedCodex
-        ) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error:
-                'runtimeConfig.source=managed-provider requires the complete managed Codex provider identity.',
-            },
-          };
-        }
-        if (runtimeConfig.permissionMode !== undefined) {
-          if (typeof runtimeConfig.permissionMode !== 'string') {
-            return {
-              ok: false,
-              response: {
-                success: false,
-                error: 'runtimeConfig.permissionMode must be a string.',
-              },
-            };
-          }
-          const runtime = (agent.runtime ?? 'builtin') as RuntimeType;
-          if (
-            runtime === 'builtin' ||
-            !isRuntimePermissionMode(runtimeConfig.permissionMode, runtime)
-          ) {
-            return {
-              ok: false,
-              response: {
-                success: false,
-                error: `Invalid runtimeConfig.permissionMode for ${runtime}. Run 'myagents runtime describe ${runtime}' for valid values.`,
-              },
-            };
-          }
-        }
-      }
-      if (key === 'permissionMode') {
-        const requestedMode = (value as string).trim();
-        if (
-          agentUsesManagedCodexProvider({
-            runtimePreference: agent.runtimePreference,
-            providerId: agent.providerId,
-            runtime:
-              typeof agent.runtime === 'string' ? agent.runtime : undefined,
-            runtimeConfig: agent.runtimeConfig as
-              | { source?: string }
-              | undefined,
-          })
-        ) {
-          const validModes: PermissionMode[] = ['auto', 'plan', 'fullAgency'];
-          if (!validModes.includes(requestedMode as PermissionMode)) {
-            return {
-              ok: false,
-              response: {
-                success: false,
-                error: `Invalid managed Codex permissionMode. Valid: ${validModes.join(', ')}.`,
-              },
-            };
-          }
-          normalizedValue = requestedMode;
-        } else {
-          const validModes: PermissionMode[] = ['auto', 'plan', 'fullAgency'];
-          if (!validModes.includes(requestedMode as PermissionMode)) {
-            return {
-              ok: false,
-              response: {
-                success: false,
-                error: `Invalid permissionMode. Valid: ${validModes.join(', ')}.`,
-              },
-            };
-          }
-          normalizedValue = requestedMode;
-        }
-      }
-
-      if (key === 'providerId' || key === 'model') {
-        normalizedValue = (value as string).trim();
-      }
-
-      if (key === 'providerId') {
-        const provider = getAllEffectiveProviders(currentConfig).find(
-          (candidate) => candidate.id === normalizedValue,
-        );
-        if (!provider) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error: `Unknown providerId: '${normalizedValue}'. Run 'myagents model list' to inspect available providers.`,
-            },
-          };
-        }
-        const selectionError = getProviderSelectionError(
-          provider,
-          currentConfig,
-        );
-        if (selectionError) {
-          return {
-            ok: false,
-            response: { success: false, error: selectionError },
-          };
-        }
-      }
-
-      if (key === 'model') {
-        const providerId =
-          typeof agent.providerId === 'string'
-            ? agent.providerId
-            : currentConfig.defaultProviderId;
-        const provider = providerId
-          ? getAllEffectiveProviders(currentConfig).find(
-              (candidate) => candidate.id === providerId,
-            )
-          : undefined;
-        if (!provider) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error:
-                'Cannot validate model without an Agent providerId. Set providerId first.',
-            },
-          };
-        }
-        const selectionError = getProviderSelectionError(
-          provider,
-          currentConfig,
-        );
-        if (selectionError) {
-          return {
-            ok: false,
-            response: { success: false, error: selectionError },
-          };
-        }
-        const registeredModels = Array.isArray(provider.models)
-          ? provider.models.flatMap((entry) => {
-              if (!entry || typeof entry !== 'object') return [];
-              const model = (entry as Record<string, unknown>).model;
-              return typeof model === 'string' && model.trim()
-                ? [model.trim()]
-                : [];
-            })
-          : [];
-        // Runtime-backed providers discover models dynamically. An empty static
-        // catalogue means validation belongs to that runtime, not that no model
-        // is legal. Providers with a concrete catalogue fail closed on typos.
-        if (
-          registeredModels.length > 0 &&
-          !registeredModels.includes(String(normalizedValue))
-        ) {
-          return {
-            ok: false,
-            response: {
-              success: false,
-              error: `Model '${normalizedValue}' is not registered for provider '${provider.id}'.`,
-            },
-          };
-        }
-      }
-
-      if (key === 'providerId') {
-        const providerId = String(normalizedValue);
-        const env = resolveProviderEnv(providerId, currentConfig);
-        const providerEnvJson = env ? JSON.stringify(env) : undefined;
-        const patch = resolveAgentConfigMutation(agent as import('../shared/types/agent').AgentConfig, { providerId, providerEnvJson });
-        return {
-          ok: true,
-          agent: { ...agent, ...patch } as AgentConfigSlim,
-          projectPatch: { providerId, ...(patch.permissionMode ? { permissionMode: patch.permissionMode } : {}) },
-          livePatch: {
-            ...patch, providerEnvJson: providerEnvJson ?? null,
-            ...(Object.hasOwn(patch, 'runtimeConfig') ? { runtimeConfig: patch.runtimeConfig ?? null } : {}),
-          },
-        };
-      }
-      const syncExecutionDefault = key === 'model' || key === 'permissionMode';
-      const update = { [key]: normalizedValue };
-      return {
-        ok: true, agent: { ...agent, ...update },
-        projectPatch: syncExecutionDefault ? update : undefined,
-        livePatch: syncExecutionDefault ? update : undefined,
-      };
-    },
+    (agent, currentConfig) =>
+      resolveAgentConfigPatchIntent(agent, currentConfig, patch, { allowEnabled: true }),
     'set',
   );
 }
@@ -4205,7 +4783,7 @@ Related:
     effect:
       'Creates a Todo Task in the current workspace. Omit workspace flags normally; pass both only for explicit cross-workspace creation.',
     options:
-      '  --taskMdFile <path>  Preferred action body (or --taskMdContent)\n  --executionMode once|scheduled|recurring\n  --dispatchAt <ISO>    Scheduled one-shot time\n  --intervalMinutes <n> Fixed interval; --startAt controls the first tick\n  --cronExpression / --cronTimezone for wall-clock recurrence\n  --trigger-file <path> Optional command Detector\n  --providerId <id> --model <id>  Optional builtin route pair',
+      '  --taskMdFile <path>  Preferred action body (or --taskMdContent)\n  --executionMode once|scheduled|recurring\n  --dispatchAt <ISO>    Scheduled one-shot time\n  --intervalMinutes <n> Fixed interval; --startAt controls the first tick\n  --cronExpression / --cronTimezone for wall-clock recurrence\n  --trigger-file <path> Optional command Detector\n  --runtime <rt>        Optional per-task runtime override (builtin|dsh|claude-code|codex|antigravity)\n  --providerId <id> --model <id>  Optional provider/model override\n  --permissionMode <m>  Optional per-task permission mode (see runtime describe <rt>)\n  --runtimeConfig <json> Optional runtime-specific JSON config',
     mutation:
       'Persists Todo only; does not start AI. A recurring interval without startAt gets its first tick about 2 seconds after task run.',
     output:
@@ -4775,17 +5353,23 @@ Discovery:
   list [--active|--archived]      Find Agent IDs; marks this CLI caller's Agent
   show <agentId>                  Inspect identity and effective birth defaults
   current                        Inspect this caller's Agent/workspace/Session
+  templates                       List available workspace templates (e.g. mino)
   network-diagnose [--network N] [--cursor C] [--limit 1..100]
                                  Inspect network protocol, devices and connection state
 
 Management:
+  create (--name <name> [--template <id>] | --workspacePath <abs> [--name <name>])
+                                  Create a managed workspace under ~/.myagents/projects/<name>
+                                  or register an existing directory (with optional initial config)
   enable <id>                     Enable an agent
   disable <id>                    Disable an agent
   archive <id>                    Archive an Agent workspace and pause proactive channels
   unarchive <id>                  Restore an archived Agent workspace
-  set <id> <key> <value>          Set enabled, runtime, runtimeConfig,
-                                  providerId/model/permissionMode, mcpEnabledServers,
-                                  or enabledPluginIds. See myagents agent set --help.
+  set <id> (<key> <value> | --field <val> ...)
+                                  Update name, enabled, runtime, runtimeConfig,
+                                  providerId/model/permissionMode, reasoningEffort,
+                                  mcpEnabledServers, or enabledPluginIds.
+                                  See myagents agent set --help.
   runtime-status                  Runtime drift status across agents
   channel list <agent-id>         List channels
   channel add <agent-id>          Add a channel
@@ -4816,11 +5400,41 @@ enable/disable/set/archive/channel commands do not manage remote Agents.
 For reusable execution context use session; for durable work, scheduling and
 run tracking use task. See myagents session --help and myagents task readme.`,
 
-  'agent/create': `myagents agent create --workspacePath <absolute-path> — Register a local workspace
+  'agent/create': `myagents agent create — Create a managed Agent workspace or register an existing directory
 
-Creates or resolves the stable Workspace Agent identity through the original
-Project/Agent owner. --workspacePath is required; --json returns identity in data.
-This does not start AI or open network access. Inspect agent list before retrying.`,
+MODES
+  1. New managed workspace (default empty dir under ~/.myagents/projects/<name>):
+     myagents agent create --name <name> [--template <templateId>] [config flags] [--json]
+  2. Register existing local directory (never auto-creates arbitrary directories):
+     myagents agent create --workspacePath <absolute-path> [--name <name>] [config flags] [--json]
+
+OPTIONS
+  --name <name>              Required when --workspacePath is omitted; optional display name
+                             when --workspacePath is given (defaults to directory basename)
+  --workspacePath <abs>      Existing absolute directory to register (incompatible with --template)
+  --template <templateId>    Initialize a new managed directory from a template (e.g. mino);
+                             run 'myagents agent templates' to list available IDs
+  --runtime <runtime>        Optional initial runtime (builtin|dsh|claude-code|codex|antigravity)
+  --providerId <id>          Optional initial provider for integrated runtimes
+  --model <id>               Optional initial model
+  --permissionMode <mode>    Optional initial permission mode
+  --reasoningEffort <level>  Optional initial reasoning effort
+  --json                     Machine-readable identity + effectiveDefaults
+
+BEHAVIOR / SAFETY
+  - Without --workspacePath, creates an empty directory at ~/.myagents/projects/<sanitized-name>
+    (or copies --template into it). Fails closed with WORKSPACE_ALREADY_EXISTS if that path
+    already exists; never silently appends '-2'.
+  - Newly created Agents always start with enabled=false (proactive Heartbeat/Memory paused),
+    even when initialized from --template mino. Does not start AI or open network access.
+  - Registering an already-registered --workspacePath without config/name overrides is idempotent;
+    passing config/name overrides for an already-registered workspace fails closed so existing
+    settings are not overwritten (use 'myagents agent set <agentId> ...' instead).`,
+  'agent/templates': `myagents agent templates [--json] — List available workspace templates
+
+Read-only. Lists built-in workspace templates (such as 'mino') and valid user
+templates registered under ~/.myagents/templates/. Pass a returned id to
+'myagents agent create --name <name> --template <id>'.`,
   'agent/enable': `myagents agent enable <agentId> — Enable local proactive capabilities
 
 Use a local ID from agent list (or --id). Enables Heartbeat, Memory Update and
@@ -4843,16 +5457,22 @@ to inspect archived identities; agent unarchive restores the workspace.`,
 Use an exact local Project-backed ID from agent list --archived (or --id).
 Restores its workspace visibility through the lifecycle owner. --json returns
 the result. Inspect agent show for the resulting configuration.`,
-  'agent/set': `myagents agent set <agentId> <key> <value> — Change local Agent configuration
+  'agent/set': `myagents agent set <agentId> (<key> <value> | --field <val> ...) — Change local Agent configuration
 
-Keys: enabled, runtime, runtimeConfig, providerId, model, permissionMode, mcpEnabledServers, enabledPluginIds.
-Values are parsed as JSON when valid; quote strings/JSON for your shell.
-Use runtime list/describe before selecting runtime-specific values.
-Configuration intent is validated by the Agent owner; providerId/model/permissionMode
-also update the Project mirror and live channels. mcpEnabledServers accepts a JSON
-array of catalogue IDs for future Sessions. enabledPluginIds replaces the Agent's
-selection for future Sessions. Pass a JSON array of IDs from myagents cc-plugin list
-or '[]' to clear it. Global availability still applies to both selections.
+MODES
+  Single field:  myagents agent set <agentId> <key> <value>
+  Atomic multi:  myagents agent set <agentId> --runtime dsh --providerId deepseek --model deepseek-v4-pro --permissionMode full-autonomous
+
+Keys / flags:
+  name, enabled, runtime, runtimeConfig, providerId, model, permissionMode,
+  reasoningEffort, mcpEnabledServers, enabledPluginIds.
+
+Do not mix positional <key> <value> with named flags. Values are parsed as JSON
+when valid; quote strings/JSON for your shell. Use runtime list/describe before
+selecting runtime-specific values. Configuration intent is validated atomically
+in a single lock against the post-patch runtime so switching runtime + provider +
+model together never fails on intermediate states.
+enabledPluginIds replaces the full plugin ID array for future Sessions; pass [] to clear.
 Existing Session configuration has its own lifecycle.
 --json returns the result. Read agent show first; network references and unknown
 keys are not supported. There is no --dry-run.`,
@@ -4936,10 +5556,12 @@ OUTPUT
   or runtimeConfig.
 
 IDENTITY / PERMISSIONS
-  Defaults belong to the target Agent. A later session start uses them and does
-  not accept caller overrides. These are future-session defaults; local output
-  marks effectiveDefaults.scope as agent-default-for-future-sessions. They do
-  not describe an existing Session's effective gate.
+  Defaults belong to the target Agent. A later local session start uses them
+  unless given one-shot execution overrides within this Agent's permission
+  ceiling (which never modify Agent defaults); remote ma-agent:1 targets reject
+  all overrides. These are future-session defaults; local output marks
+  effectiveDefaults.scope as agent-default-for-future-sessions. They do not
+  describe an existing Session's effective gate.
 
 EXAMPLE
   myagents agent show <agentId>
@@ -5053,33 +5675,48 @@ WHEN TO CALL
 EFFECT
   Atomically creates a fresh Session and admits its first prompt. Returns
   immediately after admission; it does not wait for completion.
+  Optional one-shot overrides (--runtime/--providerId/--model/--reasoningEffort/
+  --permissionMode) apply ONLY to this new Session's birth snapshot and NEVER
+  modify the target Agent's persisted defaults or IM Channels.
 
 OPTIONS
-  --agent <agentId>    Required target from agent list
-  -p, --prompt TEXT    Short single-line prompt; exclusive with --prompt-file
-  --prompt-file PATH   Prompt file for multiline/long text (maximum 1 MB)
-  --no-reply           Do not push the target turn result back
-  --json               Machine-readable receipt
+  --agent <agentId>          Required target from agent list
+  -p, --prompt TEXT          Short single-line prompt; exclusive with --prompt-file
+  --prompt-file <path|->     Prompt file or '-' for stdin/heredoc (maximum 1 MB)
+  --runtime <runtime>        Optional one-shot runtime for local Agents (builtin|dsh|claude-code|codex|antigravity)
+  --providerId <id>          Optional one-shot provider for local integrated runtimes
+  --model <id>               Optional one-shot model for local Agents
+  --reasoningEffort <level>  Optional one-shot reasoning effort (default|low|medium|high|...)
+  --permissionMode <mode>    Optional one-shot permission mode (must stay <= target Agent ceiling)
+  --no-reply                 Do not push the target turn result back
+  --json                     Machine-readable receipt
 
 OUTPUT
   accepted asynchronous receipt with agentId, new sessionId, messageId,
-  replyBack, and (when replyBack=true) resultDelivery=send.result. messageId
-  correlates with the later send.result requestEventId. No completion is implied.
+  replyBack, effectiveConfig, and (when replyBack=true) resultDelivery=send.result.
+  messageId correlates with the later send.result requestEventId.
+  When replyBack=true, end your current turn and wait for the system-delivered
+  <myagents-session-event type="send.result"> block — do NOT poll session state in a loop.
 
 IDENTITY / PERMISSIONS
-  Must be called from a real MyAgents Session. The target Agent owns runtime,
-  model, permission, provider, MCP, plugin, and tool defaults; caller overrides
-  are rejected.
+  Internal callers must run from a real MyAgents Session. Local Agents allow
+  one-shot execution overrides under the target Agent's 4-tier permission ceiling
+  (unrestricted aligns to unrestricted; lower tiers never escalate; explicit
+  --permissionMode can only equal or restrict the ceiling). MCP, plugin, and tool
+  overrides are always rejected. Remote ma-agent:1 targets reject all overrides.
 
 EXAMPLES
   myagents session start --agent <agentId> -p "Review this change"
+  myagents session start --agent <agentId> --runtime codex --model gpt-5.5 --prompt-file - <<'EOF'
+  Review the staged changes for edge cases.
+  EOF
   myagents session start --agent <agentId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Agent/lifecycle rejection. Exit 2: delivery rejection, transport
   failure, or admission unconfirmed. Exit 3: local argument error. On an
   unconfirmed receipt, keep its IDs, run session list --agent <agentId>, and do
-  not automatically resend. Inline newline or >4 KB input must use a file.`,
+  not automatically resend. Inline newline or >4 KB input must use --prompt-file.`,
 
   'session/send': `myagents session send <sessionId> — Assign work in existing context
 
@@ -5091,15 +5728,16 @@ EFFECT
   delivery, not completion. An idle/dead target can be awakened.
 
 OPTIONS
-  <sessionId>           Required target Session ID
-  -p, --prompt TEXT     Short single-line prompt; exclusive with --prompt-file
-  --prompt-file PATH    Prompt file for multiline/long text (maximum 1 MB)
-  --no-reply            One-way delivery; suppress automatic result push
-  --json                Machine-readable receipt
+  <sessionId>             Required target Session ID
+  -p, --prompt TEXT       Short single-line prompt; exclusive with --prompt-file
+  --prompt-file <path|->  Prompt file or '-' for stdin/heredoc (maximum 1 MB)
+  --no-reply              One-way delivery; suppress automatic result push
+  --json                  Machine-readable receipt
 
 OUTPUT
   Delivery receipt with message ID. By default a later send.result event is
-  pushed to the caller Session.
+  pushed to the caller Session. End your current turn and wait for
+  <myagents-session-event type="send.result"> — do NOT poll session state in a loop.
 
 IDENTITY / PERMISSIONS
   Caller label is derived from Session metadata. The target keeps its own
@@ -5107,11 +5745,14 @@ IDENTITY / PERMISSIONS
 
 EXAMPLES
   myagents session send <sessionId> -p "Run the focused tests"
+  myagents session send <sessionId> --prompt-file - <<'EOF'
+  Check the failing test and summarize the cause.
+  EOF
   myagents session send <sessionId> --prompt-file request.txt --no-reply
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: delivery failure/rejection.
-  Exit 3: argument error. Inline newline or >4 KB input must use a file.`,
+  Exit 3: argument error. Inline newline or >4 KB input must use --prompt-file.`,
 
   'session/state': `myagents session state <sessionId> — Read current activity
 
@@ -5168,7 +5809,7 @@ EXAMPLE
 
 RECOVERY
   Exit 1: Session not found/business error. Exit 2: watch delivery failure.
-  Discover Sessions with session list --agent <agentId>.`,
+  Exit 3: local argument error. Discover Sessions with session list --agent <agentId>.`,
 };
 
 export function handleHelp(payload: { path?: string[] }): AdminResponse {
@@ -8056,77 +8697,19 @@ interface RuntimeDescribeResult {
   defaultPermissionModeSource: 'runtime-catalog-fallback';
 }
 
-/** Per-runtime detection timeout — a wedged `<cli> --version` binary shouldn't
- *  block the whole command. Race each detect() against this timeout. */
-const RUNTIME_DETECT_TIMEOUT_MS = 2_000;
-
-/**
- * Race a promise against a timeout; on timeout resolves to `fallback`.
- * Used by `handleRuntimeList` / `handleRuntimeDescribe` so one misbehaving
- * runtime CLI doesn't hang the whole Admin API request.
- */
-async function raceWithTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  fallback: T,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/**
- * List every runtime MyAgents knows about with its install status.
- *
- * Detection is best-effort and actually gated at `RUNTIME_DETECT_TIMEOUT_MS`
- * per runtime — each runtime's `detect()` spawns `<cli> --version`, and a
- * wedged binary would otherwise block the whole list. We *always* return the
- * full row list — even for not-installed runtimes — so the CLI reader sees
- * every valid `--runtime` value and can learn which ones need installing.
- */
+/** Discover all runtimes concurrently; optional version probes never determine installation. */
 export async function handleRuntimeList(): Promise<AdminResponse> {
-  const rows: RuntimeListRow[] = [];
-  for (const runtime of VALID_RUNTIMES) {
-    if (runtime === 'builtin') {
-      // builtin is always "installed" — it's the embedded Claude Agent SDK.
-      rows.push({
-        runtime,
-        displayName: RUNTIME_DISPLAY_NAMES[runtime],
-        installed: true,
-        version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION,
-      });
-      continue;
-    }
-    let detection: RuntimeDetection = { installed: false };
-    try {
-      const rt = getExternalRuntime(runtime);
-      detection = await raceWithTimeout(
-        rt.detect(),
-        RUNTIME_DETECT_TIMEOUT_MS,
-        { installed: false },
-      );
-    } catch {
-      // Runtime not supported in this build (should not happen given
-      // VALID_RUNTIMES ⊆ supported types, but keep defensive).
-    }
-    const row: RuntimeListRow = {
+  const rows = await Promise.all(VALID_RUNTIMES.map(async (runtime): Promise<RuntimeListRow> => {
+    const detection = runtime === 'builtin'
+      ? { installed: true, version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION }
+      : await getExternalRuntime(runtime).detect();
+    return {
       runtime,
       displayName: RUNTIME_DISPLAY_NAMES[runtime],
-      installed: detection.installed,
-      version: detection.version,
-      path: detection.path,
+      ...detection,
+      ...(!detection.installed ? { notInstalledHint: hintForMissingRuntime(runtime) } : {}),
     };
-    if (!detection.installed) {
-      row.notInstalledHint = hintForMissingRuntime(runtime);
-    }
-    rows.push(row);
-  }
+  }));
   return { success: true, data: rows };
 }
 
@@ -8187,16 +8770,7 @@ export async function handleRuntimeDescribe(
     };
   }
 
-  let detection: RuntimeDetection = { installed: false };
-  try {
-    detection = await raceWithTimeout(
-      getExternalRuntime(runtimeArg).detect(),
-      RUNTIME_DETECT_TIMEOUT_MS,
-      { installed: false },
-    );
-  } catch {
-    /* detection returns installed:false below */
-  }
+  const detection = await getExternalRuntime(runtimeArg).detect();
 
   // Only query models when the CLI is actually installed — otherwise we'd
   // waste 10+ seconds trying to spawn a binary that doesn't exist.
@@ -8294,16 +8868,7 @@ export async function handleRuntimeDiagnose(payload: {
     };
   }
 
-  let detection: RuntimeDetection = { installed: false };
-  try {
-    detection = await raceWithTimeout(
-      getExternalRuntime(runtimeArg).detect(),
-      RUNTIME_DETECT_TIMEOUT_MS,
-      { installed: false },
-    );
-  } catch {
-    /* falls through to installed:false */
-  }
+  const detection = await getExternalRuntime(runtimeArg).detect();
 
   if (!detection.installed) {
     return {
@@ -8507,7 +9072,7 @@ export async function handleAgentShow(payload: {
           : {}),
         model: effectiveModel || null,
         permissionMode: effectivePermissionMode || null,
-        providerId: agent.providerId ?? null,
+        providerId: usesExternalCliConfiguration ? null : (agent.providerId ?? null),
         runtimeConfig: runtimeConfig ?? {},
         mcpEnabledServers: Array.isArray(agent.mcpEnabledServers)
           ? agent.mcpEnabledServers
@@ -8906,11 +9471,7 @@ async function validateTaskOverrides(
   }
   if (effectiveRuntime !== 'builtin' && isRuntimeSupported(effectiveRuntime)) {
     try {
-      const installed =
-        effectiveRuntime === 'codex' &&
-        effectiveRuntimeSource === 'managed-provider'
-          ? isManagedCodexRuntimeInstalled()
-          : (await getExternalRuntime(effectiveRuntime).detect()).installed;
+      const installed = await detectRuntimeInstallation(effectiveRuntime, effectiveRuntimeSource);
       if (!installed) {
         return {
           success: false,

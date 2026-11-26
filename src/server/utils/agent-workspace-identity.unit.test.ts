@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -55,9 +55,13 @@ vi.mock('./admin-config', async importOriginal => {
 });
 
 import {
+  getManagedProjectsRoot,
   registerWorkspaceAgent,
+  resolveManagedWorkspaceCreationPath,
   resolvePersistedAgentWorkspaceRegistry,
   resolvePersistedAgentWorkspaceConflict,
+  sanitizeManagedWorkspaceDirName,
+  stripWindowsVerbatimPrefix,
 } from './agent-workspace-identity';
 
 function project(overrides: Partial<ProjectSlim> = {}): ProjectSlim {
@@ -67,6 +71,13 @@ function project(overrides: Partial<ProjectSlim> = {}): ProjectSlim {
     path: '/repo/current',
     ...overrides,
   };
+}
+
+function materializeTestWorkspace(root: string, path: string): string {
+  mkdirSync(root, { recursive: true });
+  if (existsSync(path)) throw Object.assign(new Error('Directory already exists'), { code: 'WORKSPACE_ALREADY_EXISTS' });
+  mkdirSync(path);
+  return realpathSync(path);
 }
 
 describe('persisted Agent workspace identity', () => {
@@ -359,6 +370,168 @@ describe('persisted Agent workspace identity', () => {
     ];
     await expect(registerWorkspaceAgent(workspace())).rejects.toMatchObject({
       code: 'WORKSPACE_ARCHIVED',
+    });
+  });
+
+  describe('managed workspace creation under ~/.myagents/projects/', () => {
+    const originalHome = process.env.HOME;
+    let fakeHome: string | null = null;
+
+    beforeEach(() => {
+      // Use a temp dir under process.cwd() rather than os.tmpdir() because
+      // macOS tmpdir lives under /var (/private/var), which path-safety blocks.
+      fakeHome = mkdtempSync(join(process.cwd(), '.myagents-managed-home-'));
+      process.env.HOME = fakeHome;
+      state.projects = [];
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      if (fakeHome) rmSync(fakeHome, { recursive: true, force: true });
+      fakeHome = null;
+    });
+
+    it('sanitizes valid display names and rejects path traversal, empty, or Windows reserved device names', () => {
+      expect(sanitizeManagedWorkspaceDirName('Code Reviewer')).toBe('Code-Reviewer');
+      expect(sanitizeManagedWorkspaceDirName('设计评审助手')).toBe('设计评审助手');
+      for (const bad of [
+        '', '   ', '..', '.', '../evil', 'a/b', 'a\\b', 'foo\0bar', '!!!',
+        'CON', 'prn', 'aux', 'NUL', 'COM1', 'lpt9', 'con.txt',
+      ]) {
+        expect(() => sanitizeManagedWorkspaceDirName(bad), `expected reject for '${bad}'`).toThrow();
+      }
+      expect(stripWindowsVerbatimPrefix('\\\\?\\C:\\Users\\demo\\.myagents\\projects\\foo')).toBe(
+        'C:\\Users\\demo\\.myagents\\projects\\foo',
+      );
+      expect(stripWindowsVerbatimPrefix('//?/C:/Users/demo/.myagents')).toBe(
+        'C:/Users/demo/.myagents',
+      );
+      expect(stripWindowsVerbatimPrefix('\\\\?\\UNC\\server\\share\\ws')).toBe(
+        '\\\\server\\share\\ws',
+      );
+    });
+
+    it('allows direct children of ~/.myagents/projects/ while still blocking ~/.myagents internals, nested paths, and symlink escapes', async () => {
+      const myagentsDir = join(fakeHome!, '.myagents');
+      const credsDir = join(myagentsDir, 'credentials');
+      const projectsRoot = getManagedProjectsRoot();
+      const nestedDir = join(projectsRoot, 'parent', 'nested');
+      mkdirSync(credsDir, { recursive: true });
+      mkdirSync(nestedDir, { recursive: true });
+
+      const evilSymlink = join(projectsRoot, 'evil-link');
+      symlinkSync(credsDir, evilSymlink);
+
+      await expect(registerWorkspaceAgent(myagentsDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(credsDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(projectsRoot)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(nestedDir)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      await expect(registerWorkspaceAgent(evilSymlink)).rejects.toMatchObject({ code: 'WORKSPACE_PATH_UNSAFE' });
+      const link = resolveManagedWorkspaceCreationPath('evil-link');
+      await expect(registerWorkspaceAgent(link.workspacePath, {
+        name: link.displayName,
+        createManagedDirectory: () => materializeTestWorkspace(link.projectsRoot, link.workspacePath),
+      })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
+
+      const direct = resolveManagedWorkspaceCreationPath('QA Helper');
+      const created = await registerWorkspaceAgent(direct.workspacePath, {
+        name: 'QA Helper',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: () => materializeTestWorkspace(direct.projectsRoot, direct.workspacePath),
+      });
+      expect(created.created).toBe(true);
+      expect(created.enabled).toBe(false);
+      expect(created.workspacePath).toBe(realpathSync(direct.workspacePath));
+      // CLI-created mino Agents MUST NOT inherit template proactive tasks (Heartbeat/Memory).
+      const savedAgent = state.config.agents?.[0];
+      expect(savedAgent).toMatchObject({
+        id: created.agentId,
+        name: 'QA Helper',
+        enabled: false,
+      });
+      expect(savedAgent?.heartbeat).toBeUndefined();
+      expect(savedAgent?.memoryAutoUpdate).toBeUndefined();
+      expect(savedAgent?.memoryEvolution).toBeUndefined();
+      await expect(registerWorkspaceAgent(direct.workspacePath, {
+        name: 'QA Helper',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: () => materializeTestWorkspace(direct.projectsRoot, direct.workspacePath),
+      })).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_EXISTS' });
+    });
+
+    it('rolls back managed dir before projects.json commit, but preserves it if atomicModifyConfig defers after Project commit', async () => {
+      const target1 = resolveManagedWorkspaceCreationPath('Rollback Patch');
+      await expect(
+        registerWorkspaceAgent(target1.workspacePath, {
+          name: 'Rollback Patch',
+          createManagedDirectory: () => materializeTestWorkspace(target1.projectsRoot, target1.workspacePath),
+          applyInitialAgentPatch: () => ({ ok: false, code: 'INVALID_CONFIG', message: 'bad initial config' }),
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+      expect(existsSync(target1.workspacePath)).toBe(false);
+
+      const target2 = resolveManagedWorkspaceCreationPath('Rollback Project');
+      state.failProjectOnce = true;
+      await expect(
+        registerWorkspaceAgent(target2.workspacePath, {
+          name: 'Rollback Project',
+          createManagedDirectory: () => materializeTestWorkspace(target2.projectsRoot, target2.workspacePath),
+        }),
+      ).rejects.toThrow('projects write interrupted');
+      expect(existsSync(target2.workspacePath)).toBe(false);
+
+      // If projects.json commits and config.json fails (AGENT_MATERIALIZATION_DEFERRED),
+      // the directory MUST stay on disk so retrying reuses the saved Project claim cleanly.
+      const target3 = resolveManagedWorkspaceCreationPath('Deferred Config');
+      state.failConfigOnce = true;
+      const retryOptions: Parameters<typeof registerWorkspaceAgent>[1] = {
+        name: 'Deferred Config',
+        templateId: 'mino',
+        templateSource: 'builtin',
+        createManagedDirectory: vi.fn(() => materializeTestWorkspace(target3.projectsRoot, target3.workspacePath)),
+        applyInitialAgentPatch: (agent) => ({ ok: true, agent: { ...agent, model: 'retry-model' } }),
+      };
+      await expect(registerWorkspaceAgent(target3.workspacePath, retryOptions))
+        .rejects.toMatchObject({ code: 'AGENT_MATERIALIZATION_DEFERRED' });
+      expect(existsSync(target3.workspacePath)).toBe(true);
+      const committedAgentId = state.projects[0]?.agentId;
+      expect(committedAgentId).toBeTruthy();
+
+      const retryTarget = resolveManagedWorkspaceCreationPath('Deferred Config');
+      const retried = await registerWorkspaceAgent(retryTarget.workspacePath, retryOptions);
+      expect(retried.agentId).toBe(committedAgentId);
+      expect(retried.enabled).toBe(false);
+      expect(retried.templateId).toBe('mino');
+      expect(retryOptions.createManagedDirectory).toHaveBeenCalledTimes(1);
+      expect(state.config.agents?.[0]).toMatchObject({ model: 'retry-model' });
+    });
+
+    it('fails closed with WORKSPACE_ALREADY_REGISTERED when rejectIfAlreadyRegistered is true (project-linked and legacy)', async () => {
+      const ws = workspace();
+      await registerWorkspaceAgent(ws);
+      await expect(
+        registerWorkspaceAgent(ws, { name: 'New Name', rejectIfAlreadyRegistered: true }),
+      ).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_REGISTERED' });
+
+      state.projects = [];
+      state.config = {
+        defaultPermissionMode: 'auto',
+        agents: [{
+          id: 'legacy-existing',
+          name: 'Legacy',
+          enabled: true,
+          workspacePath: ws,
+        } as unknown as NonNullable<AdminAppConfig['agents']>[number]],
+      };
+      await expect(
+        registerWorkspaceAgent(ws, { name: 'Overwrite Legacy', rejectIfAlreadyRegistered: true }),
+      ).rejects.toMatchObject({ code: 'WORKSPACE_ALREADY_REGISTERED' });
     });
   });
 });

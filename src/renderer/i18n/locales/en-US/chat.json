@@ -70,7 +70,7 @@
       "starting": "Starting…",
       "stopped": "Tool runtime stopped; starts with the next message",
       "start": "Start tool runtime",
-      "unreported": "Configured; availability unconfirmed",
+      "unreported": "Passed to session; CLI does not report live tools",
       "stale": "Status awaiting confirmation",
       "retry": "Retry connection",
       "retryHint": "Reconnect this session’s tools, keeping the conversation and tool selection",

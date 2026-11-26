@@ -44,7 +44,7 @@ MyAgents 产品内部还可以管理模型 Provider、MCP/工具、Skill/Plugin�
 已有本地目录 → Workspace Agent → Session start → Session send → Session get
 ```
 
-Task 和 Record 可以在这条链路之外保存更长期的工作意图；Runtime discovery 用来了解当前机器真实支持的环境，并为支持 override 的 Task 选择合法值。新 Session 继承目标 Agent 的配置，已有 Session 继续使用自己的执行配置；外部 Session 调用不能临时覆盖。
+Task 和 Record 可以在这条链路之外保存更长期的工作意图；Runtime discovery 用来了解当前机器真实支持的环境，并为支持 override 的本地 `session start`、`agent create` 或 `task create-direct` 选择合法值。本地 `session start` 支持一次性覆盖本新 Session 的 `runtime`/`providerId`/`model`/`reasoningEffort`/`permissionMode`（严格受目标 Agent 默认权限天花板约束，且绝不改写目标 Agent 默认配置）；跨设备远端 `session start` 与已有 Session 的后续 `send` 仍继承目标配置，不支持覆盖。
 
 ### 开始调用前
 
@@ -98,24 +98,29 @@ $env:MYAGENTS_API_TOKEN = "<token>"
 
 ### Workspace Agent
 
-适合把一个已经存在的本地目录注册成长期 Agent、发现已有 Agent，或确认目标 Agent 的默认执行配置。
+适合在 MyAgents 托管目录下创建新的独立 Agent 工作区、把已经存在的本地目录注册成长期 Agent、发现已有 Agent，或确认目标 Agent 的默认执行配置。
 
 先读：
 
 ```text
 <CLI> agent --help
+<CLI> agent templates --help
 <CLI> agent create --help
 ```
 
 核心动作：
 
 ```text
+<CLI> agent templates --json
+<CLI> agent create --name code-reviewer --template mino --runtime codex --model gpt-5.4 --permissionMode auto-edit --json
 <CLI> agent create --workspacePath <absolute-existing-directory> --json
 <CLI> agent list --json
 <CLI> agent show <agentId> --json
 ```
 
-`agent create` 不会创建目录、初始化 Git、复制模板或自动启动 Session。同一未归档、正常可见的 workspace 重复注册会返回同一个 Agent。保存成功响应中的 `agentId`；不要用显示名称或路径猜 ID。
+- 省略 `--workspacePath` 时必须传 `--name`：MyAgents 在受管根目录 `~/.myagents/projects/<sanitized-name>` 下创建新的空目录（或配合 `--template` 从 `agent templates` 发现的模板复制，例如内置 `mino`）。目标目录已存在时直接报错（`WORKSPACE_ALREADY_EXISTS`），不会静默生成 `-2`。
+- 传入 `--workspacePath` 时，该绝对目录必须已经存在（不会在任意位置自动 mkdir，且不能与 `--template` 同用）；`--name` 可选，默认取目录名。未传初始配置/改名时对同一未归档目录幂等返回；若带了初始配置/改名且该目录已注册，则明确拒绝，不静默覆盖。
+- 新建 Agent 默认 `enabled=false`（不自动开启 Heartbeat/Memory 等主动能力），也不自动初始化 Git 或启动 Session。保存成功响应中的 `agentId`；不要用显示名称或路径猜 ID。
 
 ### 同账号跨设备 Agent
 
@@ -148,7 +153,7 @@ Agent 的注册、Task、Record 与 Runtime discovery 仍操作本机 Host；跨
 <CLI> runtime describe <runtime> --json
 ```
 
-在为支持 override 的 Task 选择 runtime/model/permissionMode 前先 describe，不要凭经验硬编码值。`models` 可能为空，例如 builtin 的模型来自 Provider；这不表示 Runtime 不支持模型。外部调用可读取 `agent show` 的未来 Session 默认值，未公开的 Provider 目录或诊断需在 App 内查看，不因响应中的恢复建议而调用非公开命令。Session start 不接受临时 override，而是继承目标 Agent 的配置。
+在为支持 override 的本地 `session start`、`agent create` 或 `task create-direct` 选择 runtime/model/permissionMode 前先 describe，不要凭经验硬编码值。`models` 可能为空，例如 builtin 的模型来自 Provider；这不表示 Runtime 不支持模型。外部调用可读取 `agent show` 的未来 Session 默认值，未公开的 Provider 目录或诊断需在 App 内查看，不因响应中的恢复建议而调用非公开命令。跨设备远端 `session start` 仍继承目标 Agent 的配置，不接受临时 override。
 
 ### Session：委托、续聊与读取结果
 
@@ -170,13 +175,15 @@ Agent 的注册、Task、Record 与 Runtime discovery 仍操作本机 Host；跨
 ```text
 <CLI> session list --agent <agentId> --limit 5 --json
 <CLI> session start --agent <agentId> --prompt-file <request-file> --json
+<CLI> session start --agent <agentId> --runtime codex --model gpt-5.4 --prompt-file - --json
 <CLI> session send <sessionId> --prompt-file <follow-up-file> --json
 <CLI> session state <sessionId> --json
 <CLI> session get <sessionId> --limit 5 --json
 ```
 
 - 保存 `start` 返回的 Product Session ID；后续 `send/get` 都使用这个 ID，不要替换成 Runtime 自己的 session 标识或投递 messageId。
-- 多行、较长或来自外部输入的 prompt 优先写入普通文本文件，再使用 `--prompt-file`，避免 shell 转义和注入。
+- 本地 `session start` 支持一次性覆盖新 Session 的 `--runtime`、`--providerId`、`--model`、`--reasoningEffort`、`--permissionMode`：仅写入本次新 Session 快照，绝不修改目标 Agent 默认设置，且有效权限严格不高于目标 Agent 默认权限天花板；不允许覆盖 MCP/Plugin/Tool/`runtimeConfig`，也不支持跨设备远端 Agent 覆盖。
+- 多行、较长或来自外部输入的 prompt 优先写入普通文本文件后传 `--prompt-file <path>`，或使用 `--prompt-file -` 从非交互 stdin（pipe/heredoc，上限 1 MiB）读取，避免 shell 转义和注入。
 - 外部 `start/send` 是 one-way。成功回执只表示请求已接受或投递，不代表 AI 已执行成功；需要结果时主动 `session get`。外部调用不提供自动结果回调或 `session watch/watches/unwatch`。
 - `session state` 只读返回 `idle`、`running` 或 `waiting_user_action`；后者要求目标用户处理审批、确认或必须回答的问题。查询不唤醒模型、不代替用户批准，`idle` 也不表示任务成功。
 - 状态不可读时返回查询错误，可按错误提示重试读取；不要把查询失败解释成目标 idle。
@@ -238,4 +245,4 @@ Agent 的注册、Task、Record 与 Runtime discovery 仍操作本机 Host；跨
 - 开关关闭或 token 失效时，请用户在「设置 → 外部调用」重新开启或注入当前 token，不要尝试绕过。
 - 参数、路径或 lifecycle 冲突时，根据 JSON `code`、错误说明和 suggestion 修正输入。mutation 响应丢失时先用只读命令核实，不自动重放。
 
-外部 token 只用于本机 CLI 访问本机 Host；CLI 可借助 MyAgents Agent 网络委托同账号其它设备上的已开放 Agent。这不提供远程直连 Host 的 HTTP/OpenAPI/SDK/MCP 接口。当前公开面不提供自动结果回调、exactly-once、Provider/MCP/Plugin/Skill/Tool/Channel/Space/Goal/Speech 管理，也不自动创建目录、初始化 Workspace 模板或 Git。目标超出公开帮助时，明确告诉用户需要在 MyAgents App 或 MyAgents 内部 Agent 中完成。
+外部 token 只用于本机 CLI 访问本机 Host；CLI 可借助 MyAgents Agent 网络委托同账号其它设备上的已开放 Agent。这不提供远程直连 Host 的 HTTP/OpenAPI/SDK/MCP 接口。当前公开面不提供自动结果回调、exactly-once、Provider/MCP/Plugin/Skill/Tool/Channel/Space/Goal/Speech 管理，也不在受管目录外任意 mkdir 或初始化 Git。目标超出公开帮助时，明确告诉用户需要在 MyAgents App 或 MyAgents 内部 Agent 中完成。

@@ -1,7 +1,7 @@
 // Shared environment utilities for external runtime subprocesses (v0.1.60)
 
 import { accessSync, constants, statSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, resolve } from 'node:path';
 
 import type { ExternalRuntimeId } from '../../shared/integrated-runtimes/identity';
 import { PROXY_ENV_KEYS } from '../../shared/proxyScope';
@@ -34,7 +34,7 @@ function which(command: string, pathStr: string): string | null {
   for (const dir of pathStr.split(delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
-      const candidate = join(dir, command + ext);
+      const candidate = resolve(dir, command + ext);
       try {
         if (statSync(candidate).isFile()) {
           if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);

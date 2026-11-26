@@ -1758,8 +1758,22 @@ export default function Chat({
       })
     : null;
   const isExternalRuntime = currentRuntime !== 'builtin';
+  const [systemCodexVersion, setSystemCodexVersion] = useState<string>();
+  useEffect(() => {
+    if (currentRuntime !== 'codex' || currentRuntimeSource !== 'system-cli') return;
+    let cancelled = false;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<string | null>('cmd_system_codex_version'))
+      .then(version => {
+        if (!cancelled) setSystemCodexVersion(version ?? undefined);
+      })
+      .catch(() => {
+        if (!cancelled) setSystemCodexVersion(undefined);
+      });
+    return () => { cancelled = true; };
+  }, [currentRuntime, currentRuntimeSource]);
   const runtimeConversationBranchSupported = supportsRuntimeConversationBranches(
-    currentRuntime, currentRuntimeSource, runtimeDetections.codex.version,
+    currentRuntime, currentRuntimeSource, systemCodexVersion,
   );
   const handleDiagnoseAgentError = useCallback(
     (message: string) => {

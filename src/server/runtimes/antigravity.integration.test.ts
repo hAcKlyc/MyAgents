@@ -1,9 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { setSidecarPort } from "../session-core/sidecar-port";
 import * as subprocess from "../utils/subprocess";
-import type { UnifiedEvent } from "./types";
+import {
+  isRuntimeSteerUnavailableError,
+  type UnifiedEvent,
+} from "./types";
 import { AntigravityRuntime } from "./antigravity";
 
 // Keep real SDK framing, pipes and process teardown. Only substitute the external executable.
@@ -63,15 +67,152 @@ lines.on('line', line => {
     return settle();
   }
   if (f.method === 'session/close') return reply({});
+  if (f.method === 'session/cancel') {
+    if (turn !== undefined) {
+      const cancelled = turn;
+      turn = undefined;
+      send({id:cancelled,result:{stopReason:'cancelled'}});
+    }
+    return;
+  }
   if (f.method === 'session/prompt') {
-    turn = f.id;
-    const textPrompt = f.params.prompt[0].text;
+    const promptText = f.params.prompt[0]?.text ?? '';
     const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    const content = text => ({type:'content',content:{type:'text',text}});
+    if (turn !== undefined && promptText === 'steer-permission-race') {
+      return send({
+        id:f.id,
+        error:{
+          code:-32603,
+          message:"Can't add this prompt to session native: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again",
+        },
+      });
+    }
+    if (turn !== undefined && promptText === 'steer-invalid') {
+      return send({id:f.id,error:{code:-32602,message:'Empty prompt'}});
+    }
     const textChunk = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
     const auth401Text = '\\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\\n';
-    if (textPrompt === 'exit') return process.exit(2);
-    if (textPrompt === 'auth-401-recover' || textPrompt === 'auth-401-exhaust' || textPrompt === 'auth-401-cap' || textPrompt === 'auth-401-cancel') {
-      globalThis.__authMode = textPrompt;
+    if (turn !== undefined && ['steer-auth-predecessor', 'steer-auth-successor', 'steer-auth-late-predecessor', 'steer-auth-rejected'].includes(promptText)) {
+      const predecessor = turn;
+      turn = f.id;
+      const predecessorResult = {stopReason:'end_turn',usage:{inputTokens:3,outputTokens:1,totalTokens:4}};
+      const successorResult = {stopReason:'end_turn',usage:{inputTokens:4,outputTokens:2,totalTokens:6}};
+      if (promptText === 'steer-auth-late-predecessor') {
+        update(textChunk('The user follow-up finished first.'));
+        reply(successorResult);
+        setTimeout(() => {
+          turn = undefined;
+          update(textChunk(auth401Text));
+          send({id:predecessor,result:predecessorResult});
+        }, 30);
+        return;
+      }
+      if (promptText === 'steer-auth-predecessor' || promptText === 'steer-auth-rejected') update(textChunk(auth401Text));
+      send({id:predecessor,result:predecessorResult});
+      setTimeout(() => {
+        const successor = turn;
+        turn = undefined;
+        if (promptText === 'steer-auth-rejected') {
+          recoverAfterFramedQuote = true;
+          return send({id:successor,error:{code:-32602,message:'The successor was rejected before execution.'}});
+        }
+        if (promptText === 'steer-auth-successor') {
+          recoverAfterFramedQuote = true;
+          update(textChunk(auth401Text));
+        } else {
+          update(textChunk('The user follow-up took over.'));
+        }
+        send({id:successor,result:successorResult});
+      }, 30);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-one') {
+      const prev = turn;
+      turn = f.id;
+      send({
+        id:prev,
+        result:{
+          stopReason:'end_turn',
+          usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:10,totalTokens:135},
+        },
+      });
+      setTimeout(() => {
+        update({sessionUpdate:'tool_call_update',toolCallId:'steer-cmd',status:'completed',content:[content('done')],rawOutput:{exit_code:0,duration_ms:15}});
+      }, 15);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-two') {
+      const prev = turn;
+      turn = f.id;
+      send({id:prev,result:{stopReason:'end_turn'}});
+      setTimeout(() => {
+        update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Final steered answer.'}});
+        const finished = turn;
+        turn = undefined;
+        send({
+          id:finished,
+          result:{
+            stopReason:'end_turn',
+            usage:{inputTokens:40,outputTokens:10,thoughtTokens:2,cachedReadTokens:20,totalTokens:72},
+          },
+        });
+      }, 15);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-cancel-target') {
+      const prev = turn;
+      turn = f.id;
+      send({id:prev,result:{stopReason:'end_turn'}});
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-next-first') {
+      const prev = turn;
+      turn = undefined;
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Early successor reply.'}});
+      reply({stopReason:'max_tokens'});
+      setTimeout(() => send({id:prev,result:{stopReason:'end_turn'}}), 25);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-old-before-rejection') {
+      const prev = turn;
+      turn = undefined;
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Tail from predecessor.'}});
+      send({id:prev,result:{stopReason:'end_turn'}});
+      setTimeout(() => {
+        update({sessionUpdate:'usage_update',used:42,size:100});
+        send({
+          id:f.id,
+          error:{
+            code:-32603,
+            message:"Can't add this prompt to session native: the running prompt is waiting for a permission or question answer; answer it or send session/cancel, then send this prompt again",
+          },
+        });
+      }, 25);
+      return;
+    }
+    if (turn !== undefined && promptText === 'steer-early-permission') {
+      const prev = turn;
+      turn = f.id;
+      send({
+        id:401,
+        method:'session/request_permission',
+        params:{
+          sessionId:'native',
+          toolCall:{toolCallId:'perm-401',title:'Approve steered action'},
+          options:[
+            {kind:'allow_once',optionId:'allow-401',name:'Yes'},
+            {kind:'reject_once',optionId:'deny-401',name:'No'},
+          ],
+        },
+      });
+      setTimeout(() => send({id:prev,result:{stopReason:'end_turn'}}), 20);
+      return;
+    }
+    turn = f.id;
+    if (promptText === 'exit') return process.exit(2);
+    if (promptText === 'auth-401-recover' || promptText === 'auth-401-exhaust' || promptText === 'auth-401-cap' || promptText === 'auth-401-cancel') {
+      globalThis.__authMode = promptText;
       globalThis.__authCalls = 0;
     }
     if (globalThis.__authMode) {
@@ -85,7 +226,7 @@ lines.on('line', line => {
           update(textChunk(auth401Text));
           return reply({stopReason:'end_turn',usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155}});
         }
-        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !textPrompt.startsWith('Continue from where you stopped.')) {
+        if (f.params.sessionId !== 'native' || f.params.prompt.length !== 1 || !promptText.startsWith('Continue from where you stopped.')) {
           return reply({stopReason:'refusal'});
         }
         if (call === 2) {
@@ -118,8 +259,8 @@ lines.on('line', line => {
         return reply({stopReason:'end_turn'});
       }
     }
-    if (textPrompt === 'auth-401-cancel-before-warning' || textPrompt === 'auth-401-cancel-after-warning') {
-      const warningBeforeCancel = textPrompt === 'auth-401-cancel-after-warning';
+    if (promptText === 'auth-401-cancel-before-warning' || promptText === 'auth-401-cancel-after-warning') {
+      const warningBeforeCancel = promptText === 'auth-401-cancel-after-warning';
       if (warningBeforeCancel) update(textChunk(auth401Text));
       update({sessionUpdate:'usage_update',used:44,size:100});
       settleAuthCancelledPrompt = () => {
@@ -128,56 +269,74 @@ lines.on('line', line => {
       };
       return;
     }
-    if (textPrompt === 'auth-401-warning-after-framed-quote') {
+    if (promptText === 'auth-401-warning-after-framed-quote') {
       recoverAfterFramedQuote = true;
       update(textChunk(auth401Text));
       update(textChunk(auth401Text));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt.startsWith('auth-401-framed-quote-')) {
+    if (promptText.startsWith('auth-401-framed-quote-')) {
       update(textChunk(auth401Text));
-      return reply({stopReason:textPrompt.slice('auth-401-framed-quote-'.length)});
+      return reply({stopReason:promptText.slice('auth-401-framed-quote-'.length)});
     }
-    if (textPrompt === 'auth-401-quoted-final-chunk') {
+    if (promptText === 'auth-401-quoted-final-chunk') {
       update(textChunk('Here is the exact error: '));
       update(textChunk(auth401Text.trim()));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-quoted') {
+    if (promptText === 'auth-401-quoted') {
       update(textChunk(auth401Text));
       update(textChunk('That error occurs when OAuth2 expires.'));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-quoted-single-chunk') {
+    if (promptText === 'auth-401-quoted-single-chunk') {
       update(textChunk(auth401Text.trim() + ' That error occurs when OAuth2 expires.'));
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'auth-401-disconnect-during-backoff') {
+    if (promptText === 'auth-401-disconnect-during-backoff') {
       update(textChunk(auth401Text));
       reply({stopReason:'end_turn',usage:{inputTokens:33,outputTokens:7,thoughtTokens:0,cachedReadTokens:5,totalTokens:45}});
       setTimeout(() => { process.stdout.end(); }, 25);
       return;
     }
-    if (textPrompt === 'auth-401-exit-during-backoff') {
+    if (promptText === 'auth-401-exit-during-backoff') {
       update(textChunk(auth401Text));
       reply({stopReason:'end_turn',usage:{inputTokens:44,outputTokens:6,thoughtTokens:2,cachedReadTokens:12,totalTokens:64}});
       setTimeout(() => { process.exit(3); }, 25);
       return;
     }
-    if (textPrompt.startsWith('Continue from where you stopped.')) {
+    if (promptText.startsWith('Continue from where you stopped.')) {
       update(textChunk(recoverAfterFramedQuote ? 'Continued after warning.' : 'UNEXPECTED_RETRY'));
       recoverAfterFramedQuote = false;
       return reply({stopReason:'end_turn'});
     }
-    if (textPrompt === 'usage') return reply({
-      stopReason:'end_turn',
-      usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
-    });
-    if (f.params.prompt[0].text === 'delegate') {
-      const update = (data, sessionId = 'native') => send({method:'session/update',params:{sessionId,update:data}});
+    if (promptText === 'usage') {
+      turn = undefined;
+      return reply({
+        stopReason:'end_turn',
+        usage:{inputTokens:100,outputTokens:20,thoughtTokens:5,cachedReadTokens:30,totalTokens:155},
+      });
+    }
+    if (promptText === 'steer-root') {
+      update({sessionUpdate:'tool_call',toolCallId:'steer-cmd',title:'sleep 4',kind:'execute',status:'in_progress',rawInput:{CommandLine:'sleep 4'}});
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Working before steer.'}});
+      return;
+    }
+    if (promptText === 'steer-root-finishable') {
+      update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'Still running.'}});
+      setTimeout(() => {
+        if (turn === f.id) {
+          turn = undefined;
+          reply({stopReason:'end_turn'});
+        }
+      }, 80);
+      return;
+    }
+    if (promptText === 'delegate') {
       const text = text => ({sessionUpdate:'agent_message_chunk',content:{type:'text',text}});
       const usage = {sessionUpdate:'usage_update',used:40,size:100};
       update(text('Waiting for delegated work.'));
+      turn = undefined;
       reply({stopReason:'end_turn'});
       setTimeout(() => {
         update(usage);
@@ -190,9 +349,7 @@ lines.on('line', line => {
       }, 25);
       return;
     }
-    if (f.params.prompt[0].text === 'tool projection') {
-      const update = data => send({method:'session/update',params:{sessionId:'native',update:data}});
-      const content = text => ({type:'content',content:{type:'text',text}});
+    if (promptText === 'tool projection') {
       update({sessionUpdate:'tool_call',toolCallId:'cmd',title:'printf synthetic-private-value',kind:'execute',status:'pending',rawInput:{CommandLine:'printf synthetic-private-value',toolSummary:'Print a marker'}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'in_progress',content:[content('first')]});
       update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:'still'}});
@@ -201,9 +358,10 @@ lines.on('line', line => {
       update({sessionUpdate:'agent_message_chunk',content:{type:'text',text:' writing'}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'failed',content:[content('final output')],rawOutput:{exit_code:6,duration_ms:25}});
       update({sessionUpdate:'tool_call_update',toolCallId:'cmd',status:'failed',content:[content('do not duplicate')]});
+      turn = undefined;
       return reply({stopReason:'end_turn'});
     }
-    if (f.params.prompt[0].text === 'exact permission choices') {
+    if (promptText === 'exact permission choices') {
       for (const id of [301,302]) send({id,method:'session/request_permission',params:{
         sessionId:'native',
         toolCall:{toolCallId:String(id),title:'Run synthetic command',kind:'execute',rawInput:{CommandLine:'printf '+ 'x'.repeat(1500)}},
@@ -218,16 +376,22 @@ lines.on('line', line => {
     for (const id of [101,102]) send({id,method:'session/request_permission',params:{sessionId:'native',toolCall:{toolCallId:String(id),title:'file '+id},options:[{kind:'allow_once',optionId:'a'+id,name:'Yes'},{kind:'reject_once',optionId:'d'+id,name:'No'}]}});
   } else if ([301,302].includes(f.id)) {
     approvals.set(f.id,f.result.outcome);
-    if (approvals.size === 2) send({id:turn,result:{
-      stopReason: approvals.get(301).optionId === 'exact-301' && approvals.get(302).optionId === 'reject-302'
-        ? 'end_turn' : 'refusal',
-    }});
+    if (approvals.size === 2 && turn !== undefined) {
+      const done = turn;
+      turn = undefined;
+      send({id:done,result:{
+        stopReason: approvals.get(301).optionId === 'exact-301' && approvals.get(302).optionId === 'reject-302'
+          ? 'end_turn' : 'refusal',
+      }});
+    }
   } else if ([101,102].includes(f.id)) {
     approvals.set(f.id,f.result.outcome);
-    if(approvals.size === 2) {
+    if(approvals.size === 2 && turn !== undefined) {
+      const done = turn;
+      turn = undefined;
       const ok = approvals.get(101).optionId === 'a101' && approvals.get(102).optionId === 'd102';
       const cancelled = [...approvals.values()].every(v => v.outcome === 'cancelled');
-      send({id:turn,result:{stopReason: ok ? 'end_turn' : cancelled ? 'cancelled' : 'refusal'}});
+      send({id:done,result:{stopReason: ok ? 'end_turn' : cancelled ? 'cancelled' : 'refusal'}});
     }
   }
 });
@@ -763,6 +927,115 @@ it("maps legacy flat model IDs onto ACP family + thought_level options while pre
   });
 });
 
+it("fails closed with an actionable error when the CLI session does not offer auto mode, and skips redundant mode RPCs", async () => {
+  const restrictedFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+let mode = 'accept-edits';
+let setModeCalls = 0;
+const select = (id, currentValue, values) => ({
+  id, name:id, type:'select', currentValue,
+  options: values.map(value => ({value, name:value})),
+});
+const configOptions = () => [
+  select('model', 'model-a', ['model-a']),
+  select('thought_level', 'high', ['medium', 'high']),
+  select('mode', mode, ['default', 'accept-edits', 'plan']),
+];
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'restricted',configOptions:configOptions()});
+  if (f.method === 'session/set_config_option') {
+    if (f.params.configId === 'mode') setModeCalls++;
+    if (f.params.configId === 'mode' && ['default', 'accept-edits', 'plan'].includes(f.params.value)) {
+      mode = f.params.value;
+      return reply({configOptions:configOptions()});
+    }
+    return send({id:f.id, error:{code:-32602, message:'Unknown mode: ' + f.params.value}});
+  }
+  if (f.method === 'session/prompt') {
+    send({method:'session/update',params:{sessionId:'restricted',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'modeCalls=' + setModeCalls}}}});
+    return reply({stopReason:'end_turn'});
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-restricted-mode-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", restrictedFixture], options));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  await expect(
+    runtime.startSession(
+      { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "auto" },
+      () => undefined,
+    ),
+  ).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("Permission mode 'auto' is not offered"));
+
+  const events: UnifiedEvent[] = [];
+  processHandle = await runtime.startSession(
+    { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "accept-edits" },
+    (e) => events.push(e),
+  );
+  await runtime.sendMessage(processHandle, "check");
+  await expect.poll(() => events.find((e) => e.kind === "turn_complete")?.status).toBe("completed");
+  // Mode was already accept-edits on session/new so no redundant set_config_option RPC was sent.
+  expect(events.find((e) => e.kind === "text_delta")).toMatchObject({ text: "modeCalls=0" });
+
+  await expect(runtime.setPermissionMode(processHandle, "auto")).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+});
+
+it("translates raw ACP -32602 on mode=auto when the worker omits mode option lists", async () => {
+  const opaqueModeFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({sessionId:'opaque',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'default',options:[]}]});
+  if (f.method === 'session/set_config_option') return send({id:f.id, error:{code:-32602, message:'Unknown mode: auto'}});
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-opaque-mode-"));
+  vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+    originalSpawn([process.execPath, "-e", opaqueModeFixture], options));
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+  await expect(
+    runtime.startSession(
+      { workspacePath: directory, sessionId: "product", scenario: { type: "desktop" }, permissionMode: "auto" },
+      () => undefined,
+    ),
+  ).rejects.toThrow(/帮我批准（auto）.*请求批准/);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("configId=mode value=auto"));
+});
+
+it("reconciles unsupported persisted reasoningEffort at startup while rejecting unsupported live switches", async () => {
+  const { options, receive } = await setup();
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  // Persisted 'max' is not in model-a's offered ['medium', 'high']: startup keeps native 'high' instead of crashing.
+  processHandle = await runtime.startSession({ ...options, model: "model-a", reasoningEffort: "max" }, receive);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("Ignoring unsupported persisted reasoningEffort='max'"));
+  const catalog = await runtime.queryModels({ process: processHandle });
+  expect(catalog[0]).toMatchObject({ value: "model-a", isCurrent: true, currentReasoningEffort: "high" });
+
+  // Explicit live switch to an unsupported level fails clearly instead of leaking raw ACP -32602.
+  await expect(runtime.setReasoningEffort(processHandle, "max")).rejects.toThrow(/推理强度 "max".*medium、high/);
+});
+
+it("rejects a fresh guarded configuration whose effort cannot be applied", async () => {
+  const { options, receive, events } = await setup();
+  await expect(runtime.startSession({
+    ...options, model: "model-a", reasoningEffort: "max", requireReasoningEffort: true,
+  }, receive)).rejects.toThrow(/推理强度 "max".*medium、high/);
+  expect(events.some((event) => event.kind === "session_init")).toBe(false);
+});
+
 it("maps the Launcher family and effort to a supported flat model for a legacy ACP worker", async () => {
   const legacyFixture = `
 const lines = require('node:readline').createInterface({input: process.stdin});
@@ -778,7 +1051,7 @@ lines.on('line', line => {
   const reply = result => send({id:f.id, result});
   if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
   if (f.method === 'session/new') return reply({sessionId:'legacy',configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],models:{currentModelId:current,availableModels:available}});
-  if (f.method === 'session/set_config_option') return reply({configOptions:[{id:'mode',name:'mode',type:'select',currentValue:f.params.value,options:[]}]});
+  if (f.method === 'session/set_config_option') return send({id:f.id,error:{code:-32602,message:'unsupported config'}});
   if (f.method === 'session/set_model') {
     if (!available.some(m => m.modelId === f.params.modelId)) return send({id:f.id,error:{code:-32602,message:'unknown model'}});
     current = f.params.modelId;
@@ -815,4 +1088,377 @@ lines.on('line', line => {
   await runtime.setModel(processHandle, family!.value);
   expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
     .toBe("legacy-a-low");
+  await runtime.stopSession(processHandle);
+  processHandle = await runtime.startSession({
+    workspacePath: directory,
+    sessionId: "legacy-flat-product",
+    scenario: { type: "desktop" },
+    model: "legacy-a-high",
+    reasoningEffort: "low",
+  }, () => undefined);
+  expect((await runtime.queryModels({ process: processHandle })).find((model) => model.isCurrent)?.value)
+    .toBe("legacy-a-low");
+});
+
+it("reports active background task watchdog state and observes native task log progress and settlement", async () => {
+  const nativeSid = "87361ac8-8654-4053-91b5-163b1affdfaa";
+  const bgFixture = `
+const lines = require('node:readline').createInterface({input: process.stdin});
+const send = f => process.stdout.write(JSON.stringify({jsonrpc:'2.0', ...f})+'\\n');
+lines.on('line', line => {
+  const f = JSON.parse(line);
+  const reply = result => send({id:f.id, result});
+  if (f.method === 'initialize') return reply({protocolVersion:1,agentCapabilities:{},authMethods:[]});
+  if (f.method === 'session/new') return reply({
+    sessionId:'${nativeSid}',
+    configOptions:[{id:'mode',name:'mode',type:'select',currentValue:'accept-edits',options:[]}],
+  });
+  if (f.method === 'session/set_config_option') return reply({
+    configOptions:[{id:'mode',name:'mode',type:'select',currentValue:f.params.value,options:[]}],
+  });
+  if (f.method === 'session/prompt') {
+    const update = data => send({method:'session/update',params:{sessionId:'${nativeSid}',update:data}});
+    update({
+      sessionUpdate:'tool_call',
+      toolCallId:'bg-cmd',
+      title:'Run spark query',
+      kind:'execute',
+      status:'completed',
+      rawInput:{CommandLine:'python3 run_sql.py'},
+      content:[{type:'content',content:{type:'text',text:'Tool is running as a background task with task id: ${nativeSid}/task-104'}}],
+    });
+    // Keep session/prompt open while waiting for the background task, matching real agy ACP reactive wakeup.
+    return;
+  }
+  if (f.method === 'session/close') return reply({});
+});
+`;
+  directory = await mkdtemp(join(tmpdir(), "MyAgents-agy-bg-task-"));
+  const fakeHome = join(directory, "home");
+  const tasksDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "tasks");
+  const messagesDir = join(fakeHome, ".gemini", "antigravity-cli", "brain", nativeSid, ".system_generated", "messages");
+  const logPath = join(tasksDir, "task-104.log");
+
+  const homeKey = process.platform === "win32" ? "USERPROFILE" : "HOME";
+  const prevHome = process.env[homeKey];
+  process.env[homeKey] = fakeHome;
+  try {
+    vi.spyOn(subprocess, "spawn").mockImplementation((_argv, options) =>
+      originalSpawn([process.execPath, "-e", bgFixture], options));
+    processHandle = await runtime.startSession(
+      { workspacePath: directory, sessionId: "product-bg", scenario: { type: "desktop" } },
+      () => undefined,
+    );
+    await runtime.sendMessage(processHandle, "run long spark query");
+
+    await expect.poll(() => processHandle?.getWatchdogState?.().lastAsyncProgressAt ?? 0).toBeGreaterThan(0);
+    expect(processHandle.getWatchdogState?.().activeAsyncWork).toBe(false);
+    await mkdir(tasksDir, { recursive: true });
+    await mkdir(messagesDir, { recursive: true });
+    await writeFile(logPath, "[1s] status=RUNNING\n", "utf8");
+    await expect.poll(() => processHandle?.getWatchdogState?.().activeAsyncWork, { timeout: 5_000 }).toBe(true);
+    const initialProgress = processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0;
+    expect(initialProgress).toBeGreaterThan(0);
+
+    // The first observation captured the log baseline.
+    await appendFile(logPath, "[60s] status=RUNNING\n", "utf8");
+    await expect
+      .poll(() => processHandle?.getWatchdogState?.().lastAsyncProgressAt ?? 0, { timeout: 5_000 })
+      .toBeGreaterThan(initialProgress);
+    const progressBeforeFinish = processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0;
+
+    // Native task completion message settles activeAsyncWork and bumps progress for parent wakeup.
+    await writeFile(
+      join(messagesDir, "done.json"),
+      JSON.stringify({
+        id: "done",
+        sender: `${nativeSid}/task-104`,
+        recipient: nativeSid,
+        timestamp: new Date().toISOString(),
+        content: `Task id "${nativeSid}/task-104" finished with result:\nCommand exited with code 0.`,
+      }),
+      "utf8",
+    );
+    await expect
+      .poll(() => processHandle?.getWatchdogState?.().activeAsyncWork, { timeout: 5_000 })
+      .toBe(false);
+    expect(processHandle.getWatchdogState?.().lastAsyncProgressAt ?? 0).toBeGreaterThan(progressBeforeFinish);
+  } finally {
+    if (prevHome === undefined) delete process.env[homeKey];
+    else process.env[homeKey] = prevHome;
+  }
+});
+
+it("propagates session-scoped internal myagents CLI env and bin PATH precedence to agy", async () => {
+  const { options, receive, spawn } = await setup();
+  vi.stubEnv("MYAGENTS_INTERNAL_CLI_TOKEN", "internal-cli-test-token");
+  setSidecarPort(41234);
+  try {
+    processHandle = await runtime.startSession(
+      { ...options, sessionId: "product-session-cli-env" },
+      receive,
+    );
+    const spawnEnv = spawn.mock.calls[0]?.[1]?.env as Record<string, string | undefined>;
+    expect(spawnEnv).toBeDefined();
+    expect(spawnEnv.MYAGENTS_PORT).toBe("41234");
+    expect(spawnEnv.MYAGENTS_INTERNAL_CLI_TOKEN).toBe("internal-cli-test-token");
+    expect(spawnEnv.MYAGENTS_SESSION_ID).toBe("product-session-cli-env");
+    expect(spawnEnv.PWD).toBe(options.workspacePath);
+    const pathKey = process.platform === "win32" ? "Path" : "PATH";
+    const home = (process.platform === "win32" ? spawnEnv.USERPROFILE : spawnEnv.HOME) || homedir();
+    const firstPathEntry = (spawnEnv[pathKey] ?? "").split(delimiter)[0];
+    expect(firstPathEntry).toBe(join(home, ".myagents", "bin"));
+  } finally {
+    setSidecarPort(0);
+    vi.unstubAllEnvs();
+  }
+});
+
+it("emits accurate MCP dispatch semantics instead of status_read_failed", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  const emptyMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(emptyMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "settled", releaseReason: "ready" },
+    servers: [],
+    tools: [],
+  });
+  await runtime.stopSession(processHandle);
+  processHandle = undefined;
+
+  events.length = 0;
+  processHandle = await runtime.startSession(
+    {
+      ...options,
+      mcpServers: [
+        { id: "local-tool", name: "Local Tool", type: "stdio", command: process.execPath, args: ["-v"], isBuiltin: false },
+      ],
+    },
+    receive,
+  );
+  const projectedMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(projectedMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "released", releaseReason: "status_unreported" },
+    servers: [expect.objectContaining({ id: "local-tool", desired: true, state: "unreported" })],
+  });
+  await runtime.stopSession(processHandle);
+  processHandle = undefined;
+
+  events.length = 0;
+  processHandle = await runtime.startSession(
+    {
+      ...options,
+      mcpServers: [
+        { id: "bad-remote", name: "Bad Remote", type: "http", url: "https://example.invalid/mcp", isBuiltin: false },
+      ],
+    },
+    receive,
+  );
+  const failedMcp = events.find((event) => event.kind === "mcp_effective_update");
+  expect(failedMcp).toMatchObject({
+    kind: "mcp_effective_update",
+    dispatch: { state: "released", releaseReason: "terminal_status" },
+    servers: [expect.objectContaining({ id: "bad-remote", desired: true, state: "failed" })],
+  });
+});
+
+it("steers an active prompt in-place via concurrent session/prompt, preserves in-flight tools, and accumulates delta usage", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect(
+    runtime.steerMessage(processHandle, "too early", undefined, { clientUserMessageId: "u-idle" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-one", undefined, {
+    clientUserMessageId: "u-steer-1",
+  });
+  expect(events.some((event) => event.kind === "turn_complete")).toBe(false);
+  // Pre-steer tool completion settles in the original assistant segment before
+  // `steer-one` is confirmed.
+  await expect.poll(() => events.some((event) => event.kind === "tool_result" && event.toolUseId === "steer-cmd")).toBe(true);
+  expect(events.filter((event) => event.kind === "tool_use_start" && event.toolUseId === "steer-cmd")).toHaveLength(1);
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-two", undefined, {
+    clientUserMessageId: "u-steer-2",
+  });
+  await expect.poll(() => events.filter((event) => event.kind === "turn_complete").length).toBe(1);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({ status: "completed" });
+  const stopIdx = events.findIndex((event) => event.kind === "text_stop");
+  const accepted1Idx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-steer-1",
+  );
+  const accepted2Idx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-steer-2",
+  );
+  const finalTextIdx = events.findIndex(
+    (event) => event.kind === "text_delta" && event.text === "Final steered answer.",
+  );
+  expect(stopIdx).toBeGreaterThanOrEqual(0);
+  expect(accepted1Idx).toBeGreaterThan(stopIdx);
+  expect(accepted2Idx).toBeGreaterThan(accepted1Idx);
+  expect(finalTextIdx).toBeGreaterThan(accepted2Idx);
+  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual([
+    { kind: "user_message_accepted", clientUserMessageId: "u-steer-1" },
+    { kind: "user_message_accepted", clientUserMessageId: "u-steer-2" },
+  ]);
+  const usages = events.filter((event) => event.kind === "usage");
+  expect(usages.at(-1)).toEqual({
+    kind: "usage",
+    inputTokens: 140,
+    outputTokens: 37,
+    cacheReadTokens: 30,
+    cacheCreationTokens: undefined,
+    semantics: "delta",
+  });
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+});
+
+it("falls back to RuntimeSteerUnavailableError when a permission is pending or races on the wire", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "permissions");
+  await expect.poll(() => events.filter((event) => event.kind === "permission_request").length).toBe(2);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect(
+    runtime.steerMessage(processHandle, "blocked by local pending", undefined, { clientUserMessageId: "u-perm-local" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+  await runtime.interruptTurn(processHandle);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+
+  const startIdx = events.length;
+  await runtime.sendMessage(processHandle, "steer-root-finishable");
+  await expect.poll(() => events.slice(startIdx).some((event) => event.kind === "text_delta")).toBe(true);
+  await expect(
+    runtime.steerMessage(processHandle, "steer-permission-race", undefined, { clientUserMessageId: "u-perm-race" }),
+  ).rejects.toSatisfy(isRuntimeSteerUnavailableError);
+  expect(events.slice(startIdx).some((event) => event.kind === "user_message_accepted")).toBe(false);
+  await expect.poll(() => events.slice(startIdx).find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+});
+
+it("preserves the active turn on non-retryable steer errors and cancels a steered turn cleanly", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  const invalidError = await runtime
+    .steerMessage(processHandle, "steer-invalid", undefined, { clientUserMessageId: "u-invalid" })
+    .then(() => null, (error: unknown) => error);
+  expect(invalidError).toBeInstanceOf(Error);
+  expect(isRuntimeSteerUnavailableError(invalidError)).toBe(false);
+  expect(events.some((event) => event.kind === "turn_complete")).toBe(false);
+  expect(runtime.canSteerMessage(processHandle)).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-cancel-target", undefined, {
+    clientUserMessageId: "u-cancel",
+  });
+  await runtime.interruptTurn(processHandle);
+  expect(runtime.canSteerMessage(processHandle)).toBe(false);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+  expect(events).toContainEqual({ kind: "user_message_cancelled", clientUserMessageId: "u-cancel" });
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  expect(events.filter((event) => event.kind === "turn_complete")).toHaveLength(1);
+});
+
+it("preserves the successor terminal when out-of-order responses settle the steered prompt first", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-next-first", undefined, {
+    clientUserMessageId: "u-next-first",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "turn_complete")).toBe(true);
+  expect(events.find((event) => event.kind === "turn_complete")).toMatchObject({
+    status: "failed",
+    error: "Antigravity 已达到此轮输出长度上限",
+  });
+  const acceptedIdx = events.findIndex(
+    (event) => event.kind === "user_message_accepted" && event.clientUserMessageId === "u-next-first",
+  );
+  const earlyTextIdx = events.findIndex(
+    (event) => event.kind === "text_delta" && event.text === "Early successor reply.",
+  );
+  const completeIdx = events.findIndex((event) => event.kind === "turn_complete");
+  expect(acceptedIdx).toBeGreaterThanOrEqual(0);
+  expect(earlyTextIdx).toBeGreaterThan(acceptedIdx);
+  expect(completeIdx).toBeGreaterThan(earlyTextIdx);
+});
+
+it("does not confirm consumption from predecessor tail text or delayed usage_update before a late steer rejection", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-old-before-rejection", undefined, {
+    clientUserMessageId: "u-late-reject",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "turn_complete")).toBe(true);
+  expect(events).toContainEqual({ kind: "text_delta", text: "Tail from predecessor." });
+  expect(events.some((event) => event.kind === "context_update")).toBe(true);
+  expect(events.some((event) => event.kind === "user_message_accepted")).toBe(false);
+  const cancelledIdx = events.findIndex(
+    (event) => event.kind === "user_message_cancelled" && event.clientUserMessageId === "u-late-reject",
+  );
+  const completeIdx = events.findIndex((event) => event.kind === "turn_complete");
+  expect(cancelledIdx).toBeGreaterThanOrEqual(0);
+  expect(completeIdx).toBeGreaterThan(cancelledIdx);
+});
+
+it("confirms a steered prompt when an unanswered permission stays open across handoff", async () => {
+  const { options, receive, events } = await setup();
+  processHandle = await runtime.startSession(options, receive);
+  await runtime.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+
+  await runtime.steerMessage(processHandle, "steer-early-permission", undefined, {
+    clientUserMessageId: "u-early-perm",
+  });
+  await expect.poll(() => events.some((event) => event.kind === "permission_request")).toBe(true);
+  expect(events).toContainEqual({
+    kind: "user_message_accepted",
+    clientUserMessageId: "u-early-perm",
+  });
+
+  await runtime.interruptTurn(processHandle);
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("cancelled");
+  expect(events.some((event) => event.kind === "user_message_cancelled")).toBe(false);
+});
+
+it.each([
+  ["steer-auth-predecessor", "The user follow-up took over.", true],
+  ["steer-auth-successor", "Continued after warning.", true],
+  ["steer-auth-late-predecessor", "The user follow-up finished first.", true],
+  ["steer-auth-rejected", "Continued after warning.", false],
+])("keeps recovery on the owning prompt when %s reports an auth warning", async (steer, reply, consumed) => {
+  const adapter = new AntigravityRuntime({ authRetryDelaysMs: [5] });
+  const { options, receive, events } = await setup();
+  processHandle = await adapter.startSession(options, receive);
+  await adapter.sendMessage(processHandle, "steer-root");
+  await expect.poll(() => events.some((event) => event.kind === "text_delta")).toBe(true);
+  await adapter.steerMessage(processHandle, steer, undefined, { clientUserMessageId: "follow-up" });
+  await expect.poll(() => events.find((event) => event.kind === "turn_complete")?.status).toBe("completed");
+  const text = events.flatMap((event) => event.kind === "text_delta" ? [event.text] : []);
+  expect(text.join("")).toBe("Working before steer." + reply);
+  expect(events.filter((event) => event.kind === "user_message_accepted")).toEqual(consumed ? [
+    { kind: "user_message_accepted", clientUserMessageId: "follow-up" },
+  ] : []);
+  expect(events.filter((event) => event.kind === "user_message_cancelled")).toEqual(consumed ? [] : [
+    { kind: "user_message_cancelled", clientUserMessageId: "follow-up" },
+  ]);
+  expect(events.filter((event) => event.kind === "turn_complete")).toHaveLength(1);
+  expect(events.filter((event) => event.kind === "usage")).toMatchObject([
+    { semantics: "delta", inputTokens: consumed ? 7 : 3, outputTokens: consumed ? 3 : 1 },
+  ]);
 });

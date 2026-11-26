@@ -527,13 +527,45 @@ export function createBuiltinSessionEngine(): SessionEngine {
     async enqueueInboxMessage(request) {
       const scenario = request.scenario ?? { type: 'desktop' as const };
       await setInteractionScenario(scenario);
+      // Fresh Inbox metadata is born after Sidecar bootstrap. Hydrate its owned
+      // birth snapshot (permissionMode, model, providerEnv, reasoningEffort) so
+      // one-shot `session start` overrides win over bootstrap Agent defaults,
+      // including mapping SDK-native subscription routes (e.g. `anthropic-sub`)
+      // to `'subscription'` so third-party bootstrap env is explicitly cleared.
+      const metadata = getSessionMetadata(request.sessionId);
+      const resolved = metadata?.configSnapshotAt
+        ? resolveWorkspaceConfig(request.workspacePath, metadata, { includeMcp: false })
+        : undefined;
+      let providerEnv: ProviderEnv | 'subscription' | undefined;
+      let model = resolved?.model;
+      if (resolved) {
+        if (resolved.providerRoute) {
+          const routed = providerEnvForRouteRequest({
+            providerRoute: resolved.providerRoute,
+            providerEnv: resolved.providerEnv,
+            model: resolved.model,
+          });
+          if (routed.error) {
+            return { queued: false, error: routed.error };
+          }
+          providerEnv = routed.providerEnv;
+          model = routed.model;
+        } else if (
+          metadata?.providerId
+          && resolveSubscriptionAuthKind(metadata.providerId) === 'sdk-native'
+        ) {
+          providerEnv = 'subscription';
+        } else {
+          providerEnv = resolved.providerEnv;
+        }
+      }
       return enqueueUserMessage(
         request.text,
         request.images,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+        resolved?.permissionMode as PermissionMode | undefined,
+        model,
+        providerEnv,
+        resolved ? (resolved.reasoningEffort ?? 'default') : undefined,
         undefined,
         undefined,
         request.inboxMeta,

@@ -763,6 +763,205 @@ fn validate_template_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate that `dest_path` is a non-existing direct child of `projects_dir`
+/// (with `projects_dir` canonicalized and no traversal or symlink escape).
+fn validate_managed_workspace_destination(
+    projects_dir: &Path,
+    dest_path: &Path,
+) -> Result<PathBuf, String> {
+    let data_dir = projects_dir
+        .parent()
+        .ok_or_else(|| "Invalid managed projects directory".to_string())?;
+    for directory in [data_dir, projects_dir] {
+        match fs::symlink_metadata(directory) {
+            Ok(metadata)
+                if metadata.is_dir()
+                    && !crate::workspace_files::path_safety::metadata_is_link_like(&metadata) => {}
+            Ok(_) => return Err("Managed projects root or its parent is a link or not a directory".to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Failed to inspect managed projects root: {error}")),
+        }
+    }
+    let parent = dest_path
+        .parent()
+        .ok_or_else(|| "Destination path must be inside ~/.myagents/projects/".to_string())?;
+    fs::create_dir_all(projects_dir)
+        .map_err(|e| format!("Failed to prepare managed projects dir: {e}"))?;
+    let canon_projects = projects_dir
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve managed projects dir: {e}"))?;
+    let canon_parent = parent
+        .canonicalize()
+        .map_err(|_| "Destination parent directory must be ~/.myagents/projects/".to_string())?;
+    if canon_parent != canon_projects {
+        return Err("Destination must be a direct child of ~/.myagents/projects/".to_string());
+    }
+    let mut leaf_components = dest_path
+        .file_name()
+        .map(Path::new)
+        .ok_or_else(|| "Invalid destination directory name".to_string())?
+        .components();
+    let leaf = match (leaf_components.next(), leaf_components.next()) {
+        (Some(std::path::Component::Normal(name)), None) => name,
+        _ => return Err("Invalid destination directory name".to_string()),
+    };
+    let leaf_str = leaf.to_string_lossy();
+    if let Err(reason) = crate::workspace_files::path_safety::validate_item_name(&leaf_str) {
+        return Err(format!(
+            "Invalid destination directory name '{}': {}",
+            leaf_str, reason
+        ));
+    }
+    if leaf_str.ends_with('.') {
+        return Err(format!("Invalid destination directory name: '{}'", leaf_str));
+    }
+    let candidate = canon_projects.join(leaf);
+    if fs::symlink_metadata(&candidate).is_ok() {
+        return Err(format!(
+            "Workspace directory already exists: {}",
+            candidate.display()
+        ));
+    }
+    Ok(candidate)
+}
+
+/// Stage template files into a unique sibling temp directory inside the same
+/// parent (`~/.myagents/projects/`) and publish via `durable_fs::rename_directory_noreplace`
+/// (atomic no-replace on macOS/Linux/Windows). Never deletes `dst` on error so a
+/// concurrent pre-existing directory (even an empty one) can never be destroyed or replaced.
+fn copy_template_atomically(src: &Path, dst: &Path) -> Result<(), String> {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| "Destination path must have a parent directory".to_string())?;
+    let staging = parent.join(format!(".myagents-tpl-stage-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&staging)
+        .map_err(|e| format!("Failed to create template staging directory: {}", e))?;
+
+    if let Err(err) = copy_dir_recursive(src, &staging) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("Failed to copy workspace template: {}", err));
+    }
+
+    if let Err(err) = crate::durable_fs::rename_directory_noreplace(&staging, dst) {
+        let _ = fs::remove_dir_all(&staging);
+        if fs::symlink_metadata(dst).is_ok()
+            || matches!(
+                err.kind(),
+                std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::DirectoryNotEmpty
+            )
+        {
+            return Err(format!(
+                "Workspace directory already exists: {}",
+                dst.display()
+            ));
+        }
+        return Err(format!("Failed to publish workspace template: {}", err));
+    }
+    Ok(())
+}
+
+/// Core testable helper used by Management API `/api/workspace/materialize-template`.
+/// Reuses the exact template resolution and `copy_dir_recursive` rules of the Tauri commands,
+/// while restricting destination strictly to a new direct child of `projects_dir`.
+pub(crate) fn materialize_template_into_managed_workspace_at(
+    projects_dir: &Path,
+    templates_dir: &Path,
+    bundled_src: Option<&Path>,
+    user_source_path: Option<&Path>,
+    dest_path: &Path,
+) -> Result<PathBuf, String> {
+    let safe_dest = validate_managed_workspace_destination(projects_dir, dest_path)?;
+    match (bundled_src, user_source_path) {
+        (Some(src), None) => {
+            copy_template_atomically(src, &safe_dest)?;
+            Ok(safe_dest)
+        }
+        (None, Some(src)) => {
+            if !templates_dir.exists() {
+                return Err("Templates directory does not exist".to_string());
+            }
+            let canon_templates = templates_dir
+                .canonicalize()
+                .map_err(|e| format!("Failed to resolve templates dir: {}", e))?;
+            let canon_src = src
+                .canonicalize()
+                .map_err(|_| format!("Template source not found: {}", src.display()))?;
+            if !canon_src.starts_with(&canon_templates) || canon_src == canon_templates {
+                return Err("Template source path must be inside ~/.myagents/templates/".to_string());
+            }
+            if !canon_src.is_dir() {
+                return Err("Template source path is not a directory".to_string());
+            }
+            copy_template_atomically(&canon_src, &safe_dest)?;
+            Ok(safe_dest)
+        }
+        (None, None) => {
+            fs::create_dir(&safe_dest).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!("Workspace directory already exists: {}", safe_dest.display())
+                } else {
+                    format!("Failed to create managed workspace directory: {error}")
+                }
+            })?;
+            Ok(safe_dest)
+        }
+        _ => Err("Provide at most one workspace template source".to_string()),
+    }
+}
+
+/// Materialize an empty or templated workspace as a direct child of the managed root.
+pub(crate) fn materialize_template_into_managed_workspace<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    template_source: &str,
+    template_id: Option<&str>,
+    source_path: Option<&str>,
+    dest_path: &str,
+) -> Result<String, String> {
+    let home_dir = dirs::home_dir().ok_or("Failed to get home dir")?;
+    let projects_dir = home_dir.join(".myagents").join("projects");
+    let templates_dir = home_dir.join(".myagents").join("templates");
+    let dst = PathBuf::from(dest_path);
+
+    let materialized = match template_source {
+        "empty" if template_id.is_none() && source_path.is_none() => {
+            materialize_template_into_managed_workspace_at(
+                &projects_dir,
+                &templates_dir,
+                None,
+                None,
+                &dst,
+            )?
+        }
+        "builtin" => {
+            let id = template_id.ok_or("Missing templateId for builtin template")?;
+            validate_template_id(id)?;
+            let src = resolve_bundled_workspace_template(app_handle, id)?;
+            materialize_template_into_managed_workspace_at(
+                &projects_dir,
+                &templates_dir,
+                Some(&src),
+                None,
+                &dst,
+            )?
+        }
+        "user" => {
+            let src_str = source_path.ok_or("Missing sourcePath for user template")?;
+            let src = PathBuf::from(src_str);
+            materialize_template_into_managed_workspace_at(
+                &projects_dir,
+                &templates_dir,
+                None,
+                Some(&src),
+                &dst,
+            )?
+        }
+        other => return Err(format!("Unsupported templateSource: '{}'", other)),
+    };
+    Ok(crate::sidecar::normalize_external_path(materialized)
+        .to_string_lossy()
+        .to_string())
+}
+
 /// Validate a workspace destination path for template apply. Reuses `validate_file_path`'s
 /// system/credential blacklist (so we can't accidentally write template files into `~/.ssh`,
 /// `/etc`, or other protected dirs) AND requires the path to exist as a real directory.
@@ -1071,7 +1270,7 @@ fn sync_admin_agent_blocking<R: Runtime>(app_handle: AppHandle<R>) -> Result<boo
 // matching exclusion list in src/server/index.ts::seedBundledSkills
 // MUST be kept in sync (comment there points back here).
 
-const SYSTEM_SKILLS_VERSION: &str = "64";
+const SYSTEM_SKILLS_VERSION: &str = "65";
 
 /// One process-wide transaction owner for the versioned system-skill
 /// snapshot. Startup automation and ConfigProvider may request convergence at
@@ -1534,10 +1733,206 @@ fn merge_dir_recursive_validated_with_home(
 #[cfg(test)]
 mod bundled_workspace_template_tests {
     use super::{
-        resolve_bundled_workspace_template_at, BUNDLED_WORKSPACE_TEMPLATES_DIR,
-        DEFAULT_BUNDLED_WORKSPACE_TEMPLATE_ID,
+        materialize_template_into_managed_workspace_at, resolve_bundled_workspace_template_at,
+        BUNDLED_WORKSPACE_TEMPLATES_DIR, DEFAULT_BUNDLED_WORKSPACE_TEMPLATE_ID,
     };
+    use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn materialize_template_copies_bundled_and_user_templates_and_enforces_containment() {
+        let root = std::env::temp_dir().join(format!(
+            "myagents-tpl-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let projects = root.join("projects");
+        let templates = root.join("templates");
+        let user_tpl = templates.join("custom-tpl");
+        let outside = root.join("outside");
+        fs::create_dir_all(&projects).unwrap();
+        fs::create_dir_all(&user_tpl).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(user_tpl.join("README.md"), "# User template").unwrap();
+        fs::write(outside.join("secret.txt"), "nope").unwrap();
+
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri must live under the repository root");
+        let mino_src =
+            resolve_bundled_workspace_template_at(repo_root, DEFAULT_BUNDLED_WORKSPACE_TEMPLATE_ID)
+                .unwrap();
+
+        // 1. Bundled mino template into new direct child succeeds
+        let bundled_dest = projects.join("my-mino");
+        let materialized = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            Some(&mino_src),
+            None,
+            &bundled_dest,
+        )
+        .expect("bundled template copy should succeed");
+        assert!(materialized.join("CLAUDE.md").is_file());
+
+        // 2. Existing destination fails closed (no silent -2 suffix)
+        let dup_err = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            Some(&mino_src),
+            None,
+            &bundled_dest,
+        )
+        .unwrap_err();
+        assert!(dup_err.contains("already exists"), "got: {dup_err}");
+
+        // 3. User template inside templates_dir succeeds
+        let user_dest = projects.join("from-user");
+        let user_mat = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            None,
+            Some(&user_tpl),
+            &user_dest,
+        )
+        .expect("user template copy should succeed");
+        assert_eq!(
+            fs::read_to_string(user_mat.join("README.md")).unwrap(),
+            "# User template"
+        );
+
+        // 4. Destination outside projects_dir or nested fails closed
+        let escape_err = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            Some(&mino_src),
+            None,
+            &outside.join("escaped"),
+        )
+        .unwrap_err();
+        assert!(escape_err.contains("direct child"), "got: {escape_err}");
+
+        let nested_parent = projects.join("nested-parent");
+        fs::create_dir_all(&nested_parent).unwrap();
+        let nested_err = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            Some(&mino_src),
+            None,
+            &nested_parent.join("child"),
+        )
+        .unwrap_err();
+        assert!(nested_err.contains("direct child"), "got: {nested_err}");
+
+        // 5. User template source outside templates_dir fails closed
+        let bad_src_err = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            None,
+            Some(&outside),
+            &projects.join("bad-src"),
+        )
+        .unwrap_err();
+        assert!(bad_src_err.contains("templates"), "got: {bad_src_err}");
+
+        // 6. Windows reserved device names and trailing dots/spaces fail closed
+        for reserved in ["CON", "nul", "COM1.txt", "foo.", "foo "] {
+            let err = materialize_template_into_managed_workspace_at(
+                &projects,
+                &templates,
+                Some(&mino_src),
+                None,
+                &projects.join(reserved),
+            )
+            .unwrap_err();
+            assert!(err.contains("Invalid destination"), "reserved '{reserved}' got: {err}");
+        }
+
+        // 7. Pre-existing destination and its files are NEVER deleted when copy_template_atomically
+        //    encounters an existing directory, and no staging directory leaks on failure.
+        let keep_dir = projects.join("keep-existing");
+        fs::create_dir_all(&keep_dir).unwrap();
+        fs::write(keep_dir.join("sentinel.txt"), "precious").unwrap();
+        let atomic_err = super::copy_template_atomically(&user_tpl, &keep_dir).unwrap_err();
+        assert!(atomic_err.contains("already exists"), "got: {atomic_err}");
+        assert_eq!(
+            fs::read_to_string(keep_dir.join("sentinel.txt")).unwrap(),
+            "precious"
+        );
+        let leaked_staging: Vec<_> = fs::read_dir(&projects)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".myagents-tpl-stage-"))
+            .collect();
+        assert!(leaked_staging.is_empty(), "staging dir leaked: {:?}", leaked_staging);
+
+        let empty = materialize_template_into_managed_workspace_at(
+            &projects,
+            &templates,
+            None,
+            None,
+            &projects.join("empty"),
+        )
+        .unwrap();
+        assert!(empty.read_dir().unwrap().next().is_none());
+
+        // 8. Symlink escape tests (Unix)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let redirected_projects = root.join("redirected-projects");
+            symlink(&outside, &redirected_projects).unwrap();
+            let root_error = materialize_template_into_managed_workspace_at(
+                &redirected_projects,
+                &templates,
+                None,
+                None,
+                &redirected_projects.join("escaped-empty"),
+            )
+            .unwrap_err();
+            assert!(root_error.contains("link"), "got: {root_error}");
+            assert!(!outside.join("escaped-empty").exists());
+
+            let redirected_data = root.join("redirected-data");
+            symlink(&outside, &redirected_data).unwrap();
+            let projects_below_link = redirected_data.join("projects");
+            let parent_error = materialize_template_into_managed_workspace_at(
+                &projects_below_link,
+                &templates,
+                Some(&mino_src),
+                None,
+                &projects_below_link.join("escaped-template"),
+            )
+            .unwrap_err();
+            assert!(parent_error.contains("link"), "got: {parent_error}");
+            assert!(!outside.join("projects").exists());
+
+            let evil_tpl_link = templates.join("evil-link");
+            symlink(&outside, &evil_tpl_link).unwrap();
+            let sym_src_err = materialize_template_into_managed_workspace_at(
+                &projects,
+                &templates,
+                None,
+                Some(&evil_tpl_link),
+                &projects.join("from-evil-link"),
+            )
+            .unwrap_err();
+            assert!(sym_src_err.contains("templates"), "got: {sym_src_err}");
+
+            let evil_dest_link = projects.join("dest-link");
+            symlink(&outside, &evil_dest_link).unwrap();
+            let sym_dest_err = materialize_template_into_managed_workspace_at(
+                &projects,
+                &templates,
+                Some(&mino_src),
+                None,
+                &evil_dest_link,
+            )
+            .unwrap_err();
+            assert!(sym_dest_err.contains("already exists"), "got: {sym_dest_err}");
+        }
+
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn committed_mino_template_is_complete_and_resolves_from_resource_root() {
@@ -1603,7 +1998,7 @@ mod system_skills_tests {
 
     #[test]
     fn system_skill_version_keeps_cuse_and_product_skills_aligned() {
-        assert_eq!(SYSTEM_SKILLS_VERSION, "64");
+        assert_eq!(SYSTEM_SKILLS_VERSION, "65");
         assert!(SYSTEM_SKILLS.contains(&"cuse"));
         assert!(!REQUIRED_SYSTEM_SKILLS.contains(&"cuse"));
         assert!(SYSTEM_SKILLS.contains(&"myagents-task-alignment"));
@@ -3461,16 +3856,7 @@ fn runtime_not_distributed() -> RuntimeDetectionResult {
     }
 }
 
-/// Detect whether external Agent Runtime CLIs are installed.
-///
-/// async + spawn_blocking is LOAD-BEARING (not a perf tweak): detection spawns
-/// `<cli> --version` per installed runtime (blocking process spawns — ~hundreds of
-/// ms each for the JS CLIs), and the in-flight-join branch blocks waiting on the
-/// running detection. A sync command runs all of that on the MAIN thread = the
-/// WKWebView UI thread on macOS, freezing the UI ~0.5–1.5s on Launcher/Chat/Settings
-/// mount for multi-runtime users. Same class as cmd_ensure_session_sidecar — see the
-/// pit_of_success.md#sync-tauri-command (sync Tauri command blocks → frozen WKWebView). The cache /
-/// in-flight-join gate is preserved inside the blocking helper.
+/// Discover runtime installations without launching an external runtime.
 #[tauri::command]
 pub async fn cmd_detect_runtimes<R: Runtime>(
     app_handle: AppHandle<R>,
@@ -3478,9 +3864,37 @@ pub async fn cmd_detect_runtimes<R: Runtime>(
     let resource_dir = app_handle.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || detect_runtimes_blocking(resource_dir))
         .await
-        // spawn_blocking only errors if the task panics — fall back to empty
-        // detections (renderer's default is all-not-installed) rather than crash.
-        .unwrap_or_else(|_| HashMap::new())
+        .unwrap_or_default()
+}
+
+/// The conversation branch menu needs the system Codex version, independently
+/// of the Launcher inventory and its other runtimes.
+#[tauri::command]
+pub async fn cmd_system_codex_version() -> Option<String> {
+    type VersionCache = (PathBuf, Instant, Option<String>);
+    static CACHE: OnceLock<Mutex<Option<VersionCache>>> = OnceLock::new();
+
+    if !crate::runtime_distribution_policy::policy().allows_external("codex") {
+        return None;
+    }
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = crate::system_binary::find("codex")?;
+        let mut cache = CACHE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((cached_path, checked_at, version)) = cache.as_ref() {
+            if cached_path == &path && checked_at.elapsed() < RUNTIME_DETECTION_CACHE_TTL {
+                return version.clone();
+            }
+        }
+        let version = detect_cli_output(&path, &["--version"]);
+        *cache = Some((path, Instant::now(), version.clone()));
+        version
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn detect_runtimes_blocking(
@@ -3524,7 +3938,7 @@ fn detect_runtimes_blocking(
             .count(results.len() as u64),
     );
 
-    finish_runtime_detection(gate, now, &results);
+    finish_runtime_detection(gate, Instant::now(), &results);
 
     results
 }
@@ -3532,15 +3946,12 @@ fn detect_runtimes_blocking(
 fn detect_cli(binary_name: &str) -> RuntimeDetectionResult {
     match crate::system_binary::find(binary_name) {
         Some(path) => {
-            let version = detect_cli_output(&path, &["--version"]);
-            let compatible = binary_name != "agy" || detect_cli_output(&path, &["acp", "--help"])
-                .is_some_and(|help| help.contains("--process-per-session"));
             RuntimeDetectionResult {
                 installed: true,
-                version,
+                version: None,
                 path: Some(path.to_string_lossy().to_string()),
-                readiness: Some(if compatible { "ready" } else { "unavailable" }.to_string()),
-                reason: (!compatible).then(|| "protocol-mismatch".to_string()),
+                readiness: None,
+                reason: None,
             }
         }
         None => RuntimeDetectionResult {
@@ -3727,6 +4138,23 @@ mod runtime_detection_cache_tests {
         fs::write(artifact.join("package.json"), "{}").unwrap();
         fs::write(artifact.join("runtime-server-process.artifact.mjs"), "").unwrap();
         dsh
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovers_installed_cli_without_running_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let cli = temp.path().join("agy");
+        let ran = temp.path().join("ran");
+        fs::write(&cli, "#!/bin/sh\ntouch \"${0%/*}/ran\"\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let detection = detect_cli(cli.to_str().unwrap());
+        assert!(detection.installed);
+        assert!(detection.version.is_none());
+        assert!(!ran.exists());
     }
 
     #[test]

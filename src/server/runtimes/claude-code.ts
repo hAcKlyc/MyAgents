@@ -12,8 +12,9 @@ import { join } from 'path';
 import type { RuntimeDetection, RuntimeModelInfo, RuntimePermissionMode, RuntimeType } from '../../shared/types/runtime';
 import { CC_PERMISSION_MODES } from '../../shared/types/runtime';
 import { isSdkEffortLevel } from '../../shared/reasoningEffort';
-import type { AgentRuntime, RuntimeConfigCapabilities, RuntimeProcess, SessionStartOptions, UnifiedEvent, UnifiedEventCallback, ResolvedImagePayload } from './types';
+import type { AgentRuntime, RuntimeDetectionOptions, RuntimeConfigCapabilities, RuntimeProcess, SessionStartOptions, UnifiedEvent, UnifiedEventCallback, ResolvedImagePayload } from './types';
 import { augmentedProcessEnv, resolveCommand, stripAnsi } from './env-utils';
+import { detectCliInstallation } from './cli-installation';
 import { ensureDirSync } from '../utils/fs-utils';
 import { ensureShellPath } from '../utils/shell';
 import { killWithEscalation } from './utils/kill-with-escalation';
@@ -273,28 +274,10 @@ export class ClaudeCodeRuntime implements AgentRuntime {
   // 整 turn 累计不能用）。每条主轮 assistant message 覆盖，turn 末（result）消费后重置。
   private lastMainAssistantUsage: { inputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null = null;
 
-  async detect(): Promise<RuntimeDetection> {
-    try {
-      await ensureShellPath();
-      const env = augmentedProcessEnv('claude-code');
-      const command = resolveCommand('claude', env);
-      const proc = spawn([command, '--version'], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        stdin: 'ignore',
-        env,
-      });
-      const text = await new Response(proc.stdout).text();
-      const code = await proc.exited;
-      if (code === 0) {
-        return {
-          installed: true,
-          version: text.trim(),
-          path: command,
-        };
-      }
-    } catch { /* not installed */ }
-    return { installed: false };
+  async detect(options?: RuntimeDetectionOptions): Promise<RuntimeDetection> {
+    await ensureShellPath();
+    const env = augmentedProcessEnv('claude-code');
+    return detectCliInstallation(resolveCommand('claude', env), env, options);
   }
 
   async queryModels(): Promise<RuntimeModelInfo[]> {
