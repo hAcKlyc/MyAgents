@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PermissionPrompt } from './PermissionPrompt';
 import { fetchJsonLargeValueRef } from '../api/largeValueRef';
@@ -73,7 +73,7 @@ describe('compact command approval authority', () => {
     const command = `  printf '%s' '${'large fixture '.repeat(6_000)}'\n`;
     let settle!: (value: Record<string, unknown>) => void;
     vi.mocked(fetchJsonLargeValueRef).mockReturnValueOnce(new Promise(resolve => { settle = resolve; }));
-    const { container } = render(<PermissionPrompt request={{ requestId: 'large-shell', sessionId: 'session-ref', toolName: 'bash', input: '',
+    const { container, unmount } = render(<PermissionPrompt request={{ requestId: 'large-shell', sessionId: 'session-ref', toolName: 'bash', input: '',
       display: { command: 'do not use fallback', cwd: '/old' },
       reviewRef: { kind: 'ref', id: 'full-shell-ref', mimetype: 'application/json', sizeBytes: 90_000, preview: '', expiresAt: 9_000_000_000_000 },
     }} onDecision={vi.fn()} />);
@@ -83,9 +83,17 @@ describe('compact command approval authority', () => {
     await screen.findByText('shell.permissionPrompt.command');
     expect(container.querySelector('[data-permission-command]')?.textContent).toBe(command);
     expect(screen.getByText('shell.permissionPrompt.alwaysAllow').closest('button')).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'app:markdown.copy' }));
-    await waitFor(() => expect(copyPlainText).toHaveBeenCalledExactlyOnceWith(command));
-    await screen.findByText('app:markdown.copied');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'app:markdown.copy' }));
+      });
+      expect(copyPlainText).toHaveBeenCalledExactlyOnceWith(command);
+      expect(screen.getByText('app:markdown.copied')).toBeInTheDocument();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 });
 
