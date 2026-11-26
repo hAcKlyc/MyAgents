@@ -74,6 +74,7 @@ import {
 } from './utils/plan-files';
 import { WATCHDOG_RESUME_REMINDER, planWatchdogAutoResume, shouldAdoptPendingContinueIntoScheduledAutoResume, shouldConsumePendingContinueAfterAbort, shouldDeferPendingContinueToScheduledAutoResume, shouldPrependWatchdogAutoResume } from './utils/watchdog-auto-resume';
 import { processImage, resizeToolImageContent, classifyImageError } from './utils/imageResize';
+import { normalizeSavedSdkMcpOutput } from './utils/sdk-mcp-output';
 import { writeBase64FilesToAgentDir } from './utils/workspace-files';
 import { ensureGitignorePattern } from './utils/gitignore';
 // Context helpers only — tool server singletons are no longer exported from
@@ -11876,9 +11877,6 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           };
         }
       },
-      // PostToolUse hook: resize oversized images in MCP tool results before sending to Claude API.
-      // Claude API rejects images exceeding 8000px per dimension; MCP tools (e.g. browser screenshots)
-      // can produce arbitrarily large images that bypass our user-upload resize pipeline.
       hooks: {
         // Product plan/read-only and MCP boundaries apply in every SDK mode.
         // SDK 0.3.269 fixed the old plan+bypass callback omission; the hook still
@@ -11926,6 +11924,16 @@ async function startStreamingSession(preWarm = false): Promise<void> {
           hooks: [
             async (input: HookInput, _toolUseId: string | undefined, options: { signal: AbortSignal }): Promise<HookJSONOutput> => {
               const postInput = input as PostToolUseHookInput;
+              const savedOutput = normalizeSavedSdkMcpOutput(postInput.tool_name, postInput.tool_response);
+              if (savedOutput !== null) {
+                return {
+                  hookSpecificOutput: {
+                    hookEventName: 'PostToolUse',
+                    updatedToolOutput: savedOutput,
+                  },
+                };
+              }
+              // Claude rejects tool images exceeding its dimension limit.
               // Propagate SDK's turn-level AbortSignal so resize aborts when the turn does.
               // Without this, a Jimp/sharp stall here blocks the SDK main loop's stdio drain.
               const resized = await resizeToolImageContent(postInput.tool_response, options?.signal);
