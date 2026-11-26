@@ -533,15 +533,16 @@ export function createBuiltinSessionEngine(): SessionEngine {
       // including mapping SDK-native subscription routes (e.g. `anthropic-sub`)
       // to `'subscription'` so third-party bootstrap env is explicitly cleared.
       const metadata = getSessionMetadata(request.sessionId);
-      const resolved = metadata?.configSnapshotAt
+      const resolved = metadata?.materializationState === 'prepared' && metadata.configSnapshotAt
         ? resolveWorkspaceConfig(request.workspacePath, metadata, { includeMcp: false })
         : undefined;
       let providerEnv: ProviderEnv | 'subscription' | undefined;
       let model = resolved?.model;
       if (resolved) {
-        if (resolved.providerRoute) {
+        const providerRoute = resolved.providerRoute;
+        if (providerRoute && (providerRoute.kind !== 'unknown-legacy' || providerRoute.reason !== 'missing-model')) {
           const routed = providerEnvForRouteRequest({
-            providerRoute: resolved.providerRoute,
+            providerRoute,
             providerEnv: resolved.providerEnv,
             model: resolved.model,
           });
@@ -550,12 +551,10 @@ export function createBuiltinSessionEngine(): SessionEngine {
           }
           providerEnv = routed.providerEnv;
           model = routed.model;
-        } else if (
-          metadata?.providerId
-          && resolveSubscriptionAuthKind(metadata.providerId) === 'sdk-native'
-        ) {
+        } else if (metadata?.providerId && resolveSubscriptionAuthKind(metadata.providerId) === 'sdk-native') {
           providerEnv = 'subscription';
         } else {
+          // A snapshot without a specific model can still use its provider defaults.
           providerEnv = resolved.providerEnv;
         }
       }

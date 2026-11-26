@@ -11024,7 +11024,7 @@ describe('external SessionEngine with fake runtime', () => {
     }
   });
 
-  it('waits for Antigravity subagent settlement before finalizing a Task turn and supports clean stop/crash settlement', async () => {
+  it('waits for Antigravity subagent settlement before finalizing a Task turn', async () => {
     const harness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
     const sessionId = 'agy-task-subagent-settlement';
     const workspacePath = join(harness.home, 'workspace');
@@ -11094,8 +11094,9 @@ describe('external SessionEngine with fake runtime', () => {
       }),
     });
     expect(harness.externalSession.__isExternalWatchdogArmedForTests()).toBe(false);
+  });
 
-    // Explicit stop while subagents are pending must cleanly settle the Task turn without hanging.
+  it('settles an Antigravity Task stopped while subagent work is pending', async () => {
     const stopHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
     const stopTaskPromise = runInjectedTurn(stopHarness, {
       prompt: 'Run stoppable task.',
@@ -11118,9 +11119,9 @@ describe('external SessionEngine with fake runtime', () => {
     const stoppedOutcome = await stopTaskPromise;
     expect(stoppedOutcome.success).toBe(false);
     expect(stopHarness.externalSession.__isExternalWatchdogArmedForTests()).toBe(false);
+  });
 
-    // Unexpected worker crash AFTER intermediate persistence completes (so sessionPlan.kind === 'failure')
-    // must still settle the deferred Task turn cleanly instead of hanging until timeout.
+  it('settles an Antigravity Task after the worker exits following intermediate persistence', async () => {
     const crashHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
     const crashSessionId = 'agy-task-crash-subagent';
     const crashTaskPromise = runInjectedTurn(crashHarness, {
@@ -11149,9 +11150,9 @@ describe('external SessionEngine with fake runtime', () => {
     expect(crashedOutcome).toMatchObject({ success: false, enqueued: true });
     expect(crashedOutcome.error).toContain('Antigravity CLI 已退出');
     expect(await crashHarness.engine.waitIdle(2000, 10)).toBe(true);
+  });
 
-    // Worker crash while intermediate persistence is still awaiting must NOT emit
-    // a contradictory chat:message-complete after chat:message-error when persistence resumes.
+  it('emits only the error terminal when an Antigravity worker exits during intermediate persistence', async () => {
     const raceHarness = await createHarness([{ kind: 'silent' }], { runtimeType: 'antigravity' });
     const raceSessionId = 'agy-task-crash-during-persist';
     const { trackInFlightSave } = await import('./tool-attachments');

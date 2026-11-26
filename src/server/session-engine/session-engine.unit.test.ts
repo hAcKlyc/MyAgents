@@ -750,6 +750,7 @@ describe('session-engine selector and adapters', () => {
       id: 'fresh-sub-session',
       agentDir: '/workspace',
       configSnapshotAt: '2026-11-25T10:00:00.000Z',
+      materializationState: 'prepared',
     });
     mocks.resolveWorkspaceConfig.mockReturnValueOnce({
       mcpServers: [],
