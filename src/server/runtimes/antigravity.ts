@@ -64,10 +64,12 @@ import { readAntigravityFileResult } from "./antigravity-native-result";
 import { readAntigravityParentAcknowledgements, readAntigravityParentTailStep } from "./antigravity-parent-ack";
 import { antigravityToolResult, presentAntigravityTool } from "./antigravity-tool";
 import { augmentedProcessEnv, resolveCommand } from "./env-utils";
+import { detectCliInstallation } from './cli-installation';
 import {
   RuntimeSteerUnavailableError,
   type AgentRuntime,
   type ResolvedImagePayload,
+  type RuntimeDetectionOptions,
   type RuntimeProcess,
   type RuntimeWatchdogState,
   type SessionStartOptions,
@@ -1583,25 +1585,9 @@ export class AntigravityRuntime implements AgentRuntime {
       reasoningEffort: "live_session_rpc",
     } as const;
   }
-  async detect() {
-    try {
-      const { path, output } = await queryCli("--version");
-      const help = await queryCli(["acp", "--help"]).catch(() => null);
-      const compatible = help?.output.includes("--process-per-session");
-      return {
-        installed: true,
-        path,
-        version: output,
-        ...(compatible
-          ? {}
-          : {
-              readiness: "unavailable" as const,
-              reason: "protocol-mismatch" as const,
-            }),
-      };
-    } catch {
-      return { installed: false };
-    }
+  async detect(options?: RuntimeDetectionOptions) {
+    const { path, env } = await executable();
+    return detectCliInstallation(path, env, options);
   }
   async queryModels(
     options?: Parameters<AgentRuntime["queryModels"]>[0],

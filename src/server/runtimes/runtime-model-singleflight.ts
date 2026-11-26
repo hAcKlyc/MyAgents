@@ -9,6 +9,9 @@ interface InFlightModelQuery {
 }
 
 const inFlightModelQueries = new Map<string, InFlightModelQuery>();
+// The app-wide Antigravity discovery catalog is separate from each live ACP session.
+const antigravityCatalogTtlMs = 60_000;
+let antigravityCatalog: { models: unknown[]; expiresAt: number } | undefined;
 
 function modelQueryKey(runtimeType: RuntimeType, runtimeSource?: RuntimeSource): string {
   return `${runtimeType}:${runtimeSource ?? 'system-cli'}`;
@@ -22,6 +25,13 @@ export async function queryRuntimeModelsSingleFlight(
 ): Promise<unknown[]> {
   if (runtimeType === 'builtin') return [];
   if (signal?.aborted) throw signal.reason ?? new Error('Runtime model query aborted');
+
+  const cacheAntigravityCatalog = runtimeType === 'antigravity'
+    && process.env.MYAGENTS_SIDECAR_ROLE === 'global';
+  if (cacheAntigravityCatalog && antigravityCatalog && Date.now() < antigravityCatalog.expiresAt) {
+    emitPerfTrace({ trace: 'runtime', phase: 'model_list_cache_hit', runtime: runtimeType, status: 'ok' });
+    return antigravityCatalog.models;
+  }
 
   const key = modelQueryKey(runtimeType, runtimeSource);
   const existing = inFlightModelQueries.get(key);
@@ -52,6 +62,10 @@ export async function queryRuntimeModelsSingleFlight(
     promise: (async () => {
     try {
       const models = await queryer(controller.signal);
+      controller.signal.throwIfAborted();
+      if (cacheAntigravityCatalog && models.length > 0) {
+        antigravityCatalog = { models, expiresAt: Date.now() + antigravityCatalogTtlMs };
+      }
       emitPerfTrace({
         trace: 'runtime',
         phase: 'model_list_done',
@@ -132,4 +146,5 @@ export function __resetRuntimeModelSingleFlightForTest(): void {
     entry.controller.abort(new Error('Runtime model query state reset'));
   }
   inFlightModelQueries.clear();
+  antigravityCatalog = undefined;
 }

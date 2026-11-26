@@ -528,6 +528,11 @@ export class RuntimeConversationBranchError extends Error {
   }
 }
 
+export interface RuntimeDetectionOptions {
+  /** Read optional CLI version metadata. Installation never depends on it. */
+  includeVersion?: boolean;
+}
+
 /**
  * AgentRuntime interface — one implementation per CLI type
  */
@@ -541,7 +546,7 @@ export interface AgentRuntime {
   getTurnProviderAnalytics?(process: RuntimeProcess): TurnProviderAnalytics;
 
   /** Check if the CLI is installed and get version info */
-  detect(): Promise<RuntimeDetection>;
+  detect(options?: RuntimeDetectionOptions): Promise<RuntimeDetection>;
 
   /** Read-only resources plus the supplied lifecycle-owned process, if any. */
   inspectRuntime?(process?: RuntimeProcess): Promise<import('../../shared/types/runtime').RuntimeInspection>;

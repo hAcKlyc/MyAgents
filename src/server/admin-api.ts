@@ -170,7 +170,6 @@ import {
   type RecoveryHint,
   type RuntimePermissionMode,
   type RuntimeModelInfo,
-  type RuntimeDetection,
   type RuntimeConfig,
   type RuntimeSource,
 } from '../shared/types/runtime';
@@ -8698,77 +8697,19 @@ interface RuntimeDescribeResult {
   defaultPermissionModeSource: 'runtime-catalog-fallback';
 }
 
-/** Per-runtime detection timeout — a wedged `<cli> --version` binary shouldn't
- *  block the whole command. Race each detect() against this timeout. */
-const RUNTIME_DETECT_TIMEOUT_MS = 2_000;
-
-/**
- * Race a promise against a timeout; on timeout resolves to `fallback`.
- * Used by `handleRuntimeList` / `handleRuntimeDescribe` so one misbehaving
- * runtime CLI doesn't hang the whole Admin API request.
- */
-async function raceWithTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  fallback: T,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(fallback), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/**
- * List every runtime MyAgents knows about with its install status.
- *
- * Detection is best-effort and actually gated at `RUNTIME_DETECT_TIMEOUT_MS`
- * per runtime — each runtime's `detect()` spawns `<cli> --version`, and a
- * wedged binary would otherwise block the whole list. We *always* return the
- * full row list — even for not-installed runtimes — so the CLI reader sees
- * every valid `--runtime` value and can learn which ones need installing.
- */
+/** Discover all runtimes concurrently; optional version probes never determine installation. */
 export async function handleRuntimeList(): Promise<AdminResponse> {
-  const rows: RuntimeListRow[] = [];
-  for (const runtime of VALID_RUNTIMES) {
-    if (runtime === 'builtin') {
-      // builtin is always "installed" — it's the embedded Claude Agent SDK.
-      rows.push({
-        runtime,
-        displayName: RUNTIME_DISPLAY_NAMES[runtime],
-        installed: true,
-        version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION,
-      });
-      continue;
-    }
-    let detection: RuntimeDetection = { installed: false };
-    try {
-      const rt = getExternalRuntime(runtime);
-      detection = await raceWithTimeout(
-        rt.detect(),
-        RUNTIME_DETECT_TIMEOUT_MS,
-        { installed: false },
-      );
-    } catch {
-      // Runtime not supported in this build (should not happen given
-      // VALID_RUNTIMES ⊆ supported types, but keep defensive).
-    }
-    const row: RuntimeListRow = {
+  const rows = await Promise.all(VALID_RUNTIMES.map(async (runtime): Promise<RuntimeListRow> => {
+    const detection = runtime === 'builtin'
+      ? { installed: true, version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION }
+      : await getExternalRuntime(runtime).detect();
+    return {
       runtime,
       displayName: RUNTIME_DISPLAY_NAMES[runtime],
-      installed: detection.installed,
-      version: detection.version,
-      path: detection.path,
+      ...detection,
+      ...(!detection.installed ? { notInstalledHint: hintForMissingRuntime(runtime) } : {}),
     };
-    if (!detection.installed) {
-      row.notInstalledHint = hintForMissingRuntime(runtime);
-    }
-    rows.push(row);
-  }
+  }));
   return { success: true, data: rows };
 }
 
@@ -8829,16 +8770,7 @@ export async function handleRuntimeDescribe(
     };
   }
 
-  let detection: RuntimeDetection = { installed: false };
-  try {
-    detection = await raceWithTimeout(
-      getExternalRuntime(runtimeArg).detect(),
-      RUNTIME_DETECT_TIMEOUT_MS,
-      { installed: false },
-    );
-  } catch {
-    /* detection returns installed:false below */
-  }
+  const detection = await getExternalRuntime(runtimeArg).detect();
 
   // Only query models when the CLI is actually installed — otherwise we'd
   // waste 10+ seconds trying to spawn a binary that doesn't exist.
@@ -8936,16 +8868,7 @@ export async function handleRuntimeDiagnose(payload: {
     };
   }
 
-  let detection: RuntimeDetection = { installed: false };
-  try {
-    detection = await raceWithTimeout(
-      getExternalRuntime(runtimeArg).detect(),
-      RUNTIME_DETECT_TIMEOUT_MS,
-      { installed: false },
-    );
-  } catch {
-    /* falls through to installed:false */
-  }
+  const detection = await getExternalRuntime(runtimeArg).detect();
 
   if (!detection.installed) {
     return {

@@ -3856,16 +3856,7 @@ fn runtime_not_distributed() -> RuntimeDetectionResult {
     }
 }
 
-/// Detect whether external Agent Runtime CLIs are installed.
-///
-/// async + spawn_blocking is LOAD-BEARING (not a perf tweak): detection spawns
-/// `<cli> --version` per installed runtime (blocking process spawns — ~hundreds of
-/// ms each for the JS CLIs), and the in-flight-join branch blocks waiting on the
-/// running detection. A sync command runs all of that on the MAIN thread = the
-/// WKWebView UI thread on macOS, freezing the UI ~0.5–1.5s on Launcher/Chat/Settings
-/// mount for multi-runtime users. Same class as cmd_ensure_session_sidecar — see the
-/// pit_of_success.md#sync-tauri-command (sync Tauri command blocks → frozen WKWebView). The cache /
-/// in-flight-join gate is preserved inside the blocking helper.
+/// Discover runtime installations without launching an external runtime.
 #[tauri::command]
 pub async fn cmd_detect_runtimes<R: Runtime>(
     app_handle: AppHandle<R>,
@@ -3873,9 +3864,37 @@ pub async fn cmd_detect_runtimes<R: Runtime>(
     let resource_dir = app_handle.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || detect_runtimes_blocking(resource_dir))
         .await
-        // spawn_blocking only errors if the task panics — fall back to empty
-        // detections (renderer's default is all-not-installed) rather than crash.
-        .unwrap_or_else(|_| HashMap::new())
+        .unwrap_or_default()
+}
+
+/// The conversation branch menu needs the system Codex version, independently
+/// of the Launcher inventory and its other runtimes.
+#[tauri::command]
+pub async fn cmd_system_codex_version() -> Option<String> {
+    type VersionCache = (PathBuf, Instant, Option<String>);
+    static CACHE: OnceLock<Mutex<Option<VersionCache>>> = OnceLock::new();
+
+    if !crate::runtime_distribution_policy::policy().allows_external("codex") {
+        return None;
+    }
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = crate::system_binary::find("codex")?;
+        let mut cache = CACHE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((cached_path, checked_at, version)) = cache.as_ref() {
+            if cached_path == &path && checked_at.elapsed() < RUNTIME_DETECTION_CACHE_TTL {
+                return version.clone();
+            }
+        }
+        let version = detect_cli_output(&path, &["--version"]);
+        *cache = Some((path, Instant::now(), version.clone()));
+        version
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn detect_runtimes_blocking(
@@ -3919,7 +3938,7 @@ fn detect_runtimes_blocking(
             .count(results.len() as u64),
     );
 
-    finish_runtime_detection(gate, now, &results);
+    finish_runtime_detection(gate, Instant::now(), &results);
 
     results
 }
@@ -3927,15 +3946,12 @@ fn detect_runtimes_blocking(
 fn detect_cli(binary_name: &str) -> RuntimeDetectionResult {
     match crate::system_binary::find(binary_name) {
         Some(path) => {
-            let version = detect_cli_output(&path, &["--version"]);
-            let compatible = binary_name != "agy" || detect_cli_output(&path, &["acp", "--help"])
-                .is_some_and(|help| help.contains("--process-per-session"));
             RuntimeDetectionResult {
                 installed: true,
-                version,
+                version: None,
                 path: Some(path.to_string_lossy().to_string()),
-                readiness: Some(if compatible { "ready" } else { "unavailable" }.to_string()),
-                reason: (!compatible).then(|| "protocol-mismatch".to_string()),
+                readiness: None,
+                reason: None,
             }
         }
         None => RuntimeDetectionResult {
@@ -4122,6 +4138,23 @@ mod runtime_detection_cache_tests {
         fs::write(artifact.join("package.json"), "{}").unwrap();
         fs::write(artifact.join("runtime-server-process.artifact.mjs"), "").unwrap();
         dsh
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovers_installed_cli_without_running_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let cli = temp.path().join("agy");
+        let ran = temp.path().join("ran");
+        fs::write(&cli, "#!/bin/sh\ntouch \"${0%/*}/ran\"\n").unwrap();
+        fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let detection = detect_cli(cli.to_str().unwrap());
+        assert!(detection.installed);
+        assert!(detection.version.is_none());
+        assert!(!ran.exists());
     }
 
     #[test]

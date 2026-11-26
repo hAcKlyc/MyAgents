@@ -59,7 +59,7 @@ vi.mock("@/context/FileActionContext", () => ({
   FileActionProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async () => ({
+  invoke: vi.fn(async (command: string) => command === "cmd_system_codex_version" ? "codex-cli 0.172.0" : ({
     builtin: { installed: true },
     dsh: { installed: true, readiness: "ready" },
     codex: { installed: true },

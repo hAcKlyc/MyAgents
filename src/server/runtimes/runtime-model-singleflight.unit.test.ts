@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   __resetRuntimeModelSingleFlightForTest,
@@ -8,6 +8,33 @@ import {
 describe('runtime model query single-flight', () => {
   beforeEach(() => {
     __resetRuntimeModelSingleFlightForTest();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  it('reuses only successful Global Sidecar catalogs and expires them independently of Session discovery', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('MYAGENTS_SIDECAR_ROLE', 'global');
+    const models = [{ value: 'gemini-fixture' }];
+    const queryer = vi.fn<() => Promise<unknown[]>>()
+      .mockResolvedValue(models)
+      .mockResolvedValueOnce([]);
+    await expect(queryRuntimeModelsSingleFlight('antigravity', queryer)).resolves.toEqual([]);
+    await expect(queryRuntimeModelsSingleFlight('antigravity', queryer)).resolves.toEqual(models);
+    await expect(queryRuntimeModelsSingleFlight('antigravity', queryer)).resolves.toEqual(models);
+    expect(queryer).toHaveBeenCalledTimes(2);
+
+    vi.stubEnv('MYAGENTS_SIDECAR_ROLE', 'session');
+    await queryRuntimeModelsSingleFlight('antigravity', queryer);
+    expect(queryer).toHaveBeenCalledTimes(3);
+
+    vi.stubEnv('MYAGENTS_SIDECAR_ROLE', 'global');
+    await vi.advanceTimersByTimeAsync(60_000);
+    await queryRuntimeModelsSingleFlight('antigravity', queryer);
+    expect(queryer).toHaveBeenCalledTimes(4);
   });
 
   it('deduplicates concurrent queries for the same runtime', async () => {

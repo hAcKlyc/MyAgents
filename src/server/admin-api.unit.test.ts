@@ -232,12 +232,39 @@ describe('current Runtime configuration ownership', () => {
   it('reports the bundled SDK implementation version in both runtime discovery receipts', async () => {
     const { CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } = await import('../shared/integrated-runtimes/identity');
     const { getExternalRuntime } = await import('./runtimes/factory');
-    const spies = (['dsh', 'claude-code', 'codex'] as const).map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockResolvedValue({ installed: false }));
+    const spies = (['dsh', 'claude-code', 'codex', 'antigravity'] as const).map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockResolvedValue({ installed: false }));
     try {
       const { handleRuntimeList, handleRuntimeDescribe } = await import('./admin-api');
       expect(await handleRuntimeList()).toMatchObject({ success: true, data: expect.arrayContaining([{ runtime: 'builtin', displayName: expect.any(String), installed: true, version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION }]) });
       expect(await handleRuntimeDescribe({ runtime: 'builtin' })).toMatchObject({ success: true, data: { runtime: 'builtin', version: CLAUDE_AGENT_SDK_IMPLEMENTATION_VERSION } });
     } finally { for (const spy of spies) spy.mockRestore(); }
+  });
+
+  it('starts runtime list probes concurrently and keeps an installation whose version is unavailable', async () => {
+    const { getExternalRuntime } = await import('./runtimes/factory');
+    const { handleRuntimeList } = await import('./admin-api');
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const runtimes = ['dsh', 'claude-code', 'codex', 'antigravity'] as const;
+    const spies = runtimes.map(runtime => vi.spyOn(getExternalRuntime(runtime), 'detect').mockImplementation(
+      async () => {
+        await promise;
+        return runtime === 'antigravity' ? { installed: true, path: '/fixture/agy' } : { installed: false };
+      },
+    ));
+    try {
+      const response = handleRuntimeList();
+      for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1);
+      resolve();
+      expect(await response).toMatchObject({
+        success: true,
+        data: expect.arrayContaining([expect.objectContaining({
+          runtime: 'antigravity', installed: true, path: '/fixture/agy',
+        })]),
+      });
+    } finally {
+      resolve();
+      for (const spy of spies) spy.mockRestore();
+    }
   });
 
   it('routes reload through the SessionEngine and uses its workspace instead of dormant SDK state', async () => {

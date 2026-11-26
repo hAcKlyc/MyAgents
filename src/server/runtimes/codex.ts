@@ -35,7 +35,7 @@ import {
 } from '../session-core/mcp-startup-admission-client';
 import { CODEX_PERMISSION_MODES } from '../../shared/types/runtime';
 import { coerceFileChanges, formatFileChangeForResult } from '../../shared/fileChange';
-import type { AgentPlanTodo, AgentRuntime, ConversationBranchBoundary, ConversationBranchResult, RuntimeConfigCapabilities, RuntimeProcess, SessionStartOptions, UnifiedEvent, UnifiedEventCallback, ResolvedImagePayload, SubAgentScope } from './types';
+import type { AgentPlanTodo, AgentRuntime, RuntimeDetectionOptions, ConversationBranchBoundary, ConversationBranchResult, RuntimeConfigCapabilities, RuntimeProcess, SessionStartOptions, UnifiedEvent, UnifiedEventCallback, ResolvedImagePayload, SubAgentScope } from './types';
 import {
   RuntimeConversationBranchError,
   RuntimeSteerUnavailableError,
@@ -50,6 +50,7 @@ import {
   type CodexThreadTokenUsage,
 } from './codex-token-usage';
 import { stripAnsi } from './env-utils';
+import { detectCliInstallation } from './cli-installation';
 import { resolveCodexCommandContext, type CodexCommandContext } from './codex-command-context';
 import { ensureDirSync } from '../utils/fs-utils';
 import { killWithEscalation } from './utils/kill-with-escalation';
@@ -3449,27 +3450,11 @@ async function collectCodexDiagnostics(
 export class CodexRuntime implements AgentRuntime {
   readonly type: RuntimeType = 'codex';
 
-  async detect(): Promise<RuntimeDetection> {
-    try {
-      const context = await resolveCodexCommandContext({ source: 'system-cli' });
-      const command = context.commandPath;
-      const proc = spawn([command, '--version'], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-        stdin: 'ignore',
-        env: context.env,
-      });
-      const text = await new Response(proc.stdout).text();
-      const code = await proc.exited;
-      if (code === 0) {
-        return {
-          installed: true,
-          version: text.trim().replace(/^codex-cli\s*/i, ''),
-          path: command,
-        };
-      }
-    } catch { /* not installed */ }
-    return { installed: false };
+  async detect(options?: RuntimeDetectionOptions): Promise<RuntimeDetection> {
+    const { commandPath, env } = await resolveCodexCommandContext({ source: 'system-cli' });
+    const detection = await detectCliInstallation(commandPath, env, options);
+    if (!detection.version) return detection;
+    return { ...detection, version: detection.version.replace(/^codex-cli\s*/i, '') };
   }
 
   async queryModels(options: { runtimeSource?: RuntimeSource; process?: RuntimeProcess } = {}): Promise<RuntimeModelInfo[]> {

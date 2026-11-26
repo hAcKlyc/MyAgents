@@ -89,6 +89,16 @@ describe('external CLI admission', () => {
     });
   });
 
+  it('points unauthenticated runtime discovery at the local CLI without opening the admin route', async () => {
+    const result = await admitAdminRequest(request(), 'runtime/list');
+
+    expect(result).toMatchObject({
+      status: 401,
+      response: { code: 'EXTERNAL_CLI_TOKEN_REQUIRED', suggestion: expect.stringContaining('agy --version') },
+    });
+    expect(managementApi).not.toHaveBeenCalled();
+  });
+
   it('delegates token authority to Rust and preserves disabled versus reset errors', async () => {
     managementApi.mockResolvedValueOnce({
       ok: true,

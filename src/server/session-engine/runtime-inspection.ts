@@ -16,5 +16,5 @@ export async function inspectRuntime(runtime: RuntimeType) {
 export async function detectRuntimeInstallation(runtime: RuntimeType, source?: RuntimeSource): Promise<boolean> {
   if (runtime === 'builtin') return true;
   if (runtime === 'codex' && source === 'managed-provider') return isManagedCodexRuntimeInstalled();
-  return isRuntimeSupported(runtime) && (await getExternalRuntime(runtime).detect()).installed;
+  return isRuntimeSupported(runtime) && (await getExternalRuntime(runtime).detect({ includeVersion: false })).installed;
 }

@@ -87,8 +87,9 @@ export async function admitAdminRequest(
         success: false,
         code: 'EXTERNAL_CLI_TOKEN_REQUIRED',
         error: 'External CLI access requires MYAGENTS_API_TOKEN.',
-        suggestion:
-          'Enable External Calls in MyAgents Settings and export the token.',
+        suggestion: route === 'runtime/list' || route === 'runtime/describe'
+          ? 'Check a local CLI directly with agy --version, codex --version, or claude --version. For MyAgents runtime commands, enable External Calls and export the token.'
+          : 'Enable External Calls in MyAgents Settings and export the token.',
       },
     };
   }
